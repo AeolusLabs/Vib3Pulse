@@ -352,16 +352,15 @@ export default function SignupPage() {
                   />
 
                   <div className="flex gap-2 pt-4">
-                    <Link href="/login" className="flex-1">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="w-full"
-                        data-testid="button-back-to-login"
-                      >
-                        Back to Login
-                      </Button>
-                    </Link>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => window.location.href = '/login'}
+                      data-testid="button-back-to-login"
+                    >
+                      Back to Login
+                    </Button>
                     <Button
                       type="submit"
                       className="flex-1"

@@ -13,6 +13,7 @@ import MyEventsPage from "@/pages/MyEventsPage";
 import ChatPage from "@/pages/ChatPage";
 import ConversationPage from "@/pages/ConversationPage";
 import ManageEventsPage from "@/pages/ManageEventsPage";
+import TicketWalletPage from "@/pages/TicketWalletPage";
 import LoginPage from "@/pages/LoginPage";
 import SignupPage from "@/pages/SignupPage";
 
@@ -26,6 +27,7 @@ function Router() {
       <Route path="/feed" component={FeedPage} />
       <Route path="/my-events" component={MyEventsPage} />
       <Route path="/manage-events" component={ManageEventsPage} />
+      <Route path="/ticket-wallet" component={TicketWalletPage} />
       <Route path="/chat" component={ChatPage} />
       <Route path="/chat/:userId" component={ConversationPage} />
       <Route path="/event/:id" component={EventDetailPage} />

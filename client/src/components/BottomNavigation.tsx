@@ -1,4 +1,4 @@
-import { Compass, LayoutGrid, Camera, Calendar, MessageCircle } from "lucide-react";
+import { Compass, LayoutGrid, Ticket, Calendar, MessageCircle } from "lucide-react";
 import { Link, useLocation } from "wouter";
 
 interface BottomNavigationProps {
@@ -9,9 +9,9 @@ export default function BottomNavigation({ onCreateClick }: BottomNavigationProp
   const [location] = useLocation();
 
   const navItems = [
-    { icon: Compass, label: "Discover", path: "/", testId: "nav-discover" },
+    { icon: Compass, label: "Discover", path: "/discover", testId: "nav-discover" },
     { icon: LayoutGrid, label: "Feed", path: "/feed", testId: "nav-feed" },
-    { icon: Camera, label: "Camera", path: null, testId: "nav-camera", isAction: true },
+    { icon: Ticket, label: "Tickets", path: "/ticket-wallet", testId: "nav-tickets" },
     { icon: Calendar, label: "My Events", path: "/my-events", testId: "nav-my-events" },
     { icon: MessageCircle, label: "Chat", path: "/chat", testId: "nav-chat" },
   ];
