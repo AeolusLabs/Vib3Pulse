@@ -44,9 +44,9 @@ export default function MenuTray() {
                   Feed
                 </Button>
               </Link>
-              <Link href="/">
+              <Link href="/discover">
                 <Button
-                  variant={location === '/' ? 'default' : 'ghost'}
+                  variant={location === '/discover' ? 'default' : 'ghost'}
                   size="sm"
                   className="w-full justify-start"
                   onClick={() => setIsOpen(false)}
