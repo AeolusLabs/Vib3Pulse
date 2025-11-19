@@ -1,6 +1,5 @@
-import { Home, Compass, Plus, User, Bell } from "lucide-react";
+import { Compass, LayoutGrid, Camera, Calendar, MessageCircle } from "lucide-react";
 import { Link, useLocation } from "wouter";
-import { Button } from "@/components/ui/button";
 
 interface BottomNavigationProps {
   onCreateClick?: () => void;
@@ -10,15 +9,15 @@ export default function BottomNavigation({ onCreateClick }: BottomNavigationProp
   const [location] = useLocation();
 
   const navItems = [
-    { icon: Home, label: "Feed", path: "/feed", testId: "nav-feed" },
     { icon: Compass, label: "Discover", path: "/", testId: "nav-discover" },
-    { icon: Plus, label: "Create", path: null, testId: "nav-create", isAction: true },
-    { icon: Bell, label: "Notifications", path: "/notifications", testId: "nav-notifications" },
-    { icon: User, label: "Profile", path: "/profile/johndoe", testId: "nav-profile" },
+    { icon: LayoutGrid, label: "Feed", path: "/feed", testId: "nav-feed" },
+    { icon: Camera, label: "Camera", path: null, testId: "nav-camera", isAction: true },
+    { icon: Calendar, label: "My Events", path: "/my-events", testId: "nav-my-events" },
+    { icon: MessageCircle, label: "Chat", path: "/chat", testId: "nav-chat" },
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 bg-card border-t md:hidden">
+    <nav className="fixed bottom-0 left-0 right-0 z-50 bg-background border-t md:hidden">
       <div className="flex items-center justify-around h-16 px-2">
         {navItems.map((item) => {
           const isActive = location === item.path;
@@ -26,28 +25,27 @@ export default function BottomNavigation({ onCreateClick }: BottomNavigationProp
 
           if (item.isAction) {
             return (
-              <Button
+              <button
                 key={item.label}
-                variant="default"
-                size="icon"
-                className="rounded-full"
+                className="flex flex-col items-center gap-1 px-3 py-2 transition-colors text-foreground"
                 onClick={onCreateClick}
                 data-testid={item.testId}
               >
-                <Icon className="h-5 w-5" />
-              </Button>
+                <Icon className="h-6 w-6" />
+                <span className="text-xs font-medium">{item.label}</span>
+              </button>
             );
           }
 
           return (
             <Link key={item.label} href={item.path!}>
               <button
-                className={`flex flex-col items-center gap-1 px-3 py-2 rounded-md transition-colors ${
+                className={`flex flex-col items-center gap-1 px-3 py-2 transition-colors ${
                   isActive ? 'text-primary' : 'text-muted-foreground'
                 }`}
                 data-testid={item.testId}
               >
-                <Icon className={`h-5 w-5 ${isActive ? 'fill-current' : ''}`} />
+                <Icon className="h-6 w-6" />
                 <span className="text-xs font-medium">{item.label}</span>
               </button>
             </Link>
