@@ -80,9 +80,11 @@ export default function Navigation({ userType = "social", onSearch, onCreateEven
                   Profile
                 </DropdownMenuItem>
                 {userType === "organizer" && (
-                  <DropdownMenuItem data-testid="menu-my-events">
-                    <Calendar className="mr-2 h-4 w-4" />
-                    My Events
+                  <DropdownMenuItem asChild data-testid="menu-my-events">
+                    <Link href="/manage-events">
+                      <Calendar className="mr-2 h-4 w-4" />
+                      My Events
+                    </Link>
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem data-testid="menu-rsvps">

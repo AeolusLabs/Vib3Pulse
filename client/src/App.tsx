@@ -10,6 +10,7 @@ import ProfilePage from "@/pages/ProfilePage";
 import FeedPage from "@/pages/FeedPage";
 import MyEventsPage from "@/pages/MyEventsPage";
 import ChatPage from "@/pages/ChatPage";
+import ManageEventsPage from "@/pages/ManageEventsPage";
 
 function Router() {
   return (
@@ -17,6 +18,7 @@ function Router() {
       <Route path="/" component={DiscoverPage} />
       <Route path="/feed" component={FeedPage} />
       <Route path="/my-events" component={MyEventsPage} />
+      <Route path="/manage-events" component={ManageEventsPage} />
       <Route path="/chat" component={ChatPage} />
       <Route path="/event/:id" component={EventDetailPage} />
       <Route path="/profile/:username" component={ProfilePage} />
