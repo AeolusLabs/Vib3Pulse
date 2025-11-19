@@ -290,27 +290,26 @@ export default function SignupPage() {
                       <FormItem>
                         <FormLabel>Password</FormLabel>
                         <FormControl>
-                          <div className="relative">
+                          <div className="flex items-center gap-2 border rounded-md focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
                             <Input
                               type={showPassword ? "text" : "password"}
                               placeholder="Min. 8 characters"
+                              className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 flex-1"
                               {...field}
                               data-testid="input-password"
                             />
-                            <Button
+                            <button
                               type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                              className="text-muted-foreground hover:text-foreground transition-colors p-2 mr-1"
                               onClick={() => setShowPassword(!showPassword)}
                               data-testid="button-toggle-password"
                             >
                               {showPassword ? (
-                                <EyeOff className="h-4 w-4 text-muted-foreground" />
+                                <EyeOff className="h-4 w-4" />
                               ) : (
-                                <Eye className="h-4 w-4 text-muted-foreground" />
+                                <Eye className="h-4 w-4" />
                               )}
-                            </Button>
+                            </button>
                           </div>
                         </FormControl>
                         <FormMessage />
@@ -325,27 +324,26 @@ export default function SignupPage() {
                       <FormItem>
                         <FormLabel>Confirm Password</FormLabel>
                         <FormControl>
-                          <div className="relative">
+                          <div className="flex items-center gap-2 border rounded-md focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
                             <Input
                               type={showConfirmPassword ? "text" : "password"}
                               placeholder="Re-enter your password"
+                              className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 flex-1"
                               {...field}
                               data-testid="input-confirm-password"
                             />
-                            <Button
+                            <button
                               type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                              className="text-muted-foreground hover:text-foreground transition-colors p-2 mr-1"
                               onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                               data-testid="button-toggle-confirm-password"
                             >
                               {showConfirmPassword ? (
-                                <EyeOff className="h-4 w-4 text-muted-foreground" />
+                                <EyeOff className="h-4 w-4" />
                               ) : (
-                                <Eye className="h-4 w-4 text-muted-foreground" />
+                                <Eye className="h-4 w-4" />
                               )}
-                            </Button>
+                            </button>
                           </div>
                         </FormControl>
                         <FormMessage />
