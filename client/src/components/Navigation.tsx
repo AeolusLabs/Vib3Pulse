@@ -1,4 +1,4 @@
-import { Search, Plus, User, Calendar } from "lucide-react";
+import { Search, Plus, User, Calendar, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import ThemeToggle from "./ThemeToggle";
 import MenuTray from "./MenuTray";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 
 interface NavigationProps {
   userType?: "organizer" | "social";
@@ -21,6 +21,13 @@ interface NavigationProps {
 }
 
 export default function Navigation({ userType = "social", onSearch, onCreateEvent }: NavigationProps) {
+  const [, setLocation] = useLocation();
+
+  const handleLogout = () => {
+    console.log("User logged out");
+    setLocation("/");
+  };
+
   return (
     <header className="sticky top-0 z-50 border-b bg-card">
       <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8">
@@ -28,7 +35,7 @@ export default function Navigation({ userType = "social", onSearch, onCreateEven
           <div className="flex items-center gap-3">
             <MenuTray />
             
-            <Link href="/" className="no-underline">
+            <Link href="/discover" className="no-underline">
               <h1 className="font-serif text-2xl font-bold text-primary hover-elevate px-3 py-1 rounded-md" data-testid="link-home">
                 VibePulse
               </h1>
@@ -92,7 +99,10 @@ export default function Navigation({ userType = "social", onSearch, onCreateEven
                   My RSVPs
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem data-testid="menu-logout">Log out</DropdownMenuItem>
+                <DropdownMenuItem onClick={handleLogout} data-testid="menu-logout">
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Log out
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
