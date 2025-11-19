@@ -1,5 +1,6 @@
 import { Calendar, MapPin, Clock, Share2, Users } from "lucide-react";
 import Navigation from "@/components/Navigation";
+import BottomNavigation from "@/components/BottomNavigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -61,7 +62,7 @@ const similarEvents = [
 
 export default function EventDetailPage() {
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background pb-20 md:pb-0">
       <Navigation userType="social" />
 
       <div className="relative h-[400px] md:h-[500px] overflow-hidden">
@@ -176,6 +177,8 @@ export default function EventDetailPage() {
           </div>
         </div>
       </main>
+
+      <BottomNavigation onCreateClick={() => console.log('Create clicked')} />
     </div>
   );
 }

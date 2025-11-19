@@ -1,4 +1,5 @@
 import Navigation from "@/components/Navigation";
+import BottomNavigation from "@/components/BottomNavigation";
 import UserProfileCard from "@/components/UserProfileCard";
 import EventCard from "@/components/EventCard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -56,7 +57,7 @@ const following = [
 
 export default function ProfilePage() {
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background pb-20 md:pb-0">
       <Navigation userType="organizer" />
 
       <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -155,6 +156,8 @@ export default function ProfilePage() {
           </TabsContent>
         </Tabs>
       </main>
+
+      <BottomNavigation onCreateClick={() => console.log('Create clicked')} />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import Navigation from "@/components/Navigation";
+import BottomNavigation from "@/components/BottomNavigation";
 import HeroSection from "@/components/HeroSection";
 import FilterBar from "@/components/FilterBar";
 import EventCard from "@/components/EventCard";
@@ -159,7 +160,7 @@ export default function DiscoverPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background pb-20 md:pb-0">
       <Navigation userType="organizer" onSearch={setSearchQuery} />
       <HeroSection onSearch={setSearchQuery} onCategoryClick={setSelectedCategory} />
       
@@ -211,6 +212,8 @@ export default function DiscoverPage() {
         onClose={() => setCreateStoryOpen(false)}
         onCreateStory={(type, content) => console.log('Story created:', type, content)}
       />
+
+      <BottomNavigation onCreateClick={() => setCreateStoryOpen(true)} />
     </div>
   );
 }

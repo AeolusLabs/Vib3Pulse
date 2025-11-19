@@ -1,5 +1,6 @@
 import { useState } from "react";
 import Navigation from "@/components/Navigation";
+import BottomNavigation from "@/components/BottomNavigation";
 import StoriesBar from "@/components/StoriesBar";
 import StoryViewer from "@/components/StoryViewer";
 import CreateStoryModal from "@/components/CreateStoryModal";
@@ -188,7 +189,7 @@ export default function FeedPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background pb-20 md:pb-0">
       <Navigation userType="social" onSearch={() => {}} />
 
       <StoriesBar
@@ -250,6 +251,8 @@ export default function FeedPage() {
         onClose={() => setCreateStoryOpen(false)}
         onCreateStory={(type, content) => console.log('Story created:', type, content)}
       />
+
+      <BottomNavigation onCreateClick={() => setCreateStoryOpen(true)} />
     </div>
   );
 }
