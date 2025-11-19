@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, integer, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -24,3 +24,57 @@ export const insertUserSchema = createInsertSchema(users).omit({
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
+
+export const events = pgTable("events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  organizerId: varchar("organizer_id").notNull().references(() => users.id),
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  eventDate: timestamp("event_date").notNull(),
+  location: text("location").notNull(),
+  category: text("category").notNull(),
+  ticketPrice: integer("ticket_price").notNull().default(0),
+  requiresRSVP: boolean("requires_rsvp").notNull().default(false),
+  ticketsAvailable: integer("tickets_available").notNull(),
+  imageUrl: text("image_url"),
+});
+
+export const insertEventSchema = createInsertSchema(events).omit({
+  id: true,
+});
+
+export type InsertEvent = z.infer<typeof insertEventSchema>;
+export type Event = typeof events.$inferSelect;
+
+export const tickets = pgTable("tickets", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  eventId: varchar("event_id").notNull().references(() => events.id),
+  purchaseDate: timestamp("purchase_date").notNull().default(sql`now()`),
+  stripePaymentIntentId: text("stripe_payment_intent_id"),
+  status: text("status").notNull().default("confirmed"),
+});
+
+export const insertTicketSchema = createInsertSchema(tickets).omit({
+  id: true,
+  purchaseDate: true,
+});
+
+export type InsertTicket = z.infer<typeof insertTicketSchema>;
+export type Ticket = typeof tickets.$inferSelect;
+
+export const rsvps = pgTable("rsvps", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  eventId: varchar("event_id").notNull().references(() => events.id),
+  rsvpDate: timestamp("rsvp_date").notNull().default(sql`now()`),
+  status: text("status").notNull().default("confirmed"),
+});
+
+export const insertRsvpSchema = createInsertSchema(rsvps).omit({
+  id: true,
+  rsvpDate: true,
+});
+
+export type InsertRsvp = z.infer<typeof insertRsvpSchema>;
+export type Rsvp = typeof rsvps.$inferSelect;
