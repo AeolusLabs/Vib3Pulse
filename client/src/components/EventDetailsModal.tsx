@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,16 @@ interface EventDetailsModalProps {
 export default function EventDetailsModal({ event, onClose }: EventDetailsModalProps) {
   const { toast } = useToast();
   const [isProcessing, setIsProcessing] = useState(false);
+
+  const { data: rsvps } = useQuery({
+    queryKey: ["/api/rsvps", "mock-user-id"],
+    queryFn: async () => {
+      const response = await fetch(`/api/rsvps?userId=mock-user-id`);
+      return response.json();
+    },
+  });
+
+  const hasRSVPed = rsvps?.some((rsvp: any) => rsvp.eventId === event.id);
 
   const purchaseTicketMutation = useMutation({
     mutationFn: async () => {
@@ -51,6 +61,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/rsvps"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/tickets"] });
       toast({
         title: "RSVP Confirmed!",
         description: "You've successfully RSVP'd to this event.",
@@ -152,10 +163,15 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
               <Button
                 className="flex-1"
                 onClick={handleRSVP}
-                disabled={rsvpMutation.isPending}
+                disabled={rsvpMutation.isPending || hasRSVPed}
                 data-testid="button-rsvp"
               >
-                {rsvpMutation.isPending ? (
+                {hasRSVPed ? (
+                  <>
+                    <CheckCircle className="h-4 w-4 mr-2" />
+                    Already RSVP'd
+                  </>
+                ) : rsvpMutation.isPending ? (
                   "Processing..."
                 ) : (
                   <>
@@ -186,10 +202,16 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
               <Button
                 className="flex-1"
                 onClick={handleRSVP}
-                disabled={rsvpMutation.isPending}
+                disabled={rsvpMutation.isPending || hasRSVPed}
                 data-testid="button-rsvp"
               >
-                {rsvpMutation.isPending ? "Processing..." : "RSVP (No ticket required)"}
+                {hasRSVPed ? (
+                  "Already RSVP'd"
+                ) : rsvpMutation.isPending ? (
+                  "Processing..."
+                ) : (
+                  "RSVP (No ticket required)"
+                )}
               </Button>
             )}
             

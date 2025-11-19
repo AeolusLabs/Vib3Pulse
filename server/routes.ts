@@ -100,13 +100,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Verify Stripe checkout session and create ticket
   // This endpoint is called by the client after successful payment redirect
+  // 
+  // SECURITY NOTE: This endpoint currently accepts userId from the request body
+  // because the application does not yet have proper authentication middleware.
+  // In production, this MUST be replaced with authenticated session middleware
+  // that extracts the userId from a verified JWT/session token, not from the request body.
+  // 
+  // TODO: Implement authentication middleware and replace userId parameter with
+  // req.user.id from authenticated session before production deployment.
   app.post("/api/tickets/verify-payment", async (req, res) => {
     try {
-      const { sessionId } = req.body;
+      // Validate request body
+      const requestSchema = z.object({
+        sessionId: z.string().min(1),
+        userId: z.string().min(1), // TODO: Replace with req.user.id from auth middleware
+      });
       
-      if (!sessionId) {
-        return res.status(400).json({ message: "Session ID is required" });
-      }
+      const { sessionId, userId } = requestSchema.parse(req.body);
 
       // Retrieve the session from Stripe to verify payment
       const session = await stripe.checkout.sessions.retrieve(sessionId);
@@ -116,7 +126,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Payment not completed" });
       }
 
-      // Verify we haven't already created a ticket for this session
+      // Validate metadata exists
+      if (!session.metadata?.userId || !session.metadata?.eventId) {
+        return res.status(400).json({ message: "Invalid session metadata" });
+      }
+
+      // CRITICAL SECURITY CHECK: Verify the requesting user matches the session metadata
+      if (session.metadata.userId !== userId) {
+        console.error(`Security violation: User ${userId} attempted to claim ticket for user ${session.metadata.userId}`);
+        return res.status(403).json({ message: "Unauthorized: Session does not belong to you" });
+      }
+
+      // Verify we haven't already created a ticket for this session (idempotency)
       const existingTicket = await storage.getTicketByPaymentIntent(session.payment_intent as string);
       if (existingTicket) {
         return res.json({ message: "Ticket already created", ticket: existingTicket });
@@ -124,8 +145,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Create the ticket
       const ticketData = insertTicketSchema.parse({
-        userId: session.metadata?.userId,
-        eventId: session.metadata?.eventId,
+        userId: session.metadata.userId,
+        eventId: session.metadata.eventId,
         stripePaymentIntentId: session.payment_intent as string,
         status: "confirmed",
       });
@@ -133,6 +154,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ticket = await storage.createTicket(ticketData);
       res.json({ message: "Ticket created successfully", ticket });
     } catch (error) {
+      if (error instanceof z.ZodError) {
+        console.error('Invalid request:', error);
+        return res.status(400).json({ message: "Invalid request data" });
+      }
       console.error('Error verifying payment:', error);
       res.status(500).json({ message: "Failed to verify payment" });
     }
