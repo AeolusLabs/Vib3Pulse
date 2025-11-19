@@ -36,7 +36,9 @@ interface EventFormData {
   type: string;
   description: string;
   startDate: string;
+  startTime: string;
   endDate: string;
+  endTime: string;
   isMultiDay: boolean;
   locationType: "physical" | "virtual";
   location: string;
@@ -76,7 +78,9 @@ export default function CreateEventModal({ open, onClose }: CreateEventModalProp
     type: "",
     description: "",
     startDate: "",
+    startTime: "",
     endDate: "",
+    endTime: "",
     isMultiDay: false,
     locationType: "physical",
     location: "",
@@ -116,7 +120,9 @@ export default function CreateEventModal({ open, onClose }: CreateEventModalProp
       type: "",
       description: "",
       startDate: "",
+      startTime: "",
       endDate: "",
+      endTime: "",
       isMultiDay: false,
       locationType: "physical",
       location: "",
@@ -170,18 +176,19 @@ export default function CreateEventModal({ open, onClose }: CreateEventModalProp
       formData.type !== "" &&
       formData.description.trim() !== "" &&
       formData.startDate !== "" &&
+      formData.startTime !== "" &&
       formData.location.trim() !== "" &&
       formData.thumbnailUrl !== ""
     );
     
     if (formData.isMultiDay) {
-      if (formData.endDate === "") {
+      if (formData.endDate === "" || formData.endTime === "") {
         return false;
       }
-      // Ensure end date is after start date
-      const startDate = new Date(formData.startDate);
-      const endDate = new Date(formData.endDate);
-      return baseValid && endDate > startDate;
+      // Ensure end date/time is after start date/time
+      const startDateTime = new Date(`${formData.startDate}T${formData.startTime}`);
+      const endDateTime = new Date(`${formData.endDate}T${formData.endTime}`);
+      return baseValid && endDateTime > startDateTime;
     }
     
     return baseValid;
@@ -269,53 +276,93 @@ export default function CreateEventModal({ open, onClose }: CreateEventModalProp
               />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="start-date">Start Date *</Label>
-                <Input
-                  id="start-date"
-                  type="datetime-local"
-                  value={formData.startDate}
-                  onChange={(e) => updateFormData({ startDate: e.target.value })}
-                  data-testid="input-start-date"
-                />
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <Label>Event Schedule *</Label>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={formData.isMultiDay}
+                    onCheckedChange={(checked) => updateFormData({ isMultiDay: checked })}
+                    data-testid="switch-multi-day"
+                  />
+                  <span className="text-sm text-muted-foreground">Multi-day event</span>
+                </div>
               </div>
 
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="end-date">
-                    End Date{formData.isMultiDay && " *"}
-                  </Label>
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      checked={formData.isMultiDay}
-                      onCheckedChange={(checked) => updateFormData({ isMultiDay: checked })}
-                      data-testid="switch-multi-day"
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="start-date">Start Date *</Label>
+                  <Input
+                    id="start-date"
+                    type="date"
+                    value={formData.startDate}
+                    onChange={(e) => updateFormData({ startDate: e.target.value })}
+                    data-testid="input-start-date"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="start-time">Start Time *</Label>
+                  <Input
+                    id="start-time"
+                    type="time"
+                    value={formData.startTime}
+                    onChange={(e) => updateFormData({ startTime: e.target.value })}
+                    data-testid="input-start-time"
+                  />
+                </div>
+              </div>
+
+              {formData.isMultiDay && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="end-date">End Date *</Label>
+                    <Input
+                      id="end-date"
+                      type="date"
+                      value={formData.endDate}
+                      onChange={(e) => updateFormData({ endDate: e.target.value })}
+                      data-testid="input-end-date"
+                      className={
+                        formData.endDate === "" || 
+                        (formData.startDate && formData.startTime && formData.endDate && formData.endTime && 
+                         new Date(`${formData.endDate}T${formData.endTime}`) <= new Date(`${formData.startDate}T${formData.startTime}`))
+                          ? "border-destructive" 
+                          : ""
+                      }
                     />
-                    <span className="text-sm text-muted-foreground">Multi-day</span>
+                    {formData.endDate === "" && (
+                      <p className="text-xs text-destructive">End date is required</p>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="end-time">End Time *</Label>
+                    <Input
+                      id="end-time"
+                      type="time"
+                      value={formData.endTime}
+                      onChange={(e) => updateFormData({ endTime: e.target.value })}
+                      data-testid="input-end-time"
+                      className={
+                        formData.endTime === "" || 
+                        (formData.startDate && formData.startTime && formData.endDate && formData.endTime && 
+                         new Date(`${formData.endDate}T${formData.endTime}`) <= new Date(`${formData.startDate}T${formData.startTime}`))
+                          ? "border-destructive" 
+                          : ""
+                      }
+                    />
+                    {formData.endTime === "" && (
+                      <p className="text-xs text-destructive">End time is required</p>
+                    )}
                   </div>
                 </div>
-                <Input
-                  id="end-date"
-                  type="datetime-local"
-                  value={formData.endDate}
-                  onChange={(e) => updateFormData({ endDate: e.target.value })}
-                  disabled={!formData.isMultiDay}
-                  data-testid="input-end-date"
-                  className={
-                    formData.isMultiDay && 
-                    (formData.endDate === "" || (formData.startDate && formData.endDate && new Date(formData.endDate) <= new Date(formData.startDate)))
-                      ? "border-destructive" 
-                      : ""
-                  }
-                />
-                {formData.isMultiDay && formData.endDate === "" && (
-                  <p className="text-xs text-destructive">End date is required for multi-day events</p>
-                )}
-                {formData.isMultiDay && formData.endDate !== "" && formData.startDate && new Date(formData.endDate) <= new Date(formData.startDate) && (
-                  <p className="text-xs text-destructive">End date must be after start date</p>
-                )}
-              </div>
+              )}
+              
+              {formData.isMultiDay && formData.endDate !== "" && formData.endTime !== "" && formData.startDate && formData.startTime && 
+               new Date(`${formData.endDate}T${formData.endTime}`) <= new Date(`${formData.startDate}T${formData.startTime}`) && (
+                <p className="text-xs text-destructive">End date/time must be after start date/time</p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -671,16 +718,16 @@ export default function CreateEventModal({ open, onClose }: CreateEventModalProp
 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <p className="text-sm text-muted-foreground">Start Date</p>
+                      <p className="text-sm text-muted-foreground">Start</p>
                       <p className="text-sm" data-testid="text-review-start-date">
-                        {new Date(formData.startDate).toLocaleString()}
+                        {new Date(`${formData.startDate}T${formData.startTime}`).toLocaleString()}
                       </p>
                     </div>
-                    {formData.isMultiDay && formData.endDate && (
+                    {formData.isMultiDay && formData.endDate && formData.endTime && (
                       <div>
-                        <p className="text-sm text-muted-foreground">End Date</p>
+                        <p className="text-sm text-muted-foreground">End</p>
                         <p className="text-sm" data-testid="text-review-end-date">
-                          {new Date(formData.endDate).toLocaleString()}
+                          {new Date(`${formData.endDate}T${formData.endTime}`).toLocaleString()}
                         </p>
                       </div>
                     )}
