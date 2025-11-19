@@ -25,13 +25,26 @@ export default function Navigation({ userType = "social", onSearch }: Navigation
     <header className="sticky top-0 z-50 border-b bg-card">
       <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between gap-4 h-16">
-          <div className="flex items-center gap-6">
-            <Link href="/" className="no-underline">
-              <h1 className="font-serif text-2xl font-bold text-primary hover-elevate px-3 py-1 rounded-md" data-testid="link-home">
-                VibePulse
-              </h1>
-            </Link>
+          <Link href="/" className="no-underline">
+            <h1 className="font-serif text-2xl font-bold text-primary hover-elevate px-3 py-1 rounded-md" data-testid="link-home">
+              VibePulse
+            </h1>
+          </Link>
 
+          <div className="hidden md:flex flex-1 max-w-md">
+            <div className="relative w-full">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="search"
+                placeholder="Search events..."
+                className="pl-10"
+                data-testid="input-search"
+                onChange={(e) => onSearch?.(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
             <nav className="hidden md:flex items-center gap-1">
               <Link href="/feed">
                 <Button
@@ -54,22 +67,6 @@ export default function Navigation({ userType = "social", onSearch }: Navigation
                 </Button>
               </Link>
             </nav>
-          </div>
-
-          <div className="hidden md:flex flex-1 max-w-md">
-            <div className="relative w-full">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                type="search"
-                placeholder="Search events..."
-                className="pl-10"
-                data-testid="input-search"
-                onChange={(e) => onSearch?.(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
             {userType === "organizer" && (
               <Button variant="default" size="default" data-testid="button-create-event">
                 <Plus className="h-4 w-4 mr-2" />
