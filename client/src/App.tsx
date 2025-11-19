@@ -10,6 +10,7 @@ import ProfilePage from "@/pages/ProfilePage";
 import FeedPage from "@/pages/FeedPage";
 import MyEventsPage from "@/pages/MyEventsPage";
 import ChatPage from "@/pages/ChatPage";
+import ConversationPage from "@/pages/ConversationPage";
 import ManageEventsPage from "@/pages/ManageEventsPage";
 
 function Router() {
@@ -20,6 +21,7 @@ function Router() {
       <Route path="/my-events" component={MyEventsPage} />
       <Route path="/manage-events" component={ManageEventsPage} />
       <Route path="/chat" component={ChatPage} />
+      <Route path="/chat/:userId" component={ConversationPage} />
       <Route path="/event/:id" component={EventDetailPage} />
       <Route path="/profile/:username" component={ProfilePage} />
       <Route component={NotFound} />

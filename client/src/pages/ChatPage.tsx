@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "wouter";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -84,49 +85,50 @@ export default function ChatPage() {
 
         <div className="space-y-2">
           {filteredConversations.map((conversation) => (
-            <Card 
-              key={conversation.id} 
-              className="hover-elevate cursor-pointer"
-              data-testid={`card-conversation-${conversation.id}`}
-            >
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="relative">
-                    <Avatar className="h-12 w-12">
-                      <AvatarImage src={conversation.avatar} alt={conversation.name} />
-                      <AvatarFallback>
-                        {conversation.name.split(' ').map(n => n[0]).join('')}
-                      </AvatarFallback>
-                    </Avatar>
-                    {conversation.online && (
-                      <div className="absolute bottom-0 right-0 h-3 w-3 bg-green-500 rounded-full border-2 border-background" />
+            <Link key={conversation.id} href={`/chat/${conversation.id}`}>
+              <Card 
+                className="hover-elevate cursor-pointer"
+                data-testid={`card-conversation-${conversation.id}`}
+              >
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="relative">
+                      <Avatar className="h-12 w-12">
+                        <AvatarImage src={conversation.avatar} alt={conversation.name} />
+                        <AvatarFallback>
+                          {conversation.name.split(' ').map(n => n[0]).join('')}
+                        </AvatarFallback>
+                      </Avatar>
+                      {conversation.online && (
+                        <div className="absolute bottom-0 right-0 h-3 w-3 bg-green-500 rounded-full border-2 border-background" />
+                      )}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-baseline justify-between gap-2 mb-1">
+                        <p className="font-semibold truncate" data-testid="text-contact-name">
+                          {conversation.name}
+                        </p>
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">
+                          {conversation.timestamp}
+                        </span>
+                      </div>
+                      <p className="text-sm text-muted-foreground truncate" data-testid="text-last-message">
+                        {conversation.lastMessage}
+                      </p>
+                    </div>
+
+                    {conversation.unread > 0 && (
+                      <div className="flex-shrink-0">
+                        <div className="bg-primary text-primary-foreground rounded-full h-5 w-5 flex items-center justify-center text-xs font-medium">
+                          {conversation.unread}
+                        </div>
+                      </div>
                     )}
                   </div>
-
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-baseline justify-between gap-2 mb-1">
-                      <p className="font-semibold truncate" data-testid="text-contact-name">
-                        {conversation.name}
-                      </p>
-                      <span className="text-xs text-muted-foreground whitespace-nowrap">
-                        {conversation.timestamp}
-                      </span>
-                    </div>
-                    <p className="text-sm text-muted-foreground truncate" data-testid="text-last-message">
-                      {conversation.lastMessage}
-                    </p>
-                  </div>
-
-                  {conversation.unread > 0 && (
-                    <div className="flex-shrink-0">
-                      <div className="bg-primary text-primary-foreground rounded-full h-5 w-5 flex items-center justify-center text-xs font-medium">
-                        {conversation.unread}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </Link>
           ))}
         </div>
 
