@@ -4,9 +4,12 @@ import BottomNavigation from "@/components/BottomNavigation";
 import StoriesBar from "@/components/StoriesBar";
 import StoryViewer from "@/components/StoryViewer";
 import CreateStoryModal from "@/components/CreateStoryModal";
+import CreatePostModal from "@/components/CreatePostModal";
 import FeedPost from "@/components/FeedPost";
 import { Button } from "@/components/ui/button";
-import { Sparkles } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Sparkles, Image as ImageIcon } from "lucide-react";
 import musicFestival from '@assets/generated_images/Outdoor_music_festival_event_179040d3.png';
 import foodTasting from '@assets/generated_images/Food_and_wine_tasting_69928d9e.png';
 import techConf from '@assets/generated_images/Tech_conference_presentation_2bcf2c35.png';
@@ -172,6 +175,7 @@ const mockPosts = [
 export default function FeedPage() {
   const [viewingStory, setViewingStory] = useState<number | null>(null);
   const [createStoryOpen, setCreateStoryOpen] = useState(false);
+  const [createPostOpen, setCreatePostOpen] = useState(false);
   const [feedFilter, setFeedFilter] = useState<'following' | 'all'>('following');
 
   const handleNextStory = () => {
@@ -225,6 +229,25 @@ export default function FeedPage() {
           </div>
         </div>
 
+        <Card className="mb-4 hover-elevate cursor-pointer" onClick={() => setCreatePostOpen(true)} data-testid="card-create-post">
+          <CardContent className="p-4">
+            <div className="flex gap-3">
+              <Avatar className="h-10 w-10 flex-shrink-0">
+                <AvatarImage src="" alt="Your avatar" />
+                <AvatarFallback>JD</AvatarFallback>
+              </Avatar>
+              <div className="flex-1 flex items-center gap-2">
+                <div className="flex-1 py-2 px-4 rounded-full bg-muted text-muted-foreground">
+                  What's happening?
+                </div>
+                <Button variant="ghost" size="icon" data-testid="button-add-image-quick">
+                  <ImageIcon className="h-5 w-5 text-primary" />
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         <div className="space-y-4">
           {mockPosts.map((post) => (
             <FeedPost key={post.id} {...post} />
@@ -250,6 +273,12 @@ export default function FeedPage() {
         open={createStoryOpen}
         onClose={() => setCreateStoryOpen(false)}
         onCreateStory={(type, content) => console.log('Story created:', type, content)}
+      />
+
+      <CreatePostModal
+        open={createPostOpen}
+        onClose={() => setCreatePostOpen(false)}
+        onCreatePost={(content, image) => console.log('Created post:', content, image)}
       />
 
       <BottomNavigation onCreateClick={() => setCreateStoryOpen(true)} />
