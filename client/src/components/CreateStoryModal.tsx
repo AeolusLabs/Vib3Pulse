@@ -1,14 +1,12 @@
-import { useState } from "react";
-import { X, Image as ImageIcon, Type } from "lucide-react";
+import { useState, useRef } from "react";
+import { Camera, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface CreateStoryModalProps {
   open: boolean;
@@ -16,126 +14,181 @@ interface CreateStoryModalProps {
   onCreateStory?: (type: "image" | "text", content: string) => void;
 }
 
-const colorOptions = [
-  { name: "Purple", value: "hsl(262 80% 87%)" },
-  { name: "Blue", value: "hsl(220 100% 84%)" },
-  { name: "Green", value: "hsl(127 63% 49%)" },
-  { name: "Pink", value: "hsl(340 70% 60%)" },
-  { name: "Orange", value: "hsl(30 70% 60%)" },
-];
-
 export default function CreateStoryModal({ open, onClose, onCreateStory }: CreateStoryModalProps) {
-  const [textContent, setTextContent] = useState("");
-  const [selectedColor, setSelectedColor] = useState(colorOptions[0].value);
-
-  const handleCreateText = () => {
-    if (textContent.trim()) {
-      onCreateStory?.("text", textContent);
-      console.log('Created text story:', textContent, 'color:', selectedColor);
-      setTextContent("");
-      onClose();
-    }
-  };
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [showCamera, setShowCamera] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        onCreateStory?.("image", reader.result as string);
-        console.log('Created image story');
-        onClose();
+        setSelectedImage(reader.result as string);
       };
       reader.readAsDataURL(file);
     }
   };
 
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'user' },
+        audio: false 
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+      setShowCamera(true);
+    } catch (error) {
+      console.error('Error accessing camera:', error);
+      alert('Unable to access camera. Please check permissions or try uploading an image instead.');
+    }
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    setShowCamera(false);
+  };
+
+  const capturePhoto = () => {
+    if (videoRef.current) {
+      const canvas = document.createElement('canvas');
+      canvas.width = videoRef.current.videoWidth;
+      canvas.height = videoRef.current.videoHeight;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(videoRef.current, 0, 0);
+        const imageData = canvas.toDataURL('image/jpeg');
+        setSelectedImage(imageData);
+        stopCamera();
+      }
+    }
+  };
+
+  const handlePostStory = () => {
+    if (selectedImage) {
+      onCreateStory?.("image", selectedImage);
+      console.log('Created image story');
+      setSelectedImage(null);
+      stopCamera();
+      onClose();
+    }
+  };
+
+  const handleClose = () => {
+    stopCamera();
+    setSelectedImage(null);
+    onClose();
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-md">
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="font-serif">Create Your Story</DialogTitle>
         </DialogHeader>
 
-        <Tabs defaultValue="text" className="w-full">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="text" data-testid="tab-text-story">
-              <Type className="h-4 w-4 mr-2" />
-              Text
-            </TabsTrigger>
-            <TabsTrigger value="image" data-testid="tab-image-story">
-              <ImageIcon className="h-4 w-4 mr-2" />
-              Image
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="text" className="space-y-4">
-            <div
-              className="w-full h-64 rounded-md flex items-center justify-center p-6"
-              style={{ backgroundColor: selectedColor }}
-            >
-              <p className="text-xl font-serif font-semibold text-center text-primary-foreground">
-                {textContent || "Your text will appear here..."}
-              </p>
-            </div>
-
-            <Textarea
-              placeholder="What's on your mind?"
-              value={textContent}
-              onChange={(e) => setTextContent(e.target.value)}
-              className="resize-none"
-              rows={3}
-              data-testid="textarea-story-content"
-            />
-
-            <div>
-              <p className="text-sm font-semibold mb-2">Background Color</p>
-              <div className="flex gap-2">
-                {colorOptions.map((color) => (
-                  <button
-                    key={color.value}
-                    className={`w-10 h-10 rounded-full border-2 ${
-                      selectedColor === color.value ? "border-primary" : "border-transparent"
-                    }`}
-                    style={{ backgroundColor: color.value }}
-                    onClick={() => setSelectedColor(color.value)}
-                    data-testid={`button-color-${color.name.toLowerCase()}`}
-                  />
-                ))}
-              </div>
-            </div>
-
+        {!selectedImage && !showCamera && (
+          <div className="space-y-4 py-4">
             <Button
-              onClick={handleCreateText}
-              className="w-full"
-              disabled={!textContent.trim()}
-              data-testid="button-post-text-story"
+              onClick={startCamera}
+              className="w-full h-32 flex flex-col gap-3"
+              variant="outline"
+              data-testid="button-take-photo"
             >
-              Post Story
+              <Camera className="h-12 w-12" />
+              <span className="font-semibold">Take Photo</span>
             </Button>
-          </TabsContent>
 
-          <TabsContent value="image" className="space-y-4">
-            <div className="border-2 border-dashed rounded-md p-8 text-center">
-              <ImageIcon className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground mb-4">
-                Upload an image for your story
-              </p>
-              <label htmlFor="story-image-upload">
-                <Button variant="outline" asChild data-testid="button-upload-image">
-                  <span>Choose Image</span>
-                </Button>
-              </label>
-              <input
-                id="story-image-upload"
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handleImageUpload}
+            <label htmlFor="story-image-upload" className="block">
+              <Button
+                variant="outline"
+                className="w-full h-32 flex flex-col gap-3"
+                asChild
+                data-testid="button-upload-photo"
+              >
+                <span>
+                  <Upload className="h-12 w-12" />
+                  <span className="font-semibold">Upload Photo</span>
+                </span>
+              </Button>
+            </label>
+            <input
+              id="story-image-upload"
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleImageUpload}
+            />
+          </div>
+        )}
+
+        {showCamera && (
+          <div className="space-y-4">
+            <div className="relative rounded-lg overflow-hidden bg-black aspect-[3/4]">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover"
               />
             </div>
-          </TabsContent>
-        </Tabs>
+            <div className="flex gap-2">
+              <Button
+                onClick={stopCamera}
+                variant="outline"
+                className="flex-1"
+                data-testid="button-cancel-camera"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={capturePhoto}
+                className="flex-1"
+                data-testid="button-capture-photo"
+              >
+                <Camera className="h-4 w-4 mr-2" />
+                Capture
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {selectedImage && !showCamera && (
+          <div className="space-y-4">
+            <div className="relative rounded-lg overflow-hidden bg-black aspect-[3/4]">
+              <img
+                src={selectedImage}
+                alt="Story preview"
+                className="w-full h-full object-cover"
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button
+                onClick={() => setSelectedImage(null)}
+                variant="outline"
+                className="flex-1"
+                data-testid="button-retake"
+              >
+                Retake
+              </Button>
+              <Button
+                onClick={handlePostStory}
+                className="flex-1"
+                data-testid="button-post-story"
+              >
+                Post Story
+              </Button>
+            </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
