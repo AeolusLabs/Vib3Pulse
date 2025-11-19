@@ -37,27 +37,6 @@ export default function Navigation({ userType = "social", onSearch }: Navigation
 
           <div className="w-12" />
         </div>
-
-        <nav className="flex items-center justify-center gap-8 md:gap-16">
-          {tabs.map((tab) => {
-            const isActive = location === tab.path;
-            return (
-              <Link key={tab.path} href={tab.path}>
-                <button
-                  className={`pb-4 text-base font-medium transition-colors relative ${
-                    isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                  data-testid={`tab-${tab.label.toLowerCase()}`}
-                >
-                  {tab.label}
-                  {isActive && (
-                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
-                  )}
-                </button>
-              </Link>
-            );
-          })}
-        </nav>
       </div>
     </header>
   );
