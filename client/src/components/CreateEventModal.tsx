@@ -484,10 +484,7 @@ export default function CreateEventModal({ open, onClose }: CreateEventModalProp
               </div>
             </div>
 
-            <div className="flex justify-end gap-2">
-              <Button onClick={onClose} variant="outline" data-testid="button-cancel">
-                Cancel
-              </Button>
+            <div className="flex justify-end">
               <Button
                 onClick={handleNext}
                 disabled={!isStep1Valid()}
