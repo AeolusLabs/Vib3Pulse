@@ -1,5 +1,7 @@
+import { useState } from "react";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
+import CreateEventModal from "@/components/CreateEventModal";
 import UserProfileCard from "@/components/UserProfileCard";
 import EventCard from "@/components/EventCard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -56,9 +58,14 @@ const following = [
 ];
 
 export default function ProfilePage() {
+  const [createEventOpen, setCreateEventOpen] = useState(false);
+
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
-      <Navigation userType="organizer" />
+      <Navigation
+        userType="organizer"
+        onCreateEvent={() => setCreateEventOpen(true)}
+      />
 
       <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
@@ -157,7 +164,12 @@ export default function ProfilePage() {
         </Tabs>
       </main>
 
-      <BottomNavigation onCreateClick={() => console.log('Create clicked')} />
+      <CreateEventModal
+        open={createEventOpen}
+        onClose={() => setCreateEventOpen(false)}
+      />
+
+      <BottomNavigation onCreateClick={() => setCreateEventOpen(true)} />
     </div>
   );
 }

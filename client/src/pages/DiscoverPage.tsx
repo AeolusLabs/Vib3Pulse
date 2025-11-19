@@ -4,6 +4,7 @@ import BottomNavigation from "@/components/BottomNavigation";
 import HeroSection from "@/components/HeroSection";
 import FilterBar from "@/components/FilterBar";
 import EventCard from "@/components/EventCard";
+import CreateEventModal from "@/components/CreateEventModal";
 import musicFestival from '@assets/generated_images/Outdoor_music_festival_event_179040d3.png';
 import foodTasting from '@assets/generated_images/Food_and_wine_tasting_69928d9e.png';
 import techConf from '@assets/generated_images/Tech_conference_presentation_2bcf2c35.png';
@@ -84,6 +85,7 @@ const mockEvents = [
 export default function DiscoverPage() {
   const [selectedCategory, setSelectedCategory] = useState("All Events");
   const [searchQuery, setSearchQuery] = useState("");
+  const [createEventOpen, setCreateEventOpen] = useState(false);
 
   //todo: remove mock functionality - replace with real filtering
   const filteredEvents = mockEvents.filter(event => {
@@ -95,7 +97,11 @@ export default function DiscoverPage() {
 
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
-      <Navigation userType="organizer" onSearch={setSearchQuery} />
+      <Navigation
+        userType="organizer"
+        onSearch={setSearchQuery}
+        onCreateEvent={() => setCreateEventOpen(true)}
+      />
       <HeroSection onSearch={setSearchQuery} onCategoryClick={setSelectedCategory} />
       
       <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -122,7 +128,12 @@ export default function DiscoverPage() {
         )}
       </main>
 
-      <BottomNavigation onCreateClick={() => console.log('Create clicked')} />
+      <CreateEventModal
+        open={createEventOpen}
+        onClose={() => setCreateEventOpen(false)}
+      />
+
+      <BottomNavigation onCreateClick={() => setCreateEventOpen(true)} />
     </div>
   );
 }

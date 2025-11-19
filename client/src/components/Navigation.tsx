@@ -17,9 +17,10 @@ import { Link } from "wouter";
 interface NavigationProps {
   userType?: "organizer" | "social";
   onSearch?: (query: string) => void;
+  onCreateEvent?: () => void;
 }
 
-export default function Navigation({ userType = "social", onSearch }: NavigationProps) {
+export default function Navigation({ userType = "social", onSearch, onCreateEvent }: NavigationProps) {
   return (
     <header className="sticky top-0 z-50 border-b bg-card">
       <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8">
@@ -49,7 +50,12 @@ export default function Navigation({ userType = "social", onSearch }: Navigation
 
           <div className="flex items-center gap-2">
             {userType === "organizer" && (
-              <Button variant="default" size="default" data-testid="button-create-event">
+              <Button
+                variant="default"
+                size="default"
+                onClick={onCreateEvent}
+                data-testid="button-create-event"
+              >
                 <Plus className="h-4 w-4 mr-2" />
                 Create Event
               </Button>
