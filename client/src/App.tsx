@@ -7,11 +7,13 @@ import NotFound from "@/pages/not-found";
 import DiscoverPage from "@/pages/DiscoverPage";
 import EventDetailPage from "@/pages/EventDetailPage";
 import ProfilePage from "@/pages/ProfilePage";
+import FeedPage from "@/pages/FeedPage";
 
 function Router() {
   return (
     <Switch>
       <Route path="/" component={DiscoverPage} />
+      <Route path="/feed" component={FeedPage} />
       <Route path="/event/:id" component={EventDetailPage} />
       <Route path="/profile/:username" component={ProfilePage} />
       <Route component={NotFound} />

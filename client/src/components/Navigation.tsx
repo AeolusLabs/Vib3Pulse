@@ -1,4 +1,4 @@
-import { Search, Plus, User, Calendar } from "lucide-react";
+import { Search, Plus, User, Calendar, Compass, Home } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -11,7 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import ThemeToggle from "./ThemeToggle";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 
 interface NavigationProps {
   userType?: "organizer" | "social";
@@ -19,15 +19,42 @@ interface NavigationProps {
 }
 
 export default function Navigation({ userType = "social", onSearch }: NavigationProps) {
+  const [location] = useLocation();
+
   return (
     <header className="sticky top-0 z-50 border-b bg-card">
       <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between gap-4 h-16">
-          <Link href="/" className="no-underline">
-            <h1 className="font-serif text-2xl font-bold text-primary hover-elevate px-3 py-1 rounded-md" data-testid="link-home">
-              VibePulse
-            </h1>
-          </Link>
+          <div className="flex items-center gap-6">
+            <Link href="/" className="no-underline">
+              <h1 className="font-serif text-2xl font-bold text-primary hover-elevate px-3 py-1 rounded-md" data-testid="link-home">
+                VibePulse
+              </h1>
+            </Link>
+
+            <nav className="hidden md:flex items-center gap-1">
+              <Link href="/feed">
+                <Button
+                  variant={location === '/feed' ? 'default' : 'ghost'}
+                  size="sm"
+                  data-testid="link-feed"
+                >
+                  <Home className="h-4 w-4 mr-2" />
+                  Feed
+                </Button>
+              </Link>
+              <Link href="/">
+                <Button
+                  variant={location === '/' ? 'default' : 'ghost'}
+                  size="sm"
+                  data-testid="link-discover"
+                >
+                  <Compass className="h-4 w-4 mr-2" />
+                  Discover
+                </Button>
+              </Link>
+            </nav>
+          </div>
 
           <div className="hidden md:flex flex-1 max-w-md">
             <div className="relative w-full">

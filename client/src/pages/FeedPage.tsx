@@ -1,0 +1,255 @@
+import { useState } from "react";
+import Navigation from "@/components/Navigation";
+import StoriesBar from "@/components/StoriesBar";
+import StoryViewer from "@/components/StoryViewer";
+import CreateStoryModal from "@/components/CreateStoryModal";
+import FeedPost from "@/components/FeedPost";
+import { Button } from "@/components/ui/button";
+import { Sparkles } from "lucide-react";
+import musicFestival from '@assets/generated_images/Outdoor_music_festival_event_179040d3.png';
+import foodTasting from '@assets/generated_images/Food_and_wine_tasting_69928d9e.png';
+import techConf from '@assets/generated_images/Tech_conference_presentation_2bcf2c35.png';
+import yogaEvent from '@assets/generated_images/Outdoor_yoga_wellness_event_c02f75d1.png';
+import artGallery from '@assets/generated_images/Art_gallery_opening_8b389604.png';
+import charityRun from '@assets/generated_images/Charity_run_event_5c615e65.png';
+
+//todo: remove mock functionality
+const mockStories = [
+  { 
+    id: '1', 
+    username: 'Live Events Co', 
+    isViewed: false,
+    slides: [
+      { id: '1-1', type: 'image' as const, content: musicFestival, timestamp: '2h ago' },
+      { id: '1-2', type: 'text' as const, content: '🎵 Summer Festival lineup announced!', backgroundColor: 'hsl(262 80% 87%)', timestamp: '2h ago' }
+    ]
+  },
+  { 
+    id: '2', 
+    username: 'Wellness Warriors', 
+    isViewed: true,
+    slides: [
+      { id: '2-1', type: 'image' as const, content: yogaEvent, timestamp: '5h ago' },
+      { id: '2-2', type: 'text' as const, content: 'Join us every morning for sunrise yoga 🧘', backgroundColor: 'hsl(127 63% 49%)', timestamp: '5h ago' }
+    ]
+  },
+  { 
+    id: '3', 
+    username: 'TechForward', 
+    isViewed: false,
+    slides: [
+      { id: '3-1', type: 'image' as const, content: techConf, timestamp: '1h ago' }
+    ]
+  },
+  { 
+    id: '4', 
+    username: 'Art Collective LA', 
+    isViewed: false,
+    slides: [
+      { id: '4-1', type: 'image' as const, content: artGallery, timestamp: '3h ago' },
+      { id: '4-2', type: 'text' as const, content: 'New exhibition opening this Friday!', backgroundColor: 'hsl(340 70% 60%)', timestamp: '3h ago' }
+    ]
+  },
+  { 
+    id: '5', 
+    username: 'Community Champions', 
+    isViewed: true,
+    slides: [
+      { id: '5-1', type: 'image' as const, content: charityRun, timestamp: '8h ago' }
+    ]
+  },
+];
+
+//todo: remove mock functionality
+const mockPosts = [
+  {
+    id: '1',
+    author: {
+      name: 'Live Events Co',
+      username: 'liveeventsco',
+      isOrganizer: true
+    },
+    content: '🎵 Excited to announce our Summer Music Festival lineup! Get your tickets now before they sell out. This is going to be the event of the year! #MusicFestival #LiveMusic',
+    image: musicFestival,
+    timestamp: '2h ago',
+    likes: 234,
+    comments: 45,
+    isLiked: false
+  },
+  {
+    id: '2',
+    author: {
+      name: 'Sarah Johnson',
+      username: 'sarahj'
+    },
+    content: 'Just got my tickets for the yoga retreat next month! Can\'t wait to disconnect and recharge 🧘‍♀️✨',
+    timestamp: '5h ago',
+    likes: 89,
+    comments: 12,
+    isLiked: true
+  },
+  {
+    id: '3',
+    author: {
+      name: 'TechForward',
+      username: 'techforward',
+      isOrganizer: true
+    },
+    content: 'Innovation never stops! Join us at the Tech Summit 2025 where we\'ll explore AI, blockchain, and the future of technology. Early bird tickets available now.',
+    image: techConf,
+    timestamp: '1h ago',
+    likes: 456,
+    comments: 78,
+    isLiked: false
+  },
+  {
+    id: '4',
+    author: {
+      name: 'Michael Chen',
+      username: 'mchen'
+    },
+    content: 'Had an amazing time at the food & wine tasting last night! The culinary experience was incredible. Highly recommend checking out their upcoming events!',
+    image: foodTasting,
+    timestamp: '3h ago',
+    likes: 124,
+    comments: 23,
+    isLiked: false
+  },
+  {
+    id: '5',
+    author: {
+      name: 'Art Collective LA',
+      username: 'artcollectivela',
+      isOrganizer: true
+    },
+    content: 'Opening reception this Friday! Come experience our new contemporary art exhibition featuring local artists. Free entry, all are welcome 🎨',
+    image: artGallery,
+    timestamp: '6h ago',
+    likes: 167,
+    comments: 34,
+    isLiked: true
+  },
+  {
+    id: '6',
+    author: {
+      name: 'Emma Rodriguez',
+      username: 'emmarodriguez'
+    },
+    content: 'Training for the charity 5K run next month! Who else is participating? Let\'s make a difference together 🏃‍♀️💪',
+    timestamp: '8h ago',
+    likes: 93,
+    comments: 19,
+    isLiked: false
+  },
+  {
+    id: '7',
+    author: {
+      name: 'Wellness Warriors',
+      username: 'wellnesswarriors',
+      isOrganizer: true
+    },
+    content: 'Morning yoga sessions are now open for registration! Join us every Saturday at sunrise for a peaceful practice in the park. First class is free 🌅',
+    timestamp: '10h ago',
+    likes: 201,
+    comments: 41,
+    isLiked: false
+  },
+  {
+    id: '8',
+    author: {
+      name: 'David Park',
+      username: 'dpark'
+    },
+    content: 'Just discovered VibePulse and I\'m loving it! So many cool events happening in the city. Already RSVP\'d to three events this month 🎉',
+    timestamp: '12h ago',
+    likes: 67,
+    comments: 8,
+    isLiked: true
+  }
+];
+
+export default function FeedPage() {
+  const [viewingStory, setViewingStory] = useState<number | null>(null);
+  const [createStoryOpen, setCreateStoryOpen] = useState(false);
+  const [feedFilter, setFeedFilter] = useState<'following' | 'all'>('following');
+
+  const handleNextStory = () => {
+    if (viewingStory !== null && viewingStory < mockStories.length - 1) {
+      setViewingStory(viewingStory + 1);
+    } else {
+      setViewingStory(null);
+    }
+  };
+
+  const handlePreviousStory = () => {
+    if (viewingStory !== null && viewingStory > 0) {
+      setViewingStory(viewingStory - 1);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-background">
+      <Navigation userType="social" onSearch={() => {}} />
+
+      <StoriesBar
+        stories={mockStories}
+        onStoryClick={(storyId) => {
+          const index = mockStories.findIndex(s => s.id === storyId);
+          setViewingStory(index);
+        }}
+        onCreateStory={() => setCreateStoryOpen(true)}
+      />
+
+      <main className="max-w-[600px] mx-auto px-4 sm:px-6 py-6">
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-serif font-semibold">Feed</h1>
+          <div className="flex gap-2">
+            <Button
+              variant={feedFilter === 'following' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setFeedFilter('following')}
+              data-testid="button-filter-following"
+            >
+              Following
+            </Button>
+            <Button
+              variant={feedFilter === 'all' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setFeedFilter('all')}
+              data-testid="button-filter-all"
+            >
+              <Sparkles className="h-4 w-4 mr-1" />
+              For You
+            </Button>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          {mockPosts.map((post) => (
+            <FeedPost key={post.id} {...post} />
+          ))}
+        </div>
+
+        <div className="text-center py-8">
+          <p className="text-muted-foreground text-sm">You're all caught up! 🎉</p>
+        </div>
+      </main>
+
+      {viewingStory !== null && (
+        <StoryViewer
+          username={mockStories[viewingStory].username}
+          slides={mockStories[viewingStory].slides}
+          onClose={() => setViewingStory(null)}
+          onNext={handleNextStory}
+          onPrevious={handlePreviousStory}
+        />
+      )}
+
+      <CreateStoryModal
+        open={createStoryOpen}
+        onClose={() => setCreateStoryOpen(false)}
+        onCreateStory={(type, content) => console.log('Story created:', type, content)}
+      />
+    </div>
+  );
+}
