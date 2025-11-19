@@ -3,6 +3,9 @@ import Navigation from "@/components/Navigation";
 import HeroSection from "@/components/HeroSection";
 import FilterBar from "@/components/FilterBar";
 import EventCard from "@/components/EventCard";
+import StoriesBar from "@/components/StoriesBar";
+import StoryViewer from "@/components/StoryViewer";
+import CreateStoryModal from "@/components/CreateStoryModal";
 import musicFestival from '@assets/generated_images/Outdoor_music_festival_event_179040d3.png';
 import foodTasting from '@assets/generated_images/Food_and_wine_tasting_69928d9e.png';
 import techConf from '@assets/generated_images/Tech_conference_presentation_2bcf2c35.png';
@@ -80,9 +83,58 @@ const mockEvents = [
   },
 ];
 
+//todo: remove mock functionality
+const mockStories = [
+  { 
+    id: '1', 
+    username: 'Live Events Co', 
+    isViewed: false,
+    slides: [
+      { id: '1-1', type: 'image' as const, content: musicFestival, timestamp: '2h ago' },
+      { id: '1-2', type: 'text' as const, content: '🎵 Summer Festival lineup announced!', backgroundColor: 'hsl(262 80% 87%)', timestamp: '2h ago' }
+    ]
+  },
+  { 
+    id: '2', 
+    username: 'Wellness Warriors', 
+    isViewed: true,
+    slides: [
+      { id: '2-1', type: 'image' as const, content: yogaEvent, timestamp: '5h ago' },
+      { id: '2-2', type: 'text' as const, content: 'Join us every morning for sunrise yoga 🧘', backgroundColor: 'hsl(127 63% 49%)', timestamp: '5h ago' }
+    ]
+  },
+  { 
+    id: '3', 
+    username: 'TechForward', 
+    isViewed: false,
+    slides: [
+      { id: '3-1', type: 'image' as const, content: techConf, timestamp: '1h ago' }
+    ]
+  },
+  { 
+    id: '4', 
+    username: 'Art Collective LA', 
+    isViewed: false,
+    slides: [
+      { id: '4-1', type: 'image' as const, content: artGallery, timestamp: '3h ago' },
+      { id: '4-2', type: 'text' as const, content: 'New exhibition opening this Friday!', backgroundColor: 'hsl(340 70% 60%)', timestamp: '3h ago' }
+    ]
+  },
+  { 
+    id: '5', 
+    username: 'Community Champions', 
+    isViewed: true,
+    slides: [
+      { id: '5-1', type: 'image' as const, content: charityRun, timestamp: '8h ago' }
+    ]
+  },
+];
+
 export default function DiscoverPage() {
   const [selectedCategory, setSelectedCategory] = useState("All Events");
   const [searchQuery, setSearchQuery] = useState("");
+  const [viewingStory, setViewingStory] = useState<number | null>(null);
+  const [createStoryOpen, setCreateStoryOpen] = useState(false);
 
   //todo: remove mock functionality - replace with real filtering
   const filteredEvents = mockEvents.filter(event => {
@@ -92,10 +144,33 @@ export default function DiscoverPage() {
     return matchesCategory && matchesSearch;
   });
 
+  const handleNextStory = () => {
+    if (viewingStory !== null && viewingStory < mockStories.length - 1) {
+      setViewingStory(viewingStory + 1);
+    } else {
+      setViewingStory(null);
+    }
+  };
+
+  const handlePreviousStory = () => {
+    if (viewingStory !== null && viewingStory > 0) {
+      setViewingStory(viewingStory - 1);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <Navigation userType="organizer" onSearch={setSearchQuery} />
       <HeroSection onSearch={setSearchQuery} onCategoryClick={setSelectedCategory} />
+      
+      <StoriesBar
+        stories={mockStories}
+        onStoryClick={(storyId) => {
+          const index = mockStories.findIndex(s => s.id === storyId);
+          setViewingStory(index);
+        }}
+        onCreateStory={() => setCreateStoryOpen(true)}
+      />
       
       <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <FilterBar
@@ -120,6 +195,22 @@ export default function DiscoverPage() {
           </div>
         )}
       </main>
+
+      {viewingStory !== null && (
+        <StoryViewer
+          username={mockStories[viewingStory].username}
+          slides={mockStories[viewingStory].slides}
+          onClose={() => setViewingStory(null)}
+          onNext={handleNextStory}
+          onPrevious={handlePreviousStory}
+        />
+      )}
+
+      <CreateStoryModal
+        open={createStoryOpen}
+        onClose={() => setCreateStoryOpen(false)}
+        onCreateStory={(type, content) => console.log('Story created:', type, content)}
+      />
     </div>
   );
 }
