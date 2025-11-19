@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -67,11 +67,13 @@ export default function SignupPage() {
   const [currentStep, setCurrentStep] = useState(1);
   const [step1Data, setStep1Data] = useState<Step1Data | null>(null);
   const [step2Data, setStep2Data] = useState<Step2Data | null>(null);
+  const [step3DataSocial, setStep3DataSocial] = useState<SocialUserData | null>(null);
+  const [step3DataOrganizer, setStep3DataOrganizer] = useState<OrganizerData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   const step1Form = useForm<Step1Data>({
     resolver: zodResolver(step1Schema),
-    defaultValues: {
+    defaultValues: step1Data || {
       email: "",
       username: "",
       password: "",
@@ -81,14 +83,14 @@ export default function SignupPage() {
 
   const step2Form = useForm<Step2Data>({
     resolver: zodResolver(step2Schema),
-    defaultValues: {
+    defaultValues: step2Data || {
       userType: undefined,
     },
   });
 
   const socialUserForm = useForm<SocialUserData>({
     resolver: zodResolver(socialUserSchema),
-    defaultValues: {
+    defaultValues: step3DataSocial || {
       displayName: "",
       dateOfBirth: "",
       bio: "",
@@ -98,7 +100,7 @@ export default function SignupPage() {
 
   const organizerForm = useForm<OrganizerData>({
     resolver: zodResolver(organizerSchema),
-    defaultValues: {
+    defaultValues: step3DataOrganizer || {
       organizationName: "",
       bio: "",
       contactEmail: "",
@@ -119,6 +121,12 @@ export default function SignupPage() {
   const onFinalSubmit = async (data: SocialUserData | OrganizerData) => {
     setIsLoading(true);
     
+    if (step2Data?.userType === "social") {
+      setStep3DataSocial(data as SocialUserData);
+    } else {
+      setStep3DataOrganizer(data as OrganizerData);
+    }
+    
     const completeData = {
       ...step1Data,
       ...step2Data,
@@ -134,10 +142,44 @@ export default function SignupPage() {
   };
 
   const goBack = () => {
+    if (currentStep === 3) {
+      const currentFormData = step2Data?.userType === "social" 
+        ? socialUserForm.getValues() 
+        : organizerForm.getValues();
+      
+      if (step2Data?.userType === "social") {
+        setStep3DataSocial(currentFormData as SocialUserData);
+      } else {
+        setStep3DataOrganizer(currentFormData as OrganizerData);
+      }
+    } else if (currentStep === 2) {
+      setStep2Data(step2Form.getValues());
+    }
+    
     if (currentStep > 1) {
       setCurrentStep(currentStep - 1);
     }
   };
+
+  useEffect(() => {
+    if (currentStep === 1 && step1Data) {
+      step1Form.reset(step1Data);
+    }
+  }, [currentStep]);
+
+  useEffect(() => {
+    if (currentStep === 2 && step2Data) {
+      step2Form.reset(step2Data);
+    }
+  }, [currentStep]);
+
+  useEffect(() => {
+    if (currentStep === 3 && step2Data?.userType === "social" && step3DataSocial) {
+      socialUserForm.reset(step3DataSocial);
+    } else if (currentStep === 3 && step2Data?.userType === "organizer" && step3DataOrganizer) {
+      organizerForm.reset(step3DataOrganizer);
+    }
+  }, [currentStep, step2Data]);
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-background">

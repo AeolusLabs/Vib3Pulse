@@ -10,12 +10,12 @@ export const users = pgTable("users", {
   password: text("password").notNull(),
   userType: text("user_type").notNull(),
   displayName: text("display_name"),
-  dateOfBirth: timestamp("date_of_birth"),
+  dateOfBirth: text("date_of_birth"),
   bio: text("bio"),
-  interests: text("interests").array(),
+  interests: text("interests").array().default(sql`'{}'`),
   organizationName: text("organization_name"),
   contactEmail: text("contact_email"),
-  socialMediaLinks: text("social_media_links").array(),
+  socialMediaLinks: text("social_media_links").array().default(sql`'{}'`),
 });
 
 export const insertUserSchema = createInsertSchema(users).omit({
