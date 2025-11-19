@@ -165,7 +165,7 @@ export default function CreateEventModal({ open, onClose }: CreateEventModalProp
   };
 
   const isStep1Valid = () => {
-    return (
+    const baseValid = (
       formData.name.trim() !== "" &&
       formData.type !== "" &&
       formData.description.trim() !== "" &&
@@ -173,6 +173,18 @@ export default function CreateEventModal({ open, onClose }: CreateEventModalProp
       formData.location.trim() !== "" &&
       formData.thumbnailUrl !== ""
     );
+    
+    if (formData.isMultiDay) {
+      if (formData.endDate === "") {
+        return false;
+      }
+      // Ensure end date is after start date
+      const startDate = new Date(formData.startDate);
+      const endDate = new Date(formData.endDate);
+      return baseValid && endDate > startDate;
+    }
+    
+    return baseValid;
   };
 
   const isStep2Valid = () => {
@@ -271,7 +283,9 @@ export default function CreateEventModal({ open, onClose }: CreateEventModalProp
 
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="end-date">End Date</Label>
+                  <Label htmlFor="end-date">
+                    End Date{formData.isMultiDay && " *"}
+                  </Label>
                   <div className="flex items-center gap-2">
                     <Switch
                       checked={formData.isMultiDay}
@@ -288,7 +302,19 @@ export default function CreateEventModal({ open, onClose }: CreateEventModalProp
                   onChange={(e) => updateFormData({ endDate: e.target.value })}
                   disabled={!formData.isMultiDay}
                   data-testid="input-end-date"
+                  className={
+                    formData.isMultiDay && 
+                    (formData.endDate === "" || (formData.startDate && formData.endDate && new Date(formData.endDate) <= new Date(formData.startDate)))
+                      ? "border-destructive" 
+                      : ""
+                  }
                 />
+                {formData.isMultiDay && formData.endDate === "" && (
+                  <p className="text-xs text-destructive">End date is required for multi-day events</p>
+                )}
+                {formData.isMultiDay && formData.endDate !== "" && formData.startDate && new Date(formData.endDate) <= new Date(formData.startDate) && (
+                  <p className="text-xs text-destructive">End date must be after start date</p>
+                )}
               </div>
             </div>
 
