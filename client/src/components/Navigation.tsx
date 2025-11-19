@@ -23,6 +23,10 @@ interface NavigationProps {
 export default function Navigation({ userType = "social", onSearch, onCreateEvent }: NavigationProps) {
   const [, setLocation] = useLocation();
 
+  // TODO: Replace with actual authenticated user's username from auth context
+  // Currently using placeholder for testing. Real authentication required before production.
+  const CURRENT_USER_USERNAME = "testuser";
+
   const handleLogout = () => {
     console.log("User logged out");
     setLocation("/");
@@ -82,9 +86,11 @@ export default function Navigation({ userType = "social", onSearch, onCreateEven
               <DropdownMenuContent align="end">
                 <DropdownMenuLabel>My Account</DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem data-testid="menu-profile">
-                  <User className="mr-2 h-4 w-4" />
-                  Profile
+                <DropdownMenuItem asChild data-testid="menu-profile">
+                  <Link href={`/profile/${CURRENT_USER_USERNAME}`}>
+                    <User className="mr-2 h-4 w-4" />
+                    Profile
+                  </Link>
                 </DropdownMenuItem>
                 {userType === "organizer" && (
                   <DropdownMenuItem asChild data-testid="menu-my-events">

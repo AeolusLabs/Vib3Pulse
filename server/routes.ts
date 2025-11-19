@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertEventSchema, insertTicketSchema, insertRsvpSchema } from "@shared/schema";
 import Stripe from "stripe";
+import { z } from "zod";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "", {
   apiVersion: "2025-11-17.clover",
@@ -223,6 +224,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ message: "RSVP cancelled" });
     } catch (error) {
       res.status(500).json({ message: "Failed to cancel RSVP" });
+    }
+  });
+
+  // User profile
+  app.get("/api/users/:username", async (req, res) => {
+    try {
+      const user = await storage.getUserByUsername(req.params.username);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Don't send password to client
+      const { password, ...userWithoutPassword } = user;
+
+      // Get user's events or RSVPs based on user type
+      if (user.userType === "organizer") {
+        const events = await storage.getUserEvents(user.id);
+        res.json({ ...userWithoutPassword, events });
+      } else {
+        const rsvps = await storage.getUserRsvps(user.id);
+        res.json({ ...userWithoutPassword, rsvps });
+      }
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch user profile" });
     }
   });
 

@@ -1,175 +1,319 @@
-import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useParams, Link } from "wouter";
+import { format, differenceInYears } from "date-fns";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
-import CreateEventModal from "@/components/CreateEventModal";
-import UserProfileCard from "@/components/UserProfileCard";
-import EventCard from "@/components/EventCard";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Card, CardContent } from "@/components/ui/card";
-import yogaEvent from '@assets/generated_images/Outdoor_yoga_wellness_event_c02f75d1.png';
-import artGallery from '@assets/generated_images/Art_gallery_opening_8b389604.png';
-import charityRun from '@assets/generated_images/Charity_run_event_5c615e65.png';
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Calendar, MapPin, DollarSign, Users, Heart, Building2, Mail, Cake } from "lucide-react";
+import type { User, Event, Rsvp } from "@shared/schema";
 
-//todo: remove mock functionality
-const userEvents = [
-  {
-    id: '4',
-    title: 'Sunrise Yoga in the Park',
-    image: yogaEvent,
-    date: 'Jul 20',
-    location: 'Riverside Park, Portland',
-    organizer: { name: 'Sarah Johnson', avatar: '' },
-    price: 'free' as const,
-    rsvpCount: 67
-  },
-  {
-    id: '5',
-    title: 'Contemporary Art Gallery Opening',
-    image: artGallery,
-    date: 'Aug 15',
-    location: 'Modern Art Space, LA',
-    organizer: { name: 'Sarah Johnson', avatar: '' },
-    price: 25 as const,
-    rsvpCount: 123
-  }
-];
-
-//todo: remove mock functionality
-const rsvpEvents = [
-  {
-    id: '6',
-    title: 'Charity 5K Run for Education',
-    image: charityRun,
-    date: 'Oct 1',
-    location: 'City Center, Chicago',
-    organizer: { name: 'Community Champions', avatar: '' },
-    price: 30 as const,
-    rsvpCount: 389
-  }
-];
-
-//todo: remove mock functionality
-const following = [
-  { id: '1', name: 'Alex Martinez', username: 'alexm', avatar: '', isOrganizer: false },
-  { id: '2', name: 'Live Events Co', username: 'liveevents', avatar: '', isOrganizer: true },
-  { id: '3', name: 'Maria Chen', username: 'mariachen', avatar: '', isOrganizer: false },
-  { id: '4', name: 'TechForward', username: 'techforward', avatar: '', isOrganizer: true },
-];
+type ProfileResponse = Omit<User, 'password'> & {
+  events?: Event[];
+  rsvps?: Array<Rsvp & { event: Event }>;
+};
 
 export default function ProfilePage() {
-  const [createEventOpen, setCreateEventOpen] = useState(false);
+  const { username } = useParams<{ username: string }>();
+
+  const { data: profile, isLoading, error } = useQuery<ProfileResponse>({
+    queryKey: [`/api/users/${username}`],
+    queryFn: async () => {
+      const response = await fetch(`/api/users/${username}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch profile');
+      }
+      return response.json();
+    },
+    enabled: !!username,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background pb-20 md:pb-0">
+        <Navigation userType="social" />
+        <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="space-y-6">
+            <Skeleton className="h-64 w-full" />
+            <Skeleton className="h-40 w-full" />
+          </div>
+        </main>
+        <BottomNavigation />
+      </div>
+    );
+  }
+
+  if (error || !profile) {
+    return (
+      <div className="min-h-screen bg-background pb-20 md:pb-0">
+        <Navigation userType="social" />
+        <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <Card>
+            <CardContent className="p-8 text-center">
+              <p className="text-muted-foreground">User not found</p>
+            </CardContent>
+          </Card>
+        </main>
+        <BottomNavigation />
+      </div>
+    );
+  }
+
+  const isSocialUser = profile.userType === "social";
+  const isOrganizer = profile.userType === "organizer";
+
+  const userType = (profile.userType === "organizer" ? "organizer" : "social") as "social" | "organizer";
 
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
-      <Navigation
-        userType="organizer"
-        onCreateEvent={() => setCreateEventOpen(true)}
-      />
+      <Navigation userType={userType} />
 
       <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-8">
-          <UserProfileCard
-            name="Sarah Johnson"
-            username="sarahj_events"
-            bio="Event organizer passionate about wellness and community building. Creating memorable experiences that bring people together and inspire positive change."
-            coverImage={yogaEvent}
-            followersCount={1247}
-            followingCount={389}
-            isFollowing={false}
-          />
-        </div>
+        {/* Profile Header */}
+        <Card className="mb-8">
+          <CardContent className="p-8">
+            <div className="flex flex-col md:flex-row gap-6 items-start">
+              {/* Avatar */}
+              <Avatar className="h-24 w-24 border-4 border-primary/20">
+                <AvatarImage src="" alt={isSocialUser ? (profile.displayName || profile.username) : (profile.organizationName || profile.username)} />
+                <AvatarFallback className="text-2xl bg-primary/10 text-primary">
+                  {isSocialUser 
+                    ? profile.displayName?.charAt(0) || profile.username.charAt(0).toUpperCase()
+                    : profile.organizationName?.charAt(0) || profile.username.charAt(0).toUpperCase()
+                  }
+                </AvatarFallback>
+              </Avatar>
 
-        <Tabs defaultValue="events" className="w-full">
-          <TabsList className="mb-6">
-            <TabsTrigger value="events" data-testid="tab-events">
-              Events Created
-            </TabsTrigger>
-            <TabsTrigger value="rsvps" data-testid="tab-rsvps">
-              RSVPs
-            </TabsTrigger>
-            <TabsTrigger value="following" data-testid="tab-following">
-              Following
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="events">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {userEvents.map((event) => (
-                <EventCard
-                  key={event.id}
-                  {...event}
-                  onClick={() => console.log('Navigate to event:', event.id)}
-                />
-              ))}
-            </div>
-            {userEvents.length === 0 && (
-              <div className="text-center py-16">
-                <p className="text-muted-foreground">No events created yet</p>
-              </div>
-            )}
-          </TabsContent>
-
-          <TabsContent value="rsvps">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {rsvpEvents.map((event) => (
-                <EventCard
-                  key={event.id}
-                  {...event}
-                  onClick={() => console.log('Navigate to event:', event.id)}
-                />
-              ))}
-            </div>
-            {rsvpEvents.length === 0 && (
-              <div className="text-center py-16">
-                <p className="text-muted-foreground">No RSVPs yet</p>
-              </div>
-            )}
-          </TabsContent>
-
-          <TabsContent value="following">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {following.map((user) => (
-                <Card key={user.id} className="hover-elevate cursor-pointer" data-testid={`card-user-${user.id}`}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-12 w-12">
-                        <AvatarImage src={user.avatar} alt={user.name} />
-                        <AvatarFallback>
-                          {user.name.split(' ').map(n => n[0]).join('')}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold truncate" data-testid="text-user-name">
-                          {user.name}
+              {/* Profile Info */}
+              <div className="flex-1 space-y-4">
+                {isSocialUser ? (
+                  <>
+                    {/* Social User Info */}
+                    <div>
+                      <h1 className="text-3xl font-bold font-serif text-foreground" data-testid="text-display-name">
+                        {profile.displayName || profile.username}
+                      </h1>
+                      <p className="text-muted-foreground" data-testid="text-username">
+                        @{profile.username}
+                      </p>
+                      {profile.dateOfBirth && (
+                        <p className="text-sm text-muted-foreground mt-1 flex items-center gap-2" data-testid="text-age">
+                          <Cake className="h-4 w-4" />
+                          {differenceInYears(new Date(), new Date(profile.dateOfBirth))} years old
                         </p>
-                        <p className="text-sm text-muted-foreground truncate" data-testid="text-username">
-                          @{user.username}
-                        </p>
-                        {user.isOrganizer && (
-                          <p className="text-xs text-primary">Event Organizer</p>
+                      )}
+                    </div>
+                    
+                    {profile.bio && (
+                      <p className="text-foreground leading-relaxed" data-testid="text-bio">
+                        {profile.bio}
+                      </p>
+                    )}
+
+                    {profile.interests && profile.interests.length > 0 && (
+                      <div data-testid="interests-section">
+                        <p className="text-sm font-medium text-muted-foreground mb-2">Interests</p>
+                        <div className="flex flex-wrap gap-2">
+                          {profile.interests.map((interest, index) => (
+                            <Badge 
+                              key={index} 
+                              variant="secondary"
+                              className="bg-primary/10 text-primary hover:bg-primary/20"
+                              data-testid={`badge-interest-${index}`}
+                            >
+                              {interest}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {/* Event Organizer Info */}
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <Building2 className="h-5 w-5 text-primary" />
+                        <h1 className="text-3xl font-bold font-serif text-foreground" data-testid="text-organization-name">
+                          {profile.organizationName || profile.username}
+                        </h1>
+                      </div>
+                      <p className="text-muted-foreground" data-testid="text-username">
+                        @{profile.username}
+                      </p>
+                      <Badge className="mt-2 bg-accent text-accent-foreground" data-testid="badge-organizer">
+                        Event Organizer
+                      </Badge>
+                    </div>
+
+                    {profile.bio && (
+                      <p className="text-foreground leading-relaxed" data-testid="text-organization-description">
+                        {profile.bio}
+                      </p>
+                    )}
+
+                    {profile.contactEmail && (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="text-contact-email">
+                        <Mail className="h-4 w-4" />
+                        {profile.contactEmail}
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* Follow Button (placeholder for future feature) */}
+                <div className="pt-2">
+                  <Button variant="outline" size="sm" data-testid="button-follow">
+                    <Heart className="h-4 w-4 mr-2" />
+                    Follow
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Content Section */}
+        {isSocialUser ? (
+          <div>
+            <h2 className="text-2xl font-bold font-serif mb-6" data-testid="heading-rsvps">
+              Events I'm Attending
+            </h2>
+            {profile.rsvps && profile.rsvps.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {profile.rsvps.map((rsvp) => (
+                  <Link key={rsvp.id} href={`/event/${rsvp.event.id}`}>
+                    <Card className="overflow-hidden hover-elevate cursor-pointer" data-testid={`card-event-${rsvp.event.id}`}>
+                    {rsvp.event.imageUrl && (
+                      <div className="aspect-video relative overflow-hidden bg-muted">
+                        <img 
+                          src={rsvp.event.imageUrl} 
+                          alt={rsvp.event.title}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    )}
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-xl line-clamp-2" data-testid="text-event-title">
+                        {rsvp.event.title}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Calendar className="h-4 w-4" />
+                        <span data-testid="text-event-date">
+                          {format(new Date(rsvp.event.eventDate), 'MMM d, yyyy • h:mm a')}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <MapPin className="h-4 w-4" />
+                        <span className="line-clamp-1" data-testid="text-event-location">
+                          {rsvp.event.location}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm">
+                        {rsvp.event.ticketPrice === 0 ? (
+                          <Badge variant="secondary" data-testid="badge-free">
+                            FREE
+                          </Badge>
+                        ) : (
+                          <div className="flex items-center gap-1 text-primary font-semibold" data-testid="text-event-price">
+                            <DollarSign className="h-4 w-4" />
+                            {(rsvp.event.ticketPrice / 100).toFixed(2)}
+                          </div>
                         )}
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-            {following.length === 0 && (
-              <div className="text-center py-16">
-                <p className="text-muted-foreground">Not following anyone yet</p>
+                    </CardContent>
+                  </Card>
+                  </Link>
+                ))}
               </div>
+            ) : (
+              <Card>
+                <CardContent className="p-8 text-center">
+                  <Users className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                  <p className="text-muted-foreground" data-testid="text-no-rsvps">
+                    No events attended yet
+                  </p>
+                </CardContent>
+              </Card>
             )}
-          </TabsContent>
-        </Tabs>
+          </div>
+        ) : (
+          <div>
+            <h2 className="text-2xl font-bold font-serif mb-6" data-testid="heading-events">
+              Events Created
+            </h2>
+            {profile.events && profile.events.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {profile.events.map((event) => (
+                  <Link key={event.id} href={`/event/${event.id}`}>
+                    <Card className="overflow-hidden hover-elevate cursor-pointer" data-testid={`card-event-${event.id}`}>
+                    {event.imageUrl && (
+                      <div className="aspect-video relative overflow-hidden bg-muted">
+                        <img 
+                          src={event.imageUrl} 
+                          alt={event.title}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    )}
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-xl line-clamp-2" data-testid="text-event-title">
+                        {event.title}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Calendar className="h-4 w-4" />
+                        <span data-testid="text-event-date">
+                          {format(new Date(event.eventDate), 'MMM d, yyyy • h:mm a')}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <MapPin className="h-4 w-4" />
+                        <span className="line-clamp-1" data-testid="text-event-location">
+                          {event.location}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm">
+                        {event.ticketPrice === 0 ? (
+                          <Badge variant="secondary" data-testid="badge-free">
+                            FREE
+                          </Badge>
+                        ) : (
+                          <div className="flex items-center gap-1 text-primary font-semibold" data-testid="text-event-price">
+                            <DollarSign className="h-4 w-4" />
+                            {(event.ticketPrice / 100).toFixed(2)}
+                          </div>
+                        )}
+                        <span className="text-xs text-muted-foreground">
+                          {event.ticketsAvailable} tickets available
+                        </span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <Card>
+                <CardContent className="p-8 text-center">
+                  <Calendar className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                  <p className="text-muted-foreground" data-testid="text-no-events">
+                    No events created yet
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        )}
       </main>
 
-      <CreateEventModal
-        open={createEventOpen}
-        onClose={() => setCreateEventOpen(false)}
-      />
-
-      <BottomNavigation onCreateClick={() => setCreateEventOpen(true)} />
+      <BottomNavigation />
     </div>
   );
 }
