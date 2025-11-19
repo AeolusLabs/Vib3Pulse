@@ -98,13 +98,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/tickets/confirm", async (req, res) => {
+  // Verify Stripe checkout session and create ticket
+  // This endpoint is called by the client after successful payment redirect
+  app.post("/api/tickets/verify-payment", async (req, res) => {
     try {
-      const ticketData = insertTicketSchema.parse(req.body);
+      const { sessionId } = req.body;
+      
+      if (!sessionId) {
+        return res.status(400).json({ message: "Session ID is required" });
+      }
+
+      // Retrieve the session from Stripe to verify payment
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      
+      // Verify payment was successful
+      if (session.payment_status !== 'paid') {
+        return res.status(400).json({ message: "Payment not completed" });
+      }
+
+      // Verify we haven't already created a ticket for this session
+      const existingTicket = await storage.getTicketByPaymentIntent(session.payment_intent as string);
+      if (existingTicket) {
+        return res.json({ message: "Ticket already created", ticket: existingTicket });
+      }
+
+      // Create the ticket
+      const ticketData = insertTicketSchema.parse({
+        userId: session.metadata?.userId,
+        eventId: session.metadata?.eventId,
+        stripePaymentIntentId: session.payment_intent as string,
+        status: "confirmed",
+      });
+      
       const ticket = await storage.createTicket(ticketData);
-      res.json(ticket);
+      res.json({ message: "Ticket created successfully", ticket });
     } catch (error) {
-      res.status(400).json({ message: "Invalid ticket data" });
+      console.error('Error verifying payment:', error);
+      res.status(500).json({ message: "Failed to verify payment" });
     }
   });
 
@@ -125,6 +155,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const rsvpData = insertRsvpSchema.parse(req.body);
       
+      // Fetch the event to validate it's free and requires RSVP
+      const event = await storage.getEvent(rsvpData.eventId);
+      if (!event) {
+        return res.status(404).json({ message: "Event not found" });
+      }
+
+      // Only allow RSVPs for free events
+      if (event.ticketPrice > 0) {
+        return res.status(400).json({ message: "This is a paid event, please purchase a ticket instead" });
+      }
+
       // Check if RSVP already exists
       const existingRsvp = await storage.getRsvp(rsvpData.userId, rsvpData.eventId);
       if (existingRsvp) {
@@ -132,6 +173,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const rsvp = await storage.createRsvp(rsvpData);
+      
+      // Also create a ticket for the free event
+      const ticketData = insertTicketSchema.parse({
+        userId: rsvpData.userId,
+        eventId: rsvpData.eventId,
+        status: "confirmed",
+      });
+      await storage.createTicket(ticketData);
+      
       res.json(rsvp);
     } catch (error) {
       res.status(400).json({ message: "Failed to create RSVP" });

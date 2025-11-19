@@ -33,6 +33,7 @@ export interface IStorage {
   
   getUserTickets(userId: string): Promise<Array<Ticket & { event: Event }>>;
   getTicket(id: string): Promise<Ticket | undefined>;
+  getTicketByPaymentIntent(paymentIntentId: string): Promise<Ticket | undefined>;
   createTicket(ticket: InsertTicket): Promise<Ticket>;
   
   getUserRsvps(userId: string): Promise<Array<Rsvp & { event: Event }>>;
@@ -86,6 +87,11 @@ export class DbStorage implements IStorage {
 
   async getTicket(id: string): Promise<Ticket | undefined> {
     const result = await db.select().from(tickets).where(eq(tickets.id, id));
+    return result[0];
+  }
+
+  async getTicketByPaymentIntent(paymentIntentId: string): Promise<Ticket | undefined> {
+    const result = await db.select().from(tickets).where(eq(tickets.stripePaymentIntentId, paymentIntentId));
     return result[0];
   }
 
