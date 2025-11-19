@@ -19,7 +19,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
   const { toast } = useToast();
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const { data: rsvps } = useQuery({
+  const { data: rsvps, isLoading: isLoadingRSVPs } = useQuery({
     queryKey: ["/api/rsvps", "mock-user-id"],
     queryFn: async () => {
       const response = await fetch(`/api/rsvps?userId=mock-user-id`);
@@ -60,7 +60,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
       });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/rsvps"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rsvps", "mock-user-id"] });
       queryClient.invalidateQueries({ queryKey: ["/api/tickets"] });
       toast({
         title: "RSVP Confirmed!",
@@ -163,10 +163,12 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
               <Button
                 className="flex-1"
                 onClick={handleRSVP}
-                disabled={rsvpMutation.isPending || hasRSVPed}
+                disabled={rsvpMutation.isPending || hasRSVPed || isLoadingRSVPs}
                 data-testid="button-rsvp"
               >
-                {hasRSVPed ? (
+                {isLoadingRSVPs ? (
+                  "Loading..."
+                ) : hasRSVPed ? (
                   <>
                     <CheckCircle className="h-4 w-4 mr-2" />
                     Already RSVP'd
@@ -202,10 +204,12 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
               <Button
                 className="flex-1"
                 onClick={handleRSVP}
-                disabled={rsvpMutation.isPending || hasRSVPed}
+                disabled={rsvpMutation.isPending || hasRSVPed || isLoadingRSVPs}
                 data-testid="button-rsvp"
               >
-                {hasRSVPed ? (
+                {isLoadingRSVPs ? (
+                  "Loading..."
+                ) : hasRSVPed ? (
                   "Already RSVP'd"
                 ) : rsvpMutation.isPending ? (
                   "Processing..."
