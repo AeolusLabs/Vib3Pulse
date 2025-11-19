@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
-import { UserPlus, Users, Building2, ArrowRight, ArrowLeft, Check } from "lucide-react";
+import { UserPlus, Users, Building2, ArrowRight, ArrowLeft, Check, Eye, EyeOff } from "lucide-react";
 import { Link } from "wouter";
 import { Label } from "@/components/ui/label";
 
@@ -70,6 +70,8 @@ export default function SignupPage() {
   const [step3DataSocial, setStep3DataSocial] = useState<SocialUserData | null>(null);
   const [step3DataOrganizer, setStep3DataOrganizer] = useState<OrganizerData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const step1Form = useForm<Step1Data>({
     resolver: zodResolver(step1Schema),
@@ -137,7 +139,11 @@ export default function SignupPage() {
     
     setTimeout(() => {
       setIsLoading(false);
-      setLocation("/");
+      if (step2Data?.userType === "social") {
+        setLocation("/feed");
+      } else {
+        setLocation("/manage-events");
+      }
     }, 1000);
   };
 
@@ -284,12 +290,28 @@ export default function SignupPage() {
                       <FormItem>
                         <FormLabel>Password</FormLabel>
                         <FormControl>
-                          <Input
-                            type="password"
-                            placeholder="Min. 8 characters"
-                            {...field}
-                            data-testid="input-password"
-                          />
+                          <div className="relative">
+                            <Input
+                              type={showPassword ? "text" : "password"}
+                              placeholder="Min. 8 characters"
+                              {...field}
+                              data-testid="input-password"
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                              onClick={() => setShowPassword(!showPassword)}
+                              data-testid="button-toggle-password"
+                            >
+                              {showPassword ? (
+                                <EyeOff className="h-4 w-4 text-muted-foreground" />
+                              ) : (
+                                <Eye className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </Button>
+                          </div>
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -303,12 +325,28 @@ export default function SignupPage() {
                       <FormItem>
                         <FormLabel>Confirm Password</FormLabel>
                         <FormControl>
-                          <Input
-                            type="password"
-                            placeholder="Re-enter your password"
-                            {...field}
-                            data-testid="input-confirm-password"
-                          />
+                          <div className="relative">
+                            <Input
+                              type={showConfirmPassword ? "text" : "password"}
+                              placeholder="Re-enter your password"
+                              {...field}
+                              data-testid="input-confirm-password"
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                              onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                              data-testid="button-toggle-confirm-password"
+                            >
+                              {showConfirmPassword ? (
+                                <EyeOff className="h-4 w-4 text-muted-foreground" />
+                              ) : (
+                                <Eye className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </Button>
+                          </div>
                         </FormControl>
                         <FormMessage />
                       </FormItem>
