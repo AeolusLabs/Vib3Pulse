@@ -8,16 +8,12 @@ import DiscoverPage from "@/pages/DiscoverPage";
 import EventDetailPage from "@/pages/EventDetailPage";
 import ProfilePage from "@/pages/ProfilePage";
 import FeedPage from "@/pages/FeedPage";
-import PeoplePage from "@/pages/PeoplePage";
-import HostsPage from "@/pages/HostsPage";
 
 function Router() {
   return (
     <Switch>
       <Route path="/" component={DiscoverPage} />
       <Route path="/feed" component={FeedPage} />
-      <Route path="/people" component={PeoplePage} />
-      <Route path="/hosts" component={HostsPage} />
       <Route path="/event/:id" component={EventDetailPage} />
       <Route path="/profile/:username" component={ProfilePage} />
       <Route component={NotFound} />
