@@ -84,6 +84,10 @@ export default function StoryViewer({
 
   const currentStory = slides[currentSlide];
 
+  if (!currentStory) {
+    return null;
+  }
+
   return (
     <div className="fixed inset-0 bg-background z-50 flex items-center justify-center">
       <div className="relative w-full h-full max-w-md mx-auto bg-card">
@@ -113,7 +117,7 @@ export default function StoryViewer({
                 <p className="font-semibold text-sm text-card-foreground" data-testid="text-story-username">
                   {username}
                 </p>
-                <p className="text-xs text-muted-foreground">{currentStory.timestamp}</p>
+                <p className="text-xs text-muted-foreground">{currentStory?.timestamp}</p>
               </div>
             </div>
             <Button
