@@ -12,10 +12,14 @@ import MyEventsPage from "@/pages/MyEventsPage";
 import ChatPage from "@/pages/ChatPage";
 import ConversationPage from "@/pages/ConversationPage";
 import ManageEventsPage from "@/pages/ManageEventsPage";
+import LoginPage from "@/pages/LoginPage";
+import SignupPage from "@/pages/SignupPage";
 
 function Router() {
   return (
     <Switch>
+      <Route path="/login" component={LoginPage} />
+      <Route path="/signup" component={SignupPage} />
       <Route path="/" component={DiscoverPage} />
       <Route path="/feed" component={FeedPage} />
       <Route path="/my-events" component={MyEventsPage} />
