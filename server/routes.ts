@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertEventSchema, insertTicketSchema, insertRsvpSchema, insertUserSchema } from "@shared/schema";
+import { insertEventSchema, insertTicketSchema, insertRsvpSchema, insertUserSchema, insertPostSchema } from "@shared/schema";
 import { hashPassword, userToSessionUser } from "./auth";
 import { requireAuth, requireOrganizer } from "./middleware";
 import passport from "passport";
@@ -283,6 +283,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ message: "RSVP cancelled" });
     } catch (error) {
       res.status(500).json({ message: "Failed to cancel RSVP" });
+    }
+  });
+
+  // Posts
+  app.get("/api/posts", async (req, res) => {
+    try {
+      const posts = await storage.getPosts();
+      res.json(posts);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch posts" });
+    }
+  });
+
+  app.get("/api/posts/user/:userId", async (req, res) => {
+    try {
+      const posts = await storage.getUserPosts(req.params.userId);
+      res.json(posts);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch user posts" });
+    }
+  });
+
+  app.post("/api/posts", requireAuth, async (req, res) => {
+    try {
+      const postData = insertPostSchema.omit({ userId: true }).parse(req.body);
+      const post = await storage.createPost({
+        ...postData,
+        userId: req.user!.id,
+      });
+      res.json(post);
+    } catch (error) {
+      res.status(400).json({ message: "Invalid post data" });
+    }
+  });
+
+  app.delete("/api/posts/:id", requireAuth, async (req, res) => {
+    try {
+      const post = await storage.getPost(req.params.id);
+      if (!post) {
+        return res.status(404).json({ message: "Post not found" });
+      }
+      
+      if (post.userId !== req.user!.id) {
+        return res.status(403).json({ message: "Not authorized to delete this post" });
+      }
+      
+      await storage.deletePost(req.params.id);
+      res.json({ message: "Post deleted" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete post" });
     }
   });
 

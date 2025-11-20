@@ -7,10 +7,13 @@ import {
   type InsertTicket,
   type Rsvp,
   type InsertRsvp,
+  type Post,
+  type InsertPost,
   users,
   events,
   tickets,
-  rsvps
+  rsvps,
+  posts
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/neon-serverless";
 import { Pool, neonConfig } from "@neondatabase/serverless";
@@ -42,6 +45,12 @@ export interface IStorage {
   getRsvp(userId: string, eventId: string): Promise<Rsvp | undefined>;
   createRsvp(rsvp: InsertRsvp): Promise<Rsvp>;
   cancelRsvp(userId: string, eventId: string): Promise<void>;
+  
+  getPosts(): Promise<Array<Post & { user: User }>>;
+  getPost(id: string): Promise<Post | undefined>;
+  getUserPosts(userId: string): Promise<Post[]>;
+  createPost(post: InsertPost): Promise<Post>;
+  deletePost(id: string): Promise<void>;
 }
 
 export class DbStorage implements IStorage {
@@ -141,6 +150,44 @@ export class DbStorage implements IStorage {
     await db
       .delete(rsvps)
       .where(and(eq(rsvps.userId, userId), eq(rsvps.eventId, eventId)));
+  }
+
+  async getPosts(): Promise<Array<Post & { user: User }>> {
+    const result = await db
+      .select()
+      .from(posts)
+      .innerJoin(users, eq(posts.userId, users.id))
+      .orderBy(posts.createdAt);
+    
+    return result.map(row => {
+      const { passwordHash, ...userWithoutPassword } = row.users;
+      return {
+        ...row.posts,
+        user: userWithoutPassword as User,
+      };
+    });
+  }
+
+  async getPost(id: string): Promise<Post | undefined> {
+    const result = await db.select().from(posts).where(eq(posts.id, id));
+    return result[0];
+  }
+
+  async getUserPosts(userId: string): Promise<Post[]> {
+    return await db
+      .select()
+      .from(posts)
+      .where(eq(posts.userId, userId))
+      .orderBy(posts.createdAt);
+  }
+
+  async createPost(insertPost: InsertPost): Promise<Post> {
+    const result = await db.insert(posts).values(insertPost).returning();
+    return result[0];
+  }
+
+  async deletePost(id: string): Promise<void> {
+    await db.delete(posts).where(eq(posts.id, id));
   }
 }
 

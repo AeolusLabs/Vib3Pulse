@@ -45,7 +45,11 @@ app.use(
 passport.use(
   new LocalStrategy(async (username, password, done) => {
     try {
-      const user = await storage.getUserByUsername(username);
+      const isEmail = username.includes('@');
+      const user = isEmail 
+        ? await storage.getUserByEmail(username)
+        : await storage.getUserByUsername(username);
+      
       if (!user) {
         return done(null, false, { message: "Invalid username or password" });
       }
