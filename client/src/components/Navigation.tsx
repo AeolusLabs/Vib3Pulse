@@ -75,8 +75,13 @@ export default function Navigation({ onSearch, onCreateEvent }: NavigationProps)
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" data-testid="button-user-menu">
                   <Avatar className="h-8 w-8">
-                    <AvatarImage src="" alt="User" />
-                    <AvatarFallback>JD</AvatarFallback>
+                    <AvatarImage src="" alt={user?.displayName || user?.organizationName || user?.username || "User"} />
+                    <AvatarFallback className="bg-primary/10 text-primary">
+                      {user?.userType === "social"
+                        ? user?.displayName?.charAt(0).toUpperCase() || user?.username?.charAt(0).toUpperCase() || "U"
+                        : user?.organizationName?.charAt(0).toUpperCase() || user?.username?.charAt(0).toUpperCase() || "U"
+                      }
+                    </AvatarFallback>
                   </Avatar>
                 </Button>
               </DropdownMenuTrigger>
