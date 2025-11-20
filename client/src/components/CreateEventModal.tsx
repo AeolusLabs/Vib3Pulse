@@ -86,7 +86,7 @@ export default function CreateEventModal({ open, onClose }: CreateEventModalProp
     startTime: "",
     endDate: "",
     endTime: "",
-    isMultiDay: false,
+    isMultiDay: false, // Kept in state but UI removed - schema only supports single date
     locationType: "physical",
     location: "",
     ageRestriction: "all",
