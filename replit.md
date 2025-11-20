@@ -77,16 +77,46 @@ Preferred communication style: Simple, everyday language.
 
 ### Authentication & Authorization
 
-**Current Implementation:**
-- Basic user schema with username/password fields
-- Zod validation schemas for user input (drizzle-zod integration)
-- Session-based authentication infrastructure in place
-- No active authentication routes implemented yet
+**Implementation Status:** ✅ Complete
+
+**Backend Authentication:**
+- Passport Local Strategy with bcrypt password hashing (12 rounds)
+- PostgreSQL session store with auto-creation enabled
+- Secure session cookies (HttpOnly, SameSite=lax)
+- Email and username uniqueness validation
+- Auth middleware: `requireAuth` and `requireOrganizer`
+- All protected routes use `req.user.id` from authenticated session
+
+**API Routes:**
+- `POST /api/auth/signup` - Create account with email/username/password
+- `POST /api/auth/login` - Authenticate user and create session
+- `POST /api/auth/logout` - Destroy session
+- `GET /api/auth/session` - Get current authenticated user
+
+**Frontend Authentication:**
+- `useAuth` hook provides global authentication state
+- `AuthenticatedLayout` component for centralized route protection
+- Login page with redirect parameter support for post-login navigation
+- Redirect preserves full URL (pathname + query + hash)
+- All authenticated queries include `credentials: 'include'`
+
+**Security Features:**
+- Bcrypt password hashing with salt (12 rounds)
+- HttpOnly cookies prevent XSS attacks
+- SameSite=lax prevents CSRF attacks
+- Unique email/username constraints prevent duplicates
+- Session secret rotation support
 
 **Design Pattern:**
-- Credential-based authentication planned
-- Session cookies for maintaining user state
+- Session-based authentication (not JWT)
+- Credentials flow with secure password storage
 - Type-safe user operations through Drizzle schema
+- Centralized auth guard via `AuthenticatedLayout`
+
+**Follow-up Work Needed:**
+- Some pages (FeedPage, ManageEventsPage, MyEventsPage) may need credential verification
+- Chat mutations should be updated to remove client-provided `senderId`
+- All queries using custom queryFn should verify they include `credentials: 'include'`
 
 ### External Dependencies
 
