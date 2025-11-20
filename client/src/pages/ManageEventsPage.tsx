@@ -8,9 +8,8 @@ import { useState } from "react";
 import { Edit, Trash2, BarChart3, Eye, EyeOff, Calendar, MapPin } from "lucide-react";
 import CreateEventModal from "@/components/CreateEventModal";
 import yogaEvent from '@assets/generated_images/Outdoor_yoga_wellness_event_c02f75d1.png';
-import artGallery from '@assets/generated_images/Art_gallery_opening_8b389604.png';
-import musicFestival from '@assets/generated_images/Outdoor_music_festival_event_179040d3.png';
-import techConference from '@assets/generated_images/Tech_conference_presentation_2bcf2c35.png';
+import { useQuery } from "@tanstack/react-query";
+import type { Event as DBEvent } from "@shared/schema";
 
 interface Event {
   id: string;
@@ -27,76 +26,40 @@ interface Event {
   isPublished: boolean;
 }
 
-//todo: remove mock functionality
-const publishedEvents: Event[] = [
-  {
-    id: '1',
-    title: 'Summer Music Festival 2025',
-    image: musicFestival,
-    date: 'Jul 15, 2025',
-    time: '6:00 PM',
-    location: 'Golden Gate Park, SF',
-    type: 'Music',
-    status: 'published' as const,
-    ticketsSold: 234,
-    totalTickets: 500,
-    revenue: 10530,
-    isPublished: true
-  },
-  {
-    id: '2',
-    title: 'Tech Innovation Summit',
-    image: techConference,
-    date: 'Aug 10, 2025',
-    time: '9:00 AM',
-    location: 'Convention Center, Austin',
-    type: 'Tech',
-    status: 'published' as const,
-    ticketsSold: 456,
-    totalTickets: 1000,
-    revenue: 45600,
-    isPublished: true
-  }
-];
-
-//todo: remove mock functionality
-const draftEvents: Event[] = [
-  {
-    id: '3',
-    title: 'Sunrise Yoga in the Park',
-    image: yogaEvent,
-    date: 'Sep 5, 2025',
-    time: '7:00 AM',
-    location: 'Riverside Park, Portland',
-    type: 'Wellness',
-    status: 'draft' as const,
-    ticketsSold: 0,
-    totalTickets: 0,
-    revenue: 0,
-    isPublished: false
-  }
-];
-
-//todo: remove mock functionality
-const pastEvents: Event[] = [
-  {
-    id: '4',
-    title: 'Contemporary Art Gallery Opening',
-    image: artGallery,
-    date: 'Jun 15, 2025',
-    time: '7:00 PM',
-    location: 'Modern Art Space, LA',
-    type: 'Arts',
-    status: 'completed' as const,
-    ticketsSold: 123,
-    totalTickets: 150,
-    revenue: 3075,
-    isPublished: true
-  }
-];
-
 export default function ManageEventsPage() {
   const [createEventOpen, setCreateEventOpen] = useState(false);
+  
+  // Fetch real events from API
+  const { data: dbEvents = [], isLoading } = useQuery<DBEvent[]>({
+    queryKey: ["/api/events/my-events"],
+  });
+
+  // Transform DB events to UI format
+  const now = new Date();
+  const transformEvent = (event: DBEvent): Event => {
+    const eventDate = new Date(event.eventDate);
+    const isPast = eventDate < now;
+    
+    return {
+      id: event.id,
+      title: event.title,
+      image: event.imageUrl || yogaEvent,
+      date: eventDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      time: eventDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+      location: event.location,
+      type: event.category,
+      status: isPast ? 'completed' : 'published',
+      ticketsSold: 0, // TODO: Get from tickets table
+      totalTickets: event.ticketsAvailable,
+      revenue: 0, // TODO: Calculate from sold tickets
+      isPublished: true, // TODO: Add isPublished field to schema
+    };
+  };
+
+  const allEvents = dbEvents.map(transformEvent);
+  const publishedEvents = allEvents.filter(e => e.status === 'published');
+  const draftEvents: Event[] = []; // TODO: Add draft status to schema
+  const pastEvents = allEvents.filter(e => e.status === 'completed');
 
   const handleEditEvent = (eventId: string) => {
     console.log('Edit event:', eventId);
@@ -264,41 +227,65 @@ export default function ManageEventsPage() {
           </TabsList>
 
           <TabsContent value="published">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {publishedEvents.map((event) => (
-                <EventManagementCard key={event.id} event={event} />
-              ))}
-            </div>
-            {publishedEvents.length === 0 && (
+            {isLoading ? (
               <div className="text-center py-16">
-                <p className="text-muted-foreground">No published events yet</p>
+                <p className="text-muted-foreground">Loading events...</p>
               </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {publishedEvents.map((event) => (
+                    <EventManagementCard key={event.id} event={event} />
+                  ))}
+                </div>
+                {publishedEvents.length === 0 && (
+                  <div className="text-center py-16">
+                    <p className="text-muted-foreground">No published events yet</p>
+                  </div>
+                )}
+              </>
             )}
           </TabsContent>
 
           <TabsContent value="drafts">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {draftEvents.map((event) => (
-                <EventManagementCard key={event.id} event={event} />
-              ))}
-            </div>
-            {draftEvents.length === 0 && (
+            {isLoading ? (
               <div className="text-center py-16">
-                <p className="text-muted-foreground">No draft events</p>
+                <p className="text-muted-foreground">Loading events...</p>
               </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {draftEvents.map((event) => (
+                    <EventManagementCard key={event.id} event={event} />
+                  ))}
+                </div>
+                {draftEvents.length === 0 && (
+                  <div className="text-center py-16">
+                    <p className="text-muted-foreground">No draft events</p>
+                  </div>
+                )}
+              </>
             )}
           </TabsContent>
 
           <TabsContent value="past">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {pastEvents.map((event) => (
-                <EventManagementCard key={event.id} event={event} />
-              ))}
-            </div>
-            {pastEvents.length === 0 && (
+            {isLoading ? (
               <div className="text-center py-16">
-                <p className="text-muted-foreground">No past events</p>
+                <p className="text-muted-foreground">Loading events...</p>
               </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {pastEvents.map((event) => (
+                    <EventManagementCard key={event.id} event={event} />
+                  ))}
+                </div>
+                {pastEvents.length === 0 && (
+                  <div className="text-center py-16">
+                    <p className="text-muted-foreground">No past events</p>
+                  </div>
+                )}
+              </>
             )}
           </TabsContent>
         </Tabs>
