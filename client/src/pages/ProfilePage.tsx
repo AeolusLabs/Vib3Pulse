@@ -34,7 +34,7 @@ export default function ProfilePage() {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-background pb-20 md:pb-0">
-        <Navigation userType="social" />
+        <Navigation onSearch={() => {}} />
         <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="space-y-6">
             <Skeleton className="h-64 w-full" />
@@ -49,7 +49,7 @@ export default function ProfilePage() {
   if (error || !profile) {
     return (
       <div className="min-h-screen bg-background pb-20 md:pb-0">
-        <Navigation userType="social" />
+        <Navigation onSearch={() => {}} />
         <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <Card>
             <CardContent className="p-8 text-center">
@@ -65,11 +65,9 @@ export default function ProfilePage() {
   const isSocialUser = profile.userType === "social";
   const isOrganizer = profile.userType === "organizer";
 
-  const userType = (profile.userType === "organizer" ? "organizer" : "social") as "social" | "organizer";
-
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
-      <Navigation userType={userType} />
+      <Navigation onSearch={() => {}} />
 
       <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Profile Header */}

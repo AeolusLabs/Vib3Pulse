@@ -22,22 +22,8 @@ export default function BottomNavigation({ onCreateClick }: BottomNavigationProp
           const isActive = location === item.path;
           const Icon = item.icon;
 
-          if (item.isAction) {
-            return (
-              <button
-                key={item.label}
-                className="flex flex-col items-center gap-1 px-3 py-2 transition-colors text-foreground"
-                onClick={onCreateClick}
-                data-testid={item.testId}
-              >
-                <Icon className="h-6 w-6" />
-                <span className="text-xs font-medium">{item.label}</span>
-              </button>
-            );
-          }
-
           return (
-            <Link key={item.label} href={item.path!}>
+            <Link key={item.label} href={item.path}>
               <button
                 className={`flex flex-col items-center gap-1 px-3 py-2 transition-colors ${
                   isActive ? 'text-primary' : 'text-muted-foreground'

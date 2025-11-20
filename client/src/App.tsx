@@ -91,7 +91,7 @@ function Router() {
         </AuthenticatedLayout>
       </Route>
       
-      <Route path="/profile/:userId">
+      <Route path="/user/:userId">
         <AuthenticatedLayout>
           <UserProfilePage />
         </AuthenticatedLayout>

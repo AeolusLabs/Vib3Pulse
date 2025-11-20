@@ -24,11 +24,11 @@ export default function UserProfilePage() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
 
-  const { data: sessionUser } = useQuery({
+  const { data: sessionUser } = useQuery<{ user: User }>({
     queryKey: ['/api/auth/session'],
   });
 
-  const { data: profile, isLoading } = useQuery<UserProfileResponse>({
+  const { data: profile, isLoading, error } = useQuery<UserProfileResponse>({
     queryKey: [`/api/users/${userId}/profile`],
     enabled: !!userId,
   });

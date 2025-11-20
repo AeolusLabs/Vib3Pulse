@@ -18,7 +18,7 @@ export default function SearchPage() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
 
-  const { data: sessionUser } = useQuery({
+  const { data: sessionUser } = useQuery<{ user: User }>({
     queryKey: ['/api/auth/session'],
   });
 
@@ -46,7 +46,7 @@ export default function SearchPage() {
   });
 
   const handleViewProfile = (userId: string) => {
-    navigate(`/profile/${userId}`);
+    navigate(`/user/${userId}`);
   };
 
   const handleMessage = (userId: string) => {

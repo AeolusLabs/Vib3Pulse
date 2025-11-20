@@ -32,7 +32,7 @@ export default function MessagesPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
-  const { data: sessionUser } = useQuery({
+  const { data: sessionUser } = useQuery<{ user: User }>({
     queryKey: ['/api/auth/session'],
   });
 

@@ -44,7 +44,7 @@ export default function FeedPost({
 
   const handleAvatarClick = () => {
     if (author.userId) {
-      navigate(`/profile/${author.userId}`);
+      navigate(`/user/${author.userId}`);
     }
   };
 
