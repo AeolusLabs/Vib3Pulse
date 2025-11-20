@@ -21,6 +21,10 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { useMutation } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import type { InsertEvent, Event } from "@shared/schema";
 
 interface TicketTier {
   id: string;
@@ -72,6 +76,7 @@ const EVENT_CATEGORIES = [
 ];
 
 export default function CreateEventModal({ open, onClose }: CreateEventModalProps) {
+  const { toast } = useToast();
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState<EventFormData>({
     name: "",
@@ -93,6 +98,50 @@ export default function CreateEventModal({ open, onClose }: CreateEventModalProp
     rsvpGeneratesTicket: true,
   });
 
+  const createEventMutation = useMutation<Event, Error, InsertEvent>({
+    mutationFn: async (eventData) => {
+      const response = await apiRequest('POST', '/api/events', eventData);
+      return await response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/events"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/events/my-events"] });
+      toast({
+        title: "Event created!",
+        description: "Your event has been successfully created.",
+      });
+      onClose();
+      // Reset form
+      setStep(1);
+      setFormData({
+        name: "",
+        type: "",
+        description: "",
+        startDate: "",
+        startTime: "",
+        endDate: "",
+        endTime: "",
+        isMultiDay: false,
+        locationType: "physical",
+        location: "",
+        ageRestriction: "all",
+        parentalGuidance: "none",
+        entryType: "free",
+        thumbnailUrl: "",
+        tickets: [],
+        requireRSVP: false,
+        rsvpGeneratesTicket: true,
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error creating event",
+        description: error.message || "Failed to create event. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const updateFormData = (updates: Partial<EventFormData>) => {
     setFormData(prev => ({ ...prev, ...updates }));
   };
@@ -110,30 +159,33 @@ export default function CreateEventModal({ open, onClose }: CreateEventModalProp
   };
 
   const handleSubmit = () => {
-    console.log("Event created:", formData);
-    //todo: replace mock functionality with API call
-    onClose();
-    // Reset form
-    setStep(1);
-    setFormData({
-      name: "",
-      type: "",
-      description: "",
-      startDate: "",
-      startTime: "",
-      endDate: "",
-      endTime: "",
-      isMultiDay: false,
-      locationType: "physical",
-      location: "",
-      ageRestriction: "all",
-      parentalGuidance: "none",
-      entryType: "free",
-      thumbnailUrl: "",
-      tickets: [],
-      requireRSVP: false,
-      rsvpGeneratesTicket: true,
-    });
+    // Convert form data to match Event schema
+    const eventDate = new Date(`${formData.startDate}T${formData.startTime}`);
+    
+    // Calculate ticket price and quantity
+    const ticketPrice = formData.entryType === "free" 
+      ? 0 
+      : (formData.tickets[0]?.price || 0);
+    
+    // For free events, set ticketsAvailable to 9999 to indicate unlimited
+    const ticketsAvailable = formData.entryType === "free"
+      ? 9999
+      : formData.tickets.reduce((sum, ticket) => sum + ticket.quantity, 0);
+    
+    const eventData: InsertEvent = {
+      organizerId: "", // This will be set by the backend from req.user
+      title: formData.name,
+      description: formData.description,
+      eventDate: eventDate,
+      location: formData.location,
+      category: formData.type,
+      ticketPrice: ticketPrice,
+      requiresRSVP: formData.requireRSVP,
+      ticketsAvailable: ticketsAvailable,
+      imageUrl: formData.thumbnailUrl || null,
+    };
+    
+    createEventMutation.mutate(eventData);
   };
 
   const handleThumbnailUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -804,11 +856,11 @@ export default function CreateEventModal({ open, onClose }: CreateEventModalProp
             </Card>
 
             <div className="flex justify-between gap-2">
-              <Button onClick={handleBack} variant="outline" data-testid="button-back-step3">
+              <Button onClick={handleBack} variant="outline" data-testid="button-back-step3" disabled={createEventMutation.isPending}>
                 Back
               </Button>
-              <Button onClick={handleSubmit} data-testid="button-create-event">
-                Create Event
+              <Button onClick={handleSubmit} disabled={createEventMutation.isPending} data-testid="button-create-event">
+                {createEventMutation.isPending ? "Creating..." : "Create Event"}
               </Button>
             </div>
           </div>

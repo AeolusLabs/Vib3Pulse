@@ -93,6 +93,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/events/my-events", requireAuth, async (req, res) => {
+    try {
+      const events = await storage.getEventsByOrganizer(req.user!.id);
+      res.json(events);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch your events" });
+    }
+  });
+
   app.get("/api/events/:id", async (req, res) => {
     try {
       const event = await storage.getEvent(req.params.id);
