@@ -44,7 +44,9 @@ export default function LoginPage() {
         description: "You've successfully signed in.",
       });
 
-      setLocation("/discover");
+      const params = new URLSearchParams(window.location.search);
+      const redirect = params.get('redirect');
+      setLocation(redirect || "/discover");
     } catch (error: any) {
       toast({
         title: "Login failed",

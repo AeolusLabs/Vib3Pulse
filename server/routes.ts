@@ -22,9 +22,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { password, ...userData } = signupSchema.parse(req.body);
       
-      const existingUser = await storage.getUserByUsername(userData.username);
-      if (existingUser) {
+      const existingUsername = await storage.getUserByUsername(userData.username);
+      if (existingUsername) {
         return res.status(400).json({ message: "Username already exists" });
+      }
+
+      const existingEmail = await storage.getUserByEmail(userData.email);
+      if (existingEmail) {
+        return res.status(400).json({ message: "Email already exists" });
       }
 
       const passwordHash = await hashPassword(password);

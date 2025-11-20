@@ -18,24 +18,20 @@ export function useAuth(): UseQueryResult<AuthUser | null, Error> {
   return useQuery<AuthUser | null, Error>({
     queryKey: ["/api/auth/session"],
     queryFn: async () => {
-      try {
-        const response = await fetch("/api/auth/session", {
-          credentials: "include",
-        });
-        
-        if (response.status === 401) {
-          return null;
-        }
-        
-        if (!response.ok) {
-          throw new Error("Failed to fetch session");
-        }
-        
-        const data: AuthResponse = await response.json();
-        return data.user;
-      } catch (error) {
+      const response = await fetch("/api/auth/session", {
+        credentials: "include",
+      });
+      
+      if (response.status === 401) {
         return null;
       }
+      
+      if (!response.ok) {
+        throw new Error("Failed to fetch session");
+      }
+      
+      const data: AuthResponse = await response.json();
+      return data.user;
     },
     staleTime: 5 * 60 * 1000,
     retry: false,

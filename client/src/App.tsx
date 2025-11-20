@@ -3,6 +3,7 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import AuthenticatedLayout from "@/components/AuthenticatedLayout";
 import NotFound from "@/pages/not-found";
 import LandingPage from "@/pages/LandingPage";
 import DiscoverPage from "@/pages/DiscoverPage";
@@ -24,14 +25,47 @@ function Router() {
       <Route path="/login" component={LoginPage} />
       <Route path="/signup" component={SignupPage} />
       <Route path="/discover" component={DiscoverPage} />
-      <Route path="/feed" component={FeedPage} />
-      <Route path="/my-events" component={MyEventsPage} />
-      <Route path="/manage-events" component={ManageEventsPage} />
-      <Route path="/ticket-wallet" component={TicketWalletPage} />
-      <Route path="/chat" component={ChatPage} />
-      <Route path="/chat/:userId" component={ConversationPage} />
       <Route path="/event/:id" component={EventDetailPage} />
       <Route path="/profile/:username" component={ProfilePage} />
+      
+      <Route path="/feed">
+        <AuthenticatedLayout>
+          <FeedPage />
+        </AuthenticatedLayout>
+      </Route>
+      
+      <Route path="/my-events">
+        <AuthenticatedLayout>
+          <MyEventsPage />
+        </AuthenticatedLayout>
+      </Route>
+      
+      <Route path="/manage-events">
+        <AuthenticatedLayout>
+          <ManageEventsPage />
+        </AuthenticatedLayout>
+      </Route>
+      
+      <Route path="/ticket-wallet">
+        <AuthenticatedLayout>
+          <TicketWalletPage />
+        </AuthenticatedLayout>
+      </Route>
+      
+      <Route path="/chat">
+        <AuthenticatedLayout>
+          <ChatPage />
+        </AuthenticatedLayout>
+      </Route>
+      
+      <Route path="/chat/:userId">
+        {(params) => (
+          <AuthenticatedLayout>
+            <ConversationPage {...params} />
+          </AuthenticatedLayout>
+        )}
+      </Route>
+      
       <Route component={NotFound} />
     </Switch>
   );

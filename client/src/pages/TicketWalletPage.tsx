@@ -12,9 +12,13 @@ export default function TicketWalletPage() {
   const { data: tickets, isLoading } = useQuery<TicketWithEvent[]>({
     queryKey: ["/api/tickets"],
     queryFn: async () => {
-      const res = await fetch("/api/tickets?userId=mock-user-id");
-      if (!res.ok) throw new Error("Failed to fetch tickets");
-      return res.json();
+      const response = await fetch("/api/tickets", {
+        credentials: "include",
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch tickets");
+      }
+      return response.json();
     },
   });
 

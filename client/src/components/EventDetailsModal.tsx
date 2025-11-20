@@ -20,9 +20,14 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
   const [isProcessing, setIsProcessing] = useState(false);
 
   const { data: rsvps, isLoading: isLoadingRSVPs } = useQuery({
-    queryKey: ["/api/rsvps", "mock-user-id"],
+    queryKey: ["/api/rsvps"],
     queryFn: async () => {
-      const response = await fetch(`/api/rsvps?userId=mock-user-id`);
+      const response = await fetch("/api/rsvps", {
+        credentials: "include",
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch RSVPs");
+      }
       return response.json();
     },
   });
@@ -33,7 +38,6 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
     mutationFn: async () => {
       const response = await apiRequest("POST", "/api/tickets/purchase", {
         eventId: event.id,
-        userId: "mock-user-id",
       });
       return response.json();
     },
@@ -56,11 +60,10 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
     mutationFn: async () => {
       await apiRequest("POST", "/api/rsvps", {
         eventId: event.id,
-        userId: "mock-user-id",
       });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/rsvps", "mock-user-id"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rsvps"] });
       queryClient.invalidateQueries({ queryKey: ["/api/tickets"] });
       toast({
         title: "RSVP Confirmed!",
