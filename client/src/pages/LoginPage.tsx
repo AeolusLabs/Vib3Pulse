@@ -9,9 +9,11 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { LogIn, Eye, EyeOff } from "lucide-react";
 import { Link } from "wouter";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 
 const loginSchema = z.object({
-  emailOrUsername: z.string().min(1, "Email or username is required"),
+  username: z.string().min(1, "Username is required"),
   password: z.string().min(1, "Password is required"),
 });
 
@@ -21,23 +23,37 @@ export default function LoginPage() {
   const [, setLocation] = useLocation();
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const { toast } = useToast();
 
   const form = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
-      emailOrUsername: "",
+      username: "",
       password: "",
     },
   });
 
   const onSubmit = async (data: LoginFormData) => {
     setIsLoading(true);
-    console.log("Login attempt:", data);
     
-    setTimeout(() => {
-      setIsLoading(false);
+    try {
+      await apiRequest("POST", "/api/auth/login", data);
+
+      toast({
+        title: "Welcome back!",
+        description: "You've successfully signed in.",
+      });
+
       setLocation("/discover");
-    }, 1000);
+    } catch (error: any) {
+      toast({
+        title: "Login failed",
+        description: error.message || "Invalid credentials. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -64,15 +80,15 @@ export default function LoginPage() {
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
                 <FormField
                   control={form.control}
-                  name="emailOrUsername"
+                  name="username"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Email or Username</FormLabel>
+                      <FormLabel>Username</FormLabel>
                       <FormControl>
                         <Input
-                          placeholder="Enter your email or username"
+                          placeholder="Enter your username"
                           {...field}
-                          data-testid="input-email-username"
+                          data-testid="input-username"
                         />
                       </FormControl>
                       <FormMessage />

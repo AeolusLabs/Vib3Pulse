@@ -1,7 +1,10 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertEventSchema, insertTicketSchema, insertRsvpSchema } from "@shared/schema";
+import { insertEventSchema, insertTicketSchema, insertRsvpSchema, insertUserSchema } from "@shared/schema";
+import { hashPassword, userToSessionUser } from "./auth";
+import { requireAuth, requireOrganizer } from "./middleware";
+import passport from "passport";
 import Stripe from "stripe";
 import { z } from "zod";
 
@@ -9,7 +12,72 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "", {
   apiVersion: "2025-11-17.clover",
 });
 
+const signupSchema = insertUserSchema.omit({ passwordHash: true }).extend({
+  password: z.string().min(8, "Password must be at least 8 characters"),
+});
+
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Authentication routes
+  app.post("/api/auth/signup", async (req, res) => {
+    try {
+      const { password, ...userData } = signupSchema.parse(req.body);
+      
+      const existingUser = await storage.getUserByUsername(userData.username);
+      if (existingUser) {
+        return res.status(400).json({ message: "Username already exists" });
+      }
+
+      const passwordHash = await hashPassword(password);
+      const user = await storage.createUser({
+        ...userData,
+        passwordHash,
+      });
+
+      req.login(userToSessionUser(user), (err) => {
+        if (err) {
+          return res.status(500).json({ message: "Failed to login after signup" });
+        }
+        res.json({ user: userToSessionUser(user) });
+      });
+    } catch (error) {
+      res.status(400).json({ message: "Invalid user data" });
+    }
+  });
+
+  app.post("/api/auth/login", (req, res, next) => {
+    passport.authenticate("local", (err: any, user: Express.User | false, info: any) => {
+      if (err) {
+        return res.status(500).json({ message: "Login failed" });
+      }
+      if (!user) {
+        return res.status(401).json({ message: info?.message || "Invalid credentials" });
+      }
+      req.login(user, (err) => {
+        if (err) {
+          return res.status(500).json({ message: "Login failed" });
+        }
+        res.json({ user });
+      });
+    })(req, res, next);
+  });
+
+  app.post("/api/auth/logout", (req, res) => {
+    req.logout((err) => {
+      if (err) {
+        return res.status(500).json({ message: "Logout failed" });
+      }
+      res.json({ message: "Logged out successfully" });
+    });
+  });
+
+  app.get("/api/auth/session", (req, res) => {
+    if (req.isAuthenticated()) {
+      res.json({ user: req.user });
+    } else {
+      res.status(401).json({ message: "Not authenticated" });
+    }
+  });
+
   // Events
   app.get("/api/events", async (req, res) => {
     try {
@@ -32,10 +100,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/events", async (req, res) => {
+  app.post("/api/events", requireOrganizer, async (req, res) => {
     try {
-      const eventData = insertEventSchema.parse(req.body);
-      const event = await storage.createEvent(eventData);
+      const eventData = insertEventSchema.omit({ organizerId: true }).parse(req.body);
+      const event = await storage.createEvent({
+        ...eventData,
+        organizerId: req.user!.id,
+      });
       res.json(event);
     } catch (error) {
       res.status(400).json({ message: "Invalid event data" });
@@ -43,21 +114,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Tickets
-  app.get("/api/tickets", async (req, res) => {
+  app.get("/api/tickets", requireAuth, async (req, res) => {
     try {
-      if (!req.query.userId) {
-        return res.status(400).json({ message: "userId is required" });
-      }
-      const tickets = await storage.getUserTickets(req.query.userId as string);
+      const tickets = await storage.getUserTickets(req.user!.id);
       res.json(tickets);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch tickets" });
     }
   });
 
-  app.post("/api/tickets/purchase", async (req, res) => {
+  app.post("/api/tickets/purchase", requireAuth, async (req, res) => {
     try {
-      const { eventId, userId } = req.body;
+      const { eventId } = req.body;
+      const userId = req.user!.id;
       
       const event = await storage.getEvent(eventId);
       if (!event) {
@@ -100,24 +169,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Verify Stripe checkout session and create ticket
-  // This endpoint is called by the client after successful payment redirect
-  // 
-  // SECURITY NOTE: This endpoint currently accepts userId from the request body
-  // because the application does not yet have proper authentication middleware.
-  // In production, this MUST be replaced with authenticated session middleware
-  // that extracts the userId from a verified JWT/session token, not from the request body.
-  // 
-  // TODO: Implement authentication middleware and replace userId parameter with
-  // req.user.id from authenticated session before production deployment.
-  app.post("/api/tickets/verify-payment", async (req, res) => {
+  app.post("/api/tickets/verify-payment", requireAuth, async (req, res) => {
     try {
-      // Validate request body
       const requestSchema = z.object({
         sessionId: z.string().min(1),
-        userId: z.string().min(1), // TODO: Replace with req.user.id from auth middleware
       });
       
-      const { sessionId, userId } = requestSchema.parse(req.body);
+      const { sessionId } = requestSchema.parse(req.body);
+      const userId = req.user!.id;
 
       // Retrieve the session from Stripe to verify payment
       const session = await stripe.checkout.sessions.retrieve(sessionId);
@@ -165,24 +224,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // RSVPs
-  app.get("/api/rsvps", async (req, res) => {
+  app.get("/api/rsvps", requireAuth, async (req, res) => {
     try {
-      if (!req.query.userId) {
-        return res.status(400).json({ message: "userId is required" });
-      }
-      const rsvps = await storage.getUserRsvps(req.query.userId as string);
+      const rsvps = await storage.getUserRsvps(req.user!.id);
       res.json(rsvps);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch RSVPs" });
     }
   });
 
-  app.post("/api/rsvps", async (req, res) => {
+  app.post("/api/rsvps", requireAuth, async (req, res) => {
     try {
-      const rsvpData = insertRsvpSchema.parse(req.body);
+      const { eventId } = req.body;
+      const userId = req.user!.id;
       
       // Fetch the event to validate it's free and requires RSVP
-      const event = await storage.getEvent(rsvpData.eventId);
+      const event = await storage.getEvent(eventId);
       if (!event) {
         return res.status(404).json({ message: "Event not found" });
       }
@@ -193,17 +250,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Check if RSVP already exists
-      const existingRsvp = await storage.getRsvp(rsvpData.userId, rsvpData.eventId);
+      const existingRsvp = await storage.getRsvp(userId, eventId);
       if (existingRsvp) {
         return res.status(400).json({ message: "Already RSVPed to this event" });
       }
 
+      const rsvpData = insertRsvpSchema.parse({ userId, eventId });
       const rsvp = await storage.createRsvp(rsvpData);
       
       // Also create a ticket for the free event
       const ticketData = insertTicketSchema.parse({
-        userId: rsvpData.userId,
-        eventId: rsvpData.eventId,
+        userId,
+        eventId,
         status: "confirmed",
       });
       await storage.createTicket(ticketData);
@@ -214,13 +272,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/rsvps/:eventId", async (req, res) => {
+  app.delete("/api/rsvps/:eventId", requireAuth, async (req, res) => {
     try {
-      const { userId } = req.query;
-      if (!userId) {
-        return res.status(400).json({ message: "userId is required" });
-      }
-      await storage.cancelRsvp(userId as string, req.params.eventId);
+      await storage.cancelRsvp(req.user!.id, req.params.eventId);
       res.json({ message: "RSVP cancelled" });
     } catch (error) {
       res.status(500).json({ message: "Failed to cancel RSVP" });
@@ -235,8 +289,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "User not found" });
       }
 
-      // Don't send password to client
-      const { password, ...userWithoutPassword } = user;
+      // Don't send password hash to client
+      const { passwordHash, ...userWithoutPassword } = user;
 
       // Get user's events or RSVPs based on user type
       if (user.userType === "organizer") {

@@ -13,6 +13,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { UserPlus, Users, Building2, ArrowRight, ArrowLeft, Check, Eye, EyeOff } from "lucide-react";
 import { Link } from "wouter";
 import { Label } from "@/components/ui/label";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 
 const EVENT_CATEGORIES = [
   "Music",
@@ -72,6 +74,7 @@ export default function SignupPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const { toast } = useToast();
 
   const step1Form = useForm<Step1Data>({
     resolver: zodResolver(step1Schema),
@@ -135,16 +138,30 @@ export default function SignupPage() {
       ...data,
     };
     
-    console.log("Complete signup data:", completeData);
+    delete (completeData as any).confirmPassword;
     
-    setTimeout(() => {
-      setIsLoading(false);
+    try {
+      await apiRequest("POST", "/api/auth/signup", completeData);
+
+      toast({
+        title: "Account created!",
+        description: "Welcome to VibePulse. Let's explore!",
+      });
+
       if (step2Data?.userType === "social") {
-        setLocation("/feed");
+        setLocation("/discover");
       } else {
-        setLocation("/manage-events");
+        setLocation("/discover");
       }
-    }, 1000);
+    } catch (error: any) {
+      toast({
+        title: "Signup failed",
+        description: error.message || "Could not create account. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const goBack = () => {

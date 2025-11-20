@@ -1,8 +1,15 @@
 import express, { type Request, Response, NextFunction } from "express";
+import session from "express-session";
+import passport from "passport";
+import { Strategy as LocalStrategy } from "passport-local";
+import connectPgSimple from "connect-pg-simple";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { storage } from "./storage";
+import { comparePassword, userToSessionUser, type SessionUser } from "./auth";
 
 const app = express();
+const PgSession = connectPgSimple(session);
 
 declare module 'http' {
   interface IncomingMessage {
@@ -15,6 +22,64 @@ app.use(express.json({
   }
 }));
 app.use(express.urlencoded({ extended: false }));
+
+app.use(
+  session({
+    store: new PgSession({
+      conString: process.env.DATABASE_URL,
+      tableName: "session",
+      createTableIfMissing: false,
+    }),
+    secret: process.env.SESSION_SECRET || "vibepulse-secret-key-change-in-production",
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+    },
+  })
+);
+
+passport.use(
+  new LocalStrategy(async (username, password, done) => {
+    try {
+      const user = await storage.getUserByUsername(username);
+      if (!user) {
+        return done(null, false, { message: "Invalid username or password" });
+      }
+
+      const isValid = await comparePassword(password, user.passwordHash);
+      if (!isValid) {
+        return done(null, false, { message: "Invalid username or password" });
+      }
+
+      return done(null, userToSessionUser(user));
+    } catch (error) {
+      return done(error);
+    }
+  })
+);
+
+passport.serializeUser((user, done) => {
+  done(null, user.id);
+});
+
+passport.deserializeUser(async (id: string, done) => {
+  try {
+    const user = await storage.getUser(id);
+    if (!user) {
+      return done(null, false);
+    }
+    done(null, userToSessionUser(user));
+  } catch (error) {
+    done(error);
+  }
+});
+
+app.use(passport.initialize());
+app.use(passport.session());
 
 app.use((req, res, next) => {
   const start = Date.now();

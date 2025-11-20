@@ -7,7 +7,7 @@ export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   email: text("email").notNull().unique(),
   username: text("username").notNull().unique(),
-  password: text("password").notNull(),
+  passwordHash: text("password_hash").notNull(),
   userType: text("user_type").notNull(),
   displayName: text("display_name"),
   dateOfBirth: text("date_of_birth"),
@@ -16,14 +16,23 @@ export const users = pgTable("users", {
   organizationName: text("organization_name"),
   contactEmail: text("contact_email"),
   socialMediaLinks: text("social_media_links").array().default(sql`'{}'`),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
+  createdAt: true,
 });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
+
+// Session table for express-session with connect-pg-simple
+export const sessions = pgTable("session", {
+  sid: varchar("sid").primaryKey(),
+  sess: text("sess").notNull(),
+  expire: timestamp("expire").notNull(),
+});
 
 export const events = pgTable("events", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

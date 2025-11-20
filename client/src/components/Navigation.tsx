@@ -13,23 +13,20 @@ import {
 import ThemeToggle from "./ThemeToggle";
 import MenuTray from "./MenuTray";
 import { Link, useLocation } from "wouter";
+import { useAuth, logout } from "@/hooks/useAuth";
 
 interface NavigationProps {
-  userType?: "organizer" | "social";
   onSearch?: (query: string) => void;
   onCreateEvent?: () => void;
 }
 
-export default function Navigation({ userType = "social", onSearch, onCreateEvent }: NavigationProps) {
+export default function Navigation({ onSearch, onCreateEvent }: NavigationProps) {
   const [, setLocation] = useLocation();
+  const { data: user, isLoading } = useAuth();
 
-  // TODO: Replace with actual authenticated user's username from auth context
-  // Currently using placeholder for testing. Real authentication required before production.
-  const CURRENT_USER_USERNAME = "testuser";
-
-  const handleLogout = () => {
-    console.log("User logged out");
-    setLocation("/");
+  const handleLogout = async () => {
+    await logout();
+    setLocation("/login");
   };
 
   return (
@@ -60,7 +57,7 @@ export default function Navigation({ userType = "social", onSearch, onCreateEven
           </div>
 
           <div className="flex items-center gap-2">
-            {userType === "organizer" && (
+            {!isLoading && user?.userType === "organizer" && (
               <Button
                 variant="default"
                 size="default"
@@ -86,13 +83,15 @@ export default function Navigation({ userType = "social", onSearch, onCreateEven
               <DropdownMenuContent align="end">
                 <DropdownMenuLabel>My Account</DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem asChild data-testid="menu-profile">
-                  <Link href={`/profile/${CURRENT_USER_USERNAME}`}>
-                    <User className="mr-2 h-4 w-4" />
-                    Profile
-                  </Link>
-                </DropdownMenuItem>
-                {userType === "organizer" && (
+                {user && (
+                  <DropdownMenuItem asChild data-testid="menu-profile">
+                    <Link href={`/profile/${user.username}`}>
+                      <User className="mr-2 h-4 w-4" />
+                      Profile
+                    </Link>
+                  </DropdownMenuItem>
+                )}
+                {user?.userType === "organizer" && (
                   <DropdownMenuItem asChild data-testid="menu-my-events">
                     <Link href="/manage-events">
                       <Calendar className="mr-2 h-4 w-4" />
