@@ -13,13 +13,22 @@ import {
   type InsertFollow,
   type Message,
   type InsertMessage,
+  type Like,
+  type InsertLike,
+  type Comment,
+  type InsertComment,
+  type Bookmark,
+  type InsertBookmark,
   users,
   events,
   tickets,
   rsvps,
   posts,
   follows,
-  messages
+  messages,
+  likes,
+  comments,
+  bookmarks
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/neon-serverless";
 import { Pool, neonConfig } from "@neondatabase/serverless";
@@ -71,6 +80,19 @@ export interface IStorage {
   
   getUserProfile(userId: string): Promise<{ user: User; posts: Post[]; events: Array<Rsvp & { event: Event }> } | undefined>;
   searchUsers(query: string): Promise<User[]>;
+  
+  likePost(userId: string, postId: string): Promise<Like>;
+  unlikePost(userId: string, postId: string): Promise<void>;
+  getPostLikes(postId: string): Promise<number>;
+  hasUserLikedPost(userId: string, postId: string): Promise<boolean>;
+  
+  addComment(comment: InsertComment): Promise<Comment>;
+  getPostComments(postId: string): Promise<Array<Comment & { user: User }>>;
+  getCommentCount(postId: string): Promise<number>;
+  
+  bookmarkPost(userId: string, postId: string): Promise<Bookmark>;
+  unbookmarkPost(userId: string, postId: string): Promise<void>;
+  hasUserBookmarkedPost(userId: string, postId: string): Promise<boolean>;
 }
 
 export class DbStorage implements IStorage {
@@ -95,7 +117,7 @@ export class DbStorage implements IStorage {
   }
 
   async getEvents(): Promise<Event[]> {
-    return await db.select().from(events);
+    return await db.select().from(events).orderBy(events.eventDate);
   }
 
   async getEvent(id: string): Promise<Event | undefined> {
@@ -177,7 +199,7 @@ export class DbStorage implements IStorage {
       .select()
       .from(posts)
       .innerJoin(users, eq(posts.userId, users.id))
-      .orderBy(posts.createdAt);
+      .orderBy(desc(posts.createdAt));
     
     return result.map(row => {
       const { passwordHash, ...userWithoutPassword } = row.users;
@@ -372,6 +394,92 @@ export class DbStorage implements IStorage {
       const { passwordHash, ...userWithoutPassword } = user;
       return userWithoutPassword as User;
     });
+  }
+
+  async likePost(userId: string, postId: string): Promise<Like> {
+    const result = await db.insert(likes).values({
+      userId,
+      postId,
+    }).returning();
+    return result[0];
+  }
+
+  async unlikePost(userId: string, postId: string): Promise<void> {
+    await db.delete(likes).where(
+      and(
+        eq(likes.userId, userId),
+        eq(likes.postId, postId)
+      )
+    );
+  }
+
+  async getPostLikes(postId: string): Promise<number> {
+    const result = await db.select().from(likes).where(eq(likes.postId, postId));
+    return result.length;
+  }
+
+  async hasUserLikedPost(userId: string, postId: string): Promise<boolean> {
+    const result = await db.select().from(likes).where(
+      and(
+        eq(likes.userId, userId),
+        eq(likes.postId, postId)
+      )
+    );
+    return result.length > 0;
+  }
+
+  async addComment(insertComment: InsertComment): Promise<Comment> {
+    const result = await db.insert(comments).values(insertComment).returning();
+    return result[0];
+  }
+
+  async getPostComments(postId: string): Promise<Array<Comment & { user: User }>> {
+    const result = await db
+      .select()
+      .from(comments)
+      .innerJoin(users, eq(comments.userId, users.id))
+      .where(eq(comments.postId, postId))
+      .orderBy(comments.createdAt);
+    
+    return result.map(row => {
+      const { passwordHash, ...userWithoutPassword } = row.users;
+      return {
+        ...row.comments,
+        user: userWithoutPassword as User,
+      };
+    });
+  }
+
+  async getCommentCount(postId: string): Promise<number> {
+    const result = await db.select().from(comments).where(eq(comments.postId, postId));
+    return result.length;
+  }
+
+  async bookmarkPost(userId: string, postId: string): Promise<Bookmark> {
+    const result = await db.insert(bookmarks).values({
+      userId,
+      postId,
+    }).returning();
+    return result[0];
+  }
+
+  async unbookmarkPost(userId: string, postId: string): Promise<void> {
+    await db.delete(bookmarks).where(
+      and(
+        eq(bookmarks.userId, userId),
+        eq(bookmarks.postId, postId)
+      )
+    );
+  }
+
+  async hasUserBookmarkedPost(userId: string, postId: string): Promise<boolean> {
+    const result = await db.select().from(bookmarks).where(
+      and(
+        eq(bookmarks.userId, userId),
+        eq(bookmarks.postId, postId)
+      )
+    );
+    return result.length > 0;
   }
 }
 

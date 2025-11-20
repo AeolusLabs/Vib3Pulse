@@ -336,6 +336,113 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Post Interactions - Likes
+  app.post("/api/posts/:postId/like", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const postId = req.params.postId;
+      
+      const alreadyLiked = await storage.hasUserLikedPost(userId, postId);
+      if (alreadyLiked) {
+        return res.status(400).json({ message: "Already liked this post" });
+      }
+      
+      const like = await storage.likePost(userId, postId);
+      res.json(like);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to like post" });
+    }
+  });
+
+  app.delete("/api/posts/:postId/like", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const postId = req.params.postId;
+      
+      await storage.unlikePost(userId, postId);
+      res.json({ message: "Unliked post" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to unlike post" });
+    }
+  });
+
+  app.get("/api/posts/:postId/likes", requireAuth, async (req, res) => {
+    try {
+      const postId = req.params.postId;
+      const userId = req.user!.id;
+      
+      const count = await storage.getPostLikes(postId);
+      const isLiked = await storage.hasUserLikedPost(userId, postId);
+      
+      res.json({ count, isLiked });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch likes" });
+    }
+  });
+
+  // Post Interactions - Comments
+  app.post("/api/posts/:postId/comments", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const postId = req.params.postId;
+      const { content } = req.body;
+      
+      if (!content || !content.trim()) {
+        return res.status(400).json({ message: "Comment content is required" });
+      }
+      
+      const comment = await storage.addComment({
+        userId,
+        postId,
+        content: content.trim(),
+      });
+      
+      res.json(comment);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to add comment" });
+    }
+  });
+
+  app.get("/api/posts/:postId/comments", async (req, res) => {
+    try {
+      const postId = req.params.postId;
+      const comments = await storage.getPostComments(postId);
+      res.json(comments);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch comments" });
+    }
+  });
+
+  // Post Interactions - Bookmarks
+  app.post("/api/posts/:postId/bookmark", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const postId = req.params.postId;
+      
+      const alreadyBookmarked = await storage.hasUserBookmarkedPost(userId, postId);
+      if (alreadyBookmarked) {
+        return res.status(400).json({ message: "Already bookmarked this post" });
+      }
+      
+      const bookmark = await storage.bookmarkPost(userId, postId);
+      res.json(bookmark);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to bookmark post" });
+    }
+  });
+
+  app.delete("/api/posts/:postId/bookmark", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const postId = req.params.postId;
+      
+      await storage.unbookmarkPost(userId, postId);
+      res.json({ message: "Removed bookmark" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to remove bookmark" });
+    }
+  });
+
   // Follows
   app.post("/api/follows/:userId", requireAuth, async (req, res) => {
     try {
