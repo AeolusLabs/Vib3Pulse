@@ -9,15 +9,21 @@ import {
   type InsertRsvp,
   type Post,
   type InsertPost,
+  type Follow,
+  type InsertFollow,
+  type Message,
+  type InsertMessage,
   users,
   events,
   tickets,
   rsvps,
-  posts
+  posts,
+  follows,
+  messages
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/neon-serverless";
 import { Pool, neonConfig } from "@neondatabase/serverless";
-import { eq, and, gte, lt } from "drizzle-orm";
+import { eq, and, gte, lt, or, ilike, desc } from "drizzle-orm";
 import ws from "ws";
 
 neonConfig.webSocketConstructor = ws;
@@ -51,6 +57,20 @@ export interface IStorage {
   getUserPosts(userId: string): Promise<Post[]>;
   createPost(post: InsertPost): Promise<Post>;
   deletePost(id: string): Promise<void>;
+  
+  followUser(followerId: string, followingId: string): Promise<Follow>;
+  unfollowUser(followerId: string, followingId: string): Promise<void>;
+  isFollowing(followerId: string, followingId: string): Promise<boolean>;
+  getFollowers(userId: string): Promise<Array<Follow & { follower: User }>>;
+  getFollowing(userId: string): Promise<Array<Follow & { following: User }>>;
+  
+  sendMessage(message: InsertMessage): Promise<Message>;
+  getConversation(userId1: string, userId2: string): Promise<Array<Message & { sender: User; receiver: User }>>;
+  getConversations(userId: string): Promise<Array<{ otherUser: User; lastMessage: Message }>>;
+  markAsRead(messageId: string): Promise<void>;
+  
+  getUserProfile(userId: string): Promise<{ user: User; posts: Post[]; events: Array<Rsvp & { event: Event }> } | undefined>;
+  searchUsers(query: string): Promise<User[]>;
 }
 
 export class DbStorage implements IStorage {
@@ -188,6 +208,170 @@ export class DbStorage implements IStorage {
 
   async deletePost(id: string): Promise<void> {
     await db.delete(posts).where(eq(posts.id, id));
+  }
+
+  async followUser(followerId: string, followingId: string): Promise<Follow> {
+    const result = await db.insert(follows).values({
+      followerId,
+      followingId,
+    }).returning();
+    return result[0];
+  }
+
+  async unfollowUser(followerId: string, followingId: string): Promise<void> {
+    await db.delete(follows).where(
+      and(
+        eq(follows.followerId, followerId),
+        eq(follows.followingId, followingId)
+      )
+    );
+  }
+
+  async isFollowing(followerId: string, followingId: string): Promise<boolean> {
+    const result = await db.select().from(follows).where(
+      and(
+        eq(follows.followerId, followerId),
+        eq(follows.followingId, followingId)
+      )
+    );
+    return result.length > 0;
+  }
+
+  async getFollowers(userId: string): Promise<Array<Follow & { follower: User }>> {
+    const result = await db
+      .select()
+      .from(follows)
+      .innerJoin(users, eq(follows.followerId, users.id))
+      .where(eq(follows.followingId, userId));
+    
+    return result.map(row => {
+      const { passwordHash, ...userWithoutPassword } = row.users;
+      return {
+        ...row.follows,
+        follower: userWithoutPassword as User,
+      };
+    });
+  }
+
+  async getFollowing(userId: string): Promise<Array<Follow & { following: User }>> {
+    const result = await db
+      .select()
+      .from(follows)
+      .innerJoin(users, eq(follows.followingId, users.id))
+      .where(eq(follows.followerId, userId));
+    
+    return result.map(row => {
+      const { passwordHash, ...userWithoutPassword } = row.users;
+      return {
+        ...row.follows,
+        following: userWithoutPassword as User,
+      };
+    });
+  }
+
+  async sendMessage(insertMessage: InsertMessage): Promise<Message> {
+    const result = await db.insert(messages).values(insertMessage).returning();
+    return result[0];
+  }
+
+  async getConversation(userId1: string, userId2: string): Promise<Array<Message & { sender: User; receiver: User }>> {
+    const result = await db
+      .select()
+      .from(messages)
+      .innerJoin(users, eq(messages.senderId, users.id))
+      .where(
+        or(
+          and(eq(messages.senderId, userId1), eq(messages.receiverId, userId2)),
+          and(eq(messages.senderId, userId2), eq(messages.receiverId, userId1))
+        )
+      )
+      .orderBy(messages.createdAt);
+    
+    const messagesWithSender = await Promise.all(result.map(async row => {
+      const receiver = await this.getUser(row.messages.receiverId);
+      const { passwordHash: senderHash, ...senderWithoutPassword } = row.users;
+      const { passwordHash: receiverHash, ...receiverWithoutPassword } = receiver!;
+      return {
+        ...row.messages,
+        sender: senderWithoutPassword as User,
+        receiver: receiverWithoutPassword as User,
+      };
+    }));
+    
+    return messagesWithSender;
+  }
+
+  async getConversations(userId: string): Promise<Array<{ otherUser: User; lastMessage: Message }>> {
+    const allMessages = await db
+      .select()
+      .from(messages)
+      .where(
+        or(
+          eq(messages.senderId, userId),
+          eq(messages.receiverId, userId)
+        )
+      )
+      .orderBy(desc(messages.createdAt));
+    
+    const conversationMap = new Map<string, Message>();
+    
+    for (const msg of allMessages) {
+      const otherUserId = msg.senderId === userId ? msg.receiverId : msg.senderId;
+      if (!conversationMap.has(otherUserId)) {
+        conversationMap.set(otherUserId, msg);
+      }
+    }
+    
+    const conversations = await Promise.all(
+      Array.from(conversationMap.entries()).map(async ([otherUserId, lastMessage]) => {
+        const otherUser = await this.getUser(otherUserId);
+        const { passwordHash, ...userWithoutPassword } = otherUser!;
+        return {
+          otherUser: userWithoutPassword as User,
+          lastMessage,
+        };
+      })
+    );
+    
+    return conversations;
+  }
+
+  async markAsRead(messageId: string): Promise<void> {
+    await db.update(messages).set({ isRead: true }).where(eq(messages.id, messageId));
+  }
+
+  async getUserProfile(userId: string): Promise<{ user: User; posts: Post[]; events: Array<Rsvp & { event: Event }> } | undefined> {
+    const user = await this.getUser(userId);
+    if (!user) return undefined;
+    
+    const userPosts = await this.getUserPosts(userId);
+    const userEvents = await this.getUserRsvps(userId);
+    
+    const { passwordHash, ...userWithoutPassword } = user;
+    
+    return {
+      user: userWithoutPassword as User,
+      posts: userPosts,
+      events: userEvents,
+    };
+  }
+
+  async searchUsers(query: string): Promise<User[]> {
+    const result = await db
+      .select()
+      .from(users)
+      .where(
+        or(
+          ilike(users.username, `%${query}%`),
+          ilike(users.displayName, `%${query}%`),
+          ilike(users.organizationName, `%${query}%`)
+        )
+      );
+    
+    return result.map(user => {
+      const { passwordHash, ...userWithoutPassword } = user;
+      return userWithoutPassword as User;
+    });
   }
 }
 

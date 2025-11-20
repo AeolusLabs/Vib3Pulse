@@ -9,6 +9,7 @@ import LandingPage from "@/pages/LandingPage";
 import DiscoverPage from "@/pages/DiscoverPage";
 import EventDetailPage from "@/pages/EventDetailPage";
 import ProfilePage from "@/pages/ProfilePage";
+import UserProfilePage from "@/pages/UserProfilePage";
 import FeedPage from "@/pages/FeedPage";
 import MyEventsPage from "@/pages/MyEventsPage";
 import ChatPage from "@/pages/ChatPage";
@@ -17,6 +18,8 @@ import ManageEventsPage from "@/pages/ManageEventsPage";
 import TicketWalletPage from "@/pages/TicketWalletPage";
 import LoginPage from "@/pages/LoginPage";
 import SignupPage from "@/pages/SignupPage";
+import SearchPage from "@/pages/SearchPage";
+import MessagesPage from "@/pages/MessagesPage";
 
 function Router() {
   return (
@@ -67,6 +70,30 @@ function Router() {
       <Route path="/chat/:userId">
         <AuthenticatedLayout>
           <ConversationPage />
+        </AuthenticatedLayout>
+      </Route>
+      
+      <Route path="/search">
+        <AuthenticatedLayout>
+          <SearchPage />
+        </AuthenticatedLayout>
+      </Route>
+      
+      <Route path="/messages">
+        <AuthenticatedLayout>
+          <MessagesPage />
+        </AuthenticatedLayout>
+      </Route>
+      
+      <Route path="/messages/:userId">
+        <AuthenticatedLayout>
+          <MessagesPage />
+        </AuthenticatedLayout>
+      </Route>
+      
+      <Route path="/profile/:userId">
+        <AuthenticatedLayout>
+          <UserProfilePage />
         </AuthenticatedLayout>
       </Route>
       

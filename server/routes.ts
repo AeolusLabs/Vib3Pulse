@@ -336,7 +336,152 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // User profile
+  // Follows
+  app.post("/api/follows/:userId", requireAuth, async (req, res) => {
+    try {
+      const followerId = req.user!.id;
+      const followingId = req.params.userId;
+      
+      if (followerId === followingId) {
+        return res.status(400).json({ message: "Cannot follow yourself" });
+      }
+      
+      const isAlreadyFollowing = await storage.isFollowing(followerId, followingId);
+      if (isAlreadyFollowing) {
+        return res.status(400).json({ message: "Already following this user" });
+      }
+      
+      const follow = await storage.followUser(followerId, followingId);
+      res.json(follow);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to follow user" });
+    }
+  });
+  
+  app.delete("/api/follows/:userId", requireAuth, async (req, res) => {
+    try {
+      const followerId = req.user!.id;
+      const followingId = req.params.userId;
+      
+      await storage.unfollowUser(followerId, followingId);
+      res.json({ message: "Unfollowed successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to unfollow user" });
+    }
+  });
+  
+  app.get("/api/follows/:userId/status", requireAuth, async (req, res) => {
+    try {
+      const followerId = req.user!.id;
+      const followingId = req.params.userId;
+      
+      const isFollowing = await storage.isFollowing(followerId, followingId);
+      res.json({ isFollowing });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to check follow status" });
+    }
+  });
+  
+  app.get("/api/follows/:userId/followers", async (req, res) => {
+    try {
+      const followers = await storage.getFollowers(req.params.userId);
+      res.json(followers);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch followers" });
+    }
+  });
+  
+  app.get("/api/follows/:userId/following", async (req, res) => {
+    try {
+      const following = await storage.getFollowing(req.params.userId);
+      res.json(following);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch following" });
+    }
+  });
+
+  // Messages
+  app.post("/api/messages", requireAuth, async (req, res) => {
+    try {
+      const { receiverId, content } = req.body;
+      const senderId = req.user!.id;
+      
+      if (senderId === receiverId) {
+        return res.status(400).json({ message: "Cannot message yourself" });
+      }
+      
+      const message = await storage.sendMessage({
+        senderId,
+        receiverId,
+        content,
+        isRead: false,
+      });
+      
+      res.json(message);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to send message" });
+    }
+  });
+  
+  app.get("/api/messages/:userId", requireAuth, async (req, res) => {
+    try {
+      const userId1 = req.user!.id;
+      const userId2 = req.params.userId;
+      
+      const conversation = await storage.getConversation(userId1, userId2);
+      res.json(conversation);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch conversation" });
+    }
+  });
+  
+  app.get("/api/messages", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const conversations = await storage.getConversations(userId);
+      res.json(conversations);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch conversations" });
+    }
+  });
+  
+  app.patch("/api/messages/:id/read", requireAuth, async (req, res) => {
+    try {
+      await storage.markAsRead(req.params.id);
+      res.json({ message: "Message marked as read" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to mark message as read" });
+    }
+  });
+
+  // User search and profile
+  app.get("/api/users/search", async (req, res) => {
+    try {
+      const query = req.query.q as string;
+      if (!query || query.trim() === "") {
+        return res.json([]);
+      }
+      
+      const users = await storage.searchUsers(query);
+      res.json(users);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to search users" });
+    }
+  });
+  
+  app.get("/api/users/:userId/profile", async (req, res) => {
+    try {
+      const profile = await storage.getUserProfile(req.params.userId);
+      if (!profile) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      res.json(profile);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch user profile" });
+    }
+  });
+
+  // User profile (legacy - keep for backward compatibility)
   app.get("/api/users/:username", async (req, res) => {
     try {
       const user = await storage.getUserByUsername(req.params.username);

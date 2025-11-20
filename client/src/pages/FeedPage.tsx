@@ -291,6 +291,7 @@ export default function FeedPage() {
                   name: post.user.displayName || post.user.organizationName || post.user.username,
                   username: post.user.username,
                   isOrganizer: post.user.userType === 'organizer',
+                  userId: post.user.id,
                 }}
                 content={post.content}
                 timestamp="Just now"

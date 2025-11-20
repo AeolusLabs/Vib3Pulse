@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Heart, MessageCircle, Share2, Bookmark } from "lucide-react";
 import { useState } from "react";
+import { useLocation } from "wouter";
 
 interface FeedPostProps {
   id: string;
@@ -11,6 +12,7 @@ interface FeedPostProps {
     username: string;
     avatar?: string;
     isOrganizer?: boolean;
+    userId?: string;
   };
   content: string;
   image?: string;
@@ -32,6 +34,7 @@ export default function FeedPost({
 }: FeedPostProps) {
   const [liked, setLiked] = useState(isLiked);
   const [likeCount, setLikeCount] = useState(likes);
+  const [, navigate] = useLocation();
 
   const handleLike = () => {
     setLiked(!liked);
@@ -39,10 +42,20 @@ export default function FeedPost({
     console.log('Toggled like for post:', id);
   };
 
+  const handleAvatarClick = () => {
+    if (author.userId) {
+      navigate(`/profile/${author.userId}`);
+    }
+  };
+
   return (
     <Card className="p-4 hover-elevate" data-testid={`post-${id}`}>
       <div className="flex gap-3">
-        <Avatar className="h-10 w-10">
+        <Avatar 
+          className="h-10 w-10 cursor-pointer hover-elevate" 
+          onClick={handleAvatarClick}
+          data-testid={`avatar-${id}`}
+        >
           <AvatarImage src={author.avatar} alt={author.name} />
           <AvatarFallback>
             {author.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
