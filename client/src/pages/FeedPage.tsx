@@ -1,4 +1,7 @@
 import { useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import StoriesBar from "@/components/StoriesBar";
@@ -177,6 +180,32 @@ export default function FeedPage() {
   const [createStoryOpen, setCreateStoryOpen] = useState(false);
   const [createPostOpen, setCreatePostOpen] = useState(false);
   const [feedFilter, setFeedFilter] = useState<'following' | 'all'>('following');
+  const { toast } = useToast();
+
+  const { data: posts = [], isLoading } = useQuery<any[]>({
+    queryKey: ['/api/posts'],
+  });
+
+  const createPostMutation = useMutation({
+    mutationFn: async (data: { content: string; imageUrl?: string }) => {
+      return await apiRequest('POST', '/api/posts', data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/posts'] });
+      setCreatePostOpen(false);
+      toast({
+        title: "Post created",
+        description: "Your post has been shared successfully.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to create post. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
 
   const handleNextStory = () => {
     if (viewingStory !== null && viewingStory < mockStories.length - 1) {
@@ -194,7 +223,7 @@ export default function FeedPage() {
 
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
-      <Navigation userType="social" onSearch={() => {}} />
+      <Navigation onSearch={() => {}} />
 
       <StoriesBar
         stories={mockStories}
@@ -249,9 +278,35 @@ export default function FeedPage() {
         </Card>
 
         <div className="space-y-4">
-          {mockPosts.map((post) => (
-            <FeedPost key={post.id} {...post} />
-          ))}
+          {isLoading ? (
+            <div className="text-center py-8">
+              <p className="text-muted-foreground">Loading posts...</p>
+            </div>
+          ) : posts.length > 0 ? (
+            posts.map((post: any) => (
+              <FeedPost
+                key={post.id}
+                id={post.id}
+                author={{
+                  name: post.user.displayName || post.user.organizationName || post.user.username,
+                  username: post.user.username,
+                  isOrganizer: post.user.userType === 'organizer',
+                }}
+                content={post.content}
+                timestamp="Just now"
+                likes={0}
+                comments={0}
+                isLiked={false}
+                image={post.imageUrl}
+              />
+            ))
+          ) : (
+            <>
+              {mockPosts.map((post) => (
+                <FeedPost key={post.id} {...post} />
+              ))}
+            </>
+          )}
         </div>
 
         <div className="text-center py-8">
@@ -278,7 +333,12 @@ export default function FeedPage() {
       <CreatePostModal
         open={createPostOpen}
         onClose={() => setCreatePostOpen(false)}
-        onCreatePost={(content, image) => console.log('Created post:', content, image)}
+        onCreatePost={(content, image) => {
+          createPostMutation.mutate({
+            content,
+            imageUrl: image,
+          });
+        }}
       />
 
       <BottomNavigation onCreateClick={() => setCreateStoryOpen(true)} />
