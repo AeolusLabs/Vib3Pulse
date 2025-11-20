@@ -52,6 +52,12 @@ function Router() {
         </AuthenticatedLayout>
       </Route>
       
+      <Route path="/wallet">
+        <AuthenticatedLayout>
+          <TicketWalletPage />
+        </AuthenticatedLayout>
+      </Route>
+      
       <Route path="/chat">
         <AuthenticatedLayout>
           <ChatPage />
@@ -59,11 +65,9 @@ function Router() {
       </Route>
       
       <Route path="/chat/:userId">
-        {(params) => (
-          <AuthenticatedLayout>
-            <ConversationPage {...params} />
-          </AuthenticatedLayout>
-        )}
+        <AuthenticatedLayout>
+          <ConversationPage />
+        </AuthenticatedLayout>
       </Route>
       
       <Route component={NotFound} />
