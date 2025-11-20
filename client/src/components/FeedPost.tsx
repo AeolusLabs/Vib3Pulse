@@ -7,6 +7,7 @@ import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import CommentDialog from "@/components/CommentDialog";
 
 interface FeedPostProps {
   id: string;
@@ -37,11 +38,18 @@ export default function FeedPost({
 }: FeedPostProps) {
   const [, navigate] = useLocation();
   const { toast } = useToast();
+  const [commentDialogOpen, setCommentDialogOpen] = useState(false);
 
   // Fetch like status and count from API
   const { data: likeData } = useQuery<{ count: number; isLiked: boolean }>({
     queryKey: [`/api/posts/${id}/likes`],
     initialData: { count: initialLikes, isLiked: initialIsLiked },
+  });
+
+  // Fetch comment count
+  const { data: comments = [] } = useQuery<any[]>({
+    queryKey: [`/api/posts/${id}/comments`],
+    enabled: commentDialogOpen,
   });
 
   // Fetch bookmark status (we'll need to add this endpoint or track it in posts)
@@ -237,11 +245,11 @@ export default function FeedPost({
               variant="ghost"
               size="sm"
               className="gap-1"
-              onClick={() => console.log('Comment on post:', id)}
+              onClick={() => setCommentDialogOpen(true)}
               data-testid={`button-comment-${id}`}
             >
               <MessageCircle className="h-4 w-4" />
-              <span className="text-xs">{initialComments}</span>
+              <span className="text-xs">{comments.length || initialComments}</span>
             </Button>
 
             <Button
@@ -268,6 +276,12 @@ export default function FeedPost({
           </div>
         </div>
       </div>
+
+      <CommentDialog
+        open={commentDialogOpen}
+        onClose={() => setCommentDialogOpen(false)}
+        postId={id}
+      />
     </Card>
   );
 }
