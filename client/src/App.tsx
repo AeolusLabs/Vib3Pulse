@@ -16,6 +16,7 @@ import ChatPage from "@/pages/ChatPage";
 import ConversationPage from "@/pages/ConversationPage";
 import ManageEventsPage from "@/pages/ManageEventsPage";
 import TicketWalletPage from "@/pages/TicketWalletPage";
+import EventCheckInPage from "@/pages/EventCheckInPage";
 import LoginPage from "@/pages/LoginPage";
 import SignupPage from "@/pages/SignupPage";
 import SearchPage from "@/pages/SearchPage";
@@ -58,6 +59,12 @@ function Router() {
       <Route path="/wallet">
         <AuthenticatedLayout>
           <TicketWalletPage />
+        </AuthenticatedLayout>
+      </Route>
+      
+      <Route path="/events/:id/check-in">
+        <AuthenticatedLayout>
+          <EventCheckInPage />
         </AuthenticatedLayout>
       </Route>
       

@@ -5,7 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import { useState } from "react";
-import { Edit, Trash2, BarChart3, Eye, EyeOff, Calendar, MapPin } from "lucide-react";
+import { Edit, Trash2, BarChart3, Eye, EyeOff, Calendar, MapPin, QrCode } from "lucide-react";
+import { Link } from "wouter";
 import CreateEventModal from "@/components/CreateEventModal";
 import yogaEvent from '@assets/generated_images/Outdoor_yoga_wellness_event_c02f75d1.png';
 import { useQuery } from "@tanstack/react-query";
@@ -157,6 +158,18 @@ export default function ManageEventsPage() {
           <Edit className="h-4 w-4 mr-2" />
           Edit
         </Button>
+        
+        <Button
+          variant="outline"
+          size="sm"
+          asChild
+          data-testid={`button-check-in-${event.id}`}
+        >
+          <Link href={`/events/${event.id}/check-in`}>
+            <QrCode className="h-4 w-4 mr-2" />
+            Check-In
+          </Link>
+        </Button>
 
         {event.status !== 'completed' && (
           <Button
@@ -205,7 +218,7 @@ export default function ManageEventsPage() {
 
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
-      <Navigation userType="organizer" onCreateEvent={() => setCreateEventOpen(true)} />
+      <Navigation onCreateEvent={() => setCreateEventOpen(true)} />
 
       <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex items-center justify-between mb-6">
