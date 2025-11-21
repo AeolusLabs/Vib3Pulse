@@ -198,7 +198,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           },
         ],
         mode: 'payment',
-        success_url: `${req.headers.origin}/ticket-wallet?success=true`,
+        success_url: `${req.headers.origin}/ticket-wallet?success=true&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${req.headers.origin}/discover?canceled=true`,
         metadata: {
           eventId,

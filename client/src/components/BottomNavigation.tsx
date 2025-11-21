@@ -1,4 +1,4 @@
-import { Compass, LayoutGrid, Search, MessageCircle } from "lucide-react";
+import { Compass, LayoutGrid, Search, MessageCircle, Ticket } from "lucide-react";
 import { Link, useLocation } from "wouter";
 
 interface BottomNavigationProps {
@@ -11,6 +11,7 @@ export default function BottomNavigation({ onCreateClick }: BottomNavigationProp
   const navItems = [
     { icon: LayoutGrid, label: "Feed", path: "/feed", testId: "nav-feed" },
     { icon: Compass, label: "Discover", path: "/discover", testId: "nav-discover" },
+    { icon: Ticket, label: "Tickets", path: "/ticket-wallet", testId: "nav-tickets" },
     { icon: Search, label: "Search", path: "/search", testId: "nav-search" },
     { icon: MessageCircle, label: "Messages", path: "/messages", testId: "nav-messages" },
   ];

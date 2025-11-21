@@ -2,48 +2,90 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, MapPin, Ticket } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Calendar, MapPin, Ticket as TicketIcon, QrCode, Loader2 } from "lucide-react";
 import { format } from "date-fns";
+import { useEffect, useState } from "react";
+import { useLocation } from "wouter";
+import { useToast } from "@/hooks/use-toast";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import BottomNavigation from "@/components/BottomNavigation";
 import type { Ticket as TicketType, Event } from "@shared/schema";
 
 type TicketWithEvent = TicketType & { event: Event };
 
 export default function TicketWalletPage() {
+  const [, navigate] = useLocation();
+  const { toast } = useToast();
+  const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
+
+  // Handle success/cancel redirects from Stripe
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('session_id');
+    
+    if (params.get('success') === 'true' && sessionId && !isVerifyingPayment) {
+      // Verify the Stripe payment and create the ticket
+      setIsVerifyingPayment(true);
+      apiRequest('POST', '/api/tickets/verify-payment', { sessionId })
+        .then(async (response) => {
+          await response.json();
+          // Refetch tickets to show the newly purchased ticket
+          queryClient.invalidateQueries({ queryKey: ["/api/tickets"] });
+          toast({
+            title: "Ticket purchased!",
+            description: "Your ticket has been added to your wallet.",
+          });
+        })
+        .catch(() => {
+          toast({
+            title: "Verification failed",
+            description: "Unable to verify your purchase. Please contact support.",
+            variant: "destructive",
+          });
+        })
+        .finally(() => {
+          setIsVerifyingPayment(false);
+          // Clean up URL
+          window.history.replaceState({}, '', '/ticket-wallet');
+        });
+    } else if (params.get('canceled') === 'true') {
+      toast({
+        title: "Purchase canceled",
+        description: "Your ticket purchase was canceled.",
+        variant: "destructive",
+      });
+      // Clean up URL
+      window.history.replaceState({}, '', '/ticket-wallet');
+    }
+  }, [toast, isVerifyingPayment]);
+
   const { data: tickets, isLoading } = useQuery<TicketWithEvent[]>({
     queryKey: ["/api/tickets"],
-    queryFn: async () => {
-      const response = await fetch("/api/tickets", {
-        credentials: "include",
-      });
-      if (!response.ok) {
-        throw new Error("Failed to fetch tickets");
-      }
-      return response.json();
-    },
   });
 
   const now = new Date();
   const upcomingTickets = tickets?.filter(ticket => new Date(ticket.event.eventDate) >= now) || [];
   const pastTickets = tickets?.filter(ticket => new Date(ticket.event.eventDate) < now) || [];
 
-  if (isLoading) {
-    return (
-      <div className="container mx-auto p-6 max-w-6xl">
-        <div className="space-y-4">
-          <h1 className="text-3xl font-bold">My Tickets</h1>
-          <div className="text-muted-foreground">Loading your tickets...</div>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="container mx-auto p-6 max-w-6xl">
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold" data-testid="heading-ticket-wallet">My Tickets</h1>
-          <p className="text-muted-foreground mt-2">View and manage your event tickets</p>
+    <div className="min-h-screen bg-background pb-20 md:pb-0">
+      <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur">
+        <div className="container flex h-16 items-center justify-between px-4">
+          <div className="flex items-center gap-2">
+            <TicketIcon className="h-6 w-6 text-primary" />
+            <h1 className="text-xl font-bold font-display" data-testid="heading-ticket-wallet">My Tickets</h1>
+          </div>
         </div>
+      </header>
+
+      <main className="container px-4 py-6 max-w-4xl mx-auto">
+        {isLoading ? (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+        ) : (
+          <div className="space-y-6">
 
         <Tabs defaultValue="upcoming" className="w-full" data-testid="tabs-tickets">
           <TabsList className="grid w-full grid-cols-2 max-w-md">
@@ -59,7 +101,7 @@ export default function TicketWalletPage() {
             {upcomingTickets.length === 0 ? (
               <Card>
                 <CardContent className="pt-6 text-center text-muted-foreground">
-                  <Ticket className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <TicketIcon className="h-12 w-12 mx-auto mb-4 opacity-50" />
                   <p>No upcoming tickets</p>
                   <p className="text-sm mt-2">Purchase tickets from the Discover page to see them here</p>
                 </CardContent>
@@ -103,7 +145,7 @@ export default function TicketWalletPage() {
             {pastTickets.length === 0 ? (
               <Card>
                 <CardContent className="pt-6 text-center text-muted-foreground">
-                  <Ticket className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <TicketIcon className="h-12 w-12 mx-auto mb-4 opacity-50" />
                   <p>No past tickets</p>
                 </CardContent>
               </Card>
@@ -142,7 +184,11 @@ export default function TicketWalletPage() {
             )}
           </TabsContent>
         </Tabs>
-      </div>
+          </div>
+        )}
+      </main>
+
+      <BottomNavigation />
     </div>
   );
 }
