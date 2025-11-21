@@ -74,11 +74,17 @@ export const tickets = pgTable("tickets", {
   purchaseDate: timestamp("purchase_date").notNull().default(sql`now()`),
   stripePaymentIntentId: text("stripe_payment_intent_id"),
   status: text("status").notNull().default("confirmed"),
+  validationCode: varchar("validation_code").notNull().unique().default(sql`gen_random_uuid()`),
+  checkedInAt: timestamp("checked_in_at"),
+  checkedInBy: varchar("checked_in_by").references(() => users.id),
 });
 
 export const insertTicketSchema = createInsertSchema(tickets).omit({
   id: true,
   purchaseDate: true,
+  validationCode: true,
+  checkedInAt: true,
+  checkedInBy: true,
 });
 
 export type InsertTicket = z.infer<typeof insertTicketSchema>;
