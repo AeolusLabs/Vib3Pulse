@@ -24,7 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { InsertEvent, Event } from "@shared/schema";
+import type { Event, EventCreateDto, EventUpdateDto } from "@shared/schema";
 
 interface TicketTier {
   id: string;
@@ -158,7 +158,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
     }
   }, [event, open]);
 
-  const createEventMutation = useMutation<Event, Error, InsertEvent>({
+  const createEventMutation = useMutation<Event, Error, EventCreateDto>({
     mutationFn: async (eventData) => {
       const response = await apiRequest('POST', '/api/events', eventData);
       return await response.json();
@@ -181,7 +181,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
     },
   });
 
-  const updateEventMutation = useMutation<Event, Error, InsertEvent & { id: string }>({
+  const updateEventMutation = useMutation<Event, Error, EventUpdateDto>({
     mutationFn: async ({ id, ...eventData }) => {
       const response = await apiRequest('PUT', `/api/events/${id}`, eventData);
       return await response.json();
@@ -234,11 +234,12 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
       ? 9999
       : formData.tickets.reduce((sum, ticket) => sum + ticket.quantity, 0);
     
-    const eventData: InsertEvent = {
-      organizerId: "", // This will be set by the backend from req.user
+    // Build event data without organizerId (backend sets it from req.user)
+    // Convert Date to ISO string for API compatibility
+    const baseEventData = {
       title: formData.name,
       description: formData.description,
-      eventDate: eventDate,
+      eventDate: eventDate.toISOString(),
       location: formData.location,
       category: formData.type,
       ticketPrice: ticketPrice,
@@ -248,9 +249,14 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
     };
     
     if (isEditMode && event) {
-      updateEventMutation.mutate({ id: event.id, ...eventData });
+      updateEventMutation.mutate({ id: event.id, ...baseEventData });
     } else {
-      createEventMutation.mutate(eventData);
+      // Only create needs organizerId placeholder (backend will replace it)
+      const createEventData: EventCreateDto = {
+        organizerId: "", // Backend replaces this from req.user
+        ...baseEventData,
+      };
+      createEventMutation.mutate(createEventData);
     }
   };
 

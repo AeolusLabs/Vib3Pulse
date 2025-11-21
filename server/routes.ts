@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertEventSchema, insertTicketSchema, insertRsvpSchema, insertUserSchema, insertPostSchema } from "@shared/schema";
+import { insertEventSchema, eventCreateDto, eventUpdateDto, insertTicketSchema, insertRsvpSchema, insertUserSchema, insertPostSchema } from "@shared/schema";
 import { hashPassword, userToSessionUser } from "./auth";
 import { requireAuth, requireOrganizer } from "./middleware";
 import passport from "passport";
@@ -116,14 +116,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/events", requireOrganizer, async (req, res) => {
     try {
-      const eventData = insertEventSchema.omit({ organizerId: true }).parse(req.body);
+      const parsedData = eventCreateDto.omit({ organizerId: true }).parse(req.body);
       const event = await storage.createEvent({
-        ...eventData,
+        ...parsedData,
         organizerId: req.user!.id,
       });
       res.json(event);
     } catch (error) {
-      res.status(400).json({ message: "Invalid event data" });
+      if (error instanceof z.ZodError) {
+        console.error('Validation error creating event:', error.errors);
+        return res.status(400).json({ message: "Invalid event data", errors: error.errors });
+      }
+      console.error('Error creating event:', error);
+      res.status(500).json({ message: "Failed to create event" });
     }
   });
 
@@ -139,11 +144,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Not authorized to edit this event" });
       }
 
-      const eventData = insertEventSchema.omit({ organizerId: true }).partial().parse(req.body);
-      const updatedEvent = await storage.updateEvent(req.params.id, eventData);
+      const parsedData = eventUpdateDto.parse(req.body);
+      const updatedEvent = await storage.updateEvent(req.params.id, parsedData);
       res.json(updatedEvent);
     } catch (error) {
-      res.status(400).json({ message: "Invalid event data" });
+      if (error instanceof z.ZodError) {
+        console.error('Validation error updating event:', error.errors);
+        return res.status(400).json({ message: "Invalid event data", errors: error.errors });
+      }
+      console.error('Error updating event:', error);
+      res.status(500).json({ message: "Failed to update event" });
     }
   });
 

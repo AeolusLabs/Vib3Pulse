@@ -28,6 +28,7 @@ interface Event {
 
 export default function ManageEventsPage() {
   const [createEventOpen, setCreateEventOpen] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<DBEvent | undefined>(undefined);
   
   // Fetch real events from API
   const { data: dbEvents = [], isLoading } = useQuery<DBEvent[]>({
@@ -62,8 +63,11 @@ export default function ManageEventsPage() {
   const pastEvents = allEvents.filter(e => e.status === 'completed');
 
   const handleEditEvent = (eventId: string) => {
-    console.log('Edit event:', eventId);
-    //todo: implement edit functionality
+    const event = dbEvents.find(e => e.id === eventId);
+    if (event) {
+      setEditingEvent(event);
+      setCreateEventOpen(true);
+    }
   };
 
   const handleDeleteEvent = (eventId: string) => {
@@ -293,7 +297,11 @@ export default function ManageEventsPage() {
 
       <CreateEventModal
         open={createEventOpen}
-        onClose={() => setCreateEventOpen(false)}
+        onClose={() => {
+          setCreateEventOpen(false);
+          setEditingEvent(undefined);
+        }}
+        event={editingEvent}
       />
 
       <BottomNavigation onCreateClick={() => setCreateEventOpen(true)} />

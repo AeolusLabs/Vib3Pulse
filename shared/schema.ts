@@ -57,6 +57,16 @@ export const insertEventSchema = createInsertSchema(events).omit({
 export type InsertEvent = z.infer<typeof insertEventSchema>;
 export type Event = typeof events.$inferSelect;
 
+// DTO schemas for API requests - accept ISO string dates and transform to Date objects
+export const eventCreateDto = insertEventSchema.extend({
+  eventDate: z.string().datetime().transform((val) => new Date(val)),
+});
+
+export const eventUpdateDto = eventCreateDto.omit({ organizerId: true }).partial();
+
+export type EventCreateDto = z.input<typeof eventCreateDto>; // Input type (before transform)
+export type EventUpdateDto = z.input<typeof eventUpdateDto> & { id: string };
+
 export const tickets = pgTable("tickets", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
