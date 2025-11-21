@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +13,51 @@ import BottomNavigation from "@/components/BottomNavigation";
 import type { Ticket as TicketType, Event } from "@shared/schema";
 
 type TicketWithEvent = TicketType & { event: Event };
+
+function TicketQRCode({ ticketId }: { ticketId: string }) {
+  const [showQR, setShowQR] = useState(false);
+  const { data: qrData, isLoading } = useQuery<{ qrCode: string }>({
+    queryKey: [`/api/tickets/${ticketId}/qr`],
+    enabled: showQR,
+  });
+
+  return (
+    <div className="mt-4">
+      <Button
+        variant="outline"
+        size="default"
+        onClick={() => setShowQR(!showQR)}
+        className="w-full"
+        data-testid={`button-show-qr-${ticketId}`}
+      >
+        <QrCode className="h-4 w-4 mr-2" />
+        {showQR ? "Hide QR Code" : "Show QR Code"}
+      </Button>
+      
+      {showQR && (
+        <div className="mt-4 flex flex-col items-center justify-center p-4 bg-background rounded-md border">
+          {isLoading ? (
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          ) : qrData?.qrCode ? (
+            <div className="space-y-2">
+              <img 
+                src={qrData.qrCode} 
+                alt="Ticket QR Code" 
+                className="w-64 h-64"
+                data-testid={`img-qr-${ticketId}`}
+              />
+              <p className="text-xs text-center text-muted-foreground">
+                Show this QR code at the event entrance
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">Failed to load QR code</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function TicketWalletPage() {
   const [, navigate] = useLocation();
@@ -133,6 +178,9 @@ export default function TicketWalletPage() {
                       </Badge>
                     </div>
                   </CardHeader>
+                  <CardContent>
+                    <TicketQRCode ticketId={ticket.id} />
+                  </CardContent>
                   <CardFooter className="text-sm text-muted-foreground">
                     Purchased on {format(new Date(ticket.purchaseDate), "MMM d, yyyy")}
                   </CardFooter>
