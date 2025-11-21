@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X, Upload, Plus, Trash2, Edit2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -60,6 +60,7 @@ interface EventFormData {
 interface CreateEventModalProps {
   open: boolean;
   onClose: () => void;
+  event?: Event; // If provided, modal is in edit mode
 }
 
 const EVENT_CATEGORIES = [
@@ -75,9 +76,11 @@ const EVENT_CATEGORIES = [
   "Entertainment"
 ];
 
-export default function CreateEventModal({ open, onClose }: CreateEventModalProps) {
+export default function CreateEventModal({ open, onClose, event }: CreateEventModalProps) {
   const { toast } = useToast();
   const [step, setStep] = useState(1);
+  const isEditMode = !!event;
+  
   const [formData, setFormData] = useState<EventFormData>({
     name: "",
     type: "",
@@ -98,20 +101,40 @@ export default function CreateEventModal({ open, onClose }: CreateEventModalProp
     rsvpGeneratesTicket: true,
   });
 
-  const createEventMutation = useMutation<Event, Error, InsertEvent>({
-    mutationFn: async (eventData) => {
-      const response = await apiRequest('POST', '/api/events', eventData);
-      return await response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/events"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/events/my-events"] });
-      toast({
-        title: "Event created!",
-        description: "Your event has been successfully created.",
+  // Pre-fill form when editing
+  useEffect(() => {
+    if (event && open) {
+      const eventDate = new Date(event.eventDate);
+      const date = eventDate.toISOString().split('T')[0];
+      const time = eventDate.toTimeString().slice(0, 5);
+      
+      setFormData({
+        name: event.title,
+        type: event.category,
+        description: event.description,
+        startDate: date,
+        startTime: time,
+        endDate: "",
+        endTime: "",
+        isMultiDay: false,
+        locationType: "physical",
+        location: event.location,
+        ageRestriction: "all",
+        parentalGuidance: "none",
+        entryType: event.ticketPrice === 0 ? "free" : "ticketed",
+        thumbnailUrl: event.imageUrl || "",
+        tickets: event.ticketPrice > 0 ? [{
+          id: "1",
+          name: "General Admission",
+          price: event.ticketPrice,
+          quantity: event.ticketsAvailable,
+          salesEndDate: date,
+        }] : [],
+        requireRSVP: event.requiresRSVP,
+        rsvpGeneratesTicket: true,
       });
-      onClose();
-      // Reset form
+    } else if (!open) {
+      // Reset form when modal closes
       setStep(1);
       setFormData({
         name: "",
@@ -132,11 +155,50 @@ export default function CreateEventModal({ open, onClose }: CreateEventModalProp
         requireRSVP: false,
         rsvpGeneratesTicket: true,
       });
+    }
+  }, [event, open]);
+
+  const createEventMutation = useMutation<Event, Error, InsertEvent>({
+    mutationFn: async (eventData) => {
+      const response = await apiRequest('POST', '/api/events', eventData);
+      return await response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/events"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/events/my-events"] });
+      toast({
+        title: "Event created!",
+        description: "Your event has been successfully created.",
+      });
+      onClose();
     },
     onError: (error) => {
       toast({
         title: "Error creating event",
         description: error.message || "Failed to create event. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const updateEventMutation = useMutation<Event, Error, InsertEvent & { id: string }>({
+    mutationFn: async ({ id, ...eventData }) => {
+      const response = await apiRequest('PUT', `/api/events/${id}`, eventData);
+      return await response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/events"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/events/my-events"] });
+      toast({
+        title: "Event updated!",
+        description: "Your event has been successfully updated.",
+      });
+      onClose();
+    },
+    onError: (error) => {
+      toast({
+        title: "Error updating event",
+        description: error.message || "Failed to update event. Please try again.",
         variant: "destructive",
       });
     },
@@ -185,7 +247,11 @@ export default function CreateEventModal({ open, onClose }: CreateEventModalProp
       imageUrl: formData.thumbnailUrl || null,
     };
     
-    createEventMutation.mutate(eventData);
+    if (isEditMode && event) {
+      updateEventMutation.mutate({ id: event.id, ...eventData });
+    } else {
+      createEventMutation.mutate(eventData);
+    }
   };
 
   const handleThumbnailUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -261,7 +327,7 @@ export default function CreateEventModal({ open, onClose }: CreateEventModalProp
         <DialogHeader>
           <div className="flex items-center justify-between">
             <DialogTitle className="text-2xl">
-              Create Event - Step {step} of 3
+              {isEditMode ? 'Edit Event' : 'Create Event'} - Step {step} of 3
             </DialogTitle>
             <Button
               variant="ghost"
@@ -856,11 +922,14 @@ export default function CreateEventModal({ open, onClose }: CreateEventModalProp
             </Card>
 
             <div className="flex justify-between gap-2">
-              <Button onClick={handleBack} variant="outline" data-testid="button-back-step3" disabled={createEventMutation.isPending}>
+              <Button onClick={handleBack} variant="outline" data-testid="button-back-step3" disabled={createEventMutation.isPending || updateEventMutation.isPending}>
                 Back
               </Button>
-              <Button onClick={handleSubmit} disabled={createEventMutation.isPending} data-testid="button-create-event">
-                {createEventMutation.isPending ? "Creating..." : "Create Event"}
+              <Button onClick={handleSubmit} disabled={createEventMutation.isPending || updateEventMutation.isPending} data-testid="button-create-event">
+                {isEditMode 
+                  ? (updateEventMutation.isPending ? "Updating..." : "Update Event")
+                  : (createEventMutation.isPending ? "Creating..." : "Create Event")
+                }
               </Button>
             </div>
           </div>
