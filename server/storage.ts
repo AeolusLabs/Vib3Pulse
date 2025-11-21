@@ -56,7 +56,11 @@ export interface IStorage {
   getUserTickets(userId: string): Promise<Array<Ticket & { event: Event }>>;
   getTicket(id: string): Promise<Ticket | undefined>;
   getTicketByPaymentIntent(paymentIntentId: string): Promise<Ticket | undefined>;
+  getTicketByValidationCode(validationCode: string): Promise<Ticket | undefined>;
   createTicket(ticket: InsertTicket): Promise<Ticket>;
+  checkInTicket(ticketId: string, organizerId: string): Promise<Ticket>;
+  getEventCheckIns(eventId: string): Promise<Array<Ticket & { user: User }>>;
+
   
   getUserRsvps(userId: string): Promise<Array<Rsvp & { event: Event }>>;
   getRsvp(userId: string, eventId: string): Promise<Rsvp | undefined>;
@@ -171,6 +175,33 @@ export class DbStorage implements IStorage {
   async createTicket(insertTicket: InsertTicket): Promise<Ticket> {
     const result = await db.insert(tickets).values(insertTicket).returning();
     return result[0];
+  }
+
+  async getTicketByValidationCode(validationCode: string): Promise<Ticket | undefined> {
+    const result = await db.select().from(tickets).where(eq(tickets.validationCode, validationCode));
+    return result[0];
+  }
+
+  async checkInTicket(ticketId: string, organizerId: string): Promise<Ticket> {
+    const result = await db
+      .update(tickets)
+      .set({ 
+        checkedInAt: new Date(),
+        checkedInBy: organizerId,
+      })
+      .where(eq(tickets.id, ticketId))
+      .returning();
+    return result[0];
+  }
+
+  async getEventCheckIns(eventId: string): Promise<Array<Ticket & { user: User }>> {
+    const result = await db
+      .select()
+      .from(tickets)
+      .innerJoin(users, eq(tickets.userId, users.id))
+      .where(eq(tickets.eventId, eventId));
+    
+    return result.map(row => ({ ...row.tickets, user: row.users }));
   }
 
   async getUserRsvps(userId: string): Promise<Array<Rsvp & { event: Event }>> {

@@ -7,6 +7,7 @@ import { requireAuth, requireOrganizer } from "./middleware";
 import passport from "passport";
 import Stripe from "stripe";
 import { z } from "zod";
+import QRCode from "qrcode";
 
 const stripe = new Stripe(process.env.TESTING_STRIPE_SECRET_KEY || process.env.STRIPE_SECRET_KEY || "", {
   apiVersion: "2025-11-17.clover",
@@ -264,6 +265,118 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       console.error('Error verifying payment:', error);
       res.status(500).json({ message: "Failed to verify payment" });
+    }
+  });
+
+  // Get QR code for a ticket
+  app.get("/api/tickets/:ticketId/qr", requireAuth, async (req, res) => {
+    try {
+      const ticket = await storage.getTicket(req.params.ticketId);
+      
+      if (!ticket) {
+        return res.status(404).json({ message: "Ticket not found" });
+      }
+
+      // Verify the ticket belongs to the requesting user
+      if (ticket.userId !== req.user!.id) {
+        return res.status(403).json({ message: "Not authorized to view this ticket" });
+      }
+
+      // Generate QR code from the validation code
+      const qrCodeDataUrl = await QRCode.toDataURL(ticket.validationCode, {
+        errorCorrectionLevel: 'H',
+        type: 'image/png',
+        width: 300,
+        margin: 2,
+      });
+
+      res.json({ qrCode: qrCodeDataUrl });
+    } catch (error) {
+      console.error('Error generating QR code:', error);
+      res.status(500).json({ message: "Failed to generate QR code" });
+    }
+  });
+
+  // Validate a ticket by validation code (for organizers)
+  app.post("/api/tickets/validate", requireAuth, async (req, res) => {
+    try {
+      const requestSchema = z.object({
+        validationCode: z.string().min(1),
+        eventId: z.string().min(1),
+      });
+
+      const { validationCode, eventId } = requestSchema.parse(req.body);
+      const organizerId = req.user!.id;
+
+      // Verify the user is the organizer of this event
+      const event = await storage.getEvent(eventId);
+      if (!event) {
+        return res.status(404).json({ message: "Event not found" });
+      }
+
+      if (event.organizerId !== organizerId) {
+        return res.status(403).json({ message: "Not authorized to validate tickets for this event" });
+      }
+
+      // Find the ticket by validation code
+      const ticket = await storage.getTicketByValidationCode(validationCode);
+      if (!ticket) {
+        return res.status(404).json({ message: "Invalid ticket code" });
+      }
+
+      // Verify the ticket is for this event
+      if (ticket.eventId !== eventId) {
+        return res.status(400).json({ message: "This ticket is not for this event" });
+      }
+
+      // Check if already checked in
+      if (ticket.checkedInAt) {
+        return res.json({
+          valid: false,
+          alreadyCheckedIn: true,
+          message: "Ticket already used",
+          checkedInAt: ticket.checkedInAt,
+          ticket,
+        });
+      }
+
+      // Mark ticket as checked in
+      const updatedTicket = await storage.checkInTicket(ticket.id, organizerId);
+
+      res.json({
+        valid: true,
+        alreadyCheckedIn: false,
+        message: "Ticket validated successfully",
+        ticket: updatedTicket,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid request data" });
+      }
+      console.error('Error validating ticket:', error);
+      res.status(500).json({ message: "Failed to validate ticket" });
+    }
+  });
+
+  // Get check-in status for an event (for organizers)
+  app.get("/api/events/:eventId/check-ins", requireAuth, async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.eventId);
+      
+      if (!event) {
+        return res.status(404).json({ message: "Event not found" });
+      }
+
+      // Verify the user is the organizer of this event
+      if (event.organizerId !== req.user!.id) {
+        return res.status(403).json({ message: "Not authorized to view check-ins for this event" });
+      }
+
+      const checkIns = await storage.getEventCheckIns(req.params.eventId);
+      res.json(checkIns);
+    } catch (error) {
+      console.error('Error fetching check-ins:', error);
+      res.status(500).json({ message: "Failed to fetch check-ins" });
     }
   });
 
