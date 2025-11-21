@@ -51,6 +51,7 @@ export interface IStorage {
   getUserEvents(userId: string): Promise<Event[]>;
   getEventsByOrganizer(organizerId: string): Promise<Event[]>;
   createEvent(event: InsertEvent): Promise<Event>;
+  updateEvent(id: string, event: Partial<InsertEvent>): Promise<Event>;
   
   getUserTickets(userId: string): Promise<Array<Ticket & { event: Event }>>;
   getTicket(id: string): Promise<Ticket | undefined>;
@@ -136,6 +137,11 @@ export class DbStorage implements IStorage {
 
   async createEvent(insertEvent: InsertEvent): Promise<Event> {
     const result = await db.insert(events).values(insertEvent).returning();
+    return result[0];
+  }
+
+  async updateEvent(id: string, eventUpdate: Partial<InsertEvent>): Promise<Event> {
+    const result = await db.update(events).set(eventUpdate).where(eq(events.id, id)).returning();
     return result[0];
   }
 

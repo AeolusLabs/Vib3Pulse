@@ -127,6 +127,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.put("/api/events/:id", requireOrganizer, async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.id);
+      if (!event) {
+        return res.status(404).json({ message: "Event not found" });
+      }
+      
+      // Verify the user owns this event
+      if (event.organizerId !== req.user!.id) {
+        return res.status(403).json({ message: "Not authorized to edit this event" });
+      }
+
+      const eventData = insertEventSchema.omit({ organizerId: true }).partial().parse(req.body);
+      const updatedEvent = await storage.updateEvent(req.params.id, eventData);
+      res.json(updatedEvent);
+    } catch (error) {
+      res.status(400).json({ message: "Invalid event data" });
+    }
+  });
+
   // Tickets
   app.get("/api/tickets", requireAuth, async (req, res) => {
     try {
