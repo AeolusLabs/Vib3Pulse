@@ -161,6 +161,13 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
   const createEventMutation = useMutation<Event, Error, EventCreateDto>({
     mutationFn: async (eventData) => {
       const response = await apiRequest('POST', '/api/events', eventData);
+      if (!response.ok) {
+        if (response.status === 413) {
+          throw new Error('Event image is too large. Please use a smaller image.');
+        }
+        const errorData = await response.json().catch(() => ({ message: 'Failed to create event' }));
+        throw new Error(errorData.message || 'Failed to create event');
+      }
       return await response.json();
     },
     onSuccess: () => {
@@ -184,6 +191,13 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
   const updateEventMutation = useMutation<Event, Error, EventUpdateDto>({
     mutationFn: async ({ id, ...eventData }) => {
       const response = await apiRequest('PUT', `/api/events/${id}`, eventData);
+      if (!response.ok) {
+        if (response.status === 413) {
+          throw new Error('Event image is too large. Please use a smaller image.');
+        }
+        const errorData = await response.json().catch(() => ({ message: 'Failed to update event' }));
+        throw new Error(errorData.message || 'Failed to update event');
+      }
       return await response.json();
     },
     onSuccess: () => {
@@ -334,6 +348,20 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
 
         // Compress and convert to base64
         const base64Url = await compressImage(file);
+        
+        // Check compressed size (base64 is ~33% larger than binary)
+        const sizeInBytes = base64Url.length * 0.75;
+        const sizeInMB = sizeInBytes / (1024 * 1024);
+        
+        if (sizeInMB > 1.5) {
+          toast({
+            title: "Image too large",
+            description: `Compressed image is ${sizeInMB.toFixed(1)}MB. Please use a smaller or simpler image.`,
+            variant: "destructive",
+          });
+          return;
+        }
+        
         updateFormData({ thumbnailUrl: base64Url });
       } catch (error) {
         console.error('Error uploading image:', error);
