@@ -1,4 +1,4 @@
-import { Search, Plus, User, Calendar, LogOut } from "lucide-react";
+import { Search, Plus, User, Calendar, LogOut, Ticket } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -104,6 +104,12 @@ export default function Navigation({ onSearch, onCreateEvent }: NavigationProps)
                     </Link>
                   </DropdownMenuItem>
                 )}
+                <DropdownMenuItem asChild data-testid="menu-my-tickets">
+                  <Link href="/ticket-wallet">
+                    <Ticket className="mr-2 h-4 w-4" />
+                    My Tickets
+                  </Link>
+                </DropdownMenuItem>
                 <DropdownMenuItem data-testid="menu-rsvps">
                   <Calendar className="mr-2 h-4 w-4" />
                   My RSVPs
