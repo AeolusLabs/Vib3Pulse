@@ -305,7 +305,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         eventId: z.string().min(1),
       });
 
-      const { validationCode, eventId } = requestSchema.parse(req.body);
+      const parseResult = requestSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        console.error('Validation error:', parseResult.error.errors);
+        console.error('Request body:', req.body);
+        return res.status(400).json({ 
+          message: "Invalid request data",
+          errors: parseResult.error.errors 
+        });
+      }
+
+      const { validationCode, eventId } = parseResult.data;
       const organizerId = req.user!.id;
 
       // Verify the user is the organizer of this event
@@ -350,9 +360,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ticket: updatedTicket,
       });
     } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid request data" });
-      }
       console.error('Error validating ticket:', error);
       res.status(500).json({ message: "Failed to validate ticket" });
     }
