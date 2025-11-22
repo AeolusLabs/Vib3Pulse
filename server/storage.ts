@@ -47,7 +47,7 @@ export interface IStorage {
   createUser(user: InsertUser): Promise<User>;
   
   getEvents(): Promise<Event[]>;
-  getEvent(id: string): Promise<Event | undefined>;
+  getEvent(id: string): Promise<(Event & { organizer: User }) | undefined>;
   getUserEvents(userId: string): Promise<Event[]>;
   getEventsByOrganizer(organizerId: string): Promise<Event[]>;
   createEvent(event: InsertEvent): Promise<Event>;
@@ -126,9 +126,20 @@ export class DbStorage implements IStorage {
     return await db.select().from(events).orderBy(events.eventDate);
   }
 
-  async getEvent(id: string): Promise<Event | undefined> {
-    const result = await db.select().from(events).where(eq(events.id, id));
-    return result[0];
+  async getEvent(id: string): Promise<(Event & { organizer: User }) | undefined> {
+    const result = await db
+      .select()
+      .from(events)
+      .innerJoin(users, eq(events.organizerId, users.id))
+      .where(eq(events.id, id));
+    
+    if (!result[0]) return undefined;
+    
+    const { passwordHash, ...userWithoutPassword } = result[0].users;
+    return {
+      ...result[0].events,
+      organizer: userWithoutPassword as User,
+    };
   }
 
   async getUserEvents(userId: string): Promise<Event[]> {
