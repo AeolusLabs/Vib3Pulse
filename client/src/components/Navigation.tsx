@@ -110,9 +110,11 @@ export default function Navigation({ onSearch, onCreateEvent }: NavigationProps)
                     My Tickets
                   </Link>
                 </DropdownMenuItem>
-                <DropdownMenuItem data-testid="menu-rsvps">
-                  <Calendar className="mr-2 h-4 w-4" />
-                  My RSVPs
+                <DropdownMenuItem asChild data-testid="menu-rsvps">
+                  <Link href="/my-rsvps">
+                    <Calendar className="mr-2 h-4 w-4" />
+                    My RSVPs
+                  </Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleLogout} data-testid="menu-logout">

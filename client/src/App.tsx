@@ -17,6 +17,7 @@ import ConversationPage from "@/pages/ConversationPage";
 import ManageEventsPage from "@/pages/ManageEventsPage";
 import TicketWalletPage from "@/pages/TicketWalletPage";
 import EventCheckInPage from "@/pages/EventCheckInPage";
+import MyRsvpsPage from "@/pages/MyRsvpsPage";
 import LoginPage from "@/pages/LoginPage";
 import SignupPage from "@/pages/SignupPage";
 import SearchPage from "@/pages/SearchPage";
@@ -65,6 +66,12 @@ function Router() {
       <Route path="/events/:id/check-in">
         <AuthenticatedLayout>
           <EventCheckInPage />
+        </AuthenticatedLayout>
+      </Route>
+      
+      <Route path="/my-rsvps">
+        <AuthenticatedLayout>
+          <MyRsvpsPage />
         </AuthenticatedLayout>
       </Route>
       
