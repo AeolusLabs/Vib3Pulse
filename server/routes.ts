@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertEventSchema, eventCreateDto, eventUpdateDto, insertTicketSchema, insertRsvpSchema, insertUserSchema, insertPostSchema } from "@shared/schema";
+import { insertEventSchema, eventCreateDto, eventUpdateDto, insertTicketSchema, insertRsvpSchema, insertUserSchema, insertPostSchema, insertStorySchema } from "@shared/schema";
 import { hashPassword, userToSessionUser } from "./auth";
 import { requireAuth, requireOrganizer } from "./middleware";
 import passport from "passport";
@@ -606,6 +606,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ message: "Post deleted" });
     } catch (error) {
       res.status(500).json({ message: "Failed to delete post" });
+    }
+  });
+
+  // Stories
+  app.get("/api/stories", async (req, res) => {
+    try {
+      const stories = await storage.getActiveStories();
+      res.json(stories);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch stories" });
+    }
+  });
+
+  app.post("/api/stories", requireAuth, async (req, res) => {
+    try {
+      const storyData = insertStorySchema.omit({ userId: true }).parse(req.body);
+      const story = await storage.createStory({
+        ...storyData,
+        userId: req.user!.id,
+      });
+      res.json(story);
+    } catch (error) {
+      res.status(400).json({ message: "Invalid story data" });
+    }
+  });
+
+  app.delete("/api/stories/:id", requireAuth, async (req, res) => {
+    try {
+      const stories = await storage.getUserStories(req.user!.id);
+      const story = stories.find(s => s.id === req.params.id);
+      
+      if (!story) {
+        return res.status(404).json({ message: "Story not found or not authorized" });
+      }
+      
+      await storage.deleteStory(req.params.id);
+      res.json({ message: "Story deleted" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete story" });
     }
   });
 

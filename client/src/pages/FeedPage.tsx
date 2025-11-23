@@ -176,6 +176,21 @@ const mockPosts = [
   }
 ];
 
+type StoryWithUser = {
+  id: string;
+  userId: string;
+  imageUrl: string;
+  type: string;
+  createdAt: string;
+  user: {
+    id: string;
+    username: string;
+    displayName?: string | null;
+    organizationName?: string | null;
+    userType: string;
+  };
+};
+
 export default function FeedPage() {
   const [viewingStory, setViewingStory] = useState<number | null>(null);
   const [createStoryOpen, setCreateStoryOpen] = useState(false);
@@ -186,6 +201,38 @@ export default function FeedPage() {
 
   const { data: posts = [], isLoading } = useQuery<any[]>({
     queryKey: ['/api/posts'],
+  });
+
+  const { data: storiesData = [] } = useQuery<StoryWithUser[]>({
+    queryKey: ['/api/stories'],
+  });
+
+  // Group stories by user - only keep the most recent story per user
+  const groupedStories = storiesData.reduce((acc: Map<string, StoryWithUser[]>, story) => {
+    const userId = story.userId;
+    if (!acc.has(userId)) {
+      acc.set(userId, []);
+    }
+    acc.get(userId)!.push(story);
+    return acc;
+  }, new Map());
+
+  // Convert to array format expected by StoriesBar
+  const stories = Array.from(groupedStories.values()).map((userStories) => {
+    const firstStory = userStories[0];
+    return {
+      id: firstStory.userId,
+      username: firstStory.user.displayName || firstStory.user.organizationName || firstStory.user.username,
+      avatar: '',
+      isViewed: false,
+      slides: userStories.map((story: StoryWithUser) => ({
+        id: story.id,
+        type: 'image' as const,
+        content: story.imageUrl,
+        timestamp: new Date(story.createdAt).toLocaleString(),
+      })),
+      userId: firstStory.userId,
+    };
   });
 
   const createPostMutation = useMutation({
@@ -210,7 +257,7 @@ export default function FeedPage() {
   });
 
   const handleNextStory = () => {
-    if (viewingStory !== null && viewingStory < mockStories.length - 1) {
+    if (viewingStory !== null && viewingStory < stories.length - 1) {
       setViewingStory(viewingStory + 1);
     } else {
       setViewingStory(null);
@@ -228,9 +275,9 @@ export default function FeedPage() {
       <Navigation onSearch={() => {}} />
 
       <StoriesBar
-        stories={mockStories}
+        stories={stories}
         onStoryClick={(storyId) => {
-          const index = mockStories.findIndex(s => s.id === storyId);
+          const index = stories.findIndex(s => s.id === storyId);
           setViewingStory(index);
         }}
         onCreateStory={() => setCreateStoryOpen(true)}
@@ -328,13 +375,14 @@ export default function FeedPage() {
         </div>
       </main>
 
-      {viewingStory !== null && (
+      {viewingStory !== null && stories[viewingStory] && (
         <StoryViewer
-          username={mockStories[viewingStory].username}
-          slides={mockStories[viewingStory].slides}
+          username={stories[viewingStory].username}
+          slides={stories[viewingStory].slides}
           onClose={() => setViewingStory(null)}
           onNext={handleNextStory}
           onPrevious={handlePreviousStory}
+          storyOwnerId={stories[viewingStory].userId}
         />
       )}
 

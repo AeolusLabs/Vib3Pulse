@@ -7,6 +7,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 interface CreateStoryModalProps {
   open: boolean;
@@ -19,6 +22,30 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
   const [showCamera, setShowCamera] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const { toast } = useToast();
+
+  const createStoryMutation = useMutation({
+    mutationFn: async (data: { imageUrl: string; type: string }) => {
+      return await apiRequest('POST', '/api/stories', data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/stories'] });
+      setSelectedImage(null);
+      stopCamera();
+      onClose();
+      toast({
+        title: "Story posted",
+        description: "Your story has been shared successfully.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to post story. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -73,11 +100,10 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
 
   const handlePostStory = () => {
     if (selectedImage) {
-      onCreateStory?.("image", selectedImage);
-      console.log('Created image story');
-      setSelectedImage(null);
-      stopCamera();
-      onClose();
+      createStoryMutation.mutate({
+        imageUrl: selectedImage,
+        type: "image",
+      });
     }
   };
 
@@ -182,9 +208,10 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
               <Button
                 onClick={handlePostStory}
                 className="flex-1"
+                disabled={createStoryMutation.isPending}
                 data-testid="button-post-story"
               >
-                Post Story
+                {createStoryMutation.isPending ? "Posting..." : "Post Story"}
               </Button>
             </div>
           </div>

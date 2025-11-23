@@ -1,9 +1,13 @@
 import { useState, useEffect } from "react";
-import { X, ChevronLeft, ChevronRight, Heart, Send } from "lucide-react";
+import { X, ChevronLeft, ChevronRight, Heart, Send, Trash2 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
 
 interface StorySlide {
   id: string;
@@ -20,6 +24,7 @@ interface StoryViewerProps {
   onClose: () => void;
   onNext?: () => void;
   onPrevious?: () => void;
+  storyOwnerId?: string;
 }
 
 export default function StoryViewer({
@@ -29,13 +34,53 @@ export default function StoryViewer({
   onClose,
   onNext,
   onPrevious,
+  storyOwnerId,
 }: StoryViewerProps) {
+  const { data: currentUser } = useAuth();
+  const { toast } = useToast();
+  const isOwnStory = currentUser?.id === storyOwnerId;
   const [currentSlide, setCurrentSlide] = useState(0);
   const [progress, setProgress] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [replyText, setReplyText] = useState("");
 
   const SLIDE_DURATION = 5000;
+
+  const deleteStoryMutation = useMutation({
+    mutationFn: async (storyId: string) => {
+      return await apiRequest('DELETE', `/api/stories/${storyId}`, undefined);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/stories'] });
+      toast({
+        title: "Story deleted",
+        description: "Your story has been removed.",
+      });
+      // Move to next story or close if this was the last one
+      if (currentSlide < slides.length - 1) {
+        setCurrentSlide(currentSlide + 1);
+        setProgress(0);
+      } else {
+        onNext?.() || onClose();
+      }
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to delete story. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleDeleteStory = () => {
+    if (confirm("Are you sure you want to delete this story?")) {
+      const currentStoryId = slides[currentSlide]?.id;
+      if (currentStoryId) {
+        deleteStoryMutation.mutate(currentStoryId);
+      }
+    }
+  };
 
   useEffect(() => {
     if (isPaused) return;
@@ -120,15 +165,29 @@ export default function StoryViewer({
                 <p className="text-xs text-muted-foreground">{currentStory?.timestamp}</p>
               </div>
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onClose}
-              className="text-card-foreground hover:bg-background/20"
-              data-testid="button-close-story"
-            >
-              <X className="h-5 w-5" />
-            </Button>
+            <div className="flex items-center gap-2">
+              {isOwnStory && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleDeleteStory}
+                  disabled={deleteStoryMutation.isPending}
+                  className="text-card-foreground hover:bg-background/20"
+                  data-testid="button-delete-story"
+                >
+                  <Trash2 className="h-5 w-5" />
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onClose}
+                className="text-card-foreground hover:bg-background/20"
+                data-testid="button-close-story"
+              >
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
           </div>
         </div>
 

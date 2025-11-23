@@ -11,6 +11,8 @@ import {
   type InsertRsvp,
   type Post,
   type InsertPost,
+  type Story,
+  type InsertStory,
   type Follow,
   type InsertFollow,
   type Message,
@@ -27,6 +29,7 @@ import {
   ticketTiers,
   rsvps,
   posts,
+  stories,
   follows,
   messages,
   likes,
@@ -83,6 +86,11 @@ export interface IStorage {
   getUserPosts(userId: string): Promise<Post[]>;
   createPost(post: InsertPost): Promise<Post>;
   deletePost(id: string): Promise<void>;
+  
+  createStory(story: InsertStory): Promise<Story>;
+  getActiveStories(): Promise<Array<Story & { user: User }>>;
+  getUserStories(userId: string): Promise<Story[]>;
+  deleteStory(id: string): Promise<void>;
   
   followUser(followerId: string, followingId: string): Promise<Follow>;
   unfollowUser(followerId: string, followingId: string): Promise<void>;
@@ -343,6 +351,47 @@ export class DbStorage implements IStorage {
 
   async deletePost(id: string): Promise<void> {
     await db.delete(posts).where(eq(posts.id, id));
+  }
+
+  async createStory(insertStory: InsertStory): Promise<Story> {
+    const result = await db.insert(stories).values(insertStory).returning();
+    return result[0];
+  }
+
+  async getActiveStories(): Promise<Array<Story & { user: User }>> {
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    
+    const result = await db
+      .select()
+      .from(stories)
+      .innerJoin(users, eq(stories.userId, users.id))
+      .where(gte(stories.createdAt, twentyFourHoursAgo))
+      .orderBy(desc(stories.createdAt));
+    
+    return result.map(row => {
+      const { passwordHash, ...userWithoutPassword } = row.users;
+      return {
+        ...row.stories,
+        user: userWithoutPassword as User,
+      };
+    });
+  }
+
+  async getUserStories(userId: string): Promise<Story[]> {
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    
+    return await db
+      .select()
+      .from(stories)
+      .where(and(
+        eq(stories.userId, userId),
+        gte(stories.createdAt, twentyFourHoursAgo)
+      ))
+      .orderBy(desc(stories.createdAt));
+  }
+
+  async deleteStory(id: string): Promise<void> {
+    await db.delete(stories).where(eq(stories.id, id));
   }
 
   async followUser(followerId: string, followingId: string): Promise<Follow> {
