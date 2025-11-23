@@ -893,7 +893,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // User search and profile
-  app.get("/api/users/search", async (req, res) => {
+  app.get("/api/users/search", requireAuth, async (req, res) => {
     try {
       const query = (req.query.q as string || "").trim();
       
@@ -1034,6 +1034,170 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Follow stats error:", error);
       res.status(500).json({ message: "Failed to fetch follow stats" });
+    }
+  });
+
+  // Buddy system routes
+  const setBuddySchema = z.object({
+    buddyId: z.string().min(1, "Buddy ID is required"),
+  });
+
+  app.post("/api/buddy/set", requireAuth, async (req, res) => {
+    try {
+      const validation = setBuddySchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ message: "Invalid request data", errors: validation.error.errors });
+      }
+
+      const { buddyId } = validation.data;
+      const userId = req.user!.id;
+
+      if (buddyId === userId) {
+        return res.status(400).json({ message: "Cannot set yourself as buddy" });
+      }
+
+      const buddy = await storage.getUser(buddyId);
+      if (!buddy) {
+        return res.status(404).json({ message: "Buddy user not found" });
+      }
+
+      if (buddy.userType !== "social") {
+        return res.status(400).json({ message: "Can only set social users as buddy" });
+      }
+
+      await storage.setBuddy(userId, buddyId);
+      res.json({ message: "Buddy set successfully" });
+    } catch (error) {
+      console.error("Set buddy error:", error);
+      res.status(500).json({ message: "Failed to set buddy" });
+    }
+  });
+
+  app.get("/api/buddy", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const buddy = await storage.getBuddy(userId);
+      res.json({ buddy });
+    } catch (error) {
+      console.error("Get buddy error:", error);
+      res.status(500).json({ message: "Failed to get buddy" });
+    }
+  });
+
+  app.delete("/api/buddy", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      await storage.removeBuddy(userId);
+      res.json({ message: "Buddy removed successfully" });
+    } catch (error) {
+      console.error("Remove buddy error:", error);
+      res.status(500).json({ message: "Failed to remove buddy" });
+    }
+  });
+
+  const setDistressMessageSchema = z.object({
+    message: z.string().min(1, "Distress message is required").max(500, "Message too long"),
+  });
+
+  app.post("/api/buddy/distress-message", requireAuth, async (req, res) => {
+    try {
+      const validation = setDistressMessageSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ message: "Invalid request data", errors: validation.error.errors });
+      }
+
+      const { message } = validation.data;
+      const userId = req.user!.id;
+
+      await storage.setDistressMessage(userId, message);
+      res.json({ message: "Distress message saved successfully" });
+    } catch (error) {
+      console.error("Set distress message error:", error);
+      res.status(500).json({ message: "Failed to save distress message" });
+    }
+  });
+
+  app.get("/api/buddy/distress-message", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const message = await storage.getDistressMessage(userId);
+      res.json({ message: message || "I need help! Please check on me." });
+    } catch (error) {
+      console.error("Get distress message error:", error);
+      res.status(500).json({ message: "Failed to get distress message" });
+    }
+  });
+
+  const triggerAlertSchema = z.object({
+    latitude: z.string().optional().nullable(),
+    longitude: z.string().optional().nullable(),
+  }).refine((data) => {
+    if (data.latitude && data.longitude) {
+      const lat = parseFloat(data.latitude);
+      const lng = parseFloat(data.longitude);
+      return !isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+    }
+    return true;
+  }, { message: "Invalid coordinates" });
+
+  app.post("/api/buddy/trigger-alert", requireAuth, async (req, res) => {
+    try {
+      const validation = triggerAlertSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ message: "Invalid request data", errors: validation.error.errors });
+      }
+
+      const { latitude, longitude } = validation.data;
+      const userId = req.user!.id;
+
+      const buddy = await storage.getBuddy(userId);
+      if (!buddy) {
+        return res.status(400).json({ message: "No buddy set" });
+      }
+
+      const distressMessage = await storage.getDistressMessage(userId);
+      const message = distressMessage || "I need help! Please check on me.";
+
+      // Log the alert
+      await storage.logDistressAlert(userId, buddy.id, message, latitude, longitude);
+
+      // Send in-app notification via WebSocket
+      const user = await storage.getUser(userId);
+      const mapLink = latitude && longitude 
+        ? `https://www.google.com/maps?q=${latitude},${longitude}`
+        : null;
+
+      wsManager.sendToUser(buddy.id, {
+        type: "distress_alert",
+        data: {
+          senderId: userId,
+          senderName: user?.displayName || user?.username || "A friend",
+          message,
+          latitude,
+          longitude,
+          mapLink,
+          timestamp: new Date().toISOString(),
+        },
+      });
+
+      res.json({ 
+        message: "Distress alert sent successfully",
+        buddy: { username: buddy.username, displayName: buddy.displayName },
+      });
+    } catch (error) {
+      console.error("Trigger alert error:", error);
+      res.status(500).json({ message: "Failed to trigger distress alert" });
+    }
+  });
+
+  app.get("/api/buddy/alerts", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const alerts = await storage.getDistressAlerts(userId);
+      res.json({ alerts });
+    } catch (error) {
+      console.error("Get alerts error:", error);
+      res.status(500).json({ message: "Failed to get distress alerts" });
     }
   });
 

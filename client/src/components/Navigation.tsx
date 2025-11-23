@@ -1,4 +1,4 @@
-import { Search, Plus, User, Calendar, LogOut, Ticket } from "lucide-react";
+import { Search, Plus, User, Calendar, LogOut, Ticket, Shield, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -14,6 +14,7 @@ import ThemeToggle from "./ThemeToggle";
 import MenuTray from "./MenuTray";
 import { Link, useLocation } from "wouter";
 import { useAuth, logout } from "@/hooks/useAuth";
+import { EmergencyButton } from "./buddy/EmergencyButton";
 
 interface NavigationProps {
   onSearch?: (query: string) => void;
@@ -69,6 +70,8 @@ export default function Navigation({ onSearch, onCreateEvent }: NavigationProps)
               </Button>
             )}
 
+            {!isLoading && user?.userType === "social" && <EmergencyButton />}
+
             <ThemeToggle />
 
             <DropdownMenu>
@@ -116,6 +119,23 @@ export default function Navigation({ onSearch, onCreateEvent }: NavigationProps)
                     My RSVPs
                   </Link>
                 </DropdownMenuItem>
+                {user?.userType === "social" && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem asChild data-testid="menu-buddy-settings">
+                      <Link href="/buddy/settings">
+                        <Shield className="mr-2 h-4 w-4" />
+                        Safety Buddy
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild data-testid="menu-alerts">
+                      <Link href="/buddy/alerts">
+                        <AlertTriangle className="mr-2 h-4 w-4" />
+                        Alert History
+                      </Link>
+                    </DropdownMenuItem>
+                  </>
+                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleLogout} data-testid="menu-logout">
                   <LogOut className="mr-2 h-4 w-4" />

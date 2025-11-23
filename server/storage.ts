@@ -23,6 +23,12 @@ import {
   type InsertComment,
   type Bookmark,
   type InsertBookmark,
+  type Buddy,
+  type InsertBuddy,
+  type DistressMessage,
+  type InsertDistressMessage,
+  type DistressAlert,
+  type InsertDistressAlert,
   users,
   events,
   tickets,
@@ -34,7 +40,10 @@ import {
   messages,
   likes,
   comments,
-  bookmarks
+  bookmarks,
+  buddies,
+  distressMessages,
+  distressAlerts
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/neon-serverless";
 import { Pool, neonConfig } from "@neondatabase/serverless";
@@ -118,6 +127,14 @@ export interface IStorage {
   bookmarkPost(userId: string, postId: string): Promise<Bookmark>;
   unbookmarkPost(userId: string, postId: string): Promise<void>;
   hasUserBookmarkedPost(userId: string, postId: string): Promise<boolean>;
+
+  setBuddy(userId: string, buddyId: string): Promise<void>;
+  getBuddy(userId: string): Promise<User | undefined>;
+  removeBuddy(userId: string): Promise<void>;
+  setDistressMessage(userId: string, message: string): Promise<void>;
+  getDistressMessage(userId: string): Promise<string | undefined>;
+  logDistressAlert(userId: string, buddyId: string, message: string, latitude?: string, longitude?: string): Promise<void>;
+  getDistressAlerts(userId: string): Promise<any[]>;
 }
 
 export class DbStorage implements IStorage {
@@ -675,6 +692,93 @@ export class DbStorage implements IStorage {
       )
     );
     return result.length > 0;
+  }
+
+  async setBuddy(userId: string, buddyId: string): Promise<void> {
+    await db.delete(buddies).where(eq(buddies.userId, userId));
+    await db.insert(buddies).values({ userId, buddyId });
+  }
+
+  async getBuddy(userId: string): Promise<User | undefined> {
+    const result = await db
+      .select()
+      .from(buddies)
+      .innerJoin(users, eq(buddies.buddyId, users.id))
+      .where(eq(buddies.userId, userId));
+    
+    if (result.length === 0) return undefined;
+    
+    const { passwordHash, ...userWithoutPassword } = result[0].users;
+    return userWithoutPassword as User;
+  }
+
+  async removeBuddy(userId: string): Promise<void> {
+    await db.delete(buddies).where(eq(buddies.userId, userId));
+  }
+
+  async setDistressMessage(userId: string, message: string): Promise<void> {
+    const existing = await db.select().from(distressMessages).where(eq(distressMessages.userId, userId));
+    
+    if (existing.length > 0) {
+      await db.update(distressMessages)
+        .set({ message, updatedAt: new Date() })
+        .where(eq(distressMessages.userId, userId));
+    } else {
+      await db.insert(distressMessages).values({ userId, message });
+    }
+  }
+
+  async getDistressMessage(userId: string): Promise<string | undefined> {
+    const result = await db.select().from(distressMessages).where(eq(distressMessages.userId, userId));
+    return result.length > 0 ? result[0].message : undefined;
+  }
+
+  async logDistressAlert(userId: string, buddyId: string, message: string, latitude?: string, longitude?: string): Promise<void> {
+    await db.insert(distressAlerts).values({
+      userId,
+      buddyId,
+      message,
+      latitude,
+      longitude,
+    });
+  }
+
+  async getDistressAlerts(userId: string): Promise<any[]> {
+    const sent = await db
+      .select()
+      .from(distressAlerts)
+      .innerJoin(users, eq(distressAlerts.buddyId, users.id))
+      .where(eq(distressAlerts.userId, userId))
+      .orderBy(desc(distressAlerts.createdAt));
+    
+    const received = await db
+      .select()
+      .from(distressAlerts)
+      .innerJoin(users, eq(distressAlerts.userId, users.id))
+      .where(eq(distressAlerts.buddyId, userId))
+      .orderBy(desc(distressAlerts.createdAt));
+    
+    const sentAlerts = sent.map(row => {
+      const { passwordHash, ...userWithoutPassword } = row.users;
+      return {
+        ...row.distress_alerts,
+        type: 'sent',
+        buddy: userWithoutPassword,
+      };
+    });
+    
+    const receivedAlerts = received.map(row => {
+      const { passwordHash, ...userWithoutPassword } = row.users;
+      return {
+        ...row.distress_alerts,
+        type: 'received',
+        sender: userWithoutPassword,
+      };
+    });
+    
+    return [...sentAlerts, ...receivedAlerts].sort((a, b) => 
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
   }
 }
 

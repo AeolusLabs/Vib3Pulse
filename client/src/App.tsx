@@ -20,6 +20,8 @@ import LoginPage from "@/pages/LoginPage";
 import SignupPage from "@/pages/SignupPage";
 import SearchPage from "@/pages/SearchPage";
 import MessagesPage from "@/pages/MessagesPage";
+import BuddySettingsPage from "@/pages/BuddySettingsPage";
+import DistressAlertsPage from "@/pages/DistressAlertsPage";
 
 function Router() {
   return (
@@ -94,6 +96,18 @@ function Router() {
       <Route path="/user/:userId">
         <AuthenticatedLayout>
           <UserProfilePage />
+        </AuthenticatedLayout>
+      </Route>
+      
+      <Route path="/buddy/settings">
+        <AuthenticatedLayout>
+          <BuddySettingsPage />
+        </AuthenticatedLayout>
+      </Route>
+      
+      <Route path="/buddy/alerts">
+        <AuthenticatedLayout>
+          <DistressAlertsPage />
         </AuthenticatedLayout>
       </Route>
       

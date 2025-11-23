@@ -216,6 +216,19 @@ class WebSocketManager {
   getOnlineUsers(): string[] {
     return Array.from(this.clients.keys());
   }
+
+  // Send message to a specific user
+  sendToUser(userId: string, payload: any) {
+    const userSockets = this.clients.get(userId);
+    if (userSockets) {
+      const message = JSON.stringify(payload);
+      userSockets.forEach((socket) => {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(message);
+        }
+      });
+    }
+  }
 }
 
 export const wsManager = new WebSocketManager();
