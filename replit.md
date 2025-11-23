@@ -118,6 +118,41 @@ Preferred communication style: Simple, everyday language.
 - Chat mutations should be updated to remove client-provided `senderId`
 - All queries using custom queryFn should verify they include `credentials: 'include'`
 
+### Stories Feature
+
+**Implementation Status:** ✅ Complete
+
+**Backend Implementation:**
+- Database schema: `stories` table with fields (id, userId, imageUrl, type, createdAt)
+- Storage methods: `createStory`, `getActiveStories`, `getUserStories`, `deleteStory`
+- 24-hour auto-expiration via SQL filtering: `WHERE createdAt >= NOW() - INTERVAL '24 hours'`
+- API routes:
+  - `POST /api/stories` - Create new story (authenticated)
+  - `GET /api/stories` - Get all active stories with user data
+  - `DELETE /api/stories/:id` - Delete own story (owner authorization)
+
+**Frontend Implementation:**
+- **CreateStoryModal**: Camera/upload interface for posting image stories
+  - Supports both camera capture and file upload
+  - Posts to `/api/stories` API with cache invalidation
+  - Shows loading state while posting
+- **FeedPage**: Displays stories bar with real data from API
+  - Fetches stories from `/api/stories`
+  - Groups stories by user (multiple stories per user become slides)
+  - Passes owner ID to StoryViewer for delete authorization
+- **StoryViewer**: Full-screen story viewer with auto-progression
+  - Shows delete button only for user's own stories
+  - Deletes via `/api/stories/:id` with confirmation dialog
+  - Auto-advances through slides with progress indicators
+
+**Features:**
+- 24-hour automatic expiration (no background job needed - server-side filtering)
+- Users can post image stories
+- Stories grouped by user in feed
+- Delete own stories with confirmation
+- Real-time cache updates via TanStack Query invalidation
+- Full authentication and authorization
+
 ### External Dependencies
 
 **UI & Styling:**
