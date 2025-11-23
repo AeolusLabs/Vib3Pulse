@@ -462,7 +462,7 @@ export default function MessagesPage() {
               <div className="space-y-4">
                 {conversation.map((message) => {
                   const isOwnMessage = message.senderId === sessionUser?.user?.id;
-                  const senderName = isOwnMessage ? 'You' : otherUser?.username || 'Unknown';
+                  const senderName = message.sender?.username || 'Unknown';
                   return (
                     <div
                       key={message.id}
