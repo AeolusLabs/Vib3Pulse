@@ -7,9 +7,17 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { storage } from "./storage";
 import { comparePassword, userToSessionUser, type SessionUser } from "./auth";
+import { wsManager } from "./websocket";
 
 const app = express();
 const PgSession = connectPgSimple(session);
+
+// Create session store that we'll use for both Express and WebSocket
+const sessionStore = new PgSession({
+  conString: process.env.DATABASE_URL,
+  tableName: "session",
+  createTableIfMissing: true,
+});
 
 declare module 'http' {
   interface IncomingMessage {
@@ -26,11 +34,7 @@ app.use(express.urlencoded({ extended: false, limit: '2mb' }));
 
 app.use(
   session({
-    store: new PgSession({
-      conString: process.env.DATABASE_URL,
-      tableName: "session",
-      createTableIfMissing: true,
-    }),
+    store: sessionStore,
     secret: process.env.SESSION_SECRET || "vibepulse-secret-key-change-in-production",
     resave: false,
     saveUninitialized: false,
@@ -118,6 +122,9 @@ app.use((req, res, next) => {
 
 (async () => {
   const server = await registerRoutes(app);
+
+  // Initialize WebSocket server
+  wsManager.initialize(server, sessionStore);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

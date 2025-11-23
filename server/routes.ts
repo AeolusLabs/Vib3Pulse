@@ -5,6 +5,7 @@ import { insertEventSchema, eventCreateDto, eventUpdateDto, insertTicketSchema, 
 import { hashPassword, userToSessionUser } from "./auth";
 import { requireAuth, requireOrganizer } from "./middleware";
 import passport from "passport";
+import { wsManager } from "./websocket";
 import Stripe from "stripe";
 import { z } from "zod";
 import QRCode from "qrcode";
@@ -772,6 +773,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isRead: false,
       });
       
+      // Broadcast message via WebSocket to recipient
+      const sender = await storage.getUser(senderId);
+      const receiver = await storage.getUser(receiverId);
+      
+      if (sender && receiver) {
+        const { passwordHash: senderHash, ...senderData } = sender;
+        const { passwordHash: receiverHash, ...receiverData } = receiver;
+        
+        wsManager.broadcastMessage(senderId, receiverId, {
+          ...message,
+          sender: senderData,
+          receiver: receiverData,
+        });
+      }
+      
       res.json(message);
     } catch (error) {
       res.status(500).json({ message: "Failed to send message" });
@@ -803,6 +819,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/messages/:id/read", requireAuth, async (req, res) => {
     try {
       await storage.markAsRead(req.params.id);
+      
+      // Broadcast read status via WebSocket
+      wsManager.broadcastMessageRead(req.params.id, req.user!.id);
+      
       res.json({ message: "Message marked as read" });
     } catch (error) {
       res.status(500).json({ message: "Failed to mark message as read" });
