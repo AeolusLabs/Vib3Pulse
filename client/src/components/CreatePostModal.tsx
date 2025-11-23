@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useAuth } from "@/hooks/useAuth";
 
 interface CreatePostModalProps {
   open: boolean;
@@ -18,6 +19,7 @@ interface CreatePostModalProps {
 }
 
 export default function CreatePostModal({ open, onClose, onCreatePost }: CreatePostModalProps) {
+  const { data: currentUser } = useAuth();
   const [content, setContent] = useState("");
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const maxLength = 280;
@@ -64,8 +66,19 @@ export default function CreatePostModal({ open, onClose, onCreatePost }: CreateP
         <div className="space-y-4">
           <div className="flex gap-3">
             <Avatar className="h-10 w-10 flex-shrink-0">
-              <AvatarImage src="" alt="Your avatar" />
-              <AvatarFallback>JD</AvatarFallback>
+              <AvatarImage 
+                src="" 
+                alt={currentUser?.userType === 'social' 
+                  ? (currentUser.displayName || currentUser.username) 
+                  : (currentUser?.organizationName || currentUser?.username || 'User')
+                } 
+              />
+              <AvatarFallback className="bg-primary/10 text-primary">
+                {currentUser?.userType === 'social'
+                  ? (currentUser.displayName?.charAt(0) || currentUser.username.charAt(0)).toUpperCase()
+                  : (currentUser?.organizationName?.charAt(0) || currentUser?.username.charAt(0) || 'U').toUpperCase()
+                }
+              </AvatarFallback>
             </Avatar>
 
             <div className="flex-1 space-y-3">

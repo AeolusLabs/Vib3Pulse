@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import StoriesBar from "@/components/StoriesBar";
@@ -181,6 +182,7 @@ export default function FeedPage() {
   const [createPostOpen, setCreatePostOpen] = useState(false);
   const [feedFilter, setFeedFilter] = useState<'following' | 'all'>('following');
   const { toast } = useToast();
+  const { data: currentUser } = useAuth();
 
   const { data: posts = [], isLoading } = useQuery<any[]>({
     queryKey: ['/api/posts'],
@@ -262,8 +264,19 @@ export default function FeedPage() {
           <CardContent className="p-4">
             <div className="flex gap-3">
               <Avatar className="h-10 w-10 flex-shrink-0">
-                <AvatarImage src="" alt="Your avatar" />
-                <AvatarFallback>JD</AvatarFallback>
+                <AvatarImage 
+                  src="" 
+                  alt={currentUser?.userType === 'social' 
+                    ? (currentUser.displayName || currentUser.username) 
+                    : (currentUser?.organizationName || currentUser?.username || 'User')
+                  } 
+                />
+                <AvatarFallback className="bg-primary/10 text-primary">
+                  {currentUser?.userType === 'social'
+                    ? (currentUser.displayName?.charAt(0) || currentUser.username.charAt(0)).toUpperCase()
+                    : (currentUser?.organizationName?.charAt(0) || currentUser?.username.charAt(0) || 'U').toUpperCase()
+                  }
+                </AvatarFallback>
               </Avatar>
               <div className="flex-1 flex items-center gap-2">
                 <div className="flex-1 py-2 px-4 rounded-full bg-muted text-muted-foreground">
