@@ -5,6 +5,8 @@ import {
   type InsertEvent,
   type Ticket,
   type InsertTicket,
+  type TicketTier,
+  type InsertTicketTier,
   type Rsvp,
   type InsertRsvp,
   type Post,
@@ -22,6 +24,7 @@ import {
   users,
   events,
   tickets,
+  ticketTiers,
   rsvps,
   posts,
   follows,
@@ -61,6 +64,13 @@ export interface IStorage {
   checkInTicket(ticketId: string, organizerId: string): Promise<Ticket>;
   getEventCheckIns(eventId: string): Promise<Array<Ticket & { user: User }>>;
 
+  getEventTicketTiers(eventId: string): Promise<TicketTier[]>;
+  getTicketTier(id: string): Promise<TicketTier | undefined>;
+  createTicketTier(tier: InsertTicketTier): Promise<TicketTier>;
+  createTicketTiers(tiers: InsertTicketTier[]): Promise<TicketTier[]>;
+  updateTicketTier(id: string, tier: Partial<InsertTicketTier>): Promise<TicketTier>;
+  deleteTicketTier(id: string): Promise<void>;
+  deleteEventTicketTiers(eventId: string): Promise<void>;
   
   getUserRsvps(userId: string): Promise<Array<Rsvp & { event: Event }>>;
   getRsvp(userId: string, eventId: string): Promise<Rsvp | undefined>;
@@ -213,6 +223,50 @@ export class DbStorage implements IStorage {
       .where(eq(tickets.eventId, eventId));
     
     return result.map(row => ({ ...row.tickets, user: row.users }));
+  }
+
+  async getEventTicketTiers(eventId: string): Promise<TicketTier[]> {
+    const result = await db
+      .select()
+      .from(ticketTiers)
+      .where(eq(ticketTiers.eventId, eventId));
+    return result;
+  }
+
+  async getTicketTier(id: string): Promise<TicketTier | undefined> {
+    const result = await db
+      .select()
+      .from(ticketTiers)
+      .where(eq(ticketTiers.id, id));
+    return result[0];
+  }
+
+  async createTicketTier(tier: InsertTicketTier): Promise<TicketTier> {
+    const result = await db.insert(ticketTiers).values(tier).returning();
+    return result[0];
+  }
+
+  async createTicketTiers(tiers: InsertTicketTier[]): Promise<TicketTier[]> {
+    if (tiers.length === 0) return [];
+    const result = await db.insert(ticketTiers).values(tiers).returning();
+    return result;
+  }
+
+  async updateTicketTier(id: string, tier: Partial<InsertTicketTier>): Promise<TicketTier> {
+    const result = await db
+      .update(ticketTiers)
+      .set(tier)
+      .where(eq(ticketTiers.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async deleteTicketTier(id: string): Promise<void> {
+    await db.delete(ticketTiers).where(eq(ticketTiers.id, id));
+  }
+
+  async deleteEventTicketTiers(eventId: string): Promise<void> {
+    await db.delete(ticketTiers).where(eq(ticketTiers.eventId, eventId));
   }
 
   async getUserRsvps(userId: string): Promise<Array<Rsvp & { event: Event }>> {
