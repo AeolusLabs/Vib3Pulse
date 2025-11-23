@@ -153,6 +153,70 @@ Preferred communication style: Simple, everyday language.
 - Real-time cache updates via TanStack Query invalidation
 - Full authentication and authorization
 
+### Buddy System (Safety Feature)
+
+**Implementation Status:** ✅ Complete
+
+**Overview:**
+Safety feature that allows social users to designate a trusted friend as their "buddy" (emergency contact) and send distress alerts with location sharing.
+
+**Backend Implementation:**
+- **Database schema:**
+  - `buddies` table: (id, userId, buddyId, createdAt) with unique constraint on userId
+  - `distress_messages` table: (id, userId, message, updatedAt) with unique userId
+  - `distress_alerts` table: (id, userId, buddyId, message, latitude, longitude, createdAt)
+- **Storage methods:** `setBuddy`, `getBuddy`, `removeBuddy`, `setDistressMessage`, `getDistressMessage`, `logDistressAlert`, `getDistressAlerts`
+- **API routes with Zod validation:**
+  - `POST /api/buddy/set` - Set a buddy (validates buddyId, prevents self-selection)
+  - `GET /api/buddy` - Get current buddy
+  - `DELETE /api/buddy` - Remove buddy
+  - `POST /api/buddy/distress-message` - Save custom distress message (max 500 chars)
+  - `GET /api/buddy/distress-message` - Get current distress message
+  - `POST /api/buddy/trigger-alert` - Trigger emergency alert (validates coordinates: lat [-90,90], lng [-180,180])
+  - `GET /api/buddy/alerts` - Get alert history (sent and received)
+
+**Frontend Implementation:**
+- **BuddySettings component:** 
+  - Select buddy from social users via UserSearch
+  - Configure custom distress message
+  - View and remove current buddy
+  - Embedded in ProfilePage
+- **EmergencyButton component:**
+  - Always visible in Navigation header (social users only)
+  - Requests geolocation permission
+  - Captures GPS coordinates
+  - Sends alert with confirmation dialog
+- **BuddySettingsPage:** Dedicated page for buddy configuration (accessible via user menu)
+- **DistressAlertsPage:** View history of sent/received alerts with location links
+- **UserSearch component:** Authenticated user search with 2-char minimum query
+
+**Security Features:**
+- All endpoints require authentication (`requireAuth`)
+- Zod validation on all inputs (buddyId, message length, coordinate ranges)
+- User search protected to prevent enumeration
+- Self-selection prevented (cannot set yourself as buddy)
+- Coordinate validation: latitude [-90, 90], longitude [-180, 180]
+
+**Real-time Features:**
+- WebSocket integration for instant in-app alerts
+- When user triggers alert, buddy receives:
+  - Distress message
+  - Current GPS location with Google Maps link
+  - Real-time WebSocket notification
+  - Alert logged to database for safety records
+
+**User Experience:**
+1. Social users set a trusted friend as their buddy
+2. Optionally customize distress message
+3. Emergency button always accessible in navigation
+4. One-click alert triggers:
+   - Location capture via browser Geolocation API
+   - Message sent to buddy via WebSocket
+   - Alert logged in database
+5. Both parties can view alert history with timestamps and locations
+
+**Note:** Architecture is ready for SMS notifications via Twilio when credentials are added
+
 ### External Dependencies
 
 **UI & Styling:**
