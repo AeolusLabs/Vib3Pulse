@@ -16,6 +16,7 @@ export const users = pgTable("users", {
   organizationName: text("organization_name"),
   contactEmail: text("contact_email"),
   socialMediaLinks: text("social_media_links").array().default(sql`'{}'`),
+  phoneNumber: text("phone_number"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
@@ -33,6 +34,7 @@ export const updateUserSchema = insertUserSchema.pick({
   organizationName: true,
   contactEmail: true,
   socialMediaLinks: true,
+  phoneNumber: true,
 }).partial();
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -247,3 +249,53 @@ export const insertBookmarkSchema = createInsertSchema(bookmarks).omit({
 
 export type InsertBookmark = z.infer<typeof insertBookmarkSchema>;
 export type Bookmark = typeof bookmarks.$inferSelect;
+
+export const buddies = pgTable("buddies", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  buddyId: varchar("buddy_id").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+}, (table) => ({
+  uniqueBuddy: unique().on(table.userId),
+}));
+
+export const insertBuddySchema = createInsertSchema(buddies).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertBuddy = z.infer<typeof insertBuddySchema>;
+export type Buddy = typeof buddies.$inferSelect;
+
+export const distressMessages = pgTable("distress_messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id).unique(),
+  message: text("message").notNull(),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
+export const insertDistressMessageSchema = createInsertSchema(distressMessages).omit({
+  id: true,
+  updatedAt: true,
+});
+
+export type InsertDistressMessage = z.infer<typeof insertDistressMessageSchema>;
+export type DistressMessage = typeof distressMessages.$inferSelect;
+
+export const distressAlerts = pgTable("distress_alerts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  buddyId: varchar("buddy_id").notNull().references(() => users.id),
+  message: text("message").notNull(),
+  latitude: text("latitude"),
+  longitude: text("longitude"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const insertDistressAlertSchema = createInsertSchema(distressAlerts).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertDistressAlert = z.infer<typeof insertDistressAlertSchema>;
+export type DistressAlert = typeof distressAlerts.$inferSelect;
