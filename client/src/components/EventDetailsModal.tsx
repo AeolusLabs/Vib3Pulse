@@ -94,9 +94,9 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
 
   return (
     <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" data-testid="modal-event-details">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto p-0" data-testid="modal-event-details">
         {event.imageUrl && (
-          <div className="aspect-video w-full overflow-hidden rounded-md -mt-6 -mx-6 mb-4">
+          <div className="aspect-video w-full overflow-hidden rounded-t-lg">
             <img 
               src={event.imageUrl} 
               alt={event.title}
@@ -105,14 +105,15 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
           </div>
         )}
 
-        <DialogHeader>
-          <div className="flex items-start justify-between gap-4">
-            <DialogTitle className="text-2xl" data-testid="modal-event-title">{event.title}</DialogTitle>
-            <Badge variant="secondary" data-testid="modal-event-category">{event.category}</Badge>
-          </div>
-        </DialogHeader>
+        <div className="p-6">
+          <DialogHeader className="mb-4">
+            <div className="flex items-start justify-between gap-4">
+              <DialogTitle className="text-2xl" data-testid="modal-event-title">{event.title}</DialogTitle>
+              <Badge variant="secondary" data-testid="modal-event-category">{event.category}</Badge>
+            </div>
+          </DialogHeader>
 
-        <div className="space-y-4">
+          <div className="space-y-4">
           <div className="grid gap-3">
             <div className="flex items-center gap-3">
               <Calendar className="h-5 w-5 text-muted-foreground" />
@@ -230,6 +231,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
               Close
             </Button>
           </div>
+        </div>
         </div>
       </DialogContent>
     </Dialog>
