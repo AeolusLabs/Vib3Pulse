@@ -105,7 +105,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
           </div>
         )}
 
-        <div className="p-6">
+        <div className="p-6 bg-[#000000fa]">
           <DialogHeader className="mb-4">
             <div className="flex items-start justify-between gap-4">
               <DialogTitle className="text-2xl" data-testid="modal-event-title">{event.title}</DialogTitle>
