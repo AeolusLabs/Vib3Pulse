@@ -70,7 +70,8 @@ export default function ProfilePage() {
 
   const isSocialUser = profile.userType === "social";
   const isOrganizer = profile.userType === "organizer";
-  const isOwnProfile = sessionUser?.user?.username === username;
+  // Compare by ID since profile data always includes id
+  const isOwnProfile = sessionUser?.user?.id === profile.id;
 
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
