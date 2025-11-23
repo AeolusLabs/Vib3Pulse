@@ -108,31 +108,92 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
       const date = eventDate.toISOString().split('T')[0];
       const time = eventDate.toTimeString().slice(0, 5);
       
-      setFormData({
-        name: event.title,
-        type: event.category,
-        description: event.description,
-        startDate: date,
-        startTime: time,
-        endDate: "",
-        endTime: "",
-        isMultiDay: false,
-        locationType: "physical",
-        location: event.location,
-        ageRestriction: "all",
-        parentalGuidance: "none",
-        entryType: event.ticketPrice === 0 ? "free" : "ticketed",
-        thumbnailUrl: event.imageUrl || "",
-        tickets: event.ticketPrice > 0 ? [{
-          id: "1",
-          name: "General Admission",
-          price: event.ticketPrice,
-          quantity: event.ticketsAvailable,
-          salesEndDate: date,
-        }] : [],
-        requireRSVP: event.requiresRSVP,
-        rsvpGeneratesTicket: true,
-      });
+      // Fetch existing ticket tiers if this is a ticketed event
+      if (event.ticketPrice > 0) {
+        fetch(`/api/events/${event.id}/ticket-tiers`, { credentials: "include" })
+          .then(res => res.json())
+          .then((tiers: any[]) => {
+            setFormData({
+              name: event.title,
+              type: event.category,
+              description: event.description,
+              startDate: date,
+              startTime: time,
+              endDate: "",
+              endTime: "",
+              isMultiDay: false,
+              locationType: "physical",
+              location: event.location,
+              ageRestriction: "all",
+              parentalGuidance: "none",
+              entryType: "ticketed",
+              thumbnailUrl: event.imageUrl || "",
+              tickets: tiers.length > 0 ? tiers.map((tier, index) => ({
+                id: tier.id || String(index + 1),
+                name: tier.name,
+                price: tier.priceCents / 100,
+                quantity: tier.quantity,
+                salesEndDate: tier.salesEndDate ? new Date(tier.salesEndDate).toISOString().split('T')[0] : date,
+              })) : [{
+                id: "1",
+                name: "General Admission",
+                price: event.ticketPrice / 100,
+                quantity: event.ticketsAvailable,
+                salesEndDate: date,
+              }],
+              requireRSVP: event.requiresRSVP,
+              rsvpGeneratesTicket: true,
+            });
+          })
+          .catch(() => {
+            // Fallback if tier fetch fails - use event.ticketPrice converted to dollars
+            setFormData({
+              name: event.title,
+              type: event.category,
+              description: event.description,
+              startDate: date,
+              startTime: time,
+              endDate: "",
+              endTime: "",
+              isMultiDay: false,
+              locationType: "physical",
+              location: event.location,
+              ageRestriction: "all",
+              parentalGuidance: "none",
+              entryType: "ticketed",
+              thumbnailUrl: event.imageUrl || "",
+              tickets: [{
+                id: "1",
+                name: "General Admission",
+                price: event.ticketPrice / 100,
+                quantity: event.ticketsAvailable,
+                salesEndDate: date,
+              }],
+              requireRSVP: event.requiresRSVP,
+              rsvpGeneratesTicket: true,
+            });
+          });
+      } else {
+        setFormData({
+          name: event.title,
+          type: event.category,
+          description: event.description,
+          startDate: date,
+          startTime: time,
+          endDate: "",
+          endTime: "",
+          isMultiDay: false,
+          locationType: "physical",
+          location: event.location,
+          ageRestriction: "all",
+          parentalGuidance: "none",
+          entryType: "free",
+          thumbnailUrl: event.imageUrl || "",
+          tickets: [],
+          requireRSVP: event.requiresRSVP,
+          rsvpGeneratesTicket: true,
+        });
+      }
     } else if (!open) {
       // Reset form when modal closes
       setStep(1);
@@ -171,27 +232,37 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
       return await response.json();
     },
     onSuccess: async (event) => {
-      if (formData.entryType === "ticketed" && formData.tickets.length > 0) {
-        const tiers = formData.tickets.map(ticket => ({
-          name: ticket.name,
-          priceCents: Math.round(ticket.price * 100),
-          quantity: ticket.quantity,
-          salesEndDate: ticket.salesEndDate ? new Date(ticket.salesEndDate).toISOString() : null,
-        }));
+      try {
+        if (formData.entryType === "ticketed" && formData.tickets.length > 0) {
+          const tiers = formData.tickets.map(ticket => ({
+            name: ticket.name,
+            priceCents: Math.round(ticket.price * 100),
+            quantity: ticket.quantity,
+            salesEndDate: ticket.salesEndDate || null,
+          }));
 
-        const tiersResponse = await apiRequest('POST', `/api/events/${event.id}/ticket-tiers`, { tiers });
-        if (!tiersResponse.ok) {
-          console.error('Failed to create ticket tiers');
+          const tiersResponse = await apiRequest('POST', `/api/events/${event.id}/ticket-tiers`, { tiers });
+          if (!tiersResponse.ok) {
+            const errorData = await tiersResponse.json().catch(() => ({ message: 'Failed to create ticket tiers' }));
+            throw new Error(errorData.message || 'Failed to create ticket tiers');
+          }
         }
-      }
 
-      queryClient.invalidateQueries({ queryKey: ["/api/events"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/events/my-events"] });
-      toast({
-        title: "Event created!",
-        description: "Your event has been successfully created.",
-      });
-      onClose();
+        queryClient.invalidateQueries({ queryKey: ["/api/events"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/events/my-events"] });
+        toast({
+          title: "Event created!",
+          description: "Your event has been successfully created.",
+        });
+        onClose();
+      } catch (error: any) {
+        toast({
+          title: "Error creating ticket tiers",
+          description: error.message || "Failed to create ticket tiers. Please try again.",
+          variant: "destructive",
+        });
+        // Don't close modal - let user retry
+      }
     },
     onError: (error) => {
       toast({
@@ -214,14 +285,54 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
       }
       return await response.json();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/events"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/events/my-events"] });
-      toast({
-        title: "Event updated!",
-        description: "Your event has been successfully updated.",
-      });
-      onClose();
+    onSuccess: async (updatedEvent) => {
+      try {
+        // Always delete existing tiers first
+        const existingTiersResponse = await fetch(`/api/events/${updatedEvent.id}/ticket-tiers`, {
+          credentials: "include",
+        });
+        if (existingTiersResponse.ok) {
+          const existingTiers = await existingTiersResponse.json();
+          if (existingTiers.length > 0) {
+            await Promise.all(
+              existingTiers.map((tier: any) =>
+                apiRequest('DELETE', `/api/ticket-tiers/${tier.id}`)
+              )
+            );
+          }
+        }
+
+        // Create new tiers only if ticketed and has tiers
+        if (formData.entryType === "ticketed" && formData.tickets.length > 0) {
+          const tiers = formData.tickets.map(ticket => ({
+            name: ticket.name,
+            priceCents: Math.round(ticket.price * 100),
+            quantity: ticket.quantity,
+            salesEndDate: ticket.salesEndDate || null,
+          }));
+
+          const tiersResponse = await apiRequest('POST', `/api/events/${updatedEvent.id}/ticket-tiers`, { tiers });
+          if (!tiersResponse.ok) {
+            const errorData = await tiersResponse.json().catch(() => ({ message: 'Failed to update ticket tiers' }));
+            throw new Error(errorData.message || 'Failed to update ticket tiers');
+          }
+        }
+
+        queryClient.invalidateQueries({ queryKey: ["/api/events"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/events/my-events"] });
+        toast({
+          title: "Event updated!",
+          description: "Your event has been successfully updated.",
+        });
+        onClose();
+      } catch (error: any) {
+        toast({
+          title: "Error updating ticket tiers",
+          description: error.message || "Failed to update ticket tiers. Please try again.",
+          variant: "destructive",
+        });
+        // Don't close modal - let user retry
+      }
     },
     onError: (error) => {
       toast({
@@ -252,10 +363,10 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
     // Convert form data to match Event schema
     const eventDate = new Date(`${formData.startDate}T${formData.startTime}`);
     
-    // Calculate ticket price and quantity
+    // Calculate ticket price and quantity - CONVERT TO CENTS
     const ticketPrice = formData.entryType === "free" 
       ? 0 
-      : (formData.tickets[0]?.price || 0);
+      : Math.round((formData.tickets[0]?.price || 0) * 100);
     
     // For free events, set ticketsAvailable to 9999 to indicate unlimited
     const ticketsAvailable = formData.entryType === "free"
@@ -420,8 +531,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
       formData.description.trim() !== "" &&
       formData.startDate !== "" &&
       formData.startTime !== "" &&
-      formData.location.trim() !== "" &&
-      formData.thumbnailUrl !== ""
+      formData.location.trim() !== ""
     );
     
     if (formData.isMultiDay) {

@@ -188,6 +188,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const tiersWithEventId = tiers.map(tier => ({
         ...tier,
         eventId: req.params.eventId,
+        salesEndDate: tier.salesEndDate ? new Date(tier.salesEndDate) : null,
       }));
 
       const createdTiers = await storage.createTicketTiers(tiersWithEventId);
@@ -206,7 +207,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const event = await storage.getEvent(tier.eventId);
-      if (!event || event.organizerId !== req.user!.id) {
+      if (!event) {
+        return res.status(404).json({ message: "Event not found" });
+      }
+
+      if (event.organizerId !== req.user!.id) {
         return res.status(403).json({ message: "Not authorized to edit this ticket tier" });
       }
 
@@ -226,7 +231,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const event = await storage.getEvent(tier.eventId);
-      if (!event || event.organizerId !== req.user!.id) {
+      if (!event) {
+        return res.status(404).json({ message: "Event not found" });
+      }
+
+      if (event.organizerId !== req.user!.id) {
         return res.status(403).json({ message: "Not authorized to delete this ticket tier" });
       }
 
