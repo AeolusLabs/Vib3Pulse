@@ -225,6 +225,9 @@ export default function FeedPage() {
       username: firstStory.user.displayName || firstStory.user.organizationName || firstStory.user.username,
       avatar: '',
       isViewed: false,
+      userType: firstStory.user.userType,
+      displayName: firstStory.user.displayName,
+      organizationName: firstStory.user.organizationName,
       slides: userStories.map((story: StoryWithUser) => ({
         id: story.id,
         type: 'image' as const,

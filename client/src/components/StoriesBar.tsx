@@ -6,6 +6,9 @@ interface Story {
   username: string;
   avatar?: string;
   isViewed?: boolean;
+  userType?: string;
+  displayName?: string | null;
+  organizationName?: string | null;
 }
 
 interface StoriesBarProps {
@@ -32,6 +35,9 @@ export default function StoriesBar({ stories, onStoryClick, onCreateStory }: Sto
               hasStory={true}
               isViewed={story.isViewed}
               onClick={() => onStoryClick?.(story.id)}
+              userType={story.userType}
+              displayName={story.displayName}
+              organizationName={story.organizationName}
             />
           ))}
         </div>

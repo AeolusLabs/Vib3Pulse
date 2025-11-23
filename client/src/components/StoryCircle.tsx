@@ -8,6 +8,9 @@ interface StoryCircleProps {
   isViewed?: boolean;
   isOwn?: boolean;
   onClick?: () => void;
+  userType?: string;
+  displayName?: string | null;
+  organizationName?: string | null;
 }
 
 export default function StoryCircle({
@@ -17,7 +20,20 @@ export default function StoryCircle({
   isViewed = false,
   isOwn = false,
   onClick,
+  userType,
+  displayName,
+  organizationName,
 }: StoryCircleProps) {
+  // Calculate avatar initials using the same pattern as profile/navigation
+  const getAvatarInitial = () => {
+    if (userType === 'social') {
+      return displayName?.charAt(0) || username.charAt(0);
+    } else if (userType === 'organizer') {
+      return organizationName?.charAt(0) || username.charAt(0);
+    }
+    // Fallback for when userType is not provided (backward compatibility)
+    return (displayName || organizationName || username).charAt(0);
+  };
   return (
     <button
       onClick={onClick}
@@ -37,8 +53,8 @@ export default function StoryCircle({
           <div className="bg-background rounded-full p-0.5">
             <Avatar className="h-16 w-16 border-2 border-background">
               <AvatarImage src={avatar} alt={username} />
-              <AvatarFallback>
-                {username.split(' ').map(n => n[0]).join('').slice(0, 2)}
+              <AvatarFallback className="bg-primary/10 text-primary">
+                {getAvatarInitial().toUpperCase()}
               </AvatarFallback>
             </Avatar>
           </div>
