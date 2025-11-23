@@ -158,6 +158,86 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Ticket Tiers
+  app.get("/api/events/:eventId/ticket-tiers", async (req, res) => {
+    try {
+      const tiers = await storage.getEventTicketTiers(req.params.eventId);
+      res.json(tiers);
+    } catch (error) {
+      console.error('Error fetching ticket tiers:', error);
+      res.status(500).json({ message: "Failed to fetch ticket tiers" });
+    }
+  });
+
+  app.post("/api/events/:eventId/ticket-tiers", requireOrganizer, async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.eventId);
+      if (!event) {
+        return res.status(404).json({ message: "Event not found" });
+      }
+      
+      if (event.organizerId !== req.user!.id) {
+        return res.status(403).json({ message: "Not authorized to edit this event" });
+      }
+
+      const { tiers } = req.body;
+      if (!Array.isArray(tiers)) {
+        return res.status(400).json({ message: "Tiers must be an array" });
+      }
+
+      const tiersWithEventId = tiers.map(tier => ({
+        ...tier,
+        eventId: req.params.eventId,
+      }));
+
+      const createdTiers = await storage.createTicketTiers(tiersWithEventId);
+      res.json(createdTiers);
+    } catch (error) {
+      console.error('Error creating ticket tiers:', error);
+      res.status(500).json({ message: "Failed to create ticket tiers" });
+    }
+  });
+
+  app.put("/api/ticket-tiers/:id", requireOrganizer, async (req, res) => {
+    try {
+      const tier = await storage.getTicketTier(req.params.id);
+      if (!tier) {
+        return res.status(404).json({ message: "Ticket tier not found" });
+      }
+
+      const event = await storage.getEvent(tier.eventId);
+      if (!event || event.organizerId !== req.user!.id) {
+        return res.status(403).json({ message: "Not authorized to edit this ticket tier" });
+      }
+
+      const updatedTier = await storage.updateTicketTier(req.params.id, req.body);
+      res.json(updatedTier);
+    } catch (error) {
+      console.error('Error updating ticket tier:', error);
+      res.status(500).json({ message: "Failed to update ticket tier" });
+    }
+  });
+
+  app.delete("/api/ticket-tiers/:id", requireOrganizer, async (req, res) => {
+    try {
+      const tier = await storage.getTicketTier(req.params.id);
+      if (!tier) {
+        return res.status(404).json({ message: "Ticket tier not found" });
+      }
+
+      const event = await storage.getEvent(tier.eventId);
+      if (!event || event.organizerId !== req.user!.id) {
+        return res.status(403).json({ message: "Not authorized to delete this ticket tier" });
+      }
+
+      await storage.deleteTicketTier(req.params.id);
+      res.json({ message: "Ticket tier deleted successfully" });
+    } catch (error) {
+      console.error('Error deleting ticket tier:', error);
+      res.status(500).json({ message: "Failed to delete ticket tier" });
+    }
+  });
+
   // Tickets
   app.get("/api/tickets", requireAuth, async (req, res) => {
     try {
