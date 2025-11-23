@@ -57,7 +57,9 @@ export default function EditProfileDialog({ user }: EditProfileDialogProps) {
       return await apiRequest("PATCH", `/api/users/${user.id}`, data);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/users/${user.id}/profile`] });
+      // Invalidate profile query by username (used by ProfilePage)
+      queryClient.invalidateQueries({ queryKey: [`/api/users/${user.username}`] });
+      // Invalidate session in case display name changed
       queryClient.invalidateQueries({ queryKey: ["/api/auth/session"] });
       toast({
         title: "Success",

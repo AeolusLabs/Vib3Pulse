@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Calendar, MapPin, DollarSign, Users, Heart, Building2, Mail, Cake } from "lucide-react";
 import type { User, Event, Rsvp } from "@shared/schema";
+import EditProfileDialog from "@/components/EditProfileDialog";
 
 type ProfileResponse = Omit<User, 'password'> & {
   events?: Event[];
@@ -19,7 +20,11 @@ type ProfileResponse = Omit<User, 'password'> & {
 export default function ProfilePage() {
   const { username } = useParams<{ username: string }>();
 
-  const { data: profile, isLoading, error } = useQuery<ProfileResponse>({
+  const { data: sessionUser, isLoading: sessionLoading } = useQuery<{ user: User }>({
+    queryKey: ['/api/auth/session'],
+  });
+
+  const { data: profile, isLoading: profileLoading, error } = useQuery<ProfileResponse>({
     queryKey: [`/api/users/${username}`],
     queryFn: async () => {
       const response = await fetch(`/api/users/${username}`);
@@ -31,7 +36,8 @@ export default function ProfilePage() {
     enabled: !!username,
   });
 
-  if (isLoading) {
+  // Wait for both queries to finish before rendering
+  if (profileLoading || sessionLoading) {
     return (
       <div className="min-h-screen bg-background pb-20 md:pb-0">
         <Navigation onSearch={() => {}} />
@@ -64,6 +70,7 @@ export default function ProfilePage() {
 
   const isSocialUser = profile.userType === "social";
   const isOrganizer = profile.userType === "organizer";
+  const isOwnProfile = sessionUser?.user?.username === username;
 
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
@@ -162,13 +169,21 @@ export default function ProfilePage() {
                   </>
                 )}
 
-                {/* Follow Button (placeholder for future feature) */}
-                <div className="pt-2">
-                  <Button variant="outline" size="sm" data-testid="button-follow">
-                    <Heart className="h-4 w-4 mr-2" />
-                    Follow
-                  </Button>
-                </div>
+                {/* Action Buttons */}
+                {isOwnProfile && (
+                  <div className="pt-2">
+                    <EditProfileDialog user={profile as User} />
+                  </div>
+                )}
+                
+                {!isOwnProfile && (
+                  <div className="pt-2">
+                    <Button variant="outline" size="sm" data-testid="button-follow">
+                      <Heart className="h-4 w-4 mr-2" />
+                      Follow
+                    </Button>
+                  </div>
+                )}
               </div>
             </div>
           </CardContent>
