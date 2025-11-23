@@ -170,7 +170,21 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
       }
       return await response.json();
     },
-    onSuccess: () => {
+    onSuccess: async (event) => {
+      if (formData.entryType === "ticketed" && formData.tickets.length > 0) {
+        const tiers = formData.tickets.map(ticket => ({
+          name: ticket.name,
+          priceCents: Math.round(ticket.price * 100),
+          quantity: ticket.quantity,
+          salesEndDate: ticket.salesEndDate ? new Date(ticket.salesEndDate).toISOString() : null,
+        }));
+
+        const tiersResponse = await apiRequest('POST', `/api/events/${event.id}/ticket-tiers`, { tiers });
+        if (!tiersResponse.ok) {
+          console.error('Failed to create ticket tiers');
+        }
+      }
+
       queryClient.invalidateQueries({ queryKey: ["/api/events"] });
       queryClient.invalidateQueries({ queryKey: ["/api/events/my-events"] });
       toast({
