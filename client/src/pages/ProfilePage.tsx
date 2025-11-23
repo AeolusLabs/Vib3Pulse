@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams, Link } from "wouter";
 import { format, differenceInYears } from "date-fns";
 import Navigation from "@/components/Navigation";
@@ -8,10 +8,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Calendar, MapPin, DollarSign, Users, Heart, Building2, Mail, Cake } from "lucide-react";
+import { Calendar, MapPin, DollarSign, Users, Heart, Building2, Mail, Cake, UserPlus, UserMinus } from "lucide-react";
 import type { User, Event, Rsvp } from "@shared/schema";
 import EditProfileDialog from "@/components/EditProfileDialog";
 import { useAuth } from "@/hooks/useAuth";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 type ProfileResponse = Omit<User, 'password'> & {
   events?: Event[];
@@ -20,6 +22,7 @@ type ProfileResponse = Omit<User, 'password'> & {
 
 export default function ProfilePage() {
   const { username } = useParams<{ username: string }>();
+  const { toast } = useToast();
 
   // Use the shared useAuth hook for consistent session cache management
   const { data: sessionUser, isLoading: sessionLoading } = useAuth();
@@ -34,6 +37,67 @@ export default function ProfilePage() {
       return response.json();
     },
     enabled: !!username,
+  });
+
+  // Fetch follow stats for the profile user
+  const { data: followStats, isLoading: followStatsLoading } = useQuery<{
+    followersCount: number;
+    followingCount: number;
+    isFollowing: boolean;
+  }>({
+    queryKey: [`/api/users/${profile?.id}/follow-stats`],
+    queryFn: async () => {
+      const response = await fetch(`/api/users/${profile?.id}/follow-stats`, {
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        throw new Error('Failed to fetch follow stats');
+      }
+      return response.json();
+    },
+    enabled: !!profile?.id,
+  });
+
+  // Follow mutation
+  const followMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("POST", `/api/users/${profile?.id}/follow`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/users/${profile?.id}/follow-stats`] });
+      toast({
+        title: "Success",
+        description: `You are now following ${profile?.displayName || profile?.organizationName || profile?.username}`,
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to follow user. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Unfollow mutation
+  const unfollowMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("POST", `/api/users/${profile?.id}/unfollow`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/users/${profile?.id}/follow-stats`] });
+      toast({
+        title: "Success",
+        description: `You unfollowed ${profile?.displayName || profile?.organizationName || profile?.username}`,
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to unfollow user. Please try again.",
+        variant: "destructive",
+      });
+    },
   });
 
   // Wait for both queries to finish before rendering
@@ -136,6 +200,26 @@ export default function ProfilePage() {
                         </div>
                       </div>
                     )}
+
+                    {/* Follower/Following Stats */}
+                    {!followStatsLoading && followStats && (
+                      <div className="flex gap-6 text-sm" data-testid="follow-stats">
+                        <div>
+                          <span className="font-bold text-foreground" data-testid="text-followers-count">
+                            {followStats.followersCount}
+                          </span>
+                          <span className="text-muted-foreground ml-1">
+                            {followStats.followersCount === 1 ? 'Follower' : 'Followers'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="font-bold text-foreground" data-testid="text-following-count">
+                            {followStats.followingCount}
+                          </span>
+                          <span className="text-muted-foreground ml-1">Following</span>
+                        </div>
+                      </div>
+                    )}
                   </>
                 ) : (
                   <>
@@ -167,6 +251,26 @@ export default function ProfilePage() {
                         {profile.contactEmail}
                       </div>
                     )}
+
+                    {/* Follower/Following Stats for Organizers */}
+                    {!followStatsLoading && followStats && (
+                      <div className="flex gap-6 text-sm" data-testid="follow-stats">
+                        <div>
+                          <span className="font-bold text-foreground" data-testid="text-followers-count">
+                            {followStats.followersCount}
+                          </span>
+                          <span className="text-muted-foreground ml-1">
+                            {followStats.followersCount === 1 ? 'Follower' : 'Followers'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="font-bold text-foreground" data-testid="text-following-count">
+                            {followStats.followingCount}
+                          </span>
+                          <span className="text-muted-foreground ml-1">Following</span>
+                        </div>
+                      </div>
+                    )}
                   </>
                 )}
 
@@ -177,12 +281,31 @@ export default function ProfilePage() {
                   </div>
                 )}
                 
-                {!isOwnProfile && (
+                {!isOwnProfile && sessionUser && (
                   <div className="pt-2">
-                    <Button variant="outline" size="sm" data-testid="button-follow">
-                      <Heart className="h-4 w-4 mr-2" />
-                      Follow
-                    </Button>
+                    {followStats?.isFollowing ? (
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={() => unfollowMutation.mutate()}
+                        disabled={unfollowMutation.isPending}
+                        data-testid="button-unfollow"
+                      >
+                        <UserMinus className="h-4 w-4 mr-2" />
+                        {unfollowMutation.isPending ? "Unfollowing..." : "Following"}
+                      </Button>
+                    ) : (
+                      <Button 
+                        variant="default" 
+                        size="sm"
+                        onClick={() => followMutation.mutate()}
+                        disabled={followMutation.isPending}
+                        data-testid="button-follow"
+                      >
+                        <UserPlus className="h-4 w-4 mr-2" />
+                        {followMutation.isPending ? "Following..." : "Follow"}
+                      </Button>
+                    )}
                   </div>
                 )}
               </div>

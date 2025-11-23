@@ -954,6 +954,89 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Follow/Unfollow routes
+  app.post("/api/users/:id/follow", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    try {
+      const targetUserId = req.params.id;
+      const currentUserId = req.user!.id;
+
+      // Can't follow yourself
+      if (targetUserId === currentUserId) {
+        return res.status(400).json({ message: "You cannot follow yourself" });
+      }
+
+      // Check if target user exists
+      const targetUser = await storage.getUser(targetUserId);
+      if (!targetUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Check if already following
+      const alreadyFollowing = await storage.isFollowing(currentUserId, targetUserId);
+      if (alreadyFollowing) {
+        return res.status(400).json({ message: "Already following this user" });
+      }
+
+      const follow = await storage.followUser(currentUserId, targetUserId);
+      res.json(follow);
+    } catch (error) {
+      console.error("Follow error:", error);
+      res.status(500).json({ message: "Failed to follow user" });
+    }
+  });
+
+  app.post("/api/users/:id/unfollow", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    try {
+      const targetUserId = req.params.id;
+      const currentUserId = req.user!.id;
+
+      // Check if currently following
+      const isFollowing = await storage.isFollowing(currentUserId, targetUserId);
+      if (!isFollowing) {
+        return res.status(400).json({ message: "Not following this user" });
+      }
+
+      await storage.unfollowUser(currentUserId, targetUserId);
+      res.json({ message: "Successfully unfollowed" });
+    } catch (error) {
+      console.error("Unfollow error:", error);
+      res.status(500).json({ message: "Failed to unfollow user" });
+    }
+  });
+
+  app.get("/api/users/:id/follow-stats", async (req, res) => {
+    try {
+      const userId = req.params.id;
+
+      // Get followers and following
+      const followers = await storage.getFollowers(userId);
+      const following = await storage.getFollowing(userId);
+
+      // Check if current user is following this user
+      let isFollowing = false;
+      if (req.isAuthenticated()) {
+        isFollowing = await storage.isFollowing(req.user!.id, userId);
+      }
+
+      res.json({
+        followersCount: followers.length,
+        followingCount: following.length,
+        isFollowing,
+      });
+    } catch (error) {
+      console.error("Follow stats error:", error);
+      res.status(500).json({ message: "Failed to fetch follow stats" });
+    }
+  });
+
   const httpServer = createServer(app);
 
   return httpServer;
