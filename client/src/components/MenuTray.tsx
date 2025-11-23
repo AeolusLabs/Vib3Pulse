@@ -56,13 +56,13 @@ export default function MenuTray() {
                   Discover
                 </Button>
               </Link>
-              <Link href="/chat">
+              <Link href="/messages">
                 <Button
-                  variant={location.startsWith('/chat') ? 'default' : 'ghost'}
+                  variant={location.startsWith('/messages') ? 'default' : 'ghost'}
                   size="sm"
                   className="w-full justify-start"
                   onClick={() => setIsOpen(false)}
-                  data-testid="link-chat"
+                  data-testid="link-messages"
                 >
                   <MessageCircle className="h-4 w-4 mr-2" />
                   Messages

@@ -12,8 +12,6 @@ import ProfilePage from "@/pages/ProfilePage";
 import UserProfilePage from "@/pages/UserProfilePage";
 import FeedPage from "@/pages/FeedPage";
 import MyEventsPage from "@/pages/MyEventsPage";
-import ChatPage from "@/pages/ChatPage";
-import ConversationPage from "@/pages/ConversationPage";
 import ManageEventsPage from "@/pages/ManageEventsPage";
 import TicketWalletPage from "@/pages/TicketWalletPage";
 import EventCheckInPage from "@/pages/EventCheckInPage";
@@ -72,18 +70,6 @@ function Router() {
       <Route path="/my-rsvps">
         <AuthenticatedLayout>
           <MyRsvpsPage />
-        </AuthenticatedLayout>
-      </Route>
-      
-      <Route path="/chat">
-        <AuthenticatedLayout>
-          <ChatPage />
-        </AuthenticatedLayout>
-      </Route>
-      
-      <Route path="/chat/:userId">
-        <AuthenticatedLayout>
-          <ConversationPage />
         </AuthenticatedLayout>
       </Route>
       
