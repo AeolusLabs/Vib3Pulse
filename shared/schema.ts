@@ -67,6 +67,24 @@ export const eventUpdateDto = eventCreateDto.omit({ organizerId: true }).partial
 export type EventCreateDto = z.input<typeof eventCreateDto>; // Input type (before transform)
 export type EventUpdateDto = z.input<typeof eventUpdateDto> & { id: string };
 
+export const ticketTiers = pgTable("ticket_tiers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventId: varchar("event_id").notNull().references(() => events.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  priceCents: integer("price_cents").notNull(),
+  quantity: integer("quantity").notNull(),
+  salesEndDate: timestamp("sales_end_date"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const insertTicketTierSchema = createInsertSchema(ticketTiers).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertTicketTier = z.infer<typeof insertTicketTierSchema>;
+export type TicketTier = typeof ticketTiers.$inferSelect;
+
 export const tickets = pgTable("tickets", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
