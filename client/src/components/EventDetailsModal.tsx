@@ -32,6 +32,19 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
     },
   });
 
+  const { data: ticketTiers, isLoading: isLoadingTiers } = useQuery({
+    queryKey: ["/api/events", event.id, "ticket-tiers"],
+    queryFn: async () => {
+      const response = await fetch(`/api/events/${event.id}/ticket-tiers`, {
+        credentials: "include",
+      });
+      if (!response.ok) {
+        throw new Error("Failed to fetch ticket tiers");
+      }
+      return response.json();
+    },
+  });
+
   const hasRSVPed = rsvps?.some((rsvp: any) => rsvp.eventId === event.id);
 
   const purchaseTicketMutation = useMutation({
@@ -139,16 +152,40 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
               </p>
             </div>
 
-            <div className="flex items-center gap-3">
-              <Ticket className="h-5 w-5 text-muted-foreground" />
-              {isFreeEvent ? (
+            {isFreeEvent ? (
+              <div className="flex items-center gap-3">
+                <Ticket className="h-5 w-5 text-muted-foreground" />
                 <Badge variant="default" className="text-base" data-testid="modal-event-price">Free Event</Badge>
-              ) : (
-                <p className="font-semibold text-xl" data-testid="modal-event-price">
-                  ${(event.ticketPrice / 100).toFixed(2)}
-                </p>
-              )}
-            </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex items-center gap-3">
+                  <Ticket className="h-5 w-5 text-muted-foreground" />
+                  <p className="font-semibold">Ticket Options</p>
+                </div>
+                {isLoadingTiers ? (
+                  <p className="text-sm text-muted-foreground ml-8">Loading ticket options...</p>
+                ) : ticketTiers && ticketTiers.length > 0 ? (
+                  <div className="ml-8 space-y-2" data-testid="ticket-tiers-list">
+                    {ticketTiers.map((tier: any, index: number) => (
+                      <div key={tier.id} className="flex items-center justify-between p-3 rounded-md border" data-testid={`ticket-tier-${index}`}>
+                        <div>
+                          <p className="font-medium" data-testid={`tier-name-${index}`}>{tier.name}</p>
+                          <p className="text-sm text-muted-foreground">{tier.quantity} available</p>
+                        </div>
+                        <p className="font-semibold text-lg" data-testid={`tier-price-${index}`}>
+                          ${(tier.priceCents / 100).toFixed(2)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground ml-8" data-testid="modal-event-price">
+                    ${(event.ticketPrice / 100).toFixed(2)}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           <Separator />
