@@ -462,6 +462,7 @@ export default function MessagesPage() {
               <div className="space-y-4">
                 {conversation.map((message) => {
                   const isOwnMessage = message.senderId === sessionUser?.user?.id;
+                  const senderName = isOwnMessage ? 'You' : otherUser?.username || 'Unknown';
                   return (
                     <div
                       key={message.id}
@@ -475,6 +476,9 @@ export default function MessagesPage() {
                             : 'bg-muted text-foreground'
                         }`}
                       >
+                        <p className={`text-xs font-medium mb-1 ${isOwnMessage ? 'text-primary-foreground' : 'text-foreground/70'}`}>
+                          {senderName}
+                        </p>
                         <p className="break-words">{message.content}</p>
                         <div className={`flex items-center gap-1 mt-1 ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
                           <p className={`text-xs ${isOwnMessage ? 'text-primary-foreground/90' : 'text-muted-foreground'}`}>
