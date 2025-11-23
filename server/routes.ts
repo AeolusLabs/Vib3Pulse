@@ -85,6 +85,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Update user profile
+  app.patch("/api/users/:userId", requireAuth, async (req, res) => {
+    try {
+      const { userId } = req.params;
+      
+      // Security check: Users can only update their own profile
+      if (req.user!.id !== userId) {
+        return res.status(403).json({ message: "Unauthorized" });
+      }
+      
+      const { updateUserSchema } = await import("@shared/schema");
+      const updates = updateUserSchema.parse(req.body);
+      
+      const updatedUser = await storage.updateUser(userId, updates);
+      res.json(updatedUser);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid profile data", errors: error.errors });
+      }
+      console.error('Error updating profile:', error);
+      res.status(500).json({ message: "Failed to update profile" });
+    }
+  });
+
   // Events
   app.get("/api/events", async (req, res) => {
     try {

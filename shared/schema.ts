@@ -24,7 +24,19 @@ export const insertUserSchema = createInsertSchema(users).omit({
   createdAt: true,
 });
 
+// Schema for safely updating user profile (excludes sensitive fields)
+export const updateUserSchema = insertUserSchema.pick({
+  displayName: true,
+  dateOfBirth: true,
+  bio: true,
+  interests: true,
+  organizationName: true,
+  contactEmail: true,
+  socialMediaLinks: true,
+}).partial();
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
+export type UpdateUser = z.infer<typeof updateUserSchema>;
 export type User = typeof users.$inferSelect;
 
 // Session table for express-session with connect-pg-simple
