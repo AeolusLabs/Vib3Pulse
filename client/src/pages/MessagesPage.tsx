@@ -374,9 +374,9 @@ export default function MessagesPage() {
                               <>
                                 <span className="inline-flex items-center gap-1">
                                   {lastMessage.isRead ? (
-                                    <CheckCheck className="h-3 w-3 text-primary" />
+                                    <CheckCheck className="h-4 w-4 text-foreground/70" />
                                   ) : (
-                                    <Check className="h-3 w-3" />
+                                    <Check className="h-4 w-4 text-muted-foreground" />
                                   )}
                                   You:
                                 </span>{" "}
@@ -477,15 +477,15 @@ export default function MessagesPage() {
                       >
                         <p className="break-words">{message.content}</p>
                         <div className={`flex items-center gap-1 mt-1 ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
-                          <p className={`text-xs ${isOwnMessage ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
+                          <p className={`text-xs ${isOwnMessage ? 'text-primary-foreground/90' : 'text-muted-foreground'}`}>
                             {formatMessageTime(message.createdAt)}
                           </p>
                           {isOwnMessage && (
                             <span className="inline-flex">
                               {message.isRead ? (
-                                <CheckCheck className="h-3 w-3 text-primary-foreground/70" data-testid={`read-receipt-${message.id}`} />
+                                <CheckCheck className="h-4 w-4 text-primary-foreground" data-testid={`read-receipt-${message.id}`} />
                               ) : (
-                                <Check className="h-3 w-3 text-primary-foreground/70" data-testid={`sent-receipt-${message.id}`} />
+                                <Check className="h-4 w-4 text-primary-foreground/80" data-testid={`sent-receipt-${message.id}`} />
                               )}
                             </span>
                           )}
