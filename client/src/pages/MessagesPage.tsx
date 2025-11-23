@@ -9,8 +9,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Send, ArrowLeft } from "lucide-react";
-import { format } from "date-fns";
+import { Badge } from "@/components/ui/badge";
+import { Send, ArrowLeft, Check, CheckCheck } from "lucide-react";
+import { format, formatDistanceToNow } from "date-fns";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { User, Message } from "@shared/schema";
@@ -18,6 +19,7 @@ import type { User, Message } from "@shared/schema";
 type Conversation = {
   otherUser: User;
   lastMessage: Message;
+  unreadCount: number;
 };
 
 type MessageWithUsers = Message & {
@@ -30,6 +32,8 @@ export default function MessagesPage() {
   const [, navigate] = useLocation();
   const [messageText, setMessageText] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
   const { toast } = useToast();
 
   const { data: sessionUser } = useQuery<{ user: User }>({
@@ -57,11 +61,79 @@ export default function MessagesPage() {
       queryClient.invalidateQueries({ queryKey: [`/api/messages/${userId}`] });
       queryClient.invalidateQueries({ queryKey: ['/api/messages'] });
       setMessageText("");
-      toast({
-        title: "Message sent",
-      });
     },
   });
+
+  const markAsReadMutation = useMutation({
+    mutationFn: async (messageId: string) => {
+      return await apiRequest('PATCH', `/api/messages/${messageId}/read`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/messages/${userId}`] });
+      queryClient.invalidateQueries({ queryKey: ['/api/messages'] });
+    },
+  });
+
+  // WebSocket connection
+  useEffect(() => {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      console.log('WebSocket connected');
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        
+        if (data.type === 'new_message') {
+          // Refresh conversation list
+          queryClient.invalidateQueries({ queryKey: ['/api/messages'] });
+          
+          // If we're viewing the conversation with this user, refresh it
+          if (userId && (data.message.senderId === userId || data.message.receiverId === userId)) {
+            queryClient.invalidateQueries({ queryKey: [`/api/messages/${userId}`] });
+            
+            // Mark as read if we're viewing this conversation
+            if (data.message.senderId === userId && !data.message.isRead) {
+              setTimeout(() => {
+                markAsReadMutation.mutate(data.message.id);
+              }, 500);
+            }
+          }
+        } else if (data.type === 'message_sent') {
+          // Message we sent from another device
+          queryClient.invalidateQueries({ queryKey: ['/api/messages'] });
+          if (userId) {
+            queryClient.invalidateQueries({ queryKey: [`/api/messages/${userId}`] });
+          }
+        } else if (data.type === 'message_read') {
+          // Message was read
+          queryClient.invalidateQueries({ queryKey: [`/api/messages/${userId}`] });
+        }
+      } catch (error) {
+        console.error('Error parsing WebSocket message:', error);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+
+    ws.onclose = () => {
+      console.log('WebSocket disconnected');
+    };
+
+    return () => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      }
+    };
+  }, [userId]);
 
   const handleSendMessage = () => {
     if (messageText.trim() && userId) {
@@ -69,11 +141,51 @@ export default function MessagesPage() {
     }
   };
 
+  // Auto-scroll to bottom on new messages
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [conversation]);
+
+  // Auto-focus input when conversation opens
+  useEffect(() => {
+    if (userId && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [userId]);
+
+  // Mark unread messages as read when viewing conversation
+  useEffect(() => {
+    if (userId && conversation.length > 0 && sessionUser?.user?.id) {
+      const unreadMessages = conversation.filter(
+        (msg) => !msg.isRead && msg.receiverId === sessionUser.user.id
+      );
+      
+      if (unreadMessages.length > 0) {
+        // Mark the last unread message as read (marks all previous as read too)
+        const lastUnread = unreadMessages[unreadMessages.length - 1];
+        setTimeout(() => {
+          markAsReadMutation.mutate(lastUnread.id);
+        }, 500);
+      }
+    }
+  }, [userId, conversation, sessionUser?.user?.id]);
+
+  // Format timestamp with relative time for recent messages
+  const formatMessageTime = (date: Date) => {
+    const now = new Date();
+    const messageDate = new Date(date);
+    const diffInHours = (now.getTime() - messageDate.getTime()) / (1000 * 60 * 60);
+    
+    if (diffInHours < 24) {
+      return format(messageDate, 'p'); // Just time for today
+    } else if (diffInHours < 168) { // Less than a week
+      return format(messageDate, 'EEE p'); // Day and time
+    } else {
+      return format(messageDate, 'MMM d, p'); // Date and time
+    }
+  };
 
   // Conversation List View
   if (!userId) {
@@ -101,7 +213,7 @@ export default function MessagesPage() {
             </Card>
           ) : (
             <div className="space-y-3">
-              {conversations.map(({ otherUser, lastMessage }) => (
+              {conversations.map(({ otherUser, lastMessage, unreadCount }) => (
                 <Card
                   key={otherUser.id}
                   className="hover-elevate cursor-pointer"
@@ -110,26 +222,49 @@ export default function MessagesPage() {
                 >
                   <CardContent className="p-4">
                     <div className="flex items-center gap-4">
-                      <Avatar className="h-12 w-12">
-                        <AvatarImage src="" alt={otherUser.displayName || otherUser.username} />
-                        <AvatarFallback className="bg-primary/10 text-primary">
-                          {(otherUser.displayName || otherUser.organizationName || otherUser.username).charAt(0).toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
+                      <div className="relative">
+                        <Avatar className="h-12 w-12">
+                          <AvatarImage src="" alt={otherUser.displayName || otherUser.username} />
+                          <AvatarFallback className="bg-primary/10 text-primary">
+                            {(otherUser.displayName || otherUser.organizationName || otherUser.username).charAt(0).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                        {unreadCount > 0 && (
+                          <Badge 
+                            className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-xs bg-primary"
+                            data-testid={`badge-unread-${otherUser.id}`}
+                          >
+                            {unreadCount}
+                          </Badge>
+                        )}
+                      </div>
 
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between mb-1">
-                          <h3 className="font-semibold text-foreground truncate">
+                          <h3 className={`font-semibold truncate ${unreadCount > 0 ? 'text-foreground' : 'text-foreground/90'}`}>
                             {otherUser.displayName || otherUser.organizationName || otherUser.username}
                           </h3>
                           <span className="text-xs text-muted-foreground">
-                            {format(new Date(lastMessage.createdAt), 'p')}
+                            {formatDistanceToNow(new Date(lastMessage.createdAt), { addSuffix: true })}
                           </span>
                         </div>
-                        <p className="text-sm text-muted-foreground truncate">
-                          {lastMessage.senderId === sessionUser?.user?.id ? "You: " : ""}
-                          {lastMessage.content}
-                        </p>
+                        <div className="flex items-center gap-1">
+                          <p className={`text-sm truncate flex-1 ${unreadCount > 0 ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
+                            {lastMessage.senderId === sessionUser?.user?.id ? (
+                              <>
+                                <span className="inline-flex items-center gap-1">
+                                  {lastMessage.isRead ? (
+                                    <CheckCheck className="h-3 w-3 text-primary" />
+                                  ) : (
+                                    <Check className="h-3 w-3" />
+                                  )}
+                                  You:
+                                </span>{" "}
+                              </>
+                            ) : ""}
+                            {lastMessage.content}
+                          </p>
+                        </div>
                       </div>
                     </div>
                   </CardContent>
@@ -221,9 +356,20 @@ export default function MessagesPage() {
                         }`}
                       >
                         <p className="break-words">{message.content}</p>
-                        <p className={`text-xs mt-1 ${isOwnMessage ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
-                          {format(new Date(message.createdAt), 'p')}
-                        </p>
+                        <div className={`flex items-center gap-1 mt-1 ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
+                          <p className={`text-xs ${isOwnMessage ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
+                            {formatMessageTime(message.createdAt)}
+                          </p>
+                          {isOwnMessage && (
+                            <span className="inline-flex">
+                              {message.isRead ? (
+                                <CheckCheck className="h-3 w-3 text-primary-foreground/70" data-testid={`read-receipt-${message.id}`} />
+                              ) : (
+                                <Check className="h-3 w-3 text-primary-foreground/70" data-testid={`sent-receipt-${message.id}`} />
+                              )}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
@@ -239,6 +385,7 @@ export default function MessagesPage() {
           <CardContent className="p-4">
             <div className="flex gap-2">
               <Input
+                ref={inputRef}
                 type="text"
                 placeholder="Type a message..."
                 value={messageText}

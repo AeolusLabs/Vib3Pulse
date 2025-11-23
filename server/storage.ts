@@ -91,7 +91,7 @@ export interface IStorage {
   
   sendMessage(message: InsertMessage): Promise<Message>;
   getConversation(userId1: string, userId2: string): Promise<Array<Message & { sender: User; receiver: User }>>;
-  getConversations(userId: string): Promise<Array<{ otherUser: User; lastMessage: Message }>>;
+  getConversations(userId: string): Promise<Array<{ otherUser: User; lastMessage: Message; unreadCount: number }>>;
   markAsRead(messageId: string): Promise<void>;
   
   getUserProfile(userId: string): Promise<{ user: User; posts: Post[]; events: Array<Rsvp & { event: Event }> } | undefined>;
@@ -430,7 +430,7 @@ export class DbStorage implements IStorage {
     return messagesWithSender;
   }
 
-  async getConversations(userId: string): Promise<Array<{ otherUser: User; lastMessage: Message }>> {
+  async getConversations(userId: string): Promise<Array<{ otherUser: User; lastMessage: Message; unreadCount: number }>> {
     const allMessages = await db
       .select()
       .from(messages)
@@ -443,11 +443,19 @@ export class DbStorage implements IStorage {
       .orderBy(desc(messages.createdAt));
     
     const conversationMap = new Map<string, Message>();
+    const unreadCountMap = new Map<string, number>();
     
     for (const msg of allMessages) {
       const otherUserId = msg.senderId === userId ? msg.receiverId : msg.senderId;
+      
+      // Track last message for each conversation
       if (!conversationMap.has(otherUserId)) {
         conversationMap.set(otherUserId, msg);
+      }
+      
+      // Count unread messages from the other user
+      if (msg.senderId === otherUserId && !msg.isRead && msg.receiverId === userId) {
+        unreadCountMap.set(otherUserId, (unreadCountMap.get(otherUserId) || 0) + 1);
       }
     }
     
@@ -458,6 +466,7 @@ export class DbStorage implements IStorage {
         return {
           otherUser: userWithoutPassword as User,
           lastMessage,
+          unreadCount: unreadCountMap.get(otherUserId) || 0,
         };
       })
     );
