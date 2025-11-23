@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Calendar, MapPin, DollarSign, Users, Heart, Building2, Mail, Cake } from "lucide-react";
 import type { User, Event, Rsvp } from "@shared/schema";
 import EditProfileDialog from "@/components/EditProfileDialog";
+import { useAuth } from "@/hooks/useAuth";
 
 type ProfileResponse = Omit<User, 'password'> & {
   events?: Event[];
@@ -20,9 +21,8 @@ type ProfileResponse = Omit<User, 'password'> & {
 export default function ProfilePage() {
   const { username } = useParams<{ username: string }>();
 
-  const { data: sessionUser, isLoading: sessionLoading } = useQuery<{ user: User }>({
-    queryKey: ['/api/auth/session'],
-  });
+  // Use the shared useAuth hook for consistent session cache management
+  const { data: sessionUser, isLoading: sessionLoading } = useAuth();
 
   const { data: profile, isLoading: profileLoading, error } = useQuery<ProfileResponse>({
     queryKey: [`/api/users/${username}`],
@@ -70,8 +70,8 @@ export default function ProfilePage() {
 
   const isSocialUser = profile.userType === "social";
   const isOrganizer = profile.userType === "organizer";
-  // Compare by ID since profile data always includes id
-  const isOwnProfile = sessionUser?.user?.id === profile.id;
+  // Compare by ID - sessionUser is the user object directly (not wrapped)
+  const isOwnProfile = sessionUser?.id === profile.id;
 
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
