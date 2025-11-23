@@ -10,7 +10,15 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Send, ArrowLeft, Check, CheckCheck } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Send, ArrowLeft, Check, CheckCheck, Search, UserPlus } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -31,6 +39,9 @@ export default function MessagesPage() {
   const { userId } = useParams<{ userId?: string }>();
   const [, navigate] = useLocation();
   const [messageText, setMessageText] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+  const [searchDialogOpen, setSearchDialogOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -48,6 +59,20 @@ export default function MessagesPage() {
   const { data: conversation = [], isLoading: conversationLoading } = useQuery<MessageWithUsers[]>({
     queryKey: [`/api/messages/${userId}`],
     enabled: !!userId,
+  });
+
+  // Debounce search query
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 300);
+    
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const { data: searchResults = [], isLoading: searchLoading } = useQuery<User[]>({
+    queryKey: [`/api/users/search?q=${debouncedSearchQuery}`],
+    enabled: debouncedSearchQuery.length >= 2,
   });
 
   const sendMessageMutation = useMutation({
@@ -194,7 +219,102 @@ export default function MessagesPage() {
         <Navigation onSearch={() => {}} />
 
         <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <h1 className="text-3xl font-bold font-serif text-foreground mb-6">Messages</h1>
+          <div className="flex items-center justify-between mb-6">
+            <h1 className="text-3xl font-bold font-serif text-foreground">Messages</h1>
+            
+            <Dialog open={searchDialogOpen} onOpenChange={setSearchDialogOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" data-testid="button-search-users">
+                  <UserPlus className="h-4 w-4 mr-2" />
+                  New Message
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>New Message</DialogTitle>
+                  <DialogDescription>
+                    Search for people to start a conversation
+                  </DialogDescription>
+                </DialogHeader>
+                
+                <div className="space-y-4">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      type="text"
+                      placeholder="Search by name or username..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-10"
+                      data-testid="input-search-users"
+                    />
+                  </div>
+                  
+                  <ScrollArea className="h-[300px]">
+                    {searchLoading ? (
+                      <div className="space-y-3">
+                        {[1, 2, 3].map((i) => (
+                          <Skeleton key={i} className="h-16 w-full" />
+                        ))}
+                      </div>
+                    ) : debouncedSearchQuery.length < 2 ? (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <Search className="h-12 w-12 mx-auto mb-2 opacity-20" />
+                        <p>Type at least 2 characters to search</p>
+                      </div>
+                    ) : searchResults.length === 0 ? (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <p>No users found</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {searchResults
+                          .filter(user => user.id !== sessionUser?.user?.id)
+                          .map((user) => (
+                            <Card
+                              key={user.id}
+                              className="hover-elevate cursor-pointer"
+                              onClick={() => {
+                                setSearchDialogOpen(false);
+                                setSearchQuery("");
+                                navigate(`/messages/${user.id}`);
+                              }}
+                              data-testid={`search-result-${user.id}`}
+                            >
+                              <CardContent className="p-3">
+                                <div className="flex items-center gap-3">
+                                  <Avatar className="h-10 w-10">
+                                    <AvatarImage src="" alt={user.displayName || user.username} />
+                                    <AvatarFallback className="bg-primary/10 text-primary">
+                                      {(user.displayName || user.organizationName || user.username).charAt(0).toUpperCase()}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                  
+                                  <div className="flex-1 min-w-0">
+                                    <h3 className="font-semibold text-foreground truncate">
+                                      {user.displayName || user.organizationName || user.username}
+                                    </h3>
+                                    <p className="text-sm text-muted-foreground truncate">
+                                      @{user.username}
+                                    </p>
+                                  </div>
+                                  
+                                  {user.userType === "organizer" && (
+                                    <Badge variant="default" className="bg-primary">
+                                      Organizer
+                                    </Badge>
+                                  )}
+                                </div>
+                              </CardContent>
+                            </Card>
+                          ))}
+                      </div>
+                    )}
+                  </ScrollArea>
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
 
           {conversationsLoading ? (
             <div className="space-y-4">

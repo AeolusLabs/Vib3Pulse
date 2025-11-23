@@ -475,7 +475,31 @@ export class DbStorage implements IStorage {
   }
 
   async markAsRead(messageId: string): Promise<void> {
-    await db.update(messages).set({ isRead: true }).where(eq(messages.id, messageId));
+    // Get the message to find the conversation participants
+    const message = await db.select().from(messages).where(eq(messages.id, messageId));
+    if (message.length === 0) return;
+    
+    const msg = message[0];
+    
+    // Determine the current user (receiver of this message) and the other user
+    const currentUserId = msg.receiverId;
+    const otherUserId = msg.senderId;
+    
+    // Mark ALL unread messages in this conversation where current user is the receiver
+    // This includes messages sent by the other user that haven't been read yet
+    await db.update(messages)
+      .set({ isRead: true })
+      .where(
+        and(
+          eq(messages.receiverId, currentUserId),
+          eq(messages.senderId, otherUserId),
+          eq(messages.isRead, false),
+          or(
+            lt(messages.createdAt, msg.createdAt),
+            eq(messages.id, messageId)
+          )
+        )
+      );
   }
 
   async getUserProfile(userId: string): Promise<{ user: User; posts: Post[]; events: Array<Rsvp & { event: Event }> } | undefined> {

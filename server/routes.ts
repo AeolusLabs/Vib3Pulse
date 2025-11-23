@@ -832,13 +832,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // User search and profile
   app.get("/api/users/search", async (req, res) => {
     try {
-      const query = req.query.q as string;
-      if (!query || query.trim() === "") {
+      const query = (req.query.q as string || "").trim();
+      
+      // Validate query length (min 2 chars)
+      if (query.length < 2) {
         return res.json([]);
       }
       
+      // Limit query length for safety
+      if (query.length > 50) {
+        return res.status(400).json({ message: "Search query too long" });
+      }
+      
       const users = await storage.searchUsers(query);
-      res.json(users);
+      
+      // Limit results to prevent large responses
+      const limitedResults = users.slice(0, 20);
+      
+      res.json(limitedResults);
     } catch (error) {
       res.status(500).json({ message: "Failed to search users" });
     }
