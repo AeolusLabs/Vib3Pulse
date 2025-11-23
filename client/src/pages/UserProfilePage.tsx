@@ -12,6 +12,7 @@ import { Calendar, MapPin, DollarSign, Users, MessageCircle, UserCheck, UserPlus
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { User, Post, Event, Rsvp } from "@shared/schema";
+import EditProfileDialog from "@/components/EditProfileDialog";
 
 type UserProfileResponse = {
   user: User;
@@ -189,6 +190,12 @@ export default function UserProfilePage() {
                 )}
 
                 {/* Action Buttons */}
+                {isOwnProfile && (
+                  <div className="pt-4">
+                    <EditProfileDialog user={user} />
+                  </div>
+                )}
+                
                 {!isOwnProfile && sessionUser && (
                   <div className="flex gap-3 pt-4">
                     {followStatus?.isFollowing ? (
