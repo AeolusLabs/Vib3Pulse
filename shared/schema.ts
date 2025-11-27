@@ -11,6 +11,8 @@ export const users = pgTable("users", {
   userType: text("user_type").notNull(),
   displayName: text("display_name"),
   dateOfBirth: text("date_of_birth"),
+  gender: text("gender"),
+  genderEditedAt: timestamp("gender_edited_at"),
   bio: text("bio"),
   interests: text("interests").array().default(sql`'{}'`),
   organizationName: text("organization_name"),
@@ -29,6 +31,7 @@ export const insertUserSchema = createInsertSchema(users).omit({
 export const updateUserSchema = insertUserSchema.pick({
   displayName: true,
   dateOfBirth: true,
+  gender: true,
   bio: true,
   interests: true,
   organizationName: true,
@@ -36,6 +39,10 @@ export const updateUserSchema = insertUserSchema.pick({
   socialMediaLinks: true,
   phoneNumber: true,
 }).partial();
+
+// Gender options enum
+export const genderOptions = ["Male", "Female", "Rather not say"] as const;
+export type Gender = typeof genderOptions[number];
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type UpdateUser = z.infer<typeof updateUserSchema>;
