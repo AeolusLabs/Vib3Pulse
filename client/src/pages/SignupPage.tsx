@@ -45,9 +45,12 @@ const step2Schema = z.object({
   }),
 });
 
+const GENDER_OPTIONS = ["Male", "Female", "Rather not say"] as const;
+
 const socialUserSchema = z.object({
   displayName: z.string().min(1, "Display name is required"),
   dateOfBirth: z.string().min(1, "Date of birth is required"),
+  gender: z.enum(GENDER_OPTIONS, { required_error: "Please select your gender" }),
   bio: z.string().max(500, "Bio must be less than 500 characters").optional(),
   interests: z.array(z.string()).min(1, "Please select at least one interest"),
 });
@@ -98,6 +101,7 @@ export default function SignupPage() {
     defaultValues: step3DataSocial || {
       displayName: "",
       dateOfBirth: "",
+      gender: undefined,
       bio: "",
       interests: [],
     },
@@ -525,6 +529,43 @@ export default function SignupPage() {
                         </FormControl>
                         <FormDescription>
                           This will not be shown publicly. Used for age verification for events.
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={socialUserForm.control}
+                    name="gender"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Gender</FormLabel>
+                        <FormControl>
+                          <RadioGroup
+                            onValueChange={field.onChange}
+                            value={field.value}
+                            className="flex flex-wrap gap-4"
+                          >
+                            {GENDER_OPTIONS.map((option) => (
+                              <div key={option} className="flex items-center space-x-2">
+                                <RadioGroupItem 
+                                  value={option} 
+                                  id={`gender-${option.toLowerCase().replace(/\s+/g, '-')}`}
+                                  data-testid={`radio-gender-${option.toLowerCase().replace(/\s+/g, '-')}`}
+                                />
+                                <Label 
+                                  htmlFor={`gender-${option.toLowerCase().replace(/\s+/g, '-')}`}
+                                  className="cursor-pointer"
+                                >
+                                  {option}
+                                </Label>
+                              </div>
+                            ))}
+                          </RadioGroup>
+                        </FormControl>
+                        <FormDescription>
+                          This can only be changed once after signup.
                         </FormDescription>
                         <FormMessage />
                       </FormItem>

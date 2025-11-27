@@ -170,7 +170,12 @@ export class DbStorage implements IStorage {
   }
 
   async updateUser(id: string, updates: Partial<InsertUser>): Promise<User> {
-    const result = await db.update(users).set(updates).where(eq(users.id, id)).returning();
+    // If gender is being updated, set genderEditedAt timestamp
+    const updatesWithTimestamp = { ...updates } as any;
+    if (updates.gender !== undefined) {
+      updatesWithTimestamp.genderEditedAt = new Date();
+    }
+    const result = await db.update(users).set(updatesWithTimestamp).where(eq(users.id, id)).returning();
     return result[0];
   }
 

@@ -35,10 +35,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const passwordHash = await hashPassword(password);
+      
+      // If gender is provided during signup, set genderEditedAt to lock it
+      const userDataWithGenderTimestamp = userData.gender 
+        ? { ...userData, genderEditedAt: new Date() }
+        : userData;
+      
       const user = await storage.createUser({
-        ...userData,
+        ...userDataWithGenderTimestamp,
         passwordHash,
-      });
+      } as any);
 
       req.login(userToSessionUser(user), (err) => {
         if (err) {
@@ -97,6 +103,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const { updateUserSchema } = await import("@shared/schema");
       const updates = updateUserSchema.parse(req.body);
+      
+      // Check if user is trying to update gender
+      if (updates.gender !== undefined) {
+        const currentUser = await storage.getUser(userId);
+        if (currentUser?.genderEditedAt) {
+          return res.status(400).json({ message: "Gender can only be changed once" });
+        }
+      }
       
       const updatedUser = await storage.updateUser(userId, updates);
       res.json(updatedUser);

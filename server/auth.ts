@@ -21,6 +21,8 @@ export type SessionUser = {
   userType: string;
   displayName?: string | null;
   organizationName?: string | null;
+  gender?: string | null;
+  genderEditedAt?: Date | null;
 };
 
 export function userToSessionUser(user: User): SessionUser {
@@ -31,6 +33,8 @@ export function userToSessionUser(user: User): SessionUser {
     userType: user.userType,
     displayName: user.displayName,
     organizationName: user.organizationName,
+    gender: user.gender,
+    genderEditedAt: user.genderEditedAt,
   };
 }
 

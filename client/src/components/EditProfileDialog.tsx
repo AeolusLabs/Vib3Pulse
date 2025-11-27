@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { updateUserSchema, type UpdateUser, type User } from "@shared/schema";
+import { updateUserSchema, type UpdateUser, type User, genderOptions } from "@shared/schema";
 import {
   Dialog,
   DialogContent,
@@ -14,9 +14,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -25,7 +28,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { Pencil, X } from "lucide-react";
+import { Pencil, X, Lock } from "lucide-react";
 
 interface EditProfileDialogProps {
   user: User;
@@ -39,11 +42,14 @@ export default function EditProfileDialog({ user }: EditProfileDialogProps) {
 
   const isSocialUser = user.userType === "social";
 
+  const hasEditedGender = !!user.genderEditedAt;
+
   const form = useForm<UpdateUser>({
     resolver: zodResolver(updateUserSchema),
     defaultValues: {
       displayName: user.displayName || "",
       dateOfBirth: user.dateOfBirth || "",
+      gender: user.gender || undefined,
       bio: user.bio || "",
       interests: user.interests || [],
       organizationName: user.organizationName || "",
@@ -169,6 +175,56 @@ export default function EditProfileDialog({ user }: EditProfileDialogProps) {
                           data-testid="input-dateOfBirth"
                         />
                       </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="gender"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="flex items-center gap-2">
+                        Gender
+                        {hasEditedGender && (
+                          <Lock className="h-3 w-3 text-muted-foreground" />
+                        )}
+                      </FormLabel>
+                      <FormControl>
+                        <RadioGroup
+                          onValueChange={field.onChange}
+                          value={field.value || undefined}
+                          className="flex flex-wrap gap-4"
+                          disabled={hasEditedGender}
+                        >
+                          {genderOptions.map((option) => (
+                            <div key={option} className="flex items-center space-x-2">
+                              <RadioGroupItem 
+                                value={option} 
+                                id={`edit-gender-${option.toLowerCase().replace(/\s+/g, '-')}`}
+                                disabled={hasEditedGender}
+                                data-testid={`radio-edit-gender-${option.toLowerCase().replace(/\s+/g, '-')}`}
+                              />
+                              <Label 
+                                htmlFor={`edit-gender-${option.toLowerCase().replace(/\s+/g, '-')}`}
+                                className={hasEditedGender ? "cursor-not-allowed text-muted-foreground" : "cursor-pointer"}
+                              >
+                                {option}
+                              </Label>
+                            </div>
+                          ))}
+                        </RadioGroup>
+                      </FormControl>
+                      {hasEditedGender ? (
+                        <FormDescription className="text-muted-foreground">
+                          Gender has already been set and cannot be changed.
+                        </FormDescription>
+                      ) : (
+                        <FormDescription>
+                          This can only be changed once.
+                        </FormDescription>
+                      )}
                       <FormMessage />
                     </FormItem>
                   )}
