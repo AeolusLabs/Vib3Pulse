@@ -10,7 +10,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { LogIn, Eye, EyeOff } from "lucide-react";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 
 const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),
@@ -38,6 +38,9 @@ export default function LoginPage() {
     
     try {
       await apiRequest("POST", "/api/auth/login", data);
+
+      // Invalidate session cache so useAuth updates with new user data
+      await queryClient.invalidateQueries({ queryKey: ["/api/auth/session"] });
 
       toast({
         title: "Welcome back!",

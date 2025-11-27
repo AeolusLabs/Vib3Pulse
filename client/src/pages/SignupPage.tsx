@@ -14,7 +14,7 @@ import { UserPlus, Users, Building2, ArrowRight, ArrowLeft, Check, Eye, EyeOff }
 import { Link } from "wouter";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 
 const EVENT_CATEGORIES = [
   "Music",
@@ -146,6 +146,9 @@ export default function SignupPage() {
     
     try {
       await apiRequest("POST", "/api/auth/signup", completeData);
+
+      // Invalidate session cache so useAuth updates with new user data
+      await queryClient.invalidateQueries({ queryKey: ["/api/auth/session"] });
 
       toast({
         title: "Account created!",

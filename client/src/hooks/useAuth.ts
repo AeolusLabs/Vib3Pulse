@@ -8,6 +8,8 @@ export type AuthUser = {
   userType: string;
   displayName?: string | null;
   organizationName?: string | null;
+  gender?: string | null;
+  genderEditedAt?: Date | null;
 };
 
 type AuthResponse = {
