@@ -128,6 +128,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/events/promoted", async (req, res) => {
+    try {
+      const promotedEvents = await storage.getPromotedEvents();
+      res.json(promotedEvents);
+    } catch (error) {
+      console.error('Error fetching promoted events:', error);
+      res.status(500).json({ message: "Failed to fetch promoted events" });
+    }
+  });
+
   app.get("/api/events/:id", async (req, res) => {
     try {
       const event = await storage.getEvent(req.params.id);
@@ -147,6 +157,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...parsedData,
         organizerId: req.user!.id,
       });
+      
+      // Auto-generate promotional post for followers
+      const user = await storage.getUser(req.user!.id);
+      const eventDate = new Date(event.eventDate).toLocaleDateString('en-US', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      });
+      const postContent = `🎉 New Event: ${event.title}\n\n📅 ${eventDate}\n📍 ${event.location}\n\n${event.description.substring(0, 150)}${event.description.length > 150 ? '...' : ''}`;
+      
+      await storage.createEventPost(req.user!.id, event.id, postContent, event.imageUrl || undefined);
+      
       res.json(event);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -269,6 +292,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error deleting ticket tier:', error);
       res.status(500).json({ message: "Failed to delete ticket tier" });
+    }
+  });
+
+  // Event Promotion & Analytics
+  app.post("/api/events/:id/promote", requireOrganizer, async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.id);
+      if (!event) {
+        return res.status(404).json({ message: "Event not found" });
+      }
+      
+      if (event.organizerId !== req.user!.id) {
+        return res.status(403).json({ message: "Not authorized to promote this event" });
+      }
+      
+      const { durationDays } = req.body;
+      if (!durationDays || typeof durationDays !== 'number' || durationDays < 1 || durationDays > 30) {
+        return res.status(400).json({ message: "Invalid duration. Must be between 1 and 30 days" });
+      }
+      
+      const promotedEvent = await storage.promoteEvent(req.params.id, durationDays);
+      res.json(promotedEvent);
+    } catch (error) {
+      console.error('Error promoting event:', error);
+      res.status(500).json({ message: "Failed to promote event" });
+    }
+  });
+
+  app.get("/api/events/:id/analytics", requireOrganizer, async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.id);
+      if (!event) {
+        return res.status(404).json({ message: "Event not found" });
+      }
+      
+      if (event.organizerId !== req.user!.id) {
+        return res.status(403).json({ message: "Not authorized to view analytics for this event" });
+      }
+      
+      const analytics = await storage.getEventAnalytics(req.params.id);
+      res.json(analytics);
+    } catch (error) {
+      console.error('Error fetching event analytics:', error);
+      res.status(500).json({ message: "Failed to fetch event analytics" });
+    }
+  });
+
+  app.post("/api/events/:id/track-view", async (req, res) => {
+    try {
+      const userId = req.user?.id;
+      await storage.trackEventView(req.params.id, userId);
+      res.json({ message: "View tracked" });
+    } catch (error) {
+      console.error('Error tracking view:', error);
+      res.status(500).json({ message: "Failed to track view" });
+    }
+  });
+
+  app.post("/api/events/:id/track-click", async (req, res) => {
+    try {
+      const { actionType } = req.body;
+      if (!actionType || typeof actionType !== 'string') {
+        return res.status(400).json({ message: "Invalid action type" });
+      }
+      
+      const userId = req.user?.id;
+      await storage.trackEventClick(req.params.id, actionType, userId);
+      res.json({ message: "Click tracked" });
+    } catch (error) {
+      console.error('Error tracking click:', error);
+      res.status(500).json({ message: "Failed to track click" });
     }
   });
 
@@ -1159,7 +1253,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const message = distressMessage || "I need help! Please check on me.";
 
       // Log the alert
-      await storage.logDistressAlert(userId, buddy.id, message, latitude, longitude);
+      await storage.logDistressAlert(userId, buddy.id, message, latitude || undefined, longitude || undefined);
 
       // Send in-app notification via WebSocket
       const user = await storage.getUser(userId);

@@ -5,9 +5,11 @@ import { Badge } from "@/components/ui/badge";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import { useState } from "react";
-import { Edit, Trash2, BarChart3, Eye, EyeOff, Calendar, MapPin, QrCode } from "lucide-react";
+import { Edit, Trash2, BarChart3, Eye, EyeOff, Calendar, MapPin, QrCode, Megaphone, Sparkles } from "lucide-react";
 import { Link } from "wouter";
 import CreateEventModal from "@/components/CreateEventModal";
+import { PromoteEventDialog } from "@/components/PromoteEventDialog";
+import { EventAnalytics } from "@/components/EventAnalytics";
 import yogaEvent from '@assets/generated_images/Outdoor_yoga_wellness_event_c02f75d1.png';
 import { useQuery } from "@tanstack/react-query";
 import type { Event as DBEvent } from "@shared/schema";
@@ -25,11 +27,16 @@ interface Event {
   totalTickets: number;
   revenue: number;
   isPublished: boolean;
+  isPromoted: boolean;
+  promotedUntil: Date | null;
 }
 
 export default function ManageEventsPage() {
   const [createEventOpen, setCreateEventOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<DBEvent | undefined>(undefined);
+  const [promoteEventId, setPromoteEventId] = useState<string | null>(null);
+  const [promoteEventTitle, setPromoteEventTitle] = useState<string>("");
+  const [showAnalyticsFor, setShowAnalyticsFor] = useState<string | null>(null);
   
   // Fetch real events from API
   const { data: dbEvents = [], isLoading } = useQuery<DBEvent[]>({
@@ -41,6 +48,8 @@ export default function ManageEventsPage() {
   const transformEvent = (event: DBEvent): Event => {
     const eventDate = new Date(event.eventDate);
     const isPast = eventDate < now;
+    const promotedUntil = event.promotedUntil ? new Date(event.promotedUntil) : null;
+    const isCurrentlyPromoted = event.isPromoted && promotedUntil && promotedUntil > now;
     
     return {
       id: event.id,
@@ -51,11 +60,18 @@ export default function ManageEventsPage() {
       location: event.location,
       type: event.category,
       status: isPast ? 'completed' : 'published',
-      ticketsSold: 0, // TODO: Get from tickets table
+      ticketsSold: 0,
       totalTickets: event.ticketsAvailable,
-      revenue: 0, // TODO: Calculate from sold tickets
-      isPublished: true, // TODO: Add isPublished field to schema
+      revenue: 0,
+      isPublished: true,
+      isPromoted: isCurrentlyPromoted || false,
+      promotedUntil: promotedUntil,
     };
+  };
+
+  const handlePromoteEvent = (eventId: string, eventTitle: string) => {
+    setPromoteEventId(eventId);
+    setPromoteEventTitle(eventTitle);
   };
 
   const allEvents = dbEvents.map(transformEvent);
@@ -95,7 +111,13 @@ export default function ManageEventsPage() {
             alt={event.title}
             className="w-full h-full object-cover"
           />
-          <div className="absolute top-2 right-2">
+          <div className="absolute top-2 right-2 flex flex-col gap-1">
+            {event.isPromoted && (
+              <Badge className="bg-gradient-to-r from-purple-500 to-pink-500 text-white">
+                <Sparkles className="h-3 w-3 mr-1" />
+                Featured
+              </Badge>
+            )}
             {event.status === 'published' && (
               <Badge className="bg-green-500">Published</Badge>
             )}
@@ -196,11 +218,24 @@ export default function ManageEventsPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => handleViewStats(event.id)}
+            onClick={() => setShowAnalyticsFor(showAnalyticsFor === event.id ? null : event.id)}
             data-testid={`button-view-stats-${event.id}`}
           >
             <BarChart3 className="h-4 w-4 mr-2" />
             Stats
+          </Button>
+        )}
+
+        {event.status === 'published' && !event.isPromoted && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handlePromoteEvent(event.id, event.title)}
+            className="text-purple-600 border-purple-300 hover:bg-purple-50"
+            data-testid={`button-promote-${event.id}`}
+          >
+            <Megaphone className="h-4 w-4 mr-2" />
+            Promote
           </Button>
         )}
 
@@ -213,6 +248,12 @@ export default function ManageEventsPage() {
           <Trash2 className="h-4 w-4 text-destructive" />
         </Button>
       </CardFooter>
+      
+      {showAnalyticsFor === event.id && (
+        <div className="px-6 pb-6">
+          <EventAnalytics eventId={event.id} />
+        </div>
+      )}
     </Card>
   );
 
@@ -316,6 +357,18 @@ export default function ManageEventsPage() {
         }}
         event={editingEvent}
       />
+
+      {promoteEventId && (
+        <PromoteEventDialog
+          eventId={promoteEventId}
+          eventTitle={promoteEventTitle}
+          isOpen={!!promoteEventId}
+          onClose={() => {
+            setPromoteEventId(null);
+            setPromoteEventTitle("");
+          }}
+        />
+      )}
 
       <BottomNavigation onCreateClick={() => setCreateEventOpen(true)} />
     </div>

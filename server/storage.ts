@@ -29,6 +29,8 @@ import {
   type InsertDistressMessage,
   type DistressAlert,
   type InsertDistressAlert,
+  type EventAnalytics,
+  type InsertEventAnalytics,
   users,
   events,
   tickets,
@@ -43,11 +45,12 @@ import {
   bookmarks,
   buddies,
   distressMessages,
-  distressAlerts
+  distressAlerts,
+  eventAnalytics
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/neon-serverless";
 import { Pool, neonConfig } from "@neondatabase/serverless";
-import { eq, and, gte, lt, or, ilike, desc } from "drizzle-orm";
+import { eq, and, gte, lt, or, ilike, desc, sql, count } from "drizzle-orm";
 import ws from "ws";
 
 neonConfig.webSocketConstructor = ws;
@@ -135,6 +138,14 @@ export interface IStorage {
   getDistressMessage(userId: string): Promise<string | undefined>;
   logDistressAlert(userId: string, buddyId: string, message: string, latitude?: string, longitude?: string): Promise<void>;
   getDistressAlerts(userId: string): Promise<any[]>;
+
+  trackEventView(eventId: string, userId?: string): Promise<void>;
+  trackEventClick(eventId: string, actionType: string, userId?: string): Promise<void>;
+  getEventAnalytics(eventId: string): Promise<{ views: number; clicks: number; rsvps: number; ticketsSold: number }>;
+  promoteEvent(eventId: string, durationDays: number): Promise<Event>;
+  getPromotedEvents(): Promise<Event[]>;
+  createEventPost(userId: string, eventId: string, content: string, imageUrl?: string): Promise<Post>;
+  getFollowerIds(userId: string): Promise<string[]>;
 }
 
 export class DbStorage implements IStorage {
@@ -779,6 +790,92 @@ export class DbStorage implements IStorage {
     return [...sentAlerts, ...receivedAlerts].sort((a, b) => 
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
+  }
+
+  async trackEventView(eventId: string, userId?: string): Promise<void> {
+    await db.insert(eventAnalytics).values({
+      eventId,
+      userId: userId || null,
+      actionType: 'view',
+    });
+  }
+
+  async trackEventClick(eventId: string, actionType: string, userId?: string): Promise<void> {
+    await db.insert(eventAnalytics).values({
+      eventId,
+      userId: userId || null,
+      actionType,
+    });
+  }
+
+  async getEventAnalytics(eventId: string): Promise<{ views: number; clicks: number; rsvps: number; ticketsSold: number }> {
+    const viewsResult = await db
+      .select({ count: count() })
+      .from(eventAnalytics)
+      .where(and(eq(eventAnalytics.eventId, eventId), eq(eventAnalytics.actionType, 'view')));
+    
+    const clicksResult = await db
+      .select({ count: count() })
+      .from(eventAnalytics)
+      .where(and(eq(eventAnalytics.eventId, eventId), eq(eventAnalytics.actionType, 'click')));
+    
+    const rsvpsResult = await db
+      .select({ count: count() })
+      .from(rsvps)
+      .where(eq(rsvps.eventId, eventId));
+    
+    const ticketsResult = await db
+      .select({ count: count() })
+      .from(tickets)
+      .where(eq(tickets.eventId, eventId));
+    
+    return {
+      views: viewsResult[0]?.count || 0,
+      clicks: clicksResult[0]?.count || 0,
+      rsvps: rsvpsResult[0]?.count || 0,
+      ticketsSold: ticketsResult[0]?.count || 0,
+    };
+  }
+
+  async promoteEvent(eventId: string, durationDays: number): Promise<Event> {
+    const promotedUntil = new Date();
+    promotedUntil.setDate(promotedUntil.getDate() + durationDays);
+    
+    const result = await db
+      .update(events)
+      .set({ isPromoted: true, promotedUntil })
+      .where(eq(events.id, eventId))
+      .returning();
+    
+    return result[0];
+  }
+
+  async getPromotedEvents(): Promise<Event[]> {
+    const now = new Date();
+    return await db
+      .select()
+      .from(events)
+      .where(and(eq(events.isPromoted, true), gte(events.promotedUntil, now)))
+      .orderBy(desc(events.promotedUntil));
+  }
+
+  async createEventPost(userId: string, eventId: string, content: string, imageUrl?: string): Promise<Post> {
+    const result = await db.insert(posts).values({
+      userId,
+      eventId,
+      content,
+      imageUrl,
+    }).returning();
+    return result[0];
+  }
+
+  async getFollowerIds(userId: string): Promise<string[]> {
+    const result = await db
+      .select({ followerId: follows.followerId })
+      .from(follows)
+      .where(eq(follows.followingId, userId));
+    
+    return result.map(r => r.followerId);
   }
 }
 

@@ -9,7 +9,7 @@ import CreateEventModal from "@/components/CreateEventModal";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar, MapPin, Users } from "lucide-react";
+import { Calendar, MapPin, Users, Sparkles } from "lucide-react";
 import { format } from "date-fns";
 import type { Event } from "@shared/schema";
 
@@ -23,7 +23,19 @@ export default function DiscoverPage() {
     queryKey: ["/api/events"],
   });
 
+  const { data: promotedEvents = [] } = useQuery<Event[]>({
+    queryKey: ["/api/events/promoted"],
+  });
+
   const filteredEvents = events.filter(event => {
+    const matchesCategory = selectedCategory === "All Events" || event.category === selectedCategory;
+    const matchesSearch = event.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         event.location.toLowerCase().includes(searchQuery.toLowerCase());
+    const isNotPromoted = !promotedEvents.some(pe => pe.id === event.id);
+    return matchesCategory && matchesSearch && isNotPromoted;
+  });
+
+  const filteredPromotedEvents = promotedEvents.filter(event => {
     const matchesCategory = selectedCategory === "All Events" || event.category === selectedCategory;
     const matchesSearch = event.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          event.location.toLowerCase().includes(searchQuery.toLowerCase());
@@ -33,7 +45,6 @@ export default function DiscoverPage() {
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
       <Navigation
-        userType="organizer"
         onSearch={setSearchQuery}
         onCreateEvent={() => setCreateEventOpen(true)}
       />
@@ -52,6 +63,83 @@ export default function DiscoverPage() {
           </div>
         ) : (
           <>
+            {filteredPromotedEvents.length > 0 && (
+              <div className="mb-8">
+                <div className="flex items-center gap-2 mb-4">
+                  <Sparkles className="h-5 w-5 text-purple-500" />
+                  <h2 className="text-xl font-semibold">Featured Events</h2>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" data-testid="featured-events-grid">
+                  {filteredPromotedEvents.map((event) => (
+                    <Card 
+                      key={event.id} 
+                      className="hover-elevate cursor-pointer overflow-hidden border-2 border-purple-300 bg-gradient-to-br from-purple-50/50 to-pink-50/50 dark:from-purple-950/20 dark:to-pink-950/20"
+                      onClick={() => setSelectedEvent(event)}
+                      data-testid={`featured-event-card-${event.id}`}
+                    >
+                      {event.imageUrl && (
+                        <div className="aspect-video w-full overflow-hidden relative">
+                          <img 
+                            src={event.imageUrl} 
+                            alt={event.title}
+                            className="w-full h-full object-cover"
+                          />
+                          <Badge className="absolute top-2 right-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white">
+                            <Sparkles className="h-3 w-3 mr-1" />
+                            Featured
+                          </Badge>
+                        </div>
+                      )}
+                      <CardHeader className="space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <h3 className="font-semibold text-lg line-clamp-2">
+                            {event.title}
+                          </h3>
+                          <Badge variant="secondary">
+                            {event.category}
+                          </Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-2">
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Calendar className="h-4 w-4" />
+                          <span>
+                            {format(new Date(event.eventDate), "MMM d, yyyy 'at' h:mm a")}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <MapPin className="h-4 w-4" />
+                          <span className="line-clamp-1">
+                            {event.location}
+                          </span>
+                        </div>
+                      </CardContent>
+                      <CardFooter className="flex items-center justify-between gap-2">
+                        {event.ticketPrice === 0 ? (
+                          <Badge variant="default" className="text-base">
+                            Free
+                          </Badge>
+                        ) : (
+                          <span className="font-semibold text-lg">
+                            ${(event.ticketPrice / 100).toFixed(2)}
+                          </span>
+                        )}
+                        <Button 
+                          size="sm" 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedEvent(event);
+                          }}
+                        >
+                          View Details
+                        </Button>
+                      </CardFooter>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" data-testid="events-grid">
               {filteredEvents.map((event) => (
                 <Card 

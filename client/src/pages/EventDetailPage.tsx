@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Calendar, MapPin, Share2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useRoute } from "wouter";
@@ -10,6 +11,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
 import TicketSelector from "@/components/TicketSelector";
 import EventCard from "@/components/EventCard";
+import { apiRequest } from "@/lib/queryClient";
 import type { Event, User } from "@shared/schema";
 import musicFestival from '@assets/generated_images/Outdoor_music_festival_event_179040d3.png';
 
@@ -23,6 +25,12 @@ export default function EventDetailPage() {
     queryKey: ["/api/events", eventId],
     enabled: !!eventId,
   });
+
+  useEffect(() => {
+    if (eventId) {
+      apiRequest("POST", `/api/events/${eventId}/track-view`, {}).catch(() => {});
+    }
+  }, [eventId]);
 
   const { data: similarEvents } = useQuery<Event[]>({
     queryKey: ["/api/events"],
