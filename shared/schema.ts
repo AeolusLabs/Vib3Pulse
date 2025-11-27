@@ -60,6 +60,8 @@ export const events = pgTable("events", {
   requiresRSVP: boolean("requires_rsvp").notNull().default(false),
   ticketsAvailable: integer("tickets_available").notNull(),
   imageUrl: text("image_url"),
+  isPromoted: boolean("is_promoted").notNull().default(false),
+  promotedUntil: timestamp("promoted_until"),
 });
 
 export const insertEventSchema = createInsertSchema(events).omit({
@@ -143,6 +145,7 @@ export const posts = pgTable("posts", {
   userId: varchar("user_id").notNull().references(() => users.id),
   content: text("content").notNull(),
   imageUrl: text("image_url"),
+  eventId: varchar("event_id").references(() => events.id),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
@@ -299,3 +302,19 @@ export const insertDistressAlertSchema = createInsertSchema(distressAlerts).omit
 
 export type InsertDistressAlert = z.infer<typeof insertDistressAlertSchema>;
 export type DistressAlert = typeof distressAlerts.$inferSelect;
+
+export const eventAnalytics = pgTable("event_analytics", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventId: varchar("event_id").notNull().references(() => events.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").references(() => users.id),
+  actionType: text("action_type").notNull(),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const insertEventAnalyticsSchema = createInsertSchema(eventAnalytics).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertEventAnalytics = z.infer<typeof insertEventAnalyticsSchema>;
+export type EventAnalytics = typeof eventAnalytics.$inferSelect;
