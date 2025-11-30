@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertEventSchema, eventCreateDto, eventUpdateDto, insertTicketSchema, insertRsvpSchema, insertUserSchema, insertPostSchema, insertStorySchema } from "@shared/schema";
+import { insertEventSchema, eventCreateDto, eventUpdateDto, insertTicketSchema, insertRsvpSchema, insertUserSchema, insertPostSchema, insertStorySchema, insertVenueSchema, insertVenueEntryNightSchema, venueCategories } from "@shared/schema";
 import { hashPassword, userToSessionUser } from "./auth";
 import { requireAuth, requireOrganizer } from "./middleware";
 import passport from "passport";
@@ -1306,6 +1306,382 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Get alerts error:", error);
       res.status(500).json({ message: "Failed to get distress alerts" });
+    }
+  });
+
+  // ==================== VENUE ROUTES ====================
+
+  // Get all venues
+  app.get("/api/venues", async (req, res) => {
+    try {
+      const allVenues = await storage.getVenues();
+      res.json(allVenues);
+    } catch (error) {
+      console.error("Get venues error:", error);
+      res.status(500).json({ message: "Failed to get venues" });
+    }
+  });
+
+  // Get promoted/featured venues
+  app.get("/api/venues/promoted", async (req, res) => {
+    try {
+      const promotedVenues = await storage.getPromotedVenues();
+      res.json(promotedVenues);
+    } catch (error) {
+      console.error("Get promoted venues error:", error);
+      res.status(500).json({ message: "Failed to get promoted venues" });
+    }
+  });
+
+  // Get venue categories
+  app.get("/api/venues/categories", (req, res) => {
+    res.json(venueCategories);
+  });
+
+  // Get single venue
+  app.get("/api/venues/:id", async (req, res) => {
+    try {
+      const venue = await storage.getVenue(req.params.id);
+      if (!venue) {
+        return res.status(404).json({ message: "Venue not found" });
+      }
+      
+      // Track venue view
+      await storage.trackVenueView(req.params.id, req.user?.id);
+      
+      res.json(venue);
+    } catch (error) {
+      console.error("Get venue error:", error);
+      res.status(500).json({ message: "Failed to get venue" });
+    }
+  });
+
+  // Get venues owned by current user
+  app.get("/api/my-venues", requireOrganizer, async (req, res) => {
+    try {
+      const myVenues = await storage.getVenuesByOwner(req.user!.id);
+      res.json(myVenues);
+    } catch (error) {
+      console.error("Get my venues error:", error);
+      res.status(500).json({ message: "Failed to get your venues" });
+    }
+  });
+
+  // Create venue
+  app.post("/api/venues", requireOrganizer, async (req, res) => {
+    try {
+      const venueData = insertVenueSchema.parse({
+        ...req.body,
+        ownerId: req.user!.id,
+      });
+      
+      const venue = await storage.createVenue(venueData);
+      res.status(201).json(venue);
+    } catch (error) {
+      console.error("Create venue error:", error);
+      res.status(400).json({ message: "Failed to create venue" });
+    }
+  });
+
+  // Update venue
+  app.patch("/api/venues/:id", requireOrganizer, async (req, res) => {
+    try {
+      const venue = await storage.getVenue(req.params.id);
+      if (!venue) {
+        return res.status(404).json({ message: "Venue not found" });
+      }
+      
+      // Check ownership
+      if (venue.ownerId !== req.user!.id) {
+        return res.status(403).json({ message: "You can only update your own venues" });
+      }
+      
+      const updatedVenue = await storage.updateVenue(req.params.id, req.body);
+      res.json(updatedVenue);
+    } catch (error) {
+      console.error("Update venue error:", error);
+      res.status(400).json({ message: "Failed to update venue" });
+    }
+  });
+
+  // Delete venue
+  app.delete("/api/venues/:id", requireOrganizer, async (req, res) => {
+    try {
+      const venue = await storage.getVenue(req.params.id);
+      if (!venue) {
+        return res.status(404).json({ message: "Venue not found" });
+      }
+      
+      // Check ownership
+      if (venue.ownerId !== req.user!.id) {
+        return res.status(403).json({ message: "You can only delete your own venues" });
+      }
+      
+      await storage.deleteVenue(req.params.id);
+      res.json({ message: "Venue deleted successfully" });
+    } catch (error) {
+      console.error("Delete venue error:", error);
+      res.status(500).json({ message: "Failed to delete venue" });
+    }
+  });
+
+  // Promote venue
+  app.post("/api/venues/:id/promote", requireOrganizer, async (req, res) => {
+    try {
+      const venue = await storage.getVenue(req.params.id);
+      if (!venue) {
+        return res.status(404).json({ message: "Venue not found" });
+      }
+      
+      if (venue.ownerId !== req.user!.id) {
+        return res.status(403).json({ message: "You can only promote your own venues" });
+      }
+      
+      const { durationDays } = req.body;
+      if (!durationDays || ![3, 7, 14, 30].includes(durationDays)) {
+        return res.status(400).json({ message: "Invalid promotion duration" });
+      }
+      
+      const promotedVenue = await storage.promoteVenue(req.params.id, durationDays);
+      res.json(promotedVenue);
+    } catch (error) {
+      console.error("Promote venue error:", error);
+      res.status(500).json({ message: "Failed to promote venue" });
+    }
+  });
+
+  // Get venue analytics
+  app.get("/api/venues/:id/analytics", requireOrganizer, async (req, res) => {
+    try {
+      const venue = await storage.getVenue(req.params.id);
+      if (!venue) {
+        return res.status(404).json({ message: "Venue not found" });
+      }
+      
+      if (venue.ownerId !== req.user!.id) {
+        return res.status(403).json({ message: "You can only view analytics for your own venues" });
+      }
+      
+      const analytics = await storage.getVenueAnalytics(req.params.id);
+      res.json(analytics);
+    } catch (error) {
+      console.error("Get venue analytics error:", error);
+      res.status(500).json({ message: "Failed to get venue analytics" });
+    }
+  });
+
+  // ==================== VENUE ENTRY NIGHTS ROUTES ====================
+
+  // Get entry nights for a venue
+  app.get("/api/venues/:venueId/entry-nights", async (req, res) => {
+    try {
+      const entryNights = await storage.getVenueEntryNights(req.params.venueId);
+      res.json(entryNights);
+    } catch (error) {
+      console.error("Get entry nights error:", error);
+      res.status(500).json({ message: "Failed to get entry nights" });
+    }
+  });
+
+  // Get upcoming entry nights for a venue (for ticket purchasing)
+  app.get("/api/venues/:venueId/entry-nights/upcoming", async (req, res) => {
+    try {
+      const upcomingNights = await storage.getUpcomingVenueEntryNights(req.params.venueId);
+      res.json(upcomingNights);
+    } catch (error) {
+      console.error("Get upcoming entry nights error:", error);
+      res.status(500).json({ message: "Failed to get upcoming entry nights" });
+    }
+  });
+
+  // Create entry night
+  app.post("/api/venues/:venueId/entry-nights", requireOrganizer, async (req, res) => {
+    try {
+      const venue = await storage.getVenue(req.params.venueId);
+      if (!venue) {
+        return res.status(404).json({ message: "Venue not found" });
+      }
+      
+      if (venue.ownerId !== req.user!.id) {
+        return res.status(403).json({ message: "You can only create entry nights for your own venues" });
+      }
+      
+      const entryNightData = insertVenueEntryNightSchema.parse({
+        ...req.body,
+        venueId: req.params.venueId,
+      });
+      
+      const entryNight = await storage.createVenueEntryNight(entryNightData);
+      res.status(201).json(entryNight);
+    } catch (error) {
+      console.error("Create entry night error:", error);
+      res.status(400).json({ message: "Failed to create entry night" });
+    }
+  });
+
+  // Update entry night
+  app.patch("/api/entry-nights/:id", requireOrganizer, async (req, res) => {
+    try {
+      const entryNight = await storage.getVenueEntryNight(req.params.id);
+      if (!entryNight) {
+        return res.status(404).json({ message: "Entry night not found" });
+      }
+      
+      const venue = await storage.getVenue(entryNight.venueId);
+      if (!venue || venue.ownerId !== req.user!.id) {
+        return res.status(403).json({ message: "You can only update entry nights for your own venues" });
+      }
+      
+      const updatedEntryNight = await storage.updateVenueEntryNight(req.params.id, req.body);
+      res.json(updatedEntryNight);
+    } catch (error) {
+      console.error("Update entry night error:", error);
+      res.status(400).json({ message: "Failed to update entry night" });
+    }
+  });
+
+  // Delete entry night
+  app.delete("/api/entry-nights/:id", requireOrganizer, async (req, res) => {
+    try {
+      const entryNight = await storage.getVenueEntryNight(req.params.id);
+      if (!entryNight) {
+        return res.status(404).json({ message: "Entry night not found" });
+      }
+      
+      const venue = await storage.getVenue(entryNight.venueId);
+      if (!venue || venue.ownerId !== req.user!.id) {
+        return res.status(403).json({ message: "You can only delete entry nights for your own venues" });
+      }
+      
+      await storage.deleteVenueEntryNight(req.params.id);
+      res.json({ message: "Entry night deleted successfully" });
+    } catch (error) {
+      console.error("Delete entry night error:", error);
+      res.status(500).json({ message: "Failed to delete entry night" });
+    }
+  });
+
+  // ==================== VENUE TICKET ROUTES ====================
+
+  // Get user's venue tickets
+  app.get("/api/my-venue-tickets", requireAuth, async (req, res) => {
+    try {
+      const tickets = await storage.getUserVenueTickets(req.user!.id);
+      res.json(tickets);
+    } catch (error) {
+      console.error("Get user venue tickets error:", error);
+      res.status(500).json({ message: "Failed to get your venue tickets" });
+    }
+  });
+
+  // Create payment intent for venue entry ticket
+  app.post("/api/venue-tickets/create-payment-intent", requireAuth, async (req, res) => {
+    try {
+      const { entryNightId } = req.body;
+      
+      const entryNight = await storage.getVenueEntryNight(entryNightId);
+      if (!entryNight) {
+        return res.status(404).json({ message: "Entry night not found" });
+      }
+      
+      if (!entryNight.isActive) {
+        return res.status(400).json({ message: "This entry night is no longer available" });
+      }
+      
+      // Check capacity
+      if (entryNight.capacity && entryNight.ticketsSold >= entryNight.capacity) {
+        return res.status(400).json({ message: "This entry night is sold out" });
+      }
+      
+      const venue = await storage.getVenue(entryNight.venueId);
+      if (!venue) {
+        return res.status(404).json({ message: "Venue not found" });
+      }
+      
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: entryNight.coverPriceCents,
+        currency: "usd",
+        metadata: {
+          type: "venue_entry",
+          entryNightId,
+          venueId: venue.id,
+          userId: req.user!.id,
+        },
+      });
+      
+      res.json({ clientSecret: paymentIntent.client_secret });
+    } catch (error) {
+      console.error("Create venue payment intent error:", error);
+      res.status(500).json({ message: "Failed to create payment" });
+    }
+  });
+
+  // Confirm venue ticket purchase
+  app.post("/api/venue-tickets/confirm", requireAuth, async (req, res) => {
+    try {
+      const { entryNightId, paymentIntentId } = req.body;
+      
+      const entryNight = await storage.getVenueEntryNight(entryNightId);
+      if (!entryNight) {
+        return res.status(404).json({ message: "Entry night not found" });
+      }
+      
+      // Create ticket
+      const ticket = await storage.createVenueTicket({
+        userId: req.user!.id,
+        venueEntryNightId: entryNightId,
+        stripePaymentIntentId: paymentIntentId,
+        status: "confirmed",
+      });
+      
+      // Increment tickets sold
+      await storage.incrementVenueEntryNightTicketsSold(entryNightId);
+      
+      // Generate QR code
+      const qrCodeDataUrl = await QRCode.toDataURL(ticket.validationCode);
+      
+      res.json({ ticket, qrCode: qrCodeDataUrl });
+    } catch (error) {
+      console.error("Confirm venue ticket error:", error);
+      res.status(500).json({ message: "Failed to confirm ticket purchase" });
+    }
+  });
+
+  // Validate venue ticket (for check-in)
+  app.post("/api/venue-tickets/validate", requireOrganizer, async (req, res) => {
+    try {
+      const { validationCode } = req.body;
+      
+      const ticket = await storage.getVenueTicketByValidationCode(validationCode);
+      if (!ticket) {
+        return res.status(404).json({ message: "Invalid ticket" });
+      }
+      
+      if (ticket.status === "checked_in") {
+        return res.status(400).json({ message: "Ticket already used" });
+      }
+      
+      const entryNight = await storage.getVenueEntryNight(ticket.venueEntryNightId);
+      if (!entryNight) {
+        return res.status(404).json({ message: "Entry night not found" });
+      }
+      
+      const venue = await storage.getVenue(entryNight.venueId);
+      if (!venue || venue.ownerId !== req.user!.id) {
+        return res.status(403).json({ message: "You can only validate tickets for your own venues" });
+      }
+      
+      const checkedInTicket = await storage.checkInVenueTicket(ticket.id, req.user!.id);
+      
+      res.json({ 
+        success: true, 
+        ticket: checkedInTicket,
+        entryNight,
+        venue
+      });
+    } catch (error) {
+      console.error("Validate venue ticket error:", error);
+      res.status(500).json({ message: "Failed to validate ticket" });
     }
   });
 
