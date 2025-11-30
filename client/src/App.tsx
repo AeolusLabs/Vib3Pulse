@@ -22,6 +22,8 @@ import SearchPage from "@/pages/SearchPage";
 import MessagesPage from "@/pages/MessagesPage";
 import BuddySettingsPage from "@/pages/BuddySettingsPage";
 import DistressAlertsPage from "@/pages/DistressAlertsPage";
+import ManageVenuesPage from "@/pages/ManageVenuesPage";
+import VenueDetailPage from "@/pages/VenueDetailPage";
 
 function Router() {
   return (
@@ -110,6 +112,14 @@ function Router() {
           <DistressAlertsPage />
         </AuthenticatedLayout>
       </Route>
+      
+      <Route path="/manage-venues">
+        <AuthenticatedLayout>
+          <ManageVenuesPage />
+        </AuthenticatedLayout>
+      </Route>
+      
+      <Route path="/venue/:id" component={VenueDetailPage} />
       
       <Route component={NotFound} />
     </Switch>

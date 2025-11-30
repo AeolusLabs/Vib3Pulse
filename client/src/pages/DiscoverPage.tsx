@@ -9,9 +9,10 @@ import CreateEventModal from "@/components/CreateEventModal";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar, MapPin, Users, Sparkles } from "lucide-react";
+import { Calendar, MapPin, Users, Sparkles, Building2, Music } from "lucide-react";
 import { format } from "date-fns";
-import type { Event } from "@shared/schema";
+import { Link } from "wouter";
+import type { Event, Venue } from "@shared/schema";
 
 export default function DiscoverPage() {
   const [selectedCategory, setSelectedCategory] = useState("All Events");
@@ -25,6 +26,10 @@ export default function DiscoverPage() {
 
   const { data: promotedEvents = [] } = useQuery<Event[]>({
     queryKey: ["/api/events/promoted"],
+  });
+
+  const { data: promotedVenues = [] } = useQuery<Venue[]>({
+    queryKey: ["/api/venues/promoted"],
   });
 
   const filteredEvents = events.filter(event => {
@@ -135,6 +140,61 @@ export default function DiscoverPage() {
                         </Button>
                       </CardFooter>
                     </Card>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {promotedVenues.length > 0 && (
+              <div className="mb-8">
+                <div className="flex items-center gap-2 mb-4">
+                  <Building2 className="h-5 w-5 text-purple-500" />
+                  <h2 className="text-xl font-semibold">Featured Venues</h2>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6" data-testid="featured-venues-grid">
+                  {promotedVenues.map((venue) => (
+                    <Link key={venue.id} href={`/venue/${venue.id}`}>
+                      <Card 
+                        className="hover-elevate cursor-pointer overflow-hidden border-2 border-purple-300 bg-gradient-to-br from-purple-50/50 to-pink-50/50 dark:from-purple-950/20 dark:to-pink-950/20"
+                        data-testid={`featured-venue-card-${venue.id}`}
+                      >
+                        {(venue.coverImageUrl || venue.imageUrl) && (
+                          <div className="aspect-video w-full overflow-hidden relative">
+                            <img 
+                              src={venue.coverImageUrl || venue.imageUrl || ""}
+                              alt={venue.name}
+                              className="w-full h-full object-cover"
+                            />
+                            <Badge className="absolute top-2 right-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white">
+                              <Sparkles className="h-3 w-3 mr-1" />
+                              Featured
+                            </Badge>
+                          </div>
+                        )}
+                        <CardHeader className="space-y-1 pb-2">
+                          <h3 className="font-semibold text-base line-clamp-1" data-testid={`venue-name-${venue.id}`}>
+                            {venue.name}
+                          </h3>
+                          <Badge variant="secondary" className="w-fit text-xs">
+                            {venue.category}
+                          </Badge>
+                        </CardHeader>
+                        <CardContent className="space-y-1 pb-3">
+                          {venue.city && (
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              <MapPin className="h-3 w-3" />
+                              <span className="line-clamp-1">{venue.city}</span>
+                            </div>
+                          )}
+                          {venue.musicTypes && Array.isArray(venue.musicTypes) && venue.musicTypes.length > 0 && (
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              <Music className="h-3 w-3" />
+                              <span className="line-clamp-1">{venue.musicTypes.slice(0, 2).join(", ")}</span>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </Link>
                   ))}
                 </div>
               </div>

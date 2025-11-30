@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, integer, boolean, unique } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, integer, boolean, unique, doublePrecision } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -334,26 +334,34 @@ export type VenueCategory = typeof venueCategories[number];
 export const venues = pgTable("venues", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   ownerId: varchar("owner_id").notNull().references(() => users.id),
-  name: text("name").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  category: varchar("category", { length: 50 }).notNull(),
   description: text("description"),
-  location: text("location").notNull(),
-  category: text("category").notNull(),
-  capacity: integer("capacity"),
+  imageUrl: varchar("image_url", { length: 512 }),
+  coverImageUrl: varchar("cover_image_url", { length: 512 }),
+  address: varchar("address", { length: 500 }),
+  city: varchar("city", { length: 100 }),
+  phone: varchar("phone", { length: 50 }),
+  website: varchar("website", { length: 255 }),
+  hours: text("hours"),
   amenities: text("amenities").array().default(sql`'{}'`),
-  operatingHours: text("operating_hours"),
-  coverImageUrl: text("cover_image_url"),
-  photos: text("photos").array().default(sql`'{}'`),
-  contactEmail: text("contact_email"),
-  contactPhone: text("contact_phone"),
-  socialMediaLinks: text("social_media_links").array().default(sql`'{}'`),
+  musicTypes: text("music_types").array().default(sql`'{}'`),
+  dressCode: varchar("dress_code", { length: 100 }),
+  ageRestriction: integer("age_restriction"),
+  latitude: doublePrecision("latitude"),
+  longitude: doublePrecision("longitude"),
   isPromoted: boolean("is_promoted").notNull().default(false),
   promotedUntil: timestamp("promoted_until"),
+  isVerified: boolean("is_verified").notNull().default(false),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").default(sql`now()`),
 });
 
 export const insertVenueSchema = createInsertSchema(venues).omit({
   id: true,
   createdAt: true,
+  updatedAt: true,
+  isVerified: true,
 });
 
 export type InsertVenue = z.infer<typeof insertVenueSchema>;

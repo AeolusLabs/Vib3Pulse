@@ -1370,8 +1370,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Create venue
   app.post("/api/venues", requireOrganizer, async (req, res) => {
     try {
+      // Derive location from address and city if not provided
+      let location = req.body.location;
+      if (!location) {
+        const parts = [req.body.address, req.body.city].filter(Boolean);
+        location = parts.length > 0 ? parts.join(", ") : req.body.name;
+      }
+      
       const venueData = insertVenueSchema.parse({
         ...req.body,
+        location,
         ownerId: req.user!.id,
       });
       
@@ -1616,7 +1624,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Confirm venue ticket purchase
+  // Confirm venue ticket purchase (requires authentication)
   app.post("/api/venue-tickets/confirm", requireAuth, async (req, res) => {
     try {
       const { entryNightId, paymentIntentId } = req.body;
