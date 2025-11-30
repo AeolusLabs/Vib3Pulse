@@ -325,3 +325,102 @@ export const insertEventAnalyticsSchema = createInsertSchema(eventAnalytics).omi
 
 export type InsertEventAnalytics = z.infer<typeof insertEventAnalyticsSchema>;
 export type EventAnalytics = typeof eventAnalytics.$inferSelect;
+
+// Venue categories
+export const venueCategories = ["Club", "Pub", "Lounge", "Bar", "Nightclub", "Rooftop"] as const;
+export type VenueCategory = typeof venueCategories[number];
+
+// Venues table for clubs, pubs, lounges
+export const venues = pgTable("venues", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  ownerId: varchar("owner_id").notNull().references(() => users.id),
+  name: text("name").notNull(),
+  description: text("description"),
+  location: text("location").notNull(),
+  category: text("category").notNull(),
+  capacity: integer("capacity"),
+  amenities: text("amenities").array().default(sql`'{}'`),
+  operatingHours: text("operating_hours"),
+  coverImageUrl: text("cover_image_url"),
+  photos: text("photos").array().default(sql`'{}'`),
+  contactEmail: text("contact_email"),
+  contactPhone: text("contact_phone"),
+  socialMediaLinks: text("social_media_links").array().default(sql`'{}'`),
+  isPromoted: boolean("is_promoted").notNull().default(false),
+  promotedUntil: timestamp("promoted_until"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const insertVenueSchema = createInsertSchema(venues).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertVenue = z.infer<typeof insertVenueSchema>;
+export type Venue = typeof venues.$inferSelect;
+
+// Venue entry nights - for cover charge nights at venues
+export const venueEntryNights = pgTable("venue_entry_nights", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  venueId: varchar("venue_id").notNull().references(() => venues.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  date: timestamp("date").notNull(),
+  coverPriceCents: integer("cover_price_cents").notNull(),
+  capacity: integer("capacity"),
+  ticketsSold: integer("tickets_sold").notNull().default(0),
+  description: text("description"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const insertVenueEntryNightSchema = createInsertSchema(venueEntryNights).omit({
+  id: true,
+  ticketsSold: true,
+  createdAt: true,
+}).extend({
+  date: z.coerce.date(),
+});
+
+export type InsertVenueEntryNight = z.infer<typeof insertVenueEntryNightSchema>;
+export type VenueEntryNight = typeof venueEntryNights.$inferSelect;
+
+// Venue entry tickets - tickets purchased for venue entry nights
+export const venueTickets = pgTable("venue_tickets", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  venueEntryNightId: varchar("venue_entry_night_id").notNull().references(() => venueEntryNights.id),
+  purchaseDate: timestamp("purchase_date").notNull().default(sql`now()`),
+  stripePaymentIntentId: text("stripe_payment_intent_id"),
+  status: text("status").notNull().default("confirmed"),
+  validationCode: varchar("validation_code").notNull().unique().default(sql`gen_random_uuid()`),
+  checkedInAt: timestamp("checked_in_at"),
+  checkedInBy: varchar("checked_in_by").references(() => users.id),
+});
+
+export const insertVenueTicketSchema = createInsertSchema(venueTickets).omit({
+  id: true,
+  purchaseDate: true,
+  validationCode: true,
+  checkedInAt: true,
+  checkedInBy: true,
+});
+
+export type InsertVenueTicket = z.infer<typeof insertVenueTicketSchema>;
+export type VenueTicket = typeof venueTickets.$inferSelect;
+
+// Venue analytics for tracking views and clicks
+export const venueAnalytics = pgTable("venue_analytics", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  venueId: varchar("venue_id").notNull().references(() => venues.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").references(() => users.id),
+  actionType: text("action_type").notNull(),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const insertVenueAnalyticsSchema = createInsertSchema(venueAnalytics).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertVenueAnalytics = z.infer<typeof insertVenueAnalyticsSchema>;
+export type VenueAnalytics = typeof venueAnalytics.$inferSelect;

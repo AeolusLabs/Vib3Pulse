@@ -31,6 +31,14 @@ import {
   type InsertDistressAlert,
   type EventAnalytics,
   type InsertEventAnalytics,
+  type Venue,
+  type InsertVenue,
+  type VenueEntryNight,
+  type InsertVenueEntryNight,
+  type VenueTicket,
+  type InsertVenueTicket,
+  type VenueAnalytics,
+  type InsertVenueAnalytics,
   users,
   events,
   tickets,
@@ -46,7 +54,11 @@ import {
   buddies,
   distressMessages,
   distressAlerts,
-  eventAnalytics
+  eventAnalytics,
+  venues,
+  venueEntryNights,
+  venueTickets,
+  venueAnalytics
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/neon-serverless";
 import { Pool, neonConfig } from "@neondatabase/serverless";
@@ -146,6 +158,37 @@ export interface IStorage {
   getPromotedEvents(): Promise<Event[]>;
   createEventPost(userId: string, eventId: string, content: string, imageUrl?: string): Promise<Post>;
   getFollowerIds(userId: string): Promise<string[]>;
+
+  // Venue methods
+  getVenues(): Promise<Venue[]>;
+  getVenue(id: string): Promise<(Venue & { owner: User }) | undefined>;
+  getVenuesByOwner(ownerId: string): Promise<Venue[]>;
+  createVenue(venue: InsertVenue): Promise<Venue>;
+  updateVenue(id: string, venue: Partial<InsertVenue>): Promise<Venue>;
+  deleteVenue(id: string): Promise<void>;
+  getPromotedVenues(): Promise<Venue[]>;
+  promoteVenue(venueId: string, durationDays: number): Promise<Venue>;
+
+  // Venue entry nights methods
+  getVenueEntryNights(venueId: string): Promise<VenueEntryNight[]>;
+  getUpcomingVenueEntryNights(venueId: string): Promise<VenueEntryNight[]>;
+  getVenueEntryNight(id: string): Promise<VenueEntryNight | undefined>;
+  createVenueEntryNight(entryNight: InsertVenueEntryNight): Promise<VenueEntryNight>;
+  updateVenueEntryNight(id: string, entryNight: Partial<InsertVenueEntryNight>): Promise<VenueEntryNight>;
+  deleteVenueEntryNight(id: string): Promise<void>;
+
+  // Venue tickets methods
+  getUserVenueTickets(userId: string): Promise<Array<VenueTicket & { entryNight: VenueEntryNight; venue: Venue }>>;
+  getVenueTicket(id: string): Promise<VenueTicket | undefined>;
+  getVenueTicketByValidationCode(validationCode: string): Promise<VenueTicket | undefined>;
+  createVenueTicket(ticket: InsertVenueTicket): Promise<VenueTicket>;
+  checkInVenueTicket(ticketId: string, organizerId: string): Promise<VenueTicket>;
+  incrementVenueEntryNightTicketsSold(entryNightId: string): Promise<void>;
+
+  // Venue analytics methods
+  trackVenueView(venueId: string, userId?: string): Promise<void>;
+  trackVenueClick(venueId: string, actionType: string, userId?: string): Promise<void>;
+  getVenueAnalytics(venueId: string): Promise<{ views: number; clicks: number; ticketsSold: number }>;
 }
 
 export class DbStorage implements IStorage {
@@ -881,6 +924,204 @@ export class DbStorage implements IStorage {
       .where(eq(follows.followingId, userId));
     
     return result.map(r => r.followerId);
+  }
+
+  // Venue methods
+  async getVenues(): Promise<Venue[]> {
+    return await db.select().from(venues).orderBy(desc(venues.createdAt));
+  }
+
+  async getVenue(id: string): Promise<(Venue & { owner: User }) | undefined> {
+    const result = await db
+      .select()
+      .from(venues)
+      .innerJoin(users, eq(venues.ownerId, users.id))
+      .where(eq(venues.id, id));
+    
+    if (!result[0]) return undefined;
+    
+    const { passwordHash, ...userWithoutPassword } = result[0].users;
+    return {
+      ...result[0].venues,
+      owner: userWithoutPassword as User,
+    };
+  }
+
+  async getVenuesByOwner(ownerId: string): Promise<Venue[]> {
+    return await db
+      .select()
+      .from(venues)
+      .where(eq(venues.ownerId, ownerId))
+      .orderBy(desc(venues.createdAt));
+  }
+
+  async createVenue(venue: InsertVenue): Promise<Venue> {
+    const result = await db.insert(venues).values(venue).returning();
+    return result[0];
+  }
+
+  async updateVenue(id: string, venueUpdate: Partial<InsertVenue>): Promise<Venue> {
+    const result = await db.update(venues).set(venueUpdate).where(eq(venues.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteVenue(id: string): Promise<void> {
+    await db.delete(venues).where(eq(venues.id, id));
+  }
+
+  async getPromotedVenues(): Promise<Venue[]> {
+    const now = new Date();
+    return await db
+      .select()
+      .from(venues)
+      .where(and(eq(venues.isPromoted, true), gte(venues.promotedUntil, now)))
+      .orderBy(desc(venues.promotedUntil));
+  }
+
+  async promoteVenue(venueId: string, durationDays: number): Promise<Venue> {
+    const promotedUntil = new Date();
+    promotedUntil.setDate(promotedUntil.getDate() + durationDays);
+    
+    const result = await db
+      .update(venues)
+      .set({ isPromoted: true, promotedUntil })
+      .where(eq(venues.id, venueId))
+      .returning();
+    
+    return result[0];
+  }
+
+  // Venue entry nights methods
+  async getVenueEntryNights(venueId: string): Promise<VenueEntryNight[]> {
+    return await db
+      .select()
+      .from(venueEntryNights)
+      .where(eq(venueEntryNights.venueId, venueId))
+      .orderBy(desc(venueEntryNights.date));
+  }
+
+  async getUpcomingVenueEntryNights(venueId: string): Promise<VenueEntryNight[]> {
+    const now = new Date();
+    return await db
+      .select()
+      .from(venueEntryNights)
+      .where(and(
+        eq(venueEntryNights.venueId, venueId),
+        gte(venueEntryNights.date, now),
+        eq(venueEntryNights.isActive, true)
+      ))
+      .orderBy(venueEntryNights.date);
+  }
+
+  async getVenueEntryNight(id: string): Promise<VenueEntryNight | undefined> {
+    const result = await db.select().from(venueEntryNights).where(eq(venueEntryNights.id, id));
+    return result[0];
+  }
+
+  async createVenueEntryNight(entryNight: InsertVenueEntryNight): Promise<VenueEntryNight> {
+    const result = await db.insert(venueEntryNights).values(entryNight).returning();
+    return result[0];
+  }
+
+  async updateVenueEntryNight(id: string, entryNight: Partial<InsertVenueEntryNight>): Promise<VenueEntryNight> {
+    const result = await db.update(venueEntryNights).set(entryNight).where(eq(venueEntryNights.id, id)).returning();
+    return result[0];
+  }
+
+  async deleteVenueEntryNight(id: string): Promise<void> {
+    await db.delete(venueEntryNights).where(eq(venueEntryNights.id, id));
+  }
+
+  // Venue tickets methods
+  async getUserVenueTickets(userId: string): Promise<Array<VenueTicket & { entryNight: VenueEntryNight; venue: Venue }>> {
+    const result = await db
+      .select()
+      .from(venueTickets)
+      .innerJoin(venueEntryNights, eq(venueTickets.venueEntryNightId, venueEntryNights.id))
+      .innerJoin(venues, eq(venueEntryNights.venueId, venues.id))
+      .where(eq(venueTickets.userId, userId))
+      .orderBy(desc(venueTickets.purchaseDate));
+    
+    return result.map(r => ({
+      ...r.venue_tickets,
+      entryNight: r.venue_entry_nights,
+      venue: r.venues,
+    }));
+  }
+
+  async getVenueTicket(id: string): Promise<VenueTicket | undefined> {
+    const result = await db.select().from(venueTickets).where(eq(venueTickets.id, id));
+    return result[0];
+  }
+
+  async getVenueTicketByValidationCode(validationCode: string): Promise<VenueTicket | undefined> {
+    const result = await db.select().from(venueTickets).where(eq(venueTickets.validationCode, validationCode));
+    return result[0];
+  }
+
+  async createVenueTicket(ticket: InsertVenueTicket): Promise<VenueTicket> {
+    const result = await db.insert(venueTickets).values(ticket).returning();
+    return result[0];
+  }
+
+  async checkInVenueTicket(ticketId: string, organizerId: string): Promise<VenueTicket> {
+    const result = await db
+      .update(venueTickets)
+      .set({ 
+        checkedInAt: new Date(),
+        checkedInBy: organizerId,
+        status: 'checked_in'
+      })
+      .where(eq(venueTickets.id, ticketId))
+      .returning();
+    return result[0];
+  }
+
+  async incrementVenueEntryNightTicketsSold(entryNightId: string): Promise<void> {
+    await db
+      .update(venueEntryNights)
+      .set({ ticketsSold: sql`${venueEntryNights.ticketsSold} + 1` })
+      .where(eq(venueEntryNights.id, entryNightId));
+  }
+
+  // Venue analytics methods
+  async trackVenueView(venueId: string, userId?: string): Promise<void> {
+    await db.insert(venueAnalytics).values({
+      venueId,
+      userId: userId || null,
+      actionType: 'view',
+    });
+  }
+
+  async trackVenueClick(venueId: string, actionType: string, userId?: string): Promise<void> {
+    await db.insert(venueAnalytics).values({
+      venueId,
+      userId: userId || null,
+      actionType,
+    });
+  }
+
+  async getVenueAnalytics(venueId: string): Promise<{ views: number; clicks: number; ticketsSold: number }> {
+    const viewsResult = await db
+      .select({ count: count() })
+      .from(venueAnalytics)
+      .where(and(eq(venueAnalytics.venueId, venueId), eq(venueAnalytics.actionType, 'view')));
+    
+    const clicksResult = await db
+      .select({ count: count() })
+      .from(venueAnalytics)
+      .where(and(eq(venueAnalytics.venueId, venueId), eq(venueAnalytics.actionType, 'click')));
+    
+    const ticketsResult = await db
+      .select({ total: sql<number>`COALESCE(SUM(${venueEntryNights.ticketsSold}), 0)` })
+      .from(venueEntryNights)
+      .where(eq(venueEntryNights.venueId, venueId));
+    
+    return {
+      views: viewsResult[0]?.count || 0,
+      clicks: clicksResult[0]?.count || 0,
+      ticketsSold: Number(ticketsResult[0]?.total) || 0,
+    };
   }
 }
 
