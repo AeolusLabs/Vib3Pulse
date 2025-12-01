@@ -217,6 +217,43 @@ Safety feature that allows social users to designate a trusted friend as their "
 
 **Note:** Architecture is ready for SMS notifications via Twilio when credentials are added
 
+### Venues Feature
+
+**Implementation Status:** ✅ Complete
+
+**Overview:**
+Venues feature allows Event Organizers to manage Clubs, Pubs, and Lounges. Venues can be promoted and sell entry tickets using the existing Stripe infrastructure.
+
+**Database Schema:**
+- `venues` table: id, ownerId, name, description, location, category (nightclub/bar/lounge/pub/rooftop/brewery/sports_bar), capacity, imageUrl, coverImageUrl, photos, address, city, phone, website, hours, musicTypes[], amenities[], dressCode, ageRestriction, isPromoted, promotedUntil, isVerified, createdAt, updatedAt
+- `venueEntryNights` table: Recurring cover charge nights for venues
+- `venueTickets` table: Purchased entry tickets with QR validation codes
+- `venueAnalytics` table: View tracking for venue analytics
+
+**API Routes:**
+- `GET /api/venues` - List all venues (with optional promoted filter)
+- `GET /api/my-venues` - Get organizer's venues (requireOrganizer)
+- `POST /api/venues` - Create venue (auto-derives location from address+city)
+- `PATCH /api/venues/:id` - Update venue (requireOrganizer)
+- `DELETE /api/venues/:id` - Delete venue (requireOrganizer)
+- `GET /api/venues/:id` - Get venue details with owner info
+- `POST /api/venues/:id/promote` - Promote venue for visibility
+- `POST /api/venues/:id/view` - Track venue view for analytics
+- Entry nights and ticket purchasing routes for venue entry management
+
+**Frontend Components:**
+- **ManageVenuesPage:** Dashboard for organizers to manage their venues
+- **CreateVenueModal:** Form for creating/editing venues with music types, amenities, dress code
+- **VenueDetailPage:** Public venue page with info, photos, hours, entry ticket purchasing
+- **PromoteVenueDialog:** Stripe-powered venue promotion dialog
+- **VenueAnalytics:** View counts and engagement analytics
+- **DiscoverPage:** Featured Venues section alongside events
+
+**Stripe Integration:**
+- Reuses existing Stripe infrastructure for ticket payments
+- Entry night tickets use same payment flow as event tickets
+- QR code generation for entry ticket validation
+
 ### External Dependencies
 
 **UI & Styling:**
