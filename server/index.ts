@@ -8,6 +8,7 @@ import { setupVite, serveStatic, log } from "./vite";
 import { storage } from "./storage";
 import { comparePassword, userToSessionUser, type SessionUser } from "./auth";
 import { wsManager } from "./websocket";
+import { setupAdminRoutes } from "./admin-routes";
 
 const app = express();
 const PgSession = connectPgSimple(session);
@@ -89,6 +90,9 @@ passport.deserializeUser(async (id: string, done) => {
 
 app.use(passport.initialize());
 app.use(passport.session());
+
+// Setup admin routes (separate authentication system)
+setupAdminRoutes(app);
 
 app.use((req, res, next) => {
   const start = Date.now();

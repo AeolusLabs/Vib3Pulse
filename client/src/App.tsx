@@ -25,6 +25,15 @@ import DistressAlertsPage from "@/pages/DistressAlertsPage";
 import ManageVenuesPage from "@/pages/ManageVenuesPage";
 import VenueDetailPage from "@/pages/VenueDetailPage";
 import VenueEntryNightsPage from "@/pages/VenueEntryNightsPage";
+import AdminLogin from "@/pages/admin/AdminLogin";
+import AdminDashboard from "@/pages/admin/AdminDashboard";
+import AdminUsers from "@/pages/admin/AdminUsers";
+import AdminEvents from "@/pages/admin/AdminEvents";
+import AdminStories from "@/pages/admin/AdminStories";
+import AdminReports from "@/pages/admin/AdminReports";
+import AdminFinance from "@/pages/admin/AdminFinance";
+import AdminStaff from "@/pages/admin/AdminStaff";
+import AdminActivity from "@/pages/admin/AdminActivity";
 
 function Router() {
   return (
@@ -127,6 +136,17 @@ function Router() {
       </Route>
       
       <Route path="/venue/:id" component={VenueDetailPage} />
+      
+      {/* Admin Panel Routes - Completely Separate from User App */}
+      <Route path="/admin" component={AdminLogin} />
+      <Route path="/admin/dashboard" component={AdminDashboard} />
+      <Route path="/admin/users" component={AdminUsers} />
+      <Route path="/admin/events" component={AdminEvents} />
+      <Route path="/admin/stories" component={AdminStories} />
+      <Route path="/admin/reports" component={AdminReports} />
+      <Route path="/admin/finance" component={AdminFinance} />
+      <Route path="/admin/staff" component={AdminStaff} />
+      <Route path="/admin/activity" component={AdminActivity} />
       
       <Route component={NotFound} />
     </Switch>

@@ -43,6 +43,16 @@ import {
   type InsertVenueTicket,
   type VenueAnalytics,
   type InsertVenueAnalytics,
+  type AdminUser,
+  type InsertAdminUser,
+  type AdminActivityLog,
+  type InsertAdminActivityLog,
+  type ContentReport,
+  type InsertContentReport,
+  type UserSuspension,
+  type InsertUserSuspension,
+  type EventModeration,
+  type InsertEventModeration,
   users,
   events,
   tickets,
@@ -64,7 +74,12 @@ import {
   venues,
   venueEntryNights,
   venueTickets,
-  venueAnalytics
+  venueAnalytics,
+  adminUsers,
+  adminActivityLogs,
+  contentReports,
+  userSuspensions,
+  eventModerations
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/neon-serverless";
 import { Pool, neonConfig } from "@neondatabase/serverless";
@@ -222,6 +237,68 @@ export interface IStorage {
     genderDistribution: { gender: string; count: number; percentage: number }[];
     eventBreakdown: { eventId: string; title: string; rsvps: number; tickets: number; views: number }[];
   }>;
+
+  // ============================================
+  // ADMIN PANEL METHODS
+  // ============================================
+  
+  // Admin users
+  getAdminUser(id: string): Promise<AdminUser | undefined>;
+  getAdminUserByUsername(username: string): Promise<AdminUser | undefined>;
+  getAdminUserByEmail(email: string): Promise<AdminUser | undefined>;
+  getAllAdminUsers(): Promise<AdminUser[]>;
+  createAdminUser(admin: InsertAdminUser): Promise<AdminUser>;
+  updateAdminUser(id: string, updates: Partial<InsertAdminUser>): Promise<AdminUser>;
+  deactivateAdminUser(id: string): Promise<AdminUser>;
+  updateAdminLastLogin(id: string): Promise<void>;
+
+  // Admin activity logs
+  logAdminActivity(log: InsertAdminActivityLog): Promise<AdminActivityLog>;
+  getAdminActivityLogs(limit?: number): Promise<Array<AdminActivityLog & { admin: AdminUser }>>;
+  getAdminUserActivityLogs(adminId: string, limit?: number): Promise<AdminActivityLog[]>;
+
+  // Content reports
+  createContentReport(report: InsertContentReport): Promise<ContentReport>;
+  getContentReports(status?: string): Promise<Array<ContentReport & { reporter: User }>>;
+  getContentReport(id: string): Promise<ContentReport | undefined>;
+  updateContentReport(id: string, updates: { status: string; reviewedBy: string; resolution?: string }): Promise<ContentReport>;
+
+  // User suspensions
+  suspendUser(suspension: InsertUserSuspension): Promise<UserSuspension>;
+  getUserSuspensions(userId: string): Promise<UserSuspension[]>;
+  getActiveSuspension(userId: string): Promise<UserSuspension | undefined>;
+  liftSuspension(suspensionId: string): Promise<UserSuspension>;
+  getAllSuspensions(): Promise<Array<UserSuspension & { user: User; admin: AdminUser }>>;
+
+  // Event moderation
+  moderateEvent(moderation: InsertEventModeration): Promise<EventModeration>;
+  getEventModerations(eventId: string): Promise<Array<EventModeration & { admin: AdminUser }>>;
+  getAllEventModerations(): Promise<Array<EventModeration & { event: Event; admin: AdminUser }>>;
+
+  // Platform stats for admin dashboard
+  getPlatformStats(): Promise<{
+    totalUsers: number;
+    totalEvents: number;
+    totalTicketsSold: number;
+    totalRevenue: number;
+    activeUsers: number;
+    newUsersToday: number;
+    pendingReports: number;
+    activeOrganizers: number;
+  }>;
+
+  // User management for admins
+  getAllUsers(limit?: number, offset?: number): Promise<User[]>;
+  getUserCount(): Promise<number>;
+  deleteUser(id: string): Promise<void>;
+
+  // Event management for admins  
+  getAllEventsAdmin(limit?: number, offset?: number): Promise<Array<Event & { organizer: User }>>;
+  deleteEvent(id: string): Promise<void>;
+
+  // Story management for admins
+  getAllStoriesAdmin(limit?: number): Promise<Array<Story & { user: User }>>;
+  deleteStoryAdmin(id: string): Promise<void>;
 }
 
 export class DbStorage implements IStorage {
@@ -1577,6 +1654,308 @@ export class DbStorage implements IStorage {
       bestSellingEvent,
       conversionRate,
     };
+  }
+
+  // ============================================
+  // ADMIN PANEL METHODS
+  // ============================================
+
+  async getAdminUser(id: string): Promise<AdminUser | undefined> {
+    const result = await db.select().from(adminUsers).where(eq(adminUsers.id, id));
+    return result[0];
+  }
+
+  async getAdminUserByUsername(username: string): Promise<AdminUser | undefined> {
+    const result = await db.select().from(adminUsers).where(eq(adminUsers.username, username));
+    return result[0];
+  }
+
+  async getAdminUserByEmail(email: string): Promise<AdminUser | undefined> {
+    const result = await db.select().from(adminUsers).where(eq(adminUsers.email, email));
+    return result[0];
+  }
+
+  async getAllAdminUsers(): Promise<AdminUser[]> {
+    return await db.select().from(adminUsers).orderBy(desc(adminUsers.createdAt));
+  }
+
+  async createAdminUser(admin: InsertAdminUser): Promise<AdminUser> {
+    const result = await db.insert(adminUsers).values(admin).returning();
+    return result[0];
+  }
+
+  async updateAdminUser(id: string, updates: Partial<InsertAdminUser>): Promise<AdminUser> {
+    const result = await db.update(adminUsers).set(updates).where(eq(adminUsers.id, id)).returning();
+    return result[0];
+  }
+
+  async deactivateAdminUser(id: string): Promise<AdminUser> {
+    const result = await db.update(adminUsers).set({ isActive: false }).where(eq(adminUsers.id, id)).returning();
+    return result[0];
+  }
+
+  async updateAdminLastLogin(id: string): Promise<void> {
+    await db.update(adminUsers).set({ lastLoginAt: new Date() }).where(eq(adminUsers.id, id));
+  }
+
+  async logAdminActivity(log: InsertAdminActivityLog): Promise<AdminActivityLog> {
+    const result = await db.insert(adminActivityLogs).values(log).returning();
+    return result[0];
+  }
+
+  async getAdminActivityLogs(limit: number = 100): Promise<Array<AdminActivityLog & { admin: AdminUser }>> {
+    const result = await db
+      .select()
+      .from(adminActivityLogs)
+      .innerJoin(adminUsers, eq(adminActivityLogs.adminId, adminUsers.id))
+      .orderBy(desc(adminActivityLogs.createdAt))
+      .limit(limit);
+    
+    return result.map(r => ({
+      ...r.admin_activity_logs,
+      admin: r.admin_users,
+    }));
+  }
+
+  async getAdminUserActivityLogs(adminId: string, limit: number = 50): Promise<AdminActivityLog[]> {
+    return await db
+      .select()
+      .from(adminActivityLogs)
+      .where(eq(adminActivityLogs.adminId, adminId))
+      .orderBy(desc(adminActivityLogs.createdAt))
+      .limit(limit);
+  }
+
+  async createContentReport(report: InsertContentReport): Promise<ContentReport> {
+    const result = await db.insert(contentReports).values(report).returning();
+    return result[0];
+  }
+
+  async getContentReports(status?: string): Promise<Array<ContentReport & { reporter: User }>> {
+    const query = db
+      .select()
+      .from(contentReports)
+      .innerJoin(users, eq(contentReports.reporterId, users.id))
+      .orderBy(desc(contentReports.createdAt));
+    
+    let results;
+    if (status) {
+      results = await query.where(eq(contentReports.status, status));
+    } else {
+      results = await query;
+    }
+    
+    return results.map(r => ({
+      ...r.content_reports,
+      reporter: r.users,
+    }));
+  }
+
+  async getContentReport(id: string): Promise<ContentReport | undefined> {
+    const result = await db.select().from(contentReports).where(eq(contentReports.id, id));
+    return result[0];
+  }
+
+  async updateContentReport(id: string, updates: { status: string; reviewedBy: string; resolution?: string }): Promise<ContentReport> {
+    const result = await db
+      .update(contentReports)
+      .set({ ...updates, reviewedAt: new Date() })
+      .where(eq(contentReports.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async suspendUser(suspension: InsertUserSuspension): Promise<UserSuspension> {
+    const result = await db.insert(userSuspensions).values(suspension).returning();
+    return result[0];
+  }
+
+  async getUserSuspensions(userId: string): Promise<UserSuspension[]> {
+    return await db
+      .select()
+      .from(userSuspensions)
+      .where(eq(userSuspensions.userId, userId))
+      .orderBy(desc(userSuspensions.createdAt));
+  }
+
+  async getActiveSuspension(userId: string): Promise<UserSuspension | undefined> {
+    const now = new Date();
+    const result = await db
+      .select()
+      .from(userSuspensions)
+      .where(
+        and(
+          eq(userSuspensions.userId, userId),
+          eq(userSuspensions.isActive, true),
+          or(
+            eq(userSuspensions.isPermanent, true),
+            gte(userSuspensions.suspendedUntil, now)
+          )
+        )
+      );
+    return result[0];
+  }
+
+  async liftSuspension(suspensionId: string): Promise<UserSuspension> {
+    const result = await db
+      .update(userSuspensions)
+      .set({ isActive: false })
+      .where(eq(userSuspensions.id, suspensionId))
+      .returning();
+    return result[0];
+  }
+
+  async getAllSuspensions(): Promise<Array<UserSuspension & { user: User; admin: AdminUser }>> {
+    const result = await db
+      .select()
+      .from(userSuspensions)
+      .innerJoin(users, eq(userSuspensions.userId, users.id))
+      .innerJoin(adminUsers, eq(userSuspensions.adminId, adminUsers.id))
+      .orderBy(desc(userSuspensions.createdAt));
+    
+    return result.map(r => ({
+      ...r.user_suspensions,
+      user: r.users,
+      admin: r.admin_users,
+    }));
+  }
+
+  async moderateEvent(moderation: InsertEventModeration): Promise<EventModeration> {
+    const result = await db.insert(eventModerations).values(moderation).returning();
+    return result[0];
+  }
+
+  async getEventModerations(eventId: string): Promise<Array<EventModeration & { admin: AdminUser }>> {
+    const result = await db
+      .select()
+      .from(eventModerations)
+      .innerJoin(adminUsers, eq(eventModerations.adminId, adminUsers.id))
+      .where(eq(eventModerations.eventId, eventId))
+      .orderBy(desc(eventModerations.createdAt));
+    
+    return result.map(r => ({
+      ...r.event_moderations,
+      admin: r.admin_users,
+    }));
+  }
+
+  async getAllEventModerations(): Promise<Array<EventModeration & { event: Event; admin: AdminUser }>> {
+    const result = await db
+      .select()
+      .from(eventModerations)
+      .innerJoin(events, eq(eventModerations.eventId, events.id))
+      .innerJoin(adminUsers, eq(eventModerations.adminId, adminUsers.id))
+      .orderBy(desc(eventModerations.createdAt));
+    
+    return result.map(r => ({
+      ...r.event_moderations,
+      event: r.events,
+      admin: r.admin_users,
+    }));
+  }
+
+  async getPlatformStats(): Promise<{
+    totalUsers: number;
+    totalEvents: number;
+    totalTicketsSold: number;
+    totalRevenue: number;
+    activeUsers: number;
+    newUsersToday: number;
+    pendingReports: number;
+    activeOrganizers: number;
+  }> {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const [userCount] = await db.select({ count: count() }).from(users);
+    const [eventCount] = await db.select({ count: count() }).from(events);
+    const [ticketCount] = await db.select({ count: count() }).from(tickets);
+    const [pendingReportCount] = await db.select({ count: count() }).from(contentReports).where(eq(contentReports.status, 'pending'));
+    const [newUserCount] = await db.select({ count: count() }).from(users).where(gte(users.createdAt, today));
+    const [organizerCount] = await db.select({ count: count() }).from(users).where(eq(users.userType, 'organizer'));
+    
+    // Calculate revenue from tickets - get events and sum ticketPrice * ticketCount per event
+    const ticketRevenue = await db
+      .select({
+        eventId: tickets.eventId,
+        count: count(),
+      })
+      .from(tickets)
+      .groupBy(tickets.eventId);
+    
+    let totalRevenue = 0;
+    for (const t of ticketRevenue) {
+      const event = await db.select().from(events).where(eq(events.id, t.eventId));
+      if (event[0]) {
+        totalRevenue += (event[0].ticketPrice || 0) * Number(t.count);
+      }
+    }
+
+    return {
+      totalUsers: Number(userCount?.count || 0),
+      totalEvents: Number(eventCount?.count || 0),
+      totalTicketsSold: Number(ticketCount?.count || 0),
+      totalRevenue,
+      activeUsers: Number(userCount?.count || 0),
+      newUsersToday: Number(newUserCount?.count || 0),
+      pendingReports: Number(pendingReportCount?.count || 0),
+      activeOrganizers: Number(organizerCount?.count || 0),
+    };
+  }
+
+  async getAllUsers(limit: number = 50, offset: number = 0): Promise<User[]> {
+    return await db
+      .select()
+      .from(users)
+      .orderBy(desc(users.createdAt))
+      .limit(limit)
+      .offset(offset);
+  }
+
+  async getUserCount(): Promise<number> {
+    const [result] = await db.select({ count: count() }).from(users);
+    return Number(result?.count || 0);
+  }
+
+  async deleteUser(id: string): Promise<void> {
+    await db.delete(users).where(eq(users.id, id));
+  }
+
+  async getAllEventsAdmin(limit: number = 50, offset: number = 0): Promise<Array<Event & { organizer: User }>> {
+    const result = await db
+      .select()
+      .from(events)
+      .innerJoin(users, eq(events.organizerId, users.id))
+      .orderBy(desc(events.eventDate))
+      .limit(limit)
+      .offset(offset);
+    
+    return result.map(r => ({
+      ...r.events,
+      organizer: r.users,
+    }));
+  }
+
+  async deleteEvent(id: string): Promise<void> {
+    await db.delete(events).where(eq(events.id, id));
+  }
+
+  async getAllStoriesAdmin(limit: number = 50): Promise<Array<Story & { user: User }>> {
+    const result = await db
+      .select()
+      .from(stories)
+      .innerJoin(users, eq(stories.userId, users.id))
+      .orderBy(desc(stories.createdAt))
+      .limit(limit);
+    
+    return result.map(r => ({
+      ...r.stories,
+      user: r.users,
+    }));
+  }
+
+  async deleteStoryAdmin(id: string): Promise<void> {
+    await db.delete(stories).where(eq(stories.id, id));
   }
 }
 

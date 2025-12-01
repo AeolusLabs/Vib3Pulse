@@ -475,3 +475,138 @@ export const insertVenueAnalyticsSchema = createInsertSchema(venueAnalytics).omi
 
 export type InsertVenueAnalytics = z.infer<typeof insertVenueAnalyticsSchema>;
 export type VenueAnalytics = typeof venueAnalytics.$inferSelect;
+
+// ============================================
+// ADMIN PANEL - Completely Separate from User System
+// ============================================
+
+// Admin roles enum
+export const adminRoles = [
+  "super_admin",
+  "content_moderator", 
+  "user_support",
+  "event_reviewer",
+  "finance_manager",
+  "analytics_viewer"
+] as const;
+export type AdminRole = typeof adminRoles[number];
+
+// Admin users table - completely separate from regular users
+export const adminUsers = pgTable("admin_users", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  email: text("email").notNull().unique(),
+  username: text("username").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  displayName: text("display_name").notNull(),
+  role: text("role").notNull(),
+  isActive: boolean("is_active").notNull().default(true),
+  createdBy: varchar("created_by"),
+  lastLoginAt: timestamp("last_login_at"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const insertAdminUserSchema = createInsertSchema(adminUsers).omit({
+  id: true,
+  lastLoginAt: true,
+  createdAt: true,
+});
+
+export type InsertAdminUser = z.infer<typeof insertAdminUserSchema>;
+export type AdminUser = typeof adminUsers.$inferSelect;
+
+// Admin sessions - separate from user sessions
+export const adminSessions = pgTable("admin_session", {
+  sid: varchar("sid").primaryKey(),
+  sess: text("sess").notNull(),
+  expire: timestamp("expire").notNull(),
+});
+
+// Admin activity logs - track all admin actions
+export const adminActivityLogs = pgTable("admin_activity_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  adminId: varchar("admin_id").notNull().references(() => adminUsers.id),
+  action: text("action").notNull(),
+  targetType: text("target_type"),
+  targetId: varchar("target_id"),
+  details: text("details"),
+  ipAddress: text("ip_address"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const insertAdminActivityLogSchema = createInsertSchema(adminActivityLogs).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAdminActivityLog = z.infer<typeof insertAdminActivityLogSchema>;
+export type AdminActivityLog = typeof adminActivityLogs.$inferSelect;
+
+// Content reports - for moderation queue
+export const contentReports = pgTable("content_reports", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  reporterId: varchar("reporter_id").notNull().references(() => users.id),
+  contentType: text("content_type").notNull(),
+  contentId: varchar("content_id").notNull(),
+  reason: text("reason").notNull(),
+  description: text("description"),
+  status: text("status").notNull().default("pending"),
+  reviewedBy: varchar("reviewed_by").references(() => adminUsers.id),
+  reviewedAt: timestamp("reviewed_at"),
+  resolution: text("resolution"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const insertContentReportSchema = createInsertSchema(contentReports).omit({
+  id: true,
+  status: true,
+  reviewedBy: true,
+  reviewedAt: true,
+  resolution: true,
+  createdAt: true,
+});
+
+export type InsertContentReport = z.infer<typeof insertContentReportSchema>;
+export type ContentReport = typeof contentReports.$inferSelect;
+
+// User suspensions - for user moderation
+export const userSuspensions = pgTable("user_suspensions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  adminId: varchar("admin_id").notNull().references(() => adminUsers.id),
+  reason: text("reason").notNull(),
+  suspendedUntil: timestamp("suspended_until"),
+  isPermanent: boolean("is_permanent").notNull().default(false),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const insertUserSuspensionSchema = createInsertSchema(userSuspensions).omit({
+  id: true,
+  isActive: true,
+  createdAt: true,
+});
+
+export type InsertUserSuspension = z.infer<typeof insertUserSuspensionSchema>;
+export type UserSuspension = typeof userSuspensions.$inferSelect;
+
+// Event moderation status
+export const eventModerationStatus = ["pending", "approved", "rejected", "flagged"] as const;
+export type EventModerationStatus = typeof eventModerationStatus[number];
+
+// Event moderation actions
+export const eventModerations = pgTable("event_moderations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventId: varchar("event_id").notNull().references(() => events.id),
+  adminId: varchar("admin_id").notNull().references(() => adminUsers.id),
+  action: text("action").notNull(),
+  reason: text("reason"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const insertEventModerationSchema = createInsertSchema(eventModerations).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertEventModeration = z.infer<typeof insertEventModerationSchema>;
+export type EventModeration = typeof eventModerations.$inferSelect;
