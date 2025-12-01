@@ -166,13 +166,37 @@ export function setupAdminRoutes(app: Express) {
       // Hash password and create the Super Admin
       const passwordHash = await bcrypt.hash(password, 12);
       
-      const newAdmin = await storage.createAdminUser({
-        username,
-        email,
-        passwordHash,
-        displayName,
-        role: "super_admin",
-      });
+      // Use try-catch to handle race conditions - if another admin was created
+      // between our initial check and now, the unique constraint will fail
+      let newAdmin;
+      try {
+        newAdmin = await storage.createAdminUser({
+          username,
+          email,
+          passwordHash,
+          displayName,
+          role: "super_admin",
+        });
+      } catch (createError: any) {
+        // Re-check if another admin was created (race condition)
+        const finalCheck = await storage.getAllAdminUsers();
+        if (finalCheck.length > 0) {
+          return res.status(403).json({ 
+            message: "Setup is disabled. Another admin account was just created." 
+          });
+        }
+        throw createError;
+      }
+
+      // Final verification - ensure this is truly the first admin
+      const allAdmins = await storage.getAllAdminUsers();
+      if (allAdmins.length > 1) {
+        // Race condition occurred - more than one admin exists
+        // This shouldn't happen with proper DB constraints, but extra safety
+        return res.status(403).json({ 
+          message: "Setup conflict detected. Please contact support." 
+        });
+      }
 
       // Log the initial setup
       await logActivity(newAdmin.id, "initial_setup", "admin", newAdmin.id, "Initial Super Admin account created", req.ip);
