@@ -10,6 +10,7 @@ export type AuthUser = {
   organizationName?: string | null;
   gender?: string | null;
   genderEditedAt?: Date | null;
+  canManageVenues?: boolean | null;
 };
 
 type AuthResponse = {

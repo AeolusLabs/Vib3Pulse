@@ -39,6 +39,7 @@ export const updateUserSchema = insertUserSchema.pick({
   contactEmail: true,
   socialMediaLinks: true,
   phoneNumber: true,
+  canManageVenues: true,
 }).partial();
 
 // Gender options enum

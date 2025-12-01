@@ -1,11 +1,11 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import { useState } from "react";
-import { Edit, Trash2, BarChart3, MapPin, Clock, Music, Calendar, Megaphone, Sparkles, Building2, Plus, DollarSign } from "lucide-react";
+import { Edit, Trash2, BarChart3, MapPin, Clock, Music, Calendar, Megaphone, Sparkles, Building2, Plus, DollarSign, Lock } from "lucide-react";
 import { Link } from "wouter";
 import CreateVenueModal from "@/components/CreateVenueModal";
 import { PromoteVenueDialog } from "@/components/PromoteVenueDialog";
@@ -13,9 +13,11 @@ import { VenueAnalytics } from "@/components/VenueAnalytics";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 import type { Venue } from "@shared/schema";
 
 export default function ManageVenuesPage() {
+  const { data: user, isLoading: authLoading } = useAuth();
   const [createVenueOpen, setCreateVenueOpen] = useState(false);
   const [editingVenue, setEditingVenue] = useState<Venue | undefined>(undefined);
   const [promoteVenueId, setPromoteVenueId] = useState<string | null>(null);
@@ -204,6 +206,97 @@ export default function ManageVenuesPage() {
       </Card>
     );
   };
+
+  const enableVenuesMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("PATCH", "/api/users/me", { canManageVenues: true });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/session"] });
+      toast({ title: "Venue management enabled!", description: "You can now create and manage venues." });
+    },
+    onError: () => {
+      toast({ title: "Failed to enable venue management", variant: "destructive" });
+    },
+  });
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-background pb-20 md:pb-0">
+        <Navigation />
+        <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="text-center py-16">
+            <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-r-transparent" />
+            <p className="mt-4 text-muted-foreground">Loading...</p>
+          </div>
+        </main>
+        <BottomNavigation />
+      </div>
+    );
+  }
+
+  if (!user?.canManageVenues) {
+    return (
+      <div className="min-h-screen bg-background pb-20 md:pb-0">
+        <Navigation />
+        <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <Card className="max-w-2xl mx-auto">
+            <CardHeader className="text-center">
+              <div className="mx-auto bg-muted rounded-full p-4 w-fit mb-4">
+                <Lock className="h-8 w-8 text-muted-foreground" />
+              </div>
+              <CardTitle className="text-2xl">Venue Management</CardTitle>
+              <CardDescription className="text-base">
+                List your club, bar, or lounge on VibePulse and start selling entry tickets
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid gap-4 text-sm">
+                <div className="flex items-start gap-3">
+                  <Building2 className="h-5 w-5 text-primary mt-0.5" />
+                  <div>
+                    <p className="font-medium">List Your Venue</p>
+                    <p className="text-muted-foreground">Create a profile for your venue with photos, hours, and amenities</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <DollarSign className="h-5 w-5 text-primary mt-0.5" />
+                  <div>
+                    <p className="font-medium">Sell Entry Tickets</p>
+                    <p className="text-muted-foreground">Set up entry nights with cover charges and manage capacity</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <Megaphone className="h-5 w-5 text-primary mt-0.5" />
+                  <div>
+                    <p className="font-medium">Promote Your Venue</p>
+                    <p className="text-muted-foreground">Get featured on the discover page to attract more guests</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <BarChart3 className="h-5 w-5 text-primary mt-0.5" />
+                  <div>
+                    <p className="font-medium">Track Analytics</p>
+                    <p className="text-muted-foreground">See views, ticket sales, and engagement metrics</p>
+                  </div>
+                </div>
+              </div>
+              <Button 
+                onClick={() => enableVenuesMutation.mutate()}
+                disabled={enableVenuesMutation.isPending}
+                className="w-full"
+                size="lg"
+                data-testid="button-enable-venues"
+              >
+                {enableVenuesMutation.isPending ? "Enabling..." : "Enable Venue Management"}
+              </Button>
+            </CardContent>
+          </Card>
+        </main>
+        <BottomNavigation />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
