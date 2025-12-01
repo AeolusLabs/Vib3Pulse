@@ -1554,7 +1554,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "You can only update entry nights for your own venues" });
       }
       
-      const updatedEntryNight = await storage.updateVenueEntryNight(req.params.id, req.body);
+      // Convert date string to Date object if provided
+      const updateData = { ...req.body };
+      if (updateData.date && typeof updateData.date === 'string') {
+        updateData.date = new Date(updateData.date);
+      }
+      
+      const updatedEntryNight = await storage.updateVenueEntryNight(req.params.id, updateData);
       res.json(updatedEntryNight);
     } catch (error) {
       console.error("Update entry night error:", error);

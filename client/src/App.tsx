@@ -24,6 +24,7 @@ import BuddySettingsPage from "@/pages/BuddySettingsPage";
 import DistressAlertsPage from "@/pages/DistressAlertsPage";
 import ManageVenuesPage from "@/pages/ManageVenuesPage";
 import VenueDetailPage from "@/pages/VenueDetailPage";
+import VenueEntryNightsPage from "@/pages/VenueEntryNightsPage";
 
 function Router() {
   return (
@@ -116,6 +117,12 @@ function Router() {
       <Route path="/manage-venues">
         <AuthenticatedLayout>
           <ManageVenuesPage />
+        </AuthenticatedLayout>
+      </Route>
+      
+      <Route path="/venues/:venueId/entry-nights">
+        <AuthenticatedLayout>
+          <VenueEntryNightsPage />
         </AuthenticatedLayout>
       </Route>
       
