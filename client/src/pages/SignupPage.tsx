@@ -60,6 +60,7 @@ const organizerSchema = z.object({
   bio: z.string().max(500, "Bio must be less than 500 characters").optional(),
   contactEmail: z.string().email("Please enter a valid email address"),
   socialMediaLinks: z.array(z.string()).optional(),
+  canManageVenues: z.boolean().default(false),
 });
 
 type Step1Data = z.infer<typeof step1Schema>;
@@ -114,6 +115,7 @@ export default function SignupPage() {
       bio: "",
       contactEmail: "",
       socialMediaLinks: [],
+      canManageVenues: false,
     },
   });
 
@@ -770,6 +772,30 @@ export default function SignupPage() {
                           />
                         </FormControl>
                         <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={organizerForm.control}
+                    name="canManageVenues"
+                    render={({ field }) => (
+                      <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4 bg-muted/30">
+                        <FormControl>
+                          <Checkbox
+                            checked={field.value}
+                            onCheckedChange={field.onChange}
+                            data-testid="checkbox-manage-venues"
+                          />
+                        </FormControl>
+                        <div className="space-y-1 leading-none">
+                          <FormLabel className="cursor-pointer">
+                            I manage a venue (club, bar, lounge)
+                          </FormLabel>
+                          <FormDescription>
+                            Enable this if you own or manage a venue and want to list it on VibePulse for event hosting and entry ticket sales.
+                          </FormDescription>
+                        </div>
                       </FormItem>
                     )}
                   />

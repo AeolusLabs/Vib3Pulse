@@ -19,6 +19,7 @@ export const users = pgTable("users", {
   contactEmail: text("contact_email"),
   socialMediaLinks: text("social_media_links").array().default(sql`'{}'`),
   phoneNumber: text("phone_number"),
+  canManageVenues: boolean("can_manage_venues").default(false),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
