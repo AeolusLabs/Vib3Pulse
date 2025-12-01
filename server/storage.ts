@@ -1292,7 +1292,12 @@ export class DbStorage implements IStorage {
     totalRevenue: number;
     ageDistribution: { ageGroup: string; count: number; percentage: number }[];
     genderDistribution: { gender: string; count: number; percentage: number }[];
-    eventBreakdown: { eventId: string; title: string; rsvps: number; tickets: number; views: number }[];
+    eventBreakdown: { eventId: string; title: string; rsvps: number; tickets: number; views: number; revenue: number; ticketPrice: number }[];
+    ticketSalesByAge: { ageGroup: string; tickets: number; revenue: number; percentage: number }[];
+    ticketSalesByGender: { gender: string; tickets: number; revenue: number; percentage: number }[];
+    averageTicketPrice: number;
+    bestSellingEvent: { title: string; tickets: number; revenue: number } | null;
+    conversionRate: number;
   }> {
     // Get all events for this organizer
     const organizerEvents = await db.select().from(events).where(eq(events.organizerId, organizerId));
@@ -1307,6 +1312,11 @@ export class DbStorage implements IStorage {
         ageDistribution: [],
         genderDistribution: [],
         eventBreakdown: [],
+        ticketSalesByAge: [],
+        ticketSalesByGender: [],
+        averageTicketPrice: 0,
+        bestSellingEvent: null,
+        conversionRate: 0,
       };
     }
     
@@ -1413,12 +1423,7 @@ export class DbStorage implements IStorage {
       ));
     const totalViews = viewsResult[0]?.count || 0;
     
-    // Calculate total revenue
-    const totalRevenue = organizerEvents.reduce((sum, event) => {
-      return sum + (event.ticketPrice || 0);
-    }, 0) * totalTicketsSold;
-    
-    // Event breakdown
+    // Event breakdown with revenue (calculated per-event for accuracy)
     const eventBreakdown = await Promise.all(
       organizerEvents.map(async (event) => {
         const eventRsvps = await db
@@ -1439,25 +1444,138 @@ export class DbStorage implements IStorage {
             eq(eventAnalytics.actionType, 'view')
           ));
         
+        const ticketCount = eventTickets[0]?.count || 0;
+        const ticketPrice = event.ticketPrice || 0;
+        
         return {
           eventId: event.id,
           title: event.title,
           rsvps: eventRsvps[0]?.count || 0,
-          tickets: eventTickets[0]?.count || 0,
+          tickets: ticketCount,
           views: eventViews[0]?.count || 0,
+          revenue: ticketCount * ticketPrice,
+          ticketPrice: ticketPrice,
         };
       })
     );
+    
+    // Get detailed ticket purchases with user demographics for ticket sales analysis
+    const ticketPurchasesWithDemos = await db
+      .select({
+        eventId: tickets.eventId,
+        userId: tickets.userId,
+        dateOfBirth: users.dateOfBirth,
+        gender: users.gender,
+      })
+      .from(tickets)
+      .innerJoin(users, eq(tickets.userId, users.id))
+      .where(inArray(tickets.eventId, eventIds));
+    
+    // Create event price lookup
+    const eventPriceMap = new Map(organizerEvents.map(e => [e.id, e.ticketPrice || 0]));
+    
+    // Calculate ticket sales by age group with revenue
+    const ticketsByAge: Record<string, { tickets: number; revenue: number }> = {
+      'Under 18': { tickets: 0, revenue: 0 },
+      '18-25': { tickets: 0, revenue: 0 },
+      '26-35': { tickets: 0, revenue: 0 },
+      '36-45': { tickets: 0, revenue: 0 },
+      '45+': { tickets: 0, revenue: 0 },
+      'Unknown': { tickets: 0, revenue: 0 },
+    };
+    
+    ticketPurchasesWithDemos.forEach(purchase => {
+      const ticketPrice = eventPriceMap.get(purchase.eventId) || 0;
+      let ageGroup = 'Unknown';
+      
+      if (purchase.dateOfBirth) {
+        const birthDate = new Date(purchase.dateOfBirth);
+        const age = Math.floor((now.getTime() - birthDate.getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+        
+        if (age < 18) ageGroup = 'Under 18';
+        else if (age <= 25) ageGroup = '18-25';
+        else if (age <= 35) ageGroup = '26-35';
+        else if (age <= 45) ageGroup = '36-45';
+        else ageGroup = '45+';
+      }
+      
+      ticketsByAge[ageGroup].tickets++;
+      ticketsByAge[ageGroup].revenue += ticketPrice;
+    });
+    
+    const totalTicketPurchases = ticketPurchasesWithDemos.length;
+    const ticketSalesByAge = Object.entries(ticketsByAge)
+      .filter(([_, data]) => data.tickets > 0)
+      .map(([ageGroup, data]) => ({
+        ageGroup,
+        tickets: data.tickets,
+        revenue: data.revenue,
+        percentage: totalTicketPurchases > 0 ? Math.round((data.tickets / totalTicketPurchases) * 100) : 0,
+      }));
+    
+    // Calculate ticket sales by gender with revenue
+    const ticketsByGender: Record<string, { tickets: number; revenue: number }> = {
+      'Male': { tickets: 0, revenue: 0 },
+      'Female': { tickets: 0, revenue: 0 },
+      'Rather not say': { tickets: 0, revenue: 0 },
+      'Unknown': { tickets: 0, revenue: 0 },
+    };
+    
+    ticketPurchasesWithDemos.forEach(purchase => {
+      const ticketPrice = eventPriceMap.get(purchase.eventId) || 0;
+      const gender = purchase.gender || 'Unknown';
+      
+      if (ticketsByGender[gender]) {
+        ticketsByGender[gender].tickets++;
+        ticketsByGender[gender].revenue += ticketPrice;
+      } else {
+        ticketsByGender['Unknown'].tickets++;
+        ticketsByGender['Unknown'].revenue += ticketPrice;
+      }
+    });
+    
+    const ticketSalesByGender = Object.entries(ticketsByGender)
+      .filter(([_, data]) => data.tickets > 0)
+      .map(([gender, data]) => ({
+        gender,
+        tickets: data.tickets,
+        revenue: data.revenue,
+        percentage: totalTicketPurchases > 0 ? Math.round((data.tickets / totalTicketPurchases) * 100) : 0,
+      }));
+    
+    // Calculate actual total revenue from event breakdown
+    const calculatedRevenue = eventBreakdown.reduce((sum, event) => sum + event.revenue, 0);
+    
+    // Calculate average ticket price
+    const averageTicketPrice = totalTicketPurchases > 0 
+      ? Math.round(calculatedRevenue / totalTicketPurchases) 
+      : 0;
+    
+    // Find best selling event
+    const sortedEvents = [...eventBreakdown].sort((a, b) => b.tickets - a.tickets);
+    const bestSellingEvent = sortedEvents.length > 0 && sortedEvents[0].tickets > 0
+      ? { title: sortedEvents[0].title, tickets: sortedEvents[0].tickets, revenue: sortedEvents[0].revenue }
+      : null;
+    
+    // Calculate conversion rate
+    const conversionRate = totalViews > 0 
+      ? Math.round(((totalRsvps + totalTicketsSold) / totalViews) * 1000) / 10 
+      : 0;
     
     return {
       totalEvents: organizerEvents.length,
       totalRsvps,
       totalTicketsSold,
       totalViews,
-      totalRevenue,
+      totalRevenue: calculatedRevenue,
       ageDistribution,
       genderDistribution,
       eventBreakdown,
+      ticketSalesByAge,
+      ticketSalesByGender,
+      averageTicketPrice,
+      bestSellingEvent,
+      conversionRate,
     };
   }
 }
