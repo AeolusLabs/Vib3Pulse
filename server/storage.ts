@@ -13,6 +13,10 @@ import {
   type InsertPost,
   type Story,
   type InsertStory,
+  type StoryLike,
+  type InsertStoryLike,
+  type StoryAllowedViewer,
+  type InsertStoryAllowedViewer,
   type Follow,
   type InsertFollow,
   type Message,
@@ -46,6 +50,8 @@ import {
   rsvps,
   posts,
   stories,
+  storyLikes,
+  storyAllowedViewers,
   follows,
   messages,
   likes,
@@ -111,10 +117,25 @@ export interface IStorage {
   createPost(post: InsertPost): Promise<Post>;
   deletePost(id: string): Promise<void>;
   
-  createStory(story: InsertStory): Promise<Story>;
-  getActiveStories(): Promise<Array<Story & { user: User }>>;
+  createStory(story: InsertStory, allowedViewerIds?: string[]): Promise<Story>;
+  getActiveStories(viewerId?: string): Promise<Array<Story & { user: User; likeCount: number; isLiked?: boolean; isReshare?: boolean }>>;
+  getStory(id: string): Promise<Story | undefined>;
   getUserStories(userId: string): Promise<Story[]>;
   deleteStory(id: string): Promise<void>;
+  
+  // Story likes
+  likeStory(userId: string, storyId: string): Promise<void>;
+  unlikeStory(userId: string, storyId: string): Promise<void>;
+  hasUserLikedStory(userId: string, storyId: string): Promise<boolean>;
+  getStoryLikeCount(storyId: string): Promise<number>;
+  
+  // Story reshares
+  reshareStory(userId: string, originalStoryId: string): Promise<Story>;
+  
+  // Story allowed viewers
+  setStoryAllowedViewers(storyId: string, viewerIds: string[]): Promise<void>;
+  getStoryAllowedViewers(storyId: string): Promise<string[]>;
+  canViewStory(viewerId: string, storyId: string): Promise<boolean>;
   
   followUser(followerId: string, followingId: string): Promise<Follow>;
   unfollowUser(followerId: string, followingId: string): Promise<void>;
@@ -429,12 +450,19 @@ export class DbStorage implements IStorage {
     await db.delete(posts).where(eq(posts.id, id));
   }
 
-  async createStory(insertStory: InsertStory): Promise<Story> {
+  async createStory(insertStory: InsertStory, allowedViewerIds?: string[]): Promise<Story> {
     const result = await db.insert(stories).values(insertStory).returning();
-    return result[0];
+    const story = result[0];
+    
+    // If private story with allowed viewers, insert them
+    if (insertStory.privacy === 'private' && allowedViewerIds && allowedViewerIds.length > 0) {
+      await this.setStoryAllowedViewers(story.id, allowedViewerIds);
+    }
+    
+    return story;
   }
 
-  async getActiveStories(): Promise<Array<Story & { user: User }>> {
+  async getActiveStories(viewerId?: string): Promise<Array<Story & { user: User; likeCount: number; isLiked?: boolean; isReshare?: boolean }>> {
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
     
     const result = await db
@@ -444,13 +472,44 @@ export class DbStorage implements IStorage {
       .where(gte(stories.createdAt, twentyFourHoursAgo))
       .orderBy(desc(stories.createdAt));
     
-    return result.map(row => {
+    const storiesWithData = await Promise.all(result.map(async (row) => {
       const { passwordHash, ...userWithoutPassword } = row.users;
+      
+      // Check privacy - if private, only show to allowed viewers
+      if (row.stories.privacy === 'private' && viewerId) {
+        const canView = await this.canViewStory(viewerId, row.stories.id);
+        if (!canView && row.stories.userId !== viewerId) {
+          return null; // Skip this story
+        }
+      } else if (row.stories.privacy === 'private' && !viewerId) {
+        return null; // Skip private stories for unauthenticated users
+      }
+      
+      // Get like count
+      const likeCount = await this.getStoryLikeCount(row.stories.id);
+      
+      // Check if viewer has liked
+      let isLiked = false;
+      if (viewerId) {
+        isLiked = await this.hasUserLikedStory(viewerId, row.stories.id);
+      }
+      
       return {
         ...row.stories,
         user: userWithoutPassword as User,
+        likeCount,
+        isLiked,
+        isReshare: !!row.stories.originalStoryId,
       };
-    });
+    }));
+    
+    // Filter out null values (private stories viewer can't see)
+    return storiesWithData.filter(s => s !== null) as Array<Story & { user: User; likeCount: number; isLiked?: boolean; isReshare?: boolean }>;
+  }
+
+  async getStory(id: string): Promise<Story | undefined> {
+    const result = await db.select().from(stories).where(eq(stories.id, id));
+    return result[0];
   }
 
   async getUserStories(userId: string): Promise<Story[]> {
@@ -468,6 +527,92 @@ export class DbStorage implements IStorage {
 
   async deleteStory(id: string): Promise<void> {
     await db.delete(stories).where(eq(stories.id, id));
+  }
+
+  // Story likes
+  async likeStory(userId: string, storyId: string): Promise<void> {
+    await db.insert(storyLikes).values({ storyId, userId }).onConflictDoNothing();
+  }
+
+  async unlikeStory(userId: string, storyId: string): Promise<void> {
+    await db.delete(storyLikes).where(
+      and(
+        eq(storyLikes.storyId, storyId),
+        eq(storyLikes.userId, userId)
+      )
+    );
+  }
+
+  async hasUserLikedStory(userId: string, storyId: string): Promise<boolean> {
+    const result = await db.select().from(storyLikes).where(
+      and(
+        eq(storyLikes.storyId, storyId),
+        eq(storyLikes.userId, userId)
+      )
+    );
+    return result.length > 0;
+  }
+
+  async getStoryLikeCount(storyId: string): Promise<number> {
+    const result = await db
+      .select({ count: count() })
+      .from(storyLikes)
+      .where(eq(storyLikes.storyId, storyId));
+    return result[0]?.count || 0;
+  }
+
+  // Story reshares
+  async reshareStory(userId: string, originalStoryId: string): Promise<Story> {
+    const originalStory = await this.getStory(originalStoryId);
+    if (!originalStory) {
+      throw new Error('Original story not found');
+    }
+    
+    const result = await db.insert(stories).values({
+      userId,
+      imageUrl: originalStory.imageUrl,
+      type: originalStory.type,
+      privacy: 'public', // Reshares are always public
+      originalStoryId,
+    }).returning();
+    
+    return result[0];
+  }
+
+  // Story allowed viewers
+  async setStoryAllowedViewers(storyId: string, viewerIds: string[]): Promise<void> {
+    // Delete existing viewers
+    await db.delete(storyAllowedViewers).where(eq(storyAllowedViewers.storyId, storyId));
+    
+    // Insert new viewers
+    if (viewerIds.length > 0) {
+      await db.insert(storyAllowedViewers).values(
+        viewerIds.map(viewerId => ({ storyId, viewerId }))
+      );
+    }
+  }
+
+  async getStoryAllowedViewers(storyId: string): Promise<string[]> {
+    const result = await db
+      .select({ viewerId: storyAllowedViewers.viewerId })
+      .from(storyAllowedViewers)
+      .where(eq(storyAllowedViewers.storyId, storyId));
+    return result.map(r => r.viewerId);
+  }
+
+  async canViewStory(viewerId: string, storyId: string): Promise<boolean> {
+    const story = await this.getStory(storyId);
+    if (!story) return false;
+    
+    // Story owner can always view
+    if (story.userId === viewerId) return true;
+    
+    // Public stories can be viewed by anyone
+    if (story.privacy === 'public') return true;
+    
+    // Private stories require viewer to be in allowed list
+    const allowedViewers = await this.getStoryAllowedViewers(storyId);
+    return allowedViewers.includes(viewerId);
   }
 
   async followUser(followerId: string, followingId: string): Promise<Follow> {

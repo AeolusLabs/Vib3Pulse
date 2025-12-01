@@ -171,16 +171,56 @@ export const stories = pgTable("stories", {
   userId: varchar("user_id").notNull().references(() => users.id),
   imageUrl: text("image_url").notNull(),
   type: text("type").notNull().default("image"),
+  privacy: text("privacy").notNull().default("public"), // "public" or "private"
+  originalStoryId: varchar("original_story_id").references((): any => stories.id), // For reshared stories
+  expiresAt: timestamp("expires_at").default(sql`now() + interval '24 hours'`),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
 export const insertStorySchema = createInsertSchema(stories).omit({
   id: true,
   createdAt: true,
+  expiresAt: true,
 });
 
 export type InsertStory = z.infer<typeof insertStorySchema>;
 export type Story = typeof stories.$inferSelect;
+
+// Story likes - tracks who liked which story
+export const storyLikes = pgTable("story_likes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  storyId: varchar("story_id").notNull().references(() => stories.id, { onDelete: 'cascade' }),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+}, (table) => ({
+  uniqueStoryLike: unique().on(table.storyId, table.userId),
+}));
+
+export const insertStoryLikeSchema = createInsertSchema(storyLikes).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertStoryLike = z.infer<typeof insertStoryLikeSchema>;
+export type StoryLike = typeof storyLikes.$inferSelect;
+
+// Story allowed viewers - for private stories
+export const storyAllowedViewers = pgTable("story_allowed_viewers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  storyId: varchar("story_id").notNull().references(() => stories.id, { onDelete: 'cascade' }),
+  viewerId: varchar("viewer_id").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+}, (table) => ({
+  uniqueViewer: unique().on(table.storyId, table.viewerId),
+}));
+
+export const insertStoryAllowedViewerSchema = createInsertSchema(storyAllowedViewers).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertStoryAllowedViewer = z.infer<typeof insertStoryAllowedViewerSchema>;
+export type StoryAllowedViewer = typeof storyAllowedViewers.$inferSelect;
 
 export const follows = pgTable("follows", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
