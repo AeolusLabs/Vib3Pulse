@@ -68,7 +68,7 @@ import {
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/neon-serverless";
 import { Pool, neonConfig } from "@neondatabase/serverless";
-import { eq, and, gte, lt, or, ilike, desc, sql, count } from "drizzle-orm";
+import { eq, and, gte, lt, or, ilike, desc, sql, count, inArray } from "drizzle-orm";
 import ws from "ws";
 
 neonConfig.webSocketConstructor = ws;
@@ -210,6 +210,18 @@ export interface IStorage {
   trackVenueView(venueId: string, userId?: string): Promise<void>;
   trackVenueClick(venueId: string, actionType: string, userId?: string): Promise<void>;
   getVenueAnalytics(venueId: string): Promise<{ views: number; clicks: number; ticketsSold: number }>;
+
+  // Organizer demographics analytics
+  getOrganizerDemographics(organizerId: string): Promise<{
+    totalEvents: number;
+    totalRsvps: number;
+    totalTicketsSold: number;
+    totalViews: number;
+    totalRevenue: number;
+    ageDistribution: { ageGroup: string; count: number; percentage: number }[];
+    genderDistribution: { gender: string; count: number; percentage: number }[];
+    eventBreakdown: { eventId: string; title: string; rsvps: number; tickets: number; views: number }[];
+  }>;
 }
 
 export class DbStorage implements IStorage {
@@ -1269,6 +1281,183 @@ export class DbStorage implements IStorage {
       views: viewsResult[0]?.count || 0,
       clicks: clicksResult[0]?.count || 0,
       ticketsSold: Number(ticketsResult[0]?.total) || 0,
+    };
+  }
+
+  async getOrganizerDemographics(organizerId: string): Promise<{
+    totalEvents: number;
+    totalRsvps: number;
+    totalTicketsSold: number;
+    totalViews: number;
+    totalRevenue: number;
+    ageDistribution: { ageGroup: string; count: number; percentage: number }[];
+    genderDistribution: { gender: string; count: number; percentage: number }[];
+    eventBreakdown: { eventId: string; title: string; rsvps: number; tickets: number; views: number }[];
+  }> {
+    // Get all events for this organizer
+    const organizerEvents = await db.select().from(events).where(eq(events.organizerId, organizerId));
+    
+    if (organizerEvents.length === 0) {
+      return {
+        totalEvents: 0,
+        totalRsvps: 0,
+        totalTicketsSold: 0,
+        totalViews: 0,
+        totalRevenue: 0,
+        ageDistribution: [],
+        genderDistribution: [],
+        eventBreakdown: [],
+      };
+    }
+    
+    const eventIds = organizerEvents.map(e => e.id);
+    
+    // Get all users who have interacted with these events (RSVPs and ticket purchases)
+    const rsvpUsers = await db
+      .select({ userId: rsvps.userId })
+      .from(rsvps)
+      .where(inArray(rsvps.eventId, eventIds));
+    
+    const ticketUsers = await db
+      .select({ userId: tickets.userId })
+      .from(tickets)
+      .where(inArray(tickets.eventId, eventIds));
+    
+    // Combine unique user IDs
+    const userIdSet = new Set<string>();
+    rsvpUsers.forEach(r => userIdSet.add(r.userId));
+    ticketUsers.forEach(t => userIdSet.add(t.userId));
+    const allUserIds = Array.from(userIdSet);
+    
+    // Get user demographics
+    let userDemographics: { dateOfBirth: string | null; gender: string | null }[] = [];
+    if (allUserIds.length > 0) {
+      userDemographics = await db
+        .select({ dateOfBirth: users.dateOfBirth, gender: users.gender })
+        .from(users)
+        .where(inArray(users.id, allUserIds));
+    }
+    
+    // Calculate age distribution
+    const now = new Date();
+    const ageGroups: Record<string, number> = {
+      'Under 18': 0,
+      '18-25': 0,
+      '26-35': 0,
+      '36-45': 0,
+      '45+': 0,
+      'Unknown': 0,
+    };
+    
+    userDemographics.forEach(user => {
+      if (!user.dateOfBirth) {
+        ageGroups['Unknown']++;
+        return;
+      }
+      
+      const birthDate = new Date(user.dateOfBirth);
+      const age = Math.floor((now.getTime() - birthDate.getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+      
+      if (age < 18) ageGroups['Under 18']++;
+      else if (age <= 25) ageGroups['18-25']++;
+      else if (age <= 35) ageGroups['26-35']++;
+      else if (age <= 45) ageGroups['36-45']++;
+      else ageGroups['45+']++;
+    });
+    
+    const totalUsers = userDemographics.length;
+    const ageDistribution = Object.entries(ageGroups)
+      .filter(([_, count]) => count > 0)
+      .map(([ageGroup, count]) => ({
+        ageGroup,
+        count,
+        percentage: totalUsers > 0 ? Math.round((count / totalUsers) * 100) : 0,
+      }));
+    
+    // Calculate gender distribution
+    const genderGroups: Record<string, number> = {
+      'Male': 0,
+      'Female': 0,
+      'Rather not say': 0,
+      'Unknown': 0,
+    };
+    
+    userDemographics.forEach(user => {
+      const gender = user.gender || 'Unknown';
+      if (genderGroups[gender] !== undefined) {
+        genderGroups[gender]++;
+      } else {
+        genderGroups['Unknown']++;
+      }
+    });
+    
+    const genderDistribution = Object.entries(genderGroups)
+      .filter(([_, count]) => count > 0)
+      .map(([gender, count]) => ({
+        gender,
+        count,
+        percentage: totalUsers > 0 ? Math.round((count / totalUsers) * 100) : 0,
+      }));
+    
+    // Calculate totals
+    const totalRsvps = rsvpUsers.length;
+    const totalTicketsSold = ticketUsers.length;
+    
+    // Get total views
+    const viewsResult = await db
+      .select({ count: count() })
+      .from(eventAnalytics)
+      .where(and(
+        inArray(eventAnalytics.eventId, eventIds),
+        eq(eventAnalytics.actionType, 'view')
+      ));
+    const totalViews = viewsResult[0]?.count || 0;
+    
+    // Calculate total revenue
+    const totalRevenue = organizerEvents.reduce((sum, event) => {
+      return sum + (event.ticketPrice || 0);
+    }, 0) * totalTicketsSold;
+    
+    // Event breakdown
+    const eventBreakdown = await Promise.all(
+      organizerEvents.map(async (event) => {
+        const eventRsvps = await db
+          .select({ count: count() })
+          .from(rsvps)
+          .where(eq(rsvps.eventId, event.id));
+        
+        const eventTickets = await db
+          .select({ count: count() })
+          .from(tickets)
+          .where(eq(tickets.eventId, event.id));
+        
+        const eventViews = await db
+          .select({ count: count() })
+          .from(eventAnalytics)
+          .where(and(
+            eq(eventAnalytics.eventId, event.id),
+            eq(eventAnalytics.actionType, 'view')
+          ));
+        
+        return {
+          eventId: event.id,
+          title: event.title,
+          rsvps: eventRsvps[0]?.count || 0,
+          tickets: eventTickets[0]?.count || 0,
+          views: eventViews[0]?.count || 0,
+        };
+      })
+    );
+    
+    return {
+      totalEvents: organizerEvents.length,
+      totalRsvps,
+      totalTicketsSold,
+      totalViews,
+      totalRevenue,
+      ageDistribution,
+      genderDistribution,
+      eventBreakdown,
     };
   }
 }

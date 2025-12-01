@@ -367,6 +367,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Organizer Demographics Dashboard
+  app.get("/api/organizers/:id/demographics", requireAuth, async (req, res) => {
+    try {
+      const organizerId = req.params.id;
+      
+      // Only allow organizers to view their own demographics, or allow viewing their own
+      if (organizerId !== req.user!.id) {
+        return res.status(403).json({ message: "Not authorized to view demographics for this organizer" });
+      }
+      
+      const demographics = await storage.getOrganizerDemographics(organizerId);
+      res.json(demographics);
+    } catch (error) {
+      console.error('Error fetching organizer demographics:', error);
+      res.status(500).json({ message: "Failed to fetch demographics" });
+    }
+  });
+
   app.post("/api/events/:id/track-view", async (req, res) => {
     try {
       const userId = req.user?.id;

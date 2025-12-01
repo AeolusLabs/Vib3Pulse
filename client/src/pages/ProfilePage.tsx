@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Calendar, MapPin, DollarSign, Users, Heart, Building2, Mail, Cake, UserPlus, UserMinus } from "lucide-react";
 import type { User, Event, Rsvp } from "@shared/schema";
 import EditProfileDialog from "@/components/EditProfileDialog";
+import { OrganizerStatsModal } from "@/components/OrganizerStatsModal";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -276,8 +277,14 @@ export default function ProfilePage() {
 
                 {/* Action Buttons */}
                 {isOwnProfile && (
-                  <div className="pt-2">
+                  <div className="pt-2 flex flex-wrap gap-2">
                     <EditProfileDialog user={profile as User} />
+                    {isOrganizer && (
+                      <OrganizerStatsModal 
+                        organizerId={profile.id} 
+                        organizerName={profile.organizationName || profile.username}
+                      />
+                    )}
                   </div>
                 )}
                 
