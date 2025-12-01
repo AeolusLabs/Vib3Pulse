@@ -109,6 +109,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { updateUserSchema } = await import("@shared/schema");
       const updates = updateUserSchema.parse(req.body);
       
+      // Security: Only organizers can enable venue management
+      if (updates.canManageVenues !== undefined) {
+        if (req.user!.userType !== "organizer") {
+          return res.status(403).json({ message: "Only event organizers can enable venue management" });
+        }
+      }
+      
       // Check if user is trying to update gender
       if (updates.gender !== undefined) {
         const currentUser = await storage.getUser(userId);
