@@ -339,6 +339,7 @@ export const venues = pgTable("venues", {
   name: varchar("name", { length: 255 }).notNull(),
   category: varchar("category", { length: 50 }).notNull(),
   description: text("description"),
+  location: text("location").notNull(),
   imageUrl: varchar("image_url", { length: 512 }),
   coverImageUrl: varchar("cover_image_url", { length: 512 }),
   address: varchar("address", { length: 500 }),

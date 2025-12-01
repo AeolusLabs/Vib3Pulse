@@ -248,16 +248,14 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
                     maxNumberOfFiles={1}
                     maxFileSize={5242880}
                     onGetUploadParameters={async () => {
-                      const res = await apiRequest("POST", "/api/objects/upload");
-                      const data = await res.json();
+                      const data = await apiRequest("POST", "/api/objects/upload") as { uploadURL: string };
                       return { method: "PUT" as const, url: data.uploadURL };
                     }}
                     onComplete={async (result: UploadResult<Record<string, unknown>, Record<string, unknown>>) => {
                       if (result.successful?.[0]?.uploadURL) {
-                        const res = await apiRequest("PUT", "/api/venue-images", { 
+                        const data = await apiRequest("PUT", "/api/venue-images", { 
                           imageURL: result.successful[0].uploadURL 
-                        });
-                        const data = await res.json();
+                        }) as { objectPath: string };
                         setFormData(prev => ({ ...prev, imageUrl: data.objectPath }));
                         toast({ title: "Logo uploaded successfully" });
                       }
@@ -300,16 +298,14 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
                     maxNumberOfFiles={1}
                     maxFileSize={10485760}
                     onGetUploadParameters={async () => {
-                      const res = await apiRequest("POST", "/api/objects/upload");
-                      const data = await res.json();
+                      const data = await apiRequest("POST", "/api/objects/upload") as { uploadURL: string };
                       return { method: "PUT" as const, url: data.uploadURL };
                     }}
                     onComplete={async (result: UploadResult<Record<string, unknown>, Record<string, unknown>>) => {
                       if (result.successful?.[0]?.uploadURL) {
-                        const res = await apiRequest("PUT", "/api/venue-images", { 
+                        const data = await apiRequest("PUT", "/api/venue-images", { 
                           imageURL: result.successful[0].uploadURL 
-                        });
-                        const data = await res.json();
+                        }) as { objectPath: string };
                         setFormData(prev => ({ ...prev, coverImageUrl: data.objectPath }));
                         toast({ title: "Cover image uploaded successfully" });
                       }
