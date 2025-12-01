@@ -10,8 +10,10 @@ import { useState, useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { X, Plus } from "lucide-react";
+import { X, Upload, ImageIcon } from "lucide-react";
+import { ObjectUploader } from "@/components/ObjectUploader";
 import type { Venue, InsertVenue } from "@shared/schema";
+import type { UploadResult } from "@uppy/core";
 
 interface CreateVenueModalProps {
   open: boolean;
@@ -218,25 +220,107 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="imageUrl">Logo/Image URL</Label>
-                <Input
-                  id="imageUrl"
-                  value={formData.imageUrl}
-                  onChange={(e) => setFormData(prev => ({ ...prev, imageUrl: e.target.value }))}
-                  placeholder="https://..."
-                  data-testid="input-venue-image"
-                />
+                <Label>Logo/Image</Label>
+                <div className="flex items-center gap-3">
+                  {formData.imageUrl ? (
+                    <div className="relative">
+                      <img 
+                        src={formData.imageUrl} 
+                        alt="Venue logo" 
+                        className="h-16 w-16 rounded-lg object-cover border"
+                      />
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-destructive text-destructive-foreground"
+                        onClick={() => setFormData(prev => ({ ...prev, imageUrl: "" }))}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="h-16 w-16 rounded-lg border-2 border-dashed flex items-center justify-center bg-muted/50">
+                      <ImageIcon className="h-6 w-6 text-muted-foreground" />
+                    </div>
+                  )}
+                  <ObjectUploader
+                    maxNumberOfFiles={1}
+                    maxFileSize={5242880}
+                    onGetUploadParameters={async () => {
+                      const res = await apiRequest("POST", "/api/objects/upload");
+                      const data = await res.json();
+                      return { method: "PUT" as const, url: data.uploadURL };
+                    }}
+                    onComplete={async (result: UploadResult<Record<string, unknown>, Record<string, unknown>>) => {
+                      if (result.successful?.[0]?.uploadURL) {
+                        const res = await apiRequest("PUT", "/api/venue-images", { 
+                          imageURL: result.successful[0].uploadURL 
+                        });
+                        const data = await res.json();
+                        setFormData(prev => ({ ...prev, imageUrl: data.objectPath }));
+                        toast({ title: "Logo uploaded successfully" });
+                      }
+                    }}
+                    buttonVariant="outline"
+                    buttonSize="sm"
+                  >
+                    <Upload className="h-4 w-4 mr-2" />
+                    Upload Logo
+                  </ObjectUploader>
+                </div>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="coverImageUrl">Cover Image URL</Label>
-                <Input
-                  id="coverImageUrl"
-                  value={formData.coverImageUrl}
-                  onChange={(e) => setFormData(prev => ({ ...prev, coverImageUrl: e.target.value }))}
-                  placeholder="https://..."
-                  data-testid="input-venue-cover"
-                />
+                <Label>Cover Image</Label>
+                <div className="flex items-center gap-3">
+                  {formData.coverImageUrl ? (
+                    <div className="relative">
+                      <img 
+                        src={formData.coverImageUrl} 
+                        alt="Cover image" 
+                        className="h-16 w-24 rounded-lg object-cover border"
+                      />
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-destructive text-destructive-foreground"
+                        onClick={() => setFormData(prev => ({ ...prev, coverImageUrl: "" }))}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="h-16 w-24 rounded-lg border-2 border-dashed flex items-center justify-center bg-muted/50">
+                      <ImageIcon className="h-6 w-6 text-muted-foreground" />
+                    </div>
+                  )}
+                  <ObjectUploader
+                    maxNumberOfFiles={1}
+                    maxFileSize={10485760}
+                    onGetUploadParameters={async () => {
+                      const res = await apiRequest("POST", "/api/objects/upload");
+                      const data = await res.json();
+                      return { method: "PUT" as const, url: data.uploadURL };
+                    }}
+                    onComplete={async (result: UploadResult<Record<string, unknown>, Record<string, unknown>>) => {
+                      if (result.successful?.[0]?.uploadURL) {
+                        const res = await apiRequest("PUT", "/api/venue-images", { 
+                          imageURL: result.successful[0].uploadURL 
+                        });
+                        const data = await res.json();
+                        setFormData(prev => ({ ...prev, coverImageUrl: data.objectPath }));
+                        toast({ title: "Cover image uploaded successfully" });
+                      }
+                    }}
+                    buttonVariant="outline"
+                    buttonSize="sm"
+                  >
+                    <Upload className="h-4 w-4 mr-2" />
+                    Upload Cover
+                  </ObjectUploader>
+                </div>
               </div>
             </div>
 
