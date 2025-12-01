@@ -9,6 +9,8 @@ import { wsManager } from "./websocket";
 import Stripe from "stripe";
 import { z } from "zod";
 import QRCode from "qrcode";
+import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
+import { ObjectPermission } from "./objectAcl";
 
 const stripe = new Stripe(process.env.TESTING_STRIPE_SECRET_KEY || process.env.STRIPE_SECRET_KEY || "", {
   apiVersion: "2025-11-17.clover",
@@ -1702,6 +1704,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Validate venue ticket error:", error);
       res.status(500).json({ message: "Failed to validate ticket" });
+    }
+  });
+
+  // Object Storage Routes (for venue image uploads)
+  // Get presigned URL for uploading
+  app.post("/api/objects/upload", requireAuth, async (req, res) => {
+    try {
+      const objectStorageService = new ObjectStorageService();
+      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+      res.json({ uploadURL });
+    } catch (error) {
+      console.error("Error getting upload URL:", error);
+      res.status(500).json({ message: "Failed to get upload URL" });
+    }
+  });
+
+  // Serve uploaded objects (public visibility for venue images)
+  app.get("/objects/:objectPath(*)", async (req, res) => {
+    const objectStorageService = new ObjectStorageService();
+    try {
+      const objectFile = await objectStorageService.getObjectEntityFile(req.path);
+      const canAccess = await objectStorageService.canAccessObjectEntity({
+        objectFile,
+        userId: req.user?.id,
+        requestedPermission: ObjectPermission.READ,
+      });
+      if (!canAccess) {
+        return res.sendStatus(401);
+      }
+      objectStorageService.downloadObject(objectFile, res);
+    } catch (error) {
+      console.error("Error serving object:", error);
+      if (error instanceof ObjectNotFoundError) {
+        return res.sendStatus(404);
+      }
+      return res.sendStatus(500);
+    }
+  });
+
+  // Set ACL policy for venue images and get normalized path
+  app.put("/api/venue-images", requireAuth, async (req, res) => {
+    if (!req.body.imageURL) {
+      return res.status(400).json({ message: "imageURL is required" });
+    }
+
+    const userId = req.user!.id;
+
+    try {
+      const objectStorageService = new ObjectStorageService();
+      const objectPath = await objectStorageService.trySetObjectEntityAclPolicy(
+        req.body.imageURL,
+        {
+          owner: userId,
+          visibility: "public",
+        }
+      );
+
+      res.status(200).json({ objectPath });
+    } catch (error) {
+      console.error("Error setting venue image:", error);
+      res.status(500).json({ message: "Failed to process venue image" });
     }
   });
 
