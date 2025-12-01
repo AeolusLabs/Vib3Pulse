@@ -93,6 +93,102 @@ export function setupAdminRoutes(app: Express) {
   app.use("/api/admin", adminSession);
 
   // ============================================
+  // FIRST-TIME ADMIN SETUP
+  // ============================================
+
+  // Check if initial setup is needed (no admins exist)
+  app.get("/api/admin/setup/status", async (req: Request, res: Response) => {
+    try {
+      const admins = await storage.getAllAdminUsers();
+      res.json({ 
+        setupRequired: admins.length === 0,
+        message: admins.length === 0 
+          ? "No admin accounts exist. Initial setup is available." 
+          : "Admin accounts already exist. Setup is disabled."
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to check setup status" });
+    }
+  });
+
+  // First-time Super Admin setup - only works when no admins exist
+  const setupSchema = z.object({
+    setupKey: z.string().min(1, "Setup key is required"),
+    username: z.string().min(3, "Username must be at least 3 characters"),
+    email: z.string().email("Valid email required"),
+    password: z.string().min(8, "Password must be at least 8 characters"),
+    displayName: z.string().min(1, "Display name required"),
+  });
+
+  app.post("/api/admin/setup", async (req: Request, res: Response) => {
+    try {
+      // Check if any admins already exist
+      const existingAdmins = await storage.getAllAdminUsers();
+      if (existingAdmins.length > 0) {
+        return res.status(403).json({ 
+          message: "Setup is disabled. Admin accounts already exist." 
+        });
+      }
+
+      // Validate input
+      const validation = setupSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ 
+          message: validation.error.errors[0].message 
+        });
+      }
+
+      const { setupKey, username, email, password, displayName } = validation.data;
+
+      // Verify setup key matches environment variable
+      const expectedKey = process.env.ADMIN_SETUP_KEY;
+      if (!expectedKey) {
+        return res.status(500).json({ 
+          message: "ADMIN_SETUP_KEY environment variable not configured. Please set it in your secrets." 
+        });
+      }
+
+      if (setupKey !== expectedKey) {
+        return res.status(401).json({ message: "Invalid setup key" });
+      }
+
+      // Check for existing username or email
+      const existingByUsername = await storage.getAdminUserByUsername(username);
+      if (existingByUsername) {
+        return res.status(400).json({ message: "Username already taken" });
+      }
+
+      const existingByEmail = await storage.getAdminUserByEmail(email);
+      if (existingByEmail) {
+        return res.status(400).json({ message: "Email already registered" });
+      }
+
+      // Hash password and create the Super Admin
+      const passwordHash = await bcrypt.hash(password, 12);
+      
+      const newAdmin = await storage.createAdminUser({
+        username,
+        email,
+        passwordHash,
+        displayName,
+        role: "super_admin",
+      });
+
+      // Log the initial setup
+      await logActivity(newAdmin.id, "initial_setup", "admin", newAdmin.id, "Initial Super Admin account created", req.ip);
+
+      const { passwordHash: _, ...adminWithoutPassword } = newAdmin;
+      res.status(201).json({ 
+        message: "Super Admin account created successfully! You can now log in.",
+        admin: adminWithoutPassword 
+      });
+    } catch (error) {
+      console.error("Admin setup error:", error);
+      res.status(500).json({ message: "Setup failed" });
+    }
+  });
+
+  // ============================================
   // ADMIN AUTHENTICATION
   // ============================================
 

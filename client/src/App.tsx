@@ -34,6 +34,7 @@ import AdminReports from "@/pages/admin/AdminReports";
 import AdminFinance from "@/pages/admin/AdminFinance";
 import AdminStaff from "@/pages/admin/AdminStaff";
 import AdminActivity from "@/pages/admin/AdminActivity";
+import AdminSetup from "@/pages/admin/AdminSetup";
 
 function Router() {
   return (
@@ -139,6 +140,7 @@ function Router() {
       
       {/* Admin Panel Routes - Completely Separate from User App */}
       <Route path="/admin" component={AdminLogin} />
+      <Route path="/admin/setup" component={AdminSetup} />
       <Route path="/admin/dashboard" component={AdminDashboard} />
       <Route path="/admin/users" component={AdminUsers} />
       <Route path="/admin/events" component={AdminEvents} />
