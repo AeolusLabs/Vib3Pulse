@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { Home, Compass, MessageCircle, Menu, X } from "lucide-react";
+import { Home, Compass, MessageCircle, Menu, X, Building2 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function MenuTray() {
   const [isOpen, setIsOpen] = useState(false);
   const [location] = useLocation();
+  const { data: user } = useAuth();
 
   return (
     <>
@@ -68,6 +70,20 @@ export default function MenuTray() {
                   Messages
                 </Button>
               </Link>
+              {user?.userType === "organizer" && user.canManageVenues && (
+                <Link href="/manage-venues">
+                  <Button
+                    variant={location === '/manage-venues' ? 'default' : 'ghost'}
+                    size="sm"
+                    className="w-full justify-start"
+                    onClick={() => setIsOpen(false)}
+                    data-testid="link-manage-venues"
+                  >
+                    <Building2 className="h-4 w-4 mr-2" />
+                    Manage Venues
+                  </Button>
+                </Link>
+              )}
             </nav>
           </div>
         </>

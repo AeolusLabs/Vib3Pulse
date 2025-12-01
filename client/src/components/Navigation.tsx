@@ -1,4 +1,4 @@
-import { Search, Plus, User, Calendar, LogOut, Ticket, Shield, AlertTriangle } from "lucide-react";
+import { Search, Plus, User, Calendar, LogOut, Ticket, Shield, AlertTriangle, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -100,12 +100,22 @@ export default function Navigation({ onSearch, onCreateEvent }: NavigationProps)
                   </DropdownMenuItem>
                 )}
                 {user?.userType === "organizer" && (
-                  <DropdownMenuItem asChild data-testid="menu-my-events">
-                    <Link href="/manage-events">
-                      <Calendar className="mr-2 h-4 w-4" />
-                      My Events
-                    </Link>
-                  </DropdownMenuItem>
+                  <>
+                    <DropdownMenuItem asChild data-testid="menu-my-events">
+                      <Link href="/manage-events">
+                        <Calendar className="mr-2 h-4 w-4" />
+                        My Events
+                      </Link>
+                    </DropdownMenuItem>
+                    {user.canManageVenues && (
+                      <DropdownMenuItem asChild data-testid="menu-manage-venues">
+                        <Link href="/manage-venues">
+                          <Building2 className="mr-2 h-4 w-4" />
+                          Manage Venues
+                        </Link>
+                      </DropdownMenuItem>
+                    )}
+                  </>
                 )}
                 <DropdownMenuItem asChild data-testid="menu-my-tickets">
                   <Link href="/ticket-wallet">
