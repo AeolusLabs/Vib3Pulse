@@ -181,7 +181,12 @@ type StoryWithUser = {
   userId: string;
   imageUrl: string;
   type: string;
+  privacy: string;
+  originalStoryId: string | null;
   createdAt: string;
+  likeCount: number;
+  isLiked?: boolean;
+  isReshare?: boolean;
   user: {
     id: string;
     username: string;
@@ -233,6 +238,11 @@ export default function FeedPage() {
         type: 'image' as const,
         content: story.imageUrl,
         timestamp: new Date(story.createdAt).toLocaleString(),
+        likeCount: story.likeCount || 0,
+        isLiked: story.isLiked || false,
+        isReshare: story.isReshare || false,
+        privacy: story.privacy || 'public',
+        originalStoryId: story.originalStoryId,
       })),
       userId: firstStory.userId,
     };
@@ -386,6 +396,8 @@ export default function FeedPage() {
           onNext={handleNextStory}
           onPrevious={handlePreviousStory}
           storyOwnerId={stories[viewingStory].userId}
+          displayName={stories[viewingStory].displayName}
+          userType={stories[viewingStory].userType}
         />
       )}
 

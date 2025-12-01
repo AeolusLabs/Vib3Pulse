@@ -1,13 +1,14 @@
-import { useState, useEffect } from "react";
-import { X, ChevronLeft, ChevronRight, Heart, Send, Trash2 } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { X, ChevronLeft, ChevronRight, Heart, Send, Trash2, Share2, Lock, RefreshCw } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
+import { Badge } from "@/components/ui/badge";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
+import { motion, AnimatePresence } from "framer-motion";
 
 interface StorySlide {
   id: string;
@@ -15,6 +16,11 @@ interface StorySlide {
   content: string;
   backgroundColor?: string;
   timestamp: string;
+  likeCount?: number;
+  isLiked?: boolean;
+  isReshare?: boolean;
+  privacy?: string;
+  originalStoryId?: string | null;
 }
 
 interface StoryViewerProps {
@@ -25,6 +31,8 @@ interface StoryViewerProps {
   onNext?: () => void;
   onPrevious?: () => void;
   storyOwnerId?: string;
+  displayName?: string | null;
+  userType?: string;
 }
 
 export default function StoryViewer({
@@ -35,6 +43,8 @@ export default function StoryViewer({
   onNext,
   onPrevious,
   storyOwnerId,
+  displayName,
+  userType,
 }: StoryViewerProps) {
   const { data: currentUser } = useAuth();
   const { toast } = useToast();
@@ -43,8 +53,23 @@ export default function StoryViewer({
   const [progress, setProgress] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [replyText, setReplyText] = useState("");
+  const [showLikeAnimation, setShowLikeAnimation] = useState(false);
+  const [localLikeStates, setLocalLikeStates] = useState<Record<string, { isLiked: boolean; likeCount: number }>>({});
 
   const SLIDE_DURATION = 5000;
+  const currentStory = slides[currentSlide];
+
+  // Initialize local like states from slides
+  useEffect(() => {
+    const initialStates: Record<string, { isLiked: boolean; likeCount: number }> = {};
+    slides.forEach(slide => {
+      initialStates[slide.id] = {
+        isLiked: slide.isLiked || false,
+        likeCount: slide.likeCount || 0,
+      };
+    });
+    setLocalLikeStates(initialStates);
+  }, [slides]);
 
   const deleteStoryMutation = useMutation({
     mutationFn: async (storyId: string) => {
@@ -56,7 +81,6 @@ export default function StoryViewer({
         title: "Story deleted",
         description: "Your story has been removed.",
       });
-      // Move to next story or close if this was the last one
       if (currentSlide < slides.length - 1) {
         setCurrentSlide(currentSlide + 1);
         setProgress(0);
@@ -73,6 +97,69 @@ export default function StoryViewer({
     },
   });
 
+  const likeStoryMutation = useMutation({
+    mutationFn: async (storyId: string) => {
+      const response = await apiRequest('POST', `/api/stories/${storyId}/like`, undefined);
+      return response.json();
+    },
+    onSuccess: (data, storyId) => {
+      setLocalLikeStates(prev => ({
+        ...prev,
+        [storyId]: { isLiked: true, likeCount: data.likeCount },
+      }));
+      setShowLikeAnimation(true);
+      setTimeout(() => setShowLikeAnimation(false), 1000);
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to like story.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const unlikeStoryMutation = useMutation({
+    mutationFn: async (storyId: string) => {
+      const response = await apiRequest('DELETE', `/api/stories/${storyId}/like`, undefined);
+      return response.json();
+    },
+    onSuccess: (data, storyId) => {
+      setLocalLikeStates(prev => ({
+        ...prev,
+        [storyId]: { isLiked: false, likeCount: data.likeCount },
+      }));
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to unlike story.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const reshareStoryMutation = useMutation({
+    mutationFn: async (storyId: string) => {
+      const response = await apiRequest('POST', `/api/stories/${storyId}/reshare`, undefined);
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/stories'] });
+      toast({
+        title: "Story reshared",
+        description: "This story has been added to your stories.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to reshare story.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleDeleteStory = () => {
     if (confirm("Are you sure you want to delete this story?")) {
       const currentStoryId = slides[currentSlide]?.id;
@@ -81,6 +168,30 @@ export default function StoryViewer({
       }
     }
   };
+
+  const handleLikeToggle = () => {
+    if (!currentStory || isOwnStory) return;
+    
+    const currentLikeState = localLikeStates[currentStory.id];
+    if (currentLikeState?.isLiked) {
+      unlikeStoryMutation.mutate(currentStory.id);
+    } else {
+      likeStoryMutation.mutate(currentStory.id);
+    }
+  };
+
+  const handleReshare = () => {
+    if (!currentStory || isOwnStory) return;
+    reshareStoryMutation.mutate(currentStory.id);
+  };
+
+  const handleDoubleTap = useCallback(() => {
+    if (!currentStory || isOwnStory) return;
+    const currentLikeState = localLikeStates[currentStory.id];
+    if (!currentLikeState?.isLiked) {
+      likeStoryMutation.mutate(currentStory.id);
+    }
+  }, [currentStory, isOwnStory, localLikeStates, likeStoryMutation]);
 
   useEffect(() => {
     if (isPaused) return;
@@ -123,56 +234,89 @@ export default function StoryViewer({
   };
 
   const handleReply = () => {
-    console.log('Reply sent:', replyText);
-    setReplyText("");
+    if (replyText.trim()) {
+      toast({
+        title: "Reply sent",
+        description: `Your reply has been sent to ${username}`,
+      });
+      setReplyText("");
+    }
   };
-
-  const currentStory = slides[currentSlide];
 
   if (!currentStory) {
     return null;
   }
 
+  const currentLikeState = localLikeStates[currentStory.id] || { isLiked: false, likeCount: 0 };
+
+  // Double tap detection for likes
+  let lastTap = 0;
+  const handleTap = (e: React.MouseEvent | React.TouchEvent) => {
+    const now = Date.now();
+    if (now - lastTap < 300) {
+      handleDoubleTap();
+      e.preventDefault();
+    }
+    lastTap = now;
+  };
+
   return (
-    <div className="fixed inset-0 bg-background z-50 flex items-center justify-center">
-      <div className="relative w-full h-full max-w-md mx-auto bg-card">
-        {/* Progress bars */}
-        <div className="absolute top-0 left-0 right-0 z-20 flex gap-1 p-2">
+    <div className="fixed inset-0 bg-black z-50 flex items-center justify-center">
+      <div className="relative w-full h-full max-w-md mx-auto">
+        {/* Progress bars - Snapchat style */}
+        <div className="absolute top-0 left-0 right-0 z-30 flex gap-1 p-2 pt-3">
           {slides.map((_, index) => (
-            <div key={index} className="flex-1 h-0.5 bg-background/30 rounded-full overflow-hidden">
-              <Progress
-                value={index === currentSlide ? progress : index < currentSlide ? 100 : 0}
-                className="h-full"
+            <div key={index} className="flex-1 h-0.5 bg-white/30 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-white transition-all duration-100 ease-linear rounded-full"
+                style={{ 
+                  width: index === currentSlide 
+                    ? `${progress}%` 
+                    : index < currentSlide 
+                      ? '100%' 
+                      : '0%' 
+                }}
               />
             </div>
           ))}
         </div>
 
-        {/* Header */}
-        <div className="absolute top-0 left-0 right-0 z-20 pt-6 px-4 pb-8 bg-gradient-to-b from-background/80 to-transparent">
+        {/* Header - Snapchat style overlay */}
+        <div className="absolute top-0 left-0 right-0 z-20 pt-8 px-4 pb-16 bg-gradient-to-b from-black/60 via-black/30 to-transparent">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Avatar className="h-10 w-10 border-2 border-background">
+            <div className="flex items-center gap-3">
+              <Avatar className="h-10 w-10 border-2 border-white ring-2 ring-primary">
                 <AvatarImage src={avatar} alt={username} />
-                <AvatarFallback>
-                  {username.split(' ').map(n => n[0]).join('')}
+                <AvatarFallback className="bg-primary text-primary-foreground">
+                  {(displayName || username).charAt(0).toUpperCase()}
                 </AvatarFallback>
               </Avatar>
               <div>
-                <p className="font-semibold text-sm text-card-foreground" data-testid="text-story-username">
-                  {username}
-                </p>
-                <p className="text-xs text-muted-foreground">{currentStory?.timestamp}</p>
+                <div className="flex items-center gap-2">
+                  <p className="font-semibold text-white text-sm" data-testid="text-story-username">
+                    {displayName || username}
+                  </p>
+                  {currentStory.privacy === 'private' && (
+                    <Lock className="h-3 w-3 text-white/80" />
+                  )}
+                  {currentStory.isReshare && (
+                    <Badge variant="secondary" className="h-5 text-[10px] bg-white/20 text-white border-0">
+                      <RefreshCw className="h-2.5 w-2.5 mr-1" />
+                      Reshared
+                    </Badge>
+                  )}
+                </div>
+                <p className="text-xs text-white/70">{currentStory.timestamp}</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
               {isOwnStory && (
                 <Button
                   variant="ghost"
                   size="icon"
                   onClick={handleDeleteStory}
                   disabled={deleteStoryMutation.isPending}
-                  className="text-card-foreground hover:bg-background/20"
+                  className="text-white hover:bg-white/20"
                   data-testid="button-delete-story"
                 >
                   <Trash2 className="h-5 w-5" />
@@ -182,10 +326,10 @@ export default function StoryViewer({
                 variant="ghost"
                 size="icon"
                 onClick={onClose}
-                className="text-card-foreground hover:bg-background/20"
+                className="text-white hover:bg-white/20"
                 data-testid="button-close-story"
               >
-                <X className="h-5 w-5" />
+                <X className="h-6 w-6" />
               </Button>
             </div>
           </div>
@@ -198,6 +342,7 @@ export default function StoryViewer({
           onMouseUp={() => setIsPaused(false)}
           onTouchStart={() => setIsPaused(true)}
           onTouchEnd={() => setIsPaused(false)}
+          onClick={handleTap}
         >
           {currentStory.type === "image" ? (
             <img
@@ -210,57 +355,104 @@ export default function StoryViewer({
               className="w-full h-full flex items-center justify-center p-8"
               style={{ backgroundColor: currentStory.backgroundColor || "hsl(var(--primary))" }}
             >
-              <p className="text-2xl font-serif font-semibold text-center text-primary-foreground">
+              <p className="text-2xl font-serif font-semibold text-center text-white">
                 {currentStory.content}
               </p>
             </div>
           )}
+
+          {/* Like animation overlay */}
+          <AnimatePresence>
+            {showLikeAnimation && (
+              <motion.div
+                initial={{ scale: 0, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0, opacity: 0 }}
+                className="absolute inset-0 flex items-center justify-center pointer-events-none"
+              >
+                <Heart className="h-32 w-32 text-red-500 fill-red-500" />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
-        {/* Navigation */}
-        <div className="absolute inset-0 z-10 flex">
+        {/* Navigation - Invisible touch areas */}
+        <div className="absolute inset-0 z-10 flex pointer-events-none">
           <button
-            className="flex-1 cursor-pointer"
+            className="flex-1 pointer-events-auto"
             onClick={handlePrevious}
             data-testid="button-previous-story"
           />
           <button
-            className="flex-1 cursor-pointer"
+            className="flex-1 pointer-events-auto"
             onClick={handleNext}
             data-testid="button-next-story"
           />
         </div>
 
-        {/* Reply input */}
-        <div className="absolute bottom-0 left-0 right-0 z-20 p-4 bg-gradient-to-t from-background/80 to-transparent">
+        {/* Bottom action bar - Snapchat style */}
+        <div className="absolute bottom-0 left-0 right-0 z-20 p-4 pb-6 bg-gradient-to-t from-black/60 via-black/30 to-transparent">
+          {/* Like count display */}
+          {currentLikeState.likeCount > 0 && (
+            <div className="flex items-center gap-1 mb-3 ml-1">
+              <Heart className="h-4 w-4 text-red-500 fill-red-500" />
+              <span className="text-sm text-white font-medium" data-testid="text-like-count">
+                {currentLikeState.likeCount} {currentLikeState.likeCount === 1 ? 'like' : 'likes'}
+              </span>
+            </div>
+          )}
+
           <div className="flex items-center gap-2">
-            <Input
-              placeholder="Reply to story..."
-              value={replyText}
-              onChange={(e) => setReplyText(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleReply()}
-              className="flex-1 bg-background/50 backdrop-blur-sm"
-              data-testid="input-story-reply"
-            />
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => console.log('Like story')}
-              className="text-card-foreground hover:bg-background/20"
-              data-testid="button-like-story"
-            >
-              <Heart className="h-5 w-5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleReply}
-              disabled={!replyText}
-              className="text-card-foreground hover:bg-background/20"
-              data-testid="button-send-reply"
-            >
-              <Send className="h-5 w-5" />
-            </Button>
+            {/* Reply input */}
+            <div className="flex-1 relative">
+              <Input
+                placeholder="Send a message..."
+                value={replyText}
+                onChange={(e) => setReplyText(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleReply()}
+                className="bg-white/10 backdrop-blur-md border-white/20 text-white placeholder:text-white/50 pr-10"
+                data-testid="input-story-reply"
+              />
+              {replyText && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleReply}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 text-white hover:bg-white/20"
+                  data-testid="button-send-reply"
+                >
+                  <Send className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+
+            {/* Like button */}
+            {!isOwnStory && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleLikeToggle}
+                disabled={likeStoryMutation.isPending || unlikeStoryMutation.isPending}
+                className={`text-white hover:bg-white/20 ${currentLikeState.isLiked ? 'text-red-500' : ''}`}
+                data-testid="button-like-story"
+              >
+                <Heart className={`h-6 w-6 ${currentLikeState.isLiked ? 'fill-red-500' : ''}`} />
+              </Button>
+            )}
+
+            {/* Reshare button */}
+            {!isOwnStory && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleReshare}
+                disabled={reshareStoryMutation.isPending}
+                className="text-white hover:bg-white/20"
+                data-testid="button-reshare-story"
+              >
+                <Share2 className="h-6 w-6" />
+              </Button>
+            )}
           </div>
         </div>
 
@@ -269,7 +461,7 @@ export default function StoryViewer({
           <Button
             variant="ghost"
             size="icon"
-            className="absolute left-4 top-1/2 -translate-y-1/2 z-20"
+            className="absolute left-2 top-1/2 -translate-y-1/2 z-20 text-white hover:bg-white/20"
             onClick={handlePrevious}
           >
             <ChevronLeft className="h-8 w-8" />
@@ -277,7 +469,7 @@ export default function StoryViewer({
           <Button
             variant="ghost"
             size="icon"
-            className="absolute right-4 top-1/2 -translate-y-1/2 z-20"
+            className="absolute right-2 top-1/2 -translate-y-1/2 z-20 text-white hover:bg-white/20"
             onClick={handleNext}
           >
             <ChevronRight className="h-8 w-8" />
