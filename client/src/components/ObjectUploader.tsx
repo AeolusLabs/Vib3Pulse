@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import type { ReactNode } from "react";
 import Uppy from "@uppy/core";
 import DashboardModal from "@uppy/react/dashboard-modal";
@@ -37,6 +37,14 @@ export function ObjectUploader({
   disabled = false,
 }: ObjectUploaderProps) {
   const [showModal, setShowModal] = useState(false);
+  const onGetUploadParametersRef = useRef(onGetUploadParameters);
+  const onCompleteRef = useRef(onComplete);
+
+  useEffect(() => {
+    onGetUploadParametersRef.current = onGetUploadParameters;
+    onCompleteRef.current = onComplete;
+  }, [onGetUploadParameters, onComplete]);
+
   const [uppy] = useState(() =>
     new Uppy({
       restrictions: {
@@ -48,19 +56,32 @@ export function ObjectUploader({
     })
       .use(AwsS3, {
         shouldUseMultipart: false,
-        getUploadParameters: onGetUploadParameters,
+        getUploadParameters: async () => {
+          return await onGetUploadParametersRef.current();
+        },
       })
       .on("complete", (result) => {
-        onComplete?.(result);
+        onCompleteRef.current?.(result);
         setShowModal(false);
       })
   );
+
+  useEffect(() => {
+    return () => {
+      uppy.cancelAll();
+    };
+  }, [uppy]);
+
+  const handleOpen = useCallback(() => {
+    uppy.cancelAll();
+    setShowModal(true);
+  }, [uppy]);
 
   return (
     <div>
       <Button
         type="button"
-        onClick={() => setShowModal(true)}
+        onClick={handleOpen}
         className={buttonClassName}
         variant={buttonVariant}
         size={buttonSize}
@@ -75,7 +96,74 @@ export function ObjectUploader({
         open={showModal}
         onRequestClose={() => setShowModal(false)}
         proudlyDisplayPoweredByUppy={false}
+        theme="auto"
+        note="Images only, up to 10 MB"
       />
+
+      <style>{`
+        .uppy-Dashboard-inner {
+          border-radius: 0.5rem;
+          border-color: hsl(var(--border));
+          background: hsl(var(--background));
+        }
+        .uppy-Dashboard-innerWrap {
+          background: hsl(var(--background));
+        }
+        .uppy-Dashboard-AddFiles-title {
+          color: hsl(var(--foreground));
+        }
+        .uppy-Dashboard-browse {
+          color: hsl(262 83% 58%);
+        }
+        .uppy-Dashboard-browse:hover {
+          color: hsl(262 83% 50%);
+        }
+        .uppy-Dashboard-AddFiles-info {
+          color: hsl(var(--muted-foreground));
+        }
+        .uppy-StatusBar {
+          background: hsl(var(--muted));
+        }
+        .uppy-StatusBar-actionBtn--upload {
+          background: hsl(262 83% 58%);
+          color: white;
+        }
+        .uppy-StatusBar-actionBtn--upload:hover {
+          background: hsl(262 83% 50%);
+        }
+        .uppy-Dashboard-Item-action--remove {
+          color: hsl(var(--destructive));
+        }
+        .uppy-DashboardContent-bar {
+          background: hsl(var(--muted));
+          border-color: hsl(var(--border));
+        }
+        .uppy-DashboardContent-title {
+          color: hsl(var(--foreground));
+        }
+        .uppy-c-btn-primary {
+          background: hsl(262 83% 58%);
+        }
+        .uppy-c-btn-primary:hover {
+          background: hsl(262 83% 50%);
+        }
+        .uppy-Dashboard-Item-name {
+          color: hsl(var(--foreground));
+        }
+        .uppy-Dashboard-Item-statusSize {
+          color: hsl(var(--muted-foreground));
+        }
+        .uppy-Dashboard-dropFilesHereHint {
+          color: hsl(262 83% 58%);
+          border-color: hsl(262 83% 58%);
+        }
+        [data-uppy-drag-drop-supported=true] .uppy-Dashboard-AddFiles {
+          border-color: hsl(var(--border));
+        }
+        .uppy-Dashboard-note {
+          color: hsl(var(--muted-foreground));
+        }
+      `}</style>
     </div>
   );
 }
