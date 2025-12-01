@@ -107,7 +107,7 @@ export default function ManageVenuesPage() {
               )}
             </div>
             <div className="absolute bottom-2 left-2">
-              <Badge className="text-[#a96bc7] bg-[#f2eded]">
+              <Badge variant="category">
                 {categoryLabels[venue.category] || venue.category}
               </Badge>
             </div>
