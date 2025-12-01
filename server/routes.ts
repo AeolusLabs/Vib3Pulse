@@ -94,7 +94,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Update user profile
   app.patch("/api/users/:userId", requireAuth, async (req, res) => {
     try {
-      const { userId } = req.params;
+      let { userId } = req.params;
+      
+      // Handle "me" as a special case for current user
+      if (userId === "me") {
+        userId = req.user!.id;
+      }
       
       // Security check: Users can only update their own profile
       if (req.user!.id !== userId) {
