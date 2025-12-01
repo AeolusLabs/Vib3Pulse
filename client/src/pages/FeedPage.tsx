@@ -367,7 +367,7 @@ export default function FeedPage() {
                   userId: post.user.id,
                 }}
                 content={post.content}
-                timestamp="Just now"
+                createdAt={post.createdAt}
                 likes={0}
                 comments={0}
                 isLiked={false}

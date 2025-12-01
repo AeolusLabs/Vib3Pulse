@@ -2,12 +2,45 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Heart, MessageCircle, Share2, Bookmark } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import CommentDialog from "@/components/CommentDialog";
+import { format } from "date-fns";
+
+function formatRelativeTime(date: Date | string): string {
+  const now = new Date();
+  const postDate = typeof date === 'string' ? new Date(date) : date;
+  const diffInSeconds = Math.floor((now.getTime() - postDate.getTime()) / 1000);
+
+  if (diffInSeconds < 60) {
+    return diffInSeconds <= 5 ? 'Just now' : `${diffInSeconds}s`;
+  }
+
+  const diffInMinutes = Math.floor(diffInSeconds / 60);
+  if (diffInMinutes < 60) {
+    return `${diffInMinutes}m`;
+  }
+
+  const diffInHours = Math.floor(diffInMinutes / 60);
+  if (diffInHours < 24) {
+    return `${diffInHours}h`;
+  }
+
+  const diffInDays = Math.floor(diffInHours / 24);
+  if (diffInDays < 7) {
+    return `${diffInDays}d`;
+  }
+
+  const diffInWeeks = Math.floor(diffInDays / 7);
+  if (diffInWeeks < 4) {
+    return `${diffInWeeks}w`;
+  }
+
+  return format(postDate, 'MMM d, yyyy');
+}
 
 interface FeedPostProps {
   id: string;
@@ -20,7 +53,8 @@ interface FeedPostProps {
   };
   content: string;
   image?: string;
-  timestamp: string;
+  timestamp?: string;
+  createdAt?: string | Date;
   likes: number;
   comments: number;
   isLiked?: boolean;
@@ -32,6 +66,7 @@ export default function FeedPost({
   content,
   image,
   timestamp,
+  createdAt,
   likes: initialLikes,
   comments: initialComments,
   isLiked: initialIsLiked = false,
@@ -39,6 +74,21 @@ export default function FeedPost({
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const [commentDialogOpen, setCommentDialogOpen] = useState(false);
+  const [displayTime, setDisplayTime] = useState(() => 
+    createdAt ? formatRelativeTime(createdAt) : timestamp || 'Just now'
+  );
+
+  useEffect(() => {
+    if (!createdAt) return;
+    
+    setDisplayTime(formatRelativeTime(createdAt));
+    
+    const interval = setInterval(() => {
+      setDisplayTime(formatRelativeTime(createdAt));
+    }, 30000);
+    
+    return () => clearInterval(interval);
+  }, [createdAt]);
 
   // Fetch like status and count from API
   const { data: likeData } = useQuery<{ count: number; isLiked: boolean }>({
@@ -212,7 +262,7 @@ export default function FeedPost({
                 Organizer
               </span>
             )}
-            <span className="text-xs text-muted-foreground">· {timestamp}</span>
+            <span className="text-xs text-muted-foreground">· {displayTime}</span>
           </div>
 
           <p className="mt-2 text-sm whitespace-pre-wrap" data-testid={`text-content-${id}`}>
