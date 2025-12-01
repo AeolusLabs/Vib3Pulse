@@ -109,6 +109,7 @@ export default function StoryViewer({
       }));
       setShowLikeAnimation(true);
       setTimeout(() => setShowLikeAnimation(false), 1000);
+      queryClient.invalidateQueries({ queryKey: ['/api/stories'] });
     },
     onError: () => {
       toast({
@@ -129,6 +130,7 @@ export default function StoryViewer({
         ...prev,
         [storyId]: { isLiked: false, likeCount: data.likeCount },
       }));
+      queryClient.invalidateQueries({ queryKey: ['/api/stories'] });
     },
     onError: () => {
       toast({
