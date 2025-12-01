@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { queryClient } from "@/lib/queryClient";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import HeroSection from "@/components/HeroSection";
@@ -9,8 +10,8 @@ import CreateEventModal from "@/components/CreateEventModal";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar, MapPin, Users, Sparkles, Building2, Music } from "lucide-react";
-import { format } from "date-fns";
+import { Calendar, MapPin, Users, Sparkles, Building2, Music, RefreshCw } from "lucide-react";
+import { format, isPast } from "date-fns";
 import { Link } from "wouter";
 import type { Event, Venue } from "@shared/schema";
 
@@ -19,33 +20,56 @@ export default function DiscoverPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [createEventOpen, setCreateEventOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const { data: events = [], isLoading } = useQuery<Event[]>({
+  const { data: events = [], isLoading, refetch: refetchEvents } = useQuery<Event[]>({
     queryKey: ["/api/events"],
+    refetchInterval: 60000,
   });
 
-  const { data: promotedEvents = [] } = useQuery<Event[]>({
+  const { data: promotedEvents = [], refetch: refetchPromoted } = useQuery<Event[]>({
     queryKey: ["/api/events/promoted"],
+    refetchInterval: 60000,
   });
 
-  const { data: promotedVenues = [] } = useQuery<Venue[]>({
+  const { data: promotedVenues = [], refetch: refetchVenues } = useQuery<Venue[]>({
     queryKey: ["/api/venues/promoted"],
+    refetchInterval: 60000,
   });
 
-  const filteredEvents = events.filter(event => {
-    const matchesCategory = selectedCategory === "All Events" || event.category === selectedCategory;
-    const matchesSearch = event.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         event.location.toLowerCase().includes(searchQuery.toLowerCase());
-    const isNotPromoted = !promotedEvents.some(pe => pe.id === event.id);
-    return matchesCategory && matchesSearch && isNotPromoted;
-  });
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await Promise.all([
+      refetchEvents(),
+      refetchPromoted(),
+      refetchVenues(),
+    ]);
+    setIsRefreshing(false);
+  };
 
-  const filteredPromotedEvents = promotedEvents.filter(event => {
-    const matchesCategory = selectedCategory === "All Events" || event.category === selectedCategory;
-    const matchesSearch = event.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         event.location.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesCategory && matchesSearch;
-  });
+  const isEventUpcoming = (event: Event) => {
+    const eventDate = new Date(event.eventDate);
+    return !isPast(eventDate);
+  };
+
+  const filteredEvents = events
+    .filter(isEventUpcoming)
+    .filter(event => {
+      const matchesCategory = selectedCategory === "All Events" || event.category === selectedCategory;
+      const matchesSearch = event.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                           event.location.toLowerCase().includes(searchQuery.toLowerCase());
+      const isNotPromoted = !promotedEvents.some(pe => pe.id === event.id);
+      return matchesCategory && matchesSearch && isNotPromoted;
+    });
+
+  const filteredPromotedEvents = promotedEvents
+    .filter(isEventUpcoming)
+    .filter(event => {
+      const matchesCategory = selectedCategory === "All Events" || event.category === selectedCategory;
+      const matchesSearch = event.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                           event.location.toLowerCase().includes(searchQuery.toLowerCase());
+      return matchesCategory && matchesSearch;
+    });
 
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
@@ -56,11 +80,24 @@ export default function DiscoverPage() {
       <HeroSection onSearch={setSearchQuery} onCategoryClick={setSelectedCategory} />
       
       <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <FilterBar
-          selectedCategory={selectedCategory}
-          onCategoryChange={setSelectedCategory}
-          onSortChange={(sort) => console.log('Sort changed:', sort)}
-        />
+        <div className="flex items-center justify-between mb-4">
+          <FilterBar
+            selectedCategory={selectedCategory}
+            onCategoryChange={setSelectedCategory}
+            onSortChange={(sort) => console.log('Sort changed:', sort)}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="flex items-center gap-2"
+            data-testid="button-refresh-discover"
+          >
+            <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+            {isRefreshing ? 'Refreshing...' : 'Refresh'}
+          </Button>
+        </div>
 
         {isLoading ? (
           <div className="text-center py-16">
