@@ -734,7 +734,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Stories
   app.get("/api/stories", async (req, res) => {
     try {
-      const stories = await storage.getActiveStories();
+      const viewerId = req.user?.id;
+      const stories = await storage.getActiveStories(viewerId);
       res.json(stories);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch stories" });
@@ -743,13 +744,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/stories", requireAuth, async (req, res) => {
     try {
-      const storyData = insertStorySchema.omit({ userId: true }).parse(req.body);
+      const { allowedViewerIds, ...storyInput } = req.body;
+      const storyData = insertStorySchema.omit({ userId: true }).parse(storyInput);
       const story = await storage.createStory({
         ...storyData,
         userId: req.user!.id,
-      });
+      }, allowedViewerIds);
       res.json(story);
     } catch (error) {
+      console.error("Create story error:", error);
       res.status(400).json({ message: "Invalid story data" });
     }
   });
@@ -767,6 +770,89 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ message: "Story deleted" });
     } catch (error) {
       res.status(500).json({ message: "Failed to delete story" });
+    }
+  });
+
+  // Story Likes
+  app.post("/api/stories/:storyId/like", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const storyId = req.params.storyId;
+      
+      const story = await storage.getStory(storyId);
+      if (!story) {
+        return res.status(404).json({ message: "Story not found" });
+      }
+      
+      // Check if user can view this story
+      const canView = await storage.canViewStory(userId, storyId);
+      if (!canView) {
+        return res.status(403).json({ message: "Not authorized to view this story" });
+      }
+      
+      await storage.likeStory(userId, storyId);
+      const likeCount = await storage.getStoryLikeCount(storyId);
+      res.json({ liked: true, likeCount });
+    } catch (error) {
+      console.error("Like story error:", error);
+      res.status(500).json({ message: "Failed to like story" });
+    }
+  });
+
+  app.delete("/api/stories/:storyId/like", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const storyId = req.params.storyId;
+      
+      await storage.unlikeStory(userId, storyId);
+      const likeCount = await storage.getStoryLikeCount(storyId);
+      res.json({ liked: false, likeCount });
+    } catch (error) {
+      console.error("Unlike story error:", error);
+      res.status(500).json({ message: "Failed to unlike story" });
+    }
+  });
+
+  app.get("/api/stories/:storyId/like-status", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const storyId = req.params.storyId;
+      
+      const isLiked = await storage.hasUserLikedStory(userId, storyId);
+      const likeCount = await storage.getStoryLikeCount(storyId);
+      res.json({ isLiked, likeCount });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get like status" });
+    }
+  });
+
+  // Story Reshares
+  app.post("/api/stories/:storyId/reshare", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const storyId = req.params.storyId;
+      
+      const originalStory = await storage.getStory(storyId);
+      if (!originalStory) {
+        return res.status(404).json({ message: "Story not found" });
+      }
+      
+      // Check if user can view this story
+      const canView = await storage.canViewStory(userId, storyId);
+      if (!canView) {
+        return res.status(403).json({ message: "Not authorized to reshare this story" });
+      }
+      
+      // Users can't reshare their own stories
+      if (originalStory.userId === userId) {
+        return res.status(400).json({ message: "Cannot reshare your own story" });
+      }
+      
+      const resharedStory = await storage.reshareStory(userId, storyId);
+      res.json(resharedStory);
+    } catch (error) {
+      console.error("Reshare story error:", error);
+      res.status(500).json({ message: "Failed to reshare story" });
     }
   });
 
