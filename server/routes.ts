@@ -511,6 +511,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       
       const ticket = await storage.createTicket(ticketData);
+
+      // Notify event organizer about ticket purchase
+      const event = await storage.getEvent(session.metadata.eventId);
+      if (event) {
+        const buyer = await storage.getUser(session.metadata.userId);
+        await storage.createNotification({
+          userId: event.organizerId,
+          type: "ticket_purchase",
+          title: "Ticket Sold",
+          message: `${buyer?.displayName || buyer?.username || "Someone"} purchased a ticket for ${event.title}`,
+          link: `/events/${event.id}`,
+          relatedUserId: session.metadata.userId,
+          relatedEntityId: ticket.id,
+        });
+        // Push real-time notification via WebSocket
+        wsManager.sendToUser(event.organizerId, {
+          type: "notification",
+          data: { type: "ticket_purchase" },
+        });
+      }
+
       res.json({ message: "Ticket created successfully", ticket });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -683,6 +704,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: "confirmed",
       });
       await storage.createTicket(ticketData);
+
+      // Notify event organizer about the RSVP
+      const attendee = await storage.getUser(userId);
+      await storage.createNotification({
+        userId: event.organizerId,
+        type: "event_rsvp",
+        title: "New RSVP",
+        message: `${attendee?.displayName || attendee?.username || "Someone"} RSVPed to ${event.title}`,
+        link: `/events/${eventId}`,
+        relatedUserId: userId,
+        relatedEntityId: eventId,
+      });
+      // Push real-time notification via WebSocket
+      wsManager.sendToUser(event.organizerId, {
+        type: "notification",
+        data: { type: "event_rsvp" },
+      });
       
       res.json(rsvp);
     } catch (error) {
@@ -1060,6 +1098,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const follow = await storage.followUser(followerId, followingId);
+
+      // Notify user they have a new follower
+      const follower = await storage.getUser(followerId);
+      await storage.createNotification({
+        userId: followingId,
+        type: "new_follower",
+        title: "New Follower",
+        message: `${follower?.displayName || follower?.username || "Someone"} started following you`,
+        link: `/profile/${followerId}`,
+        relatedUserId: followerId,
+        relatedEntityId: followerId,
+      });
+      // Push real-time notification via WebSocket
+      wsManager.sendToUser(followingId, {
+        type: "notification",
+        data: { type: "new_follower" },
+      });
+
       res.json(follow);
     } catch (error) {
       res.status(500).json({ message: "Failed to follow user" });
@@ -1483,6 +1539,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
           mapLink,
           timestamp: new Date().toISOString(),
         },
+      });
+
+      // Create persistent notification for buddy
+      await storage.createNotification({
+        userId: buddy.id,
+        type: "buddy_alert",
+        title: "Buddy Alert",
+        message: `${user?.displayName || user?.username || "Your buddy"} needs help!${mapLink ? " Location shared." : ""}`,
+        link: mapLink || `/buddy`,
+        relatedUserId: userId,
+        relatedEntityId: userId,
+      });
+      // Push real-time notification via WebSocket
+      wsManager.sendToUser(buddy.id, {
+        type: "notification",
+        data: { type: "buddy_alert" },
       });
 
       res.json({ 
