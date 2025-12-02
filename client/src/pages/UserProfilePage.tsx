@@ -20,6 +20,12 @@ type UserProfileResponse = {
   events: Array<Rsvp & { event: Event }>;
 };
 
+type SocialStats = {
+  followersCount: number;
+  followingCount: number;
+  isFollowing: boolean;
+};
+
 export default function UserProfilePage() {
   const { userId } = useParams<{ userId: string }>();
   const [, navigate] = useLocation();
@@ -39,12 +45,18 @@ export default function UserProfilePage() {
     enabled: !!userId && !!sessionUser,
   });
 
+  const { data: socialStats } = useQuery<SocialStats>({
+    queryKey: [`/api/users/${userId}/social-stats`],
+    enabled: !!userId,
+  });
+
   const followMutation = useMutation({
     mutationFn: async () => {
       return await apiRequest('POST', `/api/follows/${userId}`, {});
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/follows/${userId}/status`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/users/${userId}/social-stats`] });
       toast({
         title: "Success",
         description: "You are now following this user",
@@ -58,6 +70,7 @@ export default function UserProfilePage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/follows/${userId}/status`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/users/${userId}/social-stats`] });
       toast({
         title: "Success",
         description: "Unfollowed successfully",
@@ -134,6 +147,22 @@ export default function UserProfilePage() {
                         @{user.username}
                       </p>
                     </div>
+
+                    {/* Follower/Following Stats */}
+                    <div className="flex gap-6" data-testid="social-stats">
+                      <div className="text-center">
+                        <p className="text-xl font-bold text-foreground" data-testid="text-followers-count">
+                          {socialStats?.followersCount ?? 0}
+                        </p>
+                        <p className="text-sm text-muted-foreground">Followers</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xl font-bold text-foreground" data-testid="text-following-count">
+                          {socialStats?.followingCount ?? 0}
+                        </p>
+                        <p className="text-sm text-muted-foreground">Following</p>
+                      </div>
+                    </div>
                     
                     {user.bio && (
                       <p className="text-foreground leading-relaxed" data-testid="text-bio">
@@ -173,6 +202,22 @@ export default function UserProfilePage() {
                       <p className="text-muted-foreground" data-testid="text-username">
                         @{user.username}
                       </p>
+                    </div>
+
+                    {/* Follower/Following Stats for Organizers */}
+                    <div className="flex gap-6" data-testid="social-stats-organizer">
+                      <div className="text-center">
+                        <p className="text-xl font-bold text-foreground" data-testid="text-followers-count">
+                          {socialStats?.followersCount ?? 0}
+                        </p>
+                        <p className="text-sm text-muted-foreground">Followers</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xl font-bold text-foreground" data-testid="text-following-count">
+                          {socialStats?.followingCount ?? 0}
+                        </p>
+                        <p className="text-sm text-muted-foreground">Following</p>
+                      </div>
                     </div>
 
                     {user.bio && (
