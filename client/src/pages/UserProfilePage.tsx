@@ -13,6 +13,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { User, Post, Event, Rsvp } from "@shared/schema";
 import EditProfileDialog from "@/components/EditProfileDialog";
+import FollowersFollowingDialog from "@/components/FollowersFollowingDialog";
 
 type UserProfileResponse = {
   user: User;
@@ -150,18 +151,36 @@ export default function UserProfilePage() {
 
                     {/* Follower/Following Stats */}
                     <div className="flex gap-6" data-testid="social-stats">
-                      <div className="text-center">
-                        <p className="text-xl font-bold text-foreground" data-testid="text-followers-count">
-                          {socialStats?.followersCount ?? 0}
-                        </p>
-                        <p className="text-sm text-muted-foreground">Followers</p>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-xl font-bold text-foreground" data-testid="text-following-count">
-                          {socialStats?.followingCount ?? 0}
-                        </p>
-                        <p className="text-sm text-muted-foreground">Following</p>
-                      </div>
+                      <FollowersFollowingDialog
+                        userId={userId!}
+                        username={user.username}
+                        followersCount={socialStats?.followersCount ?? 0}
+                        followingCount={socialStats?.followingCount ?? 0}
+                        initialTab="followers"
+                        trigger={
+                          <button className="text-center hover-elevate rounded-md px-3 py-2 transition-colors" data-testid="button-show-followers">
+                            <p className="text-xl font-bold text-foreground" data-testid="text-followers-count">
+                              {socialStats?.followersCount ?? 0}
+                            </p>
+                            <p className="text-sm text-muted-foreground">Followers</p>
+                          </button>
+                        }
+                      />
+                      <FollowersFollowingDialog
+                        userId={userId!}
+                        username={user.username}
+                        followersCount={socialStats?.followersCount ?? 0}
+                        followingCount={socialStats?.followingCount ?? 0}
+                        initialTab="following"
+                        trigger={
+                          <button className="text-center hover-elevate rounded-md px-3 py-2 transition-colors" data-testid="button-show-following">
+                            <p className="text-xl font-bold text-foreground" data-testid="text-following-count">
+                              {socialStats?.followingCount ?? 0}
+                            </p>
+                            <p className="text-sm text-muted-foreground">Following</p>
+                          </button>
+                        }
+                      />
                     </div>
                     
                     {user.bio && (
@@ -206,18 +225,36 @@ export default function UserProfilePage() {
 
                     {/* Follower/Following Stats for Organizers */}
                     <div className="flex gap-6" data-testid="social-stats-organizer">
-                      <div className="text-center">
-                        <p className="text-xl font-bold text-foreground" data-testid="text-followers-count">
-                          {socialStats?.followersCount ?? 0}
-                        </p>
-                        <p className="text-sm text-muted-foreground">Followers</p>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-xl font-bold text-foreground" data-testid="text-following-count">
-                          {socialStats?.followingCount ?? 0}
-                        </p>
-                        <p className="text-sm text-muted-foreground">Following</p>
-                      </div>
+                      <FollowersFollowingDialog
+                        userId={userId!}
+                        username={user.username}
+                        followersCount={socialStats?.followersCount ?? 0}
+                        followingCount={socialStats?.followingCount ?? 0}
+                        initialTab="followers"
+                        trigger={
+                          <button className="text-center hover-elevate rounded-md px-3 py-2 transition-colors" data-testid="button-show-followers-organizer">
+                            <p className="text-xl font-bold text-foreground" data-testid="text-followers-count">
+                              {socialStats?.followersCount ?? 0}
+                            </p>
+                            <p className="text-sm text-muted-foreground">Followers</p>
+                          </button>
+                        }
+                      />
+                      <FollowersFollowingDialog
+                        userId={userId!}
+                        username={user.username}
+                        followersCount={socialStats?.followersCount ?? 0}
+                        followingCount={socialStats?.followingCount ?? 0}
+                        initialTab="following"
+                        trigger={
+                          <button className="text-center hover-elevate rounded-md px-3 py-2 transition-colors" data-testid="button-show-following-organizer">
+                            <p className="text-xl font-bold text-foreground" data-testid="text-following-count">
+                              {socialStats?.followingCount ?? 0}
+                            </p>
+                            <p className="text-sm text-muted-foreground">Following</p>
+                          </button>
+                        }
+                      />
                     </div>
 
                     {user.bio && (

@@ -1181,7 +1181,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "User not found" });
       }
       const followers = await storage.getFollowers(userId);
-      res.json(followers);
+      // Return just the user objects for easier frontend consumption
+      const users = followers.map(f => f.follower);
+      res.json(users);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch followers" });
     }
@@ -1194,7 +1196,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "User not found" });
       }
       const following = await storage.getFollowing(userId);
-      res.json(following);
+      // Return just the user objects for easier frontend consumption
+      const users = following.map(f => f.following);
+      res.json(users);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch following" });
     }
