@@ -1343,6 +1343,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const follow = await storage.followUser(currentUserId, targetUserId);
+
+      // Create notification for the followed user
+      const currentUser = await storage.getUser(currentUserId);
+      await storage.createNotification({
+        userId: targetUserId,
+        type: "new_follower",
+        title: "New Follower",
+        message: `${currentUser?.displayName || currentUser?.username || "Someone"} started following you`,
+        link: `/profile/${currentUser?.username}`,
+        relatedUserId: currentUserId,
+        relatedEntityId: currentUserId,
+      });
+
       res.json(follow);
     } catch (error) {
       console.error("Follow error:", error);
