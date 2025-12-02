@@ -53,6 +53,8 @@ import {
   type InsertUserSuspension,
   type EventModeration,
   type InsertEventModeration,
+  type Notification,
+  type InsertNotification,
   users,
   events,
   tickets,
@@ -79,7 +81,8 @@ import {
   adminActivityLogs,
   contentReports,
   userSuspensions,
-  eventModerations
+  eventModerations,
+  notifications
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/neon-serverless";
 import { Pool, neonConfig } from "@neondatabase/serverless";
@@ -299,6 +302,16 @@ export interface IStorage {
   // Story management for admins
   getAllStoriesAdmin(limit?: number): Promise<Array<Story & { user: User }>>;
   deleteStoryAdmin(id: string): Promise<void>;
+
+  // ============================================
+  // NOTIFICATIONS
+  // ============================================
+  createNotification(notification: InsertNotification): Promise<Notification>;
+  getUserNotifications(userId: string, limit?: number): Promise<Array<Notification & { relatedUser: User | null }>>;
+  getUnreadNotificationCount(userId: string): Promise<number>;
+  markNotificationAsRead(id: string): Promise<Notification>;
+  markAllNotificationsAsRead(userId: string): Promise<void>;
+  deleteNotification(id: string): Promise<void>;
 }
 
 export class DbStorage implements IStorage {
@@ -1956,6 +1969,61 @@ export class DbStorage implements IStorage {
 
   async deleteStoryAdmin(id: string): Promise<void> {
     await db.delete(stories).where(eq(stories.id, id));
+  }
+
+  // ============================================
+  // NOTIFICATIONS
+  // ============================================
+
+  async createNotification(notification: InsertNotification): Promise<Notification> {
+    const result = await db.insert(notifications).values(notification).returning();
+    return result[0];
+  }
+
+  async getUserNotifications(userId: string, limit: number = 50): Promise<Array<Notification & { relatedUser: User | null }>> {
+    const result = await db
+      .select()
+      .from(notifications)
+      .leftJoin(users, eq(notifications.relatedUserId, users.id))
+      .where(eq(notifications.userId, userId))
+      .orderBy(desc(notifications.createdAt))
+      .limit(limit);
+    
+    return result.map(r => ({
+      ...r.notifications,
+      relatedUser: r.users || null,
+    }));
+  }
+
+  async getUnreadNotificationCount(userId: string): Promise<number> {
+    const [result] = await db
+      .select({ count: count() })
+      .from(notifications)
+      .where(and(
+        eq(notifications.userId, userId),
+        eq(notifications.isRead, false)
+      ));
+    return Number(result?.count || 0);
+  }
+
+  async markNotificationAsRead(id: string): Promise<Notification> {
+    const result = await db
+      .update(notifications)
+      .set({ isRead: true })
+      .where(eq(notifications.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async markAllNotificationsAsRead(userId: string): Promise<void> {
+    await db
+      .update(notifications)
+      .set({ isRead: true })
+      .where(eq(notifications.userId, userId));
+  }
+
+  async deleteNotification(id: string): Promise<void> {
+    await db.delete(notifications).where(eq(notifications.id, id));
   }
 }
 
