@@ -810,6 +810,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       await storage.likeStory(userId, storyId);
       const likeCount = await storage.getStoryLikeCount(storyId);
+
+      // Create notification for story owner (if not liking own story)
+      if (story.userId !== userId) {
+        const liker = await storage.getUser(userId);
+        await storage.createNotification({
+          userId: story.userId,
+          type: "story_like",
+          title: "New Story Like",
+          message: `${liker?.displayName || liker?.username || "Someone"} liked your story`,
+          link: `/stories`,
+          relatedUserId: userId,
+          relatedEntityId: storyId,
+        });
+        // Push real-time notification via WebSocket
+        wsManager.sendToUser(story.userId, {
+          type: "notification",
+          data: { type: "story_like" },
+        });
+      }
+
       res.json({ liked: true, likeCount });
     } catch (error) {
       console.error("Like story error:", error);
@@ -886,6 +906,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const like = await storage.likePost(userId, postId);
+
+      // Create notification for post owner (if not liking own post)
+      const posts = await storage.getPosts();
+      const post = posts.find(p => p.id === postId);
+      if (post && post.userId !== userId) {
+        const liker = await storage.getUser(userId);
+        await storage.createNotification({
+          userId: post.userId,
+          type: "post_like",
+          title: "New Post Like",
+          message: `${liker?.displayName || liker?.username || "Someone"} liked your post`,
+          link: `/feed`,
+          relatedUserId: userId,
+          relatedEntityId: postId,
+        });
+        // Push real-time notification via WebSocket
+        wsManager.sendToUser(post.userId, {
+          type: "notification",
+          data: { type: "post_like" },
+        });
+      }
+
       res.json(like);
     } catch (error) {
       res.status(500).json({ message: "Failed to like post" });
@@ -934,6 +976,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         postId,
         content: content.trim(),
       });
+
+      // Create notification for post owner (if not commenting on own post)
+      const posts = await storage.getPosts();
+      const post = posts.find(p => p.id === postId);
+      if (post && post.userId !== userId) {
+        const commenter = await storage.getUser(userId);
+        await storage.createNotification({
+          userId: post.userId,
+          type: "post_comment",
+          title: "New Comment",
+          message: `${commenter?.displayName || commenter?.username || "Someone"} commented on your post`,
+          link: `/feed`,
+          relatedUserId: userId,
+          relatedEntityId: postId,
+        });
+        // Push real-time notification via WebSocket
+        wsManager.sendToUser(post.userId, {
+          type: "notification",
+          data: { type: "post_comment" },
+        });
+      }
       
       res.json(comment);
     } catch (error) {
@@ -1074,6 +1137,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ...message,
           sender: senderData,
           receiver: receiverData,
+        });
+
+        // Create notification for message recipient
+        await storage.createNotification({
+          userId: receiverId,
+          type: "new_message",
+          title: "New Message",
+          message: `${sender.displayName || sender.username} sent you a message`,
+          link: `/messages`,
+          relatedUserId: senderId,
+          relatedEntityId: message.id,
+        });
+        // Push real-time notification via WebSocket
+        wsManager.sendToUser(receiverId, {
+          type: "notification",
+          data: { type: "new_message" },
         });
       }
       
