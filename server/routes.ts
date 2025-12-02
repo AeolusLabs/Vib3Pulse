@@ -1109,7 +1109,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         type: "new_follower",
         title: "New Follower",
         message: `${follower?.displayName || follower?.username || "Someone"} started following you`,
-        link: `/profile/${followerId}`,
+        link: `/profile/${follower?.username}`,
         relatedUserId: followerId,
         relatedEntityId: followerId,
       });
