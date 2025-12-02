@@ -16,6 +16,19 @@ const stripe = new Stripe(process.env.TESTING_STRIPE_SECRET_KEY || process.env.S
   apiVersion: "2025-11-17.clover",
 });
 
+// Helper function to resolve identifier (UUID or username) to userId
+async function resolveUserId(identifier: string): Promise<string | null> {
+  const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
+  
+  if (isUUID) {
+    const user = await storage.getUser(identifier);
+    return user?.id || null;
+  } else {
+    const user = await storage.getUserByUsername(identifier);
+    return user?.id || null;
+  }
+}
+
 const signupSchema = insertUserSchema.omit({ passwordHash: true }).extend({
   password: z.string().min(8, "Password must be at least 8 characters"),
 });
@@ -1086,10 +1099,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Follows
-  app.post("/api/follows/:userId", requireAuth, async (req, res) => {
+  app.post("/api/follows/:identifier", requireAuth, async (req, res) => {
     try {
       const followerId = req.user!.id;
-      const followingId = req.params.userId;
+      const followingId = await resolveUserId(req.params.identifier);
+      
+      if (!followingId) {
+        return res.status(404).json({ message: "User not found" });
+      }
       
       if (followerId === followingId) {
         return res.status(400).json({ message: "Cannot follow yourself" });
@@ -1125,10 +1142,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.delete("/api/follows/:userId", requireAuth, async (req, res) => {
+  app.delete("/api/follows/:identifier", requireAuth, async (req, res) => {
     try {
       const followerId = req.user!.id;
-      const followingId = req.params.userId;
+      const followingId = await resolveUserId(req.params.identifier);
+      
+      if (!followingId) {
+        return res.status(404).json({ message: "User not found" });
+      }
       
       await storage.unfollowUser(followerId, followingId);
       res.json({ message: "Unfollowed successfully" });
@@ -1137,10 +1158,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.get("/api/follows/:userId/status", requireAuth, async (req, res) => {
+  app.get("/api/follows/:identifier/status", requireAuth, async (req, res) => {
     try {
       const followerId = req.user!.id;
-      const followingId = req.params.userId;
+      const followingId = await resolveUserId(req.params.identifier);
+      
+      if (!followingId) {
+        return res.status(404).json({ message: "User not found" });
+      }
       
       const isFollowing = await storage.isFollowing(followerId, followingId);
       res.json({ isFollowing });
@@ -1149,18 +1174,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.get("/api/follows/:userId/followers", async (req, res) => {
+  app.get("/api/follows/:identifier/followers", async (req, res) => {
     try {
-      const followers = await storage.getFollowers(req.params.userId);
+      const userId = await resolveUserId(req.params.identifier);
+      if (!userId) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      const followers = await storage.getFollowers(userId);
       res.json(followers);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch followers" });
     }
   });
   
-  app.get("/api/follows/:userId/following", async (req, res) => {
+  app.get("/api/follows/:identifier/following", async (req, res) => {
     try {
-      const following = await storage.getFollowing(req.params.userId);
+      const userId = await resolveUserId(req.params.identifier);
+      if (!userId) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      const following = await storage.getFollowing(userId);
       res.json(following);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch following" });
@@ -1283,9 +1316,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  app.get("/api/users/:userId/profile", async (req, res) => {
+  app.get("/api/users/:identifier/profile", async (req, res) => {
     try {
-      const profile = await storage.getUserProfile(req.params.userId);
+      const identifier = req.params.identifier;
+      
+      // Check if identifier is a UUID or username
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
+      
+      let user;
+      if (isUUID) {
+        user = await storage.getUser(identifier);
+      } else {
+        user = await storage.getUserByUsername(identifier);
+      }
+      
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      // Now get the full profile using the user's ID
+      const profile = await storage.getUserProfile(user.id);
       if (!profile) {
         return res.status(404).json({ message: "User not found" });
       }
@@ -1320,24 +1370,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Follow/Unfollow routes
-  app.post("/api/users/:id/follow", async (req, res) => {
+  app.post("/api/users/:identifier/follow", async (req, res) => {
     if (!req.isAuthenticated()) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
     try {
-      const targetUserId = req.params.id;
+      const targetUserId = await resolveUserId(req.params.identifier);
       const currentUserId = req.user!.id;
+      
+      if (!targetUserId) {
+        return res.status(404).json({ message: "User not found" });
+      }
 
       // Can't follow yourself
       if (targetUserId === currentUserId) {
         return res.status(400).json({ message: "You cannot follow yourself" });
-      }
-
-      // Check if target user exists
-      const targetUser = await storage.getUser(targetUserId);
-      if (!targetUser) {
-        return res.status(404).json({ message: "User not found" });
       }
 
       // Check if already following
@@ -1367,14 +1415,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/users/:id/unfollow", async (req, res) => {
+  app.post("/api/users/:identifier/unfollow", async (req, res) => {
     if (!req.isAuthenticated()) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
     try {
-      const targetUserId = req.params.id;
+      const targetUserId = await resolveUserId(req.params.identifier);
       const currentUserId = req.user!.id;
+      
+      if (!targetUserId) {
+        return res.status(404).json({ message: "User not found" });
+      }
 
       // Check if currently following
       const isFollowing = await storage.isFollowing(currentUserId, targetUserId);
@@ -1390,9 +1442,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/users/:id/follow-stats", async (req, res) => {
+  app.get("/api/users/:identifier/follow-stats", async (req, res) => {
     try {
-      const userId = req.params.id;
+      const userId = await resolveUserId(req.params.identifier);
+      
+      if (!userId) {
+        return res.status(404).json({ message: "User not found" });
+      }
 
       // Get followers and following
       const followers = await storage.getFollowers(userId);
