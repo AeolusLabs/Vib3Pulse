@@ -610,3 +610,44 @@ export const insertEventModerationSchema = createInsertSchema(eventModerations).
 
 export type InsertEventModeration = z.infer<typeof insertEventModerationSchema>;
 export type EventModeration = typeof eventModerations.$inferSelect;
+
+// ============================================
+// NOTIFICATIONS
+// ============================================
+
+// Notification types
+export const notificationTypes = [
+  "post_like",
+  "post_comment",
+  "story_like",
+  "story_comment",
+  "new_message",
+  "buddy_alert",
+  "event_rsvp",
+  "ticket_purchase",
+  "new_follower",
+] as const;
+export type NotificationType = typeof notificationTypes[number];
+
+// Notifications table
+export const notifications = pgTable("notifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  type: text("type").notNull(),
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  link: text("link"),
+  relatedUserId: varchar("related_user_id").references(() => users.id),
+  relatedEntityId: varchar("related_entity_id"),
+  isRead: boolean("is_read").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const insertNotificationSchema = createInsertSchema(notifications).omit({
+  id: true,
+  isRead: true,
+  createdAt: true,
+});
+
+export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+export type Notification = typeof notifications.$inferSelect;
