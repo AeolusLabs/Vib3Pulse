@@ -66,7 +66,12 @@ export default function ProfilePage() {
       await apiRequest("POST", `/api/users/${profile?.id}/follow`, {});
     },
     onSuccess: () => {
+      // Invalidate target user's stats
       queryClient.invalidateQueries({ queryKey: [`/api/users/${profile?.id}/follow-stats`] });
+      // Also invalidate current user's stats (their following count changed)
+      if (sessionUser?.id) {
+        queryClient.invalidateQueries({ queryKey: [`/api/users/${sessionUser.id}/follow-stats`] });
+      }
       toast({
         title: "Success",
         description: `You are now following ${profile?.displayName || profile?.organizationName || profile?.username}`,
@@ -87,7 +92,12 @@ export default function ProfilePage() {
       await apiRequest("POST", `/api/users/${profile?.id}/unfollow`, {});
     },
     onSuccess: () => {
+      // Invalidate target user's stats
       queryClient.invalidateQueries({ queryKey: [`/api/users/${profile?.id}/follow-stats`] });
+      // Also invalidate current user's stats (their following count changed)
+      if (sessionUser?.id) {
+        queryClient.invalidateQueries({ queryKey: [`/api/users/${sessionUser.id}/follow-stats`] });
+      }
       toast({
         title: "Success",
         description: `You unfollowed ${profile?.displayName || profile?.organizationName || profile?.username}`,

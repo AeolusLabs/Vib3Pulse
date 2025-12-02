@@ -56,8 +56,15 @@ export default function UserProfilePage() {
       return await apiRequest('POST', `/api/follows/${userId}`, {});
     },
     onSuccess: () => {
+      // Invalidate target user's stats
       queryClient.invalidateQueries({ queryKey: [`/api/follows/${userId}/status`] });
       queryClient.invalidateQueries({ queryKey: [`/api/users/${userId}/social-stats`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/users/${userId}/follow-stats`] });
+      // Also invalidate current user's stats (their following count changed)
+      if (sessionUser?.user?.id) {
+        queryClient.invalidateQueries({ queryKey: [`/api/users/${sessionUser.user.id}/social-stats`] });
+        queryClient.invalidateQueries({ queryKey: [`/api/users/${sessionUser.user.id}/follow-stats`] });
+      }
       toast({
         title: "Success",
         description: "You are now following this user",
@@ -70,8 +77,15 @@ export default function UserProfilePage() {
       return await apiRequest('DELETE', `/api/follows/${userId}`, {});
     },
     onSuccess: () => {
+      // Invalidate target user's stats
       queryClient.invalidateQueries({ queryKey: [`/api/follows/${userId}/status`] });
       queryClient.invalidateQueries({ queryKey: [`/api/users/${userId}/social-stats`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/users/${userId}/follow-stats`] });
+      // Also invalidate current user's stats (their following count changed)
+      if (sessionUser?.user?.id) {
+        queryClient.invalidateQueries({ queryKey: [`/api/users/${sessionUser.user.id}/social-stats`] });
+        queryClient.invalidateQueries({ queryKey: [`/api/users/${sessionUser.user.id}/follow-stats`] });
+      }
       toast({
         title: "Success",
         description: "Unfollowed successfully",
