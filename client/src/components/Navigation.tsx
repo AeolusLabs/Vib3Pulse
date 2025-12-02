@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import ThemeToggle from "./ThemeToggle";
 import MenuTray from "./MenuTray";
+import NotificationBell from "./NotificationBell";
 import { Link, useLocation } from "wouter";
 import { useAuth, logout } from "@/hooks/useAuth";
 import { EmergencyButton } from "./buddy/EmergencyButton";
@@ -71,6 +72,8 @@ export default function Navigation({ onSearch, onCreateEvent }: NavigationProps)
             )}
 
             {!isLoading && user?.userType === "social" && <EmergencyButton />}
+
+            {!isLoading && user && <NotificationBell />}
 
             <ThemeToggle />
 
