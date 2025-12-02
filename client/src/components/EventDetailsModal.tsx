@@ -208,14 +208,14 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
                           <p className="text-sm text-muted-foreground">{tier.quantity} available</p>
                         </div>
                         <p className="font-semibold text-lg" data-testid={`tier-price-${index}`}>
-                          ${(tier.priceCents / 100).toFixed(2)}
+                          £{(tier.priceCents / 100).toFixed(2)}
                         </p>
                       </div>
                     ))}
                   </div>
                 ) : (
                   <p className="text-sm text-muted-foreground ml-8" data-testid="modal-event-price">
-                    ${(event.ticketPrice / 100).toFixed(2)}
+                    £{(event.ticketPrice / 100).toFixed(2)}
                   </p>
                 )}
               </div>
@@ -347,7 +347,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
                     </div>
                     <div className="text-right">
                       <p className="text-lg font-bold" data-testid={`tier-option-price-${tier.id}`}>
-                        ${(tier.priceCents / 100).toFixed(2)}
+                        £{(tier.priceCents / 100).toFixed(2)}
                       </p>
                     </div>
                   </div>
@@ -394,7 +394,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
               <div className="flex items-center justify-between text-lg font-semibold">
                 <span>Total:</span>
                 <span data-testid="text-total-price">
-                  ${(
+                  £{(
                     ((ticketTiers?.find((t: any) => t.id === selectedTier)?.priceCents || 0) / 100) *
                     quantity
                   ).toFixed(2)}

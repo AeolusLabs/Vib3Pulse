@@ -143,7 +143,7 @@ export default function DiscoverPage() {
                           </Badge>
                         ) : (
                           <span className="font-semibold text-lg">
-                            ${(event.ticketPrice / 100).toFixed(2)}
+                            £{(event.ticketPrice / 100).toFixed(2)}
                           </span>
                         )}
                         <Button 
@@ -269,7 +269,7 @@ export default function DiscoverPage() {
                       </Badge>
                     ) : (
                       <span className="font-semibold text-lg" data-testid={`event-price-${event.id}`}>
-                        ${(event.ticketPrice / 100).toFixed(2)}
+                        £{(event.ticketPrice / 100).toFixed(2)}
                       </span>
                     )}
                     <Button 

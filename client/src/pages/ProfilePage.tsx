@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Calendar, MapPin, DollarSign, Users, Heart, Building2, Mail, Cake, UserPlus, UserMinus } from "lucide-react";
+import { Calendar, MapPin, PoundSterling, Users, Heart, Building2, Mail, Cake, UserPlus, UserMinus } from "lucide-react";
 import type { User, Event, Rsvp } from "@shared/schema";
 import EditProfileDialog from "@/components/EditProfileDialog";
 import { OrganizerStatsModal } from "@/components/OrganizerStatsModal";
@@ -365,7 +365,7 @@ export default function ProfilePage() {
                           </Badge>
                         ) : (
                           <div className="flex items-center gap-1 text-primary font-semibold" data-testid="text-event-price">
-                            <DollarSign className="h-4 w-4" />
+                            <PoundSterling className="h-4 w-4" />
                             {(rsvp.event.ticketPrice / 100).toFixed(2)}
                           </div>
                         )}
@@ -430,7 +430,7 @@ export default function ProfilePage() {
                           </Badge>
                         ) : (
                           <div className="flex items-center gap-1 text-primary font-semibold" data-testid="text-event-price">
-                            <DollarSign className="h-4 w-4" />
+                            <PoundSterling className="h-4 w-4" />
                             {(event.ticketPrice / 100).toFixed(2)}
                           </div>
                         )}

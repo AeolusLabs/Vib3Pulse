@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { DollarSign, Ticket, TrendingUp, CreditCard } from "lucide-react";
+import { PoundSterling, Ticket, TrendingUp, CreditCard } from "lucide-react";
 import AdminLayout from "./AdminLayout";
 
 interface FinanceOverview {
@@ -16,8 +16,8 @@ export default function AdminFinance() {
   const stats = [
     {
       title: "Total Revenue",
-      value: finance ? `$${(finance.totalRevenue / 100).toFixed(2)}` : "$0.00",
-      icon: <DollarSign className="w-5 h-5" />,
+      value: finance ? `£${(finance.totalRevenue / 100).toFixed(2)}` : "£0.00",
+      icon: <PoundSterling className="w-5 h-5" />,
       color: "bg-emerald-500/10 text-emerald-400",
       iconBg: "bg-emerald-500/20",
     },
@@ -31,8 +31,8 @@ export default function AdminFinance() {
     {
       title: "Avg. Ticket Price",
       value: finance && finance.totalTicketsSold > 0 
-        ? `$${((finance.totalRevenue / finance.totalTicketsSold) / 100).toFixed(2)}`
-        : "$0.00",
+        ? `£${((finance.totalRevenue / finance.totalTicketsSold) / 100).toFixed(2)}`
+        : "£0.00",
       icon: <TrendingUp className="w-5 h-5" />,
       color: "bg-purple-500/10 text-purple-400",
       iconBg: "bg-purple-500/20",
@@ -130,7 +130,7 @@ export default function AdminFinance() {
                 <div className="flex items-center justify-between">
                   <span className="text-slate-400">Event Tickets</span>
                   <span className="text-white font-medium">
-                    ${finance ? (finance.totalRevenue / 100).toFixed(2) : '0.00'}
+                    £{finance ? (finance.totalRevenue / 100).toFixed(2) : '0.00'}
                   </span>
                 </div>
                 <div className="w-full bg-slate-700 rounded-full h-2">

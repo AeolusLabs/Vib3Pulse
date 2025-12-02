@@ -442,7 +442,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         line_items: [
           {
             price_data: {
-              currency: 'usd',
+              currency: 'gbp',
               product_data: {
                 name: event.title,
                 description: event.description,
@@ -1957,7 +1957,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const paymentIntent = await stripe.paymentIntents.create({
         amount: entryNight.coverPriceCents,
-        currency: "usd",
+        currency: "gbp",
         metadata: {
           type: "venue_entry",
           entryNightId,

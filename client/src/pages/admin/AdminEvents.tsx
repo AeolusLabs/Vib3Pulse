@@ -182,7 +182,7 @@ export default function AdminEvents() {
                         {format(new Date(event.eventDate), 'MMM d, yyyy')}
                       </TableCell>
                       <TableCell className="text-slate-300">
-                        {event.ticketPrice === 0 ? 'Free' : `$${(event.ticketPrice / 100).toFixed(2)}`}
+                        {event.ticketPrice === 0 ? 'Free' : `£${(event.ticketPrice / 100).toFixed(2)}`}
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline" className="border-slate-500 text-slate-400">

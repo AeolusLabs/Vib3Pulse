@@ -80,7 +80,7 @@ export default function EventCard({
             <span data-testid="text-rsvp-count">{rsvpCount} going</span>
           </div>
           <div className="font-serif font-semibold text-lg text-primary" data-testid="text-price">
-            {price === "free" ? "Free" : `$${price}`}
+            {price === "free" ? "Free" : `£${price}`}
           </div>
         </div>
         <Button variant="secondary" size="sm" data-testid="button-view-event">

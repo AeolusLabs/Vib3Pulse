@@ -1128,7 +1128,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                       >
                         <div className="flex items-center justify-between">
                           <p className="font-medium">{ticket.name}</p>
-                          <p className="font-semibold text-primary">${ticket.price.toFixed(2)}</p>
+                          <p className="font-semibold text-primary">£{ticket.price.toFixed(2)}</p>
                         </div>
                         <div className="flex items-center gap-4 text-sm text-muted-foreground">
                           <span>Qty: {ticket.quantity}</span>

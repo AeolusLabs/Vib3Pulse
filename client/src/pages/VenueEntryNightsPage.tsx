@@ -16,7 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { 
   ArrowLeft, 
   Calendar, 
-  DollarSign, 
+  PoundSterling, 
   Users, 
   Plus, 
   Edit, 
@@ -241,7 +241,7 @@ export default function VenueEntryNightsPage() {
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">Cover Price</p>
               <p className="text-lg font-semibold flex items-center" data-testid={`text-night-price-${night.id}`}>
-                <DollarSign className="h-4 w-4" />
+                <PoundSterling className="h-4 w-4" />
                 {(night.coverPriceCents / 100).toFixed(2)}
               </p>
             </div>
@@ -268,7 +268,7 @@ export default function VenueEntryNightsPage() {
               <p className="text-xs text-muted-foreground">Revenue</p>
               <p className="text-lg font-semibold flex items-center text-green-600 dark:text-green-400" data-testid={`text-night-revenue-${night.id}`}>
                 <TrendingUp className="h-4 w-4 mr-1" />
-                ${revenue.toFixed(2)}
+                £{revenue.toFixed(2)}
               </p>
             </div>
           </div>

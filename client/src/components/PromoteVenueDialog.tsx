@@ -111,7 +111,7 @@ export function PromoteVenueDialog({ open, onOpenChange, venueId, venueName }: P
                   )}
                 </div>
                 <div className="font-semibold">{pkg.label}</div>
-                <div className="text-2xl font-bold text-purple-600">${pkg.price}</div>
+                <div className="text-2xl font-bold text-purple-600">£{pkg.price}</div>
                 <div className="text-xs text-muted-foreground mt-1">{pkg.description}</div>
               </Card>
             ))}
@@ -150,7 +150,7 @@ export function PromoteVenueDialog({ open, onOpenChange, venueId, venueName }: P
             className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600"
             data-testid="button-confirm-promote"
           >
-            {promoteMutation.isPending ? "Processing..." : `Promote for $${promotionPackages.find(p => p.duration === selectedPackage)?.price}`}
+            {promoteMutation.isPending ? "Processing..." : `Promote for £${promotionPackages.find(p => p.duration === selectedPackage)?.price}`}
           </Button>
         </DialogFooter>
       </DialogContent>

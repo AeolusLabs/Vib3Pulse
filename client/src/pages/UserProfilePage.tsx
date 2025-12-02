@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Calendar, MapPin, DollarSign, Users, MessageCircle, UserCheck, UserPlus } from "lucide-react";
+import { Calendar, MapPin, PoundSterling, Users, MessageCircle, UserCheck, UserPlus } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { User, Post, Event, Rsvp } from "@shared/schema";
@@ -286,8 +286,8 @@ export default function UserProfilePage() {
                         </div>
                         {event.ticketPrice > 0 && (
                           <div className="flex items-center gap-2 text-muted-foreground">
-                            <DollarSign className="h-4 w-4" />
-                            <span>${(event.ticketPrice / 100).toFixed(2)}</span>
+                            <PoundSterling className="h-4 w-4" />
+                            <span>£{(event.ticketPrice / 100).toFixed(2)}</span>
                           </div>
                         )}
                       </div>

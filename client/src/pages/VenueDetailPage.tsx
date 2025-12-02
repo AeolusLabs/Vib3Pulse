@@ -110,7 +110,7 @@ function TicketPurchaseForm({
           Cancel
         </Button>
         <Button type="submit" disabled={!stripe || processing}>
-          {processing ? "Processing..." : `Pay $${(entryNight.coverPriceCents / 100).toFixed(2)}`}
+          {processing ? "Processing..." : `Pay £${(entryNight.coverPriceCents / 100).toFixed(2)}`}
         </Button>
       </div>
     </form>

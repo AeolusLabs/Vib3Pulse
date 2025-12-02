@@ -67,7 +67,7 @@ export default function TicketSelector({ tiers, onPurchase }: TicketSelectorProp
                 </p>
               </div>
               <div className="font-serif text-xl font-semibold text-primary" data-testid="text-tier-price">
-                ${tier.price}
+                £{tier.price}
               </div>
             </div>
 
@@ -108,7 +108,7 @@ export default function TicketSelector({ tiers, onPurchase }: TicketSelectorProp
             <div className="flex justify-between text-lg font-semibold">
               <span>Total</span>
               <span className="font-serif text-primary" data-testid="text-total">
-                ${total.toFixed(2)}
+                £{total.toFixed(2)}
               </span>
             </div>
             <Button
