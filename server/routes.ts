@@ -852,11 +852,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Create notification for story owner (if not liking own story)
       if (story.userId !== userId) {
         const liker = await storage.getUser(userId);
+        const likerName = liker?.displayName || liker?.username || "Someone";
         await storage.createNotification({
           userId: story.userId,
           type: "story_like",
-          title: "New Story Like",
-          message: `${liker?.displayName || liker?.username || "Someone"} liked your story`,
+          title: "Story Liked",
+          message: `${likerName} liked your story`,
           link: `/stories`,
           relatedUserId: userId,
           relatedEntityId: storyId,
@@ -950,11 +951,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const post = posts.find(p => p.id === postId);
       if (post && post.userId !== userId) {
         const liker = await storage.getUser(userId);
+        const postSnippet = post.content.length > 50 ? post.content.substring(0, 50) + "..." : post.content;
         await storage.createNotification({
           userId: post.userId,
           type: "post_like",
           title: "New Post Like",
-          message: `${liker?.displayName || liker?.username || "Someone"} liked your post`,
+          message: `${liker?.displayName || liker?.username || "Someone"} liked your post: "${postSnippet}"`,
           link: `/feed`,
           relatedUserId: userId,
           relatedEntityId: postId,
@@ -1020,11 +1022,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const post = posts.find(p => p.id === postId);
       if (post && post.userId !== userId) {
         const commenter = await storage.getUser(userId);
+        const commentSnippet = content.trim().length > 60 ? content.trim().substring(0, 60) + "..." : content.trim();
         await storage.createNotification({
           userId: post.userId,
           type: "post_comment",
           title: "New Comment",
-          message: `${commenter?.displayName || commenter?.username || "Someone"} commented on your post`,
+          message: `${commenter?.displayName || commenter?.username || "Someone"} commented: "${commentSnippet}"`,
           link: `/feed`,
           relatedUserId: userId,
           relatedEntityId: postId,
@@ -1196,12 +1199,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
 
         // Create notification for message recipient
+        const messageSnippet = content.length > 50 ? content.substring(0, 50) + "..." : content;
         await storage.createNotification({
           userId: receiverId,
           type: "new_message",
           title: "New Message",
-          message: `${sender.displayName || sender.username} sent you a message`,
-          link: `/messages`,
+          message: `${sender.displayName || sender.username}: "${messageSnippet}"`,
+          link: `/messages/${senderId}`,
           relatedUserId: senderId,
           relatedEntityId: message.id,
         });

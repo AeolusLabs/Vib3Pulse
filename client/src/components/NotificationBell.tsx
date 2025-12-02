@@ -64,38 +64,42 @@ function NotificationItem({
   return (
     <button
       onClick={handleClick}
-      className={`w-full flex items-start gap-3 p-3 text-left hover-elevate rounded-md transition-colors ${
-        !notification.isRead ? "bg-primary/5" : ""
+      className={`w-full flex items-start gap-3 p-4 text-left hover-elevate transition-colors border-b last:border-b-0 ${
+        !notification.isRead ? "bg-primary/5" : "hover:bg-muted/50"
       }`}
       data-testid={`notification-item-${notification.id}`}
     >
-      <div className="flex-shrink-0 mt-0.5">
+      <div className="flex-shrink-0 mt-0.5 relative">
         {notification.relatedUser ? (
-          <Avatar className="h-8 w-8">
+          <Avatar className="h-10 w-10 border-2 border-background">
             <AvatarImage src="" alt={notification.relatedUser.displayName || notification.relatedUser.username} />
-            <AvatarFallback className="bg-primary/10 text-primary text-xs">
+            <AvatarFallback className="bg-primary/10 text-primary text-sm font-medium">
               {(notification.relatedUser.displayName || notification.relatedUser.username)?.charAt(0).toUpperCase()}
             </AvatarFallback>
           </Avatar>
         ) : (
-          <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
+          <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
             {getNotificationIcon(notification.type)}
           </div>
         )}
+        <div className="absolute -bottom-1 -right-1 h-5 w-5 rounded-full bg-background flex items-center justify-center shadow-sm border">
+          {getNotificationIcon(notification.type)}
+        </div>
       </div>
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          {getNotificationIcon(notification.type)}
-          <span className="font-medium text-sm">{notification.title}</span>
-          {!notification.isRead && (
-            <span className="h-2 w-2 rounded-full bg-primary flex-shrink-0" />
-          )}
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <span className="font-semibold text-sm text-foreground">{notification.title}</span>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {!notification.isRead && (
+              <span className="h-2.5 w-2.5 rounded-full bg-primary animate-pulse" />
+            )}
+            <span className="text-xs text-muted-foreground whitespace-nowrap">
+              {formatDistanceToNow(new Date(notification.createdAt), { addSuffix: true })}
+            </span>
+          </div>
         </div>
-        <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">
+        <p className="text-sm text-foreground/80 line-clamp-2">
           {notification.message}
-        </p>
-        <p className="text-xs text-muted-foreground mt-1">
-          {formatDistanceToNow(new Date(notification.createdAt), { addSuffix: true })}
         </p>
       </div>
     </button>
@@ -180,7 +184,7 @@ export default function NotificationBell() {
               <p className="text-sm mt-1">You'll see updates here when people interact with your content</p>
             </div>
           ) : (
-            <div className="divide-y">
+            <div>
               {notifications.map((notification) => (
                 <NotificationItem
                   key={notification.id}
