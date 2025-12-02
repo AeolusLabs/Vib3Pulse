@@ -12,6 +12,7 @@ import { Calendar, MapPin, PoundSterling, Users, Heart, Building2, Mail, Cake, U
 import type { User, Event, Rsvp } from "@shared/schema";
 import EditProfileDialog from "@/components/EditProfileDialog";
 import { OrganizerStatsModal } from "@/components/OrganizerStatsModal";
+import FollowersFollowingDialog from "@/components/FollowersFollowingDialog";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -204,21 +205,39 @@ export default function ProfilePage() {
 
                     {/* Follower/Following Stats */}
                     {!followStatsLoading && followStats && (
-                      <div className="flex gap-6 text-sm" data-testid="follow-stats">
-                        <div>
-                          <span className="font-bold text-foreground" data-testid="text-followers-count">
-                            {followStats.followersCount}
-                          </span>
-                          <span className="text-muted-foreground ml-1">
-                            {followStats.followersCount === 1 ? 'Follower' : 'Followers'}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="font-bold text-foreground" data-testid="text-following-count">
-                            {followStats.followingCount}
-                          </span>
-                          <span className="text-muted-foreground ml-1">Following</span>
-                        </div>
+                      <div className="flex gap-4 text-sm" data-testid="follow-stats">
+                        <FollowersFollowingDialog
+                          userId={profile.id}
+                          username={profile.username}
+                          followersCount={followStats.followersCount}
+                          followingCount={followStats.followingCount}
+                          initialTab="followers"
+                          trigger={
+                            <button className="hover-elevate rounded-md px-2 py-1 transition-colors" data-testid="button-show-followers">
+                              <span className="font-bold text-foreground" data-testid="text-followers-count">
+                                {followStats.followersCount}
+                              </span>
+                              <span className="text-muted-foreground ml-1">
+                                {followStats.followersCount === 1 ? 'Follower' : 'Followers'}
+                              </span>
+                            </button>
+                          }
+                        />
+                        <FollowersFollowingDialog
+                          userId={profile.id}
+                          username={profile.username}
+                          followersCount={followStats.followersCount}
+                          followingCount={followStats.followingCount}
+                          initialTab="following"
+                          trigger={
+                            <button className="hover-elevate rounded-md px-2 py-1 transition-colors" data-testid="button-show-following">
+                              <span className="font-bold text-foreground" data-testid="text-following-count">
+                                {followStats.followingCount}
+                              </span>
+                              <span className="text-muted-foreground ml-1">Following</span>
+                            </button>
+                          }
+                        />
                       </div>
                     )}
                   </>
@@ -255,21 +274,39 @@ export default function ProfilePage() {
 
                     {/* Follower/Following Stats for Organizers */}
                     {!followStatsLoading && followStats && (
-                      <div className="flex gap-6 text-sm" data-testid="follow-stats">
-                        <div>
-                          <span className="font-bold text-foreground" data-testid="text-followers-count">
-                            {followStats.followersCount}
-                          </span>
-                          <span className="text-muted-foreground ml-1">
-                            {followStats.followersCount === 1 ? 'Follower' : 'Followers'}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="font-bold text-foreground" data-testid="text-following-count">
-                            {followStats.followingCount}
-                          </span>
-                          <span className="text-muted-foreground ml-1">Following</span>
-                        </div>
+                      <div className="flex gap-4 text-sm" data-testid="follow-stats-organizer">
+                        <FollowersFollowingDialog
+                          userId={profile.id}
+                          username={profile.username}
+                          followersCount={followStats.followersCount}
+                          followingCount={followStats.followingCount}
+                          initialTab="followers"
+                          trigger={
+                            <button className="hover-elevate rounded-md px-2 py-1 transition-colors" data-testid="button-show-followers-organizer">
+                              <span className="font-bold text-foreground" data-testid="text-followers-count">
+                                {followStats.followersCount}
+                              </span>
+                              <span className="text-muted-foreground ml-1">
+                                {followStats.followersCount === 1 ? 'Follower' : 'Followers'}
+                              </span>
+                            </button>
+                          }
+                        />
+                        <FollowersFollowingDialog
+                          userId={profile.id}
+                          username={profile.username}
+                          followersCount={followStats.followersCount}
+                          followingCount={followStats.followingCount}
+                          initialTab="following"
+                          trigger={
+                            <button className="hover-elevate rounded-md px-2 py-1 transition-colors" data-testid="button-show-following-organizer">
+                              <span className="font-bold text-foreground" data-testid="text-following-count">
+                                {followStats.followingCount}
+                              </span>
+                              <span className="text-muted-foreground ml-1">Following</span>
+                            </button>
+                          }
+                        />
                       </div>
                     )}
                   </>
