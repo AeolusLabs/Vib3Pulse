@@ -80,16 +80,11 @@ export default function MessagesPage() {
     enabled: debouncedSearchQuery.length >= 2,
   });
 
-  // Fetch current user's following list for new message dialog
+  // Fetch current user's following list - load eagerly when logged in
+  const currentUserId = sessionUser?.user?.id;
   const { data: followingList = [], isLoading: followingLoading } = useQuery<User[]>({
-    queryKey: ['/api/users', sessionUser?.user?.id, 'following'],
-    queryFn: async () => {
-      if (!sessionUser?.user?.id) return [];
-      const response = await fetch(`/api/users/${sessionUser.user.id}/following`);
-      if (!response.ok) throw new Error('Failed to fetch following list');
-      return response.json();
-    },
-    enabled: !!sessionUser?.user?.id && searchDialogOpen,
+    queryKey: [`/api/follows/${currentUserId}/following`],
+    enabled: !!currentUserId,
   });
 
   // Filter following list based on search query
