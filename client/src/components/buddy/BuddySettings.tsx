@@ -3,20 +3,37 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { UserSearch } from "../UserSearch";
 import { User } from "@shared/schema";
-import { Shield, X } from "lucide-react";
+import { Shield, X, UserCheck } from "lucide-react";
 
 export function BuddySettings() {
   const { toast } = useToast();
-  const [showUserSearch, setShowUserSearch] = useState(false);
+  const [showFollowingList, setShowFollowingList] = useState(false);
+
+  const { data: sessionUser } = useQuery<{ user: User }>({
+    queryKey: ['/api/auth/session'],
+  });
 
   const { data: buddy, isLoading: buddyLoading } = useQuery<{ buddy: User | null }>({
     queryKey: ["/api/buddy"],
+  });
+
+  // Fetch user's following list when selecting a buddy
+  const { data: followingList = [], isLoading: followingLoading } = useQuery<User[]>({
+    queryKey: ['/api/users', sessionUser?.user?.id, 'following'],
+    queryFn: async () => {
+      if (!sessionUser?.user?.id) return [];
+      const response = await fetch(`/api/users/${sessionUser.user.id}/following`);
+      if (!response.ok) throw new Error('Failed to fetch following list');
+      return response.json();
+    },
+    enabled: !!sessionUser?.user?.id && showFollowingList,
   });
 
   const { data: distressMessageData } = useQuery<{ message: string }>({
@@ -31,7 +48,7 @@ export function BuddySettings() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/buddy"] });
-      setShowUserSearch(false);
+      setShowFollowingList(false);
       toast({
         title: "Buddy set!",
         description: "Your emergency contact has been updated.",
@@ -115,13 +132,21 @@ export function BuddySettings() {
         <CardContent className="space-y-4">
           {buddy?.buddy ? (
             <div className="flex items-center justify-between p-4 border rounded-md" data-testid="current-buddy">
-              <div>
-                <p className="font-medium" data-testid="text-buddy-name">
-                  {buddy.buddy.displayName || buddy.buddy.username}
-                </p>
-                <p className="text-sm text-muted-foreground" data-testid="text-buddy-username">
-                  @{buddy.buddy.username}
-                </p>
+              <div className="flex items-center gap-3">
+                <Avatar className="h-10 w-10">
+                  <AvatarImage src="" alt={buddy.buddy.displayName || buddy.buddy.username} />
+                  <AvatarFallback className="bg-primary/10 text-primary">
+                    {(buddy.buddy.displayName || buddy.buddy.username).charAt(0).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <div>
+                  <p className="font-medium" data-testid="text-buddy-name">
+                    {buddy.buddy.displayName || buddy.buddy.username}
+                  </p>
+                  <p className="text-sm text-muted-foreground" data-testid="text-buddy-username">
+                    @{buddy.buddy.username}
+                  </p>
+                </div>
               </div>
               <Button
                 variant="ghost"
@@ -135,24 +160,75 @@ export function BuddySettings() {
             </div>
           ) : (
             <div>
-              {showUserSearch ? (
-                <div className="space-y-2">
-                  <UserSearch
-                    onUserSelect={handleUserSelect}
-                    filterUserType="social"
-                    placeholder="Search for a friend to set as your buddy..."
-                  />
+              {showFollowingList ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-muted-foreground">
+                    Select a friend from the people you follow:
+                  </p>
+                  
+                  {followingLoading ? (
+                    <div className="space-y-2">
+                      {[1, 2, 3].map((i) => (
+                        <Skeleton key={i} className="h-14 w-full" />
+                      ))}
+                    </div>
+                  ) : followingList.length === 0 ? (
+                    <div className="text-center py-6 text-muted-foreground">
+                      <UserCheck className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                      <p>You're not following anyone yet.</p>
+                      <p className="text-sm mt-1">Follow some friends first to set one as your safety buddy.</p>
+                    </div>
+                  ) : (
+                    <ScrollArea className="h-[250px]">
+                      <div className="space-y-2 pr-4">
+                        {followingList.map((user) => (
+                          <div
+                            key={user.id}
+                            className="flex items-center justify-between p-3 border rounded-md hover-elevate cursor-pointer"
+                            onClick={() => handleUserSelect(user)}
+                            data-testid={`following-user-${user.id}`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <Avatar className="h-10 w-10">
+                                <AvatarImage src="" alt={user.displayName || user.username} />
+                                <AvatarFallback className="bg-primary/10 text-primary">
+                                  {(user.displayName || user.username).charAt(0).toUpperCase()}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div>
+                                <p className="font-medium">
+                                  {user.displayName || user.username}
+                                </p>
+                                <p className="text-sm text-muted-foreground">
+                                  @{user.username}
+                                </p>
+                              </div>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={setBuddyMutation.isPending}
+                              data-testid={`button-select-buddy-${user.id}`}
+                            >
+                              Select
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </ScrollArea>
+                  )}
+                  
                   <Button
                     variant="outline"
-                    onClick={() => setShowUserSearch(false)}
-                    data-testid="button-cancel-search"
+                    onClick={() => setShowFollowingList(false)}
+                    data-testid="button-cancel-selection"
                   >
                     Cancel
                   </Button>
                 </div>
               ) : (
                 <Button
-                  onClick={() => setShowUserSearch(true)}
+                  onClick={() => setShowFollowingList(true)}
                   data-testid="button-set-buddy"
                 >
                   Set Emergency Buddy
