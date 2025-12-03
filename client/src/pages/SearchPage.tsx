@@ -266,7 +266,7 @@ export default function SearchPage() {
           </div>
         ) : (
           <div className="space-y-8">
-            {sessionUser?.user && suggestedUsers.length > 0 && (
+            {(activeType === "all" || activeType === "users") && sessionUser?.user && suggestedUsers.length > 0 && (
               <section>
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-semibold font-serif flex items-center gap-2">
@@ -297,7 +297,7 @@ export default function SearchPage() {
               </section>
             )}
 
-            {trendingEvents.length > 0 && (
+            {(activeType === "all" || activeType === "events") && trendingEvents.length > 0 && (
               <section>
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-semibold font-serif flex items-center gap-2">
@@ -325,7 +325,7 @@ export default function SearchPage() {
               </section>
             )}
 
-            {trendingVenues.length > 0 && (
+            {(activeType === "all" || activeType === "venues") && trendingVenues.length > 0 && (
               <section>
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-semibold font-serif flex items-center gap-2">
@@ -350,7 +350,7 @@ export default function SearchPage() {
               </section>
             )}
 
-            {trendingPosts.length > 0 && (
+            {(activeType === "all" || activeType === "posts") && trendingPosts.length > 0 && (
               <section>
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-semibold font-serif flex items-center gap-2">
