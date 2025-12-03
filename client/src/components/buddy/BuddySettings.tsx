@@ -11,6 +11,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 import { User } from "@shared/schema";
 import { Shield, X, UserCheck, Search } from "lucide-react";
 
@@ -20,30 +21,19 @@ export function BuddySettings() {
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
 
-  const { data: sessionUser } = useQuery<{ user: User }>({
-    queryKey: ['/api/auth/session'],
-  });
+  const { data: currentUser } = useAuth();
 
   const { data: buddy, isLoading: buddyLoading } = useQuery<{ buddy: User | null }>({
     queryKey: ["/api/buddy"],
   });
 
-  // Fetch user's following list - load eagerly when logged in
-  const currentUserId = sessionUser?.user?.id;
+  // Fetch user's following list using stable endpoint (requires auth)
+  const currentUserId = currentUser?.id;
   const { data: followingList = [], isLoading: followingLoading, refetch: refetchFollowing } = useQuery<User[]>({
-    queryKey: ['/api/follows', currentUserId, 'following'],
-    queryFn: async () => {
-      if (!currentUserId) return [];
-      const response = await fetch(`/api/follows/${currentUserId}/following`, {
-        credentials: 'include',
-      });
-      if (!response.ok) {
-        throw new Error('Failed to fetch following list');
-      }
-      return response.json();
-    },
+    queryKey: ['/api/follows/me/following'],
     enabled: !!currentUserId,
     staleTime: 30000,
+    refetchOnMount: true,
   });
 
   // Refetch following list when panel is shown
@@ -224,7 +214,7 @@ export function BuddySettings() {
                         <ScrollArea className="h-[150px]">
                           <div className="space-y-2 pr-4">
                             {searchResults
-                              .filter(user => user.id !== sessionUser?.user?.id)
+                              .filter(user => user.id !== currentUser?.id)
                               .map((user) => (
                               <div
                                 key={user.id}

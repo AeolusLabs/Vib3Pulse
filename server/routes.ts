@@ -1189,6 +1189,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
+  // Get current user's following list (authenticated route with stable path)
+  app.get("/api/follows/me/following", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const following = await storage.getFollowing(userId);
+      const users = following.map(f => f.following);
+      res.json(users);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch following" });
+    }
+  });
+
   app.get("/api/follows/:identifier/following", async (req, res) => {
     try {
       const userId = await resolveUserId(req.params.identifier);
@@ -1351,9 +1363,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // User profile (legacy - keep for backward compatibility)
-  app.get("/api/users/:username", async (req, res) => {
+  app.get("/api/users/:identifier", async (req, res) => {
     try {
-      const user = await storage.getUserByUsername(req.params.username);
+      const identifier = req.params.identifier;
+      
+      // Check if identifier is a UUID or username
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
+      
+      let user;
+      if (isUUID) {
+        user = await storage.getUser(identifier);
+      } else {
+        user = await storage.getUserByUsername(identifier);
+      }
+      
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }

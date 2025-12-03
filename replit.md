@@ -67,3 +67,19 @@ Preferred communication style: Simple, everyday language.
 ### Build & Deployment
 - Replit environment
 - Stripe for payments and promotions
+
+## Development Patterns
+
+### Authentication in Frontend Components
+- Use the `useAuth()` hook from `@/hooks/useAuth.ts` to access the current user session
+- The hook returns `{ data: User | null, isLoading, error }` - the `data` is the User object directly (not wrapped in `{ user: User }`)
+- Pattern: `const { data: currentUser } = useAuth();` then access `currentUser?.id`, `currentUser?.username`, etc.
+- The hook includes built-in 401 handling and redirects to login when unauthenticated
+
+### API Route Patterns
+- User lookup routes accept both UUID and username via `/api/users/:identifier` pattern
+- UUID detection regex: `/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i`
+- Following list endpoint: `GET /api/follows/me/following` (requires auth, returns User[])
+
+### Known Development Environment Issues
+- Vite HMR WebSocket error (`wss://localhost:undefined`) appears in browser console in Replit environment - this is a known Replit development issue that does not affect app functionality

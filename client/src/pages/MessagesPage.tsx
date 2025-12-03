@@ -22,6 +22,7 @@ import { Send, ArrowLeft, Check, CheckCheck, Search, UserPlus, Reply, X } from "
 import { format, formatDistanceToNow } from "date-fns";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 import type { User, Message } from "@shared/schema";
 
 type Conversation = {
@@ -50,9 +51,7 @@ export default function MessagesPage() {
   const markedAsReadRef = useRef<string | null>(null);
   const { toast } = useToast();
 
-  const { data: sessionUser } = useQuery<{ user: User }>({
-    queryKey: ['/api/auth/session'],
-  });
+  const { data: currentUser } = useAuth();
 
   const { data: conversations = [], isLoading: conversationsLoading } = useQuery<Conversation[]>({
     queryKey: ['/api/messages'],
@@ -80,22 +79,13 @@ export default function MessagesPage() {
     enabled: debouncedSearchQuery.length >= 2,
   });
 
-  // Fetch current user's following list - load eagerly when logged in
-  const currentUserId = sessionUser?.user?.id;
+  // Fetch current user's following list using stable endpoint (requires auth)
+  const currentUserId = currentUser?.id;
   const { data: followingList = [], isLoading: followingLoading, refetch: refetchFollowing } = useQuery<User[]>({
-    queryKey: ['/api/follows', currentUserId, 'following'],
-    queryFn: async () => {
-      if (!currentUserId) return [];
-      const response = await fetch(`/api/follows/${currentUserId}/following`, {
-        credentials: 'include',
-      });
-      if (!response.ok) {
-        throw new Error('Failed to fetch following list');
-      }
-      return response.json();
-    },
+    queryKey: ['/api/follows/me/following'],
     enabled: !!currentUserId,
     staleTime: 30000,
+    refetchOnMount: true,
   });
 
   // Refetch following list when dialog opens
@@ -245,7 +235,7 @@ export default function MessagesPage() {
 
   // Mark unread messages as read when viewing conversation
   useEffect(() => {
-    if (!userId || conversation.length === 0 || !sessionUser?.user?.id) {
+    if (!userId || conversation.length === 0 || !currentUser?.id) {
       return;
     }
     
@@ -254,7 +244,7 @@ export default function MessagesPage() {
       return;
     }
     
-    const currentUserId = sessionUser.user.id;
+    const currentUserIdForRead = currentUser.id;
     const unreadMessages = conversation.filter(
       (msg) => msg.isRead === false && msg.receiverId === currentUserId
     );
@@ -275,7 +265,7 @@ export default function MessagesPage() {
     }, 100);
     
     return () => clearTimeout(timer);
-  }, [userId, conversation, sessionUser?.user?.id]);
+  }, [userId, conversation, currentUser?.id]);
 
   // Format timestamp with relative time for recent messages
   const formatMessageTime = (date: Date) => {
@@ -450,7 +440,7 @@ export default function MessagesPage() {
                         </div>
                         <div className="flex items-center gap-1">
                           <p className={`text-sm truncate flex-1 ${unreadCount > 0 ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
-                            {lastMessage.senderId === sessionUser?.user?.id ? (
+                            {lastMessage.senderId === currentUser?.id ? (
                               <>
                                 <span className="inline-flex items-center gap-1">
                                   {lastMessage.isRead ? (
@@ -481,7 +471,7 @@ export default function MessagesPage() {
 
   // Conversation View
   const otherUser = conversation.length > 0 
-    ? conversation[0].sender.id === sessionUser?.user?.id 
+    ? conversation[0].sender.id === currentUser?.id 
       ? conversation[0].receiver 
       : conversation[0].sender
     : null;
@@ -541,7 +531,7 @@ export default function MessagesPage() {
             ) : (
               <div className="space-y-4">
                 {conversation.map((message) => {
-                  const isOwnMessage = message.senderId === sessionUser?.user?.id;
+                  const isOwnMessage = message.senderId === currentUser?.id;
                   const senderName = message.sender?.username || 'Unknown';
                   return (
                     <div
