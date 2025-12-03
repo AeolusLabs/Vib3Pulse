@@ -162,7 +162,7 @@ export interface IStorage {
   getFollowing(userId: string): Promise<Array<Follow & { following: User }>>;
   
   sendMessage(message: InsertMessage): Promise<Message>;
-  getConversation(userId1: string, userId2: string): Promise<Array<Message & { sender: User; receiver: User }>>;
+  getConversation(userId1: string, userId2: string): Promise<Array<Message & { sender: User; receiver: User; replyTo?: Message & { sender: User } }>>;
   getConversations(userId: string): Promise<Array<{ otherUser: User; lastMessage: Message; unreadCount: number }>>;
   markAsRead(messageId: string): Promise<void>;
   
@@ -781,7 +781,7 @@ export class DbStorage implements IStorage {
     return result[0];
   }
 
-  async getConversation(userId1: string, userId2: string): Promise<Array<Message & { sender: User; receiver: User }>> {
+  async getConversation(userId1: string, userId2: string): Promise<Array<Message & { sender: User; receiver: User; replyTo?: Message & { sender: User } }>> {
     const result = await db
       .select()
       .from(messages)
@@ -798,10 +798,27 @@ export class DbStorage implements IStorage {
       const receiver = await this.getUser(row.messages.receiverId);
       const { passwordHash: senderHash, ...senderWithoutPassword } = row.users;
       const { passwordHash: receiverHash, ...receiverWithoutPassword } = receiver!;
+      
+      let replyTo: (Message & { sender: User }) | undefined;
+      if (row.messages.replyToId) {
+        const replyMessage = await db.select().from(messages).where(eq(messages.id, row.messages.replyToId));
+        if (replyMessage.length > 0) {
+          const replySender = await this.getUser(replyMessage[0].senderId);
+          if (replySender) {
+            const { passwordHash: replySenderHash, ...replySenderWithoutPassword } = replySender;
+            replyTo = {
+              ...replyMessage[0],
+              sender: replySenderWithoutPassword as User,
+            };
+          }
+        }
+      }
+      
       return {
         ...row.messages,
         sender: senderWithoutPassword as User,
         receiver: receiverWithoutPassword as User,
+        replyTo,
       };
     }));
     

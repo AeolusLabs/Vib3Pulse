@@ -1207,7 +1207,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Messages
   app.post("/api/messages", requireAuth, async (req, res) => {
     try {
-      const { receiverId, content } = req.body;
+      const { receiverId, content, replyToId } = req.body;
       const senderId = req.user!.id;
       
       if (senderId === receiverId) {
@@ -1218,6 +1218,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         senderId,
         receiverId,
         content,
+        replyToId: replyToId || null,
         isRead: false,
       });
       
