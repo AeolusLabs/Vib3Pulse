@@ -374,17 +374,6 @@ export default function SearchPage() {
                 </div>
               </section>
             )}
-
-            {!sessionUser?.user && (
-              <div className="text-center py-12 bg-muted/30 rounded-lg">
-                <Search className="h-16 w-16 mx-auto text-muted-foreground/30 mb-4" />
-                <p className="text-lg font-medium text-foreground mb-2">Discover amazing events and people</p>
-                <p className="text-muted-foreground mb-4">Sign in to get personalized recommendations</p>
-                <Button onClick={() => navigate('/login')} data-testid="button-sign-in">
-                  Sign In
-                </Button>
-              </div>
-            )}
           </div>
         )}
       </main>
