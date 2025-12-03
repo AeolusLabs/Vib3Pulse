@@ -77,6 +77,29 @@ export default function MessagesPage() {
     enabled: debouncedSearchQuery.length >= 2,
   });
 
+  // Fetch current user's following list for new message dialog
+  const { data: followingList = [], isLoading: followingLoading } = useQuery<User[]>({
+    queryKey: ['/api/users', sessionUser?.user?.id, 'following'],
+    queryFn: async () => {
+      if (!sessionUser?.user?.id) return [];
+      const response = await fetch(`/api/users/${sessionUser.user.id}/following`);
+      if (!response.ok) throw new Error('Failed to fetch following list');
+      return response.json();
+    },
+    enabled: !!sessionUser?.user?.id && searchDialogOpen,
+  });
+
+  // Filter following list based on search query
+  const filteredFollowing = followingList.filter(user => {
+    if (!debouncedSearchQuery) return true;
+    const searchLower = debouncedSearchQuery.toLowerCase();
+    return (
+      user.username.toLowerCase().includes(searchLower) ||
+      (user.displayName?.toLowerCase().includes(searchLower)) ||
+      (user.organizationName?.toLowerCase().includes(searchLower))
+    );
+  });
+
   const sendMessageMutation = useMutation({
     mutationFn: async ({ content, replyToId }: { content: string; replyToId?: string }) => {
       return await apiRequest('POST', '/api/messages', {
@@ -240,7 +263,7 @@ export default function MessagesPage() {
                 <DialogHeader>
                   <DialogTitle>New Message</DialogTitle>
                   <DialogDescription>
-                    Search for people to start a conversation
+                    Choose someone you follow to start a conversation
                   </DialogDescription>
                 </DialogHeader>
                 
@@ -249,72 +272,72 @@ export default function MessagesPage() {
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
                       type="text"
-                      placeholder="Search by name or username..."
+                      placeholder="Filter by name or username..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       className="pl-10"
-                      data-testid="input-search-users"
+                      data-testid="input-filter-following"
                     />
                   </div>
                   
                   <ScrollArea className="h-[300px]">
-                    {searchLoading ? (
+                    {followingLoading ? (
                       <div className="space-y-3">
                         {[1, 2, 3].map((i) => (
                           <Skeleton key={i} className="h-16 w-full" />
                         ))}
                       </div>
-                    ) : debouncedSearchQuery.length < 2 ? (
+                    ) : followingList.length === 0 ? (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <UserPlus className="h-12 w-12 mx-auto mb-2 opacity-20" />
+                        <p>You're not following anyone yet</p>
+                        <p className="text-sm mt-1">Follow people to message them</p>
+                      </div>
+                    ) : filteredFollowing.length === 0 ? (
                       <div className="text-center py-8 text-muted-foreground">
                         <Search className="h-12 w-12 mx-auto mb-2 opacity-20" />
-                        <p>Type at least 2 characters to search</p>
-                      </div>
-                    ) : searchResults.length === 0 ? (
-                      <div className="text-center py-8 text-muted-foreground">
-                        <p>No users found</p>
+                        <p>No matches found</p>
                       </div>
                     ) : (
                       <div className="space-y-2">
-                        {searchResults
-                          .filter(user => user.id !== sessionUser?.user?.id)
-                          .map((user) => (
-                            <Card
-                              key={user.id}
-                              className="hover-elevate cursor-pointer"
-                              onClick={() => {
-                                setSearchDialogOpen(false);
-                                setSearchQuery("");
-                                navigate(`/messages/${user.id}`);
-                              }}
-                              data-testid={`search-result-${user.id}`}
-                            >
-                              <CardContent className="p-3">
-                                <div className="flex items-center gap-3">
-                                  <Avatar className="h-10 w-10">
-                                    <AvatarImage src="" alt={user.displayName || user.username} />
-                                    <AvatarFallback className="bg-primary/10 text-primary">
-                                      {(user.displayName || user.organizationName || user.username).charAt(0).toUpperCase()}
-                                    </AvatarFallback>
-                                  </Avatar>
-                                  
-                                  <div className="flex-1 min-w-0">
-                                    <h3 className="font-semibold text-foreground truncate">
-                                      {user.displayName || user.organizationName || user.username}
-                                    </h3>
-                                    <p className="text-sm text-muted-foreground truncate">
-                                      @{user.username}
-                                    </p>
-                                  </div>
-                                  
-                                  {user.userType === "organizer" && (
-                                    <Badge variant="default" className="bg-primary">
-                                      Organizer
-                                    </Badge>
-                                  )}
+                        {filteredFollowing.map((user) => (
+                          <Card
+                            key={user.id}
+                            className="hover-elevate cursor-pointer"
+                            onClick={() => {
+                              setSearchDialogOpen(false);
+                              setSearchQuery("");
+                              navigate(`/messages/${user.id}`);
+                            }}
+                            data-testid={`following-user-${user.id}`}
+                          >
+                            <CardContent className="p-3">
+                              <div className="flex items-center gap-3">
+                                <Avatar className="h-10 w-10">
+                                  <AvatarImage src="" alt={user.displayName || user.username} />
+                                  <AvatarFallback className="bg-primary/10 text-primary">
+                                    {(user.displayName || user.organizationName || user.username).charAt(0).toUpperCase()}
+                                  </AvatarFallback>
+                                </Avatar>
+                                
+                                <div className="flex-1 min-w-0">
+                                  <h3 className="font-semibold text-foreground truncate">
+                                    {user.displayName || user.organizationName || user.username}
+                                  </h3>
+                                  <p className="text-sm text-muted-foreground truncate">
+                                    @{user.username}
+                                  </p>
                                 </div>
-                              </CardContent>
-                            </Card>
-                          ))}
+                                
+                                {user.userType === "organizer" && (
+                                  <Badge variant="default" className="bg-primary">
+                                    Organizer
+                                  </Badge>
+                                )}
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
                       </div>
                     )}
                   </ScrollArea>
