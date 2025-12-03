@@ -47,6 +47,7 @@ export default function MessagesPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const markedAsReadRef = useRef<string | null>(null);
   const { toast } = useToast();
 
   const { data: sessionUser } = useQuery<{ user: User }>({
@@ -56,6 +57,8 @@ export default function MessagesPage() {
   const { data: conversations = [], isLoading: conversationsLoading } = useQuery<Conversation[]>({
     queryKey: ['/api/messages'],
     enabled: !userId,
+    refetchOnMount: 'always',
+    staleTime: 0,
   });
 
   const { data: conversation = [], isLoading: conversationLoading } = useQuery<MessageWithUsers[]>({
@@ -210,21 +213,43 @@ export default function MessagesPage() {
     }
   }, [userId]);
 
+  // Reset marked-as-read tracking when conversation changes
+  useEffect(() => {
+    markedAsReadRef.current = null;
+  }, [userId]);
+
   // Mark unread messages as read when viewing conversation
   useEffect(() => {
-    if (userId && conversation.length > 0 && sessionUser?.user?.id) {
-      const unreadMessages = conversation.filter(
-        (msg) => !msg.isRead && msg.receiverId === sessionUser.user.id
-      );
-      
-      if (unreadMessages.length > 0) {
-        // Mark the last unread message as read (marks all previous as read too)
-        const lastUnread = unreadMessages[unreadMessages.length - 1];
-        setTimeout(() => {
-          markAsReadMutation.mutate(lastUnread.id);
-        }, 500);
-      }
+    if (!userId || conversation.length === 0 || !sessionUser?.user?.id) {
+      return;
     }
+    
+    // Skip if we've already marked this conversation as read
+    if (markedAsReadRef.current === userId) {
+      return;
+    }
+    
+    const currentUserId = sessionUser.user.id;
+    const unreadMessages = conversation.filter(
+      (msg) => msg.isRead === false && msg.receiverId === currentUserId
+    );
+    
+    if (unreadMessages.length === 0) {
+      return;
+    }
+    
+    // Mark that we're processing this conversation
+    markedAsReadRef.current = userId;
+    
+    // Mark the last unread message as read (marks all previous as read too)
+    const lastUnread = unreadMessages[unreadMessages.length - 1];
+    
+    // Use a small delay to ensure everything is loaded
+    const timer = setTimeout(() => {
+      markAsReadMutation.mutate(lastUnread.id);
+    }, 100);
+    
+    return () => clearTimeout(timer);
   }, [userId, conversation, sessionUser?.user?.id]);
 
   // Format timestamp with relative time for recent messages
