@@ -82,10 +82,28 @@ export default function MessagesPage() {
 
   // Fetch current user's following list - load eagerly when logged in
   const currentUserId = sessionUser?.user?.id;
-  const { data: followingList = [], isLoading: followingLoading } = useQuery<User[]>({
-    queryKey: [`/api/follows/${currentUserId}/following`],
+  const { data: followingList = [], isLoading: followingLoading, refetch: refetchFollowing } = useQuery<User[]>({
+    queryKey: ['/api/follows', currentUserId, 'following'],
+    queryFn: async () => {
+      if (!currentUserId) return [];
+      const response = await fetch(`/api/follows/${currentUserId}/following`, {
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        throw new Error('Failed to fetch following list');
+      }
+      return response.json();
+    },
     enabled: !!currentUserId,
+    staleTime: 30000,
   });
+
+  // Refetch following list when dialog opens
+  useEffect(() => {
+    if (searchDialogOpen && currentUserId) {
+      refetchFollowing();
+    }
+  }, [searchDialogOpen, currentUserId, refetchFollowing]);
 
   // Filter following list based on search query
   const filteredFollowing = followingList.filter(user => {
