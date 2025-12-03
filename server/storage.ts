@@ -86,7 +86,7 @@ import {
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/neon-serverless";
 import { Pool, neonConfig } from "@neondatabase/serverless";
-import { eq, and, gte, lt, or, ilike, desc, sql, count, inArray } from "drizzle-orm";
+import { eq, and, gte, lt, or, ilike, desc, sql, count, inArray, notInArray } from "drizzle-orm";
 import ws from "ws";
 
 neonConfig.webSocketConstructor = ws;
@@ -1133,11 +1133,7 @@ export class DbStorage implements IStorage {
     const suggested = await db
       .select()
       .from(users)
-      .where(
-        and(
-          sql`${users.id} NOT IN (${followingIds.length > 0 ? sql.join(followingIds.map(id => sql`${id}`), sql`, `) : sql`''`})`
-        )
-      )
+      .where(notInArray(users.id, followingIds))
       .limit(limit);
     
     return suggested.map(user => {

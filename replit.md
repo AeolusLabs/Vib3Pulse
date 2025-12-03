@@ -22,6 +22,7 @@ Preferred communication style: Simple, everyday language.
     - **Stories:** Image stories with 24-hour expiration, user grouping, and deletion, real-time cache updates.
     - **Buddy System (Safety Feature):** Users designate a trusted friend as an emergency contact. Allows sending distress alerts with location sharing, real-time WebSocket notifications, and alert history.
     - **Venues:** Event Organizers manage clubs, pubs, and lounges. Includes venue promotion, entry ticket sales using Stripe, and analytics tracking.
+    - **Search & Discovery:** Universal search across users, events, venues, and posts with type filter chips. Trending sections show popular content based on engagement metrics (likes, RSVPs, tickets sold, views) with time decay algorithm. Suggested users section helps users discover new people to follow.
     - **Admin Panel:** Separate, secure staff-only panel with distinct authentication, role-based access control (6 levels), activity logging, and moderation capabilities for users, events, stories, and content reports. Visual design uses a dark slate color scheme distinct from the main app.
 
 ### Data Storage
