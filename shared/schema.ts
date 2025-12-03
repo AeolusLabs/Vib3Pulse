@@ -244,6 +244,7 @@ export const messages = pgTable("messages", {
   senderId: varchar("sender_id").notNull().references(() => users.id),
   receiverId: varchar("receiver_id").notNull().references(() => users.id),
   content: text("content").notNull(),
+  replyToId: varchar("reply_to_id"),
   isRead: boolean("is_read").notNull().default(false),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
