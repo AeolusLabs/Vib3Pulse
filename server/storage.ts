@@ -169,6 +169,24 @@ export interface IStorage {
   getUserProfile(userId: string): Promise<{ user: User; posts: Post[]; events: Array<Rsvp & { event: Event }> } | undefined>;
   searchUsers(query: string): Promise<User[]>;
   
+  // Universal search methods
+  universalSearch(query: string, types?: string[]): Promise<{
+    users: User[];
+    events: Array<Event & { organizer: User }>;
+    venues: Venue[];
+    posts: Array<Post & { user: User }>;
+  }>;
+  searchEvents(query: string): Promise<Array<Event & { organizer: User }>>;
+  searchVenues(query: string): Promise<Venue[]>;
+  searchPosts(query: string): Promise<Array<Post & { user: User }>>;
+  
+  // Trending methods
+  getTrendingPosts(limit?: number): Promise<Array<Post & { user: User; likeCount: number; commentCount: number }>>;
+  getTrendingEvents(limit?: number): Promise<Array<Event & { organizer: User; rsvpCount: number; ticketCount: number }>>;
+  getTrendingVenues(limit?: number): Promise<Array<Venue & { viewCount: number }>>;
+  getTrendingStories(limit?: number): Promise<Array<Story & { user: User; likeCount: number }>>;
+  getSuggestedUsers(userId: string, limit?: number): Promise<User[]>;
+  
   likePost(userId: string, postId: string): Promise<Like>;
   unlikePost(userId: string, postId: string): Promise<void>;
   getPostLikes(postId: string): Promise<number>;
@@ -926,6 +944,203 @@ export class DbStorage implements IStorage {
       );
     
     return result.map(user => {
+      const { passwordHash, ...userWithoutPassword } = user;
+      return userWithoutPassword as User;
+    });
+  }
+
+  async searchEvents(query: string): Promise<Array<Event & { organizer: User }>> {
+    const result = await db
+      .select()
+      .from(events)
+      .innerJoin(users, eq(events.organizerId, users.id))
+      .where(
+        or(
+          ilike(events.title, `%${query}%`),
+          ilike(events.description, `%${query}%`),
+          ilike(events.location, `%${query}%`),
+          ilike(events.category, `%${query}%`)
+        )
+      )
+      .orderBy(desc(events.eventDate));
+    
+    return result.map(row => {
+      const { passwordHash, ...userWithoutPassword } = row.users;
+      return {
+        ...row.events,
+        organizer: userWithoutPassword as User,
+      };
+    });
+  }
+
+  async searchVenues(query: string): Promise<Venue[]> {
+    return await db
+      .select()
+      .from(venues)
+      .where(
+        or(
+          ilike(venues.name, `%${query}%`),
+          ilike(venues.description, `%${query}%`),
+          ilike(venues.location, `%${query}%`),
+          ilike(venues.city, `%${query}%`),
+          ilike(venues.category, `%${query}%`)
+        )
+      )
+      .orderBy(desc(venues.createdAt));
+  }
+
+  async searchPosts(query: string): Promise<Array<Post & { user: User }>> {
+    const result = await db
+      .select()
+      .from(posts)
+      .innerJoin(users, eq(posts.userId, users.id))
+      .where(ilike(posts.content, `%${query}%`))
+      .orderBy(desc(posts.createdAt));
+    
+    return result.map(row => {
+      const { passwordHash, ...userWithoutPassword } = row.users;
+      return {
+        ...row.posts,
+        user: userWithoutPassword as User,
+      };
+    });
+  }
+
+  async universalSearch(query: string, types?: string[]): Promise<{
+    users: User[];
+    events: Array<Event & { organizer: User }>;
+    venues: Venue[];
+    posts: Array<Post & { user: User }>;
+  }> {
+    const searchTypes = types && types.length > 0 ? types : ['users', 'events', 'venues', 'posts'];
+    
+    const [userResults, eventResults, venueResults, postResults] = await Promise.all([
+      searchTypes.includes('users') ? this.searchUsers(query) : Promise.resolve([]),
+      searchTypes.includes('events') ? this.searchEvents(query) : Promise.resolve([]),
+      searchTypes.includes('venues') ? this.searchVenues(query) : Promise.resolve([]),
+      searchTypes.includes('posts') ? this.searchPosts(query) : Promise.resolve([]),
+    ]);
+
+    return {
+      users: userResults.slice(0, 10),
+      events: eventResults.slice(0, 10),
+      venues: venueResults.slice(0, 10),
+      posts: postResults.slice(0, 10),
+    };
+  }
+
+  async getTrendingPosts(limit: number = 10): Promise<Array<Post & { user: User; likeCount: number; commentCount: number }>> {
+    const postsWithUser = await db
+      .select()
+      .from(posts)
+      .innerJoin(users, eq(posts.userId, users.id))
+      .orderBy(desc(posts.createdAt))
+      .limit(50);
+    
+    const postsWithEngagement = await Promise.all(
+      postsWithUser.map(async (row) => {
+        const likeCount = await this.getPostLikes(row.posts.id);
+        const commentCount = await this.getCommentCount(row.posts.id);
+        const { passwordHash, ...userWithoutPassword } = row.users;
+        return {
+          ...row.posts,
+          user: userWithoutPassword as User,
+          likeCount,
+          commentCount,
+          engagementScore: likeCount * 2 + commentCount * 3,
+        };
+      })
+    );
+    
+    return postsWithEngagement
+      .sort((a, b) => b.engagementScore - a.engagementScore)
+      .slice(0, limit)
+      .map(({ engagementScore, ...rest }) => rest);
+  }
+
+  async getTrendingEvents(limit: number = 10): Promise<Array<Event & { organizer: User; rsvpCount: number; ticketCount: number }>> {
+    const allEvents = await db
+      .select()
+      .from(events)
+      .innerJoin(users, eq(events.organizerId, users.id))
+      .where(gte(events.eventDate, new Date()))
+      .orderBy(desc(events.eventDate))
+      .limit(50);
+    
+    const eventsWithEngagement = await Promise.all(
+      allEvents.map(async (row) => {
+        const rsvpResult = await db.select().from(rsvps).where(eq(rsvps.eventId, row.events.id));
+        const ticketResult = await db.select().from(tickets).where(eq(tickets.eventId, row.events.id));
+        const { passwordHash, ...userWithoutPassword } = row.users;
+        return {
+          ...row.events,
+          organizer: userWithoutPassword as User,
+          rsvpCount: rsvpResult.length,
+          ticketCount: ticketResult.length,
+          engagementScore: rsvpResult.length * 2 + ticketResult.length * 3 + (row.events.isPromoted ? 10 : 0),
+        };
+      })
+    );
+    
+    return eventsWithEngagement
+      .sort((a, b) => b.engagementScore - a.engagementScore)
+      .slice(0, limit)
+      .map(({ engagementScore, ...rest }) => rest);
+  }
+
+  async getTrendingVenues(limit: number = 10): Promise<Array<Venue & { viewCount: number }>> {
+    const allVenues = await db
+      .select()
+      .from(venues)
+      .orderBy(desc(venues.createdAt))
+      .limit(50);
+    
+    const venuesWithViews = await Promise.all(
+      allVenues.map(async (venue) => {
+        const analytics = await this.getVenueAnalytics(venue.id);
+        return {
+          ...venue,
+          viewCount: analytics.views,
+          engagementScore: analytics.views + analytics.clicks * 2 + analytics.ticketsSold * 5 + (venue.isPromoted ? 10 : 0),
+        };
+      })
+    );
+    
+    return venuesWithViews
+      .sort((a, b) => b.engagementScore - a.engagementScore)
+      .slice(0, limit)
+      .map(({ engagementScore, ...rest }) => rest);
+  }
+
+  async getTrendingStories(limit: number = 10): Promise<Array<Story & { user: User; likeCount: number }>> {
+    const activeStories = await this.getActiveStories();
+    
+    return activeStories
+      .sort((a, b) => (b.likeCount || 0) - (a.likeCount || 0))
+      .slice(0, limit)
+      .map(({ isLiked, isReshare, ...rest }) => rest);
+  }
+
+  async getSuggestedUsers(userId: string, limit: number = 10): Promise<User[]> {
+    const following = await db
+      .select({ id: follows.followingId })
+      .from(follows)
+      .where(eq(follows.followerId, userId));
+    
+    const followingIds = following.map(f => f.id);
+    followingIds.push(userId);
+    
+    const suggested = await db
+      .select()
+      .from(users)
+      .where(
+        and(
+          sql`${users.id} NOT IN (${followingIds.length > 0 ? sql.join(followingIds.map(id => sql`${id}`), sql`, `) : sql`''`})`
+        )
+      )
+      .limit(limit);
+    
+    return suggested.map(user => {
       const { passwordHash, ...userWithoutPassword } = user;
       return userWithoutPassword as User;
     });

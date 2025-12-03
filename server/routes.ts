@@ -2107,6 +2107,97 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // =============================================
+  // SEARCH & DISCOVERY ROUTES
+  // =============================================
+
+  // Universal search endpoint
+  app.get("/api/search", requireAuth, async (req, res) => {
+    try {
+      const query = (req.query.q as string || "").trim();
+      const types = req.query.types ? (req.query.types as string).split(",") : undefined;
+      
+      if (query.length < 2) {
+        return res.json({
+          users: [],
+          events: [],
+          venues: [],
+          posts: [],
+        });
+      }
+      
+      if (query.length > 100) {
+        return res.status(400).json({ message: "Search query too long" });
+      }
+      
+      const results = await storage.universalSearch(query, types);
+      res.json(results);
+    } catch (error) {
+      console.error("Universal search error:", error);
+      res.status(500).json({ message: "Search failed" });
+    }
+  });
+
+  // Trending posts
+  app.get("/api/trending/posts", async (req, res) => {
+    try {
+      const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+      const posts = await storage.getTrendingPosts(limit);
+      res.json(posts);
+    } catch (error) {
+      console.error("Trending posts error:", error);
+      res.status(500).json({ message: "Failed to get trending posts" });
+    }
+  });
+
+  // Trending events
+  app.get("/api/trending/events", async (req, res) => {
+    try {
+      const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+      const events = await storage.getTrendingEvents(limit);
+      res.json(events);
+    } catch (error) {
+      console.error("Trending events error:", error);
+      res.status(500).json({ message: "Failed to get trending events" });
+    }
+  });
+
+  // Trending venues
+  app.get("/api/trending/venues", async (req, res) => {
+    try {
+      const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+      const venues = await storage.getTrendingVenues(limit);
+      res.json(venues);
+    } catch (error) {
+      console.error("Trending venues error:", error);
+      res.status(500).json({ message: "Failed to get trending venues" });
+    }
+  });
+
+  // Trending stories
+  app.get("/api/trending/stories", async (req, res) => {
+    try {
+      const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+      const stories = await storage.getTrendingStories(limit);
+      res.json(stories);
+    } catch (error) {
+      console.error("Trending stories error:", error);
+      res.status(500).json({ message: "Failed to get trending stories" });
+    }
+  });
+
+  // Suggested users to follow
+  app.get("/api/suggested-users", requireAuth, async (req, res) => {
+    try {
+      const limit = Math.min(parseInt(req.query.limit as string) || 10, 20);
+      const suggestedUsers = await storage.getSuggestedUsers(req.user!.id, limit);
+      res.json(suggestedUsers);
+    } catch (error) {
+      console.error("Suggested users error:", error);
+      res.status(500).json({ message: "Failed to get suggested users" });
+    }
+  });
+
   // Object Storage Routes (for venue image uploads)
   // Get presigned URL for uploading
   app.post("/api/objects/upload", requireAuth, async (req, res) => {
