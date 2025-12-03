@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Home, Compass, MessageCircle, Menu, X, Building2 } from "lucide-react";
+import { Home, Compass, MessageCircle, Menu, X, Building2, Search } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
@@ -56,6 +56,18 @@ export default function MenuTray() {
                 >
                   <Compass className="h-4 w-4 mr-2" />
                   Discover
+                </Button>
+              </Link>
+              <Link href="/search">
+                <Button
+                  variant={location === '/search' ? 'default' : 'ghost'}
+                  size="sm"
+                  className="w-full justify-start"
+                  onClick={() => setIsOpen(false)}
+                  data-testid="link-search"
+                >
+                  <Search className="h-4 w-4 mr-2" />
+                  Search
                 </Button>
               </Link>
               <Link href="/messages">
