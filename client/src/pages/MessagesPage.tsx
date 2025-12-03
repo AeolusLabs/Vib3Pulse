@@ -18,7 +18,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Send, ArrowLeft, Check, CheckCheck, Search, UserPlus } from "lucide-react";
+import { Send, ArrowLeft, Check, CheckCheck, Search, UserPlus, Reply, X } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -33,6 +33,7 @@ type Conversation = {
 type MessageWithUsers = Message & {
   sender: User;
   receiver: User;
+  replyTo?: Message & { sender: User };
 };
 
 export default function MessagesPage() {
@@ -42,6 +43,7 @@ export default function MessagesPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<MessageWithUsers | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -76,16 +78,18 @@ export default function MessagesPage() {
   });
 
   const sendMessageMutation = useMutation({
-    mutationFn: async (content: string) => {
+    mutationFn: async ({ content, replyToId }: { content: string; replyToId?: string }) => {
       return await apiRequest('POST', '/api/messages', {
         receiverId: userId,
         content,
+        replyToId,
       });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/messages/${userId}`] });
       queryClient.invalidateQueries({ queryKey: ['/api/messages'] });
       setMessageText("");
+      setReplyingTo(null);
     },
   });
 
@@ -162,7 +166,10 @@ export default function MessagesPage() {
 
   const handleSendMessage = () => {
     if (messageText.trim() && userId) {
-      sendMessageMutation.mutate(messageText);
+      sendMessageMutation.mutate({
+        content: messageText,
+        replyToId: replyingTo?.id,
+      });
     }
   };
 
@@ -466,34 +473,67 @@ export default function MessagesPage() {
                   return (
                     <div
                       key={message.id}
-                      className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`}
+                      className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'} group`}
                       data-testid={`message-${message.id}`}
                     >
-                      <div
-                        className={`max-w-[70%] rounded-lg px-4 py-2 ${
-                          isOwnMessage
-                            ? 'bg-primary text-primary-foreground'
-                            : 'bg-muted text-foreground'
-                        }`}
-                      >
-                        <p className={`text-xs font-medium mb-1 ${isOwnMessage ? 'text-primary-foreground' : 'text-foreground/70'}`}>
-                          {senderName}
-                        </p>
-                        <p className="break-words">{message.content}</p>
-                        <div className={`flex items-center gap-1 mt-1 ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
-                          <p className={`text-xs ${isOwnMessage ? 'text-primary-foreground/90' : 'text-muted-foreground'}`}>
-                            {formatMessageTime(message.createdAt)}
-                          </p>
-                          {isOwnMessage && (
-                            <span className="inline-flex">
-                              {message.isRead ? (
-                                <CheckCheck className="h-4 w-4 text-primary-foreground" data-testid={`read-receipt-${message.id}`} />
-                              ) : (
-                                <Check className="h-4 w-4 text-primary-foreground/80" data-testid={`sent-receipt-${message.id}`} />
-                              )}
-                            </span>
+                      <div className={`flex items-end gap-1 max-w-[70%] ${isOwnMessage ? 'flex-row-reverse' : 'flex-row'}`}>
+                        <div
+                          className={`rounded-lg px-4 py-2 ${
+                            isOwnMessage
+                              ? 'bg-primary text-primary-foreground'
+                              : 'bg-muted text-foreground'
+                          }`}
+                        >
+                          {message.replyTo && (
+                            <div 
+                              className={`mb-2 p-2 rounded border-l-2 ${
+                                isOwnMessage 
+                                  ? 'bg-primary-foreground/10 border-primary-foreground/50' 
+                                  : 'bg-background/50 border-foreground/30'
+                              }`}
+                              data-testid={`reply-preview-${message.id}`}
+                            >
+                              <p className={`text-xs font-medium ${isOwnMessage ? 'text-primary-foreground/80' : 'text-foreground/70'}`}>
+                                <Reply className="h-3 w-3 inline mr-1" />
+                                {message.replyTo.sender?.username || 'Unknown'}
+                              </p>
+                              <p className={`text-xs line-clamp-2 ${isOwnMessage ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
+                                {message.replyTo.content}
+                              </p>
+                            </div>
                           )}
+                          <p className={`text-xs font-medium mb-1 ${isOwnMessage ? 'text-primary-foreground' : 'text-foreground/70'}`}>
+                            {senderName}
+                          </p>
+                          <p className="break-words">{message.content}</p>
+                          <div className={`flex items-center gap-1 mt-1 ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
+                            <p className={`text-xs ${isOwnMessage ? 'text-primary-foreground/90' : 'text-muted-foreground'}`}>
+                              {formatMessageTime(message.createdAt)}
+                            </p>
+                            {isOwnMessage && (
+                              <span className="inline-flex">
+                                {message.isRead ? (
+                                  <CheckCheck className="h-4 w-4 text-primary-foreground" data-testid={`read-receipt-${message.id}`} />
+                                ) : (
+                                  <Check className="h-4 w-4 text-primary-foreground/80" data-testid={`sent-receipt-${message.id}`} />
+                                )}
+                              </span>
+                            )}
+                          </div>
                         </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 opacity-30 hover:opacity-100 focus:opacity-100 transition-opacity"
+                          onClick={() => {
+                            setReplyingTo(message);
+                            inputRef.current?.focus();
+                          }}
+                          data-testid={`button-reply-${message.id}`}
+                          aria-label={`Reply to message from ${senderName}`}
+                        >
+                          <Reply className="h-4 w-4" />
+                        </Button>
                       </div>
                     </div>
                   );
@@ -507,11 +547,36 @@ export default function MessagesPage() {
         {/* Message Input */}
         <Card>
           <CardContent className="p-4">
+            {replyingTo && (
+              <div className="mb-3 p-3 bg-muted rounded-lg border-l-2 border-primary" data-testid="reply-preview-input">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-foreground flex items-center gap-1">
+                      <Reply className="h-3 w-3" />
+                      Replying to {replyingTo.sender?.username || 'Unknown'}
+                    </p>
+                    <p className="text-sm text-muted-foreground line-clamp-2 mt-1">
+                      {replyingTo.content}
+                    </p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 shrink-0"
+                    onClick={() => setReplyingTo(null)}
+                    data-testid="button-cancel-reply"
+                    aria-label="Cancel reply"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
             <div className="flex gap-2">
               <Input
                 ref={inputRef}
                 type="text"
-                placeholder="Type a message..."
+                placeholder={replyingTo ? "Type your reply..." : "Type a message..."}
                 value={messageText}
                 onChange={(e) => setMessageText(e.target.value)}
                 onKeyPress={(e) => {
