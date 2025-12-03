@@ -218,6 +218,18 @@ export default function MessagesPage() {
     markedAsReadRef.current = null;
   }, [userId]);
 
+  // Refetch conversations when returning to the list view
+  // This ensures the unread badges are updated after viewing a conversation
+  useEffect(() => {
+    if (!userId) {
+      // Delay to ensure any pending mark-as-read operations complete on the server
+      const timer = setTimeout(() => {
+        queryClient.refetchQueries({ queryKey: ['/api/messages'] });
+      }, 350);
+      return () => clearTimeout(timer);
+    }
+  }, [userId]);
+
   // Mark unread messages as read when viewing conversation
   useEffect(() => {
     if (!userId || conversation.length === 0 || !sessionUser?.user?.id) {
