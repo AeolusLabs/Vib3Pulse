@@ -203,7 +203,7 @@ export default function UserProfilePage() {
                         initialTab="following"
                         trigger={
                           <button className="text-center hover-elevate rounded-md px-3 py-2 transition-colors" data-testid="button-show-following">
-                            <p className="text-xl font-bold text-foreground" data-testid="text-following-count">
+                            <p className="font-bold text-foreground text-[17px]" data-testid="text-following-count">
                               {socialStats?.followingCount ?? 0}
                             </p>
                             <p className="text-sm text-muted-foreground">Following</p>
@@ -238,7 +238,7 @@ export default function UserProfilePage() {
                         initialTab="followers"
                         trigger={
                           <button className="text-center hover-elevate rounded-md px-3 py-2 transition-colors" data-testid="button-show-followers-organizer">
-                            <p className="text-xl font-bold text-foreground" data-testid="text-followers-count">
+                            <p className="font-bold text-foreground text-[17px]" data-testid="text-followers-count">
                               {socialStats?.followersCount ?? 0}
                             </p>
                             <p className="text-sm text-muted-foreground">Followers</p>
@@ -253,7 +253,7 @@ export default function UserProfilePage() {
                         initialTab="following"
                         trigger={
                           <button className="text-center hover-elevate rounded-md px-3 py-2 transition-colors" data-testid="button-show-following-organizer">
-                            <p className="text-xl font-bold text-foreground" data-testid="text-following-count">
+                            <p className="font-bold text-foreground text-[17px]" data-testid="text-following-count">
                               {socialStats?.followingCount ?? 0}
                             </p>
                             <p className="text-sm text-muted-foreground">Following</p>
