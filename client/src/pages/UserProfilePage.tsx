@@ -348,8 +348,8 @@ export default function UserProfilePage() {
           </Card>
         )}
 
-        {/* Events Attending Section */}
-        {profile.events.length > 0 && (
+        {/* Events Attending Section - Only visible on own profile for safety */}
+        {isOwnProfile && profile.events.length > 0 && (
           <Card>
             <CardHeader>
               <CardTitle>Events Attending</CardTitle>
