@@ -21,7 +21,7 @@ Preferred communication style: Simple, everyday language.
 - **Features:**
     - **Stories:** Image stories with 24-hour expiration, user grouping, and deletion, real-time cache updates.
     - **Buddy System (Safety Feature):** Users designate a trusted friend as an emergency contact. Allows sending distress alerts with location sharing, real-time WebSocket notifications, and alert history.
-    - **Venues:** Event Organizers manage clubs, pubs, and lounges. Includes venue promotion, entry ticket sales using Stripe, and analytics tracking.
+    - **Venues:** Event Organizers manage clubs, pubs, and lounges. Includes venue promotion, entry ticket sales (simulated for demo), and analytics tracking.
     - **Search & Discovery:** Universal search across users, events, venues, and posts with type filter chips. Trending sections show popular content based on engagement metrics (likes, RSVPs, tickets sold, views) with time decay algorithm. Suggested users section helps users discover new people to follow.
     - **Admin Panel:** Separate, secure staff-only panel with distinct authentication, role-based access control (6 levels), activity logging, and moderation capabilities for users, events, stories, and content reports. Visual design uses a dark slate color scheme distinct from the main app.
 
@@ -66,29 +66,23 @@ Preferred communication style: Simple, everyday language.
 
 ### Build & Deployment
 - Replit environment
-- Stripe for payments and promotions
+- Simulated payments for demo purposes
 
 ### Payment System
-The payment system supports two modes, controlled by the `SIMULATE_PAYMENTS` environment variable:
+The payment system is fully simulated for demo purposes. No real payment processing occurs.
 
-**Demo Mode (`SIMULATE_PAYMENTS=true`):**
+**Simulated Payment Features:**
 - All payments are simulated - no real charges
 - Checkout sessions auto-complete with success status
 - Payment intents return mock client secrets
-- Perfect for demos and development without Stripe credentials
 - UI shows a "Demo Mode" indicator in payment forms
-
-**Live Mode (`SIMULATE_PAYMENTS=false` or not set):**
-- Real Stripe payments using configured API keys
-- Requires `STRIPE_SECRET_KEY` and `VITE_STRIPE_PUBLIC_KEY`
-- Full payment flow with card validation
+- Ticket purchases are confirmed instantly
 
 The payment abstraction layer is in `server/paymentService.ts` and provides:
-- `createCheckoutSession()` - For event ticket purchases
-- `retrieveCheckoutSession()` - For payment verification
-- `createPaymentIntent()` - For venue entry tickets
-- `isPaymentSimulated()` - To check current mode
-- `getPaymentModeDescription()` - Human-readable mode string
+- `createCheckoutSession()` - For event ticket purchases (simulated)
+- `retrieveCheckoutSession()` - For payment verification (simulated)
+- `createPaymentIntent()` - For venue entry tickets (simulated)
+- All functions return mock data suitable for testing and demos
 
 ## Development Patterns
 

@@ -121,7 +121,7 @@
 - Event header with title (Playfair 36px), date/time, location
 - Share buttons (icon-only, accent color)
 - Ticket tiers (if applicable) in Card components
-- Stripe checkout integration (embedded or modal)
+- Simulated payment form for demo purchases
 - Similar events carousel at bottom
 
 ### User Profile Page
