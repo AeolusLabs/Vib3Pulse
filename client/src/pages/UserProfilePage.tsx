@@ -330,6 +330,27 @@ export default function UserProfilePage() {
               <div className="space-y-4">
                 {profile.posts.map((post) => (
                   <div key={post.id} className="border-b last:border-0 pb-4 last:pb-0" data-testid={`post-${post.id}`}>
+                    <div className="flex items-start gap-3 mb-3">
+                      <Avatar className="h-10 w-10 border border-border">
+                        <AvatarImage src={user.avatarUrl || ""} alt={user.displayName || user.username} />
+                        <AvatarFallback className="bg-primary/10 text-primary">
+                          {(user.displayName || user.username).charAt(0).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-foreground truncate">
+                            {user.displayName || user.username}
+                          </span>
+                          <span className="text-sm text-muted-foreground">
+                            @{user.username}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {format(new Date(post.createdAt), 'PPp')}
+                        </p>
+                      </div>
+                    </div>
                     <p className="text-foreground mb-2">{post.content}</p>
                     {post.imageUrl && (
                       <img 
@@ -338,9 +359,6 @@ export default function UserProfilePage() {
                         className="rounded-md max-h-96 w-auto"
                       />
                     )}
-                    <p className="text-xs text-muted-foreground mt-2">
-                      {format(new Date(post.createdAt), 'PPp')}
-                    </p>
                   </div>
                 ))}
               </div>
