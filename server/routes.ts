@@ -1808,7 +1808,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Normalize the path and set ACL to public
       const normalizedPath = await objectStorageService.trySetObjectEntityAclPolicy(
         avatarUrl,
-        { visibility: "public" }
+        { visibility: "public", owner: req.user!.id }
       );
 
       const updatedUser = await storage.updateUser(req.user!.id, { 

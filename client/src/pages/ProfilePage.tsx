@@ -1,3 +1,4 @@
+import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams, Link } from "wouter";
 import { format, differenceInYears } from "date-fns";
@@ -8,11 +9,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Calendar, MapPin, PoundSterling, Users, Heart, Building2, Mail, Cake, UserPlus, UserMinus } from "lucide-react";
-import type { User, Event, Rsvp } from "@shared/schema";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Calendar, MapPin, PoundSterling, Building2, Mail, Cake, UserPlus, UserMinus, Camera, FileText, Heart, Repeat2, Loader2 } from "lucide-react";
+import type { User, Event, Rsvp, Post } from "@shared/schema";
 import EditProfileDialog from "@/components/EditProfileDialog";
 import { OrganizerStatsModal } from "@/components/OrganizerStatsModal";
 import FollowersFollowingDialog from "@/components/FollowersFollowingDialog";
+import FeedPost from "@/components/FeedPost";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -22,11 +25,15 @@ type ProfileResponse = Omit<User, 'password'> & {
   rsvps?: Array<Rsvp & { event: Event }>;
 };
 
+type PostWithUser = Post & { user: { id: string; username: string; displayName: string | null; avatarUrl: string | null } };
+
 export default function ProfilePage() {
   const { username } = useParams<{ username: string }>();
   const { toast } = useToast();
+  const [activeTab, setActiveTab] = useState("posts");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
 
-  // Use the shared useAuth hook for consistent session cache management
   const { data: sessionUser, isLoading: sessionLoading } = useAuth();
 
   const { data: profile, isLoading: profileLoading, error } = useQuery<ProfileResponse>({
@@ -41,7 +48,6 @@ export default function ProfilePage() {
     enabled: !!username,
   });
 
-  // Fetch follow stats for the profile user
   const { data: followStats, isLoading: followStatsLoading } = useQuery<{
     followersCount: number;
     followingCount: number;
@@ -60,15 +66,42 @@ export default function ProfilePage() {
     enabled: !!profile?.id,
   });
 
-  // Follow mutation
+  const { data: userPosts, isLoading: postsLoading } = useQuery<PostWithUser[]>({
+    queryKey: ['/api/users', profile?.id, 'posts'],
+    queryFn: async () => {
+      const response = await fetch(`/api/users/${profile?.id}/posts`);
+      if (!response.ok) throw new Error('Failed to fetch posts');
+      return response.json();
+    },
+    enabled: !!profile?.id && activeTab === 'posts',
+  });
+
+  const { data: likedPosts, isLoading: likedLoading } = useQuery<PostWithUser[]>({
+    queryKey: ['/api/users', profile?.id, 'liked-posts'],
+    queryFn: async () => {
+      const response = await fetch(`/api/users/${profile?.id}/liked-posts`);
+      if (!response.ok) throw new Error('Failed to fetch liked posts');
+      return response.json();
+    },
+    enabled: !!profile?.id && activeTab === 'likes',
+  });
+
+  const { data: repostedPosts, isLoading: repostsLoading } = useQuery<PostWithUser[]>({
+    queryKey: ['/api/users', profile?.id, 'reposted-posts'],
+    queryFn: async () => {
+      const response = await fetch(`/api/users/${profile?.id}/reposted-posts`);
+      if (!response.ok) throw new Error('Failed to fetch reposted posts');
+      return response.json();
+    },
+    enabled: !!profile?.id && activeTab === 'reposts',
+  });
+
   const followMutation = useMutation({
     mutationFn: async () => {
       await apiRequest("POST", `/api/users/${profile?.id}/follow`, {});
     },
     onSuccess: () => {
-      // Invalidate target user's stats
       queryClient.invalidateQueries({ queryKey: [`/api/users/${profile?.id}/follow-stats`] });
-      // Also invalidate current user's stats (their following count changed)
       if (sessionUser?.id) {
         queryClient.invalidateQueries({ queryKey: [`/api/users/${sessionUser.id}/follow-stats`] });
       }
@@ -86,15 +119,12 @@ export default function ProfilePage() {
     },
   });
 
-  // Unfollow mutation
   const unfollowMutation = useMutation({
     mutationFn: async () => {
       await apiRequest("POST", `/api/users/${profile?.id}/unfollow`, {});
     },
     onSuccess: () => {
-      // Invalidate target user's stats
       queryClient.invalidateQueries({ queryKey: [`/api/users/${profile?.id}/follow-stats`] });
-      // Also invalidate current user's stats (their following count changed)
       if (sessionUser?.id) {
         queryClient.invalidateQueries({ queryKey: [`/api/users/${sessionUser.id}/follow-stats`] });
       }
@@ -112,7 +142,90 @@ export default function ProfilePage() {
     },
   });
 
-  // Wait for both queries to finish before rendering
+  const handleAvatarClick = () => {
+    if (isOwnProfile && fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      toast({
+        title: "Error",
+        description: "Please select an image file",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        title: "Error",
+        description: "Image must be less than 5MB",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsUploadingAvatar(true);
+
+    try {
+      const uploadResponse = await fetch('/api/users/me/avatar', {
+        method: 'POST',
+        credentials: 'include',
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error('Failed to get upload URL');
+      }
+
+      const { uploadURL } = await uploadResponse.json();
+
+      await fetch(uploadURL, {
+        method: 'PUT',
+        body: file,
+        headers: {
+          'Content-Type': file.type,
+        },
+      });
+
+      const updateResponse = await fetch('/api/users/me/avatar', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({ avatarUrl: uploadURL }),
+      });
+
+      if (!updateResponse.ok) {
+        throw new Error('Failed to update avatar');
+      }
+
+      queryClient.invalidateQueries({ queryKey: [`/api/users/${username}`] });
+      queryClient.invalidateQueries({ queryKey: ['/api/session'] });
+
+      toast({
+        title: "Success",
+        description: "Profile picture updated successfully",
+      });
+    } catch {
+      toast({
+        title: "Error",
+        description: "Failed to upload profile picture. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploadingAvatar(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
   if (profileLoading || sessionLoading) {
     return (
       <div className="min-h-screen bg-background pb-20 md:pb-0">
@@ -146,34 +259,69 @@ export default function ProfilePage() {
 
   const isSocialUser = profile.userType === "social";
   const isOrganizer = profile.userType === "organizer";
-  // Compare by ID - sessionUser is the user object directly (not wrapped)
   const isOwnProfile = sessionUser?.id === profile.id;
+
+  const getAvatarUrl = () => {
+    if (profile.avatarUrl) {
+      if (profile.avatarUrl.startsWith('/objects/')) {
+        return profile.avatarUrl;
+      }
+      return profile.avatarUrl;
+    }
+    return undefined;
+  };
 
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
       <Navigation onSearch={() => {}} />
 
       <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Profile Header */}
         <Card className="mb-8">
           <CardContent className="p-8">
             <div className="flex flex-col md:flex-row gap-6 items-start">
-              {/* Avatar */}
-              <Avatar className="h-24 w-24 border-4 border-primary/20">
-                <AvatarImage src="" alt={isSocialUser ? (profile.displayName || profile.username) : (profile.organizationName || profile.username)} />
-                <AvatarFallback className="text-2xl bg-primary/10 text-primary">
-                  {isSocialUser 
-                    ? profile.displayName?.charAt(0) || profile.username.charAt(0).toUpperCase()
-                    : profile.organizationName?.charAt(0) || profile.username.charAt(0).toUpperCase()
-                  }
-                </AvatarFallback>
-              </Avatar>
+              <div className="relative group">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  className="hidden"
+                  accept="image/*"
+                  onChange={handleAvatarUpload}
+                  data-testid="input-avatar-upload"
+                />
+                <Avatar 
+                  className={`h-24 w-24 border-4 border-primary/20 ${isOwnProfile ? 'cursor-pointer' : ''}`}
+                  onClick={handleAvatarClick}
+                  data-testid="avatar-profile"
+                >
+                  <AvatarImage 
+                    src={getAvatarUrl()} 
+                    alt={isSocialUser ? (profile.displayName || profile.username) : (profile.organizationName || profile.username)} 
+                  />
+                  <AvatarFallback className="text-2xl bg-primary/10 text-primary">
+                    {isSocialUser 
+                      ? profile.displayName?.charAt(0) || profile.username.charAt(0).toUpperCase()
+                      : profile.organizationName?.charAt(0) || profile.username.charAt(0).toUpperCase()
+                    }
+                  </AvatarFallback>
+                </Avatar>
+                {isOwnProfile && (
+                  <div 
+                    className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                    onClick={handleAvatarClick}
+                    data-testid="avatar-overlay"
+                  >
+                    {isUploadingAvatar ? (
+                      <Loader2 className="h-6 w-6 text-white animate-spin" />
+                    ) : (
+                      <Camera className="h-6 w-6 text-white" />
+                    )}
+                  </div>
+                )}
+              </div>
 
-              {/* Profile Info */}
               <div className="flex-1 space-y-4">
                 {isSocialUser ? (
                   <>
-                    {/* Social User Info */}
                     <div>
                       <h1 className="text-3xl font-bold font-serif text-foreground" data-testid="text-display-name">
                         {profile.displayName || profile.username}
@@ -213,7 +361,6 @@ export default function ProfilePage() {
                       </div>
                     )}
 
-                    {/* Follower/Following Stats */}
                     {!followStatsLoading && followStats && (
                       <div className="flex gap-4 text-sm" data-testid="follow-stats">
                         <FollowersFollowingDialog
@@ -253,7 +400,6 @@ export default function ProfilePage() {
                   </>
                 ) : (
                   <>
-                    {/* Event Organizer Info */}
                     <div>
                       <div className="flex items-center gap-2 mb-1">
                         <Building2 className="h-5 w-5 text-primary" />
@@ -282,7 +428,6 @@ export default function ProfilePage() {
                       </div>
                     )}
 
-                    {/* Follower/Following Stats for Organizers */}
                     {!followStatsLoading && followStats && (
                       <div className="flex gap-4 text-sm" data-testid="follow-stats-organizer">
                         <FollowersFollowingDialog
@@ -322,7 +467,6 @@ export default function ProfilePage() {
                   </>
                 )}
 
-                {/* Action Buttons */}
                 {isOwnProfile && (
                   <div className="pt-2 flex flex-wrap gap-2">
                     <EditProfileDialog user={profile as User} />
@@ -367,72 +511,122 @@ export default function ProfilePage() {
           </CardContent>
         </Card>
 
-        {/* Content Section */}
         {isSocialUser ? (
-          <div>
-            <h2 className="text-2xl font-bold font-serif mb-6" data-testid="heading-rsvps">
-              Events I'm Attending
-            </h2>
-            {profile.rsvps && profile.rsvps.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {profile.rsvps.map((rsvp) => (
-                  <Link key={rsvp.id} href={`/event/${rsvp.event.id}`}>
-                    <Card className="overflow-hidden hover-elevate cursor-pointer" data-testid={`card-event-${rsvp.event.id}`}>
-                    {rsvp.event.imageUrl && (
-                      <div className="aspect-video relative overflow-hidden bg-muted">
-                        <img 
-                          src={rsvp.event.imageUrl} 
-                          alt={rsvp.event.title}
-                          className="w-full h-full object-cover"
-                        />
-                      </div>
-                    )}
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-xl line-clamp-2" data-testid="text-event-title">
-                        {rsvp.event.title}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2">
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Calendar className="h-4 w-4" />
-                        <span data-testid="text-event-date">
-                          {format(new Date(rsvp.event.eventDate), 'MMM d, yyyy • h:mm a')}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <MapPin className="h-4 w-4" />
-                        <span className="line-clamp-1" data-testid="text-event-location">
-                          {rsvp.event.location}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 text-sm">
-                        {rsvp.event.ticketPrice === 0 ? (
-                          <Badge variant="secondary" data-testid="badge-free">
-                            FREE
-                          </Badge>
-                        ) : (
-                          <div className="flex items-center gap-1 text-primary font-semibold" data-testid="text-event-price">
-                            <PoundSterling className="h-4 w-4" />
-                            {(rsvp.event.ticketPrice / 100).toFixed(2)}
-                          </div>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                  </Link>
-                ))}
-              </div>
-            ) : (
-              <Card>
-                <CardContent className="p-8 text-center">
-                  <Users className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                  <p className="text-muted-foreground" data-testid="text-no-rsvps">
-                    No events attended yet
-                  </p>
-                </CardContent>
-              </Card>
-            )}
-          </div>
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <TabsList className="grid w-full grid-cols-3 mb-6" data-testid="profile-tabs">
+              <TabsTrigger value="posts" className="flex items-center gap-2" data-testid="tab-posts">
+                <FileText className="h-4 w-4" />
+                Posts
+              </TabsTrigger>
+              <TabsTrigger value="likes" className="flex items-center gap-2" data-testid="tab-likes">
+                <Heart className="h-4 w-4" />
+                Likes
+              </TabsTrigger>
+              <TabsTrigger value="reposts" className="flex items-center gap-2" data-testid="tab-reposts">
+                <Repeat2 className="h-4 w-4" />
+                Reposts
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="posts" data-testid="content-posts">
+              {postsLoading ? (
+                <div className="space-y-4">
+                  <Skeleton className="h-32 w-full" />
+                  <Skeleton className="h-32 w-full" />
+                </div>
+              ) : userPosts && userPosts.length > 0 ? (
+                <div className="space-y-4">
+                  {userPosts.map((post) => (
+                    <FeedPost
+                      key={post.id}
+                      post={post}
+                      user={{
+                        id: post.user.id,
+                        username: post.user.username,
+                        displayName: post.user.displayName,
+                        avatarUrl: post.user.avatarUrl,
+                      }}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <Card>
+                  <CardContent className="p-8 text-center">
+                    <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                    <p className="text-muted-foreground" data-testid="text-no-posts">
+                      No posts yet
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+            </TabsContent>
+
+            <TabsContent value="likes" data-testid="content-likes">
+              {likedLoading ? (
+                <div className="space-y-4">
+                  <Skeleton className="h-32 w-full" />
+                  <Skeleton className="h-32 w-full" />
+                </div>
+              ) : likedPosts && likedPosts.length > 0 ? (
+                <div className="space-y-4">
+                  {likedPosts.map((post) => (
+                    <FeedPost
+                      key={post.id}
+                      post={post}
+                      user={{
+                        id: post.user.id,
+                        username: post.user.username,
+                        displayName: post.user.displayName,
+                        avatarUrl: post.user.avatarUrl,
+                      }}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <Card>
+                  <CardContent className="p-8 text-center">
+                    <Heart className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                    <p className="text-muted-foreground" data-testid="text-no-likes">
+                      No liked posts yet
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+            </TabsContent>
+
+            <TabsContent value="reposts" data-testid="content-reposts">
+              {repostsLoading ? (
+                <div className="space-y-4">
+                  <Skeleton className="h-32 w-full" />
+                  <Skeleton className="h-32 w-full" />
+                </div>
+              ) : repostedPosts && repostedPosts.length > 0 ? (
+                <div className="space-y-4">
+                  {repostedPosts.map((post) => (
+                    <FeedPost
+                      key={post.id}
+                      post={post}
+                      user={{
+                        id: post.user.id,
+                        username: post.user.username,
+                        displayName: post.user.displayName,
+                        avatarUrl: post.user.avatarUrl,
+                      }}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <Card>
+                  <CardContent className="p-8 text-center">
+                    <Repeat2 className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                    <p className="text-muted-foreground" data-testid="text-no-reposts">
+                      No reposts yet
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+            </TabsContent>
+          </Tabs>
         ) : (
           <div>
             <h2 className="text-2xl font-bold font-serif mb-6" data-testid="heading-events">
