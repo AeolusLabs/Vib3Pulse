@@ -20,6 +20,7 @@ export const users = pgTable("users", {
   socialMediaLinks: text("social_media_links").array().default(sql`'{}'`),
   phoneNumber: text("phone_number"),
   canManageVenues: boolean("can_manage_venues").default(false),
+  avatarUrl: text("avatar_url"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
@@ -40,6 +41,7 @@ export const updateUserSchema = insertUserSchema.pick({
   socialMediaLinks: true,
   phoneNumber: true,
   canManageVenues: true,
+  avatarUrl: true,
 }).partial();
 
 // Gender options enum
