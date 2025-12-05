@@ -21,7 +21,8 @@ import {
   ArrowLeft,
   Ticket,
   DollarSign,
-  CheckCircle
+  CheckCircle,
+  AlertCircle
 } from "lucide-react";
 import { format } from "date-fns";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -30,7 +31,10 @@ import { loadStripe } from "@stripe/stripe-js";
 import { Elements, useStripe, useElements, PaymentElement } from "@stripe/react-stripe-js";
 import type { Venue, VenueEntryNight } from "@shared/schema";
 
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLIC_KEY || "");
+// Only load Stripe if we have a valid key
+const stripePromise = import.meta.env.VITE_STRIPE_PUBLIC_KEY 
+  ? loadStripe(import.meta.env.VITE_STRIPE_PUBLIC_KEY) 
+  : null;
 
 const categoryLabels: Record<string, string> = {
   nightclub: "Nightclub",
@@ -51,6 +55,76 @@ const categoryLabels: Record<string, string> = {
   Rooftop: "Rooftop",
 };
 
+// Simulated payment form for demo mode
+function SimulatedPaymentForm({ 
+  entryNight, 
+  paymentIntentId,
+  onSuccess, 
+  onCancel 
+}: { 
+  entryNight: VenueEntryNight; 
+  paymentIntentId: string;
+  onSuccess: () => void; 
+  onCancel: () => void;
+}) {
+  const { toast } = useToast();
+  const [processing, setProcessing] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProcessing(true);
+
+    try {
+      await apiRequest("POST", "/api/venue-tickets/confirm", {
+        entryNightId: entryNight.id,
+        paymentIntentId: paymentIntentId,
+      });
+      toast({ title: "Ticket purchased successfully!" });
+      queryClient.invalidateQueries({ queryKey: ["/api/my-venue-tickets"] });
+      onSuccess();
+    } catch {
+      toast({ title: "Failed to confirm ticket", variant: "destructive" });
+    }
+
+    setProcessing(false);
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="rounded-lg border border-dashed border-amber-500/50 bg-amber-50 dark:bg-amber-950/20 p-4">
+        <div className="flex items-start gap-3">
+          <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="font-medium text-amber-800 dark:text-amber-200">Demo Mode</p>
+            <p className="text-sm text-amber-700 dark:text-amber-300">
+              Payments are simulated. No real charges will be made.
+            </p>
+          </div>
+        </div>
+      </div>
+      <div className="rounded-lg border p-4 space-y-3">
+        <div className="flex justify-between text-sm">
+          <span className="text-muted-foreground">Entry ticket</span>
+          <span>£{(entryNight.coverPriceCents / 100).toFixed(2)}</span>
+        </div>
+        <div className="border-t pt-3 flex justify-between font-medium">
+          <span>Total</span>
+          <span>£{(entryNight.coverPriceCents / 100).toFixed(2)}</span>
+        </div>
+      </div>
+      <div className="flex gap-3 justify-end">
+        <Button type="button" variant="outline" onClick={onCancel} disabled={processing}>
+          Cancel
+        </Button>
+        <Button type="submit" disabled={processing} data-testid="button-confirm-simulated-payment">
+          {processing ? "Processing..." : `Confirm Purchase`}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+// Real Stripe payment form
 function TicketPurchaseForm({ 
   entryNight, 
   onSuccess, 
@@ -122,7 +196,15 @@ export default function VenueDetailPage() {
   const { toast } = useToast();
   const [selectedEntryNight, setSelectedEntryNight] = useState<VenueEntryNight | null>(null);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
+
+  // Fetch app config to check payment mode
+  const { data: config } = useQuery<{ paymentMode: string }>({
+    queryKey: ["/api/config"],
+  });
+
+  const isDemoMode = config?.paymentMode === "demo";
 
   const { data: venue, isLoading: venueLoading } = useQuery<Venue & { owner: any }>({
     queryKey: ["/api/venues", id],
@@ -141,6 +223,7 @@ export default function VenueDetailPage() {
     },
     onSuccess: (data, entryNightId) => {
       setClientSecret(data.clientSecret);
+      setPaymentIntentId(data.paymentIntentId);
       const night = entryNights.find(n => n.id === entryNightId);
       if (night) setSelectedEntryNight(night);
     },
@@ -156,11 +239,13 @@ export default function VenueDetailPage() {
   const handleClosePayment = () => {
     setSelectedEntryNight(null);
     setClientSecret(null);
+    setPaymentIntentId(null);
   };
 
   const handlePaymentSuccess = () => {
     setSelectedEntryNight(null);
     setClientSecret(null);
+    setPaymentIntentId(null);
     setShowSuccess(true);
     setTimeout(() => setShowSuccess(false), 3000);
   };
@@ -419,13 +504,26 @@ export default function VenueDetailPage() {
             </DialogDescription>
           </DialogHeader>
           {clientSecret && selectedEntryNight && (
-            <Elements stripe={stripePromise} options={{ clientSecret }}>
-              <TicketPurchaseForm 
-                entryNight={selectedEntryNight} 
+            isDemoMode ? (
+              <SimulatedPaymentForm 
+                entryNight={selectedEntryNight}
+                paymentIntentId={paymentIntentId || ""}
                 onSuccess={handlePaymentSuccess}
                 onCancel={handleClosePayment}
               />
-            </Elements>
+            ) : stripePromise ? (
+              <Elements stripe={stripePromise} options={{ clientSecret }}>
+                <TicketPurchaseForm 
+                  entryNight={selectedEntryNight} 
+                  onSuccess={handlePaymentSuccess}
+                  onCancel={handleClosePayment}
+                />
+              </Elements>
+            ) : (
+              <div className="text-center py-4 text-muted-foreground">
+                Payment system unavailable
+              </div>
+            )
           )}
         </DialogContent>
       </Dialog>
