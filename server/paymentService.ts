@@ -1,32 +1,16 @@
 /**
- * Payment Service
+ * Payment Service (Simulation Mode)
  * 
- * This module provides a unified payment abstraction layer that supports both
- * real Stripe payments and simulated payments for development/demo purposes.
+ * This module provides simulated payment processing for demo purposes.
+ * All payments are automatically completed without requiring real payment providers.
  * 
- * Configuration:
- * - Set SIMULATE_PAYMENTS=true to enable simulated payment mode
- * - Set SIMULATE_PAYMENTS=false (or remove) to use real Stripe payments
- * 
- * When simulated:
- * - Checkout sessions return mock URLs that auto-complete
- * - Payment intents return mock client secrets
- * - All verification calls succeed automatically
+ * Features:
+ * - Checkout sessions for event ticket purchases (auto-completes)
+ * - Payment intents for venue entry tickets (auto-completes)
+ * - No external payment provider required
  */
 
-import Stripe from "stripe";
 import crypto from "crypto";
-
-// Initialize Stripe (only used when not simulating)
-const stripe = new Stripe(
-  process.env.TESTING_STRIPE_SECRET_KEY || process.env.STRIPE_SECRET_KEY || "",
-  { apiVersion: "2025-11-17.clover" }
-);
-
-// Check if payments should be simulated
-const isSimulationMode = (): boolean => {
-  return process.env.SIMULATE_PAYMENTS === "true";
-};
 
 // Generate a unique simulated ID
 const generateSimulatedId = (prefix: string): string => {
@@ -77,19 +61,24 @@ export interface PaymentIntentResult {
 }
 
 // ============================================================
-// SIMULATED PAYMENT HANDLERS
+// SIMULATED PAYMENT STORAGE
 // ============================================================
 
 // In-memory store for simulated sessions (persists during runtime)
 const simulatedSessions = new Map<string, CheckoutSessionData>();
 const simulatedPaymentIntents = new Map<string, PaymentIntentParams>();
 
+// ============================================================
+// PUBLIC API
+// ============================================================
+
 /**
- * Creates a simulated checkout session for event ticket purchases
+ * Creates a checkout session for event ticket purchases
+ * Returns a mock session that auto-completes payment
  */
-const createSimulatedCheckoutSession = (
+export const createCheckoutSession = async (
   params: CheckoutSessionParams
-): CheckoutSessionResult => {
+): Promise<CheckoutSessionResult> => {
   const sessionId = generateSimulatedId("cs");
   const paymentIntentId = generateSimulatedId("pi");
 
@@ -118,11 +107,12 @@ const createSimulatedCheckoutSession = (
 };
 
 /**
- * Retrieves a simulated checkout session
+ * Retrieves and verifies a checkout session
+ * Returns mock data with payment marked as complete
  */
-const retrieveSimulatedCheckoutSession = (
+export const retrieveCheckoutSession = async (
   sessionId: string
-): CheckoutSessionData | null => {
+): Promise<CheckoutSessionData | null> => {
   const session = simulatedSessions.get(sessionId);
   if (!session) {
     console.warn(`[PaymentService] Simulated session not found: ${sessionId}`);
@@ -133,11 +123,12 @@ const retrieveSimulatedCheckoutSession = (
 };
 
 /**
- * Creates a simulated payment intent for venue tickets
+ * Creates a payment intent for venue entry tickets
+ * Returns a mock client secret that auto-confirms
  */
-const createSimulatedPaymentIntent = (
+export const createPaymentIntent = async (
   params: PaymentIntentParams
-): PaymentIntentResult => {
+): Promise<PaymentIntentResult> => {
   const paymentIntentId = generateSimulatedId("pi");
   const clientSecret = `${paymentIntentId}_secret_${crypto.randomBytes(16).toString("hex")}`;
 
@@ -152,113 +143,32 @@ const createSimulatedPaymentIntent = (
   };
 };
 
-// ============================================================
-// PUBLIC API
-// ============================================================
-
 /**
- * Creates a checkout session for event ticket purchases
- * In simulation mode, returns a mock session that auto-completes
+ * Verifies a simulated payment intent was created
+ * Used for venue ticket confirmations
  */
-export const createCheckoutSession = async (
-  params: CheckoutSessionParams
-): Promise<CheckoutSessionResult> => {
-  if (isSimulationMode()) {
-    return createSimulatedCheckoutSession(params);
+export const verifyPaymentIntent = async (
+  paymentIntentId: string
+): Promise<PaymentIntentParams | null> => {
+  const intent = simulatedPaymentIntents.get(paymentIntentId);
+  if (!intent) {
+    console.warn(`[PaymentService] Simulated payment intent not found: ${paymentIntentId}`);
+    return null;
   }
-
-  // Real Stripe implementation
-  const session = await stripe.checkout.sessions.create({
-    payment_method_types: ["card"],
-    line_items: [
-      {
-        price_data: {
-          currency: "gbp",
-          product_data: {
-            name: params.eventTitle,
-            description: params.eventDescription,
-          },
-          unit_amount: params.priceInPence,
-        },
-        quantity: 1,
-      },
-    ],
-    mode: "payment",
-    success_url: params.successUrl,
-    cancel_url: params.cancelUrl,
-    metadata: {
-      eventId: params.eventId,
-      userId: params.userId,
-    },
-  });
-
-  return {
-    sessionId: session.id,
-    url: session.url || "",
-  };
+  console.log(`[PaymentService] Verified simulated payment intent: ${paymentIntentId}`);
+  return intent;
 };
 
 /**
- * Retrieves and verifies a checkout session
- * In simulation mode, returns mock data with payment marked as complete
- */
-export const retrieveCheckoutSession = async (
-  sessionId: string
-): Promise<CheckoutSessionData | null> => {
-  if (isSimulationMode()) {
-    return retrieveSimulatedCheckoutSession(sessionId);
-  }
-
-  // Real Stripe implementation
-  const session = await stripe.checkout.sessions.retrieve(sessionId);
-
-  return {
-    paymentStatus: session.payment_status as "paid" | "unpaid" | "no_payment_required",
-    paymentIntentId: session.payment_intent as string,
-    metadata: {
-      eventId: session.metadata?.eventId || "",
-      userId: session.metadata?.userId || "",
-    },
-  };
-};
-
-/**
- * Creates a payment intent for venue entry tickets
- * In simulation mode, returns a mock client secret
- */
-export const createPaymentIntent = async (
-  params: PaymentIntentParams
-): Promise<PaymentIntentResult> => {
-  if (isSimulationMode()) {
-    return createSimulatedPaymentIntent(params);
-  }
-
-  // Real Stripe implementation
-  const paymentIntent = await stripe.paymentIntents.create({
-    amount: params.amountInPence,
-    currency: "gbp",
-    metadata: params.metadata,
-  });
-
-  return {
-    clientSecret: paymentIntent.client_secret || "",
-    paymentIntentId: paymentIntent.id,
-  };
-};
-
-/**
- * Checks if the payment system is running in simulation mode
- * Useful for UI indicators
+ * Always returns true - payments are always simulated
  */
 export const isPaymentSimulated = (): boolean => {
-  return isSimulationMode();
+  return true;
 };
 
 /**
  * Gets a human-readable payment mode description
  */
 export const getPaymentModeDescription = (): string => {
-  return isSimulationMode()
-    ? "Demo Mode (payments simulated)"
-    : "Live Mode (real payments)";
+  return "Demo Mode (payments simulated for demonstration)";
 };
