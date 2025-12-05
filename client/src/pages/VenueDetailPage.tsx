@@ -27,14 +27,7 @@ import {
 import { format } from "date-fns";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { loadStripe } from "@stripe/stripe-js";
-import { Elements, useStripe, useElements, PaymentElement } from "@stripe/react-stripe-js";
 import type { Venue, VenueEntryNight } from "@shared/schema";
-
-// Only load Stripe if we have a valid key
-const stripePromise = import.meta.env.VITE_STRIPE_PUBLIC_KEY 
-  ? loadStripe(import.meta.env.VITE_STRIPE_PUBLIC_KEY) 
-  : null;
 
 const categoryLabels: Record<string, string> = {
   nightclub: "Nightclub",
@@ -124,72 +117,6 @@ function SimulatedPaymentForm({
   );
 }
 
-// Real Stripe payment form
-function TicketPurchaseForm({ 
-  entryNight, 
-  onSuccess, 
-  onCancel 
-}: { 
-  entryNight: VenueEntryNight; 
-  onSuccess: () => void; 
-  onCancel: () => void;
-}) {
-  const stripe = useStripe();
-  const elements = useElements();
-  const { toast } = useToast();
-  const [processing, setProcessing] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!stripe || !elements) return;
-
-    setProcessing(true);
-
-    const { error, paymentIntent } = await stripe.confirmPayment({
-      elements,
-      confirmParams: {
-        return_url: window.location.href,
-      },
-      redirect: "if_required",
-    });
-
-    if (error) {
-      toast({ title: error.message || "Payment failed", variant: "destructive" });
-      setProcessing(false);
-      return;
-    }
-
-    if (paymentIntent && paymentIntent.status === "succeeded") {
-      try {
-        await apiRequest("POST", "/api/venue-tickets/confirm", {
-          entryNightId: entryNight.id,
-          paymentIntentId: paymentIntent.id,
-        });
-        toast({ title: "Ticket purchased successfully!" });
-        queryClient.invalidateQueries({ queryKey: ["/api/my-venue-tickets"] });
-        onSuccess();
-      } catch {
-        toast({ title: "Failed to confirm ticket", variant: "destructive" });
-      }
-    }
-
-    setProcessing(false);
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <PaymentElement />
-      <div className="flex gap-3 justify-end">
-        <Button type="button" variant="outline" onClick={onCancel} disabled={processing}>
-          Cancel
-        </Button>
-        <Button type="submit" disabled={!stripe || processing}>
-          {processing ? "Processing..." : `Pay £${(entryNight.coverPriceCents / 100).toFixed(2)}`}
-        </Button>
-      </div>
-    </form>
-  );
-}
 
 export default function VenueDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -198,13 +125,6 @@ export default function VenueDetailPage() {
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
-
-  // Fetch app config to check payment mode
-  const { data: config } = useQuery<{ paymentMode: string }>({
-    queryKey: ["/api/config"],
-  });
-
-  const isDemoMode = config?.paymentMode === "demo";
 
   const { data: venue, isLoading: venueLoading } = useQuery<Venue & { owner: any }>({
     queryKey: ["/api/venues", id],
@@ -504,26 +424,12 @@ export default function VenueDetailPage() {
             </DialogDescription>
           </DialogHeader>
           {clientSecret && selectedEntryNight && (
-            isDemoMode ? (
-              <SimulatedPaymentForm 
-                entryNight={selectedEntryNight}
-                paymentIntentId={paymentIntentId || ""}
-                onSuccess={handlePaymentSuccess}
-                onCancel={handleClosePayment}
-              />
-            ) : stripePromise ? (
-              <Elements stripe={stripePromise} options={{ clientSecret }}>
-                <TicketPurchaseForm 
-                  entryNight={selectedEntryNight} 
-                  onSuccess={handlePaymentSuccess}
-                  onCancel={handleClosePayment}
-                />
-              </Elements>
-            ) : (
-              <div className="text-center py-4 text-muted-foreground">
-                Payment system unavailable
-              </div>
-            )
+            <SimulatedPaymentForm 
+              entryNight={selectedEntryNight}
+              paymentIntentId={paymentIntentId || ""}
+              onSuccess={handlePaymentSuccess}
+              onCancel={handleClosePayment}
+            />
           )}
         </DialogContent>
       </Dialog>
