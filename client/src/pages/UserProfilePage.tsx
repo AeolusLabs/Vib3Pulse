@@ -127,7 +127,6 @@ export default function UserProfilePage() {
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
       <Navigation onSearch={() => {}} />
-
       <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Profile Header */}
         <Card className="mb-8">
@@ -189,7 +188,7 @@ export default function UserProfilePage() {
                         initialTab="followers"
                         trigger={
                           <button className="text-center hover-elevate rounded-md px-3 py-2 transition-colors" data-testid="button-show-followers">
-                            <p className="text-xl font-bold text-foreground" data-testid="text-followers-count">
+                            <p className="font-bold text-foreground text-[17px]" data-testid="text-followers-count">
                               {socialStats?.followersCount ?? 0}
                             </p>
                             <p className="text-sm text-muted-foreground">Followers</p>
@@ -387,7 +386,6 @@ export default function UserProfilePage() {
           </Card>
         )}
       </main>
-
       <BottomNavigation />
     </div>
   );
