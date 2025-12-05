@@ -845,6 +845,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...sanitizedPostData,
         userId: req.user!.id,
       });
+
+      // Extract and store hashtags from post content
+      const hashtagRegex = /#(\w+)/g;
+      const hashtagMatches = sanitizedPostData.content.match(hashtagRegex) || [];
+      for (const match of hashtagMatches) {
+        const hashtag = await storage.getOrCreateHashtag(match);
+        await storage.addHashtagToPost(post.id, hashtag.id);
+      }
+
+      // Extract mentions and create notifications
+      const mentionRegex = /@(\w+)/g;
+      const mentionMatches = sanitizedPostData.content.match(mentionRegex) || [];
+      for (const match of mentionMatches) {
+        const username = match.substring(1); // Remove @ symbol
+        const mentionedUser = await storage.getUserByUsername(username);
+        if (mentionedUser && mentionedUser.id !== req.user!.id) {
+          await storage.addMentionToPost(post.id, mentionedUser.id);
+          
+          // Create notification for the mentioned user
+          const poster = await storage.getUser(req.user!.id);
+          await storage.createNotification({
+            userId: mentionedUser.id,
+            type: "mention",
+            title: "You were mentioned",
+            message: `${poster?.displayName || poster?.username || "Someone"} mentioned you in a post`,
+            link: `/feed`,
+            relatedUserId: req.user!.id,
+            relatedEntityId: post.id,
+          });
+          wsManager.sendToUser(mentionedUser.id, {
+            type: "notification",
+            data: { type: "mention" },
+          });
+        }
+      }
+
       res.json(post);
     } catch (error) {
       res.status(400).json({ message: "Invalid post data" });
@@ -1174,6 +1210,111 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ message: "Removed bookmark" });
     } catch (error) {
       res.status(500).json({ message: "Failed to remove bookmark" });
+    }
+  });
+
+  // ============================================
+  // POST REPOSTS
+  // ============================================
+
+  app.post("/api/posts/:postId/repost", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const postId = req.params.postId;
+      
+      const alreadyReposted = await storage.hasUserRepostedPost(userId, postId);
+      if (alreadyReposted) {
+        return res.status(400).json({ message: "Already reposted this post" });
+      }
+      
+      const repost = await storage.repostPost(userId, postId);
+
+      // Notify the original post author
+      const originalPost = await storage.getPost(postId);
+      if (originalPost && originalPost.userId !== userId) {
+        const reposter = await storage.getUser(userId);
+        await storage.createNotification({
+          userId: originalPost.userId,
+          type: "repost",
+          title: "Post Reposted",
+          message: `${reposter?.displayName || reposter?.username || "Someone"} reposted your post`,
+          link: `/feed`,
+          relatedUserId: userId,
+          relatedEntityId: postId,
+        });
+        wsManager.sendToUser(originalPost.userId, {
+          type: "notification",
+          data: { type: "repost" },
+        });
+      }
+
+      res.json(repost);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to repost" });
+    }
+  });
+
+  app.delete("/api/posts/:postId/repost", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const postId = req.params.postId;
+      
+      await storage.unrepostPost(userId, postId);
+      res.json({ message: "Removed repost" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to remove repost" });
+    }
+  });
+
+  app.get("/api/posts/:postId/repost-status", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const postId = req.params.postId;
+      
+      const hasReposted = await storage.hasUserRepostedPost(userId, postId);
+      const repostCount = await storage.getPostRepostCount(postId);
+      
+      res.json({ hasReposted, repostCount });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get repost status" });
+    }
+  });
+
+  // ============================================
+  // HASHTAGS
+  // ============================================
+
+  app.get("/api/hashtags/trending", async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 10;
+      const trending = await storage.getTrendingHashtags(limit);
+      res.json(trending);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch trending hashtags" });
+    }
+  });
+
+  app.get("/api/hashtags/:tag/posts", async (req, res) => {
+    try {
+      const tag = req.params.tag;
+      const posts = await storage.getPostsByHashtag(tag);
+      res.json(posts);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch posts by hashtag" });
+    }
+  });
+
+  // ============================================
+  // MENTIONS
+  // ============================================
+
+  app.get("/api/users/:userId/mentions", requireAuth, async (req, res) => {
+    try {
+      const userId = req.params.userId;
+      const mentions = await storage.getUserMentions(userId);
+      res.json(mentions);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch user mentions" });
     }
   });
 
