@@ -27,6 +27,14 @@ import {
   type InsertComment,
   type Bookmark,
   type InsertBookmark,
+  type Repost,
+  type InsertRepost,
+  type Hashtag,
+  type InsertHashtag,
+  type PostHashtag,
+  type InsertPostHashtag,
+  type PostMention,
+  type InsertPostMention,
   type Buddy,
   type InsertBuddy,
   type DistressMessage,
@@ -69,6 +77,10 @@ import {
   likes,
   comments,
   bookmarks,
+  reposts,
+  hashtags,
+  postHashtags,
+  postMentions,
   buddies,
   distressMessages,
   distressAlerts,
@@ -199,6 +211,25 @@ export interface IStorage {
   bookmarkPost(userId: string, postId: string): Promise<Bookmark>;
   unbookmarkPost(userId: string, postId: string): Promise<void>;
   hasUserBookmarkedPost(userId: string, postId: string): Promise<boolean>;
+
+  // Repost methods
+  repostPost(userId: string, postId: string): Promise<Repost>;
+  unrepostPost(userId: string, postId: string): Promise<void>;
+  hasUserRepostedPost(userId: string, postId: string): Promise<boolean>;
+  getPostRepostCount(postId: string): Promise<number>;
+  getPostsWithReposts(): Promise<Array<(Post | { repostedBy: User; originalPost: Post & { user: User }; createdAt: Date }) & { user: User }>>;
+
+  // Hashtag methods
+  getOrCreateHashtag(tag: string): Promise<Hashtag>;
+  addHashtagToPost(postId: string, hashtagId: string): Promise<void>;
+  getPostHashtags(postId: string): Promise<Hashtag[]>;
+  getPostsByHashtag(tag: string): Promise<Array<Post & { user: User }>>;
+  getTrendingHashtags(limit?: number): Promise<Hashtag[]>;
+
+  // Mention methods
+  addMentionToPost(postId: string, mentionedUserId: string): Promise<void>;
+  getPostMentions(postId: string): Promise<User[]>;
+  getUserMentions(userId: string): Promise<Array<Post & { user: User }>>;
 
   setBuddy(userId: string, buddyId: string): Promise<void>;
   getBuddy(userId: string): Promise<User | undefined>;
@@ -1226,6 +1257,180 @@ export class DbStorage implements IStorage {
       )
     );
     return result.length > 0;
+  }
+
+  // ============================================
+  // REPOST METHODS
+  // ============================================
+
+  async repostPost(userId: string, postId: string): Promise<Repost> {
+    const result = await db.insert(reposts).values({ userId, postId }).returning();
+    return result[0];
+  }
+
+  async unrepostPost(userId: string, postId: string): Promise<void> {
+    await db.delete(reposts).where(
+      and(eq(reposts.userId, userId), eq(reposts.postId, postId))
+    );
+  }
+
+  async hasUserRepostedPost(userId: string, postId: string): Promise<boolean> {
+    const result = await db.select().from(reposts).where(
+      and(eq(reposts.userId, userId), eq(reposts.postId, postId))
+    );
+    return result.length > 0;
+  }
+
+  async getPostRepostCount(postId: string): Promise<number> {
+    const result = await db.select({ count: count() })
+      .from(reposts)
+      .where(eq(reposts.postId, postId));
+    return result[0]?.count || 0;
+  }
+
+  async getPostsWithReposts(): Promise<Array<any>> {
+    // Get all original posts with user info
+    const originalPosts = await db.select({
+      post: posts,
+      user: users,
+    })
+    .from(posts)
+    .innerJoin(users, eq(posts.userId, users.id))
+    .orderBy(desc(posts.createdAt));
+
+    // Get all reposts with reposting user info and original post info
+    const repostsList = await db.select({
+      repost: reposts,
+      repostingUser: users,
+    })
+    .from(reposts)
+    .innerJoin(users, eq(reposts.userId, users.id))
+    .orderBy(desc(reposts.createdAt));
+
+    // Create a combined feed with original posts and reposts
+    const feed: any[] = [];
+
+    // Add original posts
+    for (const row of originalPosts) {
+      feed.push({
+        ...row.post,
+        user: row.user,
+        isRepost: false,
+      });
+    }
+
+    // Add reposts with reference to original post
+    for (const row of repostsList) {
+      const originalPost = originalPosts.find(p => p.post.id === row.repost.postId);
+      if (originalPost) {
+        feed.push({
+          id: `repost-${row.repost.id}`,
+          isRepost: true,
+          repostedBy: row.repostingUser,
+          originalPost: {
+            ...originalPost.post,
+            user: originalPost.user,
+          },
+          createdAt: row.repost.createdAt,
+          user: row.repostingUser,
+        });
+      }
+    }
+
+    // Sort by createdAt descending
+    feed.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    return feed;
+  }
+
+  // ============================================
+  // HASHTAG METHODS
+  // ============================================
+
+  async getOrCreateHashtag(tag: string): Promise<Hashtag> {
+    const normalizedTag = tag.toLowerCase().replace(/^#/, '');
+    
+    // Try to find existing hashtag
+    const existing = await db.select().from(hashtags).where(eq(hashtags.tag, normalizedTag));
+    if (existing.length > 0) {
+      return existing[0];
+    }
+
+    // Create new hashtag
+    const result = await db.insert(hashtags).values({ tag: normalizedTag }).returning();
+    return result[0];
+  }
+
+  async addHashtagToPost(postId: string, hashtagId: string): Promise<void> {
+    await db.insert(postHashtags).values({ postId, hashtagId }).onConflictDoNothing();
+    
+    // Increment post count for the hashtag
+    await db.update(hashtags)
+      .set({ postCount: sql`${hashtags.postCount} + 1` })
+      .where(eq(hashtags.id, hashtagId));
+  }
+
+  async getPostHashtags(postId: string): Promise<Hashtag[]> {
+    const result = await db.select({ hashtag: hashtags })
+      .from(postHashtags)
+      .innerJoin(hashtags, eq(postHashtags.hashtagId, hashtags.id))
+      .where(eq(postHashtags.postId, postId));
+    return result.map(r => r.hashtag);
+  }
+
+  async getPostsByHashtag(tag: string): Promise<Array<Post & { user: User }>> {
+    const normalizedTag = tag.toLowerCase().replace(/^#/, '');
+    
+    const result = await db.select({
+      post: posts,
+      user: users,
+    })
+    .from(posts)
+    .innerJoin(users, eq(posts.userId, users.id))
+    .innerJoin(postHashtags, eq(posts.id, postHashtags.postId))
+    .innerJoin(hashtags, eq(postHashtags.hashtagId, hashtags.id))
+    .where(eq(hashtags.tag, normalizedTag))
+    .orderBy(desc(posts.createdAt));
+
+    return result.map(r => ({ ...r.post, user: r.user }));
+  }
+
+  async getTrendingHashtags(limit: number = 10): Promise<Hashtag[]> {
+    const result = await db.select()
+      .from(hashtags)
+      .orderBy(desc(hashtags.postCount))
+      .limit(limit);
+    return result;
+  }
+
+  // ============================================
+  // MENTION METHODS
+  // ============================================
+
+  async addMentionToPost(postId: string, mentionedUserId: string): Promise<void> {
+    await db.insert(postMentions).values({ postId, mentionedUserId }).onConflictDoNothing();
+  }
+
+  async getPostMentions(postId: string): Promise<User[]> {
+    const result = await db.select({ user: users })
+      .from(postMentions)
+      .innerJoin(users, eq(postMentions.mentionedUserId, users.id))
+      .where(eq(postMentions.postId, postId));
+    return result.map(r => r.user);
+  }
+
+  async getUserMentions(userId: string): Promise<Array<Post & { user: User }>> {
+    const result = await db.select({
+      post: posts,
+      user: users,
+    })
+    .from(posts)
+    .innerJoin(users, eq(posts.userId, users.id))
+    .innerJoin(postMentions, eq(posts.id, postMentions.postId))
+    .where(eq(postMentions.mentionedUserId, userId))
+    .orderBy(desc(posts.createdAt));
+
+    return result.map(r => ({ ...r.post, user: r.user }));
   }
 
   async setBuddy(userId: string, buddyId: string): Promise<void> {

@@ -166,6 +166,77 @@ export const insertPostSchema = createInsertSchema(posts).omit({
 export type InsertPost = z.infer<typeof insertPostSchema>;
 export type Post = typeof posts.$inferSelect;
 
+// Reposts - tracks who reposted which post (like Twitter retweets)
+export const reposts = pgTable("reposts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  postId: varchar("post_id").notNull().references(() => posts.id, { onDelete: 'cascade' }),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+}, (table) => ({
+  uniqueRepost: unique().on(table.userId, table.postId),
+}));
+
+export const insertRepostSchema = createInsertSchema(reposts).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertRepost = z.infer<typeof insertRepostSchema>;
+export type Repost = typeof reposts.$inferSelect;
+
+// Hashtags - stores unique hashtags for searchability
+export const hashtags = pgTable("hashtags", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tag: text("tag").notNull().unique(),
+  postCount: integer("post_count").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const insertHashtagSchema = createInsertSchema(hashtags).omit({
+  id: true,
+  createdAt: true,
+  postCount: true,
+});
+
+export type InsertHashtag = z.infer<typeof insertHashtagSchema>;
+export type Hashtag = typeof hashtags.$inferSelect;
+
+// Post Hashtags - junction table for posts and hashtags
+export const postHashtags = pgTable("post_hashtags", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  postId: varchar("post_id").notNull().references(() => posts.id, { onDelete: 'cascade' }),
+  hashtagId: varchar("hashtag_id").notNull().references(() => hashtags.id, { onDelete: 'cascade' }),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+}, (table) => ({
+  uniquePostHashtag: unique().on(table.postId, table.hashtagId),
+}));
+
+export const insertPostHashtagSchema = createInsertSchema(postHashtags).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertPostHashtag = z.infer<typeof insertPostHashtagSchema>;
+export type PostHashtag = typeof postHashtags.$inferSelect;
+
+// Post Mentions - tracks @mentions in posts for notifications
+export const postMentions = pgTable("post_mentions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  postId: varchar("post_id").notNull().references(() => posts.id, { onDelete: 'cascade' }),
+  mentionedUserId: varchar("mentioned_user_id").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+}, (table) => ({
+  uniqueMention: unique().on(table.postId, table.mentionedUserId),
+}));
+
+export const insertPostMentionSchema = createInsertSchema(postMentions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertPostMention = z.infer<typeof insertPostMentionSchema>;
+export type PostMention = typeof postMentions.$inferSelect;
+
 export const stories = pgTable("stories", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
