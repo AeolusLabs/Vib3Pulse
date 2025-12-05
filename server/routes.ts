@@ -1724,6 +1724,105 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // User posts endpoint
+  app.get("/api/users/:identifier/posts", async (req, res) => {
+    try {
+      const userId = await resolveUserId(req.params.identifier);
+      
+      if (!userId) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const posts = await storage.getUserPosts(userId);
+      const user = await storage.getUser(userId);
+      
+      // Add user info to each post
+      const postsWithUser = posts.map(post => ({
+        ...post,
+        user: user ? { id: user.id, username: user.username, displayName: user.displayName, avatarUrl: user.avatarUrl } : null
+      }));
+
+      res.json(postsWithUser);
+    } catch (error) {
+      console.error("Get user posts error:", error);
+      res.status(500).json({ message: "Failed to fetch user posts" });
+    }
+  });
+
+  // User liked posts endpoint
+  app.get("/api/users/:identifier/liked-posts", async (req, res) => {
+    try {
+      const userId = await resolveUserId(req.params.identifier);
+      
+      if (!userId) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const likedPosts = await storage.getUserLikedPosts(userId);
+      res.json(likedPosts);
+    } catch (error) {
+      console.error("Get user liked posts error:", error);
+      res.status(500).json({ message: "Failed to fetch liked posts" });
+    }
+  });
+
+  // User reposted posts endpoint
+  app.get("/api/users/:identifier/reposted-posts", async (req, res) => {
+    try {
+      const userId = await resolveUserId(req.params.identifier);
+      
+      if (!userId) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const repostedPosts = await storage.getUserRepostedPosts(userId);
+      res.json(repostedPosts);
+    } catch (error) {
+      console.error("Get user reposted posts error:", error);
+      res.status(500).json({ message: "Failed to fetch reposted posts" });
+    }
+  });
+
+  // Avatar upload endpoint
+  app.post("/api/users/me/avatar", requireAuth, async (req, res) => {
+    try {
+      const objectStorageService = new ObjectStorageService();
+      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+      res.json({ uploadURL });
+    } catch (error) {
+      console.error("Error getting avatar upload URL:", error);
+      res.status(500).json({ message: "Failed to get upload URL" });
+    }
+  });
+
+  // Update avatar URL after upload
+  app.patch("/api/users/me/avatar", requireAuth, async (req, res) => {
+    try {
+      const { avatarUrl } = req.body;
+      if (!avatarUrl) {
+        return res.status(400).json({ message: "Avatar URL is required" });
+      }
+
+      const objectStorageService = new ObjectStorageService();
+      
+      // Normalize the path and set ACL to public
+      const normalizedPath = await objectStorageService.trySetObjectEntityAclPolicy(
+        avatarUrl,
+        { visibility: "public" }
+      );
+
+      const updatedUser = await storage.updateUser(req.user!.id, { 
+        avatarUrl: normalizedPath 
+      });
+      
+      const { passwordHash, ...userWithoutPassword } = updatedUser;
+      res.json(userWithoutPassword);
+    } catch (error) {
+      console.error("Error updating avatar:", error);
+      res.status(500).json({ message: "Failed to update avatar" });
+    }
+  });
+
   // Buddy system routes
   const setBuddySchema = z.object({
     buddyId: z.string().min(1, "Buddy ID is required"),
