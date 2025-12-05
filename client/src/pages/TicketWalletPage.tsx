@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar, MapPin, Ticket as TicketIcon, QrCode, Loader2 } from "lucide-react";
+import { Calendar, MapPin, Ticket as TicketIcon, QrCode, Loader2, ArrowLeft } from "lucide-react";
 import { format } from "date-fns";
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
@@ -116,7 +116,15 @@ export default function TicketWalletPage() {
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
       <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur">
-        <div className="container flex h-16 items-center justify-between px-4">
+        <div className="container flex h-16 items-center gap-4 px-4">
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            onClick={() => navigate("/")}
+            data-testid="button-back"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
           <div className="flex items-center gap-2">
             <TicketIcon className="h-6 w-6 text-primary" />
             <h1 className="text-xl font-bold font-display" data-testid="heading-ticket-wallet">My Tickets</h1>
