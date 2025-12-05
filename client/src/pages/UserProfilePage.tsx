@@ -154,6 +154,30 @@ export default function UserProfilePage() {
                         @{user.username}
                       </p>
                     </div>
+                    
+                    {user.bio && (
+                      <p className="text-foreground leading-relaxed" data-testid="text-bio">
+                        {user.bio}
+                      </p>
+                    )}
+
+                    {user.interests && user.interests.length > 0 && (
+                      <div data-testid="interests-section">
+                        <p className="text-sm font-medium text-muted-foreground mb-2">Interests</p>
+                        <div className="flex flex-wrap gap-2">
+                          {user.interests.map((interest, index) => (
+                            <Badge 
+                              key={index} 
+                              variant="secondary"
+                              className="bg-primary/10 text-primary hover:bg-primary/20"
+                              data-testid={`badge-interest-${index}`}
+                            >
+                              {interest}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Follower/Following Stats */}
                     <div className="flex gap-6" data-testid="social-stats">
@@ -188,30 +212,6 @@ export default function UserProfilePage() {
                         }
                       />
                     </div>
-                    
-                    {user.bio && (
-                      <p className="text-foreground leading-relaxed" data-testid="text-bio">
-                        {user.bio}
-                      </p>
-                    )}
-
-                    {user.interests && user.interests.length > 0 && (
-                      <div data-testid="interests-section">
-                        <p className="text-sm font-medium text-muted-foreground mb-2">Interests</p>
-                        <div className="flex flex-wrap gap-2">
-                          {user.interests.map((interest, index) => (
-                            <Badge 
-                              key={index} 
-                              variant="secondary"
-                              className="bg-primary/10 text-primary hover:bg-primary/20"
-                              data-testid={`badge-interest-${index}`}
-                            >
-                              {interest}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                    )}
                   </>
                 ) : (
                   <>
