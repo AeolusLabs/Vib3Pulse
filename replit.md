@@ -68,6 +68,28 @@ Preferred communication style: Simple, everyday language.
 - Replit environment
 - Stripe for payments and promotions
 
+### Payment System
+The payment system supports two modes, controlled by the `SIMULATE_PAYMENTS` environment variable:
+
+**Demo Mode (`SIMULATE_PAYMENTS=true`):**
+- All payments are simulated - no real charges
+- Checkout sessions auto-complete with success status
+- Payment intents return mock client secrets
+- Perfect for demos and development without Stripe credentials
+- UI shows a "Demo Mode" indicator in payment forms
+
+**Live Mode (`SIMULATE_PAYMENTS=false` or not set):**
+- Real Stripe payments using configured API keys
+- Requires `STRIPE_SECRET_KEY` and `VITE_STRIPE_PUBLIC_KEY`
+- Full payment flow with card validation
+
+The payment abstraction layer is in `server/paymentService.ts` and provides:
+- `createCheckoutSession()` - For event ticket purchases
+- `retrieveCheckoutSession()` - For payment verification
+- `createPaymentIntent()` - For venue entry tickets
+- `isPaymentSimulated()` - To check current mode
+- `getPaymentModeDescription()` - Human-readable mode string
+
 ## Development Patterns
 
 ### Authentication in Frontend Components
