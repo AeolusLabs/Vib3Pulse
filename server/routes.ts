@@ -887,6 +887,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(post);
     } catch (error) {
+      console.error("Post creation error:", error);
       res.status(400).json({ message: "Invalid post data" });
     }
   });
