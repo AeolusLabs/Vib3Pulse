@@ -3,12 +3,20 @@ import session from "express-session";
 import passport from "passport";
 import { Strategy as LocalStrategy } from "passport-local";
 import connectPgSimple from "connect-pg-simple";
+import cookieParser from "cookie-parser";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { storage } from "./storage";
 import { comparePassword, userToSessionUser, type SessionUser } from "./auth";
 import { wsManager } from "./websocket";
 import { setupAdminRoutes } from "./admin-routes";
+import { 
+  csrfProtection, 
+  csrfTokenEndpoint, 
+  apiRateLimiter, 
+  securityHeaders,
+  logSecurityEvent
+} from "./security";
 
 const app = express();
 const PgSession = connectPgSimple(session);
@@ -25,6 +33,13 @@ declare module 'http' {
     rawBody: unknown
   }
 }
+
+// Security headers first
+app.use(securityHeaders);
+
+// Cookie parser for CSRF token validation
+app.use(cookieParser());
+
 app.use(express.json({
   limit: '2mb',
   verify: (req, _res, buf) => {
@@ -33,17 +48,19 @@ app.use(express.json({
 }));
 app.use(express.urlencoded({ extended: false, limit: '2mb' }));
 
+// Session configuration with strengthened security
 app.use(
   session({
     store: sessionStore,
     secret: process.env.SESSION_SECRET || "vibepulse-secret-key-change-in-production",
     resave: false,
     saveUninitialized: false,
+    name: "vibepulse.sid",
     cookie: {
       maxAge: 30 * 24 * 60 * 60 * 1000,
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      sameSite: "strict",
     },
   })
 );
@@ -93,6 +110,15 @@ app.use(passport.session());
 
 // Setup admin routes (separate authentication system)
 setupAdminRoutes(app);
+
+// CSRF token endpoint - must be before CSRF protection middleware
+app.get("/api/csrf-token", csrfTokenEndpoint);
+
+// Apply rate limiting to all API routes
+app.use("/api", apiRateLimiter);
+
+// Apply CSRF protection to all API routes (after session is established)
+app.use("/api", csrfProtection);
 
 app.use((req, res, next) => {
   const start = Date.now();

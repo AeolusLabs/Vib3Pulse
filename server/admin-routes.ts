@@ -6,6 +6,13 @@ import { Pool } from "@neondatabase/serverless";
 import { storage } from "./storage";
 import { insertAdminUserSchema, adminRoles, type AdminRole } from "@shared/schema";
 import { z } from "zod";
+import { 
+  authRateLimiter, 
+  checkLoginThrottle, 
+  recordLoginAttempt, 
+  clearLoginAttempts, 
+  logSecurityEvent 
+} from "./security";
 
 const pgSession = connectPgSimple(session);
 
@@ -74,7 +81,7 @@ export function setupAdminRoutes(app: Express) {
     createTableIfMissing: true,
   });
 
-  // Admin session middleware - separate from user sessions
+  // Admin session middleware - separate from user sessions with strict security
   const adminSession = session({
     store: adminSessionStore,
     secret: process.env.SESSION_SECRET || "admin-secret-key-change-in-production",
@@ -85,7 +92,7 @@ export function setupAdminRoutes(app: Express) {
       secure: process.env.NODE_ENV === "production",
       httpOnly: true,
       maxAge: 8 * 60 * 60 * 1000, // 8 hours for admin sessions
-      sameSite: "lax",
+      sameSite: "strict", // Strict for admin sessions
     },
   });
 
@@ -217,27 +224,47 @@ export function setupAdminRoutes(app: Express) {
   // ============================================
 
   // Admin login
-  app.post("/api/admin/login", async (req: Request, res: Response) => {
+  app.post("/api/admin/login", authRateLimiter, async (req: Request, res: Response) => {
     try {
       const { username, password } = req.body;
+      const ip = req.ip || req.headers["x-forwarded-for"] as string || "unknown";
       
       if (!username || !password) {
         return res.status(400).json({ message: "Username and password required" });
       }
 
+      // Check login throttling
+      const throttleCheck = checkLoginThrottle(`admin:${username}`, ip);
+      if (!throttleCheck.allowed) {
+        logSecurityEvent("lockout", { identifier: `admin:${username}`, ip, lockedUntil: throttleCheck.lockedUntil });
+        return res.status(429).json({ 
+          message: `Account temporarily locked. Try again after ${throttleCheck.lockedUntil?.toLocaleTimeString()}`,
+          lockedUntil: throttleCheck.lockedUntil
+        });
+      }
+
       const admin = await storage.getAdminUserByUsername(username);
       if (!admin) {
+        recordLoginAttempt(`admin:${username}`, ip, false);
+        logSecurityEvent("login_failed", { identifier: `admin:${username}`, ip, type: "admin" });
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
       if (!admin.isActive) {
+        recordLoginAttempt(`admin:${username}`, ip, false);
         return res.status(401).json({ message: "Account is deactivated" });
       }
 
       const isValidPassword = await bcrypt.compare(password, admin.passwordHash);
       if (!isValidPassword) {
+        recordLoginAttempt(`admin:${username}`, ip, false);
+        logSecurityEvent("login_failed", { identifier: `admin:${username}`, ip, type: "admin" });
         return res.status(401).json({ message: "Invalid credentials" });
       }
+
+      // Clear login attempts on successful login
+      clearLoginAttempts(`admin:${username}`, ip);
+      logSecurityEvent("login_success", { adminId: admin.id, ip, type: "admin" });
 
       // Set session
       req.session.adminId = admin.id;

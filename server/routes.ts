@@ -11,6 +11,17 @@ import { z } from "zod";
 import QRCode from "qrcode";
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { ObjectPermission } from "./objectAcl";
+import { 
+  authRateLimiter, 
+  sensitiveOperationLimiter,
+  checkLoginThrottle, 
+  recordLoginAttempt, 
+  clearLoginAttempts,
+  sanitizeTextOnly,
+  validateAndSanitizeObject,
+  logSecurityEvent,
+  rotateCsrfToken
+} from "./security";
 
 const stripe = new Stripe(process.env.TESTING_STRIPE_SECRET_KEY || process.env.STRIPE_SECRET_KEY || "", {
   apiVersion: "2025-11-17.clover",
@@ -35,7 +46,7 @@ const signupSchema = insertUserSchema.omit({ passwordHash: true }).extend({
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Authentication routes
-  app.post("/api/auth/signup", async (req, res) => {
+  app.post("/api/auth/signup", authRateLimiter, async (req, res) => {
     try {
       const { password, ...userData } = signupSchema.parse(req.body);
       
@@ -72,19 +83,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/auth/login", (req, res, next) => {
+  app.post("/api/auth/login", authRateLimiter, (req, res, next) => {
+    const identifier = req.body.username || "";
+    const ip = req.ip || req.headers["x-forwarded-for"] as string || "unknown";
+    
+    const throttleCheck = checkLoginThrottle(identifier, ip);
+    if (!throttleCheck.allowed) {
+      logSecurityEvent("lockout", { identifier, ip, lockedUntil: throttleCheck.lockedUntil });
+      return res.status(429).json({ 
+        message: `Account temporarily locked. Try again after ${throttleCheck.lockedUntil?.toLocaleTimeString()}`,
+        lockedUntil: throttleCheck.lockedUntil
+      });
+    }
+    
     passport.authenticate("local", (err: any, user: Express.User | false, info: any) => {
       if (err) {
         return res.status(500).json({ message: "Login failed" });
       }
       if (!user) {
+        recordLoginAttempt(identifier, ip, false);
+        logSecurityEvent("login_failed", { identifier, ip, remainingAttempts: throttleCheck.remainingAttempts ? throttleCheck.remainingAttempts - 1 : 0 });
         return res.status(401).json({ message: info?.message || "Invalid credentials" });
       }
-      req.login(user, (err) => {
-        if (err) {
+      
+      req.session.regenerate((regenerateErr) => {
+        if (regenerateErr) {
           return res.status(500).json({ message: "Login failed" });
         }
-        res.json({ user });
+        
+        req.login(user, (loginErr) => {
+          if (loginErr) {
+            return res.status(500).json({ message: "Login failed" });
+          }
+          
+          clearLoginAttempts(identifier, ip);
+          logSecurityEvent("login_success", { userId: user.id, ip });
+          
+          // Rotate CSRF token on successful login for security
+          const newCsrfToken = rotateCsrfToken(res);
+          
+          res.json({ user, csrfToken: newCsrfToken });
+        });
       });
     })(req, res, next);
   });
@@ -107,7 +146,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update user profile
-  app.patch("/api/users/:userId", requireAuth, async (req, res) => {
+  app.patch("/api/users/:userId", requireAuth, sensitiveOperationLimiter, async (req, res) => {
     try {
       let { userId } = req.params;
       
@@ -122,7 +161,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const { updateUserSchema } = await import("@shared/schema");
-      const updates = updateUserSchema.parse(req.body);
+      let updates = updateUserSchema.parse(req.body);
+      
+      // Sanitize text fields in profile updates
+      if (updates.displayName) updates.displayName = sanitizeTextOnly(updates.displayName);
+      if (updates.bio) updates.bio = sanitizeTextOnly(updates.bio);
+      if (updates.organizationName) updates.organizationName = sanitizeTextOnly(updates.organizationName);
       
       // Security: Only organizers can enable venue management
       if (updates.canManageVenues !== undefined) {
@@ -194,8 +238,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/events", requireOrganizer, async (req, res) => {
     try {
       const parsedData = eventCreateDto.omit({ organizerId: true }).parse(req.body);
-      const event = await storage.createEvent({
+      
+      const sanitizedData = {
         ...parsedData,
+        title: sanitizeTextOnly(parsedData.title || ""),
+        description: sanitizeTextOnly(parsedData.description || ""),
+        location: sanitizeTextOnly(parsedData.location || ""),
+      };
+      
+      const event = await storage.createEvent({
+        ...sanitizedData,
         organizerId: req.user!.id,
       });
       
@@ -435,7 +487,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/tickets/purchase", requireAuth, async (req, res) => {
+  app.post("/api/tickets/purchase", requireAuth, sensitiveOperationLimiter, async (req, res) => {
     try {
       const { eventId } = req.body;
       const userId = req.user!.id;
@@ -772,8 +824,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/posts", requireAuth, async (req, res) => {
     try {
       const postData = insertPostSchema.omit({ userId: true }).parse(req.body);
-      const post = await storage.createPost({
+      
+      const sanitizedPostData = {
         ...postData,
+        content: sanitizeTextOnly(postData.content || ""),
+      };
+      
+      const post = await storage.createPost({
+        ...sanitizedPostData,
         userId: req.user!.id,
       });
       res.json(post);
@@ -815,8 +873,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { allowedViewerIds, ...storyInput } = req.body;
       const storyData = insertStorySchema.omit({ userId: true }).parse(storyInput);
-      const story = await storage.createStory({
+      
+      // Sanitize story content to prevent XSS
+      const sanitizedStoryData = {
         ...storyData,
+        text: storyData.text ? sanitizeTextOnly(storyData.text) : null,
+      };
+      
+      const story = await storage.createStory({
+        ...sanitizedStoryData,
         userId: req.user!.id,
       }, allowedViewerIds);
       res.json(story);
@@ -1024,10 +1089,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Comment content is required" });
       }
       
+      // Sanitize content to prevent XSS
+      const sanitizedContent = sanitizeTextOnly(content.trim());
+      
       const comment = await storage.addComment({
         userId,
         postId,
-        content: content.trim(),
+        content: sanitizedContent,
       });
 
       // Create notification for post owner (if not commenting on own post)
@@ -1035,7 +1103,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const post = posts.find(p => p.id === postId);
       if (post && post.userId !== userId) {
         const commenter = await storage.getUser(userId);
-        const commentSnippet = content.trim().length > 60 ? content.trim().substring(0, 60) + "..." : content.trim();
+        const commentSnippet = sanitizedContent.length > 60 ? sanitizedContent.substring(0, 60) + "..." : sanitizedContent;
         await storage.createNotification({
           userId: post.userId,
           type: "post_comment",
@@ -1226,10 +1294,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Cannot message yourself" });
       }
       
+      const sanitizedContent = sanitizeTextOnly(content || "");
+      if (!sanitizedContent.trim()) {
+        return res.status(400).json({ message: "Message cannot be empty" });
+      }
+      
       const message = await storage.sendMessage({
         senderId,
         receiverId,
-        content,
+        content: sanitizedContent,
         replyToId: replyToId || null,
         isRead: false,
       });
@@ -1248,8 +1321,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           receiver: receiverData,
         });
 
-        // Create notification for message recipient
-        const messageSnippet = content.length > 50 ? content.substring(0, 50) + "..." : content;
+        // Create notification for message recipient - use sanitized content
+        const messageSnippet = sanitizedContent.length > 50 ? sanitizedContent.substring(0, 50) + "..." : sanitizedContent;
         await storage.createNotification({
           userId: receiverId,
           type: "new_message",
@@ -2020,7 +2093,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create payment intent for venue entry ticket
-  app.post("/api/venue-tickets/create-payment-intent", requireAuth, async (req, res) => {
+  app.post("/api/venue-tickets/create-payment-intent", requireAuth, sensitiveOperationLimiter, async (req, res) => {
     try {
       const { entryNightId } = req.body;
       
@@ -2062,7 +2135,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Confirm venue ticket purchase (requires authentication)
-  app.post("/api/venue-tickets/confirm", requireAuth, async (req, res) => {
+  app.post("/api/venue-tickets/confirm", requireAuth, sensitiveOperationLimiter, async (req, res) => {
     try {
       const { entryNightId, paymentIntentId } = req.body;
       

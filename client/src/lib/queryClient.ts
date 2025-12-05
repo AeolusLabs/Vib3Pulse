@@ -1,8 +1,45 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
+let csrfToken: string | null = null;
+
+function getCsrfTokenFromCookie(): string | null {
+  const match = document.cookie.match(/csrf-token=([^;]+)/);
+  return match ? match[1] : null;
+}
+
+async function ensureCsrfToken(): Promise<string> {
+  let token = getCsrfTokenFromCookie();
+  
+  if (!token) {
+    const res = await fetch("/api/csrf-token", {
+      credentials: "include",
+    });
+    if (res.ok) {
+      const data = await res.json();
+      token = data.csrfToken;
+    }
+  }
+  
+  if (!token) {
+    token = getCsrfTokenFromCookie();
+  }
+  
+  if (token) {
+    csrfToken = token;
+  }
+  
+  return csrfToken || "";
+}
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
+    
+    if (res.status === 403 && text.includes("CSRF")) {
+      csrfToken = null;
+      await ensureCsrfToken();
+    }
+    
     throw new Error(`${res.status}: ${text}`);
   }
 }
@@ -12,9 +49,19 @@ export async function apiRequest(
   url: string,
   data?: unknown | undefined,
 ): Promise<Response> {
+  const token = await ensureCsrfToken();
+  
+  const headers: Record<string, string> = {
+    "x-csrf-token": token,
+  };
+  
+  if (data) {
+    headers["Content-Type"] = "application/json";
+  }
+  
   const res = await fetch(url, {
     method,
-    headers: data ? { "Content-Type": "application/json" } : {},
+    headers,
     body: data ? JSON.stringify(data) : undefined,
     credentials: "include",
   });
