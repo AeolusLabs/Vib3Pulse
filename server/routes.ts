@@ -102,7 +102,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       if (!user) {
         recordLoginAttempt(identifier, ip, false);
-        logSecurityEvent("login_failed", { identifier, ip, remainingAttempts: throttleCheck.remainingAttempts ? throttleCheck.remainingAttempts - 1 : 0 });
+        
+        // Check if this failed attempt triggered a lockout
+        const postAttemptCheck = checkLoginThrottle(identifier, ip);
+        if (!postAttemptCheck.allowed) {
+          logSecurityEvent("lockout", { identifier, ip, lockedUntil: postAttemptCheck.lockedUntil });
+          return res.status(429).json({ 
+            message: `Too many failed attempts. Account temporarily locked. Try again after ${postAttemptCheck.lockedUntil?.toLocaleTimeString()}`,
+            lockedUntil: postAttemptCheck.lockedUntil
+          });
+        }
+        
+        logSecurityEvent("login_failed", { identifier, ip, remainingAttempts: postAttemptCheck.remainingAttempts || 0 });
         return res.status(401).json({ message: info?.message || "Invalid credentials" });
       }
       

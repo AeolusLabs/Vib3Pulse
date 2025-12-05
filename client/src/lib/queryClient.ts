@@ -40,7 +40,18 @@ async function throwIfResNotOk(res: Response) {
       await ensureCsrfToken();
     }
     
-    throw new Error(`${res.status}: ${text}`);
+    // Try to parse JSON error response for better error messages
+    let errorMessage = text;
+    try {
+      const errorJson = JSON.parse(text);
+      if (errorJson.message) {
+        errorMessage = errorJson.message;
+      }
+    } catch {
+      // Not JSON, use raw text
+    }
+    
+    throw new Error(errorMessage);
   }
 }
 
