@@ -1,8 +1,8 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Heart, MessageCircle, Share2, Bookmark } from "lucide-react";
-import { useState, useEffect } from "react";
+import { Heart, MessageCircle, Share2, Bookmark, Repeat2 } from "lucide-react";
+import { useState, useEffect, Fragment } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -58,6 +58,70 @@ interface FeedPostProps {
   likes: number;
   comments: number;
   isLiked?: boolean;
+  isRepost?: boolean;
+  repostedBy?: {
+    name: string;
+    username: string;
+    userId?: string;
+  };
+  onPostClick?: () => void;
+}
+
+function renderContentWithLinkedMentionsAndHashtags(
+  content: string, 
+  navigate: (path: string) => void
+) {
+  const parts: (string | JSX.Element)[] = [];
+  const regex = /(@\w+|#\w+)/g;
+  let lastIndex = 0;
+  let match;
+  let partIndex = 0;
+
+  while ((match = regex.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(content.slice(lastIndex, match.index));
+    }
+    
+    const token = match[0];
+    if (token.startsWith('@')) {
+      const username = token.slice(1);
+      parts.push(
+        <button
+          key={`mention-${partIndex++}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            navigate(`/profile/${username}`);
+          }}
+          className="text-primary hover:underline font-medium"
+          data-testid={`mention-${username}`}
+        >
+          {token}
+        </button>
+      );
+    } else if (token.startsWith('#')) {
+      const hashtag = token.slice(1);
+      parts.push(
+        <button
+          key={`hashtag-${partIndex++}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            navigate(`/search?tag=${hashtag}`);
+          }}
+          className="text-primary hover:underline font-medium"
+          data-testid={`hashtag-${hashtag}`}
+        >
+          {token}
+        </button>
+      );
+    }
+    lastIndex = regex.lastIndex;
+  }
+
+  if (lastIndex < content.length) {
+    parts.push(content.slice(lastIndex));
+  }
+
+  return parts;
 }
 
 export default function FeedPost({
@@ -70,6 +134,9 @@ export default function FeedPost({
   likes: initialLikes,
   comments: initialComments,
   isLiked: initialIsLiked = false,
+  isRepost = false,
+  repostedBy,
+  onPostClick,
 }: FeedPostProps) {
   const [, navigate] = useLocation();
   const { toast } = useToast();
@@ -104,6 +171,20 @@ export default function FeedPost({
 
   // Fetch bookmark status (we'll need to add this endpoint or track it in posts)
   const [bookmarkStatus, setBookmarkStatus] = useState(false);
+
+  // Fetch repost status and count
+  const { data: repostData } = useQuery<{ hasReposted: boolean; repostCount: number }>({
+    queryKey: ['/api/posts', id, 'repost-status'],
+    queryFn: async () => {
+      try {
+        const response = await fetch(`/api/posts/${id}/repost-status`);
+        if (!response.ok) return { hasReposted: false, repostCount: 0 };
+        return response.json();
+      } catch {
+        return { hasReposted: false, repostCount: 0 };
+      }
+    },
+  });
 
   // Like/Unlike mutations with optimistic updates
   const likeMutation = useMutation({
@@ -235,12 +316,114 @@ export default function FeedPost({
     bookmarkMutation.mutate(bookmarkStatus);
   };
 
+  // Repost mutation
+  const repostMutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest('POST', `/api/posts/${id}/repost`, {});
+    },
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ['/api/posts', id, 'repost-status'] });
+      const previousData = queryClient.getQueryData(['/api/posts', id, 'repost-status']);
+      queryClient.setQueryData(['/api/posts', id, 'repost-status'], (old: any) => ({
+        hasReposted: true,
+        repostCount: (old?.repostCount || 0) + 1,
+      }));
+      return { previousData };
+    },
+    onError: (_, __, context) => {
+      if (context?.previousData) {
+        queryClient.setQueryData(['/api/posts', id, 'repost-status'], context.previousData);
+      }
+      toast({
+        title: "Error",
+        description: "Failed to repost",
+        variant: "destructive",
+      });
+    },
+    onSuccess: () => {
+      toast({
+        title: "Reposted!",
+        description: "Post shared to your followers",
+      });
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/posts', id, 'repost-status'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/posts'] });
+    },
+  });
+
+  const unrepostMutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest('DELETE', `/api/posts/${id}/repost`, {});
+    },
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ['/api/posts', id, 'repost-status'] });
+      const previousData = queryClient.getQueryData(['/api/posts', id, 'repost-status']);
+      queryClient.setQueryData(['/api/posts', id, 'repost-status'], (old: any) => ({
+        hasReposted: false,
+        repostCount: Math.max((old?.repostCount || 1) - 1, 0),
+      }));
+      return { previousData };
+    },
+    onError: (_, __, context) => {
+      if (context?.previousData) {
+        queryClient.setQueryData(['/api/posts', id, 'repost-status'], context.previousData);
+      }
+      toast({
+        title: "Error",
+        description: "Failed to remove repost",
+        variant: "destructive",
+      });
+    },
+    onSuccess: () => {
+      toast({
+        title: "Repost removed",
+        description: "Repost has been removed",
+      });
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/posts', id, 'repost-status'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/posts'] });
+    },
+  });
+
+  const handleRepost = () => {
+    if (repostData?.hasReposted) {
+      unrepostMutation.mutate();
+    } else {
+      repostMutation.mutate();
+    }
+  };
+
   return (
     <Card className="p-4 hover-elevate" data-testid={`post-${id}`}>
-      <div className="flex gap-3">
+      {isRepost && repostedBy && (
+        <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
+          <Repeat2 className="h-3 w-3" />
+          <button 
+            onClick={(e) => {
+              e.stopPropagation();
+              if (repostedBy.userId) navigate(`/user/${repostedBy.userId}`);
+              else navigate(`/profile/${repostedBy.username}`);
+            }}
+            className="hover:underline"
+            data-testid={`repost-indicator-${id}`}
+          >
+            {repostedBy.name} reposted
+          </button>
+        </div>
+      )}
+
+      <div 
+        className="flex gap-3 cursor-pointer"
+        onClick={() => onPostClick?.()}
+      >
         <Avatar 
           className="h-10 w-10 cursor-pointer hover-elevate" 
-          onClick={handleAvatarClick}
+          onClick={(e) => {
+            e.stopPropagation();
+            handleAvatarClick();
+          }}
           data-testid={`avatar-${id}`}
         >
           <AvatarImage src={author.avatar} alt={author.name} />
@@ -266,7 +449,7 @@ export default function FeedPost({
           </div>
 
           <p className="mt-2 text-sm whitespace-pre-wrap" data-testid={`text-content-${id}`}>
-            {content}
+            {renderContentWithLinkedMentionsAndHashtags(content, navigate)}
           </p>
 
           {image && (
@@ -283,7 +466,10 @@ export default function FeedPost({
               variant="ghost"
               size="sm"
               className={`gap-1 ${likeData?.isLiked ? 'text-primary' : ''}`}
-              onClick={handleLike}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleLike();
+              }}
               disabled={likeMutation.isPending || unlikeMutation.isPending}
               data-testid={`button-like-${id}`}
             >
@@ -295,7 +481,10 @@ export default function FeedPost({
               variant="ghost"
               size="sm"
               className="gap-1"
-              onClick={() => setCommentDialogOpen(true)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setCommentDialogOpen(true);
+              }}
               data-testid={`button-comment-${id}`}
             >
               <MessageCircle className="h-4 w-4" />
@@ -305,7 +494,25 @@ export default function FeedPost({
             <Button
               variant="ghost"
               size="sm"
-              onClick={handleShare}
+              className={`gap-1 ${repostData?.hasReposted ? 'text-green-500' : ''}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleRepost();
+              }}
+              disabled={repostMutation.isPending || unrepostMutation.isPending}
+              data-testid={`button-repost-${id}`}
+            >
+              <Repeat2 className={`h-4 w-4 ${repostData?.hasReposted ? 'fill-current' : ''}`} />
+              <span className="text-xs">{repostData?.repostCount || 0}</span>
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleShare();
+              }}
               data-testid={`button-share-${id}`}
             >
               <Share2 className="h-4 w-4" />
@@ -316,7 +523,10 @@ export default function FeedPost({
             <Button
               variant="ghost"
               size="sm"
-              onClick={handleBookmark}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleBookmark();
+              }}
               disabled={bookmarkMutation.isPending}
               className={bookmarkStatus ? 'text-primary' : ''}
               data-testid={`button-bookmark-${id}`}
