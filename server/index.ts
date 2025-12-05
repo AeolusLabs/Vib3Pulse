@@ -19,6 +19,10 @@ import {
 } from "./security";
 
 const app = express();
+
+// Trust proxy to work correctly behind Replit's reverse proxy
+app.set('trust proxy', 1);
+
 const PgSession = connectPgSimple(session);
 
 // Create session store that we'll use for both Express and WebSocket

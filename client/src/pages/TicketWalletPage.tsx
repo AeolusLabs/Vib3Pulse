@@ -64,13 +64,13 @@ export default function TicketWalletPage() {
   const { toast } = useToast();
   const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
 
-  // Handle success/cancel redirects from Stripe
+  // Handle success/cancel redirects from payment
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const sessionId = params.get('session_id');
     
     if (params.get('success') === 'true' && sessionId && !isVerifyingPayment) {
-      // Verify the Stripe payment and create the ticket
+      // Verify the payment and create the ticket
       setIsVerifyingPayment(true);
       apiRequest('POST', '/api/tickets/verify-payment', { sessionId })
         .then(async (response) => {
