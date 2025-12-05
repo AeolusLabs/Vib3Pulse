@@ -6,7 +6,6 @@ import { hashPassword, userToSessionUser } from "./auth";
 import { requireAuth, requireOrganizer } from "./middleware";
 import passport from "passport";
 import { wsManager } from "./websocket";
-import Stripe from "stripe";
 import { z } from "zod";
 import QRCode from "qrcode";
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
@@ -22,10 +21,13 @@ import {
   logSecurityEvent,
   rotateCsrfToken
 } from "./security";
-
-const stripe = new Stripe(process.env.TESTING_STRIPE_SECRET_KEY || process.env.STRIPE_SECRET_KEY || "", {
-  apiVersion: "2025-11-17.clover",
-});
+import {
+  createCheckoutSession,
+  retrieveCheckoutSession,
+  createPaymentIntent,
+  isPaymentSimulated,
+  getPaymentModeDescription,
+} from "./paymentService";
 
 // Helper function to resolve identifier (UUID or username) to userId
 async function resolveUserId(identifier: string): Promise<string | null> {
@@ -45,7 +47,18 @@ const signupSchema = insertUserSchema.omit({ passwordHash: true }).extend({
 });
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Authentication routes
+  // ==================== CONFIG ROUTES ====================
+  
+  // Expose app configuration (safe public info only)
+  app.get("/api/config", (req, res) => {
+    res.json({
+      paymentMode: isPaymentSimulated() ? "demo" : "live",
+      paymentModeDescription: getPaymentModeDescription(),
+    });
+  });
+
+  // ==================== AUTHENTICATION ROUTES ====================
+  
   app.post("/api/auth/signup", authRateLimiter, async (req, res) => {
     try {
       const { password, ...userData } = signupSchema.parse(req.body);
@@ -512,38 +525,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "This is a free event, use RSVP instead" });
       }
 
-      // Create Stripe checkout session
-      const session = await stripe.checkout.sessions.create({
-        payment_method_types: ['card'],
-        line_items: [
-          {
-            price_data: {
-              currency: 'gbp',
-              product_data: {
-                name: event.title,
-                description: event.description,
-              },
-              unit_amount: event.ticketPrice,
-            },
-            quantity: 1,
-          },
-        ],
-        mode: 'payment',
-        success_url: `${req.headers.origin}/ticket-wallet?success=true&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${req.headers.origin}/discover?canceled=true`,
-        metadata: {
-          eventId,
-          userId,
-        },
+      // Create checkout session (real or simulated based on SIMULATE_PAYMENTS env)
+      const session = await createCheckoutSession({
+        eventId,
+        userId,
+        eventTitle: event.title,
+        eventDescription: event.description,
+        priceInPence: event.ticketPrice,
+        successUrl: `${req.headers.origin}/ticket-wallet?success=true&session_id={CHECKOUT_SESSION_ID}`,
+        cancelUrl: `${req.headers.origin}/discover?canceled=true`,
       });
 
-      res.json({ sessionId: session.id, url: session.url });
+      res.json({ sessionId: session.sessionId, url: session.url });
     } catch (error) {
+      console.error("Create checkout session error:", error);
       res.status(500).json({ message: "Failed to create checkout session" });
     }
   });
 
-  // Verify Stripe checkout session and create ticket
+  // Verify checkout session and create ticket
   app.post("/api/tickets/verify-payment", requireAuth, async (req, res) => {
     try {
       const requestSchema = z.object({
@@ -553,11 +553,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { sessionId } = requestSchema.parse(req.body);
       const userId = req.user!.id;
 
-      // Retrieve the session from Stripe to verify payment
-      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      // Retrieve the session (real or simulated based on SIMULATE_PAYMENTS env)
+      const session = await retrieveCheckoutSession(sessionId);
       
+      if (!session) {
+        return res.status(400).json({ message: "Invalid session" });
+      }
+
       // Verify payment was successful
-      if (session.payment_status !== 'paid') {
+      if (session.paymentStatus !== "paid") {
         return res.status(400).json({ message: "Payment not completed" });
       }
 
@@ -573,7 +577,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Verify we haven't already created a ticket for this session (idempotency)
-      const existingTicket = await storage.getTicketByPaymentIntent(session.payment_intent as string);
+      const existingTicket = await storage.getTicketByPaymentIntent(session.paymentIntentId);
       if (existingTicket) {
         return res.json({ message: "Ticket already created", ticket: existingTicket });
       }
@@ -582,7 +586,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ticketData = insertTicketSchema.parse({
         userId: session.metadata.userId,
         eventId: session.metadata.eventId,
-        stripePaymentIntentId: session.payment_intent as string,
+        stripePaymentIntentId: session.paymentIntentId,
         status: "confirmed",
       });
       
@@ -611,10 +615,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ message: "Ticket created successfully", ticket });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        console.error('Invalid request:', error);
+        console.error("Invalid request:", error);
         return res.status(400).json({ message: "Invalid request data" });
       }
-      console.error('Error verifying payment:', error);
+      console.error("Error verifying payment:", error);
       res.status(500).json({ message: "Failed to verify payment" });
     }
   });
@@ -921,14 +925,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { allowedViewerIds, ...storyInput } = req.body;
       const storyData = insertStorySchema.omit({ userId: true }).parse(storyInput);
       
-      // Sanitize story content to prevent XSS
-      const sanitizedStoryData = {
-        ...storyData,
-        text: storyData.text ? sanitizeTextOnly(storyData.text) : null,
-      };
-      
       const story = await storage.createStory({
-        ...sanitizedStoryData,
+        ...storyData,
         userId: req.user!.id,
       }, allowedViewerIds);
       res.json(story);
@@ -2388,9 +2386,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Venue not found" });
       }
       
-      const paymentIntent = await stripe.paymentIntents.create({
-        amount: entryNight.coverPriceCents,
-        currency: "gbp",
+      // Create payment intent (real or simulated based on SIMULATE_PAYMENTS env)
+      const paymentIntent = await createPaymentIntent({
+        amountInPence: entryNight.coverPriceCents,
         metadata: {
           type: "venue_entry",
           entryNightId,
@@ -2399,7 +2397,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         },
       });
       
-      res.json({ clientSecret: paymentIntent.client_secret });
+      res.json({ 
+        clientSecret: paymentIntent.clientSecret,
+        paymentIntentId: paymentIntent.paymentIntentId,
+      });
     } catch (error) {
       console.error("Create venue payment intent error:", error);
       res.status(500).json({ message: "Failed to create payment" });
