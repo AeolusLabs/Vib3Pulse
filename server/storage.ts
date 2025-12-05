@@ -144,6 +144,8 @@ export interface IStorage {
   getPosts(): Promise<Array<Post & { user: User }>>;
   getPost(id: string): Promise<Post | undefined>;
   getUserPosts(userId: string): Promise<Post[]>;
+  getUserLikedPosts(userId: string): Promise<Array<Post & { user: User }>>;
+  getUserRepostedPosts(userId: string): Promise<Array<Post & { user: User }>>;
   createPost(post: InsertPost): Promise<Post>;
   deletePost(id: string): Promise<void>;
   
@@ -589,7 +591,43 @@ export class DbStorage implements IStorage {
       .select()
       .from(posts)
       .where(eq(posts.userId, userId))
-      .orderBy(posts.createdAt);
+      .orderBy(desc(posts.createdAt));
+  }
+
+  async getUserLikedPosts(userId: string): Promise<Array<Post & { user: User }>> {
+    const likedPosts = await db
+      .select({
+        post: posts,
+        user: users,
+      })
+      .from(likes)
+      .innerJoin(posts, eq(likes.postId, posts.id))
+      .innerJoin(users, eq(posts.userId, users.id))
+      .where(eq(likes.userId, userId))
+      .orderBy(desc(likes.createdAt));
+    
+    return likedPosts.map(row => ({
+      ...row.post,
+      user: row.user,
+    }));
+  }
+
+  async getUserRepostedPosts(userId: string): Promise<Array<Post & { user: User }>> {
+    const repostedPosts = await db
+      .select({
+        post: posts,
+        user: users,
+      })
+      .from(reposts)
+      .innerJoin(posts, eq(reposts.originalPostId, posts.id))
+      .innerJoin(users, eq(posts.userId, users.id))
+      .where(eq(reposts.userId, userId))
+      .orderBy(desc(reposts.createdAt));
+    
+    return repostedPosts.map(row => ({
+      ...row.post,
+      user: row.user,
+    }));
   }
 
   async createPost(insertPost: InsertPost): Promise<Post> {
