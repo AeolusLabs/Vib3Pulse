@@ -10,6 +10,7 @@ import StoryViewer from "@/components/StoryViewer";
 import CreateStoryModal from "@/components/CreateStoryModal";
 import CreatePostModal from "@/components/CreatePostModal";
 import FeedPost from "@/components/FeedPost";
+import PostDetailDialog from "@/components/PostDetailDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -201,6 +202,7 @@ export default function FeedPage() {
   const [createStoryOpen, setCreateStoryOpen] = useState(false);
   const [createPostOpen, setCreatePostOpen] = useState(false);
   const [feedFilter, setFeedFilter] = useState<'following' | 'all'>('following');
+  const [selectedPost, setSelectedPost] = useState<any | null>(null);
   const { toast } = useToast();
   const { data: currentUser } = useAuth();
 
@@ -365,6 +367,7 @@ export default function FeedPage() {
                   username: post.user.username,
                   isOrganizer: post.user.userType === 'organizer',
                   userId: post.user.id,
+                  avatar: post.user.avatarUrl,
                 }}
                 content={post.content}
                 createdAt={post.createdAt}
@@ -372,12 +375,13 @@ export default function FeedPage() {
                 comments={0}
                 isLiked={false}
                 image={post.imageUrl}
+                onPostClick={() => setSelectedPost(post)}
               />
             ))
           ) : (
             <>
               {mockPosts.map((post) => (
-                <FeedPost key={post.id} {...post} />
+                <FeedPost key={post.id} {...post} onPostClick={() => setSelectedPost(post)} />
               ))}
             </>
           )}
@@ -417,6 +421,23 @@ export default function FeedPage() {
           });
         }}
       />
+
+      {selectedPost && (
+        <PostDetailDialog
+          open={!!selectedPost}
+          onClose={() => setSelectedPost(null)}
+          postId={selectedPost.id}
+          author={{
+            name: selectedPost.user?.displayName || selectedPost.user?.organizationName || selectedPost.user?.username || selectedPost.author?.name || 'Unknown',
+            username: selectedPost.user?.username || selectedPost.author?.username || 'unknown',
+            avatar: selectedPost.user?.avatarUrl || selectedPost.author?.avatar,
+            userId: selectedPost.user?.id || selectedPost.author?.userId,
+          }}
+          content={selectedPost.content}
+          image={selectedPost.imageUrl || selectedPost.image}
+          createdAt={selectedPost.createdAt}
+        />
+      )}
 
       <BottomNavigation onCreateClick={() => setCreateStoryOpen(true)} />
     </div>
