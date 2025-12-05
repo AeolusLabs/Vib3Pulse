@@ -182,7 +182,7 @@ export default function ProfilePage() {
         throw new Error('Failed to get upload URL');
       }
 
-      const { uploadURL } = await uploadResponse.json();
+      const { uploadURL, stablePath } = await uploadResponse.json();
 
       await fetch(uploadURL, {
         method: 'PUT',
@@ -198,7 +198,7 @@ export default function ProfilePage() {
           'Content-Type': 'application/json',
         },
         credentials: 'include',
-        body: JSON.stringify({ avatarUrl: uploadURL }),
+        body: JSON.stringify({ avatarPath: stablePath }),
       });
 
       if (!updateResponse.ok) {
@@ -539,13 +539,18 @@ export default function ProfilePage() {
                   {userPosts.map((post) => (
                     <FeedPost
                       key={post.id}
-                      post={post}
-                      user={{
-                        id: post.user.id,
+                      id={post.id}
+                      author={{
+                        name: post.user.displayName || post.user.username,
                         username: post.user.username,
-                        displayName: post.user.displayName,
-                        avatarUrl: post.user.avatarUrl,
+                        avatar: post.user.avatarUrl || undefined,
+                        userId: post.user.id,
                       }}
+                      content={post.content}
+                      image={post.imageUrl || undefined}
+                      createdAt={post.createdAt}
+                      likes={0}
+                      comments={0}
                     />
                   ))}
                 </div>
@@ -572,13 +577,18 @@ export default function ProfilePage() {
                   {likedPosts.map((post) => (
                     <FeedPost
                       key={post.id}
-                      post={post}
-                      user={{
-                        id: post.user.id,
+                      id={post.id}
+                      author={{
+                        name: post.user.displayName || post.user.username,
                         username: post.user.username,
-                        displayName: post.user.displayName,
-                        avatarUrl: post.user.avatarUrl,
+                        avatar: post.user.avatarUrl || undefined,
+                        userId: post.user.id,
                       }}
+                      content={post.content}
+                      image={post.imageUrl || undefined}
+                      createdAt={post.createdAt}
+                      likes={0}
+                      comments={0}
                     />
                   ))}
                 </div>
@@ -605,13 +615,18 @@ export default function ProfilePage() {
                   {repostedPosts.map((post) => (
                     <FeedPost
                       key={post.id}
-                      post={post}
-                      user={{
-                        id: post.user.id,
+                      id={post.id}
+                      author={{
+                        name: post.user.displayName || post.user.username,
                         username: post.user.username,
-                        displayName: post.user.displayName,
-                        avatarUrl: post.user.avatarUrl,
+                        avatar: post.user.avatarUrl || undefined,
+                        userId: post.user.id,
                       }}
+                      content={post.content}
+                      image={post.imageUrl || undefined}
+                      createdAt={post.createdAt}
+                      likes={0}
+                      comments={0}
                     />
                   ))}
                 </div>

@@ -619,7 +619,7 @@ export class DbStorage implements IStorage {
         user: users,
       })
       .from(reposts)
-      .innerJoin(posts, eq(reposts.originalPostId, posts.id))
+      .innerJoin(posts, eq(reposts.postId, posts.id))
       .innerJoin(users, eq(posts.userId, users.id))
       .where(eq(reposts.userId, userId))
       .orderBy(desc(reposts.createdAt));

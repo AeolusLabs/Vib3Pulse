@@ -1783,36 +1783,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Avatar upload endpoint
+  // Avatar upload endpoint - returns presigned PUT URL and stable object path
   app.post("/api/users/me/avatar", requireAuth, async (req, res) => {
     try {
       const objectStorageService = new ObjectStorageService();
+      const privateObjectDir = process.env.PRIVATE_OBJECT_DIR || "";
+      const objectId = crypto.randomUUID();
+      
+      // Get presigned URL for upload
       const uploadURL = await objectStorageService.getObjectEntityUploadURL();
-      res.json({ uploadURL });
+      
+      // Extract the object ID from the upload URL and create stable path
+      const url = new URL(uploadURL);
+      const pathParts = url.pathname.split('/');
+      const uploadsIndex = pathParts.findIndex(p => p === 'uploads');
+      const extractedId = uploadsIndex !== -1 ? pathParts.slice(uploadsIndex).join('/') : `uploads/${objectId}`;
+      const stablePath = `/objects/${extractedId}`;
+      
+      res.json({ uploadURL, stablePath });
     } catch (error) {
       console.error("Error getting avatar upload URL:", error);
       res.status(500).json({ message: "Failed to get upload URL" });
     }
   });
 
-  // Update avatar URL after upload
+  // Update avatar URL after upload - accepts the stable path
   app.patch("/api/users/me/avatar", requireAuth, async (req, res) => {
     try {
-      const { avatarUrl } = req.body;
-      if (!avatarUrl) {
-        return res.status(400).json({ message: "Avatar URL is required" });
+      const { avatarPath } = req.body;
+      if (!avatarPath) {
+        return res.status(400).json({ message: "Avatar path is required" });
+      }
+
+      // Validate the path format
+      if (!avatarPath.startsWith('/objects/')) {
+        return res.status(400).json({ message: "Invalid avatar path format" });
       }
 
       const objectStorageService = new ObjectStorageService();
       
-      // Normalize the path and set ACL to public
-      const normalizedPath = await objectStorageService.trySetObjectEntityAclPolicy(
-        avatarUrl,
-        { visibility: "public", owner: req.user!.id }
-      );
+      // Verify the object exists and set ACL to public
+      try {
+        const objectFile = await objectStorageService.getObjectEntityFile(avatarPath);
+        const { setObjectAclPolicy } = await import('./objectAcl');
+        await setObjectAclPolicy(objectFile, { visibility: "public", owner: req.user!.id });
+      } catch (err) {
+        console.error("Error setting avatar ACL:", err);
+        return res.status(400).json({ message: "Avatar upload not found or incomplete" });
+      }
 
       const updatedUser = await storage.updateUser(req.user!.id, { 
-        avatarUrl: normalizedPath 
+        avatarUrl: avatarPath 
       });
       
       const { passwordHash, ...userWithoutPassword } = updatedUser;
