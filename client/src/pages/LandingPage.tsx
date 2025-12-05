@@ -182,7 +182,7 @@ export default function LandingPage() {
                   <div className="p-1 rounded-full bg-primary/10 mt-0.5">
                     <div className="w-2 h-2 rounded-full bg-primary" />
                   </div>
-                  <span>Secure ticket purchasing with Stripe integration</span>
+                  <span>Secure ticket purchasing with instant confirmation</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <div className="p-1 rounded-full bg-primary/10 mt-0.5">
@@ -243,7 +243,7 @@ export default function LandingPage() {
                   <div className="p-1 rounded-full bg-primary/10 mt-0.5">
                     <div className="w-2 h-2 rounded-full bg-primary" />
                   </div>
-                  <span>Integrated payment processing for ticket sales</span>
+                  <span>Seamless payment processing for ticket sales</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <div className="p-1 rounded-full bg-primary/10 mt-0.5">

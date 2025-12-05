@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { PoundSterling, Ticket, TrendingUp, CreditCard } from "lucide-react";
+import { PoundSterling, Ticket, TrendingUp, CreditCard, Info } from "lucide-react";
 import AdminLayout from "./AdminLayout";
+import { Badge } from "@/components/ui/badge";
 
 interface FinanceOverview {
   totalRevenue: number;
@@ -38,8 +39,8 @@ export default function AdminFinance() {
       iconBg: "bg-purple-500/20",
     },
     {
-      title: "Payment Gateway",
-      value: "Stripe",
+      title: "Payment Mode",
+      value: "Demo",
       icon: <CreditCard className="w-5 h-5" />,
       color: "bg-indigo-500/10 text-indigo-400",
       iconBg: "bg-indigo-500/20",
@@ -102,21 +103,22 @@ export default function AdminFinance() {
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between p-4 bg-slate-700/30 rounded-lg">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-indigo-500/20 rounded-lg flex items-center justify-center">
-                    <CreditCard className="w-5 h-5 text-indigo-400" />
+                  <div className="w-10 h-10 bg-amber-500/20 rounded-lg flex items-center justify-center">
+                    <Info className="w-5 h-5 text-amber-400" />
                   </div>
                   <div>
-                    <p className="text-white font-medium">Stripe Integration</p>
-                    <p className="text-sm text-slate-400">Connected</p>
+                    <p className="text-white font-medium">Simulated Payments</p>
+                    <p className="text-sm text-slate-400">Demo Mode Active</p>
                   </div>
                 </div>
-                <span className="px-2 py-1 rounded-full bg-green-500/20 text-green-400 text-sm">
-                  Active
-                </span>
+                <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30">
+                  Demo
+                </Badge>
               </div>
               <p className="text-sm text-slate-400">
-                All payments are processed through Stripe. Refunds and disputes 
-                should be handled directly in the Stripe Dashboard.
+                All payments are currently simulated for demonstration purposes. 
+                No real transactions are processed. Connect a payment provider 
+                for production use.
               </p>
             </CardContent>
           </Card>
@@ -142,7 +144,7 @@ export default function AdminFinance() {
               </div>
               <p className="text-sm text-slate-400 pt-2">
                 Revenue is calculated from all confirmed ticket purchases.
-                Platform fees and processing fees are handled by Stripe.
+                All amounts shown are simulated for demonstration.
               </p>
             </CardContent>
           </Card>
@@ -150,23 +152,22 @@ export default function AdminFinance() {
 
         <Card className="bg-slate-800/50 border-slate-700">
           <CardHeader>
-            <CardTitle className="text-white">Stripe Dashboard Access</CardTitle>
+            <CardTitle className="text-white">Demo Mode Information</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-slate-400 mb-4">
-              For detailed transaction history, refunds, disputes, and payouts, 
-              please access the Stripe Dashboard directly.
-            </p>
-            <a 
-              href="https://dashboard.stripe.com" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors"
-              data-testid="link-stripe-dashboard"
-            >
-              <CreditCard className="w-4 h-4" />
-              Open Stripe Dashboard
-            </a>
+            <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+              <div className="flex items-start gap-3">
+                <Info className="w-5 h-5 text-amber-400 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-white font-medium mb-1">Simulated Payment Environment</p>
+                  <p className="text-slate-400 text-sm">
+                    This platform is running in demo mode. All payments are simulated 
+                    and no real money is transferred. Ticket purchases are instantly 
+                    confirmed for testing purposes.
+                  </p>
+                </div>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>
