@@ -55,6 +55,54 @@ function calculateDistanceMiles(lat1: number, lon1: number, lat2: number, lon2: 
   return R * c;
 }
 
+// Forward geocode an address to coordinates using OpenStreetMap Nominatim
+async function geocodeAddress(address: string): Promise<{ latitude: number; longitude: number; city: string | null } | null> {
+  try {
+    // Add UK bias for better results
+    const searchAddress = address.includes("UK") || address.includes("United Kingdom") 
+      ? address 
+      : `${address}, UK`;
+    
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchAddress)}&format=json&addressdetails=1&limit=1`,
+      {
+        headers: {
+          "User-Agent": "VibePulse/1.0 (social-events-platform)",
+        },
+      }
+    );
+    
+    if (!response.ok) {
+      console.error("Geocoding request failed:", response.status);
+      return null;
+    }
+    
+    const results = await response.json();
+    if (!results || results.length === 0) {
+      console.log("No geocoding results for:", address);
+      return null;
+    }
+    
+    const result = results[0];
+    const lat = parseFloat(result.lat);
+    const lon = parseFloat(result.lon);
+    
+    if (isNaN(lat) || isNaN(lon)) {
+      return null;
+    }
+    
+    // Extract city from address details
+    const addr = result.address || {};
+    const city = addr.city || addr.town || addr.village || addr.county || null;
+    
+    console.log(`Geocoded "${address}" to lat=${lat}, lon=${lon}, city=${city}`);
+    return { latitude: lat, longitude: lon, city };
+  } catch (error) {
+    console.error("Geocoding error for address:", address, error);
+    return null;
+  }
+}
+
 // Helper to add distance to events/venues and sort by proximity
 function sortByProximity<T extends { latitude?: number | null; longitude?: number | null }>(
   items: T[],
@@ -408,9 +456,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         location: sanitizeTextOnly(parsedData.location || ""),
       };
       
+      // Geocode the location to get coordinates
+      let geocodeResult = null;
+      if (sanitizedData.location) {
+        geocodeResult = await geocodeAddress(sanitizedData.location);
+      }
+      
       const event = await storage.createEvent({
         ...sanitizedData,
         organizerId: req.user!.id,
+        latitude: geocodeResult?.latitude || null,
+        longitude: geocodeResult?.longitude || null,
+        city: geocodeResult?.city || sanitizedData.city || null,
       });
       
       // Auto-generate promotional post for followers
@@ -449,7 +506,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const parsedData = eventUpdateDto.parse(req.body);
-      const updatedEvent = await storage.updateEvent(req.params.id, parsedData);
+      
+      // If location changed, re-geocode
+      let updateData = { ...parsedData };
+      if (parsedData.location && parsedData.location !== event.location) {
+        const geocodeResult = await geocodeAddress(parsedData.location);
+        if (geocodeResult) {
+          updateData.latitude = geocodeResult.latitude;
+          updateData.longitude = geocodeResult.longitude;
+          updateData.city = geocodeResult.city || parsedData.city || null;
+        }
+      }
+      
+      const updatedEvent = await storage.updateEvent(req.params.id, updateData);
       res.json(updatedEvent);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -458,6 +527,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       console.error('Error updating event:', error);
       res.status(500).json({ message: "Failed to update event" });
+    }
+  });
+
+  // Endpoint to backfill geocoding for events without coordinates (organizer can geocode their own events)
+  app.post("/api/events/geocode-missing", requireOrganizer, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const allEvents = await storage.getEvents();
+      // Only geocode events owned by this user
+      const eventsWithoutCoords = allEvents.filter(e => 
+        (!e.latitude || !e.longitude) && e.organizerId === userId
+      );
+      
+      let geocoded = 0;
+      let failed = 0;
+      const results: { id: string; location: string; success: boolean; city?: string | null }[] = [];
+      
+      for (const event of eventsWithoutCoords) {
+        if (!event.location) {
+          results.push({ id: event.id, location: "", success: false });
+          failed++;
+          continue;
+        }
+        
+        // Rate limit to respect Nominatim usage policy (1 request per second)
+        await new Promise(resolve => setTimeout(resolve, 1100));
+        
+        const geocodeResult = await geocodeAddress(event.location);
+        if (geocodeResult) {
+          await storage.updateEvent(event.id, {
+            latitude: geocodeResult.latitude,
+            longitude: geocodeResult.longitude,
+            city: geocodeResult.city,
+          });
+          results.push({ id: event.id, location: event.location, success: true, city: geocodeResult.city });
+          geocoded++;
+        } else {
+          results.push({ id: event.id, location: event.location, success: false });
+          failed++;
+        }
+      }
+      
+      res.json({
+        message: `Geocoding complete: ${geocoded} successful, ${failed} failed`,
+        total: eventsWithoutCoords.length,
+        geocoded,
+        failed,
+        results,
+      });
+    } catch (error) {
+      console.error("Geocode backfill error:", error);
+      res.status(500).json({ message: "Failed to geocode events" });
     }
   });
 
