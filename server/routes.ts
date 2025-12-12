@@ -1182,6 +1182,118 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Comment Interactions - Like
+  app.post("/api/comments/:commentId/like", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const commentId = req.params.commentId;
+      
+      const alreadyLiked = await storage.hasUserLikedComment(userId, commentId);
+      if (alreadyLiked) {
+        return res.status(400).json({ message: "Already liked this comment" });
+      }
+      
+      const like = await storage.likeComment(userId, commentId);
+      res.json(like);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to like comment" });
+    }
+  });
+
+  app.delete("/api/comments/:commentId/like", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const commentId = req.params.commentId;
+      await storage.unlikeComment(userId, commentId);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to unlike comment" });
+    }
+  });
+
+  app.get("/api/comments/:commentId/likes", async (req, res) => {
+    try {
+      const commentId = req.params.commentId;
+      const userId = req.user?.id;
+      const count = await storage.getCommentLikeCount(commentId);
+      const isLiked = userId ? await storage.hasUserLikedComment(userId, commentId) : false;
+      res.json({ count, isLiked });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get comment likes" });
+    }
+  });
+
+  // Comment Interactions - Replies
+  app.post("/api/comments/:commentId/replies", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const commentId = req.params.commentId;
+      const { content } = req.body;
+      
+      if (!content || !content.trim()) {
+        return res.status(400).json({ message: "Reply content is required" });
+      }
+      
+      const sanitizedContent = sanitizeTextOnly(content.trim());
+      const reply = await storage.addCommentReply(userId, commentId, sanitizedContent);
+      res.json(reply);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to add reply" });
+    }
+  });
+
+  app.get("/api/comments/:commentId/replies", async (req, res) => {
+    try {
+      const commentId = req.params.commentId;
+      const replies = await storage.getCommentReplies(commentId);
+      const count = await storage.getCommentReplyCount(commentId);
+      res.json({ replies, count });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get replies" });
+    }
+  });
+
+  // Comment Interactions - Repost
+  app.post("/api/comments/:commentId/repost", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const commentId = req.params.commentId;
+      
+      const alreadyReposted = await storage.hasUserRepostedComment(userId, commentId);
+      if (alreadyReposted) {
+        return res.status(400).json({ message: "Already reposted this comment" });
+      }
+      
+      const repost = await storage.repostComment(userId, commentId);
+      res.json(repost);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to repost comment" });
+    }
+  });
+
+  app.delete("/api/comments/:commentId/repost", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const commentId = req.params.commentId;
+      await storage.unrepostComment(userId, commentId);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to remove repost" });
+    }
+  });
+
+  app.get("/api/comments/:commentId/repost-status", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const commentId = req.params.commentId;
+      const hasReposted = await storage.hasUserRepostedComment(userId, commentId);
+      const repostCount = await storage.getCommentRepostCount(commentId);
+      res.json({ hasReposted, repostCount });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get repost status" });
+    }
+  });
+
   // Post Interactions - Bookmarks
   app.post("/api/posts/:postId/bookmark", requireAuth, async (req, res) => {
     try {
