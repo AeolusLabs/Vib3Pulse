@@ -1237,6 +1237,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         throw new Error('Failed to upload to storage');
       }
       
+      // Set ACL policy to make the image publicly readable
+      try {
+        await objectStorageService.trySetObjectEntityAclPolicy(stablePath, {
+          owner: req.user!.id,
+          visibility: "public",
+        });
+      } catch (aclError) {
+        console.error("Error setting ACL policy:", aclError);
+        // Continue even if ACL fails - the image was uploaded successfully
+      }
+      
       res.json({ stablePath });
     } catch (error) {
       console.error("Error uploading story image:", error);
