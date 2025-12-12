@@ -42,6 +42,41 @@ async function resolveUserId(identifier: string): Promise<string | null> {
   }
 }
 
+// Haversine formula for calculating distance between two coordinates (in miles)
+function calculateDistanceMiles(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 3959; // Earth's radius in miles
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+// Helper to add distance to events/venues and sort by proximity
+function sortByProximity<T extends { latitude?: number | null; longitude?: number | null }>(
+  items: T[],
+  userLat: number,
+  userLon: number
+): (T & { distance: number | null })[] {
+  return items
+    .map(item => ({
+      ...item,
+      distance: item.latitude && item.longitude 
+        ? calculateDistanceMiles(userLat, userLon, item.latitude, item.longitude)
+        : null
+    }))
+    .sort((a, b) => {
+      // Items with distance come first, sorted by distance
+      if (a.distance !== null && b.distance !== null) return a.distance - b.distance;
+      if (a.distance !== null) return -1;
+      if (b.distance !== null) return 1;
+      return 0;
+    });
+}
+
 const signupSchema = insertUserSchema.omit({ passwordHash: true }).extend({
   password: z.string().min(8, "Password must be at least 8 characters"),
 });
@@ -244,6 +279,109 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error fetching promoted events:', error);
       res.status(500).json({ message: "Failed to fetch promoted events" });
+    }
+  });
+
+  // Get events sorted by proximity to user location
+  app.get("/api/events/nearby", async (req, res) => {
+    try {
+      const { lat, lon, maxDistance } = req.query;
+      
+      if (!lat || !lon) {
+        return res.status(400).json({ message: "Latitude and longitude are required" });
+      }
+      
+      const userLat = parseFloat(lat as string);
+      const userLon = parseFloat(lon as string);
+      const maxDist = maxDistance ? parseFloat(maxDistance as string) : undefined;
+      
+      if (isNaN(userLat) || isNaN(userLon)) {
+        return res.status(400).json({ message: "Invalid coordinates" });
+      }
+      
+      const allEvents = await storage.getEvents();
+      const eventsWithDistance = sortByProximity(allEvents, userLat, userLon);
+      
+      // Filter by max distance if provided
+      const filteredEvents = maxDist 
+        ? eventsWithDistance.filter(e => e.distance === null || e.distance <= maxDist)
+        : eventsWithDistance;
+      
+      res.json(filteredEvents);
+    } catch (error) {
+      console.error('Error fetching nearby events:', error);
+      res.status(500).json({ message: "Failed to fetch nearby events" });
+    }
+  });
+
+  // Get events happening within the next few hours near user
+  app.get("/api/events/happening-now", async (req, res) => {
+    try {
+      const { lat, lon, hours = "3" } = req.query;
+      
+      if (!lat || !lon) {
+        return res.status(400).json({ message: "Latitude and longitude are required" });
+      }
+      
+      const userLat = parseFloat(lat as string);
+      const userLon = parseFloat(lon as string);
+      const hoursAhead = parseInt(hours as string) || 3;
+      
+      if (isNaN(userLat) || isNaN(userLon)) {
+        return res.status(400).json({ message: "Invalid coordinates" });
+      }
+      
+      const allEvents = await storage.getEvents();
+      const now = new Date();
+      const cutoffTime = new Date(now.getTime() + hoursAhead * 60 * 60 * 1000);
+      
+      // Filter events happening within the next X hours
+      const upcomingEvents = allEvents.filter(event => {
+        const eventDate = new Date(event.eventDate);
+        return eventDate >= now && eventDate <= cutoffTime;
+      });
+      
+      // Sort by proximity and limit to nearby events (within 25 miles)
+      const nearbyUpcoming = sortByProximity(upcomingEvents, userLat, userLon)
+        .filter(e => e.distance === null || e.distance <= 25);
+      
+      res.json(nearbyUpcoming);
+    } catch (error) {
+      console.error('Error fetching happening now events:', error);
+      res.status(500).json({ message: "Failed to fetch happening now events" });
+    }
+  });
+
+  // Get trending events in user's city
+  app.get("/api/events/trending-in-city", async (req, res) => {
+    try {
+      const { city } = req.query;
+      
+      if (!city) {
+        return res.status(400).json({ message: "City is required" });
+      }
+      
+      const cityName = (city as string).toLowerCase();
+      const allEvents = await storage.getEvents();
+      
+      // Filter events by city (checking both city field and location text)
+      const cityEvents = allEvents.filter(event => {
+        const eventCity = event.city?.toLowerCase() || "";
+        const eventLocation = event.location.toLowerCase();
+        return eventCity.includes(cityName) || eventLocation.includes(cityName);
+      });
+      
+      // Sort by upcoming date (soonest first)
+      const sortedEvents = cityEvents.sort((a, b) => {
+        const dateA = new Date(a.eventDate).getTime();
+        const dateB = new Date(b.eventDate).getTime();
+        return dateA - dateB;
+      });
+      
+      res.json(sortedEvents);
+    } catch (error) {
+      console.error('Error fetching trending events:', error);
+      res.status(500).json({ message: "Failed to fetch trending events" });
     }
   });
 
@@ -2237,6 +2375,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Get promoted venues error:", error);
       res.status(500).json({ message: "Failed to get promoted venues" });
+    }
+  });
+
+  // Get venues sorted by proximity to user location
+  app.get("/api/venues/nearby", async (req, res) => {
+    try {
+      const { lat, lon, maxDistance } = req.query;
+      
+      if (!lat || !lon) {
+        return res.status(400).json({ message: "Latitude and longitude are required" });
+      }
+      
+      const userLat = parseFloat(lat as string);
+      const userLon = parseFloat(lon as string);
+      const maxDist = maxDistance ? parseFloat(maxDistance as string) : undefined;
+      
+      if (isNaN(userLat) || isNaN(userLon)) {
+        return res.status(400).json({ message: "Invalid coordinates" });
+      }
+      
+      const allVenues = await storage.getVenues();
+      const venuesWithDistance = sortByProximity(allVenues, userLat, userLon);
+      
+      // Filter by max distance if provided
+      const filteredVenues = maxDist 
+        ? venuesWithDistance.filter(v => v.distance === null || v.distance <= maxDist)
+        : venuesWithDistance;
+      
+      res.json(filteredVenues);
+    } catch (error) {
+      console.error('Error fetching nearby venues:', error);
+      res.status(500).json({ message: "Failed to fetch nearby venues" });
     }
   });
 
