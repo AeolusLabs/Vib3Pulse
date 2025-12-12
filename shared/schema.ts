@@ -361,6 +361,52 @@ export const insertCommentSchema = createInsertSchema(comments).omit({
 export type InsertComment = z.infer<typeof insertCommentSchema>;
 export type Comment = typeof comments.$inferSelect;
 
+export const commentLikes = pgTable("comment_likes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  commentId: varchar("comment_id").notNull().references(() => comments.id),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const insertCommentLikeSchema = createInsertSchema(commentLikes).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertCommentLike = z.infer<typeof insertCommentLikeSchema>;
+export type CommentLike = typeof commentLikes.$inferSelect;
+
+export const commentReplies = pgTable("comment_replies", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  commentId: varchar("comment_id").notNull().references(() => comments.id),
+  content: text("content").notNull(),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const insertCommentReplySchema = createInsertSchema(commentReplies).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertCommentReply = z.infer<typeof insertCommentReplySchema>;
+export type CommentReply = typeof commentReplies.$inferSelect;
+
+export const commentReposts = pgTable("comment_reposts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  commentId: varchar("comment_id").notNull().references(() => comments.id),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const insertCommentRepostSchema = createInsertSchema(commentReposts).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertCommentRepost = z.infer<typeof insertCommentRepostSchema>;
+export type CommentRepost = typeof commentReposts.$inferSelect;
+
 export const bookmarks = pgTable("bookmarks", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
