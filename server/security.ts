@@ -40,12 +40,12 @@ export function rotateCsrfToken(res: Response): string {
   return newToken;
 }
 
+// Paths exempt from CSRF protection (relative to /api mount point)
+// Only webhooks are exempt since they're called by external services without CSRF tokens
 const CSRF_EXEMPT_PATHS = [
-  "/api/webhooks/stripe",
-  "/api/stripe/webhook",
-  "/api/webhook",
-  "/api/stories/upload",
-  "/api/posts/upload",
+  "/webhooks/stripe",
+  "/stripe/webhook",
+  "/webhook",
 ];
 
 function isExemptFromCsrf(path: string): boolean {

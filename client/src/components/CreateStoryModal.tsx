@@ -46,13 +46,42 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
 
   const [isUploading, setIsUploading] = useState(false);
 
+  // Helper to get CSRF token, fetching from server if not in cookie
+  const getCsrfToken = async (): Promise<string> => {
+    // First check if token exists in cookie
+    const match = document.cookie.match(/csrf-token=([^;]+)/);
+    if (match && match[1]) {
+      return match[1];
+    }
+    // Token not in cookie, fetch from server to initialize it
+    try {
+      const response = await fetch('/api/csrf-token', {
+        method: 'GET',
+        credentials: 'include',
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.csrfToken) {
+          return data.csrfToken;
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch CSRF token:', error);
+    }
+    throw new Error('Unable to get security token. Please refresh the page and try again.');
+  };
+
   const uploadImageToStorage = async (imageDataUrl: string): Promise<string> => {
+    // Get CSRF token (throws if unavailable)
+    const csrfToken = await getCsrfToken();
+    
     // Use server-side upload to bypass CORS issues with direct GCS uploads
     const response = await fetch('/api/stories/upload', {
       method: 'POST',
       credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
+        'x-csrf-token': csrfToken,
       },
       body: JSON.stringify({ imageData: imageDataUrl }),
     });
