@@ -1238,6 +1238,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Set ACL policy to make the image publicly readable
+      // This MUST succeed for the image to be viewable - fail the request if it doesn't
       try {
         await objectStorageService.trySetObjectEntityAclPolicy(stablePath, {
           owner: req.user!.id,
@@ -1245,7 +1246,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       } catch (aclError) {
         console.error("Error setting ACL policy:", aclError);
-        // Continue even if ACL fails - the image was uploaded successfully
+        // ACL must be set for the image to be viewable - fail the upload
+        return res.status(500).json({ message: "Failed to set image permissions. Please try again." });
       }
       
       res.json({ stablePath });
@@ -1279,6 +1281,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userStories = allStories.filter(s => s.userId === req.user!.id);
       
       let fixed = 0;
+      const errors: { storyId: string; error: string }[] = [];
+      
       for (const story of userStories) {
         if (story.imageUrl && story.imageUrl.startsWith('/objects/')) {
           try {
@@ -1288,12 +1292,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
             });
             fixed++;
           } catch (err) {
-            console.error(`Failed to fix ACL for story ${story.id}:`, err);
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            // ObjectNotFoundError means the image doesn't exist - not a real failure
+            if (errorMessage.includes('ObjectNotFound') || errorMessage.includes('not found')) {
+              console.log(`Story ${story.id} image not found in storage, skipping`);
+            } else {
+              console.error(`Failed to fix ACL for story ${story.id}:`, err);
+              errors.push({ storyId: story.id, error: errorMessage });
+            }
           }
         }
       }
       
-      res.json({ message: `Fixed ACL on ${fixed} story images` });
+      res.json({ 
+        message: `Fixed ACL on ${fixed} story images`,
+        fixed,
+        total: userStories.length,
+        errors: errors.length > 0 ? errors : undefined,
+      });
     } catch (error) {
       console.error("Fix ACL error:", error);
       res.status(500).json({ message: "Failed to fix story ACLs" });
