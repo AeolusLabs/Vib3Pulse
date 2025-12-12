@@ -10,6 +10,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
+import CommentItem from "./CommentItem";
 
 interface PostDetailDialogProps {
   open: boolean;
@@ -344,42 +345,23 @@ export default function PostDetailDialog({
               ) : (
                 <div className="space-y-4">
                   {comments.map((comment: any) => (
-                    <div key={comment.id} className="flex gap-3" data-testid={`dialog-comment-${comment.id}`}>
-                      <Avatar 
-                        className="h-8 w-8 cursor-pointer"
-                        onClick={() => {
-                          if (comment.user?.id) navigate(`/user/${comment.user.id}`);
-                          else navigate(`/profile/${comment.user?.username}`);
-                          onClose();
-                        }}
-                      >
-                        <AvatarImage src={comment.user?.avatarUrl} alt={comment.user?.displayName} />
-                        <AvatarFallback>
-                          {(comment.user?.displayName || comment.user?.username || 'U').slice(0, 2).toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-medium text-sm">
-                            {comment.user?.displayName || comment.user?.username}
-                          </span>
-                          <span className="text-xs text-muted-foreground">
-                            @{comment.user?.username}
-                          </span>
-                          {comment.createdAt && (
-                            <span className="text-xs text-muted-foreground">
-                              · {format(new Date(comment.createdAt), 'MMM d, h:mm a')}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-sm mt-1">
-                          {renderContentWithLinkedMentionsAndHashtags(comment.content, (path) => {
+                    <CommentItem
+                      key={comment.id}
+                      comment={comment}
+                      postId={postId}
+                      onNavigate={(path) => {
+                        navigate(path);
+                        onClose();
+                      }}
+                      renderContent={(content) => (
+                        <>
+                          {renderContentWithLinkedMentionsAndHashtags(content, (path) => {
                             navigate(path);
                             onClose();
                           })}
-                        </p>
-                      </div>
-                    </div>
+                        </>
+                      )}
+                    />
                   ))}
                 </div>
               )}

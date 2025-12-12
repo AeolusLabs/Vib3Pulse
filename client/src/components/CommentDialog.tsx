@@ -8,13 +8,12 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Send } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { format } from "date-fns";
+import CommentItem from "./CommentItem";
 
 interface CommentDialogProps {
   open: boolean;
@@ -33,6 +32,7 @@ type Comment = {
     username: string;
     displayName?: string;
     organizationName?: string;
+    avatarUrl?: string;
   };
 };
 
@@ -115,28 +115,11 @@ export default function CommentDialog({ open, onClose, postId }: CommentDialogPr
           ) : (
             <div className="space-y-4">
               {comments.map((comment) => (
-                <div key={comment.id} className="flex gap-3" data-testid={`comment-${comment.id}`}>
-                  <Avatar className="h-10 w-10 flex-shrink-0">
-                    <AvatarImage src="" alt={comment.user.displayName || comment.user.username} />
-                    <AvatarFallback className="bg-primary/10 text-primary text-sm">
-                      {(comment.user.displayName || comment.user.organizationName || comment.user.username).charAt(0).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-
-                  <div className="flex-1 min-w-0">
-                    <div className="bg-muted rounded-lg px-3 py-2">
-                      <p className="font-semibold text-sm">
-                        {comment.user.displayName || comment.user.organizationName || comment.user.username}
-                      </p>
-                      <p className="text-sm mt-1 break-words" data-testid={`comment-text-${comment.id}`}>
-                        {comment.content}
-                      </p>
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1 px-3">
-                      {format(new Date(comment.createdAt), 'PPp')}
-                    </p>
-                  </div>
-                </div>
+                <CommentItem 
+                  key={comment.id} 
+                  comment={comment} 
+                  postId={postId}
+                />
               ))}
             </div>
           )}
