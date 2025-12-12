@@ -921,6 +921,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get story image upload URL
+  app.get("/api/stories/upload-url", requireAuth, async (req, res) => {
+    try {
+      const objectStorageService = new ObjectStorageService();
+      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+      
+      // Extract stable path from upload URL
+      const url = new URL(uploadURL);
+      const pathParts = url.pathname.split('/');
+      const uploadsIndex = pathParts.findIndex(p => p === 'uploads');
+      const extractedId = uploadsIndex !== -1 ? pathParts.slice(uploadsIndex).join('/') : pathParts.slice(-1)[0];
+      const stablePath = `/objects/${extractedId}`;
+      
+      res.json({ uploadURL, stablePath });
+    } catch (error) {
+      console.error("Error getting story upload URL:", error);
+      res.status(500).json({ message: "Failed to get upload URL" });
+    }
+  });
+
   app.post("/api/stories", requireAuth, async (req, res) => {
     try {
       const { allowedViewerIds, ...storyInput } = req.body;

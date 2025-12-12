@@ -17,6 +17,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { User } from "@shared/schema";
+import StoryCamera from "./StoryCamera";
 
 interface CreateStoryModalProps {
   open: boolean;
@@ -27,6 +28,7 @@ interface CreateStoryModalProps {
 export default function CreateStoryModal({ open, onClose, onCreateStory }: CreateStoryModalProps) {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [showCamera, setShowCamera] = useState(false);
+  const [showFullscreenCamera, setShowFullscreenCamera] = useState(false);
   const [privacy, setPrivacy] = useState<"public" | "private">("public");
   const [selectedViewers, setSelectedViewers] = useState<string[]>([]);
   const [showViewerSelection, setShowViewerSelection] = useState(false);
@@ -39,6 +41,40 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
     queryKey: ['/api/followers'],
     enabled: privacy === "private",
   });
+
+  const [isUploading, setIsUploading] = useState(false);
+
+  const uploadImageToStorage = async (imageDataUrl: string): Promise<string> => {
+    const response = await fetch('/api/stories/upload-url', {
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      throw new Error('Failed to get upload URL');
+    }
+    const { uploadURL, stablePath } = await response.json();
+    
+    const base64Data = imageDataUrl.split(',')[1];
+    const binaryString = atob(base64Data);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    const blob = new Blob([bytes], { type: 'image/jpeg' });
+    
+    const uploadResponse = await fetch(uploadURL, {
+      method: 'PUT',
+      body: blob,
+      headers: {
+        'Content-Type': 'image/jpeg',
+      },
+    });
+    
+    if (!uploadResponse.ok) {
+      throw new Error('Failed to upload image');
+    }
+    
+    return stablePath;
+  };
 
   const createStoryMutation = useMutation({
     mutationFn: async (data: { imageUrl: string; type: string; privacy: string; allowedViewerIds?: string[] }) => {
@@ -69,7 +105,14 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
     setPrivacy("public");
     setSelectedViewers([]);
     setShowViewerSelection(false);
+    setShowFullscreenCamera(false);
+    setIsUploading(false);
     stopCamera();
+  };
+
+  const handleCameraCapture = (imageDataUrl: string) => {
+    setSelectedImage(imageDataUrl);
+    setShowFullscreenCamera(false);
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -123,14 +166,32 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
     }
   };
 
-  const handlePostStory = () => {
+  const handlePostStory = async () => {
     if (selectedImage) {
-      createStoryMutation.mutate({
-        imageUrl: selectedImage,
-        type: "image",
-        privacy,
-        allowedViewerIds: privacy === "private" ? selectedViewers : undefined,
-      });
+      try {
+        setIsUploading(true);
+        
+        let imageUrl = selectedImage;
+        if (selectedImage.startsWith('data:')) {
+          imageUrl = await uploadImageToStorage(selectedImage);
+        }
+        
+        createStoryMutation.mutate({
+          imageUrl,
+          type: "image",
+          privacy,
+          allowedViewerIds: privacy === "private" ? selectedViewers : undefined,
+        });
+      } catch (error) {
+        console.error('Error uploading story:', error);
+        toast({
+          title: "Upload Error",
+          description: "Failed to upload your story image. Please try again.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsUploading(false);
+      }
     }
   };
 
@@ -170,13 +231,12 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
         {!selectedImage && !showCamera && (
           <div className="space-y-4 py-4">
             <Button
-              onClick={startCamera}
-              className="w-full h-32 flex flex-col gap-3"
-              variant="outline"
+              onClick={() => setShowFullscreenCamera(true)}
+              className="w-full h-32 flex flex-col gap-3 bg-gradient-to-br from-[#D0BFFF] to-[#B0D0FF] hover:from-[#C0AFEF] hover:to-[#A0C0EF] text-black"
               data-testid="button-take-photo"
             >
               <Camera className="h-12 w-12" />
-              <span className="font-semibold">Take Photo</span>
+              <span className="font-semibold">Open Camera</span>
             </Button>
 
             <label htmlFor="story-image-upload" className="block">
@@ -199,38 +259,6 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
               className="hidden"
               onChange={handleImageUpload}
             />
-          </div>
-        )}
-
-        {showCamera && (
-          <div className="space-y-4">
-            <div className="relative rounded-lg overflow-hidden bg-black aspect-[3/4]">
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="w-full h-full object-cover"
-              />
-            </div>
-            <div className="flex gap-2">
-              <Button
-                onClick={stopCamera}
-                variant="outline"
-                className="flex-1"
-                data-testid="button-cancel-camera"
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={capturePhoto}
-                className="flex-1"
-                data-testid="button-capture-photo"
-              >
-                <Camera className="h-4 w-4 mr-2" />
-                Capture
-              </Button>
-            </div>
           </div>
         )}
 
@@ -303,10 +331,10 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
               <Button
                 onClick={handlePostStory}
                 className="flex-1"
-                disabled={createStoryMutation.isPending || (privacy === "private" && selectedViewers.length === 0)}
+                disabled={isUploading || createStoryMutation.isPending || (privacy === "private" && selectedViewers.length === 0)}
                 data-testid="button-post-story"
               >
-                {createStoryMutation.isPending ? "Posting..." : "Post Story"}
+                {isUploading ? "Uploading..." : createStoryMutation.isPending ? "Posting..." : "Post Story"}
               </Button>
             </div>
           </div>
@@ -405,6 +433,12 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
           </div>
         )}
       </DialogContent>
+
+      <StoryCamera
+        open={showFullscreenCamera}
+        onClose={() => setShowFullscreenCamera(false)}
+        onCapture={handleCameraCapture}
+      />
     </Dialog>
   );
 }
