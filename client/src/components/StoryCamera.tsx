@@ -42,13 +42,13 @@ export default function StoryCamera({ open, onClose, onCapture }: StoryCameraPro
   const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
   const [selectedColor, setSelectedColor] = useState("#FFFFFF");
   const [selectedFontSize, setSelectedFontSize] = useState(32);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [cameraError, setCameraError] = useState<string | null>(null);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const dragOffsetRef = useRef({ x: 0, y: 0 });
 
   const startCamera = useCallback(async () => {
     try {
@@ -193,10 +193,10 @@ export default function StoryCamera({ open, onClose, onCapture }: StoryCameraPro
     const currentX = (overlay.x / 100) * containerRect.width;
     const currentY = (overlay.y / 100) * containerRect.height;
     
-    setDragOffset({
+    dragOffsetRef.current = {
       x: clientX - containerRect.left - currentX,
       y: clientY - containerRect.top - currentY,
-    });
+    };
 
     const handleMove = (moveEvent: MouseEvent | TouchEvent) => {
       if (!containerRef.current) return;
@@ -205,8 +205,8 @@ export default function StoryCamera({ open, onClose, onCapture }: StoryCameraPro
       const moveClientY = 'touches' in moveEvent ? moveEvent.touches[0].clientY : moveEvent.clientY;
       
       const rect = containerRef.current.getBoundingClientRect();
-      const x = ((moveClientX - rect.left - dragOffset.x) / rect.width) * 100;
-      const y = ((moveClientY - rect.top - dragOffset.y) / rect.height) * 100;
+      const x = ((moveClientX - rect.left - dragOffsetRef.current.x) / rect.width) * 100;
+      const y = ((moveClientY - rect.top - dragOffsetRef.current.y) / rect.height) * 100;
       
       setTextOverlays(prev => prev.map(t => 
         t.id === id ? { ...t, x: Math.max(5, Math.min(95, x)), y: Math.max(5, Math.min(95, y)) } : t
