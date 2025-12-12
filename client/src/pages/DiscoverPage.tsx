@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
@@ -9,10 +9,19 @@ import CreateEventModal from "@/components/CreateEventModal";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar, MapPin, Users, Sparkles, Building2, Music } from "lucide-react";
+import { Calendar, MapPin, Users, Sparkles, Building2, Music, Clock, TrendingUp, Navigation2, Loader2 } from "lucide-react";
 import { format, isPast } from "date-fns";
 import { Link } from "wouter";
+import { useGeolocation } from "@/hooks/useGeolocation";
 import type { Event, Venue } from "@shared/schema";
+
+interface EventWithDistance extends Event {
+  distance?: number | null;
+}
+
+interface VenueWithDistance extends Venue {
+  distance?: number | null;
+}
 
 export default function DiscoverPage() {
   const [selectedCategory, setSelectedCategory] = useState("All Events");
@@ -20,10 +29,69 @@ export default function DiscoverPage() {
   const [createEventOpen, setCreateEventOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
 
+  const { 
+    latitude, 
+    longitude, 
+    city, 
+    loading: locationLoading, 
+    error: locationError,
+    permissionStatus,
+    requestLocation,
+    hasLocation,
+    formatDistance 
+  } = useGeolocation();
+
+  // Request location on mount if not already granted
+  useEffect(() => {
+    if (permissionStatus === "prompt" || permissionStatus === "unknown") {
+      // Don't auto-request, let user click the button
+    }
+  }, [permissionStatus]);
+
+  // Standard events query
   const { data: events = [], isLoading } = useQuery<Event[]>({
     queryKey: ["/api/events"],
     refetchInterval: 60000,
     refetchIntervalInBackground: true,
+  });
+
+  // Nearby events (when location available)
+  const { data: nearbyEvents = [] } = useQuery<EventWithDistance[]>({
+    queryKey: ["/api/events/nearby", latitude, longitude],
+    queryFn: async () => {
+      if (!latitude || !longitude) return [];
+      const response = await fetch(`/api/events/nearby?lat=${latitude}&lon=${longitude}`);
+      if (!response.ok) return [];
+      return response.json();
+    },
+    enabled: hasLocation,
+    refetchInterval: 60000,
+  });
+
+  // Happening now events (when location available)
+  const { data: happeningNowEvents = [] } = useQuery<EventWithDistance[]>({
+    queryKey: ["/api/events/happening-now", latitude, longitude],
+    queryFn: async () => {
+      if (!latitude || !longitude) return [];
+      const response = await fetch(`/api/events/happening-now?lat=${latitude}&lon=${longitude}&hours=3`);
+      if (!response.ok) return [];
+      return response.json();
+    },
+    enabled: hasLocation,
+    refetchInterval: 60000,
+  });
+
+  // Trending in city events (when city detected)
+  const { data: trendingEvents = [] } = useQuery<Event[]>({
+    queryKey: ["/api/events/trending-in-city", city],
+    queryFn: async () => {
+      if (!city) return [];
+      const response = await fetch(`/api/events/trending-in-city?city=${encodeURIComponent(city)}`);
+      if (!response.ok) return [];
+      return response.json();
+    },
+    enabled: !!city,
+    refetchInterval: 60000,
   });
 
   const { data: promotedEvents = [] } = useQuery<Event[]>({
@@ -32,10 +100,23 @@ export default function DiscoverPage() {
     refetchIntervalInBackground: true,
   });
 
-  const { data: promotedVenues = [] } = useQuery<Venue[]>({
+  const { data: promotedVenues = [] } = useQuery<VenueWithDistance[]>({
     queryKey: ["/api/venues/promoted"],
     refetchInterval: 60000,
     refetchIntervalInBackground: true,
+  });
+
+  // Nearby venues (when location available)
+  const { data: nearbyVenues = [] } = useQuery<VenueWithDistance[]>({
+    queryKey: ["/api/venues/nearby", latitude, longitude],
+    queryFn: async () => {
+      if (!latitude || !longitude) return [];
+      const response = await fetch(`/api/venues/nearby?lat=${latitude}&lon=${longitude}&maxDistance=50`);
+      if (!response.ok) return [];
+      return response.json();
+    },
+    enabled: hasLocation,
+    refetchInterval: 60000,
   });
 
   const isEventUpcoming = (event: Event) => {
@@ -43,7 +124,10 @@ export default function DiscoverPage() {
     return !isPast(eventDate);
   };
 
-  const filteredEvents = events
+  // Use nearby events if location available, otherwise regular events
+  const baseEvents = hasLocation && nearbyEvents.length > 0 ? nearbyEvents : events;
+
+  const filteredEvents = baseEvents
     .filter(isEventUpcoming)
     .filter(event => {
       const matchesCategory = selectedCategory === "All Events" || event.category === selectedCategory;
@@ -62,6 +146,21 @@ export default function DiscoverPage() {
       return matchesCategory && matchesSearch;
     });
 
+  // Filter promoted venues - prefer nearby if available
+  const displayVenues = hasLocation && nearbyVenues.length > 0 
+    ? nearbyVenues.filter(v => promotedVenues.some(pv => pv.id === v.id))
+    : promotedVenues;
+
+  const renderDistanceBadge = (distance: number | null | undefined) => {
+    if (distance === null || distance === undefined) return null;
+    return (
+      <Badge variant="outline" className="text-xs bg-purple-50 dark:bg-purple-950/30 border-purple-200">
+        <Navigation2 className="h-3 w-3 mr-1" />
+        {formatDistance(distance)}
+      </Badge>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
       <Navigation
@@ -71,6 +170,54 @@ export default function DiscoverPage() {
       <HeroSection onSearch={setSearchQuery} onCategoryClick={setSelectedCategory} />
       
       <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Location Banner */}
+        {!hasLocation && permissionStatus !== "denied" && (
+          <div className="mb-6 p-4 rounded-lg bg-gradient-to-r from-purple-100 to-pink-100 dark:from-purple-950/40 dark:to-pink-950/40 border border-purple-200 dark:border-purple-800">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-full bg-purple-200 dark:bg-purple-800">
+                  <MapPin className="h-5 w-5 text-purple-600 dark:text-purple-300" />
+                </div>
+                <div>
+                  <p className="font-medium text-sm">Enable Location</p>
+                  <p className="text-xs text-muted-foreground">See events and venues near you</p>
+                </div>
+              </div>
+              <Button 
+                size="sm" 
+                onClick={requestLocation}
+                disabled={locationLoading}
+                data-testid="button-enable-location"
+              >
+                {locationLoading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Getting location...
+                  </>
+                ) : (
+                  <>
+                    <Navigation2 className="h-4 w-4 mr-2" />
+                    Enable Location
+                  </>
+                )}
+              </Button>
+            </div>
+            {locationError && (
+              <p className="text-xs text-destructive mt-2">{locationError}</p>
+            )}
+          </div>
+        )}
+
+        {/* Location Active Badge */}
+        {hasLocation && city && (
+          <div className="mb-4 flex items-center gap-2">
+            <Badge variant="outline" className="bg-green-50 dark:bg-green-950/30 border-green-300 text-green-700 dark:text-green-400">
+              <Navigation2 className="h-3 w-3 mr-1" />
+              Showing events near {city}
+            </Badge>
+          </div>
+        )}
+
         <div className="mb-4">
           <FilterBar
             selectedCategory={selectedCategory}
@@ -85,6 +232,118 @@ export default function DiscoverPage() {
           </div>
         ) : (
           <>
+            {/* Happening Near Me Now Section */}
+            {hasLocation && happeningNowEvents.length > 0 && (
+              <div className="mb-8">
+                <div className="flex items-center gap-2 mb-4">
+                  <Clock className="h-5 w-5 text-orange-500" />
+                  <h2 className="text-xl font-semibold">Happening Near You Now</h2>
+                  <Badge variant="secondary" className="text-xs">Within 3 hours</Badge>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" data-testid="happening-now-grid">
+                  {happeningNowEvents.slice(0, 3).map((event) => (
+                    <Card 
+                      key={event.id} 
+                      className="hover-elevate cursor-pointer overflow-hidden border-2 border-orange-300 bg-gradient-to-br from-orange-50/50 to-yellow-50/50 dark:from-orange-950/20 dark:to-yellow-950/20"
+                      onClick={() => setSelectedEvent(event)}
+                      data-testid={`happening-now-card-${event.id}`}
+                    >
+                      {event.imageUrl && (
+                        <div className="aspect-video w-full overflow-hidden relative">
+                          <img 
+                            src={event.imageUrl} 
+                            alt={event.title}
+                            className="w-full h-full object-cover"
+                          />
+                          <Badge className="absolute top-2 right-2 bg-gradient-to-r from-orange-500 to-yellow-500 text-white">
+                            <Clock className="h-3 w-3 mr-1" />
+                            Soon
+                          </Badge>
+                        </div>
+                      )}
+                      <CardHeader className="space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <h3 className="font-semibold text-lg line-clamp-2">
+                            {event.title}
+                          </h3>
+                          {renderDistanceBadge(event.distance)}
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-2">
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Calendar className="h-4 w-4" />
+                          <span>
+                            {format(new Date(event.eventDate), "h:mm a 'today'")}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <MapPin className="h-4 w-4" />
+                          <span className="line-clamp-1">{event.location}</span>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Trending in Your City Section */}
+            {city && trendingEvents.length > 0 && (
+              <div className="mb-8">
+                <div className="flex items-center gap-2 mb-4">
+                  <TrendingUp className="h-5 w-5 text-blue-500" />
+                  <h2 className="text-xl font-semibold">Trending in {city}</h2>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" data-testid="trending-city-grid">
+                  {trendingEvents.filter(isEventUpcoming).slice(0, 3).map((event) => (
+                    <Card 
+                      key={event.id} 
+                      className="hover-elevate cursor-pointer overflow-hidden border-2 border-blue-300 bg-gradient-to-br from-blue-50/50 to-cyan-50/50 dark:from-blue-950/20 dark:to-cyan-950/20"
+                      onClick={() => setSelectedEvent(event)}
+                      data-testid={`trending-card-${event.id}`}
+                    >
+                      {event.imageUrl && (
+                        <div className="aspect-video w-full overflow-hidden relative">
+                          <img 
+                            src={event.imageUrl} 
+                            alt={event.title}
+                            className="w-full h-full object-cover"
+                          />
+                          <Badge className="absolute top-2 right-2 bg-gradient-to-r from-blue-500 to-cyan-500 text-white">
+                            <TrendingUp className="h-3 w-3 mr-1" />
+                            Trending
+                          </Badge>
+                        </div>
+                      )}
+                      <CardHeader className="space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <h3 className="font-semibold text-lg line-clamp-2">
+                            {event.title}
+                          </h3>
+                          <Badge variant="secondary">
+                            {event.category}
+                          </Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-2">
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Calendar className="h-4 w-4" />
+                          <span>
+                            {format(new Date(event.eventDate), "MMM d, yyyy 'at' h:mm a")}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <MapPin className="h-4 w-4" />
+                          <span className="line-clamp-1">{event.location}</span>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Featured Events */}
             {filteredPromotedEvents.length > 0 && (
               <div className="mb-8">
                 <div className="flex items-center gap-2 mb-4">
@@ -162,14 +421,18 @@ export default function DiscoverPage() {
               </div>
             )}
 
-            {promotedVenues.length > 0 && (
+            {/* Featured Venues */}
+            {displayVenues.length > 0 && (
               <div className="mb-8">
                 <div className="flex items-center gap-2 mb-4">
                   <Building2 className="h-5 w-5 text-purple-500" />
                   <h2 className="text-xl font-semibold">Featured Venues</h2>
+                  {hasLocation && (
+                    <Badge variant="outline" className="text-xs">Sorted by distance</Badge>
+                  )}
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6" data-testid="featured-venues-grid">
-                  {promotedVenues.map((venue) => (
+                  {displayVenues.map((venue) => (
                     <Link key={venue.id} href={`/venue/${venue.id}`}>
                       <Card 
                         className="hover-elevate cursor-pointer overflow-hidden border-2 border-purple-300 bg-gradient-to-br from-purple-50/50 to-pink-50/50 dark:from-purple-950/20 dark:to-pink-950/20"
@@ -189,9 +452,12 @@ export default function DiscoverPage() {
                           </div>
                         )}
                         <CardHeader className="space-y-1 pb-2">
-                          <h3 className="font-semibold text-base line-clamp-1" data-testid={`venue-name-${venue.id}`}>
-                            {venue.name}
-                          </h3>
+                          <div className="flex items-start justify-between gap-1">
+                            <h3 className="font-semibold text-base line-clamp-1" data-testid={`venue-name-${venue.id}`}>
+                              {venue.name}
+                            </h3>
+                            {renderDistanceBadge((venue as VenueWithDistance).distance)}
+                          </div>
                           <Badge variant="secondary" className="w-fit text-xs">
                             {venue.category}
                           </Badge>
@@ -217,6 +483,18 @@ export default function DiscoverPage() {
               </div>
             )}
 
+            {/* All Events (sorted by proximity if location available) */}
+            <div className="mb-4">
+              <div className="flex items-center gap-2 mb-4">
+                <Calendar className="h-5 w-5 text-muted-foreground" />
+                <h2 className="text-xl font-semibold">
+                  {hasLocation ? "Events Near You" : "All Events"}
+                </h2>
+                {hasLocation && (
+                  <Badge variant="outline" className="text-xs">Sorted by distance</Badge>
+                )}
+              </div>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" data-testid="events-grid">
               {filteredEvents.map((event) => (
                 <Card 
@@ -243,6 +521,11 @@ export default function DiscoverPage() {
                         {event.category}
                       </Badge>
                     </div>
+                    {hasLocation && (event as EventWithDistance).distance !== undefined && (
+                      <div className="flex items-center">
+                        {renderDistanceBadge((event as EventWithDistance).distance)}
+                      </div>
+                    )}
                   </CardHeader>
                   <CardContent className="space-y-2">
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
