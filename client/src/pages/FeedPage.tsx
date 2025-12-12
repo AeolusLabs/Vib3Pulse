@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import type { Event, Venue } from "@shared/schema";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import StoriesBar from "@/components/StoriesBar";
@@ -197,14 +198,55 @@ type StoryWithUser = {
   };
 };
 
+type ShareData = {
+  type: "event" | "venue";
+  id: string;
+  title?: string;
+  name?: string;
+};
+
 export default function FeedPage() {
   const [viewingStory, setViewingStory] = useState<number | null>(null);
   const [createStoryOpen, setCreateStoryOpen] = useState(false);
   const [createPostOpen, setCreatePostOpen] = useState(false);
   const [feedFilter, setFeedFilter] = useState<'following' | 'all'>('following');
   const [selectedPost, setSelectedPost] = useState<any | null>(null);
+  const [attachedEvent, setAttachedEvent] = useState<Event | null>(null);
+  const [attachedVenue, setAttachedVenue] = useState<Venue | null>(null);
   const { toast } = useToast();
   const { data: currentUser } = useAuth();
+
+  // Check for shared event/venue data on mount
+  useEffect(() => {
+    const shareDataStr = sessionStorage.getItem("shareToFeed");
+    if (shareDataStr) {
+      try {
+        const shareData: ShareData = JSON.parse(shareDataStr);
+        sessionStorage.removeItem("shareToFeed");
+        
+        // Fetch the event or venue details
+        if (shareData.type === "event") {
+          fetch(`/api/events/${shareData.id}`)
+            .then(res => res.json())
+            .then(event => {
+              setAttachedEvent(event);
+              setCreatePostOpen(true);
+            })
+            .catch(console.error);
+        } else if (shareData.type === "venue") {
+          fetch(`/api/venues/${shareData.id}`)
+            .then(res => res.json())
+            .then(venue => {
+              setAttachedVenue(venue);
+              setCreatePostOpen(true);
+            })
+            .catch(console.error);
+        }
+      } catch (e) {
+        console.error("Failed to parse share data:", e);
+      }
+    }
+  }, []);
 
   const { data: posts = [], isLoading } = useQuery<any[]>({
     queryKey: ['/api/posts'],
@@ -251,12 +293,12 @@ export default function FeedPage() {
   });
 
   const createPostMutation = useMutation({
-    mutationFn: async (data: { content: string; imageUrl?: string }) => {
+    mutationFn: async (data: { content: string; imageUrl?: string; eventId?: string; venueId?: string }) => {
       return await apiRequest('POST', '/api/posts', data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/posts'] });
-      setCreatePostOpen(false);
+      handleCloseCreatePost();
       toast({
         title: "Post created",
         description: "Your post has been shared successfully.",
@@ -270,6 +312,12 @@ export default function FeedPage() {
       });
     },
   });
+
+  const handleCloseCreatePost = () => {
+    setCreatePostOpen(false);
+    setAttachedEvent(null);
+    setAttachedVenue(null);
+  };
 
   const handleNextStory = () => {
     if (viewingStory !== null && viewingStory < stories.length - 1) {
@@ -413,11 +461,15 @@ export default function FeedPage() {
 
       <CreatePostModal
         open={createPostOpen}
-        onClose={() => setCreatePostOpen(false)}
-        onCreatePost={(content, image) => {
+        onClose={handleCloseCreatePost}
+        attachedEvent={attachedEvent}
+        attachedVenue={attachedVenue}
+        onCreatePost={(content, image, eventId, venueId) => {
           createPostMutation.mutate({
             content,
             imageUrl: image,
+            eventId,
+            venueId,
           });
         }}
       />

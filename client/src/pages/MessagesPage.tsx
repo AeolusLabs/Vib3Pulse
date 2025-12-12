@@ -3,6 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
+import NewMessageModal from "@/components/NewMessageModal";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,7 +24,7 @@ import { format, formatDistanceToNow } from "date-fns";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
-import type { User, Message } from "@shared/schema";
+import type { User, Message, Event, Venue } from "@shared/schema";
 
 type Conversation = {
   otherUser: User;
@@ -37,6 +38,13 @@ type MessageWithUsers = Message & {
   replyTo?: Message & { sender: User };
 };
 
+type ShareData = {
+  type: "event" | "venue";
+  id: string;
+  title?: string;
+  name?: string;
+};
+
 export default function MessagesPage() {
   const { userId } = useParams<{ userId?: string }>();
   const [, navigate] = useLocation();
@@ -45,6 +53,9 @@ export default function MessagesPage() {
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
   const [replyingTo, setReplyingTo] = useState<MessageWithUsers | null>(null);
+  const [newMessageModalOpen, setNewMessageModalOpen] = useState(false);
+  const [attachedEvent, setAttachedEvent] = useState<Event | null>(null);
+  const [attachedVenue, setAttachedVenue] = useState<Venue | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -52,6 +63,44 @@ export default function MessagesPage() {
   const { toast } = useToast();
 
   const { data: currentUser } = useAuth();
+
+  // Check for shared event/venue data on mount
+  useEffect(() => {
+    const shareDataStr = sessionStorage.getItem("shareToMessage");
+    if (shareDataStr) {
+      try {
+        const shareData: ShareData = JSON.parse(shareDataStr);
+        sessionStorage.removeItem("shareToMessage");
+        
+        // Fetch the event or venue details
+        if (shareData.type === "event") {
+          fetch(`/api/events/${shareData.id}`)
+            .then(res => res.json())
+            .then(event => {
+              setAttachedEvent(event);
+              setNewMessageModalOpen(true);
+            })
+            .catch(console.error);
+        } else if (shareData.type === "venue") {
+          fetch(`/api/venues/${shareData.id}`)
+            .then(res => res.json())
+            .then(venue => {
+              setAttachedVenue(venue);
+              setNewMessageModalOpen(true);
+            })
+            .catch(console.error);
+        }
+      } catch (e) {
+        console.error("Failed to parse share data:", e);
+      }
+    }
+  }, []);
+
+  const handleCloseNewMessageModal = () => {
+    setNewMessageModalOpen(false);
+    setAttachedEvent(null);
+    setAttachedVenue(null);
+  };
 
   const { data: conversations = [], isLoading: conversationsLoading } = useQuery<Conversation[]>({
     queryKey: ['/api/messages'],
@@ -664,6 +713,13 @@ export default function MessagesPage() {
       </main>
 
       <BottomNavigation />
+
+      <NewMessageModal
+        open={newMessageModalOpen}
+        onClose={handleCloseNewMessageModal}
+        attachedEvent={attachedEvent}
+        attachedVenue={attachedVenue}
+      />
     </div>
   );
 }

@@ -1873,7 +1873,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Messages
   app.post("/api/messages", requireAuth, async (req, res) => {
     try {
-      const { receiverId, content, replyToId } = req.body;
+      const { receiverId, content, replyToId, eventId, venueId } = req.body;
       const senderId = req.user!.id;
       
       if (senderId === receiverId) {
@@ -1890,6 +1890,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         receiverId,
         content: sanitizedContent,
         replyToId: replyToId || null,
+        eventId: eventId || null,
+        venueId: venueId || null,
         isRead: false,
       });
       

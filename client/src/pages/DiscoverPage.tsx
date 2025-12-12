@@ -6,10 +6,11 @@ import HeroSection from "@/components/HeroSection";
 import FilterBar from "@/components/FilterBar";
 import EventDetailsModal from "@/components/EventDetailsModal";
 import CreateEventModal from "@/components/CreateEventModal";
+import ShareModal from "@/components/ShareModal";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar, MapPin, Users, Sparkles, Building2, Music, Clock, TrendingUp, Navigation2, Loader2, XCircle, RefreshCw } from "lucide-react";
+import { Calendar, MapPin, Users, Sparkles, Building2, Music, Clock, TrendingUp, Navigation2, Loader2, XCircle, RefreshCw, Share2 } from "lucide-react";
 import { format, isPast } from "date-fns";
 import { Link } from "wouter";
 import { useGeolocation } from "@/hooks/useGeolocation";
@@ -28,6 +29,30 @@ export default function DiscoverPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [createEventOpen, setCreateEventOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareEvent, setShareEvent] = useState<Event | null>(null);
+  const [shareVenue, setShareVenue] = useState<Venue | null>(null);
+
+  const handleShareEvent = (event: Event, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setShareEvent(event);
+    setShareVenue(null);
+    setShareModalOpen(true);
+  };
+
+  const handleShareVenue = (venue: Venue, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setShareVenue(venue);
+    setShareEvent(null);
+    setShareModalOpen(true);
+  };
+
+  const handleCloseShareModal = () => {
+    setShareModalOpen(false);
+    setShareEvent(null);
+    setShareVenue(null);
+  };
 
   const { 
     latitude, 
@@ -436,15 +461,25 @@ export default function DiscoverPage() {
                             £{(event.ticketPrice / 100).toFixed(2)}
                           </span>
                         )}
-                        <Button 
-                          size="sm" 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedEvent(event);
-                          }}
-                        >
-                          View Details
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          <Button 
+                            size="icon"
+                            variant="ghost"
+                            onClick={(e) => handleShareEvent(event, e)}
+                            data-testid={`button-share-featured-event-${event.id}`}
+                          >
+                            <Share2 className="h-4 w-4" />
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedEvent(event);
+                            }}
+                          >
+                            View Details
+                          </Button>
+                        </div>
                       </CardFooter>
                     </Card>
                   ))}
@@ -493,7 +528,7 @@ export default function DiscoverPage() {
                             {venue.category}
                           </Badge>
                         </CardHeader>
-                        <CardContent className="space-y-1 pb-3">
+                        <CardContent className="space-y-1 pb-2">
                           {venue.city && (
                             <div className="flex items-center gap-2 text-xs text-muted-foreground">
                               <MapPin className="h-3 w-3" />
@@ -507,6 +542,16 @@ export default function DiscoverPage() {
                             </div>
                           )}
                         </CardContent>
+                        <CardFooter className="pt-0 pb-3 flex justify-end">
+                          <Button 
+                            size="icon"
+                            variant="ghost"
+                            onClick={(e) => handleShareVenue(venue, e)}
+                            data-testid={`button-share-venue-${venue.id}`}
+                          >
+                            <Share2 className="h-4 w-4" />
+                          </Button>
+                        </CardFooter>
                       </Card>
                     </Link>
                   ))}
@@ -586,16 +631,26 @@ export default function DiscoverPage() {
                         £{(event.ticketPrice / 100).toFixed(2)}
                       </span>
                     )}
-                    <Button 
-                      size="sm" 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedEvent(event);
-                      }}
-                      data-testid={`button-view-event-${event.id}`}
-                    >
-                      View Details
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button 
+                        size="icon"
+                        variant="ghost"
+                        onClick={(e) => handleShareEvent(event, e)}
+                        data-testid={`button-share-event-${event.id}`}
+                      >
+                        <Share2 className="h-4 w-4" />
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedEvent(event);
+                        }}
+                        data-testid={`button-view-event-${event.id}`}
+                      >
+                        View Details
+                      </Button>
+                    </div>
                   </CardFooter>
                 </Card>
               ))}
@@ -626,6 +681,13 @@ export default function DiscoverPage() {
           onClose={() => setSelectedEvent(null)}
         />
       )}
+
+      <ShareModal
+        open={shareModalOpen}
+        onClose={handleCloseShareModal}
+        event={shareEvent}
+        venue={shareVenue}
+      />
     </div>
   );
 }

@@ -160,6 +160,7 @@ export const posts = pgTable("posts", {
   content: text("content").notNull(),
   imageUrl: text("image_url"),
   eventId: varchar("event_id").references(() => events.id),
+  venueId: varchar("venue_id").references(() => venues.id),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
@@ -322,6 +323,8 @@ export const messages = pgTable("messages", {
   receiverId: varchar("receiver_id").notNull().references(() => users.id),
   content: text("content").notNull(),
   replyToId: varchar("reply_to_id"),
+  eventId: varchar("event_id").references(() => events.id),
+  venueId: varchar("venue_id").references(() => venues.id),
   isRead: boolean("is_read").notNull().default(false),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
