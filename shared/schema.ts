@@ -246,6 +246,7 @@ export const stories = pgTable("stories", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
   imageUrl: text("image_url").notNull(),
+  caption: text("caption"),
   type: text("type").notNull().default("image"),
   privacy: text("privacy").notNull().default("public"), // "public" or "private"
   originalStoryId: varchar("original_story_id").references((): any => stories.id), // For reshared stories

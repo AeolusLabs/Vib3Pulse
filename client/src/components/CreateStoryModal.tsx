@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
-import { Camera, Upload, Globe, Lock, Users, Check, X } from "lucide-react";
+import { Camera, Upload, Globe, Lock, Users, Check, X, Type } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -32,6 +33,7 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
   const [privacy, setPrivacy] = useState<"public" | "private">("public");
   const [selectedViewers, setSelectedViewers] = useState<string[]>([]);
   const [showViewerSelection, setShowViewerSelection] = useState(false);
+  const [caption, setCaption] = useState("");
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const { toast } = useToast();
@@ -65,7 +67,7 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
   };
 
   const createStoryMutation = useMutation({
-    mutationFn: async (data: { imageUrl: string; type: string; privacy: string; allowedViewerIds?: string[] }) => {
+    mutationFn: async (data: { imageUrl: string; type: string; privacy: string; caption?: string; allowedViewerIds?: string[] }) => {
       return await apiRequest('POST', '/api/stories', data);
     },
     onSuccess: () => {
@@ -95,6 +97,7 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
     setShowViewerSelection(false);
     setShowFullscreenCamera(false);
     setIsUploading(false);
+    setCaption("");
     stopCamera();
   };
 
@@ -168,6 +171,7 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
           imageUrl,
           type: "image",
           privacy,
+          caption: caption.trim() || undefined,
           allowedViewerIds: privacy === "private" ? selectedViewers : undefined,
         });
       } catch (error) {
@@ -258,6 +262,38 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
                 alt="Story preview"
                 className="w-full h-full object-cover"
               />
+              {caption && (
+                <div className="absolute bottom-4 left-4 right-4 text-center">
+                  <p 
+                    className="text-white text-lg font-semibold px-3 py-2 bg-black/50 rounded-lg"
+                    style={{ textShadow: "1px 1px 2px rgba(0,0,0,0.8)" }}
+                  >
+                    {caption}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Caption Input */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Type className="h-4 w-4 text-muted-foreground" />
+                <Label htmlFor="story-caption" className="text-sm font-medium">
+                  Add caption (optional)
+                </Label>
+              </div>
+              <Textarea
+                id="story-caption"
+                value={caption}
+                onChange={(e) => setCaption(e.target.value.slice(0, 150))}
+                placeholder="Write something about your story..."
+                className="resize-none"
+                rows={2}
+                data-testid="input-story-caption"
+              />
+              <p className="text-xs text-muted-foreground text-right">
+                {caption.length}/150
+              </p>
             </div>
 
             {/* Privacy Settings */}

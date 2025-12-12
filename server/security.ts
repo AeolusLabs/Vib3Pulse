@@ -44,6 +44,8 @@ const CSRF_EXEMPT_PATHS = [
   "/api/webhooks/stripe",
   "/api/stripe/webhook",
   "/api/webhook",
+  "/api/stories/upload",
+  "/api/posts/upload",
 ];
 
 function isExemptFromCsrf(path: string): boolean {
