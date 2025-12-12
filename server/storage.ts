@@ -25,6 +25,12 @@ import {
   type InsertLike,
   type Comment,
   type InsertComment,
+  type CommentLike,
+  type InsertCommentLike,
+  type CommentReply,
+  type InsertCommentReply,
+  type CommentRepost,
+  type InsertCommentRepost,
   type Bookmark,
   type InsertBookmark,
   type Repost,
@@ -76,6 +82,9 @@ import {
   messages,
   likes,
   comments,
+  commentLikes,
+  commentReplies,
+  commentReposts,
   bookmarks,
   reposts,
   hashtags,
@@ -209,6 +218,21 @@ export interface IStorage {
   addComment(comment: InsertComment): Promise<Comment>;
   getPostComments(postId: string): Promise<Array<Comment & { user: User }>>;
   getCommentCount(postId: string): Promise<number>;
+  
+  // Comment interactions
+  likeComment(userId: string, commentId: string): Promise<CommentLike>;
+  unlikeComment(userId: string, commentId: string): Promise<void>;
+  hasUserLikedComment(userId: string, commentId: string): Promise<boolean>;
+  getCommentLikeCount(commentId: string): Promise<number>;
+  
+  addCommentReply(userId: string, commentId: string, content: string): Promise<CommentReply>;
+  getCommentReplies(commentId: string): Promise<Array<CommentReply & { user: User }>>;
+  getCommentReplyCount(commentId: string): Promise<number>;
+  
+  repostComment(userId: string, commentId: string): Promise<CommentRepost>;
+  unrepostComment(userId: string, commentId: string): Promise<void>;
+  hasUserRepostedComment(userId: string, commentId: string): Promise<boolean>;
+  getCommentRepostCount(commentId: string): Promise<number>;
   
   bookmarkPost(userId: string, postId: string): Promise<Bookmark>;
   unbookmarkPost(userId: string, postId: string): Promise<void>;
@@ -1267,6 +1291,105 @@ export class DbStorage implements IStorage {
 
   async getCommentCount(postId: string): Promise<number> {
     const result = await db.select().from(comments).where(eq(comments.postId, postId));
+    return result.length;
+  }
+
+  // ============================================
+  // COMMENT INTERACTION METHODS
+  // ============================================
+
+  async likeComment(userId: string, commentId: string): Promise<CommentLike> {
+    const result = await db.insert(commentLikes).values({
+      userId,
+      commentId,
+    }).returning();
+    return result[0];
+  }
+
+  async unlikeComment(userId: string, commentId: string): Promise<void> {
+    await db.delete(commentLikes).where(
+      and(
+        eq(commentLikes.userId, userId),
+        eq(commentLikes.commentId, commentId)
+      )
+    );
+  }
+
+  async hasUserLikedComment(userId: string, commentId: string): Promise<boolean> {
+    const result = await db.select().from(commentLikes).where(
+      and(
+        eq(commentLikes.userId, userId),
+        eq(commentLikes.commentId, commentId)
+      )
+    );
+    return result.length > 0;
+  }
+
+  async getCommentLikeCount(commentId: string): Promise<number> {
+    const result = await db.select().from(commentLikes).where(eq(commentLikes.commentId, commentId));
+    return result.length;
+  }
+
+  async addCommentReply(userId: string, commentId: string, content: string): Promise<CommentReply> {
+    const result = await db.insert(commentReplies).values({
+      userId,
+      commentId,
+      content,
+    }).returning();
+    return result[0];
+  }
+
+  async getCommentReplies(commentId: string): Promise<Array<CommentReply & { user: User }>> {
+    const result = await db
+      .select()
+      .from(commentReplies)
+      .innerJoin(users, eq(commentReplies.userId, users.id))
+      .where(eq(commentReplies.commentId, commentId))
+      .orderBy(commentReplies.createdAt);
+    
+    return result.map(row => {
+      const { passwordHash, ...userWithoutPassword } = row.users;
+      return {
+        ...row.comment_replies,
+        user: userWithoutPassword as User,
+      };
+    });
+  }
+
+  async getCommentReplyCount(commentId: string): Promise<number> {
+    const result = await db.select().from(commentReplies).where(eq(commentReplies.commentId, commentId));
+    return result.length;
+  }
+
+  async repostComment(userId: string, commentId: string): Promise<CommentRepost> {
+    const result = await db.insert(commentReposts).values({
+      userId,
+      commentId,
+    }).returning();
+    return result[0];
+  }
+
+  async unrepostComment(userId: string, commentId: string): Promise<void> {
+    await db.delete(commentReposts).where(
+      and(
+        eq(commentReposts.userId, userId),
+        eq(commentReposts.commentId, commentId)
+      )
+    );
+  }
+
+  async hasUserRepostedComment(userId: string, commentId: string): Promise<boolean> {
+    const result = await db.select().from(commentReposts).where(
+      and(
+        eq(commentReposts.userId, userId),
+        eq(commentReposts.commentId, commentId)
+      )
+    );
+    return result.length > 0;
+  }
+
+  async getCommentRepostCount(commentId: string): Promise<number> {
+    const result = await db.select().from(commentReposts).where(eq(commentReposts.commentId, commentId));
     return result.length;
   }
 
