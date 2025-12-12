@@ -495,7 +495,7 @@ export default function FeedPost({
               className="mt-3 border-2 border-primary/30 bg-primary/5 cursor-pointer hover-elevate"
               onClick={(e) => {
                 e.stopPropagation();
-                navigate(`/events/${displayEvent.id}`);
+                navigate(`/discover?event=${displayEvent.id}`);
               }}
               data-testid={`attached-event-${id}`}
             >
@@ -533,7 +533,7 @@ export default function FeedPost({
               className="mt-3 border-2 border-primary/30 bg-primary/5 cursor-pointer hover-elevate"
               onClick={(e) => {
                 e.stopPropagation();
-                navigate(`/venues/${displayVenue.id}`);
+                navigate(`/discover?venue=${displayVenue.id}`);
               }}
               data-testid={`attached-venue-${id}`}
             >

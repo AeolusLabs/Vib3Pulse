@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar, MapPin, Users, Sparkles, Building2, Music, Clock, TrendingUp, Navigation2, Loader2, XCircle, RefreshCw, Share2 } from "lucide-react";
 import { format, isPast } from "date-fns";
-import { Link } from "wouter";
+import { Link, useSearch } from "wouter";
 import { useGeolocation } from "@/hooks/useGeolocation";
 import type { Event, Venue } from "@shared/schema";
 
@@ -32,6 +32,13 @@ export default function DiscoverPage() {
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [shareEvent, setShareEvent] = useState<Event | null>(null);
   const [shareVenue, setShareVenue] = useState<Venue | null>(null);
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  
+  // Parse query parameters for shared event/venue
+  const searchString = useSearch();
+  const urlParams = new URLSearchParams(searchString);
+  const sharedEventId = urlParams.get("event");
+  const sharedVenueId = urlParams.get("venue");
 
   const handleShareEvent = (event: Event, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -73,6 +80,69 @@ export default function DiscoverPage() {
       // Don't auto-request, let user click the button
     }
   }, [permissionStatus]);
+
+  // Scroll to and highlight shared event/venue when loaded from URL params
+  // Prioritize venue if both exist (edge case), but typically only one should be present
+  useEffect(() => {
+    // Determine which param to use - prefer venue for venue links, event for event links
+    // If somehow both exist, venue takes precedence (arbitrary but consistent)
+    let targetId: string | null = null;
+    let type: "event" | "venue" | null = null;
+    
+    if (sharedVenueId) {
+      targetId = sharedVenueId;
+      type = "venue";
+    } else if (sharedEventId) {
+      targetId = sharedEventId;
+      type = "event";
+    }
+    
+    if (!targetId || !type) return;
+
+    // Try different possible element IDs
+    const possibleIds = type === "event" 
+      ? [`event-card-${targetId}`, `featured-event-card-${targetId}`]
+      : [`featured-venue-card-${targetId}`, `venue-card-${targetId}`];
+    
+    // Set highlight state (also used for auto-clearing after 5s)
+    setHighlightedId(targetId);
+    
+    // Retry finding and scrolling to element (content might take time to load)
+    let attempts = 0;
+    const maxAttempts = 20;
+    let highlightTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    
+    const tryScroll = () => {
+      for (const elementId of possibleIds) {
+        const element = document.querySelector(`[data-testid="${elementId}"]`);
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth", block: "center" });
+          return true;
+        }
+      }
+      return false;
+    };
+    
+    const scrollInterval = setInterval(() => {
+      attempts++;
+      if (tryScroll()) {
+        clearInterval(scrollInterval);
+        // Only start the removal timer AFTER element is found
+        highlightTimeoutId = setTimeout(() => setHighlightedId(null), 5000);
+      } else if (attempts >= maxAttempts) {
+        clearInterval(scrollInterval);
+        // Also clear highlight if element never found
+        setHighlightedId(null);
+      }
+    }, 300);
+
+    return () => {
+      clearInterval(scrollInterval);
+      if (highlightTimeoutId) {
+        clearTimeout(highlightTimeoutId);
+      }
+    };
+  }, [sharedEventId, sharedVenueId]);
 
   // Standard events query
   const { data: events = [], isLoading } = useQuery<Event[]>({
@@ -407,10 +477,12 @@ export default function DiscoverPage() {
                   <h2 className="text-xl font-semibold">Featured Events</h2>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" data-testid="featured-events-grid">
-                  {filteredPromotedEvents.map((event) => (
+                  {filteredPromotedEvents.map((event) => {
+                    const isFeaturedEventHighlighted = sharedEventId === String(event.id) || highlightedId === String(event.id);
+                    return (
                     <Card 
                       key={event.id} 
-                      className="hover-elevate cursor-pointer overflow-hidden border-2 border-purple-300 bg-gradient-to-br from-purple-50/50 to-pink-50/50 dark:from-purple-950/20 dark:to-pink-950/20"
+                      className={`hover-elevate cursor-pointer overflow-hidden border-2 border-purple-300 bg-gradient-to-br from-purple-50/50 to-pink-50/50 dark:from-purple-950/20 dark:to-pink-950/20 transition-all duration-500 ${isFeaturedEventHighlighted ? 'ring-4 ring-primary ring-offset-2 scale-[1.02]' : ''}`}
                       onClick={() => setSelectedEvent(event)}
                       data-testid={`featured-event-card-${event.id}`}
                     >
@@ -482,7 +554,8 @@ export default function DiscoverPage() {
                         </div>
                       </CardFooter>
                     </Card>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -498,10 +571,13 @@ export default function DiscoverPage() {
                   )}
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6" data-testid="featured-venues-grid">
-                  {displayVenues.map((venue) => (
+                  {displayVenues.map((venue) => {
+                    // Use sharedVenueId directly for initial highlight (more reliable than async state)
+                    const isHighlighted = sharedVenueId === String(venue.id) || highlightedId === String(venue.id);
+                    return (
                     <Link key={venue.id} href={`/venue/${venue.id}`}>
                       <Card 
-                        className="hover-elevate cursor-pointer overflow-hidden border-2 border-purple-300 bg-gradient-to-br from-purple-50/50 to-pink-50/50 dark:from-purple-950/20 dark:to-pink-950/20"
+                        className={`hover-elevate cursor-pointer overflow-hidden border-2 border-purple-300 bg-gradient-to-br from-purple-50/50 to-pink-50/50 dark:from-purple-950/20 dark:to-pink-950/20 transition-all duration-500 ${isHighlighted ? 'ring-4 ring-primary ring-offset-2 scale-[1.02]' : ''}`}
                         data-testid={`featured-venue-card-${venue.id}`}
                       >
                         {(venue.coverImageUrl || venue.imageUrl) && (
@@ -554,7 +630,8 @@ export default function DiscoverPage() {
                         </CardFooter>
                       </Card>
                     </Link>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -572,10 +649,12 @@ export default function DiscoverPage() {
               </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" data-testid="events-grid">
-              {filteredEvents.map((event) => (
+              {filteredEvents.map((event) => {
+                const isEventHighlighted = sharedEventId === String(event.id) || highlightedId === String(event.id);
+                return (
                 <Card 
                   key={event.id} 
-                  className="hover-elevate cursor-pointer overflow-hidden"
+                  className={`hover-elevate cursor-pointer overflow-hidden transition-all duration-500 ${isEventHighlighted ? 'ring-4 ring-primary ring-offset-2 scale-[1.02]' : ''}`}
                   onClick={() => setSelectedEvent(event)}
                   data-testid={`event-card-${event.id}`}
                 >
@@ -653,7 +732,8 @@ export default function DiscoverPage() {
                     </div>
                   </CardFooter>
                 </Card>
-              ))}
+                );
+              })}
             </div>
 
             {filteredEvents.length === 0 && (
