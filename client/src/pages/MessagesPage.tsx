@@ -19,7 +19,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Send, ArrowLeft, Check, CheckCheck, Search, UserPlus, Reply, X } from "lucide-react";
+import { Send, ArrowLeft, Check, CheckCheck, Search, UserPlus, Reply, X, Calendar, MapPin, Building2 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -45,6 +45,100 @@ type ShareData = {
   name?: string;
 };
 
+// Helper component to display attached event in message
+function MessageAttachedEvent({ eventId, isOwnMessage }: { eventId: string; isOwnMessage: boolean }) {
+  const [, navigate] = useLocation();
+  const { data: event } = useQuery<Event>({
+    queryKey: ['/api/events', eventId],
+    enabled: !!eventId,
+  });
+
+  if (!event) return null;
+
+  return (
+    <div 
+      className={`mt-2 p-2 rounded-lg cursor-pointer ${
+        isOwnMessage 
+          ? 'bg-primary-foreground/20 hover:bg-primary-foreground/30' 
+          : 'bg-background/50 hover:bg-background/70'
+      }`}
+      onClick={(e) => {
+        e.stopPropagation();
+        navigate(`/events/${event.id}`);
+      }}
+    >
+      <div className="flex gap-2">
+        {event.imageUrl && (
+          <img 
+            src={event.imageUrl} 
+            alt={event.title}
+            className="w-12 h-12 rounded object-cover flex-shrink-0"
+          />
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1 mb-0.5">
+            <Calendar className="h-3 w-3" />
+            <span className="text-xs font-medium">Event</span>
+          </div>
+          <p className="text-sm font-medium line-clamp-1">{event.title}</p>
+          <p className="text-xs opacity-70 flex items-center gap-1">
+            <MapPin className="h-3 w-3" />
+            <span className="line-clamp-1">{event.location}</span>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Helper component to display attached venue in message
+function MessageAttachedVenue({ venueId, isOwnMessage }: { venueId: string; isOwnMessage: boolean }) {
+  const [, navigate] = useLocation();
+  const { data: venue } = useQuery<Venue>({
+    queryKey: ['/api/venues', venueId],
+    enabled: !!venueId,
+  });
+
+  if (!venue) return null;
+
+  return (
+    <div 
+      className={`mt-2 p-2 rounded-lg cursor-pointer ${
+        isOwnMessage 
+          ? 'bg-primary-foreground/20 hover:bg-primary-foreground/30' 
+          : 'bg-background/50 hover:bg-background/70'
+      }`}
+      onClick={(e) => {
+        e.stopPropagation();
+        navigate(`/venues/${venue.id}`);
+      }}
+    >
+      <div className="flex gap-2">
+        {(venue.coverImageUrl || venue.imageUrl) && (
+          <img 
+            src={venue.coverImageUrl || venue.imageUrl || ""} 
+            alt={venue.name}
+            className="w-12 h-12 rounded object-cover flex-shrink-0"
+          />
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1 mb-0.5">
+            <Building2 className="h-3 w-3" />
+            <span className="text-xs font-medium">Venue</span>
+          </div>
+          <p className="text-sm font-medium line-clamp-1">{venue.name}</p>
+          {venue.city && (
+            <p className="text-xs opacity-70 flex items-center gap-1">
+              <MapPin className="h-3 w-3" />
+              <span className="line-clamp-1">{venue.city}</span>
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function MessagesPage() {
   const { userId } = useParams<{ userId?: string }>();
   const [, navigate] = useLocation();
@@ -64,37 +158,65 @@ export default function MessagesPage() {
 
   const { data: currentUser } = useAuth();
 
-  // Check for shared event/venue data on mount
+  // Check for shared event/venue data on every navigation to this page
+  // Use localStorage to persist across login redirects
   useEffect(() => {
-    const shareDataStr = sessionStorage.getItem("shareToMessage");
-    if (shareDataStr) {
-      try {
-        const shareData: ShareData = JSON.parse(shareDataStr);
-        sessionStorage.removeItem("shareToMessage");
-        
-        // Fetch the event or venue details
-        if (shareData.type === "event") {
-          fetch(`/api/events/${shareData.id}`)
-            .then(res => res.json())
-            .then(event => {
-              setAttachedEvent(event);
-              setNewMessageModalOpen(true);
-            })
-            .catch(console.error);
-        } else if (shareData.type === "venue") {
-          fetch(`/api/venues/${shareData.id}`)
-            .then(res => res.json())
-            .then(venue => {
-              setAttachedVenue(venue);
-              setNewMessageModalOpen(true);
-            })
-            .catch(console.error);
+    const checkShareData = () => {
+      const shareDataStr = localStorage.getItem("shareToMessage");
+      if (shareDataStr) {
+        try {
+          const shareData: ShareData = JSON.parse(shareDataStr);
+          // Don't remove yet - wait until modal is successfully opened
+          
+          // Fetch the event or venue details
+          if (shareData.type === "event") {
+            fetch(`/api/events/${shareData.id}`)
+              .then(res => res.json())
+              .then(event => {
+                setAttachedEvent(event);
+                setNewMessageModalOpen(true);
+                localStorage.removeItem("shareToMessage"); // Clear after successful open
+              })
+              .catch(err => {
+                console.error("Failed to fetch event:", err);
+                localStorage.removeItem("shareToMessage");
+              });
+          } else if (shareData.type === "venue") {
+            fetch(`/api/venues/${shareData.id}`)
+              .then(res => res.json())
+              .then(venue => {
+                setAttachedVenue(venue);
+                setNewMessageModalOpen(true);
+                localStorage.removeItem("shareToMessage");
+              })
+              .catch(err => {
+                console.error("Failed to fetch venue:", err);
+                localStorage.removeItem("shareToMessage");
+              });
+          }
+        } catch (e) {
+          console.error("Failed to parse share data:", e);
+          localStorage.removeItem("shareToMessage");
         }
-      } catch (e) {
-        console.error("Failed to parse share data:", e);
       }
-    }
-  }, []);
+    };
+
+    // Check immediately on mount/navigation
+    checkShareData();
+    
+    // Also check when the page becomes visible (for when user returns via back button)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkShareData();
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [userId]);
 
   const handleCloseNewMessageModal = () => {
     setNewMessageModalOpen(false);
@@ -514,6 +636,13 @@ export default function MessagesPage() {
         </main>
 
         <BottomNavigation />
+        
+        <NewMessageModal
+          open={newMessageModalOpen}
+          onClose={handleCloseNewMessageModal}
+          attachedEvent={attachedEvent}
+          attachedVenue={attachedVenue}
+        />
       </div>
     );
   }
@@ -618,6 +747,15 @@ export default function MessagesPage() {
                             {senderName}
                           </p>
                           <p className="break-words">{message.content}</p>
+                          
+                          {(message as any).eventId && (
+                            <MessageAttachedEvent eventId={(message as any).eventId} isOwnMessage={isOwnMessage} />
+                          )}
+                          
+                          {(message as any).venueId && (
+                            <MessageAttachedVenue venueId={(message as any).venueId} isOwnMessage={isOwnMessage} />
+                          )}
+                          
                           <div className={`flex items-center gap-1 mt-1 ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
                             <p className={`text-xs ${isOwnMessage ? 'text-primary-foreground/90' : 'text-muted-foreground'}`}>
                               {formatMessageTime(message.createdAt)}

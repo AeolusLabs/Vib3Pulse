@@ -148,6 +148,67 @@ export default function NewMessageModal({
 
         {!selectedUser ? (
           <div className="flex-1 flex flex-col min-h-0">
+            {(attachedEvent || attachedVenue) && (
+              <div className="mb-4">
+                <p className="text-sm text-muted-foreground mb-2">You're sharing:</p>
+                {attachedEvent && (
+                  <Card className="border-2 border-primary/30 bg-primary/5">
+                    <CardContent className="p-3">
+                      <div className="flex gap-3">
+                        {attachedEvent.imageUrl && (
+                          <img 
+                            src={attachedEvent.imageUrl} 
+                            alt={attachedEvent.title}
+                            className="w-14 h-14 rounded-lg object-cover flex-shrink-0"
+                          />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <Badge variant="secondary" className="mb-1 text-xs">
+                            <Calendar className="h-3 w-3 mr-1" />
+                            Event
+                          </Badge>
+                          <h4 className="font-semibold text-sm line-clamp-1">{attachedEvent.title}</h4>
+                          <p className="text-xs text-muted-foreground flex items-center gap-1">
+                            <MapPin className="h-3 w-3" />
+                            <span className="line-clamp-1">{attachedEvent.location}</span>
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+                {attachedVenue && (
+                  <Card className="border-2 border-primary/30 bg-primary/5">
+                    <CardContent className="p-3">
+                      <div className="flex gap-3">
+                        {(attachedVenue.coverImageUrl || attachedVenue.imageUrl) && (
+                          <img 
+                            src={attachedVenue.coverImageUrl || attachedVenue.imageUrl || ""} 
+                            alt={attachedVenue.name}
+                            className="w-14 h-14 rounded-lg object-cover flex-shrink-0"
+                          />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <Badge variant="secondary" className="mb-1 text-xs">
+                            <Building2 className="h-3 w-3 mr-1" />
+                            Venue
+                          </Badge>
+                          <h4 className="font-semibold text-sm line-clamp-1">{attachedVenue.name}</h4>
+                          {attachedVenue.city && (
+                            <p className="text-xs text-muted-foreground flex items-center gap-1">
+                              <MapPin className="h-3 w-3" />
+                              <span className="line-clamp-1">{attachedVenue.city}</span>
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            )}
+            
+            <p className="text-sm font-medium mb-2">Select a follower to send to:</p>
             <div className="relative mb-3">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -159,7 +220,7 @@ export default function NewMessageModal({
               />
             </div>
 
-            <ScrollArea className="flex-1 max-h-[300px]">
+            <ScrollArea className="flex-1 max-h-[250px]">
               {followingLoading ? (
                 <div className="text-center py-8">
                   <p className="text-muted-foreground text-sm">Loading followers...</p>

@@ -1,7 +1,8 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Heart, MessageCircle, Share2, Bookmark, Repeat2 } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Heart, MessageCircle, Share2, Bookmark, Repeat2, Calendar, MapPin, Building2 } from "lucide-react";
 import { useState, useEffect, Fragment } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -9,6 +10,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import CommentDialog from "@/components/CommentDialog";
 import { format } from "date-fns";
+import type { Event, Venue } from "@shared/schema";
 
 function formatRelativeTime(date: Date | string): string {
   const now = new Date();
@@ -64,6 +66,10 @@ interface FeedPostProps {
     username: string;
     userId?: string;
   };
+  eventId?: string | null;
+  venueId?: string | null;
+  attachedEvent?: Event | null;
+  attachedVenue?: Venue | null;
   onPostClick?: () => void;
 }
 
@@ -136,6 +142,10 @@ export default function FeedPost({
   isLiked: initialIsLiked = false,
   isRepost = false,
   repostedBy,
+  eventId,
+  venueId,
+  attachedEvent,
+  attachedVenue,
   onPostClick,
 }: FeedPostProps) {
   const [, navigate] = useLocation();
@@ -188,6 +198,22 @@ export default function FeedPost({
       }
     },
   });
+
+  // Fetch attached event if we have an eventId but no attachedEvent prop
+  const { data: fetchedEvent } = useQuery<Event>({
+    queryKey: ['/api/events', eventId],
+    enabled: !!eventId && !attachedEvent,
+  });
+
+  // Fetch attached venue if we have a venueId but no attachedVenue prop
+  const { data: fetchedVenue } = useQuery<Venue>({
+    queryKey: ['/api/venues', venueId],
+    enabled: !!venueId && !attachedVenue,
+  });
+
+  // Use provided attached data or fetched data
+  const displayEvent = attachedEvent || fetchedEvent;
+  const displayVenue = attachedVenue || fetchedVenue;
 
   // Like/Unlike mutations with optimistic updates
   const likeMutation = useMutation({
@@ -462,6 +488,81 @@ export default function FeedPost({
               className="mt-3 rounded-md w-full max-h-96 object-cover"
               data-testid={`img-post-${id}`}
             />
+          )}
+
+          {displayEvent && (
+            <Card 
+              className="mt-3 border-2 border-primary/30 bg-primary/5 cursor-pointer hover-elevate"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`/events/${displayEvent.id}`);
+              }}
+              data-testid={`attached-event-${id}`}
+            >
+              <CardContent className="p-3">
+                <div className="flex gap-3">
+                  {displayEvent.imageUrl && (
+                    <img 
+                      src={displayEvent.imageUrl} 
+                      alt={displayEvent.title}
+                      className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
+                    />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <Badge variant="secondary" className="mb-1 text-xs">
+                      <Calendar className="h-3 w-3 mr-1" />
+                      Event
+                    </Badge>
+                    <h4 className="font-semibold text-sm line-clamp-1">{displayEvent.title}</h4>
+                    <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
+                      <Calendar className="h-3 w-3" />
+                      {format(new Date(displayEvent.eventDate), "MMM d, yyyy")}
+                    </p>
+                    <p className="text-xs text-muted-foreground flex items-center gap-1">
+                      <MapPin className="h-3 w-3" />
+                      <span className="line-clamp-1">{displayEvent.location}</span>
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {displayVenue && (
+            <Card 
+              className="mt-3 border-2 border-primary/30 bg-primary/5 cursor-pointer hover-elevate"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`/venues/${displayVenue.id}`);
+              }}
+              data-testid={`attached-venue-${id}`}
+            >
+              <CardContent className="p-3">
+                <div className="flex gap-3">
+                  {(displayVenue.coverImageUrl || displayVenue.imageUrl) && (
+                    <img 
+                      src={displayVenue.coverImageUrl || displayVenue.imageUrl || ""} 
+                      alt={displayVenue.name}
+                      className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
+                    />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <Badge variant="secondary" className="mb-1 text-xs">
+                      <Building2 className="h-3 w-3 mr-1" />
+                      Venue
+                    </Badge>
+                    <h4 className="font-semibold text-sm line-clamp-1">{displayVenue.name}</h4>
+                    <p className="text-xs text-muted-foreground">{displayVenue.category}</p>
+                    {displayVenue.city && (
+                      <p className="text-xs text-muted-foreground flex items-center gap-1">
+                        <MapPin className="h-3 w-3" />
+                        <span className="line-clamp-1">{displayVenue.city}</span>
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           )}
 
           <div className="flex items-center gap-1 mt-3">

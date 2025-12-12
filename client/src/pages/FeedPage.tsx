@@ -423,6 +423,8 @@ export default function FeedPage() {
                 comments={0}
                 isLiked={false}
                 image={post.imageUrl}
+                eventId={post.eventId}
+                venueId={post.venueId}
                 onPostClick={() => setSelectedPost(post)}
               />
             ))
