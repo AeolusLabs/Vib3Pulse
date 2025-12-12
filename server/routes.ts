@@ -1271,6 +1271,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Fix ACL on existing story images that are missing public visibility
+  app.post("/api/stories/fix-acl", requireAuth, async (req, res) => {
+    try {
+      const objectStorageService = new ObjectStorageService();
+      const allStories = await storage.getActiveStories(req.user!.id);
+      const userStories = allStories.filter(s => s.userId === req.user!.id);
+      
+      let fixed = 0;
+      for (const story of userStories) {
+        if (story.imageUrl && story.imageUrl.startsWith('/objects/')) {
+          try {
+            await objectStorageService.trySetObjectEntityAclPolicy(story.imageUrl, {
+              owner: req.user!.id,
+              visibility: "public",
+            });
+            fixed++;
+          } catch (err) {
+            console.error(`Failed to fix ACL for story ${story.id}:`, err);
+          }
+        }
+      }
+      
+      res.json({ message: `Fixed ACL on ${fixed} story images` });
+    } catch (error) {
+      console.error("Fix ACL error:", error);
+      res.status(500).json({ message: "Failed to fix story ACLs" });
+    }
+  });
+
   app.delete("/api/stories/:id", requireAuth, async (req, res) => {
     try {
       const stories = await storage.getUserStories(req.user!.id);
