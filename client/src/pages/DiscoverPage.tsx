@@ -9,7 +9,7 @@ import CreateEventModal from "@/components/CreateEventModal";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar, MapPin, Users, Sparkles, Building2, Music, Clock, TrendingUp, Navigation2, Loader2 } from "lucide-react";
+import { Calendar, MapPin, Users, Sparkles, Building2, Music, Clock, TrendingUp, Navigation2, Loader2, XCircle, RefreshCw } from "lucide-react";
 import { format, isPast } from "date-fns";
 import { Link } from "wouter";
 import { useGeolocation } from "@/hooks/useGeolocation";
@@ -37,6 +37,7 @@ export default function DiscoverPage() {
     error: locationError,
     permissionStatus,
     requestLocation,
+    clearLocation,
     hasLocation,
     formatDistance 
   } = useGeolocation();
@@ -170,7 +171,7 @@ export default function DiscoverPage() {
       <HeroSection onSearch={setSearchQuery} onCategoryClick={setSelectedCategory} />
       
       <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Location Banner */}
+        {/* Location Banner - Prompt state */}
         {!hasLocation && permissionStatus !== "denied" && (
           <div className="mb-6 p-4 rounded-lg bg-gradient-to-r from-purple-100 to-pink-100 dark:from-purple-950/40 dark:to-pink-950/40 border border-purple-200 dark:border-purple-800">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
@@ -205,6 +206,36 @@ export default function DiscoverPage() {
             {locationError && (
               <p className="text-xs text-destructive mt-2">{locationError}</p>
             )}
+          </div>
+        )}
+
+        {/* Location Banner - Denied state */}
+        {permissionStatus === "denied" && (
+          <div className="mb-6 p-4 rounded-lg bg-gradient-to-r from-amber-100 to-orange-100 dark:from-amber-950/40 dark:to-orange-950/40 border border-amber-300 dark:border-amber-800">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-full bg-amber-200 dark:bg-amber-800">
+                  <XCircle className="h-5 w-5 text-amber-600 dark:text-amber-300" />
+                </div>
+                <div>
+                  <p className="font-medium text-sm">Location Access Denied</p>
+                  <p className="text-xs text-muted-foreground">
+                    To see nearby events, please enable location in your browser settings and refresh the page.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  onClick={clearLocation}
+                  data-testid="button-clear-location"
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Reset & Try Again
+                </Button>
+              </div>
+            </div>
           </div>
         )}
 
