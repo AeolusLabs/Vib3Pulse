@@ -2216,6 +2216,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return true;
   }, { message: "Invalid coordinates" });
 
+  // Helper function to reverse geocode coordinates to a readable location name
+  async function reverseGeocodeLocation(lat: string, lon: string): Promise<string | null> {
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&addressdetails=1`,
+        {
+          headers: {
+            "User-Agent": "VibePulse/1.0",
+          },
+        }
+      );
+      if (!response.ok) return null;
+      
+      const data = await response.json();
+      const address = data.address;
+      
+      // Build a readable location string
+      const parts: string[] = [];
+      if (address?.road || address?.street) parts.push(address.road || address.street);
+      if (address?.suburb || address?.neighbourhood) parts.push(address.suburb || address.neighbourhood);
+      if (address?.city || address?.town || address?.village) parts.push(address.city || address.town || address.village);
+      if (address?.county) parts.push(address.county);
+      
+      return parts.length > 0 ? parts.slice(0, 3).join(", ") : null;
+    } catch (error) {
+      console.error("Reverse geocoding error:", error);
+      return null;
+    }
+  }
+
   app.post("/api/buddy/trigger-alert", requireAuth, async (req, res) => {
     try {
       const validation = triggerAlertSchema.safeParse(req.body);
@@ -2234,6 +2264,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const distressMessage = await storage.getDistressMessage(userId);
       const message = distressMessage || "I need help! Please check on me.";
 
+      // Get readable location name if coordinates provided
+      let locationName: string | null = null;
+      if (latitude && longitude) {
+        locationName = await reverseGeocodeLocation(latitude, longitude);
+      }
+
       // Log the alert
       await storage.logDistressAlert(userId, buddy.id, message, latitude || undefined, longitude || undefined);
 
@@ -2242,6 +2278,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const mapLink = latitude && longitude 
         ? `https://www.google.com/maps?q=${latitude},${longitude}`
         : null;
+      
+      // Build the location message
+      const locationMessage = locationName 
+        ? ` They are near ${locationName}.`
+        : (mapLink ? " Location shared." : "");
 
       wsManager.sendToUser(buddy.id, {
         type: "distress_alert",
@@ -2251,17 +2292,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           message,
           latitude,
           longitude,
+          locationName,
           mapLink,
           timestamp: new Date().toISOString(),
         },
       });
 
-      // Create persistent notification for buddy
+      // Create persistent notification for buddy with readable location
       await storage.createNotification({
         userId: buddy.id,
         type: "buddy_alert",
         title: "Buddy Alert",
-        message: `${user?.displayName || user?.username || "Your buddy"} needs help!${mapLink ? " Location shared." : ""}`,
+        message: `${user?.displayName || user?.username || "Your buddy"} needs help!${locationMessage}`,
         link: mapLink || `/buddy`,
         relatedUserId: userId,
         relatedEntityId: userId,
