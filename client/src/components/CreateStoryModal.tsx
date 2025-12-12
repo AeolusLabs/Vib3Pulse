@@ -45,34 +45,22 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
   const [isUploading, setIsUploading] = useState(false);
 
   const uploadImageToStorage = async (imageDataUrl: string): Promise<string> => {
-    const response = await fetch('/api/stories/upload-url', {
+    // Use server-side upload to bypass CORS issues with direct GCS uploads
+    const response = await fetch('/api/stories/upload', {
+      method: 'POST',
       credentials: 'include',
-    });
-    if (!response.ok) {
-      throw new Error('Failed to get upload URL');
-    }
-    const { uploadURL, stablePath } = await response.json();
-    
-    const base64Data = imageDataUrl.split(',')[1];
-    const binaryString = atob(base64Data);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    const blob = new Blob([bytes], { type: 'image/jpeg' });
-    
-    const uploadResponse = await fetch(uploadURL, {
-      method: 'PUT',
-      body: blob,
       headers: {
-        'Content-Type': 'image/jpeg',
+        'Content-Type': 'application/json',
       },
+      body: JSON.stringify({ imageData: imageDataUrl }),
     });
     
-    if (!uploadResponse.ok) {
-      throw new Error('Failed to upload image');
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Upload failed' }));
+      throw new Error(error.message || 'Failed to upload image');
     }
     
+    const { stablePath } = await response.json();
     return stablePath;
   };
 
@@ -438,6 +426,13 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
         open={showFullscreenCamera}
         onClose={() => setShowFullscreenCamera(false)}
         onCapture={handleCameraCapture}
+        onSwitchToUpload={() => {
+          // Trigger the file upload input
+          const fileInput = document.getElementById('story-image-upload') as HTMLInputElement;
+          if (fileInput) {
+            fileInput.click();
+          }
+        }}
       />
     </Dialog>
   );

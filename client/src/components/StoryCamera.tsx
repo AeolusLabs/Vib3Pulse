@@ -18,6 +18,7 @@ interface StoryCameraProps {
   open: boolean;
   onClose: () => void;
   onCapture: (imageDataUrl: string) => void;
+  onSwitchToUpload?: () => void;
 }
 
 const TEXT_COLORS = [
@@ -32,7 +33,7 @@ const TEXT_COLORS = [
 
 const FONT_SIZES = [24, 32, 48, 64];
 
-export default function StoryCamera({ open, onClose, onCapture }: StoryCameraProps) {
+export default function StoryCamera({ open, onClose, onCapture, onSwitchToUpload }: StoryCameraProps) {
   const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
   const [flashEnabled, setFlashEnabled] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
@@ -57,6 +58,12 @@ export default function StoryCamera({ open, onClose, onCapture }: StoryCameraPro
         streamRef.current.getTracks().forEach(track => track.stop());
       }
 
+      // Check if mediaDevices is available
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setCameraError("Camera not available. Please use the upload option instead, or try on a device with a camera.");
+        return;
+      }
+
       const constraints: MediaStreamConstraints = {
         video: {
           facingMode: facingMode,
@@ -73,9 +80,33 @@ export default function StoryCamera({ open, onClose, onCapture }: StoryCameraPro
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error accessing camera:", error);
-      setCameraError("Unable to access camera. Please check permissions and try again.");
+      
+      // Provide specific error messages based on the error type
+      if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+        setCameraError("Camera permission denied. Please allow camera access in your browser settings and try again.");
+      } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+        setCameraError("No camera found. Please connect a camera or use the upload option instead.");
+      } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+        setCameraError("Camera is in use by another application. Please close other apps using the camera and try again.");
+      } else if (error.name === 'OverconstrainedError') {
+        setCameraError("Camera doesn't support the requested settings. Trying with basic settings...");
+        // Try with simpler constraints
+        try {
+          const simpleStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+          streamRef.current = simpleStream;
+          if (videoRef.current) {
+            videoRef.current.srcObject = simpleStream;
+            await videoRef.current.play();
+          }
+          setCameraError(null);
+        } catch {
+          setCameraError("Unable to access camera. Please use the upload option instead.");
+        }
+      } else {
+        setCameraError("Unable to access camera. Please check permissions or use the upload option instead.");
+      }
     }
   }, [facingMode]);
 
@@ -361,11 +392,26 @@ export default function StoryCamera({ open, onClose, onCapture }: StoryCameraPro
                 />
                 {cameraError && (
                   <div className="absolute inset-0 flex items-center justify-center bg-black/80 p-8">
-                    <div className="text-center text-white">
-                      <p className="text-lg mb-4">{cameraError}</p>
-                      <Button onClick={startCamera} variant="secondary">
-                        Try Again
-                      </Button>
+                    <div className="text-center text-white max-w-sm">
+                      <p className="text-lg mb-6">{cameraError}</p>
+                      <div className="flex flex-col gap-3">
+                        <Button onClick={startCamera} variant="secondary" data-testid="button-try-camera-again">
+                          Try Again
+                        </Button>
+                        {onSwitchToUpload && (
+                          <Button 
+                            onClick={() => {
+                              handleClose();
+                              onSwitchToUpload();
+                            }} 
+                            variant="outline"
+                            className="border-white/30 text-white hover:bg-white/20"
+                            data-testid="button-switch-to-upload"
+                          >
+                            Upload Photo Instead
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}

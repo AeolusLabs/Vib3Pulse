@@ -1200,6 +1200,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Server-side story image upload (bypasses CORS issues)
+  app.post("/api/stories/upload", requireAuth, async (req, res) => {
+    try {
+      const { imageData } = req.body;
+      
+      if (!imageData || !imageData.startsWith('data:image')) {
+        return res.status(400).json({ message: "Invalid image data" });
+      }
+      
+      const objectStorageService = new ObjectStorageService();
+      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+      
+      // Extract stable path from upload URL
+      const url = new URL(uploadURL);
+      const pathParts = url.pathname.split('/');
+      const uploadsIndex = pathParts.findIndex(p => p === 'uploads');
+      const extractedId = uploadsIndex !== -1 ? pathParts.slice(uploadsIndex).join('/') : pathParts.slice(-1)[0];
+      const stablePath = `/objects/${extractedId}`;
+      
+      // Convert base64 to buffer
+      const base64Data = imageData.split(',')[1];
+      const buffer = Buffer.from(base64Data, 'base64');
+      
+      // Upload to GCS using signed URL
+      const uploadResponse = await fetch(uploadURL, {
+        method: 'PUT',
+        body: buffer,
+        headers: {
+          'Content-Type': 'image/jpeg',
+        },
+      });
+      
+      if (!uploadResponse.ok) {
+        console.error("GCS upload failed:", uploadResponse.status, await uploadResponse.text());
+        throw new Error('Failed to upload to storage');
+      }
+      
+      res.json({ stablePath });
+    } catch (error) {
+      console.error("Error uploading story image:", error);
+      res.status(500).json({ message: "Failed to upload image" });
+    }
+  });
+
   app.post("/api/stories", requireAuth, async (req, res) => {
     try {
       const { allowedViewerIds, ...storyInput } = req.body;
