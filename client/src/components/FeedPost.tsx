@@ -159,15 +159,18 @@ export default function FeedPost({
 
   // Fetch like status and count from API
   const { data: likeData } = useQuery<{ count: number; isLiked: boolean }>({
-    queryKey: [`/api/posts/${id}/likes`],
-    initialData: { count: initialLikes, isLiked: initialIsLiked },
+    queryKey: ['/api/posts', id, 'likes'],
+    staleTime: 0,
   });
 
-  // Fetch comment count
-  const { data: comments = [] } = useQuery<any[]>({
-    queryKey: [`/api/posts/${id}/comments`],
-    enabled: commentDialogOpen,
+  // Fetch comment count (always fetch to show count, not just when dialog is open)
+  const { data: commentsData } = useQuery<{ comments: any[]; count: number }>({
+    queryKey: ['/api/posts', id, 'comments'],
+    staleTime: 0,
   });
+  
+  const comments = commentsData?.comments || [];
+  const commentCount = commentsData?.count ?? comments.length;
 
   // Fetch bookmark status (we'll need to add this endpoint or track it in posts)
   const [bookmarkStatus, setBookmarkStatus] = useState(false);
@@ -193,13 +196,13 @@ export default function FeedPost({
     },
     onMutate: async () => {
       // Cancel outgoing refetches
-      await queryClient.cancelQueries({ queryKey: [`/api/posts/${id}/likes`] });
+      await queryClient.cancelQueries({ queryKey: ['/api/posts', id, 'likes'] });
       
       // Snapshot previous value
-      const previousLikes = queryClient.getQueryData([`/api/posts/${id}/likes`]);
+      const previousLikes = queryClient.getQueryData(['/api/posts', id, 'likes']);
       
       // Optimistically update
-      queryClient.setQueryData([`/api/posts/${id}/likes`], (old: any) => ({
+      queryClient.setQueryData(['/api/posts', id, 'likes'], (old: any) => ({
         count: (old?.count || 0) + 1,
         isLiked: true,
       }));
@@ -209,7 +212,7 @@ export default function FeedPost({
     onError: (err, variables, context) => {
       // Rollback on error
       if (context?.previousLikes) {
-        queryClient.setQueryData([`/api/posts/${id}/likes`], context.previousLikes);
+        queryClient.setQueryData(['/api/posts', id, 'likes'], context.previousLikes);
       }
       toast({
         title: "Error",
@@ -218,7 +221,7 @@ export default function FeedPost({
       });
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/posts/${id}/likes`] });
+      queryClient.invalidateQueries({ queryKey: ['/api/posts', id, 'likes'] });
     },
   });
 
@@ -227,10 +230,10 @@ export default function FeedPost({
       return await apiRequest('DELETE', `/api/posts/${id}/like`, {});
     },
     onMutate: async () => {
-      await queryClient.cancelQueries({ queryKey: [`/api/posts/${id}/likes`] });
-      const previousLikes = queryClient.getQueryData([`/api/posts/${id}/likes`]);
+      await queryClient.cancelQueries({ queryKey: ['/api/posts', id, 'likes'] });
+      const previousLikes = queryClient.getQueryData(['/api/posts', id, 'likes']);
       
-      queryClient.setQueryData([`/api/posts/${id}/likes`], (old: any) => ({
+      queryClient.setQueryData(['/api/posts', id, 'likes'], (old: any) => ({
         count: Math.max((old?.count || 1) - 1, 0),
         isLiked: false,
       }));
@@ -239,7 +242,7 @@ export default function FeedPost({
     },
     onError: (err, variables, context) => {
       if (context?.previousLikes) {
-        queryClient.setQueryData([`/api/posts/${id}/likes`], context.previousLikes);
+        queryClient.setQueryData(['/api/posts', id, 'likes'], context.previousLikes);
       }
       toast({
         title: "Error",
@@ -248,7 +251,7 @@ export default function FeedPost({
       });
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/posts/${id}/likes`] });
+      queryClient.invalidateQueries({ queryKey: ['/api/posts', id, 'likes'] });
     },
   });
 
@@ -488,7 +491,7 @@ export default function FeedPost({
               data-testid={`button-comment-${id}`}
             >
               <MessageCircle className="h-4 w-4" />
-              <span className="text-xs">{comments.length || initialComments}</span>
+              <span className="text-xs">{commentCount}</span>
             </Button>
 
             <Button

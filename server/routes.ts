@@ -1176,7 +1176,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const postId = req.params.postId;
       const comments = await storage.getPostComments(postId);
-      res.json(comments);
+      res.json({ comments, count: comments.length });
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch comments" });
     }

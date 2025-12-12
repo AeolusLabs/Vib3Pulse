@@ -99,13 +99,15 @@ export default function PostDetailDialog({
   const { toast } = useToast();
   const [newComment, setNewComment] = useState('');
 
-  const { data: comments = [], isLoading: commentsLoading } = useQuery<any[]>({
+  const { data: commentsData, isLoading: commentsLoading } = useQuery<{ comments: any[]; count: number }>({
     queryKey: ['/api/posts', postId, 'comments'],
     enabled: open,
   });
+  
+  const comments = commentsData?.comments || [];
 
   const { data: likeData } = useQuery<{ count: number; isLiked: boolean }>({
-    queryKey: [`/api/posts/${postId}/likes`],
+    queryKey: ['/api/posts', postId, 'likes'],
     enabled: open,
   });
 
@@ -131,7 +133,7 @@ export default function PostDetailDialog({
       return await apiRequest('POST', `/api/posts/${postId}/like`, {});
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/posts/${postId}/likes`] });
+      queryClient.invalidateQueries({ queryKey: ['/api/posts', postId, 'likes'] });
     },
     onError: () => {
       toast({

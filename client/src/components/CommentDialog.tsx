@@ -41,17 +41,19 @@ export default function CommentDialog({ open, onClose, postId }: CommentDialogPr
   const { toast } = useToast();
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const { data: comments = [], isLoading } = useQuery<Comment[]>({
-    queryKey: [`/api/posts/${postId}/comments`],
+  const { data: commentsData, isLoading } = useQuery<{ comments: Comment[]; count: number }>({
+    queryKey: ['/api/posts', postId, 'comments'],
     enabled: open,
   });
+  
+  const comments = commentsData?.comments || [];
 
   const addCommentMutation = useMutation({
     mutationFn: async (content: string) => {
       return await apiRequest('POST', `/api/posts/${postId}/comments`, { content });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/posts/${postId}/comments`] });
+      queryClient.invalidateQueries({ queryKey: ['/api/posts', postId, 'comments'] });
       setCommentText("");
       toast({
         title: "Comment added!",
