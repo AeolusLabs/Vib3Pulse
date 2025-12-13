@@ -349,10 +349,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Unable to reset password. Please request a new reset link." });
       }
       
-      const bcrypt = await import("bcrypt");
-      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      // Use the same hashPassword function as signup for consistency
+      const hashedPassword = await hashPassword(newPassword);
       
       await storage.updateUserPassword(user.id, hashedPassword);
+      console.log(`Password reset successful for user ${user.id} (${user.email})`);
       await storage.clearPasswordResetToken(user.id);
       
       res.json({ message: "Password has been reset successfully. You can now login with your new password." });
