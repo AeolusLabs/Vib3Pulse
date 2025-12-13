@@ -36,6 +36,8 @@ import AdminFinance from "@/pages/admin/AdminFinance";
 import AdminStaff from "@/pages/admin/AdminStaff";
 import AdminActivity from "@/pages/admin/AdminActivity";
 import AdminSetup from "@/pages/admin/AdminSetup";
+import ForgotPasswordPage from "@/pages/ForgotPasswordPage";
+import ResetPasswordPage from "@/pages/ResetPasswordPage";
 
 function Router() {
   return (
@@ -43,6 +45,8 @@ function Router() {
       <Route path="/" component={LandingPage} />
       <Route path="/login" component={LoginPage} />
       <Route path="/signup" component={SignupPage} />
+      <Route path="/forgot-password" component={ForgotPasswordPage} />
+      <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/discover" component={DiscoverPage} />
       <Route path="/event/:id" component={EventDetailPage} />
       <Route path="/profile/:username" component={ProfilePage} />
