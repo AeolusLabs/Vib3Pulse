@@ -22,6 +22,7 @@ import SearchPage from "@/pages/SearchPage";
 import MessagesPage from "@/pages/MessagesPage";
 import BuddySettingsPage from "@/pages/BuddySettingsPage";
 import DistressAlertsPage from "@/pages/DistressAlertsPage";
+import AccountSettingsPage from "@/pages/AccountSettingsPage";
 import ManageVenuesPage from "@/pages/ManageVenuesPage";
 import VenueDetailPage from "@/pages/VenueDetailPage";
 import VenueEntryNightsPage from "@/pages/VenueEntryNightsPage";
@@ -121,6 +122,12 @@ function Router() {
       <Route path="/buddy/alerts">
         <AuthenticatedLayout>
           <DistressAlertsPage />
+        </AuthenticatedLayout>
+      </Route>
+      
+      <Route path="/account/settings">
+        <AuthenticatedLayout>
+          <AccountSettingsPage />
         </AuthenticatedLayout>
       </Route>
       

@@ -1,4 +1,4 @@
-import { Search, Plus, User, Calendar, LogOut, Ticket, Shield, AlertTriangle, Building2 } from "lucide-react";
+import { Search, Plus, User, Calendar, LogOut, Ticket, Shield, AlertTriangle, Building2, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -150,6 +150,12 @@ export default function Navigation({ onSearch, onCreateEvent }: NavigationProps)
                   </>
                 )}
                 <DropdownMenuSeparator />
+                <DropdownMenuItem asChild data-testid="menu-account-settings">
+                  <Link href="/account/settings">
+                    <Settings className="mr-2 h-4 w-4" />
+                    Account Settings
+                  </Link>
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleLogout} data-testid="menu-logout">
                   <LogOut className="mr-2 h-4 w-4" />
                   Log out
