@@ -252,6 +252,82 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Change password
+  app.patch("/api/auth/change-password", requireAuth, sensitiveOperationLimiter, async (req, res) => {
+    try {
+      const { currentPassword, newPassword } = req.body;
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({ message: "Current password and new password are required" });
+      }
+      if (newPassword.length < 8) {
+        return res.status(400).json({ message: "New password must be at least 8 characters" });
+      }
+      
+      const user = await storage.getUser(req.user!.id);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      const bcrypt = await import("bcrypt");
+      const isValid = await bcrypt.compare(currentPassword, user.passwordHash);
+      if (!isValid) {
+        return res.status(400).json({ message: "Current password is incorrect" });
+      }
+      
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      await storage.updateUserPassword(req.user!.id, hashedPassword);
+      res.json({ message: "Password changed successfully" });
+    } catch (error) {
+      console.error("Error changing password:", error);
+      res.status(500).json({ message: "Failed to change password" });
+    }
+  });
+
+  // Change username
+  app.patch("/api/users/me/username", requireAuth, sensitiveOperationLimiter, async (req, res) => {
+    try {
+      const { newUsername } = req.body;
+      if (!newUsername) {
+        return res.status(400).json({ message: "New username is required" });
+      }
+      if (newUsername.length < 3) {
+        return res.status(400).json({ message: "Username must be at least 3 characters" });
+      }
+      
+      const user = await storage.getUser(req.user!.id);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      if (user.usernameChangesRemaining <= 0) {
+        return res.status(400).json({ message: "No username changes remaining. You can only change your username twice." });
+      }
+      
+      const existingUser = await storage.getUserByUsername(newUsername);
+      if (existingUser && existingUser.id !== user.id) {
+        return res.status(400).json({ message: "Username is already taken" });
+      }
+      
+      const updatedUser = await storage.updateUsername(req.user!.id, newUsername);
+      
+      // Update session with new username
+      req.login(userToSessionUser(updatedUser), (err) => {
+        if (err) {
+          console.error("Error updating session:", err);
+        }
+      });
+      
+      res.json({ 
+        message: "Username changed successfully",
+        user: userToSessionUser(updatedUser),
+        usernameChangesRemaining: updatedUser.usernameChangesRemaining
+      });
+    } catch (error) {
+      console.error("Error changing username:", error);
+      res.status(500).json({ message: "Failed to change username" });
+    }
+  });
+
   // Update user profile
   app.patch("/api/users/:userId", requireAuth, sensitiveOperationLimiter, async (req, res) => {
     try {
