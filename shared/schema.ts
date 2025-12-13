@@ -21,6 +21,7 @@ export const users = pgTable("users", {
   phoneNumber: text("phone_number"),
   canManageVenues: boolean("can_manage_venues").default(false),
   avatarUrl: text("avatar_url"),
+  usernameChangesRemaining: integer("username_changes_remaining").notNull().default(2),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 

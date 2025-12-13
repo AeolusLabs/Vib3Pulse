@@ -121,6 +121,8 @@ export interface IStorage {
   getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, updates: Partial<InsertUser>): Promise<User>;
+  updateUserPassword(userId: string, hashedPassword: string): Promise<void>;
+  updateUsername(userId: string, newUsername: string): Promise<User>;
   
   getEvents(): Promise<Event[]>;
   getEvent(id: string): Promise<(Event & { organizer: User }) | undefined>;
@@ -417,6 +419,18 @@ export class DbStorage implements IStorage {
       updatesWithTimestamp.genderEditedAt = new Date();
     }
     const result = await db.update(users).set(updatesWithTimestamp).where(eq(users.id, id)).returning();
+    return result[0];
+  }
+
+  async updateUserPassword(userId: string, hashedPassword: string): Promise<void> {
+    await db.update(users).set({ passwordHash: hashedPassword }).where(eq(users.id, userId));
+  }
+
+  async updateUsername(userId: string, newUsername: string): Promise<User> {
+    const result = await db.update(users).set({ 
+      username: newUsername,
+      usernameChangesRemaining: sql`${users.usernameChangesRemaining} - 1`
+    }).where(eq(users.id, userId)).returning();
     return result[0];
   }
 
