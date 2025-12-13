@@ -344,7 +344,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const user = await storage.getUserByPasswordResetToken(token);
       if (!user) {
-        return res.status(400).json({ message: "Invalid or expired reset token" });
+        // Log internally for admin monitoring, but return generic error to prevent token enumeration
+        console.log("Password reset attempted with invalid or expired token");
+        return res.status(400).json({ message: "Unable to reset password. Please request a new reset link." });
       }
       
       const bcrypt = await import("bcrypt");
@@ -356,7 +358,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ message: "Password has been reset successfully. You can now login with your new password." });
     } catch (error) {
       console.error("Error in reset-password:", error);
-      res.status(500).json({ message: "Failed to reset password" });
+      // Return same generic error message to prevent information leakage
+      res.status(400).json({ message: "Unable to reset password. Please request a new reset link." });
     }
   });
 
