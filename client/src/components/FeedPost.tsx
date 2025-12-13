@@ -2,12 +2,29 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Heart, MessageCircle, Share2, Bookmark, Repeat2, Calendar, MapPin, Building2 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Heart, MessageCircle, Share2, Bookmark, Repeat2, Calendar, MapPin, Building2, MoreHorizontal, Trash2 } from "lucide-react";
 import { useState, useEffect, Fragment } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 import CommentDialog from "@/components/CommentDialog";
 import { format } from "date-fns";
 import type { Event, Venue } from "@shared/schema";
@@ -150,10 +167,14 @@ export default function FeedPost({
 }: FeedPostProps) {
   const [, navigate] = useLocation();
   const { toast } = useToast();
+  const { data: currentUser } = useAuth();
   const [commentDialogOpen, setCommentDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [displayTime, setDisplayTime] = useState(() => 
     createdAt ? formatRelativeTime(createdAt) : timestamp || 'Just now'
   );
+  
+  const isOwnPost = currentUser?.id === author.userId;
 
   useEffect(() => {
     if (!createdAt) return;
@@ -416,6 +437,26 @@ export default function FeedPost({
     },
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest('DELETE', `/api/posts/${id}`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/posts'] });
+      toast({
+        title: "Post deleted",
+        description: "Your post has been removed.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to delete post. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleRepost = () => {
     if (repostData?.hasReposted) {
       unrepostMutation.mutate();
@@ -610,33 +651,44 @@ export default function FeedPost({
               <span className="text-xs">{repostData?.repostCount || 0}</span>
             </Button>
 
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleShare();
-              }}
-              data-testid={`button-share-${id}`}
-            >
-              <Share2 className="h-4 w-4" />
-            </Button>
-
             <div className="flex-1" />
 
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleBookmark();
-              }}
-              disabled={bookmarkMutation.isPending}
-              className={bookmarkStatus ? 'text-primary' : ''}
-              data-testid={`button-bookmark-${id}`}
-            >
-              <Bookmark className={`h-4 w-4 ${bookmarkStatus ? 'fill-current' : ''}`} />
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={(e) => e.stopPropagation()}
+                  data-testid={`button-more-${id}`}
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                <DropdownMenuItem onClick={() => handleShare()} data-testid={`menu-share-${id}`}>
+                  <Share2 className="h-4 w-4 mr-2" />
+                  Share
+                </DropdownMenuItem>
+                <DropdownMenuItem 
+                  onClick={() => handleBookmark()} 
+                  disabled={bookmarkMutation.isPending}
+                  data-testid={`menu-bookmark-${id}`}
+                >
+                  <Bookmark className={`h-4 w-4 mr-2 ${bookmarkStatus ? 'fill-current text-primary' : ''}`} />
+                  {bookmarkStatus ? 'Saved' : 'Save'}
+                </DropdownMenuItem>
+                {isOwnPost && (
+                  <DropdownMenuItem 
+                    onClick={() => setDeleteDialogOpen(true)}
+                    className="text-destructive focus:text-destructive"
+                    data-testid={`menu-delete-${id}`}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </div>
@@ -646,6 +698,27 @@ export default function FeedPost({
         onClose={() => setCommentDialogOpen(false)}
         postId={id}
       />
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Post</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this post? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid={`button-cancel-delete-${id}`}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deleteMutation.mutate()}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              data-testid={`button-confirm-delete-${id}`}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }
