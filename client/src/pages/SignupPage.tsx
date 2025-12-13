@@ -157,11 +157,10 @@ export default function SignupPage() {
         description: "Welcome to VibePulse. Let's explore!",
       });
 
-      if (step2Data?.userType === "social") {
-        setLocation("/discover");
-      } else {
-        setLocation("/discover");
-      }
+      // Honor redirect param if present (for share-to-message flow)
+      const params = new URLSearchParams(window.location.search);
+      const redirect = params.get('redirect');
+      setLocation(redirect || "/discover");
     } catch (error: any) {
       toast({
         title: "Signup failed",

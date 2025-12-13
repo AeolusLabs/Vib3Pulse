@@ -159,14 +159,28 @@ export default function MessagesPage() {
   const { data: currentUser } = useAuth();
 
   // Check for shared event/venue data on every navigation to this page
-  // Use localStorage to persist across login redirects
+  // Check URL params first (survives login redirects), then localStorage as backup
   useEffect(() => {
     const checkShareData = () => {
-      const shareDataStr = localStorage.getItem("shareToMessage");
+      // First check URL params (more reliable across login redirects)
+      const urlParams = new URLSearchParams(window.location.search);
+      const shareParam = urlParams.get('share');
+      let shareDataStr = shareParam ? decodeURIComponent(shareParam) : null;
+      
+      // Fall back to localStorage if no URL param
+      if (!shareDataStr) {
+        shareDataStr = localStorage.getItem("shareToMessage");
+      }
+      
       if (shareDataStr) {
         try {
           const shareData: ShareData = JSON.parse(shareDataStr);
-          // Don't remove yet - wait until modal is successfully opened
+          
+          // Clear the URL param to avoid re-processing on refresh
+          if (shareParam) {
+            const newUrl = window.location.pathname;
+            window.history.replaceState({}, '', newUrl);
+          }
           
           // Fetch the event or venue details
           if (shareData.type === "event") {

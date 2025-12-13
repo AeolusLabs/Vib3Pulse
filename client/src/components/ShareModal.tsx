@@ -46,9 +46,10 @@ export default function ShareModal({ open, onClose, event, venue }: ShareModalPr
         : null;
     
     if (shareData) {
-      // Use localStorage instead of sessionStorage to persist across login redirects
+      // Store in localStorage as backup AND pass via URL params to survive login redirects
       localStorage.setItem("shareToMessage", JSON.stringify(shareData));
-      navigate("/messages");
+      const encodedData = encodeURIComponent(JSON.stringify(shareData));
+      navigate(`/messages?share=${encodedData}`);
     }
     onClose();
   };
