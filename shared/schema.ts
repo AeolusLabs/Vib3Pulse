@@ -22,6 +22,8 @@ export const users = pgTable("users", {
   canManageVenues: boolean("can_manage_venues").default(false),
   avatarUrl: text("avatar_url"),
   usernameChangesRemaining: integer("username_changes_remaining").notNull().default(2),
+  passwordResetToken: text("password_reset_token"),
+  passwordResetExpires: timestamp("password_reset_expires"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
