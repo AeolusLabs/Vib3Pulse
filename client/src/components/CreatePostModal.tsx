@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { Image as ImageIcon, X, Calendar, MapPin, Building2 } from "lucide-react";
+import { Image as ImageIcon, X, Calendar, MapPin, Building2, Users } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -12,16 +13,26 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useAuth } from "@/hooks/useAuth";
 import { format } from "date-fns";
-import type { Event, Venue } from "@shared/schema";
+import type { Event, Venue, Community } from "@shared/schema";
+
+type CommunityWithRole = Community & { memberCount: number; role: string };
 
 interface CreatePostModalProps {
   open: boolean;
   onClose: () => void;
   attachedEvent?: Event | null;
   attachedVenue?: Venue | null;
-  onCreatePost?: (content: string, image?: string, eventId?: string, venueId?: string) => void;
+  defaultCommunityId?: string | null;
+  onCreatePost?: (content: string, image?: string, eventId?: string, venueId?: string, communityId?: string) => void;
 }
 
 export default function CreatePostModal({ 
@@ -29,12 +40,27 @@ export default function CreatePostModal({
   onClose, 
   attachedEvent,
   attachedVenue,
+  defaultCommunityId,
   onCreatePost 
 }: CreatePostModalProps) {
   const { data: currentUser } = useAuth();
   const [content, setContent] = useState("");
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedCommunityId, setSelectedCommunityId] = useState<string>("none");
   const maxLength = 280;
+
+  // Fetch user's communities
+  const { data: myCommunities = [] } = useQuery<CommunityWithRole[]>({
+    queryKey: ['/api/communities/my'],
+    enabled: open && !!currentUser,
+  });
+
+  // Set default community when opening - sync on every open
+  useEffect(() => {
+    if (open) {
+      setSelectedCommunityId(defaultCommunityId || "none");
+    }
+  }, [open, defaultCommunityId]);
 
   useEffect(() => {
     if (open && (attachedEvent || attachedVenue)) {
@@ -61,11 +87,13 @@ export default function CreatePostModal({
         content, 
         selectedImage || undefined,
         attachedEvent?.id,
-        attachedVenue?.id
+        attachedVenue?.id,
+        selectedCommunityId !== "none" ? selectedCommunityId : undefined
       );
       console.log('Created post:', content, selectedImage ? 'with image' : 'text only');
       setContent("");
       setSelectedImage(null);
+      setSelectedCommunityId("none");
       onClose();
     }
   };
@@ -73,6 +101,7 @@ export default function CreatePostModal({
   const handleClose = () => {
     setContent("");
     setSelectedImage(null);
+    setSelectedCommunityId("none");
     onClose();
   };
 
@@ -223,6 +252,23 @@ export default function CreatePostModal({
                 className="hidden"
                 onChange={handleImageUpload}
               />
+              
+              {myCommunities.length > 0 && (
+                <Select value={selectedCommunityId} onValueChange={setSelectedCommunityId}>
+                  <SelectTrigger className="w-[160px] h-8" data-testid="select-community-trigger">
+                    <Users className="h-4 w-4 mr-1" />
+                    <SelectValue placeholder="Post to..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none" data-testid="select-item-my-feed">My Feed</SelectItem>
+                    {myCommunities.map((community) => (
+                      <SelectItem key={community.id} value={community.id} data-testid={`select-item-community-${community.id}`}>
+                        {community.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
 
             <div className="flex items-center gap-3">

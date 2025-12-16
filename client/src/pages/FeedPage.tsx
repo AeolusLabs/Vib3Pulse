@@ -3,7 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
-import type { Event, Venue } from "@shared/schema";
+import type { Event, Venue, Community } from "@shared/schema";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import StoriesBar from "@/components/StoriesBar";
@@ -15,7 +15,9 @@ import PostDetailDialog from "@/components/PostDetailDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Sparkles, Image as ImageIcon } from "lucide-react";
+import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
+import { Sparkles, Image as ImageIcon, Plus, Users } from "lucide-react";
+import CommunityModal from "@/components/CommunityModal";
 import musicFestival from '@assets/generated_images/Outdoor_music_festival_event_179040d3.png';
 import foodTasting from '@assets/generated_images/Food_and_wine_tasting_69928d9e.png';
 import techConf from '@assets/generated_images/Tech_conference_presentation_2bcf2c35.png';
@@ -205,16 +207,26 @@ type ShareData = {
   name?: string;
 };
 
+type CommunityWithRole = Community & { memberCount: number; role: string };
+
 export default function FeedPage() {
   const [viewingStory, setViewingStory] = useState<number | null>(null);
   const [createStoryOpen, setCreateStoryOpen] = useState(false);
   const [createPostOpen, setCreatePostOpen] = useState(false);
-  const [feedFilter, setFeedFilter] = useState<'following' | 'all'>('following');
+  const [feedFilter, setFeedFilter] = useState<string>('following'); // 'following', 'all', or community ID
   const [selectedPost, setSelectedPost] = useState<any | null>(null);
   const [attachedEvent, setAttachedEvent] = useState<Event | null>(null);
   const [attachedVenue, setAttachedVenue] = useState<Venue | null>(null);
+  const [communityModalOpen, setCommunityModalOpen] = useState(false);
+  const [selectedCommunityForPost, setSelectedCommunityForPost] = useState<string | null>(null);
   const { toast } = useToast();
   const { data: currentUser } = useAuth();
+
+  // Fetch user's communities
+  const { data: myCommunities = [] } = useQuery<CommunityWithRole[]>({
+    queryKey: ['/api/communities/my'],
+    enabled: !!currentUser,
+  });
 
   // Check for shared event/venue data on mount
   useEffect(() => {
@@ -248,9 +260,30 @@ export default function FeedPage() {
     }
   }, []);
 
-  const { data: posts = [], isLoading } = useQuery<any[]>({
+  // Determine if we're viewing a community feed
+  const isViewingCommunity = feedFilter !== 'following' && feedFilter !== 'all';
+  const selectedCommunity = isViewingCommunity 
+    ? myCommunities.find(c => c.id === feedFilter) 
+    : null;
+
+  // Use separate queries for main feed vs community feed to ensure proper reactivity
+  const { data: mainPosts = [], isLoading: isLoadingMain } = useQuery<any[]>({
     queryKey: ['/api/posts'],
+    enabled: !isViewingCommunity,
   });
+
+  const { data: communityPosts = [], isLoading: isLoadingCommunity } = useQuery<any[]>({
+    queryKey: ['/api/communities', feedFilter, 'posts'],
+    queryFn: async () => {
+      const res = await fetch(`/api/communities/${feedFilter}/posts`);
+      if (!res.ok) throw new Error('Failed to fetch community posts');
+      return res.json();
+    },
+    enabled: isViewingCommunity,
+  });
+
+  const posts = isViewingCommunity ? communityPosts : mainPosts;
+  const isLoading = isViewingCommunity ? isLoadingCommunity : isLoadingMain;
 
   const { data: storiesData = [] } = useQuery<StoryWithUser[]>({
     queryKey: ['/api/stories'],
@@ -293,11 +326,16 @@ export default function FeedPage() {
   });
 
   const createPostMutation = useMutation({
-    mutationFn: async (data: { content: string; imageUrl?: string; eventId?: string; venueId?: string }) => {
+    mutationFn: async (data: { content: string; imageUrl?: string; eventId?: string; venueId?: string; communityId?: string }) => {
       return await apiRequest('POST', '/api/posts', data);
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['/api/posts'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/communities'] });
+      // Also invalidate community-specific posts if posting to a community
+      if (variables.communityId) {
+        queryClient.invalidateQueries({ queryKey: ['/api/communities', variables.communityId, 'posts'] });
+      }
       handleCloseCreatePost();
       toast({
         title: "Post created",
@@ -347,27 +385,66 @@ export default function FeedPage() {
       />
 
       <main className="max-w-[600px] mx-auto px-4 sm:px-6 py-6">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-serif font-semibold">Feed</h1>
-          <div className="flex gap-2">
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <h1 className="text-2xl font-serif font-semibold">Feed</h1>
             <Button
-              variant={feedFilter === 'following' ? 'default' : 'outline'}
+              variant="ghost"
               size="sm"
-              onClick={() => setFeedFilter('following')}
-              data-testid="button-filter-following"
+              onClick={() => setCommunityModalOpen(true)}
+              data-testid="button-manage-communities"
             >
-              Following
-            </Button>
-            <Button
-              variant={feedFilter === 'all' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setFeedFilter('all')}
-              data-testid="button-filter-all"
-            >
-              <Sparkles className="h-4 w-4 mr-1" />
-              For You
+              <Users className="h-4 w-4 mr-1" />
+              Communities
             </Button>
           </div>
+          <ScrollArea className="w-full">
+            <div className="flex gap-2 pb-2">
+              <Button
+                variant={feedFilter === 'following' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setFeedFilter('following')}
+                data-testid="button-filter-following"
+                className="whitespace-nowrap"
+              >
+                Following
+              </Button>
+              <Button
+                variant={feedFilter === 'all' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setFeedFilter('all')}
+                data-testid="button-filter-all"
+                className="whitespace-nowrap"
+              >
+                <Sparkles className="h-4 w-4 mr-1" />
+                For You
+              </Button>
+              {myCommunities.map((community) => (
+                <Button
+                  key={community.id}
+                  variant={feedFilter === community.id ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setFeedFilter(community.id)}
+                  data-testid={`button-filter-community-${community.id}`}
+                  className="whitespace-nowrap"
+                >
+                  {community.name}
+                </Button>
+              ))}
+              {currentUser && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCommunityModalOpen(true)}
+                  data-testid="button-add-community"
+                  className="whitespace-nowrap"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+            <ScrollBar orientation="horizontal" />
+          </ScrollArea>
         </div>
 
         <Card className="mb-4 hover-elevate cursor-pointer" onClick={() => setCreatePostOpen(true)} data-testid="card-create-post">
@@ -426,6 +503,7 @@ export default function FeedPage() {
                 image={post.imageUrl}
                 eventId={post.eventId}
                 venueId={post.venueId}
+                community={post.community}
                 onPostClick={() => setSelectedPost(post)}
               />
             ))
@@ -467,12 +545,14 @@ export default function FeedPage() {
         onClose={handleCloseCreatePost}
         attachedEvent={attachedEvent}
         attachedVenue={attachedVenue}
-        onCreatePost={(content, image, eventId, venueId) => {
+        defaultCommunityId={isViewingCommunity ? feedFilter : null}
+        onCreatePost={(content, image, eventId, venueId, communityId) => {
           createPostMutation.mutate({
             content,
             imageUrl: image,
             eventId,
             venueId,
+            communityId,
           });
         }}
       />
@@ -495,6 +575,11 @@ export default function FeedPage() {
       )}
 
       <BottomNavigation onCreateClick={() => setCreateStoryOpen(true)} />
+
+      <CommunityModal
+        open={communityModalOpen}
+        onClose={() => setCommunityModalOpen(false)}
+      />
     </div>
   );
 }

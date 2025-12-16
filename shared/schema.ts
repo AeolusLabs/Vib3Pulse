@@ -167,6 +167,7 @@ export const posts = pgTable("posts", {
   imageUrl: text("image_url"),
   eventId: varchar("event_id").references(() => events.id),
   venueId: varchar("venue_id").references(() => venues.id),
+  communityId: varchar("community_id").references(() => communities.id),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
@@ -759,6 +760,7 @@ export const notificationTypes = [
   "event_rsvp",
   "ticket_purchase",
   "new_follower",
+  "community_post",
 ] as const;
 export type NotificationType = typeof notificationTypes[number];
 
@@ -784,3 +786,49 @@ export const insertNotificationSchema = createInsertSchema(notifications).omit({
 
 export type InsertNotification = z.infer<typeof insertNotificationSchema>;
 export type Notification = typeof notifications.$inferSelect;
+
+// ============================================
+// COMMUNITIES
+// ============================================
+
+// Community membership roles
+export const communityRoles = ["owner", "moderator", "member"] as const;
+export type CommunityRole = typeof communityRoles[number];
+
+// Communities table
+export const communities = pgTable("communities", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: varchar("name", { length: 100 }).notNull(),
+  slug: varchar("slug", { length: 100 }).notNull().unique(),
+  description: text("description"),
+  coverImageUrl: text("cover_image_url"),
+  createdByUserId: varchar("created_by_user_id").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const insertCommunitySchema = createInsertSchema(communities).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertCommunity = z.infer<typeof insertCommunitySchema>;
+export type Community = typeof communities.$inferSelect;
+
+// Community memberships table
+export const communityMemberships = pgTable("community_memberships", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  communityId: varchar("community_id").notNull().references(() => communities.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  role: text("role").notNull().default("member"),
+  joinedAt: timestamp("joined_at").notNull().default(sql`now()`),
+}, (table) => ({
+  uniqueMembership: unique().on(table.communityId, table.userId),
+}));
+
+export const insertCommunityMembershipSchema = createInsertSchema(communityMemberships).omit({
+  id: true,
+  joinedAt: true,
+});
+
+export type InsertCommunityMembership = z.infer<typeof insertCommunityMembershipSchema>;
+export type CommunityMembership = typeof communityMemberships.$inferSelect;

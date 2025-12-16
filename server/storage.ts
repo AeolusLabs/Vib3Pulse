@@ -69,6 +69,10 @@ import {
   type InsertEventModeration,
   type Notification,
   type InsertNotification,
+  type Community,
+  type InsertCommunity,
+  type CommunityMembership,
+  type InsertCommunityMembership,
   users,
   events,
   tickets,
@@ -103,7 +107,9 @@ import {
   contentReports,
   userSuspensions,
   eventModerations,
-  notifications
+  notifications,
+  communities,
+  communityMemberships
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/neon-serverless";
 import { Pool, neonConfig } from "@neondatabase/serverless";
@@ -392,6 +398,29 @@ export interface IStorage {
   markNotificationAsRead(id: string): Promise<Notification>;
   markAllNotificationsAsRead(userId: string): Promise<void>;
   deleteNotification(id: string): Promise<void>;
+
+  // ============================================
+  // COMMUNITIES
+  // ============================================
+  createCommunity(community: InsertCommunity): Promise<Community>;
+  getCommunity(id: string): Promise<Community | undefined>;
+  getCommunityBySlug(slug: string): Promise<Community | undefined>;
+  getCommunities(): Promise<Array<Community & { memberCount: number; creator: User }>>;
+  getUserCommunities(userId: string): Promise<Array<Community & { memberCount: number; role: string }>>;
+  updateCommunity(id: string, updates: Partial<InsertCommunity>): Promise<Community>;
+  deleteCommunity(id: string): Promise<void>;
+  
+  // Community membership
+  joinCommunity(userId: string, communityId: string, role?: string): Promise<CommunityMembership>;
+  leaveCommunity(userId: string, communityId: string): Promise<void>;
+  isCommunityMember(userId: string, communityId: string): Promise<boolean>;
+  getCommunityMembers(communityId: string): Promise<Array<CommunityMembership & { user: User }>>;
+  getCommunityMemberIds(communityId: string): Promise<string[]>;
+  getCommunityMembership(userId: string, communityId: string): Promise<CommunityMembership | undefined>;
+  
+  // Community posts
+  getCommunityPosts(communityId: string): Promise<Array<Post & { user: User; community: Community }>>;
+  getPostsWithCommunity(): Promise<Array<Post & { user: User; community: Community | null }>>;
 }
 
 export class DbStorage implements IStorage {
@@ -2659,6 +2688,178 @@ export class DbStorage implements IStorage {
 
   async deleteNotification(id: string): Promise<void> {
     await db.delete(notifications).where(eq(notifications.id, id));
+  }
+
+  // ============================================
+  // COMMUNITY METHODS
+  // ============================================
+
+  async createCommunity(community: InsertCommunity): Promise<Community> {
+    const result = await db.insert(communities).values(community).returning();
+    return result[0];
+  }
+
+  async getCommunity(id: string): Promise<Community | undefined> {
+    const result = await db.select().from(communities).where(eq(communities.id, id));
+    return result[0];
+  }
+
+  async getCommunityBySlug(slug: string): Promise<Community | undefined> {
+    const result = await db.select().from(communities).where(eq(communities.slug, slug));
+    return result[0];
+  }
+
+  async getCommunities(): Promise<Array<Community & { memberCount: number; creator: User }>> {
+    const result = await db
+      .select({
+        community: communities,
+        creator: users,
+        memberCount: sql<number>`(SELECT COUNT(*) FROM community_memberships WHERE community_id = ${communities.id})::int`,
+      })
+      .from(communities)
+      .innerJoin(users, eq(communities.createdByUserId, users.id))
+      .orderBy(desc(communities.createdAt));
+    
+    return result.map(r => ({
+      ...r.community,
+      memberCount: r.memberCount,
+      creator: r.creator,
+    }));
+  }
+
+  async getUserCommunities(userId: string): Promise<Array<Community & { memberCount: number; role: string }>> {
+    const result = await db
+      .select({
+        community: communities,
+        membership: communityMemberships,
+        memberCount: sql<number>`(SELECT COUNT(*) FROM community_memberships WHERE community_id = ${communities.id})::int`,
+      })
+      .from(communityMemberships)
+      .innerJoin(communities, eq(communityMemberships.communityId, communities.id))
+      .where(eq(communityMemberships.userId, userId))
+      .orderBy(desc(communityMemberships.joinedAt));
+    
+    return result.map(r => ({
+      ...r.community,
+      memberCount: r.memberCount,
+      role: r.membership.role,
+    }));
+  }
+
+  async updateCommunity(id: string, updates: Partial<InsertCommunity>): Promise<Community> {
+    const result = await db
+      .update(communities)
+      .set(updates)
+      .where(eq(communities.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async deleteCommunity(id: string): Promise<void> {
+    await db.delete(communities).where(eq(communities.id, id));
+  }
+
+  async joinCommunity(userId: string, communityId: string, role: string = "member"): Promise<CommunityMembership> {
+    const result = await db
+      .insert(communityMemberships)
+      .values({ userId, communityId, role })
+      .returning();
+    return result[0];
+  }
+
+  async leaveCommunity(userId: string, communityId: string): Promise<void> {
+    await db
+      .delete(communityMemberships)
+      .where(and(
+        eq(communityMemberships.userId, userId),
+        eq(communityMemberships.communityId, communityId)
+      ));
+  }
+
+  async isCommunityMember(userId: string, communityId: string): Promise<boolean> {
+    const result = await db
+      .select()
+      .from(communityMemberships)
+      .where(and(
+        eq(communityMemberships.userId, userId),
+        eq(communityMemberships.communityId, communityId)
+      ));
+    return result.length > 0;
+  }
+
+  async getCommunityMembers(communityId: string): Promise<Array<CommunityMembership & { user: User }>> {
+    const result = await db
+      .select({
+        membership: communityMemberships,
+        user: users,
+      })
+      .from(communityMemberships)
+      .innerJoin(users, eq(communityMemberships.userId, users.id))
+      .where(eq(communityMemberships.communityId, communityId))
+      .orderBy(desc(communityMemberships.joinedAt));
+    
+    return result.map(r => ({
+      ...r.membership,
+      user: r.user,
+    }));
+  }
+
+  async getCommunityMemberIds(communityId: string): Promise<string[]> {
+    const result = await db
+      .select({ userId: communityMemberships.userId })
+      .from(communityMemberships)
+      .where(eq(communityMemberships.communityId, communityId));
+    return result.map(r => r.userId);
+  }
+
+  async getCommunityMembership(userId: string, communityId: string): Promise<CommunityMembership | undefined> {
+    const result = await db
+      .select()
+      .from(communityMemberships)
+      .where(and(
+        eq(communityMemberships.userId, userId),
+        eq(communityMemberships.communityId, communityId)
+      ));
+    return result[0];
+  }
+
+  async getCommunityPosts(communityId: string): Promise<Array<Post & { user: User; community: Community }>> {
+    const result = await db
+      .select({
+        post: posts,
+        user: users,
+        community: communities,
+      })
+      .from(posts)
+      .innerJoin(users, eq(posts.userId, users.id))
+      .innerJoin(communities, eq(posts.communityId, communities.id))
+      .where(eq(posts.communityId, communityId))
+      .orderBy(desc(posts.createdAt));
+    
+    return result.map(r => ({
+      ...r.post,
+      user: r.user,
+      community: r.community,
+    }));
+  }
+
+  async getPostsWithCommunity(): Promise<Array<Post & { user: User; community: Community | null }>> {
+    const result = await db
+      .select({
+        post: posts,
+        user: users,
+        community: communities,
+      })
+      .from(posts)
+      .innerJoin(users, eq(posts.userId, users.id))
+      .leftJoin(communities, eq(posts.communityId, communities.id))
+      .orderBy(desc(posts.createdAt));
+    
+    return result.map(r => ({
+      ...r.post,
+      user: r.user,
+      community: r.community,
+    }));
   }
 }
 

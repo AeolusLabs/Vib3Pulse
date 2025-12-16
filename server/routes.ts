@@ -1262,7 +1262,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Posts
   app.get("/api/posts", async (req, res) => {
     try {
-      const posts = await storage.getPosts();
+      const posts = await storage.getPostsWithCommunity();
       res.json(posts);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch posts" });
@@ -1281,6 +1281,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/posts", requireAuth, async (req, res) => {
     try {
       const postData = insertPostSchema.omit({ userId: true }).parse(req.body);
+      
+      // If posting to a community, validate membership
+      if (postData.communityId) {
+        const isMember = await storage.isCommunityMember(req.user!.id, postData.communityId);
+        if (!isMember) {
+          return res.status(403).json({ message: "You must be a member of this community to post" });
+        }
+      }
       
       const sanitizedPostData = {
         ...postData,
@@ -1324,6 +1332,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
             type: "notification",
             data: { type: "mention" },
           });
+        }
+      }
+
+      // Notify community members if this is a community post
+      if (postData.communityId) {
+        const community = await storage.getCommunity(postData.communityId);
+        const memberIds = await storage.getCommunityMemberIds(postData.communityId);
+        const poster = await storage.getUser(req.user!.id);
+        
+        for (const memberId of memberIds) {
+          // Don't notify the poster themselves
+          if (memberId !== req.user!.id) {
+            await storage.createNotification({
+              userId: memberId,
+              type: "community_post",
+              title: `New post in ${community?.name}`,
+              message: `${poster?.displayName || poster?.username || "Someone"} posted in ${community?.name}`,
+              link: `/feed`,
+              relatedUserId: req.user!.id,
+              relatedEntityId: post.id,
+            });
+            wsManager.sendToUser(memberId, {
+              type: "notification",
+              data: { type: "community_post" },
+            });
+          }
         }
       }
 
@@ -3376,6 +3410,223 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error setting venue image:", error);
       res.status(500).json({ message: "Failed to process venue image" });
+    }
+  });
+
+  // ============================================
+  // COMMUNITY ROUTES
+  // ============================================
+
+  // Get all communities
+  app.get("/api/communities", async (req, res) => {
+    try {
+      const communities = await storage.getCommunities();
+      res.json(communities);
+    } catch (error) {
+      console.error("Error fetching communities:", error);
+      res.status(500).json({ message: "Failed to fetch communities" });
+    }
+  });
+
+  // Get user's communities (communities they are a member of)
+  app.get("/api/communities/my", requireAuth, async (req, res) => {
+    try {
+      const communities = await storage.getUserCommunities(req.user!.id);
+      res.json(communities);
+    } catch (error) {
+      console.error("Error fetching user communities:", error);
+      res.status(500).json({ message: "Failed to fetch user communities" });
+    }
+  });
+
+  // Get a specific community
+  app.get("/api/communities/:id", async (req, res) => {
+    try {
+      const community = await storage.getCommunity(req.params.id);
+      if (!community) {
+        return res.status(404).json({ message: "Community not found" });
+      }
+      res.json(community);
+    } catch (error) {
+      console.error("Error fetching community:", error);
+      res.status(500).json({ message: "Failed to fetch community" });
+    }
+  });
+
+  // Create a new community
+  app.post("/api/communities", requireAuth, async (req, res) => {
+    try {
+      const { name, description, coverImageUrl } = req.body;
+      
+      if (!name || name.trim().length === 0) {
+        return res.status(400).json({ message: "Community name is required" });
+      }
+
+      // Generate slug from name
+      const slug = name.toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .substring(0, 50);
+
+      // Check if slug already exists
+      const existingCommunity = await storage.getCommunityBySlug(slug);
+      if (existingCommunity) {
+        return res.status(400).json({ message: "A community with a similar name already exists" });
+      }
+
+      const community = await storage.createCommunity({
+        name: sanitizeTextOnly(name.trim()),
+        slug,
+        description: description ? sanitizeTextOnly(description) : null,
+        coverImageUrl: coverImageUrl || null,
+        createdByUserId: req.user!.id,
+      });
+
+      // Auto-join the creator as owner
+      await storage.joinCommunity(req.user!.id, community.id, "owner");
+
+      res.status(201).json(community);
+    } catch (error) {
+      console.error("Error creating community:", error);
+      res.status(500).json({ message: "Failed to create community" });
+    }
+  });
+
+  // Update a community
+  app.put("/api/communities/:id", requireAuth, async (req, res) => {
+    try {
+      const community = await storage.getCommunity(req.params.id);
+      if (!community) {
+        return res.status(404).json({ message: "Community not found" });
+      }
+
+      // Check if user is the owner
+      const membership = await storage.getCommunityMembership(req.user!.id, req.params.id);
+      if (!membership || membership.role !== "owner") {
+        return res.status(403).json({ message: "Only the owner can update this community" });
+      }
+
+      const { name, description, coverImageUrl } = req.body;
+      const updates: any = {};
+      
+      if (name) updates.name = sanitizeTextOnly(name.trim());
+      if (description !== undefined) updates.description = description ? sanitizeTextOnly(description) : null;
+      if (coverImageUrl !== undefined) updates.coverImageUrl = coverImageUrl;
+
+      const updatedCommunity = await storage.updateCommunity(req.params.id, updates);
+      res.json(updatedCommunity);
+    } catch (error) {
+      console.error("Error updating community:", error);
+      res.status(500).json({ message: "Failed to update community" });
+    }
+  });
+
+  // Delete a community
+  app.delete("/api/communities/:id", requireAuth, async (req, res) => {
+    try {
+      const community = await storage.getCommunity(req.params.id);
+      if (!community) {
+        return res.status(404).json({ message: "Community not found" });
+      }
+
+      // Check if user is the owner
+      const membership = await storage.getCommunityMembership(req.user!.id, req.params.id);
+      if (!membership || membership.role !== "owner") {
+        return res.status(403).json({ message: "Only the owner can delete this community" });
+      }
+
+      await storage.deleteCommunity(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting community:", error);
+      res.status(500).json({ message: "Failed to delete community" });
+    }
+  });
+
+  // Join a community
+  app.post("/api/communities/:id/join", requireAuth, async (req, res) => {
+    try {
+      const community = await storage.getCommunity(req.params.id);
+      if (!community) {
+        return res.status(404).json({ message: "Community not found" });
+      }
+
+      // Check if already a member
+      const isMember = await storage.isCommunityMember(req.user!.id, req.params.id);
+      if (isMember) {
+        return res.status(400).json({ message: "Already a member of this community" });
+      }
+
+      const membership = await storage.joinCommunity(req.user!.id, req.params.id);
+      res.status(201).json(membership);
+    } catch (error) {
+      console.error("Error joining community:", error);
+      res.status(500).json({ message: "Failed to join community" });
+    }
+  });
+
+  // Leave a community
+  app.delete("/api/communities/:id/leave", requireAuth, async (req, res) => {
+    try {
+      const community = await storage.getCommunity(req.params.id);
+      if (!community) {
+        return res.status(404).json({ message: "Community not found" });
+      }
+
+      // Check if user is the owner
+      const membership = await storage.getCommunityMembership(req.user!.id, req.params.id);
+      if (membership?.role === "owner") {
+        return res.status(400).json({ message: "Owner cannot leave the community. Transfer ownership or delete the community." });
+      }
+
+      await storage.leaveCommunity(req.user!.id, req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error leaving community:", error);
+      res.status(500).json({ message: "Failed to leave community" });
+    }
+  });
+
+  // Get community members
+  app.get("/api/communities/:id/members", async (req, res) => {
+    try {
+      const community = await storage.getCommunity(req.params.id);
+      if (!community) {
+        return res.status(404).json({ message: "Community not found" });
+      }
+
+      const members = await storage.getCommunityMembers(req.params.id);
+      res.json(members);
+    } catch (error) {
+      console.error("Error fetching community members:", error);
+      res.status(500).json({ message: "Failed to fetch community members" });
+    }
+  });
+
+  // Get community posts
+  app.get("/api/communities/:id/posts", async (req, res) => {
+    try {
+      const community = await storage.getCommunity(req.params.id);
+      if (!community) {
+        return res.status(404).json({ message: "Community not found" });
+      }
+
+      const posts = await storage.getCommunityPosts(req.params.id);
+      res.json(posts);
+    } catch (error) {
+      console.error("Error fetching community posts:", error);
+      res.status(500).json({ message: "Failed to fetch community posts" });
+    }
+  });
+
+  // Check membership status
+  app.get("/api/communities/:id/membership", requireAuth, async (req, res) => {
+    try {
+      const membership = await storage.getCommunityMembership(req.user!.id, req.params.id);
+      res.json({ isMember: !!membership, membership: membership || null });
+    } catch (error) {
+      console.error("Error checking membership:", error);
+      res.status(500).json({ message: "Failed to check membership" });
     }
   });
 

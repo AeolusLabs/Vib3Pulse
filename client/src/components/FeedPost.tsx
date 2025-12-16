@@ -88,6 +88,7 @@ interface FeedPostProps {
   venueId?: string | null;
   attachedEvent?: Event | null;
   attachedVenue?: Venue | null;
+  community?: { id: string; name: string } | null;
   onPostClick?: () => void;
 }
 
@@ -164,6 +165,7 @@ export default function FeedPost({
   venueId,
   attachedEvent,
   attachedVenue,
+  community,
   onPostClick,
 }: FeedPostProps) {
   const [, navigate] = useLocation();
@@ -518,6 +520,11 @@ export default function FeedPost({
               <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">
                 Organizer
               </span>
+            )}
+            {community && (
+              <Badge variant="outline" className="text-xs py-0" data-testid={`community-tag-${id}`}>
+                {community.name}
+              </Badge>
             )}
             <span className="text-xs text-muted-foreground">· {displayTime}</span>
           </div>

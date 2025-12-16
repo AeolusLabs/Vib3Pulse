@@ -22,13 +22,14 @@ Preferred communication style: Simple, everyday language.
     - **Stories:** Image stories with 24-hour expiration, user grouping, and deletion, real-time cache updates.
     - **Buddy System (Safety Feature):** Users designate a trusted friend as an emergency contact. Allows sending distress alerts with location sharing, real-time WebSocket notifications, and alert history.
     - **Venues:** Event Organizers manage clubs, pubs, and lounges. Includes venue promotion, entry ticket sales (simulated for demo), and analytics tracking.
+    - **Communities:** Users can create and join communities. Community tabs appear alongside "Following" and "For You" on the Feed page in a horizontal scrollable tab bar. Users can post to communities (posts are tagged with the community name), and community posts notify all members.
     - **Search & Discovery:** Universal search across users, events, venues, and posts with type filter chips. Trending sections show popular content based on engagement metrics (likes, RSVPs, tickets sold, views) with time decay algorithm. Suggested users section helps users discover new people to follow.
     - **Admin Panel:** Separate, secure staff-only panel with distinct authentication, role-based access control (6 levels), activity logging, and moderation capabilities for users, events, stories, and content reports. Visual design uses a dark slate color scheme distinct from the main app.
 
 ### Data Storage
 - **Database:** PostgreSQL (via Neon serverless) as the primary database.
 - **ORM:** Drizzle ORM for type-safe queries, schema-first approach with migrations.
-- **Schema:** Users, stories, buddies, distress messages, distress alerts, venues, venue entry nights, venue tickets, venue analytics, admin users, admin activity logs, content reports, user suspensions, event moderations.
+- **Schema:** Users, stories, buddies, distress messages, distress alerts, venues, venue entry nights, venue tickets, venue analytics, communities, community memberships, posts (with communityId), admin users, admin activity logs, content reports, user suspensions, event moderations.
 - **Abstraction:** `IStorage` interface for database operations, allowing interchangeability (e.g., `MemStorage` for development).
 - **Session Management:** PostgreSQL-backed sessions.
 
