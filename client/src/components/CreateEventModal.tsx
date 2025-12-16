@@ -75,7 +75,8 @@ const EVENT_CATEGORIES = [
   "Business",
   "Education",
   "Community",
-  "Entertainment"
+  "Entertainment",
+  "Theatre"
 ];
 
 export default function CreateEventModal({ open, onClose, event }: CreateEventModalProps) {

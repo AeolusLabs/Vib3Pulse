@@ -16,7 +16,8 @@ const categories = [
   "Arts",
   "Sports",
   "Wellness",
-  "Networking"
+  "Networking",
+  "Theatre"
 ];
 
 export default function FilterBar({ 
