@@ -9,7 +9,7 @@ interface HeroSectionProps {
   onCategoryClick?: (category: string) => void;
 }
 
-const quickCategories = ["Music", "Food & Drink", "Tech", "Arts", "Sports", "Wellness"];
+const quickCategories = ["Music", "Food & Drink", "Tech", "Arts", "Sports", "Wellness", "Theatre"];
 
 export default function HeroSection({ onSearch, onCategoryClick }: HeroSectionProps) {
   return (
