@@ -414,6 +414,7 @@ export default function FeedPage() {
                   name: post.user.displayName || post.user.organizationName || post.user.username,
                   username: post.user.username,
                   isOrganizer: post.user.userType === 'organizer',
+                  isVerified: post.user.isVerified,
                   userId: post.user.id,
                   avatar: post.user.avatarUrl,
                 }}

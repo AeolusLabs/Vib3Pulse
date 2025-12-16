@@ -24,6 +24,8 @@ export type SessionUser = {
   gender?: string | null;
   genderEditedAt?: Date | null;
   canManageVenues?: boolean | null;
+  isVerified?: boolean | null;
+  isOfficial?: boolean | null;
 };
 
 export function userToSessionUser(user: User): SessionUser {
@@ -37,6 +39,8 @@ export function userToSessionUser(user: User): SessionUser {
     gender: user.gender,
     genderEditedAt: user.genderEditedAt,
     canManageVenues: user.canManageVenues,
+    isVerified: user.isVerified,
+    isOfficial: user.isOfficial,
   };
 }
 

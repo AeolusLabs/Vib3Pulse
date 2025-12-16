@@ -18,7 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Heart, MessageCircle, Share2, Bookmark, Repeat2, Calendar, MapPin, Building2, MoreHorizontal, Trash2 } from "lucide-react";
+import { Heart, MessageCircle, Share2, Bookmark, Repeat2, Calendar, MapPin, Building2, MoreHorizontal, Trash2, BadgeCheck } from "lucide-react";
 import { useState, useEffect, Fragment } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -68,6 +68,7 @@ interface FeedPostProps {
     username: string;
     avatar?: string;
     isOrganizer?: boolean;
+    isVerified?: boolean;
     userId?: string;
   };
   content: string;
@@ -507,6 +508,9 @@ export default function FeedPost({
             <p className="font-semibold text-sm" data-testid={`text-author-${id}`}>
               {author.name}
             </p>
+            {author.isVerified && (
+              <BadgeCheck className="h-4 w-4 text-blue-500 fill-blue-500" data-testid={`badge-verified-${id}`} />
+            )}
             <p className="text-xs text-muted-foreground">
               @{author.username}
             </p>

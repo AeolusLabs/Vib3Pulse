@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Calendar, MapPin, PoundSterling, Users, MessageCircle, UserCheck, UserPlus } from "lucide-react";
+import { Calendar, MapPin, PoundSterling, Users, MessageCircle, UserCheck, UserPlus, BadgeCheck } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { User, Post, Event, Rsvp } from "@shared/schema";
@@ -146,9 +146,14 @@ export default function UserProfilePage() {
                 {isSocialUser ? (
                   <>
                     <div>
-                      <h1 className="text-3xl font-bold font-serif text-foreground" data-testid="text-display-name">
-                        {user.displayName || user.username}
-                      </h1>
+                      <div className="flex items-center gap-2">
+                        <h1 className="text-3xl font-bold font-serif text-foreground" data-testid="text-display-name">
+                          {user.displayName || user.username}
+                        </h1>
+                        {user.isVerified && (
+                          <BadgeCheck className="h-6 w-6 text-blue-500 fill-blue-500" data-testid="badge-verified" />
+                        )}
+                      </div>
                       <p className="text-muted-foreground" data-testid="text-username">
                         @{user.username}
                       </p>
@@ -219,6 +224,9 @@ export default function UserProfilePage() {
                         <h1 className="text-3xl font-bold font-serif text-foreground" data-testid="text-organization-name">
                           {user.organizationName || user.username}
                         </h1>
+                        {user.isVerified && (
+                          <BadgeCheck className="h-6 w-6 text-blue-500 fill-blue-500" data-testid="badge-verified" />
+                        )}
                         <Badge variant="default" className="bg-primary" data-testid="badge-organizer">
                           Event Organizer
                         </Badge>
