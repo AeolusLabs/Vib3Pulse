@@ -24,6 +24,8 @@ export const users = pgTable("users", {
   usernameChangesRemaining: integer("username_changes_remaining").notNull().default(2),
   passwordResetToken: text("password_reset_token"),
   passwordResetExpires: timestamp("password_reset_expires"),
+  isVerified: boolean("is_verified").notNull().default(false),
+  isOfficial: boolean("is_official").notNull().default(false),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
