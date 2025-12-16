@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Calendar, MapPin, Share2 } from "lucide-react";
+import { Calendar, MapPin, Share2, ExternalLink } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useRoute } from "wouter";
 import { format } from "date-fns";
@@ -152,7 +152,18 @@ export default function EventDetailPage() {
                   </p>
                 </div>
 
-                <div className="flex gap-2 mt-6 pt-6 border-t">
+                <div className="flex flex-wrap gap-2 mt-6 pt-6 border-t">
+                  {event.externalTicketUrl && (
+                    <Button 
+                      asChild
+                      data-testid="button-external-tickets"
+                    >
+                      <a href={event.externalTicketUrl} target="_blank" rel="noopener noreferrer">
+                        <ExternalLink className="h-4 w-4 mr-2" />
+                        Get Tickets
+                      </a>
+                    </Button>
+                  )}
                   <Button variant="outline" size="default" data-testid="button-share">
                     <Share2 className="h-4 w-4 mr-2" />
                     Share Event

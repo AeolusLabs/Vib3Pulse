@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
-import { Calendar, MapPin, Users, Ticket, CheckCircle, Minus, Plus } from "lucide-react";
+import { Calendar, MapPin, Users, Ticket, CheckCircle, Minus, Plus, ExternalLink } from "lucide-react";
 import { format } from "date-fns";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Event } from "@shared/schema";
@@ -233,7 +233,22 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
 
           <Separator />
 
-          <div className="flex gap-3 pt-2">
+          {event.externalTicketUrl && (
+            <div className="flex items-center gap-2 p-3 rounded-md border bg-muted/50">
+              <ExternalLink className="h-4 w-4 text-muted-foreground" />
+              <div className="flex-1">
+                <p className="text-sm font-medium">External Tickets Available</p>
+                <p className="text-xs text-muted-foreground">Tickets are sold on an external platform</p>
+              </div>
+              <Button size="sm" asChild data-testid="button-external-tickets-modal">
+                <a href={event.externalTicketUrl} target="_blank" rel="noopener noreferrer">
+                  Get Tickets
+                </a>
+              </Button>
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-3 pt-2">
             {isFreeEvent && requiresRSVP ? (
               <Button
                 className="flex-1"

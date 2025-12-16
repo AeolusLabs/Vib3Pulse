@@ -50,6 +50,7 @@ interface EventFormData {
   parentalGuidance: "none" | "advised";
   entryType: "free" | "ticketed";
   thumbnailUrl: string;
+  externalTicketUrl: string;
   
   // Step 2
   tickets: TicketTier[];
@@ -96,6 +97,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
     parentalGuidance: "none",
     entryType: "free",
     thumbnailUrl: "",
+    externalTicketUrl: "",
     tickets: [],
     requireRSVP: false,
     rsvpGeneratesTicket: true,
@@ -128,6 +130,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
               parentalGuidance: "none",
               entryType: "ticketed",
               thumbnailUrl: event.imageUrl || "",
+              externalTicketUrl: event.externalTicketUrl || "",
               tickets: tiers.length > 0 ? tiers.map((tier, index) => ({
                 id: tier.id || String(index + 1),
                 name: tier.name,
@@ -162,6 +165,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
               parentalGuidance: "none",
               entryType: "ticketed",
               thumbnailUrl: event.imageUrl || "",
+              externalTicketUrl: event.externalTicketUrl || "",
               tickets: [{
                 id: "1",
                 name: "General Admission",
@@ -189,6 +193,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
           parentalGuidance: "none",
           entryType: "free",
           thumbnailUrl: event.imageUrl || "",
+          externalTicketUrl: event.externalTicketUrl || "",
           tickets: [],
           requireRSVP: event.requiresRSVP,
           rsvpGeneratesTicket: true,
@@ -212,6 +217,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
         parentalGuidance: "none",
         entryType: "free",
         thumbnailUrl: "",
+        externalTicketUrl: "",
         tickets: [],
         requireRSVP: false,
         rsvpGeneratesTicket: true,
@@ -385,6 +391,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
       requiresRSVP: formData.requireRSVP,
       ticketsAvailable: ticketsAvailable,
       imageUrl: formData.thumbnailUrl || null,
+      externalTicketUrl: formData.externalTicketUrl || null,
     };
     
     if (isEditMode && event) {
@@ -852,6 +859,21 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
         {/* Step 2: Entry Configuration */}
         {step === 2 && (
           <div className="space-y-6">
+            <div className="space-y-2">
+              <Label htmlFor="external-ticket-url">External Ticketing Link (Optional)</Label>
+              <Input
+                id="external-ticket-url"
+                type="url"
+                placeholder="https://eventbrite.com/your-event or other ticketing platform"
+                value={formData.externalTicketUrl}
+                onChange={(e) => updateFormData({ externalTicketUrl: e.target.value })}
+                data-testid="input-external-ticket-url"
+              />
+              <p className="text-xs text-muted-foreground">
+                Link to Eventbrite, Ticketmaster, Dice, or other external ticketing platforms
+              </p>
+            </div>
+
             {formData.entryType === "ticketed" ? (
               <>
                 <div className="space-y-4">
