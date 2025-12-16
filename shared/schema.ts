@@ -77,6 +77,7 @@ export const events = pgTable("events", {
   requiresRSVP: boolean("requires_rsvp").notNull().default(false),
   ticketsAvailable: integer("tickets_available").notNull(),
   imageUrl: text("image_url"),
+  externalTicketUrl: text("external_ticket_url"),
   isPromoted: boolean("is_promoted").notNull().default(false),
   promotedUntil: timestamp("promoted_until"),
 });
