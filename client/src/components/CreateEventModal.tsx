@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { useAuth } from "@/hooks/useAuth";
 import {
   Dialog,
   DialogContent,
@@ -79,8 +80,12 @@ const EVENT_CATEGORIES = [
 
 export default function CreateEventModal({ open, onClose, event }: CreateEventModalProps) {
   const { toast } = useToast();
+  const { data: currentUser } = useAuth();
   const [step, setStep] = useState(1);
   const isEditMode = !!event;
+  
+  // Only verified/official users can add external ticket links
+  const canAddExternalTicketUrl = currentUser?.isVerified || currentUser?.isOfficial;
   
   const [formData, setFormData] = useState<EventFormData>({
     name: "",
@@ -859,20 +864,22 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
         {/* Step 2: Entry Configuration */}
         {step === 2 && (
           <div className="space-y-6">
-            <div className="space-y-2">
-              <Label htmlFor="external-ticket-url">External Ticketing Link (Optional)</Label>
-              <Input
-                id="external-ticket-url"
-                type="url"
-                placeholder="https://eventbrite.com/your-event or other ticketing platform"
-                value={formData.externalTicketUrl}
-                onChange={(e) => updateFormData({ externalTicketUrl: e.target.value })}
-                data-testid="input-external-ticket-url"
-              />
-              <p className="text-xs text-muted-foreground">
-                Link to Eventbrite, Ticketmaster, Dice, or other external ticketing platforms
-              </p>
-            </div>
+            {canAddExternalTicketUrl && (
+              <div className="space-y-2">
+                <Label htmlFor="external-ticket-url">External Ticketing Link (Optional)</Label>
+                <Input
+                  id="external-ticket-url"
+                  type="url"
+                  placeholder="https://eventbrite.com/your-event or other ticketing platform"
+                  value={formData.externalTicketUrl}
+                  onChange={(e) => updateFormData({ externalTicketUrl: e.target.value })}
+                  data-testid="input-external-ticket-url"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Link to Eventbrite, Ticketmaster, Dice, or other external ticketing platforms
+                </p>
+              </div>
+            )}
 
             {formData.entryType === "ticketed" ? (
               <>

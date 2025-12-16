@@ -11,6 +11,8 @@ export type AuthUser = {
   gender?: string | null;
   genderEditedAt?: Date | null;
   canManageVenues?: boolean | null;
+  isVerified?: boolean | null;
+  isOfficial?: boolean | null;
 };
 
 type AuthResponse = {

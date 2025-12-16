@@ -606,11 +606,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const parsedData = eventCreateDto.omit({ organizerId: true }).parse(req.body);
       
+      // Check if user is allowed to add external ticket URLs (only verified/official accounts)
+      const currentUser = await storage.getUser(req.user!.id);
+      if (parsedData.externalTicketUrl && !currentUser?.isVerified && !currentUser?.isOfficial) {
+        return res.status(403).json({ 
+          message: "Only verified accounts can add external ticketing links" 
+        });
+      }
+      
       const sanitizedData = {
         ...parsedData,
         title: sanitizeTextOnly(parsedData.title || ""),
         description: sanitizeTextOnly(parsedData.description || ""),
         location: sanitizeTextOnly(parsedData.location || ""),
+        // Strip external ticket URL if user is not verified
+        externalTicketUrl: (currentUser?.isVerified || currentUser?.isOfficial) 
+          ? parsedData.externalTicketUrl 
+          : null,
       };
       
       // Geocode the location to get coordinates
@@ -664,8 +676,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const parsedData = eventUpdateDto.parse(req.body);
       
+      // Check if user is allowed to add external ticket URLs (only verified/official accounts)
+      const currentUser = await storage.getUser(req.user!.id);
+      if (parsedData.externalTicketUrl && !currentUser?.isVerified && !currentUser?.isOfficial) {
+        return res.status(403).json({ 
+          message: "Only verified accounts can add external ticketing links" 
+        });
+      }
+      
       // If location changed, re-geocode
-      let updateData = { ...parsedData };
+      let updateData = { 
+        ...parsedData,
+        // Strip external ticket URL if user is not verified - always set to null for non-verified
+        externalTicketUrl: (currentUser?.isVerified || currentUser?.isOfficial) 
+          ? parsedData.externalTicketUrl 
+          : null, // Non-verified users cannot have external ticket links
+      };
       if (parsedData.location && parsedData.location !== event.location) {
         const geocodeResult = await geocodeAddress(parsedData.location);
         if (geocodeResult) {
