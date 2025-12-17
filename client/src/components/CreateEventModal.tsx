@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Upload, Plus, Trash2, Edit2 } from "lucide-react";
+import { X, Upload, Plus, Trash2, Edit2, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,6 +35,12 @@ interface TicketTier {
   salesEndDate: string;
 }
 
+interface ExternalTicketLink {
+  id: string;
+  platform: string;
+  url: string;
+}
+
 interface EventFormData {
   // Step 1
   name: string;
@@ -49,9 +55,10 @@ interface EventFormData {
   location: string;
   ageRestriction: "all" | "18+" | "21+";
   parentalGuidance: "none" | "advised";
-  entryType: "free" | "ticketed";
+  entryType: "free" | "ticketed" | "external";
   thumbnailUrl: string;
   externalTicketUrl: string;
+  externalTicketLinks: ExternalTicketLink[];
   
   // Step 2
   tickets: TicketTier[];
@@ -104,10 +111,13 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
     entryType: "free",
     thumbnailUrl: "",
     externalTicketUrl: "",
+    externalTicketLinks: [],
     tickets: [],
     requireRSVP: false,
     rsvpGeneratesTicket: true,
   });
+  
+  const [externalLinksModalOpen, setExternalLinksModalOpen] = useState(false);
 
   // Pre-fill form when editing
   useEffect(() => {
@@ -134,9 +144,10 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
               location: event.location,
               ageRestriction: "all",
               parentalGuidance: "none",
-              entryType: "ticketed",
+              entryType: event.externalTicketUrl ? "external" : "ticketed",
               thumbnailUrl: event.imageUrl || "",
               externalTicketUrl: event.externalTicketUrl || "",
+              externalTicketLinks: event.externalTicketUrl ? [{ id: "1", platform: "External", url: event.externalTicketUrl }] : [],
               tickets: tiers.length > 0 ? tiers.map((tier, index) => ({
                 id: tier.id || String(index + 1),
                 name: tier.name,
@@ -169,9 +180,10 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
               location: event.location,
               ageRestriction: "all",
               parentalGuidance: "none",
-              entryType: "ticketed",
+              entryType: event.externalTicketUrl ? "external" : "ticketed",
               thumbnailUrl: event.imageUrl || "",
               externalTicketUrl: event.externalTicketUrl || "",
+              externalTicketLinks: event.externalTicketUrl ? [{ id: "1", platform: "External", url: event.externalTicketUrl }] : [],
               tickets: [{
                 id: "1",
                 name: "General Admission",
@@ -197,9 +209,10 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
           location: event.location,
           ageRestriction: "all",
           parentalGuidance: "none",
-          entryType: "free",
+          entryType: event.externalTicketUrl ? "external" : "free",
           thumbnailUrl: event.imageUrl || "",
           externalTicketUrl: event.externalTicketUrl || "",
+          externalTicketLinks: event.externalTicketUrl ? [{ id: "1", platform: "External", url: event.externalTicketUrl }] : [],
           tickets: [],
           requireRSVP: event.requiresRSVP,
           rsvpGeneratesTicket: true,
@@ -208,6 +221,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
     } else if (!open) {
       // Reset form when modal closes
       setStep(1);
+      setExternalLinksModalOpen(false);
       setFormData({
         name: "",
         type: "",
@@ -224,6 +238,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
         entryType: "free",
         thumbnailUrl: "",
         externalTicketUrl: "",
+        externalTicketLinks: [],
         tickets: [],
         requireRSVP: false,
         rsvpGeneratesTicket: true,
@@ -397,7 +412,10 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
       requiresRSVP: formData.requireRSVP,
       ticketsAvailable: ticketsAvailable,
       imageUrl: formData.thumbnailUrl || null,
-      externalTicketUrl: formData.externalTicketUrl || null,
+      externalTicketUrl: formData.entryType === "external" && formData.externalTicketLinks.length > 0 
+        ? formData.externalTicketLinks[0].url 
+        : (formData.externalTicketUrl || null),
+      externalTicketLinks: formData.entryType === "external" ? formData.externalTicketLinks : undefined,
     };
     
     if (isEditMode && event) {
@@ -566,10 +584,25 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
         t.name.trim() !== "" && t.price > 0 && t.quantity > 0 && t.salesEndDate !== ""
       );
     }
+    if (formData.entryType === "external") {
+      return formData.externalTicketLinks.length > 0 && formData.externalTicketLinks.every(l =>
+        l.platform.trim() !== "" && l.url.trim() !== "" && isValidUrl(l.url)
+      );
+    }
     return true;
+  };
+  
+  const isValidUrl = (url: string) => {
+    try {
+      new URL(url);
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -800,7 +833,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
               <Label>Entry Type *</Label>
               <RadioGroup
                 value={formData.entryType}
-                onValueChange={(value: "free" | "ticketed") => updateFormData({ entryType: value })}
+                onValueChange={(value: "free" | "ticketed" | "external") => updateFormData({ entryType: value })}
               >
                 <div className="flex items-center space-x-2">
                   <RadioGroupItem value="free" id="free" data-testid="radio-free" />
@@ -810,6 +843,12 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                   <RadioGroupItem value="ticketed" id="ticketed" data-testid="radio-ticketed" />
                   <Label htmlFor="ticketed">Ticketed Event</Label>
                 </div>
+                {canAddExternalTicketUrl && (
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="external" id="external" data-testid="radio-external" />
+                    <Label htmlFor="external">External Ticket Link(s)</Label>
+                  </div>
+                )}
               </RadioGroup>
             </div>
 
@@ -865,24 +904,62 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
         {/* Step 2: Entry Configuration */}
         {step === 2 && (
           <div className="space-y-6">
-            {canAddExternalTicketUrl && (
-              <div className="space-y-2">
-                <Label htmlFor="external-ticket-url">External Ticketing Link (Optional)</Label>
-                <Input
-                  id="external-ticket-url"
-                  type="url"
-                  placeholder="https://eventbrite.com/your-event or other ticketing platform"
-                  value={formData.externalTicketUrl}
-                  onChange={(e) => updateFormData({ externalTicketUrl: e.target.value })}
-                  data-testid="input-external-ticket-url"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Link to Eventbrite, Ticketmaster, Dice, or other external ticketing platforms
-                </p>
-              </div>
-            )}
+            {formData.entryType === "external" ? (
+              <>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-lg font-semibold">External Ticket Links</h3>
+                      <p className="text-sm text-muted-foreground">
+                        Add links to external ticketing platforms (Eventbrite, Ticketmaster, Dice, etc.)
+                      </p>
+                    </div>
+                    <Button
+                      onClick={() => setExternalLinksModalOpen(true)}
+                      size="sm"
+                      data-testid="button-manage-external-links"
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      {formData.externalTicketLinks.length > 0 ? "Manage Links" : "Add Links"}
+                    </Button>
+                  </div>
 
-            {formData.entryType === "ticketed" ? (
+                  {formData.externalTicketLinks.length === 0 ? (
+                    <Card>
+                      <CardContent className="py-12 text-center">
+                        <p className="text-muted-foreground">
+                          No ticket links yet. Click "Add Links" to add external ticketing links.
+                        </p>
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    <div className="space-y-2">
+                      {formData.externalTicketLinks.map((link, index) => (
+                        <Card key={link.id}>
+                          <CardContent className="py-3 flex items-center justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium text-sm">{link.platform}</p>
+                              <p className="text-xs text-muted-foreground truncate">{link.url}</p>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => {
+                                const newLinks = formData.externalTicketLinks.filter(l => l.id !== link.id);
+                                updateFormData({ externalTicketLinks: newLinks });
+                              }}
+                              data-testid={`button-remove-link-${index}`}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : formData.entryType === "ticketed" ? (
               <>
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
@@ -1147,7 +1224,24 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                   </Button>
                 </div>
 
-                {formData.entryType === "ticketed" ? (
+                {formData.entryType === "external" ? (
+                  <div className="space-y-3">
+                    <Badge className="bg-blue-500" data-testid="text-review-entry-type">External Ticketing</Badge>
+                    {formData.externalTicketLinks.map((link, index) => (
+                      <div
+                        key={link.id}
+                        className="p-4 border rounded-lg space-y-2"
+                        data-testid={`review-link-${index}`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="font-medium">{link.platform}</p>
+                          <ExternalLink className="h-4 w-4 text-muted-foreground" />
+                        </div>
+                        <p className="text-sm text-muted-foreground truncate">{link.url}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : formData.entryType === "ticketed" ? (
                   <div className="space-y-3">
                     <Badge className="bg-primary" data-testid="text-review-entry-type">Ticketed Event</Badge>
                     {formData.tickets.map((ticket, index) => (
@@ -1201,5 +1295,156 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
         )}
       </DialogContent>
     </Dialog>
+    
+    {/* External Links Modal */}
+    <Dialog open={externalLinksModalOpen} onOpenChange={setExternalLinksModalOpen}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Manage External Ticket Links</DialogTitle>
+        </DialogHeader>
+        <ExternalLinksModalContent
+          links={formData.externalTicketLinks}
+          onSave={(links) => {
+            updateFormData({ externalTicketLinks: links });
+            setExternalLinksModalOpen(false);
+          }}
+          onCancel={() => setExternalLinksModalOpen(false)}
+        />
+      </DialogContent>
+    </Dialog>
+    </>
+  );
+}
+
+// Common ticketing platforms
+const TICKETING_PLATFORMS = [
+  "Eventbrite",
+  "Ticketmaster",
+  "Dice",
+  "See Tickets",
+  "Skiddle",
+  "Resident Advisor",
+  "AXS",
+  "Ticketswap",
+  "Fatsoma",
+  "Other",
+];
+
+interface ExternalLinksModalContentProps {
+  links: ExternalTicketLink[];
+  onSave: (links: ExternalTicketLink[]) => void;
+  onCancel: () => void;
+}
+
+function ExternalLinksModalContent({ links, onSave, onCancel }: ExternalLinksModalContentProps) {
+  const [localLinks, setLocalLinks] = useState<ExternalTicketLink[]>(
+    links.length > 0 ? [...links] : [{ id: "1", platform: "", url: "" }]
+  );
+
+  const addLink = () => {
+    setLocalLinks([...localLinks, { id: String(Date.now()), platform: "", url: "" }]);
+  };
+
+  const removeLink = (id: string) => {
+    if (localLinks.length > 1) {
+      setLocalLinks(localLinks.filter(l => l.id !== id));
+    }
+  };
+
+  const updateLink = (id: string, field: "platform" | "url", value: string) => {
+    setLocalLinks(localLinks.map(l => l.id === id ? { ...l, [field]: value } : l));
+  };
+
+  const isValid = () => {
+    return localLinks.every(l => l.platform.trim() !== "" && l.url.trim() !== "" && isValidUrlCheck(l.url));
+  };
+
+  const isValidUrlCheck = (url: string) => {
+    try {
+      new URL(url);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        Add links to external ticketing platforms where users can purchase tickets.
+      </p>
+      
+      <div className="space-y-3 max-h-[40vh] overflow-y-auto">
+        {localLinks.map((link, index) => (
+          <div key={link.id} className="p-4 border rounded-lg space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">Link {index + 1}</span>
+              {localLinks.length > 1 && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => removeLink(link.id)}
+                  data-testid={`button-remove-modal-link-${index}`}
+                >
+                  <Trash2 className="h-4 w-4 text-destructive" />
+                </Button>
+              )}
+            </div>
+            
+            <div className="space-y-2">
+              <Label>Platform</Label>
+              <Select
+                value={link.platform}
+                onValueChange={(value) => updateLink(link.id, "platform", value)}
+              >
+                <SelectTrigger data-testid={`select-platform-${index}`}>
+                  <SelectValue placeholder="Select platform" />
+                </SelectTrigger>
+                <SelectContent>
+                  {TICKETING_PLATFORMS.map((platform) => (
+                    <SelectItem key={platform} value={platform}>
+                      {platform}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="space-y-2">
+              <Label>Ticket URL</Label>
+              <Input
+                type="url"
+                placeholder="https://..."
+                value={link.url}
+                onChange={(e) => updateLink(link.id, "url", e.target.value)}
+                data-testid={`input-link-url-${index}`}
+              />
+              {link.url && !isValidUrlCheck(link.url) && (
+                <p className="text-xs text-destructive">Please enter a valid URL</p>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+      
+      <Button
+        variant="outline"
+        onClick={addLink}
+        className="w-full"
+        data-testid="button-add-another-link"
+      >
+        <Plus className="h-4 w-4 mr-2" />
+        Add Another Link
+      </Button>
+      
+      <div className="flex justify-end gap-2 pt-2">
+        <Button variant="outline" onClick={onCancel} data-testid="button-cancel-links">
+          Cancel
+        </Button>
+        <Button onClick={() => onSave(localLinks)} disabled={!isValid()} data-testid="button-save-links">
+          Save Links
+        </Button>
+      </div>
+    </div>
   );
 }
