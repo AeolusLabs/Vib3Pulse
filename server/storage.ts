@@ -220,6 +220,7 @@ export interface IStorage {
   getTrendingVenues(limit?: number): Promise<Array<Venue & { viewCount: number }>>;
   getTrendingStories(limit?: number): Promise<Array<Story & { user: User; likeCount: number }>>;
   getSuggestedUsers(userId: string, limit?: number): Promise<User[]>;
+  getRecommendedUsers(userId: string, limit?: number): Promise<User[]>;
   
   likePost(userId: string, postId: string): Promise<Like>;
   unlikePost(userId: string, postId: string): Promise<void>;
@@ -1303,6 +1304,74 @@ export class DbStorage implements IStorage {
       const { passwordHash, ...userWithoutPassword } = user;
       return userWithoutPassword as User;
     });
+  }
+
+  async getRecommendedUsers(userId: string, limit: number = 10): Promise<User[]> {
+    // Get current user's interests and location
+    const currentUser = await this.getUser(userId);
+    if (!currentUser) {
+      return [];
+    }
+    
+    // Get users the current user is already following
+    const following = await db
+      .select({ id: follows.followingId })
+      .from(follows)
+      .where(eq(follows.followerId, userId));
+    
+    const excludeIds = [userId, ...following.map(f => f.id)];
+    
+    // Get all eligible users (not following and not self)
+    const allUsers = await db
+      .select()
+      .from(users)
+      .where(notInArray(users.id, excludeIds));
+    
+    // Calculate match score for each user based on interests and location
+    const scoredUsers = allUsers.map(user => {
+      let score = 0;
+      
+      // Interest matching (each shared interest = +2 points)
+      const currentInterests = currentUser.interests || [];
+      const userInterests = user.interests || [];
+      const sharedInterests = currentInterests.filter((i: string | null) => 
+        userInterests.some((ui: string | null) => ui?.toLowerCase() === i?.toLowerCase())
+      );
+      score += sharedInterests.length * 2;
+      
+      // Location matching (+3 points for same location)
+      if (currentUser.location && user.location) {
+        const currentLoc = currentUser.location.toLowerCase().trim();
+        const userLoc = user.location.toLowerCase().trim();
+        if (currentLoc === userLoc) {
+          score += 3;
+        } else if (currentLoc.includes(userLoc) || userLoc.includes(currentLoc)) {
+          score += 1;
+        }
+      }
+      
+      // Bonus for verified/official users (+1 point)
+      if (user.isVerified || user.isOfficial) {
+        score += 1;
+      }
+      
+      const { passwordHash, ...userWithoutPassword } = user;
+      return {
+        ...userWithoutPassword as User,
+        matchScore: score,
+        sharedInterestsCount: sharedInterests.length,
+        sameLocation: currentUser.location && user.location && 
+          currentUser.location.toLowerCase().trim() === user.location?.toLowerCase().trim(),
+      };
+    });
+    
+    // Sort by score (highest first), then filter to only those with some match
+    const sortedUsers = scoredUsers
+      .sort((a, b) => b.matchScore - a.matchScore)
+      .slice(0, limit);
+    
+    // Return users without the extra fields (matchScore etc are just for sorting)
+    return sortedUsers.map(({ matchScore, sharedInterestsCount, sameLocation, ...user }) => user);
   }
 
   async likePost(userId: string, postId: string): Promise<Like> {

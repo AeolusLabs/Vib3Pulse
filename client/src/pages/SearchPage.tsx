@@ -100,12 +100,21 @@ export default function SearchPage() {
     enabled: !!sessionUser?.user,
   });
 
+  const isSearching = debouncedQuery.trim().length >= 2;
+
+  // Recommended users based on similar interests and location
+  const { data: recommendedUsers = [], isLoading: recommendedUsersLoading } = useQuery<User[]>({
+    queryKey: ['/api/recommended-users'],
+    enabled: !!sessionUser?.user && activeType === "users" && !isSearching,
+  });
+
   const followMutation = useMutation({
     mutationFn: async (userId: string) => {
       return await apiRequest('POST', `/api/follows/${userId}`, {});
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/suggested-users'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/recommended-users'] });
       toast({
         title: "Success",
         description: "You are now following this user",
@@ -119,8 +128,6 @@ export default function SearchPage() {
     searchResults.venues.length > 0 ||
     searchResults.posts.length > 0
   );
-
-  const isSearching = debouncedQuery.trim().length >= 2;
 
   const totalResults = searchResults ? 
     searchResults.users.length + 
@@ -266,12 +273,55 @@ export default function SearchPage() {
           </div>
         ) : (
           <div className="space-y-8">
+            {/* Recommended users based on interests/location - shown when Users filter is active */}
+            {activeType === "users" && sessionUser?.user && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xl font-semibold font-serif flex items-center gap-2">
+                    <Users className="h-5 w-5 text-primary" />
+                    Recommended for You
+                  </h2>
+                  <p className="text-sm text-muted-foreground">Based on your interests & location</p>
+                </div>
+                {recommendedUsersLoading ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {[1, 2, 3, 4].map((i) => (
+                      <Skeleton key={i} className="h-24 w-full rounded-lg" />
+                    ))}
+                  </div>
+                ) : recommendedUsers.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {recommendedUsers.map((user) => (
+                      <UserResultCard
+                        key={user.id}
+                        user={user}
+                        sessionUser={sessionUser?.user}
+                        onFollow={(id) => followMutation.mutate(id)}
+                        navigate={navigate}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <Card>
+                    <CardContent className="py-8 text-center">
+                      <Users className="h-12 w-12 mx-auto text-muted-foreground/30 mb-4" />
+                      <p className="text-muted-foreground">No recommendations yet</p>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Add interests and location to your profile to get personalized recommendations
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
+              </section>
+            )}
+
+            {/* Suggested users - shown when all or users filter is active */}
             {(activeType === "all" || activeType === "users") && sessionUser?.user && suggestedUsers.length > 0 && (
               <section>
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-semibold font-serif flex items-center gap-2">
                     <Sparkles className="h-5 w-5 text-primary" />
-                    Suggested for You
+                    {activeType === "users" ? "More Users to Follow" : "Suggested for You"}
                   </h2>
                 </div>
                 <ScrollArea className="w-full whitespace-nowrap">

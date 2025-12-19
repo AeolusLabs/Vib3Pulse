@@ -3352,6 +3352,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Recommended users based on interests and location
+  app.get("/api/recommended-users", requireAuth, async (req, res) => {
+    try {
+      const limit = Math.min(parseInt(req.query.limit as string) || 15, 30);
+      const recommendedUsers = await storage.getRecommendedUsers(req.user!.id, limit);
+      res.json(recommendedUsers);
+    } catch (error) {
+      console.error("Recommended users error:", error);
+      res.status(500).json({ message: "Failed to get recommended users" });
+    }
+  });
+
   // Object Storage Routes (for venue image uploads)
   // Get presigned URL for uploading
   app.post("/api/objects/upload", requireAuth, async (req, res) => {
