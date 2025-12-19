@@ -137,6 +137,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
 
   const isFreeEvent = event.ticketPrice === 0;
   const requiresRSVP = event.requiresRSVP;
+  const hasExternalTickets = !!event.externalTicketUrl;
 
   return (
     <>
@@ -186,7 +187,12 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
               </p>
             </div>
 
-            {isFreeEvent ? (
+            {hasExternalTickets ? (
+              <div className="flex items-center gap-3">
+                <ExternalLink className="h-5 w-5 text-muted-foreground" />
+                <Badge variant="default" className="bg-blue-500 text-base" data-testid="modal-event-price">External</Badge>
+              </div>
+            ) : isFreeEvent ? (
               <div className="flex items-center gap-3">
                 <Ticket className="h-5 w-5 text-muted-foreground" />
                 <Badge variant="default" className="text-base" data-testid="modal-event-price">Free Event</Badge>
@@ -249,7 +255,18 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
           )}
 
           <div className="flex flex-wrap gap-3 pt-2">
-            {isFreeEvent && requiresRSVP ? (
+            {hasExternalTickets ? (
+              <Button
+                className="flex-1"
+                asChild
+                data-testid="button-get-external-tickets"
+              >
+                <a href={event.externalTicketUrl!} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  Get Tickets
+                </a>
+              </Button>
+            ) : isFreeEvent && requiresRSVP ? (
               <Button
                 className="flex-1"
                 onClick={handleRSVP}
