@@ -701,7 +701,11 @@ export default function DiscoverPage() {
                     </div>
                   </CardContent>
                   <CardFooter className="flex items-center justify-between gap-2">
-                    {event.ticketPrice === 0 ? (
+                    {event.externalTicketUrl ? (
+                      <Badge variant="default" className="bg-blue-500 text-base" data-testid={`event-price-${event.id}`}>
+                        External
+                      </Badge>
+                    ) : event.ticketPrice === 0 ? (
                       <Badge variant="default" className="text-base" data-testid={`event-price-${event.id}`}>
                         Free
                       </Badge>
