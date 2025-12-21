@@ -487,6 +487,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get events by category (public endpoint for landing page)
+  app.get("/api/events/by-category/:category", async (req, res) => {
+    try {
+      const { category } = req.params;
+      const allEvents = await storage.getEvents();
+      // Filter events by category (case-insensitive)
+      const filteredEvents = allEvents.filter(
+        (event) => event.category.toLowerCase() === category.toLowerCase()
+      );
+      res.json(filteredEvents);
+    } catch (error) {
+      console.error('Error fetching events by category:', error);
+      res.status(500).json({ message: "Failed to fetch events by category" });
+    }
+  });
+
+  // Get featured events for landing page (public endpoint)
+  app.get("/api/events/featured", async (req, res) => {
+    try {
+      const allEvents = await storage.getEvents();
+      // Return upcoming events sorted by date, limit to 8
+      const now = new Date();
+      const featuredEvents = allEvents
+        .filter((event) => new Date(event.eventDate) >= now)
+        .sort((a, b) => new Date(a.eventDate).getTime() - new Date(b.eventDate).getTime())
+        .slice(0, 8);
+      res.json(featuredEvents);
+    } catch (error) {
+      console.error('Error fetching featured events:', error);
+      res.status(500).json({ message: "Failed to fetch featured events" });
+    }
+  });
+
   // Get events sorted by proximity to user location
   app.get("/api/events/nearby", async (req, res) => {
     try {
