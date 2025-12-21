@@ -13,7 +13,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { 
   Search, 
-  UserPlus, 
+  UserPlus,
+  UserCheck,
   MessageCircle, 
   Calendar, 
   MapPin, 
@@ -107,19 +108,95 @@ export default function SearchPage() {
     enabled: !!currentUser && activeType === "users" && !isSearching,
   });
 
+  // Get list of users the current user is following
+  const { data: followingUsers = [] } = useQuery<User[]>({
+    queryKey: ['/api/follows/me/following'],
+    enabled: !!currentUser,
+  });
+
+  // Local state for optimistic updates
+  const [optimisticFollows, setOptimisticFollows] = useState<Set<string>>(new Set());
+  const [optimisticUnfollows, setOptimisticUnfollows] = useState<Set<string>>(new Set());
+
+  // Track followed user IDs with optimistic updates
+  const followingIds = new Set([
+    ...followingUsers.map(u => u.id),
+    ...Array.from(optimisticFollows),
+  ]);
+  // Remove unfollowed users from the set
+  Array.from(optimisticUnfollows).forEach(id => followingIds.delete(id));
+
   const followMutation = useMutation({
     mutationFn: async (userId: string) => {
       return await apiRequest('POST', `/api/follows/${userId}`, {});
     },
+    onMutate: (userId: string) => {
+      // Optimistically add to following
+      setOptimisticFollows(prev => new Set([...Array.from(prev), userId]));
+      setOptimisticUnfollows(prev => {
+        const next = new Set(Array.from(prev));
+        next.delete(userId);
+        return next;
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/suggested-users'] });
       queryClient.invalidateQueries({ queryKey: ['/api/recommended-users'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/follows/me/following'] });
       toast({
         title: "Success",
         description: "You are now following this user",
       });
     },
+    onError: (_error, userId) => {
+      // Rollback optimistic update on error
+      setOptimisticFollows(prev => {
+        const next = new Set(prev);
+        next.delete(userId);
+        return next;
+      });
+    },
   });
+
+  const unfollowMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      return await apiRequest('DELETE', `/api/follows/${userId}`, {});
+    },
+    onMutate: (userId: string) => {
+      // Optimistically remove from following
+      setOptimisticUnfollows(prev => new Set([...Array.from(prev), userId]));
+      setOptimisticFollows(prev => {
+        const next = new Set(Array.from(prev));
+        next.delete(userId);
+        return next;
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/suggested-users'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/recommended-users'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/follows/me/following'] });
+      toast({
+        title: "Unfollowed",
+        description: "You have unfollowed this user",
+      });
+    },
+    onError: (_error, userId) => {
+      // Rollback optimistic update on error
+      setOptimisticUnfollows(prev => {
+        const next = new Set(prev);
+        next.delete(userId);
+        return next;
+      });
+    },
+  });
+
+  const handleFollowToggle = (userId: string) => {
+    if (followingIds.has(userId)) {
+      unfollowMutation.mutate(userId);
+    } else {
+      followMutation.mutate(userId);
+    }
+  };
 
   const hasSearchResults = searchResults && (
     searchResults.users.length > 0 ||
@@ -217,7 +294,7 @@ export default function SearchPage() {
                   {searchResults.users.length > 0 && (
                     <SearchResultSection title="Users" icon={Users}>
                       {searchResults.users.map((user) => (
-                        <UserResultCard key={user.id} user={user} sessionUser={currentUser} onFollow={(id) => followMutation.mutate(id)} navigate={navigate} />
+                        <UserResultCard key={user.id} user={user} sessionUser={currentUser} isFollowing={followingIds.has(user.id)} onFollowToggle={handleFollowToggle} navigate={navigate} />
                       ))}
                     </SearchResultSection>
                   )}
@@ -246,7 +323,7 @@ export default function SearchPage() {
 
                 <TabsContent value="users" className="space-y-3">
                   {searchResults.users.map((user) => (
-                    <UserResultCard key={user.id} user={user} sessionUser={currentUser} onFollow={(id) => followMutation.mutate(id)} navigate={navigate} />
+                    <UserResultCard key={user.id} user={user} sessionUser={currentUser} isFollowing={followingIds.has(user.id)} onFollowToggle={handleFollowToggle} navigate={navigate} />
                   ))}
                 </TabsContent>
 
@@ -295,7 +372,8 @@ export default function SearchPage() {
                         key={user.id}
                         user={user}
                         sessionUser={currentUser}
-                        onFollow={(id) => followMutation.mutate(id)}
+                        isFollowing={followingIds.has(user.id)}
+                        onFollowToggle={handleFollowToggle}
                         navigate={navigate}
                       />
                     ))}
@@ -334,8 +412,9 @@ export default function SearchPage() {
                         <SuggestedUserCard
                           key={user.id}
                           user={user}
-                          onFollow={(id) => followMutation.mutate(id)}
-                          isPending={followMutation.isPending}
+                          isFollowing={followingIds.has(user.id)}
+                          onFollowToggle={handleFollowToggle}
+                          isPending={followMutation.isPending || unfollowMutation.isPending}
                           navigate={navigate}
                         />
                       ))
@@ -444,7 +523,7 @@ function SearchResultSection({ title, icon: Icon, children }: { title: string; i
   );
 }
 
-function UserResultCard({ user, sessionUser, onFollow, navigate }: { user: User; sessionUser?: { id: string } | null; onFollow: (id: string) => void; navigate: (path: string) => void }) {
+function UserResultCard({ user, sessionUser, isFollowing, onFollowToggle, navigate }: { user: User; sessionUser?: { id: string } | null; isFollowing: boolean; onFollowToggle: (id: string) => void; navigate: (path: string) => void }) {
   const isSocialUser = user.userType === "social";
   const isOwnProfile = sessionUser?.id === user.id;
 
@@ -477,11 +556,18 @@ function UserResultCard({ user, sessionUser, onFollow, navigate }: { user: User;
           {!isOwnProfile && sessionUser && (
             <Button
               size="sm"
-              variant="outline"
-              onClick={(e) => { e.stopPropagation(); onFollow(user.id); }}
+              variant={isFollowing ? "default" : "outline"}
+              onClick={(e) => { e.stopPropagation(); onFollowToggle(user.id); }}
               data-testid={`button-follow-${user.id}`}
             >
-              <UserPlus className="h-4 w-4" />
+              {isFollowing ? (
+                <>
+                  <UserCheck className="h-4 w-4 mr-1" />
+                  Following
+                </>
+              ) : (
+                <UserPlus className="h-4 w-4" />
+              )}
             </Button>
           )}
         </div>
@@ -577,7 +663,7 @@ function PostResultCard({ post, navigate }: { post: Post & { user: User }; navig
   );
 }
 
-function SuggestedUserCard({ user, onFollow, isPending, navigate }: { user: User; onFollow: (id: string) => void; isPending: boolean; navigate: (path: string) => void }) {
+function SuggestedUserCard({ user, isFollowing, onFollowToggle, isPending, navigate }: { user: User; isFollowing: boolean; onFollowToggle: (id: string) => void; isPending: boolean; navigate: (path: string) => void }) {
   const isSocialUser = user.userType === "social";
   
   return (
@@ -602,12 +688,22 @@ function SuggestedUserCard({ user, onFollow, isPending, navigate }: { user: User
         <Button
           size="sm"
           className="w-full"
-          onClick={(e) => { e.stopPropagation(); onFollow(user.id); }}
+          variant={isFollowing ? "secondary" : "default"}
+          onClick={(e) => { e.stopPropagation(); onFollowToggle(user.id); }}
           disabled={isPending}
           data-testid={`button-follow-suggested-${user.id}`}
         >
-          <UserPlus className="h-3 w-3 mr-1" />
-          Follow
+          {isFollowing ? (
+            <>
+              <UserCheck className="h-3 w-3 mr-1" />
+              Following
+            </>
+          ) : (
+            <>
+              <UserPlus className="h-3 w-3 mr-1" />
+              Follow
+            </>
+          )}
         </Button>
       </CardContent>
     </Card>
