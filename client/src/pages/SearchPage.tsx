@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 import { format } from "date-fns";
 import type { User, Event, Post, Venue, Story } from "@shared/schema";
 
@@ -65,9 +66,7 @@ export default function SearchPage() {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  const { data: sessionUser } = useQuery<{ user: User }>({
-    queryKey: ['/api/auth/session'],
-  });
+  const { data: currentUser } = useAuth();
 
   const { data: searchResults, isLoading: searchLoading } = useQuery<SearchResults>({
     queryKey: ['/api/search', debouncedQuery, activeType],
@@ -97,7 +96,7 @@ export default function SearchPage() {
 
   const { data: suggestedUsers = [], isLoading: suggestedUsersLoading } = useQuery<User[]>({
     queryKey: ['/api/suggested-users'],
-    enabled: !!sessionUser?.user,
+    enabled: !!currentUser,
   });
 
   const isSearching = debouncedQuery.trim().length >= 2;
@@ -105,7 +104,7 @@ export default function SearchPage() {
   // Recommended users based on similar interests and location
   const { data: recommendedUsers = [], isLoading: recommendedUsersLoading } = useQuery<User[]>({
     queryKey: ['/api/recommended-users'],
-    enabled: !!sessionUser?.user && activeType === "users" && !isSearching,
+    enabled: !!currentUser && activeType === "users" && !isSearching,
   });
 
   const followMutation = useMutation({
@@ -218,7 +217,7 @@ export default function SearchPage() {
                   {searchResults.users.length > 0 && (
                     <SearchResultSection title="Users" icon={Users}>
                       {searchResults.users.map((user) => (
-                        <UserResultCard key={user.id} user={user} sessionUser={sessionUser?.user} onFollow={(id) => followMutation.mutate(id)} navigate={navigate} />
+                        <UserResultCard key={user.id} user={user} sessionUser={currentUser} onFollow={(id) => followMutation.mutate(id)} navigate={navigate} />
                       ))}
                     </SearchResultSection>
                   )}
@@ -247,7 +246,7 @@ export default function SearchPage() {
 
                 <TabsContent value="users" className="space-y-3">
                   {searchResults.users.map((user) => (
-                    <UserResultCard key={user.id} user={user} sessionUser={sessionUser?.user} onFollow={(id) => followMutation.mutate(id)} navigate={navigate} />
+                    <UserResultCard key={user.id} user={user} sessionUser={currentUser} onFollow={(id) => followMutation.mutate(id)} navigate={navigate} />
                   ))}
                 </TabsContent>
 
@@ -274,8 +273,8 @@ export default function SearchPage() {
         ) : (
           <div className="space-y-8">
             {/* Recommended users based on interests/location - shown when Users filter is active */}
-            {activeType === "users" && sessionUser?.user && (
-              <section>
+            {activeType === "users" && currentUser && (
+              <section data-testid="section-recommended-users">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-semibold font-serif flex items-center gap-2">
                     <Users className="h-5 w-5 text-primary" />
@@ -295,7 +294,7 @@ export default function SearchPage() {
                       <UserResultCard
                         key={user.id}
                         user={user}
-                        sessionUser={sessionUser?.user}
+                        sessionUser={currentUser}
                         onFollow={(id) => followMutation.mutate(id)}
                         navigate={navigate}
                       />
@@ -316,7 +315,7 @@ export default function SearchPage() {
             )}
 
             {/* Suggested users - shown when all or users filter is active */}
-            {(activeType === "all" || activeType === "users") && sessionUser?.user && suggestedUsers.length > 0 && (
+            {(activeType === "all" || activeType === "users") && currentUser && suggestedUsers.length > 0 && (
               <section>
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-semibold font-serif flex items-center gap-2">
@@ -445,7 +444,7 @@ function SearchResultSection({ title, icon: Icon, children }: { title: string; i
   );
 }
 
-function UserResultCard({ user, sessionUser, onFollow, navigate }: { user: User; sessionUser?: User; onFollow: (id: string) => void; navigate: (path: string) => void }) {
+function UserResultCard({ user, sessionUser, onFollow, navigate }: { user: User; sessionUser?: { id: string } | null; onFollow: (id: string) => void; navigate: (path: string) => void }) {
   const isSocialUser = user.userType === "social";
   const isOwnProfile = sessionUser?.id === user.id;
 
