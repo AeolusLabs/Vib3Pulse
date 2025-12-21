@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { LogIn, Eye, EyeOff } from "lucide-react";
+import { LogIn, Eye, EyeOff, Sparkles } from "lucide-react";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -62,21 +62,28 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-background">
-      <div className="w-full max-w-md">
+    <div className="dark min-h-screen flex items-center justify-center p-4 bg-[#0a0a0a] relative overflow-hidden">
+      <div className="absolute inset-0 bg-gradient-to-br from-purple-900/20 via-[#0a0a0a] to-pink-900/10" />
+      <div className="absolute top-20 left-10 w-72 h-72 bg-purple-500/10 rounded-full blur-3xl" />
+      <div className="absolute bottom-20 right-10 w-96 h-96 bg-pink-500/10 rounded-full blur-3xl" />
+      
+      <div className="w-full max-w-md relative z-10">
         <div className="text-center mb-8">
-          <h1 className="font-playfair text-4xl font-bold text-primary mb-2">
-            VibePulse
-          </h1>
-          <p className="text-muted-foreground">
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <Sparkles className="w-8 h-8 text-purple-400" />
+            <h1 className="font-playfair text-4xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
+              VibePulse
+            </h1>
+          </div>
+          <p className="text-white/60">
             Welcome back! Sign in to continue
           </p>
         </div>
 
-        <Card>
+        <Card className="bg-white/5 border-white/10 backdrop-blur-sm">
           <CardHeader>
-            <CardTitle>Sign In</CardTitle>
-            <CardDescription>
+            <CardTitle className="text-white">Sign In</CardTitle>
+            <CardDescription className="text-white/60">
               Enter your credentials to access your account
             </CardDescription>
           </CardHeader>
@@ -88,10 +95,11 @@ export default function LoginPage() {
                   name="username"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Username</FormLabel>
+                      <FormLabel className="text-white/80">Username</FormLabel>
                       <FormControl>
                         <Input
                           placeholder="Enter your username"
+                          className="bg-white/5 border-white/20 text-white placeholder:text-white/40 focus:border-purple-500"
                           {...field}
                           data-testid="input-username"
                         />
@@ -106,19 +114,19 @@ export default function LoginPage() {
                   name="password"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Password</FormLabel>
+                      <FormLabel className="text-white/80">Password</FormLabel>
                       <FormControl>
-                        <div className="flex items-center gap-2 border rounded-md focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
+                        <div className="flex items-center gap-2 border border-white/20 rounded-md focus-within:ring-2 focus-within:ring-purple-500 focus-within:border-purple-500 bg-white/5">
                           <Input
                             type={showPassword ? "text" : "password"}
                             placeholder="Enter your password"
-                            className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 flex-1"
+                            className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 flex-1 bg-transparent text-white placeholder:text-white/40"
                             {...field}
                             data-testid="input-password"
                           />
                           <button
                             type="button"
-                            className="text-muted-foreground hover:text-foreground transition-colors p-2 mr-1"
+                            className="text-white/40 hover:text-white/80 transition-colors p-2 mr-1"
                             onClick={() => setShowPassword(!showPassword)}
                             data-testid="button-toggle-password"
                           >
@@ -137,7 +145,7 @@ export default function LoginPage() {
 
                 <Button
                   type="submit"
-                  className="w-full"
+                  className="w-full bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white border-0"
                   disabled={isLoading}
                   data-testid="button-login"
                 >
@@ -156,16 +164,16 @@ export default function LoginPage() {
           <CardFooter className="flex flex-col gap-2">
             <Link 
               href="/forgot-password"
-              className="text-sm text-primary hover:underline" 
+              className="text-sm text-purple-400 hover:text-purple-300 hover:underline" 
               data-testid="link-forgot-password"
             >
               Forgot your password?
             </Link>
-            <div className="text-sm text-center text-muted-foreground">
+            <div className="text-sm text-center text-white/50">
               Don't have an account?{" "}
               <Link 
                 href={`/signup${window.location.search}`}
-                className="text-primary hover:underline font-medium" 
+                className="text-purple-400 hover:text-purple-300 hover:underline font-medium" 
                 data-testid="link-signup"
               >
                 Sign up
