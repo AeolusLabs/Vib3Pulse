@@ -662,33 +662,48 @@ export default function FeedPost({
               <span className="text-xs">{repostData?.repostCount || 0}</span>
             </Button>
 
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleShare();
+              }}
+              data-testid={`button-share-${id}`}
+            >
+              <Share2 className="h-4 w-4" />
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              className={`gap-1 ${bookmarkStatus ? 'text-primary' : ''}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleBookmark();
+              }}
+              disabled={bookmarkMutation.isPending}
+              data-testid={`button-bookmark-${id}`}
+            >
+              <Bookmark className={`h-4 w-4 ${bookmarkStatus ? 'fill-current' : ''}`} />
+            </Button>
+
             <div className="flex-1" />
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={(e) => e.stopPropagation()}
-                  data-testid={`button-more-${id}`}
-                >
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-                <DropdownMenuItem onClick={() => handleShare()} data-testid={`menu-share-${id}`}>
-                  <Share2 className="h-4 w-4 mr-2" />
-                  Share
-                </DropdownMenuItem>
-                <DropdownMenuItem 
-                  onClick={() => handleBookmark()} 
-                  disabled={bookmarkMutation.isPending}
-                  data-testid={`menu-bookmark-${id}`}
-                >
-                  <Bookmark className={`h-4 w-4 mr-2 ${bookmarkStatus ? 'fill-current text-primary' : ''}`} />
-                  {bookmarkStatus ? 'Saved' : 'Save'}
-                </DropdownMenuItem>
-                {isOwnPost && (
+            {isOwnPost && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(e) => e.stopPropagation()}
+                    data-testid={`button-more-${id}`}
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
                   <DropdownMenuItem 
                     onClick={() => setDeleteDialogOpen(true)}
                     className="text-destructive focus:text-destructive"
@@ -697,9 +712,9 @@ export default function FeedPost({
                     <Trash2 className="h-4 w-4 mr-2" />
                     Delete
                   </DropdownMenuItem>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         </div>
       </div>
