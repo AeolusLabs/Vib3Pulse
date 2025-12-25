@@ -21,11 +21,11 @@ export default function HeroSection({ onSearch, onCategoryClick }: HeroSectionPr
         }}
       />
 
-      <div className="relative z-10 max-w-3xl mx-auto px-4 text-center">
-        <h1 className="font-serif text-4xl sm:text-5xl md:text-6xl font-bold mb-4 text-foreground" data-testid="text-hero-title">
+      <div className="relative z-10 w-full max-w-3xl mx-auto px-6 sm:px-8 text-center">
+        <h1 className="font-serif text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold mb-4 text-foreground break-words" data-testid="text-hero-title">
           Discover Events That Match Your Vibe
         </h1>
-        <p className="text-lg text-muted-foreground mb-8">
+        <p className="text-base sm:text-lg text-muted-foreground mb-8 px-2">
           Find amazing experiences, connect with organizers, and join the community
         </p>
 
