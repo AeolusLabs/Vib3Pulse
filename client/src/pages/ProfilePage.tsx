@@ -173,20 +173,11 @@ export default function ProfilePage() {
     setIsUploadingAvatar(true);
 
     try {
-      // Step 1: Get presigned upload URL
-      const uploadResponse = await fetch('/api/users/me/avatar', {
-        method: 'POST',
-        credentials: 'include',
-      });
-
-      if (!uploadResponse.ok) {
-        const errorData = await uploadResponse.json().catch(() => ({}));
-        throw new Error(errorData.message || 'Failed to get upload URL');
-      }
-
+      // Step 1: Get presigned upload URL (uses apiRequest for CSRF protection)
+      const uploadResponse = await apiRequest('POST', '/api/users/me/avatar');
       const { uploadURL, stablePath } = await uploadResponse.json();
 
-      // Step 2: Upload file to cloud storage
+      // Step 2: Upload file to cloud storage (external URL, no CSRF needed)
       const cloudUploadResponse = await fetch(uploadURL, {
         method: 'PUT',
         body: file,
@@ -200,20 +191,8 @@ export default function ProfilePage() {
         throw new Error('Failed to upload file to cloud storage');
       }
 
-      // Step 3: Update user's avatar URL in database
-      const updateResponse = await fetch('/api/users/me/avatar', {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({ avatarPath: stablePath }),
-      });
-
-      if (!updateResponse.ok) {
-        const errorData = await updateResponse.json().catch(() => ({}));
-        throw new Error(errorData.message || 'Failed to update avatar');
-      }
+      // Step 3: Update user's avatar URL in database (uses apiRequest for CSRF protection)
+      await apiRequest('PATCH', '/api/users/me/avatar', { avatarPath: stablePath });
 
       queryClient.invalidateQueries({ queryKey: [`/api/users/${username}`] });
       queryClient.invalidateQueries({ queryKey: ['/api/session'] });
