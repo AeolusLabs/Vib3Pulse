@@ -22,6 +22,8 @@ Preferred communication style: Simple, everyday language.
     - **Stories:** Image stories with 24-hour expiration, user grouping, and deletion, real-time cache updates.
     - **Buddy System (Safety Feature):** Users designate a trusted friend as an emergency contact. Allows sending distress alerts with location sharing, real-time WebSocket notifications, and alert history.
     - **Venues:** Event Organizers manage clubs, pubs, and lounges. Includes venue promotion, entry ticket sales (simulated for demo), and analytics tracking.
+      - **Gallery Management:** Venue owners can upload up to 6 photos to their venue gallery. Photos can be deleted, replaced, or added via the VenueGalleryManager component on the venue detail page.
+      - **Gallery Lightbox:** Users can click on venue gallery images to view them in a full-screen lightbox with navigation arrows and keyboard controls (arrow keys, Escape to close).
     - **Communities:** Users can create and join communities. Community tabs appear alongside "Following" and "For You" on the Feed page in a horizontal scrollable tab bar. Users can post to communities (posts are tagged with the community name), and community posts notify all members.
     - **Group Chats:** Users can create group conversations for planning nights out. Features include:
       - Group creation with member selection from following list
