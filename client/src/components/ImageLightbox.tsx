@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from "lucide-react";
+import { X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface ImageLightboxProps {
@@ -102,6 +102,26 @@ export default function ImageLightbox({
     setIsZoomed(!isZoomed);
   };
 
+  const handleDownload = async () => {
+    const imageUrl = images[currentIndex];
+    try {
+      const response = await fetch(imageUrl);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const filename = imageUrl.split('/').pop() || `image-${currentIndex + 1}.jpg`;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Failed to download image:', error);
+      window.open(imageUrl, '_blank');
+    }
+  };
+
   if (!open || images.length === 0) return null;
 
   return (
@@ -129,6 +149,16 @@ export default function ImageLightbox({
         variant="ghost"
         size="icon"
         className="absolute top-4 right-16 text-white hover:bg-white/20 z-10"
+        onClick={handleDownload}
+        data-testid="lightbox-download"
+      >
+        <Download className="h-5 w-5" />
+      </Button>
+
+      <Button
+        variant="ghost"
+        size="icon"
+        className="absolute top-4 right-28 text-white hover:bg-white/20 z-10"
         onClick={toggleZoom}
         data-testid="lightbox-zoom"
       >
