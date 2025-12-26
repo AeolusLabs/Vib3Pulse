@@ -39,6 +39,7 @@ import { useToast } from "@/hooks/use-toast";
 import PollMessage from "./PollMessage";
 import CreatePollModal from "./CreatePollModal";
 import { ObjectUploader } from "./ObjectUploader";
+import { MentionInput, renderMessageWithMentions } from "./MentionInput";
 import type { User, Conversation, ConversationParticipant, ConversationMessage } from "@shared/schema";
 import type { AuthUser } from "@/hooks/useAuth";
 
@@ -444,7 +445,13 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
                             : 'bg-muted rounded-bl-md'
                         }`}
                       >
-                        <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
+                        <p className="text-sm whitespace-pre-wrap break-words">
+                          {renderMessageWithMentions(
+                            message.content || '', 
+                            currentUser.username,
+                            (username) => navigate(`/profile/${username}`)
+                          )}
+                        </p>
                       </div>
                     )}
                     {showTime && (
@@ -486,11 +493,12 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
           >
             <ChartBar className="h-5 w-5" />
           </Button>
-          <Input
-            placeholder="Type a message..."
+          <MentionInput
+            placeholder="Type @ to mention someone..."
             value={messageText}
-            onChange={(e) => setMessageText(e.target.value)}
-            className="flex-1"
+            onChange={setMessageText}
+            participants={conversation?.participants || []}
+            onSubmit={handleSend}
             data-testid="input-message"
           />
           <Button

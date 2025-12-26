@@ -131,7 +131,7 @@ import {
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/neon-serverless";
 import { Pool, neonConfig } from "@neondatabase/serverless";
-import { eq, and, gte, lt, or, ilike, desc, sql, count, inArray, notInArray } from "drizzle-orm";
+import { eq, and, gte, gt, lt, or, ilike, desc, sql, count, inArray, notInArray } from "drizzle-orm";
 import ws from "ws";
 
 neonConfig.webSocketConstructor = ws;
@@ -3091,7 +3091,7 @@ export class DbStorage implements IStorage {
           .where(and(
             eq(conversationMessages.conversationId, conv.id),
             eq(conversationMessages.isDeleted, false),
-            gte(conversationMessages.createdAt, userConv.lastReadAt),
+            gt(conversationMessages.createdAt, userConv.lastReadAt),
             sql`${conversationMessages.senderId} != ${userId}`
           ));
         unreadCount = unreadResult?.count || 0;
