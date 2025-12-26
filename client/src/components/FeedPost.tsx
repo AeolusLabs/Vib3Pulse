@@ -574,7 +574,30 @@ export default function FeedPost({
             
             return allImages.length > 0 ? (
               <div className="mt-3" data-testid={`images-post-${id}`}>
-                <ImageGrid images={allImages} maxImages={4} />
+                <ImageGrid 
+                  images={allImages} 
+                  maxImages={4}
+                  postData={{
+                    id: id,
+                    likesCount: likeData?.count || initialLikes,
+                    commentsCount: initialComments,
+                    repostsCount: repostData?.repostCount || 0,
+                    isLiked: likeData?.isLiked || false,
+                    isReposted: repostData?.hasReposted || false,
+                    author: {
+                      id: author.userId || "",
+                      username: author.username,
+                      displayName: author.name,
+                      avatarUrl: author.avatar,
+                    },
+                  }}
+                  currentUser={currentUser ? {
+                    id: currentUser.id,
+                    username: currentUser.username,
+                    displayName: currentUser.displayName || currentUser.username,
+                    avatarUrl: undefined,
+                  } : null}
+                />
               </div>
             ) : null;
           })()}

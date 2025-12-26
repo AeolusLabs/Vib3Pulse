@@ -1,13 +1,37 @@
 import { useState } from "react";
 import ImageLightbox from "./ImageLightbox";
 
+interface PostData {
+  id: string;
+  likesCount: number;
+  commentsCount: number;
+  repostsCount: number;
+  isLiked?: boolean;
+  isReposted?: boolean;
+  author?: {
+    id: string;
+    username: string;
+    displayName: string;
+    avatarUrl?: string;
+  };
+}
+
+interface CurrentUser {
+  id: string;
+  username: string;
+  displayName: string;
+  avatarUrl?: string;
+}
+
 interface ImageGridProps {
   images: string[];
   maxImages?: number;
   className?: string;
+  postData?: PostData;
+  currentUser?: CurrentUser | null;
 }
 
-export default function ImageGrid({ images, maxImages = 4, className = "" }: ImageGridProps) {
+export default function ImageGrid({ images, maxImages = 4, className = "", postData, currentUser }: ImageGridProps) {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
 
@@ -75,6 +99,8 @@ export default function ImageGrid({ images, maxImages = 4, className = "" }: Ima
         initialIndex={lightboxIndex}
         open={lightboxOpen}
         onClose={() => setLightboxOpen(false)}
+        postData={postData}
+        currentUser={currentUser}
       />
     </>
   );

@@ -9,6 +9,7 @@ import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 import { format } from "date-fns";
 import CommentItem from "./CommentItem";
 import ImageGrid from "./ImageGrid";
@@ -105,6 +106,7 @@ export default function PostDetailDialog({
   ].filter(Boolean) as string[];
   const [, navigate] = useLocation();
   const { toast } = useToast();
+  const { data: currentUser } = useAuth();
   const [newComment, setNewComment] = useState('');
 
   const { data: commentsData, isLoading: commentsLoading } = useQuery<{ comments: any[]; count: number }>({
@@ -264,7 +266,30 @@ export default function PostDetailDialog({
 
             {allImages.length > 0 && (
               <div className="mt-4" data-testid={`dialog-images-${postId}`}>
-                <ImageGrid images={allImages} maxImages={4} />
+                <ImageGrid 
+                  images={allImages} 
+                  maxImages={4}
+                  postData={{
+                    id: postId,
+                    likesCount: likeData?.count || 0,
+                    commentsCount: comments.length,
+                    repostsCount: repostData?.repostCount || 0,
+                    isLiked: likeData?.isLiked || false,
+                    isReposted: repostData?.hasReposted || false,
+                    author: {
+                      id: author.userId || "",
+                      username: author.username,
+                      displayName: author.name,
+                      avatarUrl: author.avatar,
+                    },
+                  }}
+                  currentUser={currentUser ? {
+                    id: currentUser.id,
+                    username: currentUser.username,
+                    displayName: currentUser.displayName || currentUser.username,
+                    avatarUrl: undefined,
+                  } : null}
+                />
               </div>
             )}
 
