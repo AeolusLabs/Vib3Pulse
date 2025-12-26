@@ -350,6 +350,134 @@ export const insertMessageSchema = createInsertSchema(messages).omit({
 export type InsertMessage = z.infer<typeof insertMessageSchema>;
 export type Message = typeof messages.$inferSelect;
 
+// Group Chat / Conversations System
+export const conversations = pgTable("conversations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  isGroup: boolean("is_group").notNull().default(false),
+  name: text("name"), // Only for group chats
+  avatarUrl: text("avatar_url"), // Group avatar
+  createdById: varchar("created_by_id").references(() => users.id),
+  lastMessageAt: timestamp("last_message_at"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const insertConversationSchema = createInsertSchema(conversations).omit({
+  id: true,
+  createdAt: true,
+  lastMessageAt: true,
+});
+
+export type InsertConversation = z.infer<typeof insertConversationSchema>;
+export type Conversation = typeof conversations.$inferSelect;
+
+// Conversation participants (members)
+export const conversationParticipants = pgTable("conversation_participants", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  conversationId: varchar("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  role: text("role").notNull().default("member"), // 'admin' or 'member'
+  joinedAt: timestamp("joined_at").notNull().default(sql`now()`),
+  lastReadAt: timestamp("last_read_at"),
+}, (table) => ({
+  uniqueParticipant: unique().on(table.conversationId, table.userId),
+}));
+
+export const insertConversationParticipantSchema = createInsertSchema(conversationParticipants).omit({
+  id: true,
+  joinedAt: true,
+});
+
+export type InsertConversationParticipant = z.infer<typeof insertConversationParticipantSchema>;
+export type ConversationParticipant = typeof conversationParticipants.$inferSelect;
+
+// Messages within conversations (supports both 1:1 and group)
+export const conversationMessages = pgTable("conversation_messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  conversationId: varchar("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+  senderId: varchar("sender_id").notNull().references(() => users.id),
+  content: text("content"),
+  messageType: text("message_type").notNull().default("text"), // 'text', 'event', 'venue', 'post', 'poll', 'image'
+  // Shared content references
+  eventId: varchar("event_id").references(() => events.id),
+  venueId: varchar("venue_id").references(() => venues.id),
+  postId: varchar("post_id").references(() => posts.id),
+  pollId: varchar("poll_id"), // Will reference polls table
+  imageUrls: text("image_urls").array().default(sql`'{}'`),
+  replyToId: varchar("reply_to_id"),
+  isDeleted: boolean("is_deleted").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const insertConversationMessageSchema = createInsertSchema(conversationMessages).omit({
+  id: true,
+  createdAt: true,
+  isDeleted: true,
+});
+
+export type InsertConversationMessage = z.infer<typeof insertConversationMessageSchema>;
+export type ConversationMessage = typeof conversationMessages.$inferSelect;
+
+// Polls for group decision making
+export const polls = pgTable("polls", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  conversationId: varchar("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+  creatorId: varchar("creator_id").notNull().references(() => users.id),
+  question: text("question").notNull(),
+  status: text("status").notNull().default("open"), // 'open', 'closed'
+  allowMultiple: boolean("allow_multiple").notNull().default(false),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  closedAt: timestamp("closed_at"),
+});
+
+export const insertPollSchema = createInsertSchema(polls).omit({
+  id: true,
+  createdAt: true,
+  closedAt: true,
+  status: true,
+});
+
+export type InsertPoll = z.infer<typeof insertPollSchema>;
+export type Poll = typeof polls.$inferSelect;
+
+// Poll options
+export const pollOptions = pgTable("poll_options", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  pollId: varchar("poll_id").notNull().references(() => polls.id, { onDelete: "cascade" }),
+  text: text("text").notNull(),
+  // For event/venue suggestions
+  eventId: varchar("event_id").references(() => events.id),
+  venueId: varchar("venue_id").references(() => venues.id),
+  orderIndex: integer("order_index").notNull().default(0),
+});
+
+export const insertPollOptionSchema = createInsertSchema(pollOptions).omit({
+  id: true,
+});
+
+export type InsertPollOption = z.infer<typeof insertPollOptionSchema>;
+export type PollOption = typeof pollOptions.$inferSelect;
+
+// Poll votes
+export const pollVotes = pgTable("poll_votes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  pollId: varchar("poll_id").notNull().references(() => polls.id, { onDelete: "cascade" }),
+  optionId: varchar("option_id").notNull().references(() => pollOptions.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+}, (table) => ({
+  // Unique vote per user per poll (for single-choice polls, enforced in application)
+  uniqueVote: unique().on(table.pollId, table.optionId, table.userId),
+}));
+
+export const insertPollVoteSchema = createInsertSchema(pollVotes).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertPollVote = z.infer<typeof insertPollVoteSchema>;
+export type PollVote = typeof pollVotes.$inferSelect;
+
 export const likes = pgTable("likes", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
