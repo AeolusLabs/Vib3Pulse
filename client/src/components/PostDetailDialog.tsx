@@ -2,7 +2,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Heart, MessageCircle, Share2, Bookmark, Repeat2, Send } from "lucide-react";
 import { useState, Fragment } from "react";
 import { useLocation } from "wouter";
@@ -225,7 +224,7 @@ export default function PostDetailDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto">
           <div className="p-6">
             <div className="flex gap-3">
               <Avatar 
@@ -396,7 +395,7 @@ export default function PostDetailDialog({
               )}
             </div>
           </div>
-        </ScrollArea>
+        </div>
       </DialogContent>
     </Dialog>
   );

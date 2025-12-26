@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { X, ChevronLeft, ChevronRight, MoreHorizontal, Download, Heart, MessageCircle, Repeat2, Share2, BarChart3, Send } from "lucide-react";
+import { X, MoreHorizontal, Download, Heart, MessageCircle, Repeat2, Share2, BarChart3, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
@@ -307,18 +307,6 @@ export default function ImageLightbox({
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       >
-        {images.length > 1 && currentIndex > 0 && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="absolute left-2 text-white hover:bg-white/20 z-10 h-10 w-10"
-            onClick={goToPrevious}
-            data-testid="lightbox-prev"
-          >
-            <ChevronLeft className="h-6 w-6" />
-          </Button>
-        )}
-
         {isLoading && (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -333,18 +321,6 @@ export default function ImageLightbox({
           draggable={false}
           data-testid="lightbox-image"
         />
-
-        {images.length > 1 && currentIndex < images.length - 1 && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="absolute right-2 text-white hover:bg-white/20 z-10 h-10 w-10"
-            onClick={goToNext}
-            data-testid="lightbox-next"
-          >
-            <ChevronRight className="h-6 w-6" />
-          </Button>
-        )}
 
         {/* Image dots indicator */}
         {images.length > 1 && (

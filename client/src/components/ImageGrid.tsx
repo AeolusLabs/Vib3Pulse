@@ -83,7 +83,6 @@ export default function ImageGrid({ images, maxImages = 4, className = "", postD
               src={image}
               alt={`Image ${index + 1}`}
               className="w-full h-full object-cover transition-transform hover:scale-105"
-              loading="lazy"
             />
             {index === maxImages - 1 && remainingCount > 0 && (
               <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
