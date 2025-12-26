@@ -27,6 +27,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import CommentDialog from "@/components/CommentDialog";
 import LinkPreviewCard, { extractFirstUrl } from "@/components/LinkPreviewCard";
+import ImageGrid from "@/components/ImageGrid";
 import { format } from "date-fns";
 import type { Event, Venue } from "@shared/schema";
 
@@ -564,42 +565,19 @@ export default function FeedPost({
             ) : null;
           })()}
 
-          {/* Multiple images grid */}
-          {imageUrls.length > 0 ? (
-            <div className={`mt-3 grid gap-1 rounded-md overflow-hidden ${
-              imageUrls.length === 1 ? 'grid-cols-1' :
-              imageUrls.length === 2 ? 'grid-cols-2' :
-              imageUrls.length === 3 ? 'grid-cols-2' :
-              'grid-cols-2'
-            }`}>
-              {imageUrls.slice(0, 4).map((imgUrl, idx) => (
-                <div 
-                  key={idx} 
-                  className={`relative ${
-                    imageUrls.length === 3 && idx === 0 ? 'row-span-2' : ''
-                  }`}
-                >
-                  <img
-                    src={imgUrl}
-                    alt={`Post image ${idx + 1}`}
-                    className={`w-full object-cover ${
-                      imageUrls.length === 1 ? 'max-h-96' :
-                      imageUrls.length === 3 && idx === 0 ? 'h-full' :
-                      'aspect-square'
-                    }`}
-                    data-testid={`img-post-${id}-${idx}`}
-                  />
-                </div>
-              ))}
-            </div>
-          ) : image && (
-            <img
-              src={image}
-              alt="Post"
-              className="mt-3 rounded-md w-full max-h-96 object-cover"
-              data-testid={`img-post-${id}`}
-            />
-          )}
+          {/* Multiple images grid with lightbox support */}
+          {(() => {
+            const allImages = [
+              ...imageUrls,
+              ...(image && !imageUrls.includes(image) ? [image] : []),
+            ].filter(Boolean);
+            
+            return allImages.length > 0 ? (
+              <div className="mt-3" data-testid={`images-post-${id}`}>
+                <ImageGrid images={allImages} maxImages={4} />
+              </div>
+            ) : null;
+          })()}
 
           {displayEvent && (
             <Card 

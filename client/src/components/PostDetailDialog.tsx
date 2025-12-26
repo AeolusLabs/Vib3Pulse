@@ -11,6 +11,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import CommentItem from "./CommentItem";
+import ImageGrid from "./ImageGrid";
 
 interface PostDetailDialogProps {
   open: boolean;
@@ -24,6 +25,7 @@ interface PostDetailDialogProps {
   };
   content: string;
   image?: string;
+  imageUrls?: string[];
   createdAt?: string | Date;
 }
 
@@ -94,8 +96,13 @@ export default function PostDetailDialog({
   author,
   content,
   image,
+  imageUrls,
   createdAt,
 }: PostDetailDialogProps) {
+  const allImages = [
+    ...(imageUrls || []),
+    ...(image && !imageUrls?.includes(image) ? [image] : []),
+  ].filter(Boolean) as string[];
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const [newComment, setNewComment] = useState('');
@@ -255,13 +262,10 @@ export default function PostDetailDialog({
               </p>
             </div>
 
-            {image && (
-              <img
-                src={image}
-                alt="Post"
-                className="mt-4 rounded-lg w-full max-h-[500px] object-cover"
-                data-testid={`dialog-img-${postId}`}
-              />
+            {allImages.length > 0 && (
+              <div className="mt-4" data-testid={`dialog-images-${postId}`}>
+                <ImageGrid images={allImages} maxImages={4} />
+              </div>
             )}
 
             {createdAt && (

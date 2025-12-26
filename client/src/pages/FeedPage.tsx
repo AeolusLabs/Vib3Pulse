@@ -620,6 +620,7 @@ export default function FeedPage() {
           }}
           content={selectedPost.content}
           image={selectedPost.imageUrl || selectedPost.image}
+          imageUrls={selectedPost.imageUrls}
           createdAt={selectedPost.createdAt}
         />
       )}
