@@ -6,11 +6,12 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { useState, useEffect } from "react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { useState, useEffect, useRef } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { X, Upload, ImageIcon } from "lucide-react";
+import { X, Upload, ImageIcon, MoreVertical, Trash2, RefreshCw } from "lucide-react";
 import { ObjectUploader } from "@/components/ObjectUploader";
 import type { Venue, InsertVenue } from "@shared/schema";
 import type { UploadResult } from "@uppy/core";
@@ -66,6 +67,30 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
     amenities: [] as string[],
   });
   const maxGalleryImages = 6;
+  const [replacingImageIndex, setReplacingImageIndex] = useState<number | null>(null);
+  const replaceImageInputRef = useRef<HTMLInputElement>(null);
+
+  const handleReplaceImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files?.[0] || replacingImageIndex === null) return;
+    
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result as string;
+      setFormData(prev => {
+        const newImageUrls = [...prev.imageUrls];
+        newImageUrls[replacingImageIndex] = base64;
+        return { ...prev, imageUrls: newImageUrls };
+      });
+      toast({ title: "Image replaced successfully" });
+    };
+    reader.readAsDataURL(file);
+    
+    setReplacingImageIndex(null);
+    if (replaceImageInputRef.current) {
+      replaceImageInputRef.current.value = "";
+    }
+  };
 
   useEffect(() => {
     if (editingVenue) {
@@ -338,6 +363,15 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
                 </span>
               </div>
               
+              <input
+                ref={replaceImageInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleReplaceImage}
+                data-testid="input-replace-gallery-image"
+              />
+              
               {formData.imageUrls.length > 0 && (
                 <div className="grid grid-cols-3 gap-2">
                   {formData.imageUrls.map((url, idx) => (
@@ -348,19 +382,43 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
                         className="w-full h-full object-cover"
                       />
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors z-10" />
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="destructive"
-                        className="absolute top-1 right-1 h-7 w-7 rounded-full shadow-lg z-20"
-                        onClick={() => setFormData(prev => ({ 
-                          ...prev, 
-                          imageUrls: prev.imageUrls.filter((_, i) => i !== idx) 
-                        }))}
-                        data-testid={`button-remove-gallery-${idx}`}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="secondary"
+                            className="absolute top-1 right-1 h-7 w-7 rounded-full shadow-lg z-20"
+                            data-testid={`button-gallery-menu-${idx}`}
+                          >
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem 
+                            onSelect={(e) => {
+                              e.preventDefault();
+                              setReplacingImageIndex(idx);
+                              setTimeout(() => replaceImageInputRef.current?.click(), 0);
+                            }}
+                            data-testid={`menu-replace-gallery-${idx}`}
+                          >
+                            <RefreshCw className="h-4 w-4 mr-2" />
+                            Replace
+                          </DropdownMenuItem>
+                          <DropdownMenuItem 
+                            className="text-destructive"
+                            onSelect={() => setFormData(prev => ({ 
+                              ...prev, 
+                              imageUrls: prev.imageUrls.filter((_, i) => i !== idx) 
+                            }))}
+                            data-testid={`menu-delete-gallery-${idx}`}
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   ))}
                 </div>
