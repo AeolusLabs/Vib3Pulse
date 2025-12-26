@@ -28,6 +28,7 @@ import {
   isPaymentSimulated,
   getPaymentModeDescription,
 } from "./paymentService";
+import { fetchLinkPreview } from "./linkPreviewService";
 
 // Helper function to resolve identifier (UUID or username) to userId
 async function resolveUserId(identifier: string): Promise<string | null> {
@@ -2367,6 +2368,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ message: "Message marked as read" });
     } catch (error) {
       res.status(500).json({ message: "Failed to mark message as read" });
+    }
+  });
+
+  // Link preview endpoint with SSRF protection and rate limiting
+  app.get("/api/link-preview", requireAuth, sensitiveOperationLimiter, async (req, res) => {
+    try {
+      const url = req.query.url as string;
+      
+      if (!url || typeof url !== 'string') {
+        return res.status(400).json({ message: "URL parameter is required" });
+      }
+      
+      if (url.length > 2048) {
+        return res.status(400).json({ message: "URL too long" });
+      }
+      
+      const metadata = await fetchLinkPreview(url);
+      
+      if (!metadata) {
+        return res.status(404).json({ message: "Could not fetch link preview" });
+      }
+      
+      res.json(metadata);
+    } catch (error) {
+      console.error("Link preview error:", error);
+      res.status(500).json({ message: "Failed to fetch link preview" });
     }
   });
 

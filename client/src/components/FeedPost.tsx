@@ -26,6 +26,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import CommentDialog from "@/components/CommentDialog";
+import LinkPreviewCard, { extractFirstUrl } from "@/components/LinkPreviewCard";
 import { format } from "date-fns";
 import type { Event, Venue } from "@shared/schema";
 
@@ -551,9 +552,17 @@ export default function FeedPost({
             <span className="text-xs text-muted-foreground">· {displayTime}</span>
           </div>
 
-          <p className="mt-2 text-sm whitespace-pre-wrap" data-testid={`text-content-${id}`}>
+          <p className="mt-2 text-sm whitespace-pre-wrap break-words overflow-hidden" data-testid={`text-content-${id}`}>
             {renderContentWithLinkedMentionsAndHashtags(content, navigate, mentionedUsers)}
           </p>
+
+          {/* Link preview card - show when URL detected and no attached event/venue */}
+          {(() => {
+            const firstUrl = extractFirstUrl(content);
+            return firstUrl && !displayEvent && !displayVenue ? (
+              <LinkPreviewCard url={firstUrl} />
+            ) : null;
+          })()}
 
           {/* Multiple images grid */}
           {imageUrls.length > 0 ? (
