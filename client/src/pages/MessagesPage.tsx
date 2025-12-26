@@ -19,7 +19,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Send, ArrowLeft, Check, CheckCheck, Search, UserPlus, Reply, X, Calendar, MapPin, Building2 } from "lucide-react";
+import { Send, ArrowLeft, Check, CheckCheck, Search, UserPlus, Reply, X, Calendar, MapPin, Building2, Users } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -477,13 +477,22 @@ export default function MessagesPage() {
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-3xl font-bold font-serif text-foreground">Messages</h1>
             
-            <Dialog open={searchDialogOpen} onOpenChange={setSearchDialogOpen}>
-              <DialogTrigger asChild>
-                <Button variant="outline" data-testid="button-search-users">
-                  <UserPlus className="h-4 w-4 mr-2" />
-                  New Message
-                </Button>
-              </DialogTrigger>
+            <div className="flex items-center gap-2">
+              <Button 
+                variant="outline" 
+                onClick={() => navigate("/groups")}
+                data-testid="button-view-groups"
+              >
+                <Users className="h-4 w-4 mr-2" />
+                Groups
+              </Button>
+              <Dialog open={searchDialogOpen} onOpenChange={setSearchDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" data-testid="button-search-users">
+                    <UserPlus className="h-4 w-4 mr-2" />
+                    New Message
+                  </Button>
+                </DialogTrigger>
               <DialogContent className="max-w-md">
                 <DialogHeader>
                   <DialogTitle>New Message</DialogTitle>
@@ -569,6 +578,7 @@ export default function MessagesPage() {
                 </div>
               </DialogContent>
             </Dialog>
+            </div>
           </div>
 
           {conversationsLoading ? (

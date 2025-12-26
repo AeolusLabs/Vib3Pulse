@@ -20,6 +20,7 @@ import LoginPage from "@/pages/LoginPage";
 import SignupPage from "@/pages/SignupPage";
 import SearchPage from "@/pages/SearchPage";
 import MessagesPage from "@/pages/MessagesPage";
+import GroupChatsPage from "@/pages/GroupChatsPage";
 import BuddySettingsPage from "@/pages/BuddySettingsPage";
 import DistressAlertsPage from "@/pages/DistressAlertsPage";
 import AccountSettingsPage from "@/pages/AccountSettingsPage";
@@ -108,6 +109,18 @@ function Router() {
       <Route path="/messages/:userId">
         <AuthenticatedLayout>
           <MessagesPage />
+        </AuthenticatedLayout>
+      </Route>
+      
+      <Route path="/groups">
+        <AuthenticatedLayout>
+          <GroupChatsPage />
+        </AuthenticatedLayout>
+      </Route>
+      
+      <Route path="/groups/:conversationId">
+        <AuthenticatedLayout>
+          <GroupChatsPage />
         </AuthenticatedLayout>
       </Route>
       
