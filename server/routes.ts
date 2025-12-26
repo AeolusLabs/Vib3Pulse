@@ -2709,6 +2709,99 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Group avatar upload endpoint - returns presigned PUT URL and stable object path
+  app.post("/api/conversations/:id/avatar", requireAuth, async (req, res) => {
+    try {
+      const conversationId = req.params.id;
+      const conversation = await storage.getConversationById(conversationId);
+      
+      if (!conversation) {
+        return res.status(404).json({ message: "Conversation not found" });
+      }
+      
+      if (!conversation.isGroup) {
+        return res.status(400).json({ message: "Avatar upload only available for group chats" });
+      }
+      
+      // Check if user is admin
+      const participant = conversation.participants.find(p => p.userId === req.user!.id);
+      if (!participant || participant.role !== 'admin') {
+        return res.status(403).json({ message: "Only group admins can update the avatar" });
+      }
+      
+      const objectStorageService = new ObjectStorageService();
+      const objectId = crypto.randomUUID();
+      
+      // Get presigned URL for upload
+      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+      
+      // Extract the object ID from the upload URL and create stable path
+      const url = new URL(uploadURL);
+      const pathParts = url.pathname.split('/');
+      const uploadsIndex = pathParts.findIndex(p => p === 'uploads');
+      const extractedId = uploadsIndex !== -1 ? pathParts.slice(uploadsIndex).join('/') : `uploads/${objectId}`;
+      const stablePath = `/objects/${extractedId}`;
+      
+      res.json({ uploadURL, stablePath });
+    } catch (error) {
+      console.error("Error getting group avatar upload URL:", error);
+      res.status(500).json({ message: "Failed to get upload URL" });
+    }
+  });
+
+  // Update group avatar URL after upload - accepts the stable path
+  app.patch("/api/conversations/:id/avatar", requireAuth, async (req, res) => {
+    try {
+      const conversationId = req.params.id;
+      const { avatarPath } = req.body;
+      
+      if (!avatarPath) {
+        return res.status(400).json({ message: "Avatar path is required" });
+      }
+
+      // Validate the path format
+      if (!avatarPath.startsWith('/objects/')) {
+        return res.status(400).json({ message: "Invalid avatar path format" });
+      }
+
+      const conversation = await storage.getConversationById(conversationId);
+      if (!conversation) {
+        return res.status(404).json({ message: "Conversation not found" });
+      }
+      
+      if (!conversation.isGroup) {
+        return res.status(400).json({ message: "Avatar update only available for group chats" });
+      }
+      
+      // Check if user is admin
+      const participant = conversation.participants.find(p => p.userId === req.user!.id);
+      if (!participant || participant.role !== 'admin') {
+        return res.status(403).json({ message: "Only group admins can update the avatar" });
+      }
+
+      const objectStorageService = new ObjectStorageService();
+      
+      // Verify the object exists and set ACL to public
+      try {
+        const objectFile = await objectStorageService.getObjectEntityFile(avatarPath);
+        const { setObjectAclPolicy } = await import('./objectAcl');
+        await setObjectAclPolicy(objectFile, { visibility: "public", owner: req.user!.id });
+      } catch (err) {
+        console.error("Error setting group avatar ACL:", err);
+        return res.status(400).json({ message: "Avatar upload not found or incomplete" });
+      }
+
+      const updatedConversation = await storage.updateConversation(conversationId, { 
+        avatarUrl: avatarPath 
+      });
+      
+      res.json(updatedConversation);
+    } catch (error) {
+      console.error("Error updating group avatar:", error);
+      res.status(500).json({ message: "Failed to update avatar" });
+    }
+  });
+
   // Buddy system routes
   const setBuddySchema = z.object({
     buddyId: z.string().min(1, "Buddy ID is required"),

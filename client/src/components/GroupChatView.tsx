@@ -32,12 +32,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Send, ArrowLeft, Users, Settings, ChartBar, MoreVertical, UserPlus, LogOut, Shield, UserMinus, Trash2, Loader2, Link2, Copy, Check } from "lucide-react";
+import { Send, ArrowLeft, Users, Settings, ChartBar, MoreVertical, UserPlus, LogOut, Shield, UserMinus, Trash2, Loader2, Link2, Copy, Check, Camera } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import PollMessage from "./PollMessage";
 import CreatePollModal from "./CreatePollModal";
+import { ObjectUploader } from "./ObjectUploader";
 import type { User, Conversation, ConversationParticipant, ConversationMessage } from "@shared/schema";
 import type { AuthUser } from "@/hooks/useAuth";
 
@@ -64,6 +65,7 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [memberToRemove, setMemberToRemove] = useState<string | null>(null);
   const [inviteCopied, setInviteCopied] = useState(false);
+  const pendingAvatarPath = useRef<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
@@ -213,30 +215,12 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
           <ArrowLeft className="h-5 w-5" />
         </Button>
 
-        {conversation.avatarUrl ? (
-          <Avatar className="h-10 w-10">
-            <AvatarImage src={conversation.avatarUrl} alt={conversation.name || "Group"} />
-            <AvatarFallback className="bg-primary/10 text-primary">
-              <Users className="h-5 w-5" />
-            </AvatarFallback>
-          </Avatar>
-        ) : (
-          <div className="flex -space-x-2">
-            {conversation.participants.slice(0, 3).map((p) => (
-              <Avatar key={p.userId} className="h-8 w-8 border-2 border-background">
-                <AvatarImage src={p.user.avatarUrl || ""} />
-                <AvatarFallback className="text-xs">
-                  {p.user.displayName?.[0] || p.user.username[0]}
-                </AvatarFallback>
-              </Avatar>
-            ))}
-            {conversation.participants.length > 3 && (
-              <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-xs font-medium border-2 border-background">
-                +{conversation.participants.length - 3}
-              </div>
-            )}
-          </div>
-        )}
+        <Avatar className="h-10 w-10">
+          <AvatarImage src={conversation.avatarUrl || ""} alt={conversation.name || "Group"} />
+          <AvatarFallback className="bg-primary/10 text-primary">
+            <Users className="h-5 w-5" />
+          </AvatarFallback>
+        </Avatar>
 
         <div className="flex-1 min-w-0">
           <h3 className="font-semibold truncate" data-testid="text-group-name">{conversation.name}</h3>
@@ -253,12 +237,59 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
           </SheetTrigger>
           <SheetContent>
             <SheetHeader>
-              <SheetTitle>Group Members</SheetTitle>
+              <SheetTitle>Group Settings</SheetTitle>
               <SheetDescription>
                 {conversation.participants.length} members
               </SheetDescription>
             </SheetHeader>
-            <ScrollArea className="h-[calc(100vh-120px)] mt-4">
+            
+            {isAdmin && (
+              <div className="py-4 border-b">
+                <p className="text-sm font-medium mb-3">Group Avatar</p>
+                <div className="flex items-center gap-4">
+                  <Avatar className="h-16 w-16">
+                    <AvatarImage src={conversation.avatarUrl || ""} alt={conversation.name || "Group"} />
+                    <AvatarFallback className="bg-primary/10 text-primary">
+                      <Users className="h-6 w-6" />
+                    </AvatarFallback>
+                  </Avatar>
+                  <ObjectUploader
+                    onGetUploadParameters={async () => {
+                      const response = await apiRequest("POST", `/api/conversations/${conversationId}/avatar`);
+                      if (!response.ok) throw new Error("Failed to get upload URL");
+                      const data = await response.json();
+                      pendingAvatarPath.current = data.stablePath;
+                      return { method: "PUT" as const, url: data.uploadURL };
+                    }}
+                    onComplete={async (result) => {
+                      if (result.successful && result.successful.length > 0 && pendingAvatarPath.current) {
+                        const avatarPath = pendingAvatarPath.current;
+                        pendingAvatarPath.current = null;
+                        
+                        const patchResponse = await apiRequest("PATCH", `/api/conversations/${conversationId}/avatar`, { avatarPath });
+                        if (patchResponse.ok) {
+                          queryClient.invalidateQueries({ queryKey: ['/api/conversations', conversationId] });
+                          queryClient.invalidateQueries({ queryKey: ['/api/conversations'] });
+                          toast({ title: "Group avatar updated" });
+                        } else {
+                          toast({ title: "Failed to update avatar", variant: "destructive" });
+                        }
+                      }
+                    }}
+                    buttonVariant="outline"
+                    buttonSize="sm"
+                  >
+                    <Camera className="h-4 w-4 mr-2" />
+                    Change Avatar
+                  </ObjectUploader>
+                </div>
+              </div>
+            )}
+            
+            <div className="py-4">
+              <p className="text-sm font-medium mb-3">Members</p>
+            </div>
+            <ScrollArea className="h-[calc(100vh-280px)]">
               <div className="space-y-2">
                 {conversation.participants.map((p) => (
                   <div key={p.userId} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50">

@@ -617,34 +617,12 @@ export default function MessagesPage() {
                     <div className="flex items-center gap-4">
                       <div className="relative">
                         {isGroup ? (
-                          conv.avatarUrl ? (
-                            <Avatar className="h-12 w-12">
-                              <AvatarImage src={conv.avatarUrl} alt={conv.name || "Group"} />
-                              <AvatarFallback className="bg-primary/10 text-primary">
-                                <Users className="h-5 w-5" />
-                              </AvatarFallback>
-                            </Avatar>
-                          ) : (
-                            <div className="flex -space-x-2">
-                              {conv.participants.slice(0, 3).map((p, i) => (
-                                <Avatar 
-                                  key={p.userId} 
-                                  className="h-10 w-10 border-2 border-background"
-                                  style={{ zIndex: 3 - i }}
-                                >
-                                  <AvatarImage src={p.user.avatarUrl || ""} />
-                                  <AvatarFallback className="text-xs bg-primary/10 text-primary">
-                                    {(p.user.displayName || p.user.username)[0].toUpperCase()}
-                                  </AvatarFallback>
-                                </Avatar>
-                              ))}
-                              {conv.participants.length > 3 && (
-                                <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center text-xs font-medium border-2 border-background">
-                                  +{conv.participants.length - 3}
-                                </div>
-                              )}
-                            </div>
-                          )
+                          <Avatar className="h-12 w-12">
+                            <AvatarImage src={conv.avatarUrl || ""} alt={conv.name || "Group"} />
+                            <AvatarFallback className="bg-primary/10 text-primary">
+                              <Users className="h-5 w-5" />
+                            </AvatarFallback>
+                          </Avatar>
                         ) : (
                           <Avatar className="h-12 w-12">
                             <AvatarImage 
