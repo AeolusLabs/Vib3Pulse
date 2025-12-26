@@ -347,12 +347,12 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
                         alt={`Gallery ${idx + 1}`} 
                         className="w-full h-full object-cover"
                       />
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors z-10" />
                       <Button
                         type="button"
                         size="icon"
                         variant="destructive"
-                        className="absolute top-1 right-1 h-7 w-7 rounded-full shadow-lg"
+                        className="absolute top-1 right-1 h-7 w-7 rounded-full shadow-lg z-20"
                         onClick={() => setFormData(prev => ({ 
                           ...prev, 
                           imageUrls: prev.imageUrls.filter((_, i) => i !== idx) 
