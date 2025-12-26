@@ -173,18 +173,21 @@ export default function ProfilePage() {
     setIsUploadingAvatar(true);
 
     try {
+      // Step 1: Get presigned upload URL
       const uploadResponse = await fetch('/api/users/me/avatar', {
         method: 'POST',
         credentials: 'include',
       });
 
       if (!uploadResponse.ok) {
-        throw new Error('Failed to get upload URL');
+        const errorData = await uploadResponse.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to get upload URL');
       }
 
       const { uploadURL, stablePath } = await uploadResponse.json();
 
-      await fetch(uploadURL, {
+      // Step 2: Upload file to cloud storage
+      const cloudUploadResponse = await fetch(uploadURL, {
         method: 'PUT',
         body: file,
         headers: {
@@ -192,6 +195,12 @@ export default function ProfilePage() {
         },
       });
 
+      if (!cloudUploadResponse.ok) {
+        console.error('Cloud upload failed:', cloudUploadResponse.status, cloudUploadResponse.statusText);
+        throw new Error('Failed to upload file to cloud storage');
+      }
+
+      // Step 3: Update user's avatar URL in database
       const updateResponse = await fetch('/api/users/me/avatar', {
         method: 'PATCH',
         headers: {
@@ -202,7 +211,8 @@ export default function ProfilePage() {
       });
 
       if (!updateResponse.ok) {
-        throw new Error('Failed to update avatar');
+        const errorData = await updateResponse.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to update avatar');
       }
 
       queryClient.invalidateQueries({ queryKey: [`/api/users/${username}`] });
@@ -212,10 +222,11 @@ export default function ProfilePage() {
         title: "Success",
         description: "Profile picture updated successfully",
       });
-    } catch {
+    } catch (error: any) {
+      console.error('Avatar upload error:', error);
       toast({
         title: "Error",
-        description: "Failed to upload profile picture. Please try again.",
+        description: error.message || "Failed to upload profile picture. Please try again.",
         variant: "destructive",
       });
     } finally {

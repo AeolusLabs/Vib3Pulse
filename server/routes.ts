@@ -2651,12 +2651,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Avatar upload endpoint - returns presigned PUT URL and stable object path
   app.post("/api/users/me/avatar", requireAuth, async (req, res) => {
     try {
+      console.log(`[Avatar Upload] User ${req.user!.id} requesting upload URL`);
       const objectStorageService = new ObjectStorageService();
-      const privateObjectDir = process.env.PRIVATE_OBJECT_DIR || "";
       const objectId = crypto.randomUUID();
       
       // Get presigned URL for upload
       const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+      console.log(`[Avatar Upload] Generated presigned URL for user ${req.user!.id}`);
       
       // Extract the object ID from the upload URL and create stable path
       const url = new URL(uploadURL);
@@ -2665,46 +2666,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const extractedId = uploadsIndex !== -1 ? pathParts.slice(uploadsIndex).join('/') : `uploads/${objectId}`;
       const stablePath = `/objects/${extractedId}`;
       
+      console.log(`[Avatar Upload] Stable path: ${stablePath}`);
       res.json({ uploadURL, stablePath });
-    } catch (error) {
-      console.error("Error getting avatar upload URL:", error);
-      res.status(500).json({ message: "Failed to get upload URL" });
+    } catch (error: any) {
+      console.error("[Avatar Upload] Error getting upload URL:", error?.message || error);
+      res.status(500).json({ message: "Failed to get upload URL. Please ensure object storage is configured." });
     }
   });
 
   // Update avatar URL after upload - accepts the stable path
   app.patch("/api/users/me/avatar", requireAuth, async (req, res) => {
     try {
+      console.log(`[Avatar Update] User ${req.user!.id} updating avatar`);
       const { avatarPath } = req.body;
       if (!avatarPath) {
+        console.log("[Avatar Update] Missing avatarPath in request body");
         return res.status(400).json({ message: "Avatar path is required" });
       }
 
       // Validate the path format
       if (!avatarPath.startsWith('/objects/')) {
+        console.log(`[Avatar Update] Invalid path format: ${avatarPath}`);
         return res.status(400).json({ message: "Invalid avatar path format" });
       }
 
+      console.log(`[Avatar Update] Processing path: ${avatarPath}`);
       const objectStorageService = new ObjectStorageService();
       
       // Verify the object exists and set ACL to public
       try {
+        console.log("[Avatar Update] Getting object file...");
         const objectFile = await objectStorageService.getObjectEntityFile(avatarPath);
+        console.log("[Avatar Update] Setting ACL to public...");
         const { setObjectAclPolicy } = await import('./objectAcl');
         await setObjectAclPolicy(objectFile, { visibility: "public", owner: req.user!.id });
-      } catch (err) {
-        console.error("Error setting avatar ACL:", err);
-        return res.status(400).json({ message: "Avatar upload not found or incomplete" });
+        console.log("[Avatar Update] ACL set successfully");
+      } catch (err: any) {
+        console.error("[Avatar Update] Error setting avatar ACL:", err?.message || err);
+        return res.status(400).json({ message: "Avatar upload not found or incomplete. The file may not have been uploaded successfully." });
       }
 
       const updatedUser = await storage.updateUser(req.user!.id, { 
         avatarUrl: avatarPath 
       });
       
+      console.log(`[Avatar Update] Successfully updated avatar for user ${req.user!.id}`);
       const { passwordHash, ...userWithoutPassword } = updatedUser;
       res.json(userWithoutPassword);
-    } catch (error) {
-      console.error("Error updating avatar:", error);
+    } catch (error: any) {
+      console.error("[Avatar Update] Error updating avatar:", error?.message || error);
       res.status(500).json({ message: "Failed to update avatar" });
     }
   });
