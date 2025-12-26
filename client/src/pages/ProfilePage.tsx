@@ -10,7 +10,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Calendar, MapPin, PoundSterling, Building2, Mail, Cake, UserPlus, UserMinus, Camera, FileText, Heart, Repeat2, Loader2 } from "lucide-react";
+import { Calendar, MapPin, PoundSterling, Building2, Mail, Cake, UserPlus, UserMinus, Camera, FileText, Heart, Repeat2, Loader2, Trash2 } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import type { User, Event, Rsvp, Post } from "@shared/schema";
 import EditProfileDialog from "@/components/EditProfileDialog";
 import { OrganizerStatsModal } from "@/components/OrganizerStatsModal";
@@ -143,8 +144,26 @@ export default function ProfilePage() {
   });
 
   const handleAvatarClick = () => {
-    if (isOwnProfile && fileInputRef.current) {
+    if (fileInputRef.current) {
       fileInputRef.current.click();
+    }
+  };
+
+  const handleDeleteAvatar = async () => {
+    try {
+      await apiRequest('DELETE', '/api/users/me/avatar');
+      queryClient.invalidateQueries({ queryKey: [`/api/users/${username}`] });
+      queryClient.invalidateQueries({ queryKey: ['/api/session'] });
+      toast({
+        title: "Success",
+        description: "Profile picture removed",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to remove profile picture",
+        variant: "destructive",
+      });
     }
   };
 
@@ -278,34 +297,74 @@ export default function ProfilePage() {
                   onChange={handleAvatarUpload}
                   data-testid="input-avatar-upload"
                 />
-                <Avatar 
-                  className={`h-24 w-24 border-4 border-primary/20 ${isOwnProfile ? 'cursor-pointer' : ''}`}
-                  onClick={handleAvatarClick}
-                  data-testid="avatar-profile"
-                >
-                  <AvatarImage 
-                    src={getAvatarUrl()} 
-                    alt={isSocialUser ? (profile.displayName || profile.username) : (profile.organizationName || profile.username)} 
-                  />
-                  <AvatarFallback className="text-2xl bg-primary/10 text-primary">
-                    {isSocialUser 
-                      ? profile.displayName?.charAt(0) || profile.username.charAt(0).toUpperCase()
-                      : profile.organizationName?.charAt(0) || profile.username.charAt(0).toUpperCase()
-                    }
-                  </AvatarFallback>
-                </Avatar>
-                {isOwnProfile && (
-                  <div 
-                    className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                    onClick={handleAvatarClick}
-                    data-testid="avatar-overlay"
+                {isOwnProfile ? (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button 
+                        type="button"
+                        className="relative cursor-pointer rounded-full focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                        data-testid="button-avatar-menu"
+                      >
+                        <Avatar 
+                          className="h-24 w-24 border-4 border-primary/20"
+                          data-testid="avatar-profile"
+                        >
+                          <AvatarImage 
+                            src={getAvatarUrl()} 
+                            alt={isSocialUser ? (profile.displayName || profile.username) : (profile.organizationName || profile.username)} 
+                          />
+                          <AvatarFallback className="text-2xl bg-primary/10 text-primary">
+                            {isSocialUser 
+                              ? profile.displayName?.charAt(0) || profile.username.charAt(0).toUpperCase()
+                              : profile.organizationName?.charAt(0) || profile.username.charAt(0).toUpperCase()
+                            }
+                          </AvatarFallback>
+                        </Avatar>
+                        <div 
+                          className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                          data-testid="avatar-overlay"
+                        >
+                          {isUploadingAvatar ? (
+                            <Loader2 className="h-6 w-6 text-white animate-spin" />
+                          ) : (
+                            <Camera className="h-6 w-6 text-white" />
+                          )}
+                        </div>
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      <DropdownMenuItem onClick={handleAvatarClick} data-testid="menu-change-photo">
+                        <Camera className="h-4 w-4 mr-2" />
+                        Change photo
+                      </DropdownMenuItem>
+                      {profile.avatarUrl && (
+                        <DropdownMenuItem 
+                          onClick={handleDeleteAvatar} 
+                          className="text-destructive focus:text-destructive"
+                          data-testid="menu-remove-photo"
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Remove photo
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : (
+                  <Avatar 
+                    className="h-24 w-24 border-4 border-primary/20"
+                    data-testid="avatar-profile"
                   >
-                    {isUploadingAvatar ? (
-                      <Loader2 className="h-6 w-6 text-white animate-spin" />
-                    ) : (
-                      <Camera className="h-6 w-6 text-white" />
-                    )}
-                  </div>
+                    <AvatarImage 
+                      src={getAvatarUrl()} 
+                      alt={isSocialUser ? (profile.displayName || profile.username) : (profile.organizationName || profile.username)} 
+                    />
+                    <AvatarFallback className="text-2xl bg-primary/10 text-primary">
+                      {isSocialUser 
+                        ? profile.displayName?.charAt(0) || profile.username.charAt(0).toUpperCase()
+                        : profile.organizationName?.charAt(0) || profile.username.charAt(0).toUpperCase()
+                      }
+                    </AvatarFallback>
+                  </Avatar>
                 )}
               </div>
 

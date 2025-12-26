@@ -2719,6 +2719,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Delete avatar - removes avatar URL from user profile
+  app.delete("/api/users/me/avatar", requireAuth, async (req, res) => {
+    try {
+      console.log(`[Avatar Delete] User ${req.user!.id} removing avatar`);
+      
+      const updatedUser = await storage.updateUser(req.user!.id, { 
+        avatarUrl: null 
+      });
+      
+      console.log(`[Avatar Delete] Successfully removed avatar for user ${req.user!.id}`);
+      const { passwordHash, ...userWithoutPassword } = updatedUser;
+      res.json(userWithoutPassword);
+    } catch (error: any) {
+      console.error("[Avatar Delete] Error removing avatar:", error?.message || error);
+      res.status(500).json({ message: "Failed to remove avatar" });
+    }
+  });
+
   // Group avatar upload endpoint - returns presigned PUT URL and stable object path
   app.post("/api/conversations/:id/avatar", requireAuth, async (req, res) => {
     try {

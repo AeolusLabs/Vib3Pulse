@@ -204,21 +204,22 @@ export default function CreatePostModal({
               {selectedImages.length > 0 && (
                 <div className="grid grid-cols-2 gap-2">
                   {selectedImages.map((image, index) => (
-                    <div key={index} className="relative rounded-lg overflow-hidden border aspect-square">
+                    <div key={index} className="relative rounded-lg overflow-hidden border aspect-square group">
                       <img
                         src={image}
                         alt={`Upload ${index + 1}`}
                         className="w-full h-full object-cover"
                       />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
                       <Button
                         type="button"
-                        variant="ghost"
+                        variant="destructive"
                         size="icon"
-                        className="absolute top-1 right-1 h-6 w-6 bg-background/80 hover:bg-background"
+                        className="absolute top-1 right-1 h-7 w-7 rounded-full shadow-lg"
                         onClick={() => setSelectedImages(selectedImages.filter((_, i) => i !== index))}
                         data-testid={`button-remove-image-${index}`}
                       >
-                        <X className="h-3 w-3" />
+                        <X className="h-4 w-4" />
                       </Button>
                     </div>
                   ))}

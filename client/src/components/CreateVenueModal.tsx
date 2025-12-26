@@ -341,24 +341,25 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
               {formData.imageUrls.length > 0 && (
                 <div className="grid grid-cols-3 gap-2">
                   {formData.imageUrls.map((url, idx) => (
-                    <div key={idx} className="relative aspect-video rounded-lg overflow-hidden border">
+                    <div key={idx} className="relative aspect-video rounded-lg overflow-hidden border group">
                       <img 
                         src={url} 
                         alt={`Gallery ${idx + 1}`} 
                         className="w-full h-full object-cover"
                       />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors" />
                       <Button
                         type="button"
                         size="icon"
-                        variant="ghost"
-                        className="absolute top-1 right-1 h-6 w-6 rounded-full bg-destructive text-destructive-foreground"
+                        variant="destructive"
+                        className="absolute top-1 right-1 h-7 w-7 rounded-full shadow-lg"
                         onClick={() => setFormData(prev => ({ 
                           ...prev, 
                           imageUrls: prev.imageUrls.filter((_, i) => i !== idx) 
                         }))}
                         data-testid={`button-remove-gallery-${idx}`}
                       >
-                        <X className="h-3 w-3" />
+                        <X className="h-4 w-4" />
                       </Button>
                     </div>
                   ))}
