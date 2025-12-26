@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Search, Users, X, Loader2 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { User, Follow } from "@shared/schema";
+import type { User } from "@shared/schema";
 
 interface CreateGroupModalProps {
   open: boolean;
@@ -25,8 +25,8 @@ export default function CreateGroupModal({ open, onOpenChange, onGroupCreated }:
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const { toast } = useToast();
 
-  const { data: following } = useQuery<Array<Follow & { following: User }>>({
-    queryKey: ['/api/users/me/following'],
+  const { data: following } = useQuery<User[]>({
+    queryKey: ['/api/follows/me/following'],
     enabled: open,
   });
 
@@ -87,7 +87,7 @@ export default function CreateGroupModal({ open, onOpenChange, onGroupCreated }:
 
   const usersToShow = searchQuery.length >= 2
     ? searchResults || []
-    : (following || []).map((f) => f.following);
+    : following || [];
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
