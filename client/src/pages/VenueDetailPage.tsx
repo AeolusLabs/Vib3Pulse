@@ -8,6 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import ImageLightbox from "@/components/ImageLightbox";
+import { VenueGalleryManager } from "@/components/VenueGalleryManager";
+import { useAuth } from "@/hooks/useAuth";
 import { 
   MapPin, 
   Phone, 
@@ -22,7 +25,10 @@ import {
   Ticket,
   DollarSign,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  Edit,
+  Trash2,
+  Replace
 } from "lucide-react";
 import { format } from "date-fns";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -121,15 +127,25 @@ function SimulatedPaymentForm({
 export default function VenueDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { toast } = useToast();
+  const { data: currentUser } = useAuth();
   const [selectedEntryNight, setSelectedEntryNight] = useState<VenueEntryNight | null>(null);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [galleryLightboxOpen, setGalleryLightboxOpen] = useState(false);
+  const [galleryLightboxIndex, setGalleryLightboxIndex] = useState(0);
 
   const { data: venue, isLoading: venueLoading } = useQuery<Venue & { owner: any }>({
     queryKey: ["/api/venues", id],
     enabled: !!id,
   });
+
+  const isVenueOwner = currentUser?.id === venue?.ownerId;
+
+  const openGalleryLightbox = (index: number) => {
+    setGalleryLightboxIndex(index);
+    setGalleryLightboxOpen(true);
+  };
 
   const { data: entryNights = [], isLoading: nightsLoading } = useQuery<VenueEntryNight[]>({
     queryKey: ["/api/venues", id, "entry-nights", "upcoming"],
@@ -247,24 +263,50 @@ export default function VenueDetailPage() {
               {venue.imageUrls.map((imgUrl, idx) => (
                 <div 
                   key={idx} 
-                  className={`relative overflow-hidden rounded-lg ${
+                  className={`relative overflow-hidden rounded-lg cursor-pointer group ${
                     venue.imageUrls!.length === 3 && idx === 0 ? 'md:row-span-2' : ''
                   }`}
+                  onClick={() => openGalleryLightbox(idx)}
+                  data-testid={`button-gallery-image-${idx}`}
                 >
                   <img
                     src={imgUrl}
                     alt={`${venue.name} gallery ${idx + 1}`}
-                    className={`w-full object-cover ${
+                    className={`w-full object-cover transition-transform group-hover:scale-105 ${
                       venue.imageUrls!.length === 1 ? 'h-64' :
                       venue.imageUrls!.length === 3 && idx === 0 ? 'h-full min-h-40' :
                       'aspect-square'
                     }`}
                     data-testid={`img-venue-gallery-${idx}`}
                   />
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
                 </div>
               ))}
             </div>
           </div>
+        )}
+
+        {/* Gallery Lightbox */}
+        {venue.imageUrls && venue.imageUrls.length > 0 && (
+          <ImageLightbox
+            images={venue.imageUrls}
+            initialIndex={galleryLightboxIndex}
+            open={galleryLightboxOpen}
+            onClose={() => setGalleryLightboxOpen(false)}
+          />
+        )}
+
+        {/* Venue Owner Gallery Management */}
+        {isVenueOwner && (
+          <Card className="mb-8">
+            <CardContent className="pt-6">
+              <VenueGalleryManager
+                venueId={venue.id}
+                imageUrls={venue.imageUrls || []}
+                maxImages={6}
+              />
+            </CardContent>
+          </Card>
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

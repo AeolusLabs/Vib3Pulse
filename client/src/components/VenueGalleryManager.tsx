@@ -1,0 +1,204 @@
+import { useState, useRef } from "react";
+import { useMutation } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { ObjectUploader } from "@/components/ObjectUploader";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import { Trash2, Replace, Upload, X, Camera, FolderOpen, Image as ImageIcon } from "lucide-react";
+import type { UploadResult } from "@uppy/core";
+
+interface VenueGalleryManagerProps {
+  venueId: string;
+  imageUrls: string[];
+  maxImages?: number;
+}
+
+export function VenueGalleryManager({ venueId, imageUrls, maxImages = 6 }: VenueGalleryManagerProps) {
+  const { toast } = useToast();
+  const [deleteIndex, setDeleteIndex] = useState<number | null>(null);
+  const [replaceIndex, setReplaceIndex] = useState<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const updateGalleryMutation = useMutation({
+    mutationFn: async (newImageUrls: string[]) => {
+      return apiRequest("PATCH", `/api/venues/${venueId}`, { imageUrls: newImageUrls });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/venues", venueId] });
+      toast({ title: "Gallery updated successfully" });
+    },
+    onError: () => {
+      toast({ title: "Failed to update gallery", variant: "destructive" });
+    },
+  });
+
+  const handleDeleteImage = (index: number) => {
+    const newUrls = imageUrls.filter((_, i) => i !== index);
+    updateGalleryMutation.mutate(newUrls);
+    setDeleteIndex(null);
+  };
+
+  const handleReplaceComplete = async (result: UploadResult<Record<string, unknown>, Record<string, unknown>>, index: number) => {
+    if (result.successful?.[0]?.uploadURL) {
+      try {
+        const response = await apiRequest("PUT", "/api/venue-images", { 
+          imageURL: result.successful[0].uploadURL 
+        });
+        const data = await response.json() as { objectPath: string };
+        
+        const newUrls = [...imageUrls];
+        newUrls[index] = data.objectPath;
+        updateGalleryMutation.mutate(newUrls);
+        setReplaceIndex(null);
+      } catch {
+        toast({ title: "Failed to replace image", variant: "destructive" });
+      }
+    }
+  };
+
+  const handleAddComplete = async (result: UploadResult<Record<string, unknown>, Record<string, unknown>>) => {
+    const newUrls: string[] = [];
+    for (const file of result.successful || []) {
+      if (file.uploadURL) {
+        try {
+          const response = await apiRequest("PUT", "/api/venue-images", { 
+            imageURL: file.uploadURL 
+          });
+          const data = await response.json() as { objectPath: string };
+          newUrls.push(data.objectPath);
+        } catch {
+          console.error("Failed to process uploaded image");
+        }
+      }
+    }
+    if (newUrls.length > 0) {
+      updateGalleryMutation.mutate([...imageUrls, ...newUrls]);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Manage Gallery</h3>
+        <span className="text-sm text-muted-foreground">
+          {imageUrls.length}/{maxImages} images
+        </span>
+      </div>
+
+      {imageUrls.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          {imageUrls.map((url, idx) => (
+            <div key={idx} className="relative aspect-video rounded-lg overflow-hidden border group">
+              <img 
+                src={url} 
+                alt={`Gallery ${idx + 1}`} 
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="secondary"
+                  className="h-8 w-8"
+                  onClick={() => setReplaceIndex(idx)}
+                  disabled={updateGalleryMutation.isPending}
+                  data-testid={`button-replace-gallery-${idx}`}
+                >
+                  <Replace className="h-4 w-4" />
+                </Button>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="destructive"
+                  className="h-8 w-8"
+                  onClick={() => setDeleteIndex(idx)}
+                  disabled={updateGalleryMutation.isPending}
+                  data-testid={`button-delete-gallery-${idx}`}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {imageUrls.length < maxImages && (
+        <div className="space-y-3">
+          <ObjectUploader
+            maxNumberOfFiles={maxImages - imageUrls.length}
+            maxFileSize={10485760}
+            onGetUploadParameters={async () => {
+              const response = await apiRequest("POST", "/api/objects/upload");
+              const data = await response.json() as { uploadURL: string };
+              return { method: "PUT" as const, url: data.uploadURL };
+            }}
+            onComplete={handleAddComplete}
+            buttonVariant="outline"
+            buttonSize="default"
+          >
+            <Upload className="h-4 w-4 mr-2" />
+            Add Photos
+          </ObjectUploader>
+          <p className="text-xs text-muted-foreground flex items-center gap-2">
+            <Camera className="h-3 w-3" />
+            You can take a photo or choose from your device
+          </p>
+        </div>
+      )}
+
+      <Dialog open={deleteIndex !== null} onOpenChange={() => setDeleteIndex(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Image</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this image from your gallery? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setDeleteIndex(null)}>
+              Cancel
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={() => deleteIndex !== null && handleDeleteImage(deleteIndex)}
+              disabled={updateGalleryMutation.isPending}
+              data-testid="button-confirm-delete"
+            >
+              {updateGalleryMutation.isPending ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={replaceIndex !== null} onOpenChange={() => setReplaceIndex(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Replace Image</DialogTitle>
+            <DialogDescription>
+              Choose a new image to replace the current one.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <ObjectUploader
+              maxNumberOfFiles={1}
+              maxFileSize={10485760}
+              onGetUploadParameters={async () => {
+                const response = await apiRequest("POST", "/api/objects/upload");
+                const data = await response.json() as { uploadURL: string };
+                return { method: "PUT" as const, url: data.uploadURL };
+              }}
+              onComplete={(result) => replaceIndex !== null && handleReplaceComplete(result, replaceIndex)}
+              buttonVariant="default"
+              buttonSize="default"
+            >
+              <FolderOpen className="h-4 w-4 mr-2" />
+              Choose New Image
+            </ObjectUploader>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
