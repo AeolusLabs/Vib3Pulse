@@ -302,11 +302,7 @@ export default function FeedPage() {
     queryKey: ['/api/users/by-usernames', mentionedUsernames],
     queryFn: async () => {
       if (mentionedUsernames.length === 0) return [];
-      const res = await fetch('/api/users/by-usernames', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ usernames: mentionedUsernames }),
-      });
+      const res = await apiRequest('POST', '/api/users/by-usernames', { usernames: mentionedUsernames });
       if (!res.ok) return [];
       return res.json();
     },

@@ -1,11 +1,11 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { ObjectUploader } from "@/components/ObjectUploader";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { Trash2, Replace, Upload, X, Camera, FolderOpen, Image as ImageIcon } from "lucide-react";
+import { Trash2, Replace, Upload, Camera, FolderOpen } from "lucide-react";
 import type { UploadResult } from "@uppy/core";
 
 interface VenueGalleryManagerProps {
@@ -14,27 +14,45 @@ interface VenueGalleryManagerProps {
   maxImages?: number;
 }
 
-export function VenueGalleryManager({ venueId, imageUrls, maxImages = 6 }: VenueGalleryManagerProps) {
+export function VenueGalleryManager({ venueId, imageUrls: propImageUrls, maxImages = 6 }: VenueGalleryManagerProps) {
   const { toast } = useToast();
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null);
   const [replaceIndex, setReplaceIndex] = useState<number | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Local state that syncs from props but can be optimistically updated
+  const [localImageUrls, setLocalImageUrls] = useState<string[]>(propImageUrls);
+  
+  // Sync local state when props change (e.g., after query refetch)
+  useEffect(() => {
+    setLocalImageUrls(propImageUrls);
+  }, [propImageUrls]);
 
   const updateGalleryMutation = useMutation({
     mutationFn: async (newImageUrls: string[]) => {
-      return apiRequest("PATCH", `/api/venues/${venueId}`, { imageUrls: newImageUrls });
+      const response = await apiRequest("PATCH", `/api/venues/${venueId}`, { imageUrls: newImageUrls });
+      return response.json();
     },
-    onSuccess: () => {
+    onMutate: async (newImageUrls) => {
+      // Optimistically update local state immediately
+      setLocalImageUrls(newImageUrls);
+    },
+    onSuccess: (data) => {
+      // Update local state with server response to ensure consistency
+      if (data?.imageUrls) {
+        setLocalImageUrls(data.imageUrls);
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/venues", venueId] });
       toast({ title: "Gallery updated successfully" });
     },
     onError: () => {
+      // Revert to props on error
+      setLocalImageUrls(propImageUrls);
       toast({ title: "Failed to update gallery", variant: "destructive" });
     },
   });
 
   const handleDeleteImage = (index: number) => {
-    const newUrls = imageUrls.filter((_, i) => i !== index);
+    const newUrls = localImageUrls.filter((_, i) => i !== index);
     updateGalleryMutation.mutate(newUrls);
     setDeleteIndex(null);
   };
@@ -47,7 +65,7 @@ export function VenueGalleryManager({ venueId, imageUrls, maxImages = 6 }: Venue
         });
         const data = await response.json() as { objectPath: string };
         
-        const newUrls = [...imageUrls];
+        const newUrls = [...localImageUrls];
         newUrls[index] = data.objectPath;
         updateGalleryMutation.mutate(newUrls);
         setReplaceIndex(null);
@@ -73,7 +91,7 @@ export function VenueGalleryManager({ venueId, imageUrls, maxImages = 6 }: Venue
       }
     }
     if (newUrls.length > 0) {
-      updateGalleryMutation.mutate([...imageUrls, ...newUrls]);
+      updateGalleryMutation.mutate([...localImageUrls, ...newUrls]);
     }
   };
 
@@ -82,14 +100,14 @@ export function VenueGalleryManager({ venueId, imageUrls, maxImages = 6 }: Venue
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold">Manage Gallery</h3>
         <span className="text-sm text-muted-foreground">
-          {imageUrls.length}/{maxImages} images
+          {localImageUrls.length}/{maxImages} images
         </span>
       </div>
 
-      {imageUrls.length > 0 && (
+      {localImageUrls.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          {imageUrls.map((url, idx) => (
-            <div key={idx} className="relative aspect-video rounded-lg overflow-hidden border group">
+          {localImageUrls.map((url, idx) => (
+            <div key={`${url}-${idx}`} className="relative aspect-video rounded-lg overflow-hidden border group">
               <img 
                 src={url} 
                 alt={`Gallery ${idx + 1}`} 
@@ -124,10 +142,10 @@ export function VenueGalleryManager({ venueId, imageUrls, maxImages = 6 }: Venue
         </div>
       )}
 
-      {imageUrls.length < maxImages && (
+      {localImageUrls.length < maxImages && (
         <div className="space-y-3">
           <ObjectUploader
-            maxNumberOfFiles={maxImages - imageUrls.length}
+            maxNumberOfFiles={maxImages - localImageUrls.length}
             maxFileSize={10485760}
             onGetUploadParameters={async () => {
               const response = await apiRequest("POST", "/api/objects/upload");
