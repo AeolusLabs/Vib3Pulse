@@ -3435,6 +3435,144 @@ export class DbStorage implements IStorage {
       .returning();
     return result;
   }
+
+  // Migration: Convert legacy direct messages to new conversation system
+  async migrateLegacyMessages(): Promise<{ migratedConversations: number; migratedMessages: number }> {
+    // Get all unique sender/receiver pairs from legacy messages table
+    const legacyMessages = await db.select().from(messages).orderBy(messages.createdAt);
+    
+    if (legacyMessages.length === 0) {
+      return { migratedConversations: 0, migratedMessages: 0 };
+    }
+
+    // Track unique conversation pairs
+    const conversationPairs = new Map<string, { user1: string; user2: string; messages: typeof legacyMessages }>();
+    
+    for (const msg of legacyMessages) {
+      // Create a consistent key for the pair (sorted user IDs)
+      const sortedIds = [msg.senderId, msg.receiverId].sort();
+      const pairKey = `${sortedIds[0]}_${sortedIds[1]}`;
+      
+      if (!conversationPairs.has(pairKey)) {
+        conversationPairs.set(pairKey, { 
+          user1: sortedIds[0], 
+          user2: sortedIds[1], 
+          messages: [] 
+        });
+      }
+      conversationPairs.get(pairKey)!.messages.push(msg);
+    }
+
+    let migratedConversations = 0;
+    let migratedMessages = 0;
+
+    for (const pair of Array.from(conversationPairs.values())) {
+      // Check if conversation already exists (avoid duplicates)
+      const existingConv = await this.findExistingDirectConversation(pair.user1, pair.user2);
+      
+      let conversation: Conversation;
+      if (existingConv) {
+        conversation = existingConv;
+      } else {
+        // Create new conversation
+        const [newConv] = await db.insert(conversations).values({
+          isGroup: false,
+          createdById: pair.user1,
+        }).returning();
+        conversation = newConv;
+        
+        // Add participants
+        await db.insert(conversationParticipants).values([
+          { conversationId: conversation.id, userId: pair.user1, role: 'member' },
+          { conversationId: conversation.id, userId: pair.user2, role: 'member' },
+        ]);
+        
+        migratedConversations++;
+      }
+
+      // Migrate messages (check if already migrated by looking for same content/timestamp)
+      for (const msg of pair.messages) {
+        // Check if this message was already migrated
+        const [existing] = await db
+          .select()
+          .from(conversationMessages)
+          .where(and(
+            eq(conversationMessages.conversationId, conversation.id),
+            eq(conversationMessages.senderId, msg.senderId),
+            eq(conversationMessages.content, msg.content),
+            eq(conversationMessages.createdAt, msg.createdAt)
+          ))
+          .limit(1);
+        
+        if (!existing) {
+          await db.insert(conversationMessages).values({
+            conversationId: conversation.id,
+            senderId: msg.senderId,
+            content: msg.content,
+            messageType: 'text',
+            eventId: msg.eventId,
+            venueId: msg.venueId,
+            createdAt: msg.createdAt,
+          });
+          migratedMessages++;
+        }
+      }
+
+      // Update lastMessageAt on conversation
+      const lastMsg = pair.messages[pair.messages.length - 1];
+      if (lastMsg) {
+        await db.update(conversations)
+          .set({ lastMessageAt: lastMsg.createdAt })
+          .where(eq(conversations.id, conversation.id));
+      }
+      
+      // Set lastReadAt for both participants based on isRead flags
+      const readMessages = pair.messages.filter((m: typeof legacyMessages[0]) => m.isRead);
+      if (readMessages.length > 0) {
+        const lastReadTime = readMessages[readMessages.length - 1].createdAt;
+        await db.update(conversationParticipants)
+          .set({ lastReadAt: lastReadTime })
+          .where(and(
+            eq(conversationParticipants.conversationId, conversation.id),
+            eq(conversationParticipants.userId, pair.user2)
+          ));
+      }
+    }
+
+    return { migratedConversations, migratedMessages };
+  }
+
+  private async findExistingDirectConversation(userId1: string, userId2: string): Promise<Conversation | undefined> {
+    const user1Convs = await db
+      .select({ conversationId: conversationParticipants.conversationId })
+      .from(conversationParticipants)
+      .where(eq(conversationParticipants.userId, userId1));
+    
+    const user2Convs = await db
+      .select({ conversationId: conversationParticipants.conversationId })
+      .from(conversationParticipants)
+      .where(eq(conversationParticipants.userId, userId2));
+    
+    const sharedConvIds = user1Convs
+      .map(c => c.conversationId)
+      .filter(id => user2Convs.some(c => c.conversationId === id));
+    
+    for (const convId of sharedConvIds) {
+      const [conv] = await db.select().from(conversations).where(eq(conversations.id, convId));
+      if (conv && !conv.isGroup) {
+        const [participantCount] = await db
+          .select({ count: count() })
+          .from(conversationParticipants)
+          .where(eq(conversationParticipants.conversationId, convId));
+        
+        if (participantCount?.count === 2) {
+          return conv;
+        }
+      }
+    }
+    
+    return undefined;
+  }
 }
 
 export const storage = new DbStorage();

@@ -187,6 +187,16 @@ app.use((req, res, next) => {
   console.log(`[STARTUP] Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`[STARTUP] Database connected: ${!!process.env.DATABASE_URL}`);
   
+  // Run migration for legacy direct messages to new conversation system
+  try {
+    const migrationResult = await storage.migrateLegacyMessages();
+    if (migrationResult.migratedConversations > 0 || migrationResult.migratedMessages > 0) {
+      console.log(`[STARTUP] Migrated ${migrationResult.migratedConversations} conversations and ${migrationResult.migratedMessages} messages from legacy system`);
+    }
+  } catch (err) {
+    console.error('[STARTUP] Legacy message migration failed:', err);
+  }
+  
   server.listen({
     port,
     host: "0.0.0.0",
