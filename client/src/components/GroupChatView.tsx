@@ -32,7 +32,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Send, ArrowLeft, Users, Settings, ChartBar, MoreVertical, UserPlus, LogOut, Shield, UserMinus, Trash2, Loader2 } from "lucide-react";
+import { Send, ArrowLeft, Users, Settings, ChartBar, MoreVertical, UserPlus, LogOut, Shield, UserMinus, Trash2, Loader2, Link2, Copy, Check } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -63,6 +63,7 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
   const [addMemberOpen, setAddMemberOpen] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [memberToRemove, setMemberToRemove] = useState<string | null>(null);
+  const [inviteCopied, setInviteCopied] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
@@ -133,6 +134,34 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
     },
   });
 
+  const generateInviteMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", `/api/conversations/${conversationId}/invite`);
+      if (!response.ok) {
+        throw new Error("Failed to generate invite link");
+      }
+      const data = await response.json();
+      if (!data || !data.inviteCode) {
+        throw new Error("Invalid response from server");
+      }
+      return data;
+    },
+    onSuccess: async (data) => {
+      const inviteLink = `${window.location.origin}/join/${data.inviteCode}`;
+      try {
+        await navigator.clipboard.writeText(inviteLink);
+        setInviteCopied(true);
+        setTimeout(() => setInviteCopied(false), 2000);
+        toast({ title: "Invite link copied to clipboard" });
+      } catch {
+        toast({ title: "Invite code: " + data.inviteCode });
+      }
+    },
+    onError: () => {
+      toast({ title: "Failed to generate invite", variant: "destructive" });
+    },
+  });
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -184,21 +213,30 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
           <ArrowLeft className="h-5 w-5" />
         </Button>
 
-        <div className="flex -space-x-2">
-          {conversation.participants.slice(0, 3).map((p) => (
-            <Avatar key={p.userId} className="h-8 w-8 border-2 border-background">
-              <AvatarImage src={p.user.avatarUrl || ""} />
-              <AvatarFallback className="text-xs">
-                {p.user.displayName?.[0] || p.user.username[0]}
-              </AvatarFallback>
-            </Avatar>
-          ))}
-          {conversation.participants.length > 3 && (
-            <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-xs font-medium border-2 border-background">
-              +{conversation.participants.length - 3}
-            </div>
-          )}
-        </div>
+        {conversation.avatarUrl ? (
+          <Avatar className="h-10 w-10">
+            <AvatarImage src={conversation.avatarUrl} alt={conversation.name || "Group"} />
+            <AvatarFallback className="bg-primary/10 text-primary">
+              <Users className="h-5 w-5" />
+            </AvatarFallback>
+          </Avatar>
+        ) : (
+          <div className="flex -space-x-2">
+            {conversation.participants.slice(0, 3).map((p) => (
+              <Avatar key={p.userId} className="h-8 w-8 border-2 border-background">
+                <AvatarImage src={p.user.avatarUrl || ""} />
+                <AvatarFallback className="text-xs">
+                  {p.user.displayName?.[0] || p.user.username[0]}
+                </AvatarFallback>
+              </Avatar>
+            ))}
+            {conversation.participants.length > 3 && (
+              <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-xs font-medium border-2 border-background">
+                +{conversation.participants.length - 3}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="flex-1 min-w-0">
           <h3 className="font-semibold truncate" data-testid="text-group-name">{conversation.name}</h3>
@@ -298,6 +336,19 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
               <ChartBar className="h-4 w-4 mr-2" />
               Create Poll
             </DropdownMenuItem>
+            {isAdmin && (
+              <DropdownMenuItem 
+                onClick={() => generateInviteMutation.mutate()}
+                disabled={generateInviteMutation.isPending}
+              >
+                {inviteCopied ? (
+                  <Check className="h-4 w-4 mr-2" />
+                ) : (
+                  <Link2 className="h-4 w-4 mr-2" />
+                )}
+                {generateInviteMutation.isPending ? "Generating..." : inviteCopied ? "Copied!" : "Copy Invite Link"}
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className="text-destructive"

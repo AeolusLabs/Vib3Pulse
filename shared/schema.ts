@@ -356,6 +356,7 @@ export const conversations = pgTable("conversations", {
   isGroup: boolean("is_group").notNull().default(false),
   name: text("name"), // Only for group chats
   avatarUrl: text("avatar_url"), // Group avatar
+  inviteCode: text("invite_code").unique(), // Unique invite code for joining group
   createdById: varchar("created_by_id").references(() => users.id),
   lastMessageAt: timestamp("last_message_at"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),

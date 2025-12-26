@@ -458,6 +458,10 @@ export interface IStorage {
   deleteConversation(id: string): Promise<void>;
   getOrCreateDirectConversation(userId1: string, userId2: string): Promise<Conversation>;
   
+  // Invite codes
+  generateInviteCode(conversationId: string): Promise<string>;
+  getConversationByInviteCode(inviteCode: string): Promise<Conversation | undefined>;
+  
   // Conversation participants
   addConversationParticipant(conversationId: string, userId: string, role?: string): Promise<ConversationParticipant>;
   removeConversationParticipant(conversationId: string, userId: string): Promise<void>;
@@ -3076,7 +3080,7 @@ export class DbStorage implements IStorage {
       
       const lastMessage = lastMsgResult[0] || null;
       
-      // Get unread count
+      // Get unread count (excluding user's own messages)
       const userConv = userConversations.find(c => c.conversationId === conv.id);
       let unreadCount = 0;
       
@@ -3087,16 +3091,19 @@ export class DbStorage implements IStorage {
           .where(and(
             eq(conversationMessages.conversationId, conv.id),
             eq(conversationMessages.isDeleted, false),
-            gte(conversationMessages.createdAt, userConv.lastReadAt)
+            gte(conversationMessages.createdAt, userConv.lastReadAt),
+            sql`${conversationMessages.senderId} != ${userId}`
           ));
         unreadCount = unreadResult?.count || 0;
       } else {
+        // If never read, count all messages not from self
         const [unreadResult] = await db
           .select({ count: count() })
           .from(conversationMessages)
           .where(and(
             eq(conversationMessages.conversationId, conv.id),
-            eq(conversationMessages.isDeleted, false)
+            eq(conversationMessages.isDeleted, false),
+            sql`${conversationMessages.senderId} != ${userId}`
           ));
         unreadCount = unreadResult?.count || 0;
       }
@@ -3119,6 +3126,17 @@ export class DbStorage implements IStorage {
 
   async deleteConversation(id: string): Promise<void> {
     await db.delete(conversations).where(eq(conversations.id, id));
+  }
+
+  async generateInviteCode(conversationId: string): Promise<string> {
+    const code = Math.random().toString(36).substring(2, 10).toUpperCase();
+    await db.update(conversations).set({ inviteCode: code }).where(eq(conversations.id, conversationId));
+    return code;
+  }
+
+  async getConversationByInviteCode(inviteCode: string): Promise<Conversation | undefined> {
+    const [result] = await db.select().from(conversations).where(eq(conversations.inviteCode, inviteCode));
+    return result;
   }
 
   async getOrCreateDirectConversation(userId1: string, userId2: string): Promise<Conversation> {

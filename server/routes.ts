@@ -1372,7 +1372,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           await objectStorageService.trySetObjectEntityAclPolicy(stablePath, {
             owner: req.user!.id,
-            isPublic: true,
+            visibility: "public",
           });
         } catch (aclError) {
           console.error("Failed to set ACL policy:", aclError);
@@ -4053,6 +4053,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error updating participant role:", error);
       res.status(500).json({ message: "Failed to update role" });
+    }
+  });
+
+  // Generate invite code for group
+  app.post("/api/conversations/:id/invite", requireAuth, async (req, res) => {
+    try {
+      const conversation = await storage.getConversationById(req.params.id);
+      
+      if (!conversation) {
+        return res.status(404).json({ message: "Conversation not found" });
+      }
+      
+      if (!conversation.isGroup) {
+        return res.status(400).json({ message: "Cannot create invite for direct conversations" });
+      }
+      
+      const role = await storage.getParticipantRole(req.params.id, req.user!.id);
+      if (role !== 'admin') {
+        return res.status(403).json({ message: "Only admins can generate invite codes" });
+      }
+      
+      const inviteCode = await storage.generateInviteCode(req.params.id);
+      res.json({ inviteCode });
+    } catch (error) {
+      console.error("Error generating invite code:", error);
+      res.status(500).json({ message: "Failed to generate invite code" });
+    }
+  });
+
+  // Join group via invite code
+  app.post("/api/conversations/join/:code", requireAuth, async (req, res) => {
+    try {
+      const conversation = await storage.getConversationByInviteCode(req.params.code);
+      
+      if (!conversation) {
+        return res.status(404).json({ message: "Invalid invite code" });
+      }
+      
+      // Check if already a participant
+      const isAlreadyParticipant = await storage.isConversationParticipant(conversation.id, req.user!.id);
+      if (isAlreadyParticipant) {
+        // Return the conversation anyway so they can navigate to it
+        const fullConversation = await storage.getConversationById(conversation.id);
+        return res.json(fullConversation);
+      }
+      
+      // Add as member
+      await storage.addConversationParticipant(conversation.id, req.user!.id, 'member');
+      const fullConversation = await storage.getConversationById(conversation.id);
+      res.json(fullConversation);
+    } catch (error) {
+      console.error("Error joining group:", error);
+      res.status(500).json({ message: "Failed to join group" });
     }
   });
 

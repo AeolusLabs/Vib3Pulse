@@ -38,6 +38,7 @@ import AdminActivity from "@/pages/admin/AdminActivity";
 import AdminSetup from "@/pages/admin/AdminSetup";
 import ForgotPasswordPage from "@/pages/ForgotPasswordPage";
 import ResetPasswordPage from "@/pages/ResetPasswordPage";
+import JoinGroupPage from "@/pages/JoinGroupPage";
 
 function Router() {
   return (
@@ -148,6 +149,8 @@ function Router() {
       </Route>
       
       <Route path="/venue/:id" component={VenueDetailPage} />
+      
+      <Route path="/join/:code" component={JoinGroupPage} />
       
       {/* Admin Panel Routes - Completely Separate from User App */}
       <Route path="/admin" component={AdminLogin} />
