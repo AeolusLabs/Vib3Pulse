@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Image as ImageIcon, X, Calendar, MapPin, Building2, Users } from "lucide-react";
+import { ImagePlus, X, Calendar, MapPin, Building2, Users } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -23,6 +23,7 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { format } from "date-fns";
 import type { Event, Venue, Community } from "@shared/schema";
+import { MultiImageUploader } from "./MultiImageUploader";
 
 type CommunityWithRole = Community & { memberCount: number; role: string };
 
@@ -32,7 +33,7 @@ interface CreatePostModalProps {
   attachedEvent?: Event | null;
   attachedVenue?: Venue | null;
   defaultCommunityId?: string | null;
-  onCreatePost?: (content: string, image?: string, eventId?: string, venueId?: string, communityId?: string) => void;
+  onCreatePost?: (content: string, images?: string[], eventId?: string, venueId?: string, communityId?: string) => void;
 }
 
 export default function CreatePostModal({ 
@@ -45,9 +46,10 @@ export default function CreatePostModal({
 }: CreatePostModalProps) {
   const { data: currentUser } = useAuth();
   const [content, setContent] = useState("");
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [selectedCommunityId, setSelectedCommunityId] = useState<string>("none");
   const maxLength = 280;
+  const maxImages = 4;
 
   // Fetch user's communities
   const { data: myCommunities = [] } = useQuery<CommunityWithRole[]>({
@@ -70,29 +72,18 @@ export default function CreatePostModal({
     }
   }, [open, attachedEvent, attachedVenue]);
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setSelectedImage(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
   const handlePost = () => {
     if (content.trim()) {
       onCreatePost?.(
         content, 
-        selectedImage || undefined,
+        selectedImages.length > 0 ? selectedImages : undefined,
         attachedEvent?.id,
         attachedVenue?.id,
         selectedCommunityId !== "none" ? selectedCommunityId : undefined
       );
-      console.log('Created post:', content, selectedImage ? 'with image' : 'text only');
+      console.log('Created post:', content, selectedImages.length > 0 ? `with ${selectedImages.length} images` : 'text only');
       setContent("");
-      setSelectedImage(null);
+      setSelectedImages([]);
       setSelectedCommunityId("none");
       onClose();
     }
@@ -100,7 +91,7 @@ export default function CreatePostModal({
 
   const handleClose = () => {
     setContent("");
-    setSelectedImage(null);
+    setSelectedImages([]);
     setSelectedCommunityId("none");
     onClose();
   };
@@ -210,22 +201,27 @@ export default function CreatePostModal({
                 </Card>
               )}
 
-              {selectedImage && (
-                <div className="relative rounded-lg overflow-hidden border">
-                  <img
-                    src={selectedImage}
-                    alt="Upload preview"
-                    className="w-full max-h-64 object-cover"
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="absolute top-2 right-2 bg-background/80 hover:bg-background"
-                    onClick={() => setSelectedImage(null)}
-                    data-testid="button-remove-image"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
+              {selectedImages.length > 0 && (
+                <div className="grid grid-cols-2 gap-2">
+                  {selectedImages.map((image, index) => (
+                    <div key={index} className="relative rounded-lg overflow-hidden border aspect-square">
+                      <img
+                        src={image}
+                        alt={`Upload ${index + 1}`}
+                        className="w-full h-full object-cover"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="absolute top-1 right-1 h-6 w-6 bg-background/80 hover:bg-background"
+                        onClick={() => setSelectedImages(selectedImages.filter((_, i) => i !== index))}
+                        data-testid={`button-remove-image-${index}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -233,25 +229,51 @@ export default function CreatePostModal({
 
           <div className="flex items-center justify-between pt-3 border-t">
             <div className="flex items-center gap-2">
-              <label htmlFor="post-image-upload">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  asChild
-                  data-testid="button-add-image"
-                >
-                  <span className="cursor-pointer">
-                    <ImageIcon className="h-5 w-5 text-primary" />
-                  </span>
-                </Button>
-              </label>
-              <input
-                id="post-image-upload"
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handleImageUpload}
-              />
+              {selectedImages.length < maxImages && (
+                <>
+                  <label htmlFor="post-image-upload">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      asChild
+                      data-testid="button-add-image"
+                    >
+                      <span className="cursor-pointer">
+                        <ImagePlus className="h-5 w-5 text-primary" />
+                      </span>
+                    </Button>
+                  </label>
+                  <input
+                    id="post-image-upload"
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      const files = e.target.files;
+                      if (files) {
+                        const remainingSlots = maxImages - selectedImages.length;
+                        const filesToProcess = Array.from(files).slice(0, remainingSlots);
+                        filesToProcess.forEach((file) => {
+                          if (file.type.startsWith("image/")) {
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                              setSelectedImages(prev => [...prev, reader.result as string].slice(0, maxImages));
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        });
+                      }
+                      e.target.value = "";
+                    }}
+                  />
+                </>
+              )}
+              {selectedImages.length > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  {selectedImages.length}/{maxImages}
+                </span>
+              )}
               
               {myCommunities.length > 0 && (
                 <Select value={selectedCommunityId} onValueChange={setSelectedCommunityId}>

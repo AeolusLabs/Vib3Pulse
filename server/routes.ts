@@ -458,6 +458,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Batch fetch users by usernames (for @mentions avatar lookup)
+  app.post("/api/users/by-usernames", async (req, res) => {
+    try {
+      const { usernames } = req.body;
+      if (!Array.isArray(usernames) || usernames.length === 0) {
+        return res.json([]);
+      }
+      // Limit to 50 usernames per request
+      const limitedUsernames = usernames.slice(0, 50);
+      const users = await storage.getUsersByUsernames(limitedUsernames);
+      // Only return public profile info for mentions
+      const publicUsers = users.map(u => ({
+        username: u.username,
+        displayName: u.displayName,
+        avatarUrl: u.avatarUrl,
+      }));
+      res.json(publicUsers);
+    } catch (error) {
+      console.error("Error fetching users by usernames:", error);
+      res.status(500).json({ message: "Failed to fetch users" });
+    }
+  });
+
   // Events
   app.get("/api/events", async (req, res) => {
     try {
@@ -1289,6 +1312,79 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ message: "RSVP cancelled" });
     } catch (error) {
       res.status(500).json({ message: "Failed to cancel RSVP" });
+    }
+  });
+
+  // Generic image upload endpoint for posts/venues (supports multiple images)
+  app.post("/api/upload-images", requireAuth, async (req, res) => {
+    try {
+      const { images } = req.body;
+      
+      if (!Array.isArray(images) || images.length === 0) {
+        return res.status(400).json({ message: "No images provided" });
+      }
+      
+      if (images.length > 6) {
+        return res.status(400).json({ message: "Maximum 6 images allowed per upload" });
+      }
+      
+      const objectStorageService = new ObjectStorageService();
+      const uploadedUrls: string[] = [];
+      
+      for (const imageData of images) {
+        if (!imageData || !imageData.startsWith('data:image')) {
+          continue;
+        }
+        
+        const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+        
+        // Extract stable path from upload URL
+        const url = new URL(uploadURL);
+        const pathParts = url.pathname.split('/');
+        const uploadsIndex = pathParts.findIndex(p => p === 'uploads');
+        const extractedId = uploadsIndex !== -1 ? pathParts.slice(uploadsIndex).join('/') : pathParts.slice(-1)[0];
+        const stablePath = `/objects/${extractedId}`;
+        
+        // Convert base64 to buffer
+        const base64Data = imageData.split(',')[1];
+        const buffer = Buffer.from(base64Data, 'base64');
+        
+        // Determine content type from base64 prefix
+        const contentTypeMatch = imageData.match(/data:(image\/\w+);base64/);
+        const contentType = contentTypeMatch ? contentTypeMatch[1] : 'image/jpeg';
+        
+        // Upload to GCS using signed URL
+        const uploadResponse = await fetch(uploadURL, {
+          method: 'PUT',
+          body: buffer,
+          headers: {
+            'Content-Type': contentType,
+          },
+        });
+        
+        if (!uploadResponse.ok) {
+          console.error("GCS upload failed:", uploadResponse.status);
+          continue;
+        }
+        
+        // Set ACL policy to make the image publicly readable
+        try {
+          await objectStorageService.trySetObjectEntityAclPolicy(stablePath, {
+            owner: req.user!.id,
+            isPublic: true,
+          });
+        } catch (aclError) {
+          console.error("Failed to set ACL policy:", aclError);
+        }
+        
+        // Return stable path as URL
+        uploadedUrls.push(stablePath);
+      }
+      
+      res.json({ urls: uploadedUrls });
+    } catch (error) {
+      console.error("Error uploading images:", error);
+      res.status(500).json({ message: "Failed to upload images" });
     }
   });
 

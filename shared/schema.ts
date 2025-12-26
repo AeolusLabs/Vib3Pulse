@@ -166,7 +166,8 @@ export const posts = pgTable("posts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
   content: text("content").notNull(),
-  imageUrl: text("image_url"),
+  imageUrl: text("image_url"), // Legacy - kept for backward compatibility
+  imageUrls: text("image_urls").array().default(sql`'{}'`), // Up to 4 images
   eventId: varchar("event_id").references(() => events.id),
   venueId: varchar("venue_id").references(() => venues.id),
   communityId: varchar("community_id").references(() => communities.id),
@@ -176,6 +177,9 @@ export const posts = pgTable("posts", {
 export const insertPostSchema = createInsertSchema(posts).omit({
   id: true,
   createdAt: true,
+  imageUrl: true, // Use imageUrls instead
+}).extend({
+  imageUrls: z.array(z.string()).max(4, "Maximum 4 images allowed").optional(),
 });
 
 export type InsertPost = z.infer<typeof insertPostSchema>;
@@ -516,8 +520,9 @@ export const venues = pgTable("venues", {
   category: varchar("category", { length: 50 }).notNull(),
   description: text("description"),
   location: text("location").notNull(),
-  imageUrl: varchar("image_url", { length: 512 }),
+  imageUrl: varchar("image_url", { length: 512 }), // Legacy - primary image
   coverImageUrl: varchar("cover_image_url", { length: 512 }),
+  imageUrls: text("image_urls").array().default(sql`'{}'`), // Up to 6 venue images
   address: varchar("address", { length: 500 }),
   city: varchar("city", { length: 100 }),
   phone: varchar("phone", { length: 50 }),
@@ -541,6 +546,8 @@ export const insertVenueSchema = createInsertSchema(venues).omit({
   createdAt: true,
   updatedAt: true,
   isVerified: true,
+}).extend({
+  imageUrls: z.array(z.string()).max(6, "Maximum 6 images allowed").optional(),
 });
 
 export type InsertVenue = z.infer<typeof insertVenueSchema>;

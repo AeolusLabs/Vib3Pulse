@@ -234,6 +234,39 @@ export default function VenueDetailPage() {
           </div>
         )}
 
+        {/* Gallery Images */}
+        {venue.imageUrls && venue.imageUrls.length > 0 && (
+          <div className="mb-8">
+            <h3 className="text-lg font-semibold mb-3">Gallery</h3>
+            <div className={`grid gap-2 rounded-xl overflow-hidden ${
+              venue.imageUrls.length === 1 ? 'grid-cols-1' :
+              venue.imageUrls.length === 2 ? 'grid-cols-2' :
+              venue.imageUrls.length <= 4 ? 'grid-cols-2 md:grid-cols-4' :
+              'grid-cols-2 md:grid-cols-3'
+            }`}>
+              {venue.imageUrls.map((imgUrl, idx) => (
+                <div 
+                  key={idx} 
+                  className={`relative overflow-hidden rounded-lg ${
+                    venue.imageUrls!.length === 3 && idx === 0 ? 'md:row-span-2' : ''
+                  }`}
+                >
+                  <img
+                    src={imgUrl}
+                    alt={`${venue.name} gallery ${idx + 1}`}
+                    className={`w-full object-cover ${
+                      venue.imageUrls!.length === 1 ? 'h-64' :
+                      venue.imageUrls!.length === 3 && idx === 0 ? 'h-full min-h-40' :
+                      'aspect-square'
+                    }`}
+                    data-testid={`img-venue-gallery-${idx}`}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-6">
             <div>

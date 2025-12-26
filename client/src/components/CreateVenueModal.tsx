@@ -55,6 +55,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
     description: "",
     imageUrl: "",
     coverImageUrl: "",
+    imageUrls: [] as string[],
     address: "",
     city: "",
     phone: "",
@@ -64,6 +65,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
     musicTypes: [] as string[],
     amenities: [] as string[],
   });
+  const maxGalleryImages = 6;
 
   useEffect(() => {
     if (editingVenue) {
@@ -73,6 +75,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
         description: editingVenue.description || "",
         imageUrl: editingVenue.imageUrl || "",
         coverImageUrl: editingVenue.coverImageUrl || "",
+        imageUrls: editingVenue.imageUrls || [],
         address: editingVenue.address || "",
         city: editingVenue.city || "",
         phone: editingVenue.phone || "",
@@ -89,6 +92,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
         description: "",
         imageUrl: "",
         coverImageUrl: "",
+        imageUrls: [],
         address: "",
         city: "",
         phone: "",
@@ -132,6 +136,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
       description: formData.description || null,
       imageUrl: formData.imageUrl || null,
       coverImageUrl: formData.coverImageUrl || null,
+      imageUrls: formData.imageUrls.length > 0 ? formData.imageUrls : [],
       address: formData.address || null,
       city: formData.city || null,
       phone: formData.phone || null,
@@ -322,6 +327,83 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
                   </ObjectUploader>
                 </div>
               </div>
+            </div>
+
+            {/* Gallery Images Section - Up to 6 */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label>Gallery Images</Label>
+                <span className="text-xs text-muted-foreground">
+                  {formData.imageUrls.length}/{maxGalleryImages} images
+                </span>
+              </div>
+              
+              {formData.imageUrls.length > 0 && (
+                <div className="grid grid-cols-3 gap-2">
+                  {formData.imageUrls.map((url, idx) => (
+                    <div key={idx} className="relative aspect-video rounded-lg overflow-hidden border">
+                      <img 
+                        src={url} 
+                        alt={`Gallery ${idx + 1}`} 
+                        className="w-full h-full object-cover"
+                      />
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="absolute top-1 right-1 h-6 w-6 rounded-full bg-destructive text-destructive-foreground"
+                        onClick={() => setFormData(prev => ({ 
+                          ...prev, 
+                          imageUrls: prev.imageUrls.filter((_, i) => i !== idx) 
+                        }))}
+                        data-testid={`button-remove-gallery-${idx}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              {formData.imageUrls.length < maxGalleryImages && (
+                <ObjectUploader
+                  maxNumberOfFiles={maxGalleryImages - formData.imageUrls.length}
+                  maxFileSize={10485760}
+                  onGetUploadParameters={async () => {
+                    const response = await apiRequest("POST", "/api/objects/upload");
+                    const data = await response.json() as { uploadURL: string };
+                    return { method: "PUT" as const, url: data.uploadURL };
+                  }}
+                  onComplete={async (result: UploadResult<Record<string, unknown>, Record<string, unknown>>) => {
+                    const newUrls: string[] = [];
+                    for (const file of result.successful || []) {
+                      if (file.uploadURL) {
+                        const response = await apiRequest("PUT", "/api/venue-images", { 
+                          imageURL: file.uploadURL 
+                        });
+                        const data = await response.json() as { objectPath: string };
+                        newUrls.push(data.objectPath);
+                      }
+                    }
+                    if (newUrls.length > 0) {
+                      setFormData(prev => ({ 
+                        ...prev, 
+                        imageUrls: [...prev.imageUrls, ...newUrls].slice(0, maxGalleryImages) 
+                      }));
+                      toast({ title: `${newUrls.length} image(s) uploaded successfully` });
+                    }
+                  }}
+                  buttonVariant="outline"
+                  buttonSize="sm"
+                  buttonClassName="w-full"
+                >
+                  <Upload className="h-4 w-4 mr-2" />
+                  Add Gallery Images ({maxGalleryImages - formData.imageUrls.length} remaining)
+                </ObjectUploader>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Upload photos of your venue's interior, exterior, atmosphere, etc.
+              </p>
             </div>
 
             <div className="space-y-2">

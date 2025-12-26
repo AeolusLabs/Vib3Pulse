@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -285,6 +285,35 @@ export default function FeedPage() {
   const posts = isViewingCommunity ? communityPosts : mainPosts;
   const isLoading = isViewingCommunity ? isLoadingCommunity : isLoadingMain;
 
+  // Extract unique @usernames from all posts for avatar lookup
+  const mentionedUsernames = useMemo(() => {
+    const usernames = new Set<string>();
+    posts.forEach((post: any) => {
+      const matches = post.content?.match(/@(\w+)/g);
+      if (matches) {
+        matches.forEach((match: string) => usernames.add(match.slice(1).toLowerCase()));
+      }
+    });
+    return Array.from(usernames);
+  }, [posts]);
+
+  // Fetch mentioned users' data (avatars) in batch
+  const { data: mentionedUsersData = [] } = useQuery<{ username: string; displayName: string | null; avatarUrl: string | null }[]>({
+    queryKey: ['/api/users/by-usernames', mentionedUsernames],
+    queryFn: async () => {
+      if (mentionedUsernames.length === 0) return [];
+      const res = await fetch('/api/users/by-usernames', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usernames: mentionedUsernames }),
+      });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: mentionedUsernames.length > 0,
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+  });
+
   const { data: storiesData = [] } = useQuery<StoryWithUser[]>({
     queryKey: ['/api/stories'],
   });
@@ -326,8 +355,27 @@ export default function FeedPage() {
   });
 
   const createPostMutation = useMutation({
-    mutationFn: async (data: { content: string; imageUrl?: string; eventId?: string; venueId?: string; communityId?: string }) => {
-      return await apiRequest('POST', '/api/posts', data);
+    mutationFn: async (data: { content: string; images?: string[]; eventId?: string; venueId?: string; communityId?: string }) => {
+      // Upload images first if they are base64 data URLs
+      let imageUrls: string[] | undefined;
+      if (data.images && data.images.length > 0) {
+        const base64Images = data.images.filter(img => img.startsWith('data:'));
+        if (base64Images.length > 0) {
+          const uploadRes = await apiRequest('POST', '/api/upload-images', { images: base64Images });
+          if (uploadRes.ok) {
+            const { urls } = await uploadRes.json();
+            imageUrls = urls;
+          }
+        }
+      }
+      
+      return await apiRequest('POST', '/api/posts', {
+        content: data.content,
+        imageUrls,
+        eventId: data.eventId,
+        venueId: data.venueId,
+        communityId: data.communityId,
+      });
     },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['/api/posts'] });
@@ -501,9 +549,11 @@ export default function FeedPage() {
                 comments={0}
                 isLiked={false}
                 image={post.imageUrl}
+                imageUrls={post.imageUrls || []}
                 eventId={post.eventId}
                 venueId={post.venueId}
                 community={post.community}
+                mentionedUsers={mentionedUsersData}
                 onPostClick={() => setSelectedPost(post)}
               />
             ))
@@ -546,10 +596,10 @@ export default function FeedPage() {
         attachedEvent={attachedEvent}
         attachedVenue={attachedVenue}
         defaultCommunityId={isViewingCommunity ? feedFilter : null}
-        onCreatePost={(content, image, eventId, venueId, communityId) => {
+        onCreatePost={(content, images, eventId, venueId, communityId) => {
           createPostMutation.mutate({
             content,
-            imageUrl: image,
+            images,
             eventId,
             venueId,
             communityId,

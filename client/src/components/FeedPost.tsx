@@ -61,6 +61,12 @@ function formatRelativeTime(date: Date | string): string {
   return format(postDate, 'MMM d, yyyy');
 }
 
+interface MentionedUser {
+  username: string;
+  avatarUrl?: string | null;
+  displayName?: string | null;
+}
+
 interface FeedPostProps {
   id: string;
   author: {
@@ -73,6 +79,7 @@ interface FeedPostProps {
   };
   content: string;
   image?: string;
+  imageUrls?: string[];
   timestamp?: string;
   createdAt?: string | Date;
   likes: number;
@@ -89,18 +96,22 @@ interface FeedPostProps {
   attachedEvent?: Event | null;
   attachedVenue?: Venue | null;
   community?: { id: string; name: string } | null;
+  mentionedUsers?: MentionedUser[];
   onPostClick?: () => void;
 }
 
 function renderContentWithLinkedMentionsAndHashtags(
   content: string, 
-  navigate: (path: string) => void
+  navigate: (path: string) => void,
+  mentionedUsers: MentionedUser[] = []
 ) {
   const parts: (string | JSX.Element)[] = [];
   const regex = /(@\w+|#\w+)/g;
   let lastIndex = 0;
   let match;
   let partIndex = 0;
+  
+  const userMap = new Map(mentionedUsers.map(u => [u.username.toLowerCase(), u]));
 
   while ((match = regex.exec(content)) !== null) {
     if (match.index > lastIndex) {
@@ -110,6 +121,8 @@ function renderContentWithLinkedMentionsAndHashtags(
     const token = match[0];
     if (token.startsWith('@')) {
       const username = token.slice(1);
+      const mentionedUser = userMap.get(username.toLowerCase());
+      
       parts.push(
         <button
           key={`mention-${partIndex++}`}
@@ -117,9 +130,16 @@ function renderContentWithLinkedMentionsAndHashtags(
             e.stopPropagation();
             navigate(`/profile/${username}`);
           }}
-          className="text-primary hover:underline font-medium"
+          className="inline-flex items-center gap-1 text-primary hover:underline font-medium"
           data-testid={`mention-${username}`}
         >
+          {mentionedUser?.avatarUrl && (
+            <img 
+              src={mentionedUser.avatarUrl} 
+              alt={username}
+              className="h-4 w-4 rounded-full object-cover inline-block"
+            />
+          )}
           {token}
         </button>
       );
@@ -154,6 +174,7 @@ export default function FeedPost({
   author,
   content,
   image,
+  imageUrls = [],
   timestamp,
   createdAt,
   likes: initialLikes,
@@ -166,6 +187,7 @@ export default function FeedPost({
   attachedEvent,
   attachedVenue,
   community,
+  mentionedUsers = [],
   onPostClick,
 }: FeedPostProps) {
   const [, navigate] = useLocation();
@@ -530,10 +552,38 @@ export default function FeedPost({
           </div>
 
           <p className="mt-2 text-sm whitespace-pre-wrap" data-testid={`text-content-${id}`}>
-            {renderContentWithLinkedMentionsAndHashtags(content, navigate)}
+            {renderContentWithLinkedMentionsAndHashtags(content, navigate, mentionedUsers)}
           </p>
 
-          {image && (
+          {/* Multiple images grid */}
+          {imageUrls.length > 0 ? (
+            <div className={`mt-3 grid gap-1 rounded-md overflow-hidden ${
+              imageUrls.length === 1 ? 'grid-cols-1' :
+              imageUrls.length === 2 ? 'grid-cols-2' :
+              imageUrls.length === 3 ? 'grid-cols-2' :
+              'grid-cols-2'
+            }`}>
+              {imageUrls.slice(0, 4).map((imgUrl, idx) => (
+                <div 
+                  key={idx} 
+                  className={`relative ${
+                    imageUrls.length === 3 && idx === 0 ? 'row-span-2' : ''
+                  }`}
+                >
+                  <img
+                    src={imgUrl}
+                    alt={`Post image ${idx + 1}`}
+                    className={`w-full object-cover ${
+                      imageUrls.length === 1 ? 'max-h-96' :
+                      imageUrls.length === 3 && idx === 0 ? 'h-full' :
+                      'aspect-square'
+                    }`}
+                    data-testid={`img-post-${id}-${idx}`}
+                  />
+                </div>
+              ))}
+            </div>
+          ) : image && (
             <img
               src={image}
               alt="Post"
