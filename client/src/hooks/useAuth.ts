@@ -49,6 +49,7 @@ export async function logout() {
     credentials: "include",
   });
   
+  // Clear all user-specific cached data to prevent cross-user data leakage
+  queryClient.clear();
   queryClient.setQueryData(["/api/auth/session"], null);
-  queryClient.invalidateQueries({ queryKey: ["/api/auth/session"] });
 }
