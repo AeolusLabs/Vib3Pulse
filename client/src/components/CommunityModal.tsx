@@ -41,7 +41,7 @@ export default function CommunityModal({ open, onClose }: CommunityModalProps) {
   });
 
   const { data: myCommunities = [], refetch: refetchMyCommunities } = useQuery<CommunityWithRole[]>({
-    queryKey: ['/api/communities/my', currentUser?.id],
+    queryKey: ['/api/communities/my'],
     enabled: open && !!currentUser?.id,
     staleTime: 0,
   });
@@ -52,7 +52,7 @@ export default function CommunityModal({ open, onClose }: CommunityModalProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/communities'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/communities/my', currentUser?.id] });
+      queryClient.invalidateQueries({ queryKey: ['/api/communities/my'] });
       setNewCommunityName("");
       setNewCommunityDescription("");
       setActiveTab("my-communities");
@@ -76,7 +76,7 @@ export default function CommunityModal({ open, onClose }: CommunityModalProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/communities'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/communities/my', currentUser?.id] });
+      queryClient.invalidateQueries({ queryKey: ['/api/communities/my'] });
       toast({
         title: "Joined community",
         description: "You are now a member of this community.",
@@ -97,7 +97,7 @@ export default function CommunityModal({ open, onClose }: CommunityModalProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/communities'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/communities/my', currentUser?.id] });
+      queryClient.invalidateQueries({ queryKey: ['/api/communities/my'] });
       toast({
         title: "Left community",
         description: "You have left this community.",
