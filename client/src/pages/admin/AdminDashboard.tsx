@@ -1,5 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { 
   Users, 
   Calendar, 
@@ -8,9 +9,14 @@ import {
   UserPlus, 
   Flag, 
   Building,
-  TrendingUp
+  TrendingUp,
+  Wrench,
+  ImageIcon,
+  Loader2
 } from "lucide-react";
 import AdminLayout from "./AdminLayout";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 
 interface PlatformStats {
   totalUsers: number;
@@ -24,8 +30,33 @@ interface PlatformStats {
 }
 
 export default function AdminDashboard() {
+  const { toast } = useToast();
   const { data: stats, isLoading } = useQuery<PlatformStats>({
     queryKey: ["/api/admin/stats"],
+  });
+
+  const { data: adminUser } = useQuery<{ role: string }>({
+    queryKey: ["/api/admin/me"],
+  });
+
+  const fixAclMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/admin/utilities/fix-post-acl");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "ACL Fix Complete",
+        description: `Fixed ${data.fixed} images, skipped ${data.skipped}${data.errors?.length ? `, ${data.errors.length} errors` : ''}`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
   });
 
   const statCards = [
@@ -213,6 +244,46 @@ export default function AdminDashboard() {
             </CardContent>
           </Card>
         </div>
+
+        {adminUser?.role === "super_admin" && (
+          <Card className="bg-slate-800/50 border-slate-700">
+            <CardHeader>
+              <CardTitle className="text-white flex items-center gap-2">
+                <Wrench className="w-5 h-5" />
+                Admin Utilities
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between gap-4 p-3 rounded-lg bg-slate-700/30">
+                <div className="flex items-center gap-3">
+                  <ImageIcon className="w-5 h-5 text-purple-400" />
+                  <div>
+                    <p className="text-white font-medium">Fix Post Image ACLs</p>
+                    <p className="text-sm text-slate-400">
+                      Repairs visibility settings on all post images so they display correctly to other users
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  onClick={() => fixAclMutation.mutate()}
+                  disabled={fixAclMutation.isPending}
+                  variant="outline"
+                  className="shrink-0"
+                  data-testid="button-fix-acl"
+                >
+                  {fixAclMutation.isPending ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Fixing...
+                    </>
+                  ) : (
+                    "Run Fix"
+                  )}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </AdminLayout>
   );

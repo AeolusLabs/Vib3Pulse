@@ -192,26 +192,16 @@ export default function ProfilePage() {
     setIsUploadingAvatar(true);
 
     try {
-      // Step 1: Get presigned upload URL (uses apiRequest for CSRF protection)
-      const uploadResponse = await apiRequest('POST', '/api/users/me/avatar');
-      const { uploadURL, stablePath } = await uploadResponse.json();
-
-      // Step 2: Upload file to cloud storage (external URL, no CSRF needed)
-      const cloudUploadResponse = await fetch(uploadURL, {
-        method: 'PUT',
-        body: file,
-        headers: {
-          'Content-Type': file.type,
-        },
+      // Convert file to base64 for server-side upload
+      const reader = new FileReader();
+      const imageData = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
       });
 
-      if (!cloudUploadResponse.ok) {
-        console.error('Cloud upload failed:', cloudUploadResponse.status, cloudUploadResponse.statusText);
-        throw new Error('Failed to upload file to cloud storage');
-      }
-
-      // Step 3: Update user's avatar URL in database (uses apiRequest for CSRF protection)
-      await apiRequest('PATCH', '/api/users/me/avatar', { avatarPath: stablePath });
+      // Server-side upload - bypasses CORS issues
+      await apiRequest('POST', '/api/users/me/avatar', { imageData });
 
       queryClient.invalidateQueries({ queryKey: [`/api/users/${username}`] });
       queryClient.invalidateQueries({ queryKey: ['/api/session'] });

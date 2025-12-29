@@ -766,4 +766,70 @@ export function setupAdminRoutes(app: Express) {
       res.status(500).json({ message: "Failed to get finance overview" });
     }
   });
+
+  // ============================================
+  // UTILITIES (Super Admin only)
+  // ============================================
+
+  // Fix ACL on all post images (repair existing posts that have broken image visibility)
+  app.post("/api/admin/utilities/fix-post-acl", requireSuperAdmin, async (req: Request, res: Response) => {
+    try {
+      console.log(`[Admin Utility] Starting ACL fix for all posts by admin ${req.session.adminId}`);
+      const { ObjectStorageService } = await import("./objectStorage");
+      const objectStorageService = new ObjectStorageService();
+      const allPosts = await storage.getAllPosts();
+      
+      let fixed = 0;
+      let skipped = 0;
+      const errors: { postId: string; imageUrl: string; error: string }[] = [];
+      
+      for (const post of allPosts) {
+        const imageUrls = [...(post.imageUrls || [])];
+        if (post.imageUrl && post.imageUrl.startsWith('/objects/')) {
+          imageUrls.push(post.imageUrl);
+        }
+        
+        for (const imageUrl of imageUrls) {
+          if (imageUrl && imageUrl.startsWith('/objects/')) {
+            try {
+              await objectStorageService.trySetObjectEntityAclPolicy(imageUrl, {
+                owner: post.userId,
+                visibility: "public",
+              });
+              fixed++;
+              console.log(`[Admin Utility] Fixed ACL for: ${imageUrl}`);
+            } catch (err: any) {
+              const errorMessage = err instanceof Error ? err.message : String(err);
+              if (errorMessage.includes('ObjectNotFound') || errorMessage.includes('not found')) {
+                skipped++;
+              } else {
+                console.error(`[Admin Utility] Error for ${imageUrl}:`, errorMessage);
+                errors.push({ postId: post.id, imageUrl, error: errorMessage });
+              }
+            }
+          }
+        }
+      }
+      
+      await logActivity(
+        req.session.adminId!,
+        "fix_post_acl",
+        "utility",
+        "all_posts",
+        `Fixed ACL for ${fixed} post images, skipped ${skipped}, errors: ${errors.length}`,
+        req.ip
+      );
+      
+      console.log(`[Admin Utility] Complete. Fixed: ${fixed}, Skipped: ${skipped}, Errors: ${errors.length}`);
+      res.json({
+        message: `Fixed ACL for ${fixed} post images`,
+        fixed,
+        skipped,
+        errors: errors.length > 0 ? errors : undefined,
+      });
+    } catch (error) {
+      console.error("[Admin Utility] Error:", error);
+      res.status(500).json({ message: "Failed to fix post ACLs" });
+    }
+  });
 }

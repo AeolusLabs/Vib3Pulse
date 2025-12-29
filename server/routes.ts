@@ -2648,9 +2648,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Avatar upload endpoint - returns presigned PUT URL and stable object path
+  // Avatar upload endpoint - server-side upload to bypass CORS issues
   app.post("/api/users/me/avatar", requireAuth, async (req, res) => {
     try {
+      const { imageData } = req.body;
+      
+      // If imageData is provided, do server-side upload
+      if (imageData && imageData.startsWith('data:image')) {
+        console.log(`[Avatar Upload] Server-side upload for user ${req.user!.id}`);
+        const objectStorageService = new ObjectStorageService();
+        const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+        
+        // Extract stable path from upload URL
+        const url = new URL(uploadURL);
+        const pathParts = url.pathname.split('/');
+        const uploadsIndex = pathParts.findIndex(p => p === 'uploads');
+        const extractedId = uploadsIndex !== -1 ? pathParts.slice(uploadsIndex).join('/') : pathParts.slice(-1)[0];
+        const stablePath = `/objects/${extractedId}`;
+        
+        // Convert base64 to buffer
+        const base64Data = imageData.split(',')[1];
+        const buffer = Buffer.from(base64Data, 'base64');
+        
+        // Determine content type from base64 prefix
+        const contentTypeMatch = imageData.match(/data:(image\/\w+);base64/);
+        const contentType = contentTypeMatch ? contentTypeMatch[1] : 'image/jpeg';
+        
+        // Upload to GCS using signed URL
+        const uploadResponse = await fetch(uploadURL, {
+          method: 'PUT',
+          body: buffer,
+          headers: {
+            'Content-Type': contentType,
+          },
+        });
+        
+        if (!uploadResponse.ok) {
+          console.error("[Avatar Upload] GCS upload failed:", uploadResponse.status);
+          throw new Error('Failed to upload to storage');
+        }
+        
+        // Set ACL policy to make the avatar publicly readable
+        try {
+          await objectStorageService.trySetObjectEntityAclPolicy(stablePath, {
+            owner: req.user!.id,
+            visibility: "public",
+          });
+          console.log("[Avatar Upload] ACL set to public");
+        } catch (aclError) {
+          console.error("[Avatar Upload] Failed to set ACL:", aclError);
+        }
+        
+        // Update user's avatar URL in database
+        const updatedUser = await storage.updateUser(req.user!.id, { 
+          avatarUrl: stablePath 
+        });
+        
+        console.log(`[Avatar Upload] Successfully uploaded avatar for user ${req.user!.id}`);
+        const { passwordHash, ...userWithoutPassword } = updatedUser;
+        return res.json(userWithoutPassword);
+      }
+      
+      // Fallback: return presigned URL for client-side upload
       console.log(`[Avatar Upload] User ${req.user!.id} requesting upload URL`);
       const objectStorageService = new ObjectStorageService();
       const objectId = crypto.randomUUID();
@@ -2669,8 +2728,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`[Avatar Upload] Stable path: ${stablePath}`);
       res.json({ uploadURL, stablePath });
     } catch (error: any) {
-      console.error("[Avatar Upload] Error getting upload URL:", error?.message || error);
-      res.status(500).json({ message: "Failed to get upload URL. Please ensure object storage is configured." });
+      console.error("[Avatar Upload] Error:", error?.message || error);
+      res.status(500).json({ message: "Failed to upload avatar. Please try again." });
     }
   });
 

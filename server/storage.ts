@@ -181,6 +181,7 @@ export interface IStorage {
   cancelRsvp(userId: string, eventId: string): Promise<void>;
   
   getPosts(): Promise<Array<Post & { user: User }>>;
+  getAllPosts(): Promise<Post[]>;
   getPost(id: string): Promise<Post | undefined>;
   getUserPosts(userId: string): Promise<Post[]>;
   getUserLikedPosts(userId: string): Promise<Array<Post & { user: User }>>;
@@ -744,6 +745,10 @@ export class DbStorage implements IStorage {
         user: userWithoutPassword as User,
       };
     });
+  }
+
+  async getAllPosts(): Promise<Post[]> {
+    return await db.select().from(posts).orderBy(desc(posts.createdAt));
   }
 
   async getPost(id: string): Promise<Post | undefined> {
