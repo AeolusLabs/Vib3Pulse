@@ -33,6 +33,7 @@ interface TicketTier {
   price: number;
   quantity: number;
   salesEndDate: string;
+  dayDate?: string; // For multi-day events: null/undefined = all-days pass, date string = specific day
 }
 
 interface ExternalTicketLink {
@@ -280,6 +281,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
             priceCents: Math.round(ticket.price * 100),
             quantity: ticket.quantity,
             salesEndDate: ticket.salesEndDate || null,
+            dayDate: ticket.dayDate || null,
           }));
 
           const tiersResponse = await apiRequest('POST', `/api/events/${event.id}/ticket-tiers`, { tiers });
@@ -350,6 +352,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
             priceCents: Math.round(ticket.price * 100),
             quantity: ticket.quantity,
             salesEndDate: ticket.salesEndDate || null,
+            dayDate: ticket.dayDate || null,
           }));
 
           const tiersResponse = await apiRequest('POST', `/api/events/${updatedEvent.id}/ticket-tiers`, { tiers });
@@ -579,6 +582,33 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
     updateFormData({
       tickets: formData.tickets.filter(ticket => ticket.id !== id),
     });
+  };
+
+  // Get all days for multi-day event ticket selection
+  const getEventDays = () => {
+    if (!formData.isMultiDay || !formData.startDate || !formData.endDate) {
+      return [];
+    }
+    
+    const days: { value: string; label: string }[] = [];
+    const start = new Date(formData.startDate);
+    const end = new Date(formData.endDate);
+    
+    // Add each day between start and end (inclusive)
+    const current = new Date(start);
+    while (current <= end) {
+      days.push({
+        value: current.toISOString().split('T')[0],
+        label: current.toLocaleDateString('en-US', { 
+          weekday: 'long', 
+          month: 'short', 
+          day: 'numeric' 
+        }),
+      });
+      current.setDate(current.getDate() + 1);
+    }
+    
+    return days;
   };
 
   const isStep1Valid = () => {
@@ -1062,7 +1092,10 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                     <div>
                       <h3 className="text-lg font-semibold">Ticket Tiers</h3>
                       <p className="text-sm text-muted-foreground">
-                        Create different ticket types for your event
+                        {formData.isMultiDay 
+                          ? "Create tickets for specific days or an all-days pass"
+                          : "Create different ticket types for your event"
+                        }
                       </p>
                     </div>
                     <Button
@@ -1090,7 +1123,17 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                           <CardContent className="pt-6">
                             <div className="space-y-4">
                               <div className="flex items-center justify-between">
-                                <h4 className="font-semibold">Tier {index + 1}</h4>
+                                <div className="flex items-center gap-2">
+                                  <h4 className="font-semibold">Tier {index + 1}</h4>
+                                  {formData.isMultiDay && (
+                                    <Badge variant={ticket.dayDate ? "secondary" : "default"}>
+                                      {ticket.dayDate 
+                                        ? new Date(ticket.dayDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+                                        : "All Days Pass"
+                                      }
+                                    </Badge>
+                                  )}
+                                </div>
                                 <Button
                                   variant="ghost"
                                   size="icon"
@@ -1146,6 +1189,36 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                                     data-testid={`input-ticket-sales-end-${index}`}
                                   />
                                 </div>
+
+                                {formData.isMultiDay && (
+                                  <div className="space-y-2 md:col-span-2">
+                                    <Label>Valid For</Label>
+                                    <Select
+                                      value={ticket.dayDate || "all-days"}
+                                      onValueChange={(value) => updateTicket(ticket.id, { 
+                                        dayDate: value === "all-days" ? undefined : value 
+                                      })}
+                                    >
+                                      <SelectTrigger data-testid={`select-ticket-day-${index}`}>
+                                        <SelectValue placeholder="Select day" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="all-days">All Days Pass</SelectItem>
+                                        {getEventDays().map((day) => (
+                                          <SelectItem key={day.value} value={day.value}>
+                                            {day.label}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                    <p className="text-xs text-muted-foreground">
+                                      {ticket.dayDate 
+                                        ? "This ticket is valid only for the selected day"
+                                        : "This ticket grants access to all days of the event"
+                                      }
+                                    </p>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           </CardContent>

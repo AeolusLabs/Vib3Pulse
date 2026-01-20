@@ -486,7 +486,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/events", async (req, res) => {
     try {
       const events = await storage.getEvents();
-      res.json(events);
+      
+      // Fetch ticket tiers for all events to calculate price ranges
+      const eventsWithPriceRanges = await Promise.all(
+        events.map(async (event) => {
+          try {
+            const tiers = await storage.getEventTicketTiers(event.id);
+            if (tiers.length === 0) {
+              return {
+                ...event,
+                minPrice: event.ticketPrice,
+                maxPrice: event.ticketPrice,
+              };
+            }
+            const prices = tiers.map(t => t.priceCents);
+            return {
+              ...event,
+              minPrice: Math.min(...prices),
+              maxPrice: Math.max(...prices),
+            };
+          } catch {
+            return {
+              ...event,
+              minPrice: event.ticketPrice,
+              maxPrice: event.ticketPrice,
+            };
+          }
+        })
+      );
+      
+      res.json(eventsWithPriceRanges);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch events" });
     }

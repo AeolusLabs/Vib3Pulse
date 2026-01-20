@@ -18,6 +18,8 @@ import type { Event, Venue } from "@shared/schema";
 
 interface EventWithDistance extends Event {
   distance?: number | null;
+  minPrice?: number;
+  maxPrice?: number;
 }
 
 interface VenueWithDistance extends Venue {
@@ -530,7 +532,15 @@ export default function DiscoverPage() {
                           </Badge>
                         ) : (
                           <span className="font-semibold text-lg">
-                            £{(event.ticketPrice / 100).toFixed(2)}
+                            {(() => {
+                              const eventWithPrices = event as EventWithDistance;
+                              const minPrice = eventWithPrices.minPrice ?? event.ticketPrice;
+                              const maxPrice = eventWithPrices.maxPrice ?? event.ticketPrice;
+                              if (minPrice === maxPrice) {
+                                return `£${(minPrice / 100).toFixed(2)}`;
+                              }
+                              return `£${(minPrice / 100).toFixed(2)} - £${(maxPrice / 100).toFixed(2)}`;
+                            })()}
                           </span>
                         )}
                         <div className="flex items-center gap-2">
@@ -711,7 +721,15 @@ export default function DiscoverPage() {
                       </Badge>
                     ) : (
                       <span className="font-semibold text-lg" data-testid={`event-price-${event.id}`}>
-                        £{(event.ticketPrice / 100).toFixed(2)}
+                        {(() => {
+                          const eventWithPrices = event as EventWithDistance;
+                          const minPrice = eventWithPrices.minPrice ?? event.ticketPrice;
+                          const maxPrice = eventWithPrices.maxPrice ?? event.ticketPrice;
+                          if (minPrice === maxPrice) {
+                            return `£${(minPrice / 100).toFixed(2)}`;
+                          }
+                          return `£${(minPrice / 100).toFixed(2)} - £${(maxPrice / 100).toFixed(2)}`;
+                        })()}
                       </span>
                     )}
                     <div className="flex items-center gap-2">
