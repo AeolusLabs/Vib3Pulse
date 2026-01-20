@@ -558,20 +558,38 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
     }
     
     const days: { value: string; label: string }[] = [];
-    const start = new Date(formData.startDate);
-    const end = new Date(formData.endDate);
+    
+    // Parse dates as local dates to avoid timezone issues
+    const [startYear, startMonth, startDay] = formData.startDate.split('-').map(Number);
+    const [endYear, endMonth, endDay] = formData.endDate.split('-').map(Number);
+    
+    // Create dates at noon to avoid DST issues
+    const start = new Date(startYear, startMonth - 1, startDay, 12, 0, 0);
+    const end = new Date(endYear, endMonth - 1, endDay, 12, 0, 0);
+    
+    // Use a Set to prevent duplicates
+    const addedDates = new Set<string>();
     
     // Add each day between start and end (inclusive)
     const current = new Date(start);
     while (current <= end) {
-      days.push({
-        value: current.toISOString().split('T')[0],
-        label: current.toLocaleDateString('en-US', { 
-          weekday: 'long', 
-          month: 'short', 
-          day: 'numeric' 
-        }),
-      });
+      const year = current.getFullYear();
+      const month = String(current.getMonth() + 1).padStart(2, '0');
+      const day = String(current.getDate()).padStart(2, '0');
+      const dateStr = `${year}-${month}-${day}`;
+      
+      // Only add if not already added
+      if (!addedDates.has(dateStr)) {
+        addedDates.add(dateStr);
+        days.push({
+          value: dateStr,
+          label: current.toLocaleDateString('en-US', { 
+            weekday: 'long', 
+            month: 'short', 
+            day: 'numeric' 
+          }),
+        });
+      }
       current.setDate(current.getDate() + 1);
     }
     
