@@ -72,6 +72,7 @@ export const events = pgTable("events", {
   title: text("title").notNull(),
   description: text("description").notNull(),
   eventDate: timestamp("event_date").notNull(),
+  eventEndDate: timestamp("event_end_date"),
   location: text("location").notNull(),
   city: text("city"),
   latitude: doublePrecision("latitude"),
@@ -84,12 +85,14 @@ export const events = pgTable("events", {
   externalTicketUrl: text("external_ticket_url"),
   isPromoted: boolean("is_promoted").notNull().default(false),
   promotedUntil: timestamp("promoted_until"),
+  communityId: varchar("community_id"),
 });
 
 export const insertEventSchema = createInsertSchema(events).omit({
   id: true,
 }).extend({
   eventDate: z.coerce.date(),
+  eventEndDate: z.coerce.date().optional().nullable(),
 });
 
 export type InsertEvent = z.infer<typeof insertEventSchema>;
@@ -98,6 +101,9 @@ export type Event = typeof events.$inferSelect;
 // DTO schemas for API requests - accept ISO string dates and transform to Date objects
 export const eventCreateDto = insertEventSchema.extend({
   eventDate: z.string().datetime().transform((val) => new Date(val)),
+  eventEndDate: z.string().datetime().transform((val) => new Date(val)).optional().nullable(),
+  createCommunity: z.boolean().optional(),
+  communityName: z.string().optional(),
 });
 
 export const eventUpdateDto = eventCreateDto.omit({ organizerId: true }).partial();
@@ -112,6 +118,7 @@ export const ticketTiers = pgTable("ticket_tiers", {
   priceCents: integer("price_cents").notNull(),
   quantity: integer("quantity").notNull(),
   salesEndDate: timestamp("sales_end_date"),
+  dayDate: timestamp("day_date"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
