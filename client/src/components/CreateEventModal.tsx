@@ -64,6 +64,10 @@ interface EventFormData {
   tickets: TicketTier[];
   requireRSVP: boolean;
   rsvpGeneratesTicket: boolean;
+  
+  // Community
+  createCommunity: boolean;
+  communityName: string;
 }
 
 interface CreateEventModalProps {
@@ -103,7 +107,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
     startTime: "",
     endDate: "",
     endTime: "",
-    isMultiDay: false, // Kept in state but UI removed - schema only supports single date
+    isMultiDay: false,
     locationType: "physical",
     location: "",
     ageRestriction: "all",
@@ -115,6 +119,8 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
     tickets: [],
     requireRSVP: false,
     rsvpGeneratesTicket: true,
+    createCommunity: false,
+    communityName: "",
   });
   
   const [externalLinksModalOpen, setExternalLinksModalOpen] = useState(false);
@@ -163,6 +169,8 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
               }],
               requireRSVP: event.requiresRSVP,
               rsvpGeneratesTicket: true,
+              createCommunity: false,
+              communityName: "",
             });
           })
           .catch(() => {
@@ -193,6 +201,8 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
               }],
               requireRSVP: event.requiresRSVP,
               rsvpGeneratesTicket: true,
+              createCommunity: false,
+              communityName: "",
             });
           });
       } else {
@@ -216,6 +226,8 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
           tickets: [],
           requireRSVP: event.requiresRSVP,
           rsvpGeneratesTicket: true,
+          createCommunity: false,
+          communityName: "",
         });
       }
     } else if (!open) {
@@ -242,6 +254,8 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
         tickets: [],
         requireRSVP: false,
         rsvpGeneratesTicket: true,
+        createCommunity: false,
+        communityName: "",
       });
     }
   }, [event, open]);
@@ -390,6 +404,15 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
     // Convert form data to match Event schema
     const eventDate = new Date(`${formData.startDate}T${formData.startTime}`);
     
+    // Calculate event end date
+    let eventEndDate: Date | null = null;
+    if (formData.isMultiDay && formData.endDate && formData.endTime) {
+      eventEndDate = new Date(`${formData.endDate}T${formData.endTime}`);
+    } else if (!formData.isMultiDay && formData.endTime) {
+      // For single-day events, end date is same day but at end time
+      eventEndDate = new Date(`${formData.startDate}T${formData.endTime}`);
+    }
+    
     // Calculate ticket price and quantity - CONVERT TO CENTS
     const ticketPrice = formData.entryType === "free" 
       ? 0 
@@ -406,6 +429,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
       title: formData.name,
       description: formData.description,
       eventDate: eventDate.toISOString(),
+      eventEndDate: eventEndDate ? eventEndDate.toISOString() : null,
       location: formData.location,
       category: formData.type,
       ticketPrice: ticketPrice,
@@ -416,6 +440,8 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
         ? formData.externalTicketLinks[0].url 
         : (formData.externalTicketUrl || null),
       externalTicketLinks: formData.entryType === "external" ? formData.externalTicketLinks : undefined,
+      createCommunity: formData.createCommunity,
+      communityName: formData.communityName,
     };
     
     if (isEditMode && event) {
@@ -562,17 +588,23 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
       formData.description.trim() !== "" &&
       formData.startDate !== "" &&
       formData.startTime !== "" &&
+      formData.endTime !== "" &&
       formData.location.trim() !== ""
     );
     
     if (formData.isMultiDay) {
-      if (formData.endDate === "" || formData.endTime === "") {
+      if (formData.endDate === "") {
         return false;
       }
       // Ensure end date/time is after start date/time
       const startDateTime = new Date(`${formData.startDate}T${formData.startTime}`);
       const endDateTime = new Date(`${formData.endDate}T${formData.endTime}`);
       return baseValid && endDateTime > startDateTime;
+    }
+    
+    // For single-day events, ensure end time is after start time
+    if (formData.endTime <= formData.startTime) {
+      return false;
     }
     
     return baseValid;
@@ -688,9 +720,9 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className={`grid grid-cols-1 ${formData.isMultiDay ? 'md:grid-cols-2' : 'md:grid-cols-3'} gap-4`}>
                 <div className="space-y-2">
-                  <Label htmlFor="start-date">Start Date *</Label>
+                  <Label htmlFor="start-date">{formData.isMultiDay ? 'Start Date *' : 'Date *'}</Label>
                   <Input
                     id="start-date"
                     type="date"
@@ -710,6 +742,32 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                     data-testid="input-start-time"
                   />
                 </div>
+
+                {!formData.isMultiDay && (
+                  <div className="space-y-2">
+                    <Label htmlFor="end-time">End Time *</Label>
+                    <Input
+                      id="end-time"
+                      type="time"
+                      value={formData.endTime}
+                      onChange={(e) => updateFormData({ endTime: e.target.value })}
+                      data-testid="input-end-time"
+                      className={
+                        formData.endTime === "" || 
+                        (formData.startDate && formData.startTime && formData.endTime && 
+                         formData.endTime <= formData.startTime)
+                          ? "border-destructive" 
+                          : ""
+                      }
+                    />
+                    {formData.endTime === "" && (
+                      <p className="text-xs text-destructive">End time is required</p>
+                    )}
+                    {formData.endTime !== "" && formData.startTime && formData.endTime <= formData.startTime && (
+                      <p className="text-xs text-destructive">End time must be after start time</p>
+                    )}
+                  </div>
+                )}
               </div>
 
               {formData.isMultiDay && (
@@ -888,6 +946,44 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                 </label>
               </div>
             </div>
+
+            {!isEditMode && (
+              <div className="space-y-4 p-4 border rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label htmlFor="create-community" className="text-base font-medium">Create Event Community</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Create a community for attendees to connect and discuss this event
+                    </p>
+                  </div>
+                  <Switch
+                    id="create-community"
+                    checked={formData.createCommunity}
+                    onCheckedChange={(checked) => updateFormData({ 
+                      createCommunity: checked,
+                      communityName: checked && !formData.communityName ? formData.name : formData.communityName
+                    })}
+                    data-testid="switch-create-community"
+                  />
+                </div>
+                
+                {formData.createCommunity && (
+                  <div className="space-y-2">
+                    <Label htmlFor="community-name">Community Name</Label>
+                    <Input
+                      id="community-name"
+                      placeholder="Enter community name"
+                      value={formData.communityName}
+                      onChange={(e) => updateFormData({ communityName: e.target.value })}
+                      data-testid="input-community-name"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      You'll be added as the admin of this community
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="flex justify-end">
               <Button
