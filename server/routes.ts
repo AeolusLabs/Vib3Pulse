@@ -671,6 +671,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
+      // Handle community creation if requested
+      let communityId: string | null = null;
+      if (parsedData.createCommunity && parsedData.communityName) {
+        const communitySlug = parsedData.communityName
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-|-$/g, '') + '-' + Date.now();
+        
+        const newCommunity = await storage.createCommunity({
+          name: parsedData.communityName,
+          slug: communitySlug,
+          description: `Community for ${parsedData.title || parsedData.communityName}`,
+          createdByUserId: req.user!.id,
+        });
+        
+        // Auto-join the creator as admin
+        await storage.joinCommunity(req.user!.id, newCommunity.id, 'admin');
+        communityId = newCommunity.id;
+      }
+      
       const sanitizedData = {
         ...parsedData,
         title: sanitizeTextOnly(parsedData.title || ""),
@@ -694,6 +714,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         latitude: geocodeResult?.latitude || null,
         longitude: geocodeResult?.longitude || null,
         city: geocodeResult?.city || sanitizedData.city || null,
+        communityId: communityId,
       });
       
       // Auto-generate promotional post for followers
@@ -853,6 +874,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...tier,
         eventId: req.params.eventId,
         salesEndDate: tier.salesEndDate ? new Date(tier.salesEndDate) : null,
+        dayDate: tier.dayDate ? new Date(tier.dayDate) : null,
       }));
 
       const createdTiers = await storage.createTicketTiers(tiersWithEventId);
