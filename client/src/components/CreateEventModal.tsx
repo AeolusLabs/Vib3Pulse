@@ -130,106 +130,73 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
   useEffect(() => {
     if (event && open) {
       const eventDate = new Date(event.eventDate);
-      const date = eventDate.toISOString().split('T')[0];
-      const time = eventDate.toTimeString().slice(0, 5);
+      const startDateStr = eventDate.toISOString().split('T')[0];
+      const startTimeStr = eventDate.toTimeString().slice(0, 5);
+      
+      // Calculate end date/time and isMultiDay from eventEndDate
+      let endDateStr = "";
+      let endTimeStr = "";
+      let isMultiDayEvent = false;
+      
+      if (event.eventEndDate) {
+        const endDate = new Date(event.eventEndDate);
+        endDateStr = endDate.toISOString().split('T')[0];
+        endTimeStr = endDate.toTimeString().slice(0, 5);
+        // Multi-day if end date is different from start date
+        isMultiDayEvent = startDateStr !== endDateStr;
+      }
+      
+      // Helper to build form data
+      const buildFormData = (tiers: any[] = []) => ({
+        name: event.title,
+        type: event.category,
+        description: event.description,
+        startDate: startDateStr,
+        startTime: startTimeStr,
+        endDate: isMultiDayEvent ? endDateStr : "",
+        endTime: endTimeStr,
+        isMultiDay: isMultiDayEvent,
+        locationType: "physical" as const,
+        location: event.location,
+        ageRestriction: "all" as const,
+        parentalGuidance: "none" as const,
+        entryType: event.externalTicketUrl ? "external" as const : (event.ticketPrice > 0 ? "ticketed" as const : "free" as const),
+        thumbnailUrl: event.imageUrl || "",
+        externalTicketUrl: event.externalTicketUrl || "",
+        externalTicketLinks: event.externalTicketUrl ? [{ id: "1", platform: "External", url: event.externalTicketUrl }] : [],
+        tickets: tiers.length > 0 ? tiers.map((tier, index) => ({
+          id: tier.id || String(index + 1),
+          name: tier.name,
+          price: tier.priceCents / 100,
+          quantity: tier.quantity,
+          salesEndDate: tier.salesEndDate ? new Date(tier.salesEndDate).toISOString().split('T')[0] : startDateStr,
+          dayDate: tier.dayDate ? new Date(tier.dayDate).toISOString().split('T')[0] : undefined,
+        })) : (event.ticketPrice > 0 ? [{
+          id: "1",
+          name: "General Admission",
+          price: event.ticketPrice / 100,
+          quantity: event.ticketsAvailable,
+          salesEndDate: startDateStr,
+        }] : []),
+        requireRSVP: event.requiresRSVP,
+        rsvpGeneratesTicket: true,
+        createCommunity: false,
+        communityName: "",
+      });
       
       // Fetch existing ticket tiers if this is a ticketed event
       if (event.ticketPrice > 0) {
         fetch(`/api/events/${event.id}/ticket-tiers`, { credentials: "include" })
           .then(res => res.json())
           .then((tiers: any[]) => {
-            setFormData({
-              name: event.title,
-              type: event.category,
-              description: event.description,
-              startDate: date,
-              startTime: time,
-              endDate: "",
-              endTime: "",
-              isMultiDay: false,
-              locationType: "physical",
-              location: event.location,
-              ageRestriction: "all",
-              parentalGuidance: "none",
-              entryType: event.externalTicketUrl ? "external" : "ticketed",
-              thumbnailUrl: event.imageUrl || "",
-              externalTicketUrl: event.externalTicketUrl || "",
-              externalTicketLinks: event.externalTicketUrl ? [{ id: "1", platform: "External", url: event.externalTicketUrl }] : [],
-              tickets: tiers.length > 0 ? tiers.map((tier, index) => ({
-                id: tier.id || String(index + 1),
-                name: tier.name,
-                price: tier.priceCents / 100,
-                quantity: tier.quantity,
-                salesEndDate: tier.salesEndDate ? new Date(tier.salesEndDate).toISOString().split('T')[0] : date,
-              })) : [{
-                id: "1",
-                name: "General Admission",
-                price: event.ticketPrice / 100,
-                quantity: event.ticketsAvailable,
-                salesEndDate: date,
-              }],
-              requireRSVP: event.requiresRSVP,
-              rsvpGeneratesTicket: true,
-              createCommunity: false,
-              communityName: "",
-            });
+            setFormData(buildFormData(tiers));
           })
           .catch(() => {
-            // Fallback if tier fetch fails - use event.ticketPrice converted to dollars
-            setFormData({
-              name: event.title,
-              type: event.category,
-              description: event.description,
-              startDate: date,
-              startTime: time,
-              endDate: "",
-              endTime: "",
-              isMultiDay: false,
-              locationType: "physical",
-              location: event.location,
-              ageRestriction: "all",
-              parentalGuidance: "none",
-              entryType: event.externalTicketUrl ? "external" : "ticketed",
-              thumbnailUrl: event.imageUrl || "",
-              externalTicketUrl: event.externalTicketUrl || "",
-              externalTicketLinks: event.externalTicketUrl ? [{ id: "1", platform: "External", url: event.externalTicketUrl }] : [],
-              tickets: [{
-                id: "1",
-                name: "General Admission",
-                price: event.ticketPrice / 100,
-                quantity: event.ticketsAvailable,
-                salesEndDate: date,
-              }],
-              requireRSVP: event.requiresRSVP,
-              rsvpGeneratesTicket: true,
-              createCommunity: false,
-              communityName: "",
-            });
+            // Fallback if tier fetch fails
+            setFormData(buildFormData([]));
           });
       } else {
-        setFormData({
-          name: event.title,
-          type: event.category,
-          description: event.description,
-          startDate: date,
-          startTime: time,
-          endDate: "",
-          endTime: "",
-          isMultiDay: false,
-          locationType: "physical",
-          location: event.location,
-          ageRestriction: "all",
-          parentalGuidance: "none",
-          entryType: event.externalTicketUrl ? "external" : "free",
-          thumbnailUrl: event.imageUrl || "",
-          externalTicketUrl: event.externalTicketUrl || "",
-          externalTicketLinks: event.externalTicketUrl ? [{ id: "1", platform: "External", url: event.externalTicketUrl }] : [],
-          tickets: [],
-          requireRSVP: event.requiresRSVP,
-          rsvpGeneratesTicket: true,
-          createCommunity: false,
-          communityName: "",
-        });
+        setFormData(buildFormData([]));
       }
     } else if (!open) {
       // Reset form when modal closes

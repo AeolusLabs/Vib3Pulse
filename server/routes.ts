@@ -482,39 +482,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Events
-  app.get("/api/events", async (req, res) => {
-    try {
-      const events = await storage.getEvents();
-      
-      // Fetch ticket tiers for all events to calculate price ranges
-      const eventsWithPriceRanges = await Promise.all(
-        events.map(async (event) => {
-          try {
-            const tiers = await storage.getEventTicketTiers(event.id);
-            if (tiers.length === 0) {
-              return {
-                ...event,
-                minPrice: event.ticketPrice,
-                maxPrice: event.ticketPrice,
-              };
-            }
-            const prices = tiers.map(t => t.priceCents);
-            return {
-              ...event,
-              minPrice: Math.min(...prices),
-              maxPrice: Math.max(...prices),
-            };
-          } catch {
+  // Helper function to add price ranges to events
+  async function addPriceRangesToEvents<T extends { id: string; ticketPrice: number }>(events: T[]): Promise<(T & { minPrice: number; maxPrice: number })[]> {
+    return Promise.all(
+      events.map(async (event) => {
+        try {
+          const tiers = await storage.getEventTicketTiers(event.id);
+          if (tiers.length === 0) {
             return {
               ...event,
               minPrice: event.ticketPrice,
               maxPrice: event.ticketPrice,
             };
           }
-        })
-      );
-      
+          const prices = tiers.map(t => t.priceCents);
+          return {
+            ...event,
+            minPrice: Math.min(...prices),
+            maxPrice: Math.max(...prices),
+          };
+        } catch {
+          return {
+            ...event,
+            minPrice: event.ticketPrice,
+            maxPrice: event.ticketPrice,
+          };
+        }
+      })
+    );
+  }
+
+  // Events
+  app.get("/api/events", async (req, res) => {
+    try {
+      const events = await storage.getEvents();
+      const eventsWithPriceRanges = await addPriceRangesToEvents(events);
       res.json(eventsWithPriceRanges);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch events" });
@@ -533,7 +535,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/events/promoted", async (req, res) => {
     try {
       const promotedEvents = await storage.getPromotedEvents();
-      res.json(promotedEvents);
+      const eventsWithPrices = await addPriceRangesToEvents(promotedEvents);
+      res.json(eventsWithPrices);
     } catch (error) {
       console.error('Error fetching promoted events:', error);
       res.status(500).json({ message: "Failed to fetch promoted events" });
@@ -549,7 +552,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const filteredEvents = allEvents.filter(
         (event) => event.category.toLowerCase() === category.toLowerCase()
       );
-      res.json(filteredEvents);
+      const eventsWithPrices = await addPriceRangesToEvents(filteredEvents);
+      res.json(eventsWithPrices);
     } catch (error) {
       console.error('Error fetching events by category:', error);
       res.status(500).json({ message: "Failed to fetch events by category" });
@@ -566,7 +570,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .filter((event) => new Date(event.eventDate) >= now)
         .sort((a, b) => new Date(a.eventDate).getTime() - new Date(b.eventDate).getTime())
         .slice(0, 8);
-      res.json(featuredEvents);
+      const eventsWithPrices = await addPriceRangesToEvents(featuredEvents);
+      res.json(eventsWithPrices);
     } catch (error) {
       console.error('Error fetching featured events:', error);
       res.status(500).json({ message: "Failed to fetch featured events" });
@@ -598,7 +603,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ? eventsWithDistance.filter(e => e.distance === null || e.distance <= maxDist)
         : eventsWithDistance;
       
-      res.json(filteredEvents);
+      const eventsWithPrices = await addPriceRangesToEvents(filteredEvents);
+      res.json(eventsWithPrices);
     } catch (error) {
       console.error('Error fetching nearby events:', error);
       res.status(500).json({ message: "Failed to fetch nearby events" });
@@ -636,7 +642,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const nearbyUpcoming = sortByProximity(upcomingEvents, userLat, userLon)
         .filter(e => e.distance === null || e.distance <= 25);
       
-      res.json(nearbyUpcoming);
+      const eventsWithPrices = await addPriceRangesToEvents(nearbyUpcoming);
+      res.json(eventsWithPrices);
     } catch (error) {
       console.error('Error fetching happening now events:', error);
       res.status(500).json({ message: "Failed to fetch happening now events" });
@@ -669,7 +676,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return dateA - dateB;
       });
       
-      res.json(sortedEvents);
+      const eventsWithPrices = await addPriceRangesToEvents(sortedEvents);
+      res.json(eventsWithPrices);
     } catch (error) {
       console.error('Error fetching trending events:', error);
       res.status(500).json({ message: "Failed to fetch trending events" });
