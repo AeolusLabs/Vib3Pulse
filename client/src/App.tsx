@@ -1,7 +1,10 @@
+import { useEffect } from "react";
 import { Switch, Route } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
+import { ToastAction } from "@/components/ui/toast";
+import { useToast } from "@/hooks/use-toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import AuthenticatedLayout from "@/components/AuthenticatedLayout";
 import NotFound from "@/pages/not-found";
@@ -169,11 +172,42 @@ function Router() {
   );
 }
 
+function SWUpdatePrompt() {
+  const { toast } = useToast();
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const registration = (event as CustomEvent).detail as ServiceWorkerRegistration;
+      toast({
+        title: "Update Available",
+        description: "A new version of VibePulse is available.",
+        action: (
+          <ToastAction
+            altText="Refresh"
+            onClick={() => {
+              registration.waiting?.postMessage({ type: "SKIP_WAITING" });
+              window.location.reload();
+            }}
+            data-testid="button-sw-update"
+          >
+            Refresh
+          </ToastAction>
+        ),
+      });
+    };
+    window.addEventListener("sw-update-available", handler);
+    return () => window.removeEventListener("sw-update-available", handler);
+  }, [toast]);
+
+  return null;
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
+        <SWUpdatePrompt />
         <Router />
       </TooltipProvider>
     </QueryClientProvider>

@@ -76,6 +76,7 @@ Preferred communication style: Simple, everyday language.
 ### Build & Deployment
 - Replit environment
 - Simulated payments for demo purposes
+- **PWA Support:** Manual service worker (`client/public/sw.js`), web manifest (`client/public/manifest.json`), and offline fallback page (`client/public/offline.html`). Service worker registered in `client/src/main.tsx` only in production mode. Caching strategies: NetworkOnly for auth/payment APIs, NetworkFirst for general API calls, CacheFirst for Google Fonts, cache-then-network for static assets. Update prompt component in `App.tsx` shows toast when new SW version is available.
 
 ### Payment System
 The payment system is fully simulated for demo purposes. No real payment processing occurs.
