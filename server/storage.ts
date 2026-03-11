@@ -47,6 +47,8 @@ import {
   type InsertDistressMessage,
   type DistressAlert,
   type InsertDistressAlert,
+  type CheckInTimer,
+  type InsertCheckInTimer,
   type EventAnalytics,
   type InsertEventAnalytics,
   type Venue,
@@ -109,6 +111,7 @@ import {
   buddies,
   distressMessages,
   distressAlerts,
+  checkInTimers,
   eventAnalytics,
   venues,
   venueEntryNights,
@@ -291,11 +294,21 @@ export interface IStorage {
 
   setBuddy(userId: string, buddyId: string): Promise<void>;
   getBuddy(userId: string): Promise<User | undefined>;
+  getBuddyWithStatus(userId: string): Promise<{ buddy: User; status: string } | undefined>;
   removeBuddy(userId: string): Promise<void>;
+  respondToBuddyRequest(buddyId: string, requesterId: string, accept: boolean): Promise<void>;
+  getBuddyRequests(userId: string): Promise<Array<{ id: string; requester: User; createdAt: Date }>>;
   setDistressMessage(userId: string, message: string): Promise<void>;
   getDistressMessage(userId: string): Promise<string | undefined>;
-  logDistressAlert(userId: string, buddyId: string, message: string, latitude?: string, longitude?: string): Promise<void>;
+  logDistressAlert(userId: string, buddyId: string, message: string, latitude?: string, longitude?: string): Promise<string>;
   getDistressAlerts(userId: string): Promise<any[]>;
+  resolveDistressAlert(alertId: string, userId: string, status: string): Promise<any>;
+  createCheckInTimer(userId: string, expiresAt: Date): Promise<any>;
+  getActiveCheckInTimer(userId: string): Promise<any>;
+  checkIn(userId: string): Promise<void>;
+  cancelCheckInTimer(userId: string): Promise<void>;
+  getExpiredActiveTimers(): Promise<any[]>;
+  markTimerTriggered(timerId: string): Promise<void>;
 
   trackEventView(eventId: string, userId?: string): Promise<void>;
   trackEventClick(eventId: string, actionType: string, userId?: string): Promise<void>;
@@ -1810,7 +1823,7 @@ export class DbStorage implements IStorage {
 
   async setBuddy(userId: string, buddyId: string): Promise<void> {
     await db.delete(buddies).where(eq(buddies.userId, userId));
-    await db.insert(buddies).values({ userId, buddyId });
+    await db.insert(buddies).values({ userId, buddyId, status: "pending" });
   }
 
   async getBuddy(userId: string): Promise<User | undefined> {
@@ -1826,8 +1839,49 @@ export class DbStorage implements IStorage {
     return userWithoutPassword as User;
   }
 
+  async getBuddyWithStatus(userId: string): Promise<{ buddy: User; status: string } | undefined> {
+    const result = await db
+      .select()
+      .from(buddies)
+      .innerJoin(users, eq(buddies.buddyId, users.id))
+      .where(eq(buddies.userId, userId));
+    
+    if (result.length === 0) return undefined;
+    
+    const { passwordHash, ...userWithoutPassword } = result[0].users;
+    return { buddy: userWithoutPassword as User, status: result[0].buddies.status };
+  }
+
   async removeBuddy(userId: string): Promise<void> {
     await db.delete(buddies).where(eq(buddies.userId, userId));
+  }
+
+  async respondToBuddyRequest(buddyId: string, requesterId: string, accept: boolean): Promise<void> {
+    if (accept) {
+      await db.update(buddies)
+        .set({ status: "accepted" })
+        .where(and(eq(buddies.userId, requesterId), eq(buddies.buddyId, buddyId)));
+    } else {
+      await db.delete(buddies)
+        .where(and(eq(buddies.userId, requesterId), eq(buddies.buddyId, buddyId)));
+    }
+  }
+
+  async getBuddyRequests(userId: string): Promise<Array<{ id: string; requester: User; createdAt: Date }>> {
+    const result = await db
+      .select()
+      .from(buddies)
+      .innerJoin(users, eq(buddies.userId, users.id))
+      .where(and(eq(buddies.buddyId, userId), eq(buddies.status, "pending")));
+    
+    return result.map(row => {
+      const { passwordHash, ...userWithoutPassword } = row.users;
+      return {
+        id: row.buddies.id,
+        requester: userWithoutPassword as User,
+        createdAt: row.buddies.createdAt,
+      };
+    });
   }
 
   async setDistressMessage(userId: string, message: string): Promise<void> {
@@ -1847,14 +1901,16 @@ export class DbStorage implements IStorage {
     return result.length > 0 ? result[0].message : undefined;
   }
 
-  async logDistressAlert(userId: string, buddyId: string, message: string, latitude?: string, longitude?: string): Promise<void> {
-    await db.insert(distressAlerts).values({
+  async logDistressAlert(userId: string, buddyId: string, message: string, latitude?: string, longitude?: string): Promise<string> {
+    const result = await db.insert(distressAlerts).values({
       userId,
       buddyId,
       message,
       latitude,
       longitude,
-    });
+      status: "active",
+    }).returning({ id: distressAlerts.id });
+    return result[0].id;
   }
 
   async getDistressAlerts(userId: string): Promise<any[]> {
@@ -1893,6 +1949,62 @@ export class DbStorage implements IStorage {
     return [...sentAlerts, ...receivedAlerts].sort((a, b) => 
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
+  }
+
+  async resolveDistressAlert(alertId: string, userId: string, status: string): Promise<any> {
+    const result = await db.update(distressAlerts)
+      .set({ status, resolvedAt: new Date() })
+      .where(and(eq(distressAlerts.id, alertId), eq(distressAlerts.userId, userId)))
+      .returning();
+    return result[0];
+  }
+
+  async createCheckInTimer(userId: string, expiresAt: Date): Promise<any> {
+    await db.update(checkInTimers)
+      .set({ status: "cancelled" })
+      .where(and(eq(checkInTimers.userId, userId), eq(checkInTimers.status, "active")));
+    
+    const result = await db.insert(checkInTimers).values({
+      userId,
+      expiresAt,
+      status: "active",
+    }).returning();
+    return result[0];
+  }
+
+  async getActiveCheckInTimer(userId: string): Promise<any> {
+    const result = await db
+      .select()
+      .from(checkInTimers)
+      .where(and(eq(checkInTimers.userId, userId), eq(checkInTimers.status, "active")));
+    return result.length > 0 ? result[0] : null;
+  }
+
+  async checkIn(userId: string): Promise<void> {
+    await db.update(checkInTimers)
+      .set({ status: "checked_in", checkedInAt: new Date() })
+      .where(and(eq(checkInTimers.userId, userId), eq(checkInTimers.status, "active")));
+  }
+
+  async cancelCheckInTimer(userId: string): Promise<void> {
+    await db.update(checkInTimers)
+      .set({ status: "cancelled" })
+      .where(and(eq(checkInTimers.userId, userId), eq(checkInTimers.status, "active")));
+  }
+
+  async getExpiredActiveTimers(): Promise<any[]> {
+    const now = new Date();
+    const result = await db
+      .select()
+      .from(checkInTimers)
+      .where(and(eq(checkInTimers.status, "active"), lt(checkInTimers.expiresAt, now)));
+    return result;
+  }
+
+  async markTimerTriggered(timerId: string): Promise<void> {
+    await db.update(checkInTimers)
+      .set({ status: "triggered" })
+      .where(eq(checkInTimers.id, timerId));
   }
 
   async trackEventView(eventId: string, userId?: string): Promise<void> {

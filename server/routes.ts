@@ -3036,7 +3036,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       await storage.setBuddy(userId, buddyId);
-      res.json({ message: "Buddy set successfully" });
+
+      const currentUser = await storage.getUser(userId);
+      await storage.createNotification({
+        userId: buddyId,
+        type: "buddy_request",
+        title: "Buddy Request",
+        message: `${currentUser?.displayName || currentUser?.username || "Someone"} wants you as their safety buddy`,
+        link: "/buddy/settings",
+        relatedUserId: userId,
+        relatedEntityId: userId,
+      });
+      wsManager.sendToUser(buddyId, {
+        type: "notification",
+        data: { type: "buddy_request" },
+      });
+
+      res.json({ message: "Buddy request sent" });
     } catch (error) {
       console.error("Set buddy error:", error);
       res.status(500).json({ message: "Failed to set buddy" });
@@ -3046,11 +3062,69 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/buddy", requireAuth, async (req, res) => {
     try {
       const userId = req.user!.id;
-      const buddy = await storage.getBuddy(userId);
-      res.json({ buddy });
+      const buddyData = await storage.getBuddyWithStatus(userId);
+      if (!buddyData) {
+        res.json({ buddy: null, status: null });
+      } else {
+        res.json({ buddy: buddyData.buddy, status: buddyData.status });
+      }
     } catch (error) {
       console.error("Get buddy error:", error);
       res.status(500).json({ message: "Failed to get buddy" });
+    }
+  });
+
+  app.get("/api/buddy/requests", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const requests = await storage.getBuddyRequests(userId);
+      res.json({ requests });
+    } catch (error) {
+      console.error("Get buddy requests error:", error);
+      res.status(500).json({ message: "Failed to get buddy requests" });
+    }
+  });
+
+  const respondBuddySchema = z.object({
+    requesterId: z.string().min(1),
+    accept: z.boolean(),
+  });
+
+  app.post("/api/buddy/respond", requireAuth, async (req, res) => {
+    try {
+      const validation = respondBuddySchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ message: "Invalid request data" });
+      }
+
+      const { requesterId, accept } = validation.data;
+      const userId = req.user!.id;
+
+      await storage.respondToBuddyRequest(userId, requesterId, accept);
+
+      const currentUser = await storage.getUser(userId);
+      const responseMsg = accept
+        ? `${currentUser?.displayName || currentUser?.username} accepted your buddy request`
+        : `${currentUser?.displayName || currentUser?.username} declined your buddy request`;
+
+      await storage.createNotification({
+        userId: requesterId,
+        type: "buddy_request_response",
+        title: accept ? "Buddy Request Accepted" : "Buddy Request Declined",
+        message: responseMsg,
+        link: "/buddy/settings",
+        relatedUserId: userId,
+        relatedEntityId: userId,
+      });
+      wsManager.sendToUser(requesterId, {
+        type: "notification",
+        data: { type: "buddy_request_response" },
+      });
+
+      res.json({ message: accept ? "Buddy request accepted" : "Buddy request declined" });
+    } catch (error) {
+      console.error("Respond buddy error:", error);
+      res.status(500).json({ message: "Failed to respond to buddy request" });
     }
   });
 
@@ -3150,10 +3224,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { latitude, longitude } = validation.data;
       const userId = req.user!.id;
 
-      const buddy = await storage.getBuddy(userId);
-      if (!buddy) {
+      const buddyData = await storage.getBuddyWithStatus(userId);
+      if (!buddyData) {
         return res.status(400).json({ message: "No buddy set" });
       }
+      if (buddyData.status !== "accepted") {
+        return res.status(400).json({ message: "Your buddy hasn't accepted your request yet" });
+      }
+      const buddy = buddyData.buddy;
 
       const distressMessage = await storage.getDistressMessage(userId);
       const message = distressMessage || "I need help! Please check on me.";
@@ -3226,6 +3304,121 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Get alerts error:", error);
       res.status(500).json({ message: "Failed to get distress alerts" });
+    }
+  });
+
+  app.post("/api/buddy/alerts/:id/resolve", requireAuth, async (req, res) => {
+    try {
+      const alertId = req.params.id;
+      const userId = req.user!.id;
+      const alert = await storage.resolveDistressAlert(alertId, userId, "resolved");
+      if (!alert) {
+        return res.status(404).json({ message: "Alert not found" });
+      }
+      const user = await storage.getUser(userId);
+      await storage.createNotification({
+        userId: alert.buddyId,
+        type: "buddy_alert_resolved",
+        title: "Buddy is Safe",
+        message: `${user?.displayName || user?.username || "Your buddy"} has marked themselves as safe`,
+        link: "/buddy/alerts",
+        relatedUserId: userId,
+        relatedEntityId: alertId,
+      });
+      wsManager.sendToUser(alert.buddyId, {
+        type: "notification",
+        data: { type: "buddy_alert_resolved" },
+      });
+      res.json({ message: "Alert resolved" });
+    } catch (error) {
+      console.error("Resolve alert error:", error);
+      res.status(500).json({ message: "Failed to resolve alert" });
+    }
+  });
+
+  app.post("/api/buddy/alerts/:id/false-alarm", requireAuth, async (req, res) => {
+    try {
+      const alertId = req.params.id;
+      const userId = req.user!.id;
+      const alert = await storage.resolveDistressAlert(alertId, userId, "false_alarm");
+      if (!alert) {
+        return res.status(404).json({ message: "Alert not found" });
+      }
+      const user = await storage.getUser(userId);
+      await storage.createNotification({
+        userId: alert.buddyId,
+        type: "buddy_alert_resolved",
+        title: "False Alarm",
+        message: `${user?.displayName || user?.username || "Your buddy"} marked their alert as a false alarm`,
+        link: "/buddy/alerts",
+        relatedUserId: userId,
+        relatedEntityId: alertId,
+      });
+      wsManager.sendToUser(alert.buddyId, {
+        type: "notification",
+        data: { type: "buddy_alert_resolved" },
+      });
+      res.json({ message: "Alert marked as false alarm" });
+    } catch (error) {
+      console.error("False alarm error:", error);
+      res.status(500).json({ message: "Failed to mark as false alarm" });
+    }
+  });
+
+  const createTimerSchema = z.object({
+    durationMinutes: z.number().min(1).max(1440),
+  });
+
+  app.post("/api/checkin-timer", requireAuth, async (req, res) => {
+    try {
+      const validation = createTimerSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ message: "Invalid duration" });
+      }
+      const userId = req.user!.id;
+      const buddyData = await storage.getBuddyWithStatus(userId);
+      if (!buddyData || buddyData.status !== "accepted") {
+        return res.status(400).json({ message: "You need an accepted buddy to set a check-in timer" });
+      }
+      const expiresAt = new Date(Date.now() + validation.data.durationMinutes * 60 * 1000);
+      const timer = await storage.createCheckInTimer(userId, expiresAt);
+      res.json({ timer });
+    } catch (error) {
+      console.error("Create timer error:", error);
+      res.status(500).json({ message: "Failed to create timer" });
+    }
+  });
+
+  app.get("/api/checkin-timer", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const timer = await storage.getActiveCheckInTimer(userId);
+      res.json({ timer });
+    } catch (error) {
+      console.error("Get timer error:", error);
+      res.status(500).json({ message: "Failed to get timer" });
+    }
+  });
+
+  app.post("/api/checkin-timer/checkin", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      await storage.checkIn(userId);
+      res.json({ message: "Checked in successfully" });
+    } catch (error) {
+      console.error("Check in error:", error);
+      res.status(500).json({ message: "Failed to check in" });
+    }
+  });
+
+  app.delete("/api/checkin-timer", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      await storage.cancelCheckInTimer(userId);
+      res.json({ message: "Timer cancelled" });
+    } catch (error) {
+      console.error("Cancel timer error:", error);
+      res.status(500).json({ message: "Failed to cancel timer" });
     }
   });
 
@@ -4677,6 +4870,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   const httpServer = createServer(app);
+
+  setInterval(async () => {
+    try {
+      const expiredTimers = await storage.getExpiredActiveTimers();
+      for (const timer of expiredTimers) {
+        try {
+          const buddyData = await storage.getBuddyWithStatus(timer.userId);
+          if (!buddyData || buddyData.status !== "accepted") {
+            await storage.markTimerTriggered(timer.id);
+            continue;
+          }
+          const buddy = buddyData.buddy;
+          const distressMsg = await storage.getDistressMessage(timer.userId);
+          const message = distressMsg || "I need help! Please check on me.";
+
+          await storage.logDistressAlert(timer.userId, buddy.id, `[Auto-Alert] ${message}`);
+          await storage.markTimerTriggered(timer.id);
+
+          const user = await storage.getUser(timer.userId);
+          const senderName = user?.displayName || user?.username || "Your buddy";
+
+          wsManager.sendToUser(buddy.id, {
+            type: "distress_alert",
+            data: {
+              senderId: timer.userId,
+              senderName,
+              message: `[Auto-Alert] ${message}`,
+              timestamp: new Date().toISOString(),
+            },
+          });
+
+          await storage.createNotification({
+            userId: buddy.id,
+            type: "buddy_alert",
+            title: "Check-In Timer Expired",
+            message: `${senderName} didn't check in on time. They may need help!`,
+            link: "/buddy/alerts",
+            relatedUserId: timer.userId,
+            relatedEntityId: timer.userId,
+          });
+          wsManager.sendToUser(buddy.id, {
+            type: "notification",
+            data: { type: "buddy_alert" },
+          });
+
+          console.log(`[CheckIn] Timer expired for user ${timer.userId}, alert sent to buddy ${buddy.id}`);
+        } catch (timerError) {
+          console.error(`[CheckIn] Error processing timer ${timer.id}:`, timerError);
+        }
+      }
+    } catch (error) {
+      console.error("[CheckIn] Polling error:", error);
+    }
+  }, 60000);
 
   return httpServer;
 }

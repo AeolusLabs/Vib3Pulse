@@ -20,7 +20,7 @@ export function EmergencyButton() {
   const [location, setLocation] = useState<{ latitude: string; longitude: string } | null>(null);
   const [gettingLocation, setGettingLocation] = useState(false);
 
-  const { data: buddy } = useQuery<{ buddy: User | null }>({
+  const { data: buddyData } = useQuery<{ buddy: User | null; status: string | null }>({
     queryKey: ["/api/buddy"],
   });
 
@@ -89,10 +89,18 @@ export function EmergencyButton() {
   };
 
   const handleEmergencyClick = () => {
-    if (!buddy?.buddy) {
+    if (!buddyData?.buddy) {
       toast({
         title: "No Buddy Set",
         description: "Please set an emergency buddy in your profile settings first",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (buddyData.status !== "accepted") {
+      toast({
+        title: "Buddy Not Accepted",
+        description: "Your buddy hasn't accepted your request yet",
         variant: "destructive",
       });
       return;
@@ -129,7 +137,7 @@ export function EmergencyButton() {
             <DialogDescription className="space-y-2">
               <p>
                 This will send an emergency alert to your buddy:{" "}
-                <strong>{buddy?.buddy?.displayName || buddy?.buddy?.username}</strong>
+                <strong>{buddyData?.buddy?.displayName || buddyData?.buddy?.username}</strong>
               </p>
               {gettingLocation && (
                 <p className="text-sm text-muted-foreground">Getting your location...</p>

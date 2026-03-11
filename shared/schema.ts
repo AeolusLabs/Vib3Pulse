@@ -585,6 +585,7 @@ export const buddies = pgTable("buddies", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
   buddyId: varchar("buddy_id").notNull().references(() => users.id),
+  status: text("status").notNull().default("pending"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 }, (table) => ({
   uniqueBuddy: unique().on(table.userId),
@@ -620,16 +621,37 @@ export const distressAlerts = pgTable("distress_alerts", {
   message: text("message").notNull(),
   latitude: text("latitude"),
   longitude: text("longitude"),
+  status: text("status").notNull().default("active"),
+  resolvedAt: timestamp("resolved_at"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
 export const insertDistressAlertSchema = createInsertSchema(distressAlerts).omit({
   id: true,
   createdAt: true,
+  resolvedAt: true,
 });
 
 export type InsertDistressAlert = z.infer<typeof insertDistressAlertSchema>;
 export type DistressAlert = typeof distressAlerts.$inferSelect;
+
+export const checkInTimers = pgTable("check_in_timers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  expiresAt: timestamp("expires_at").notNull(),
+  checkedInAt: timestamp("checked_in_at"),
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const insertCheckInTimerSchema = createInsertSchema(checkInTimers).omit({
+  id: true,
+  createdAt: true,
+  checkedInAt: true,
+});
+
+export type InsertCheckInTimer = z.infer<typeof insertCheckInTimerSchema>;
+export type CheckInTimer = typeof checkInTimers.$inferSelect;
 
 export const eventAnalytics = pgTable("event_analytics", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -905,6 +927,9 @@ export const notificationTypes = [
   "story_comment",
   "new_message",
   "buddy_alert",
+  "buddy_request",
+  "buddy_request_response",
+  "buddy_alert_resolved",
   "event_rsvp",
   "ticket_purchase",
   "new_follower",

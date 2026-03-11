@@ -1,4 +1,4 @@
-import { Bell, Check, CheckCheck, Heart, MessageCircle, UserPlus, Ticket, CalendarCheck, AlertTriangle, X } from "lucide-react";
+import { Bell, Check, CheckCheck, Heart, MessageCircle, UserPlus, Ticket, CalendarCheck, AlertTriangle, X, Shield, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -38,6 +38,12 @@ function getNotificationIcon(type: string) {
       return <Ticket className="h-4 w-4 text-amber-500" />;
     case "buddy_alert":
       return <AlertTriangle className="h-4 w-4 text-red-500" />;
+    case "buddy_request":
+      return <Shield className="h-4 w-4 text-primary" />;
+    case "buddy_request_response":
+      return <UserPlus className="h-4 w-4 text-green-500" />;
+    case "buddy_alert_resolved":
+      return <CheckCircle className="h-4 w-4 text-green-500" />;
     default:
       return <Bell className="h-4 w-4 text-muted-foreground" />;
   }
