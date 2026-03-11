@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react";
-import { ImagePlus, X, Calendar, MapPin, Building2, Users, Video, Film } from "lucide-react";
+import { useState, useEffect } from "react";
+import { ImagePlus, Calendar, MapPin, Building2, Users, Film } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { format } from "date-fns";
 import type { Event, Venue, Community } from "@shared/schema";
 import { MultiImageUploader } from "./MultiImageUploader";
+import { VideoUploader } from "./VideoUploader";
 
 type CommunityWithRole = Community & { memberCount: number; role: string };
 
@@ -34,7 +35,7 @@ interface CreatePostModalProps {
   attachedEvent?: Event | null;
   attachedVenue?: Venue | null;
   defaultCommunityId?: string | null;
-  onCreatePost?: (content: string, images?: string[], eventId?: string, venueId?: string, communityId?: string, videoDataUrl?: string) => void;
+  onCreatePost?: (content: string, images?: string[], eventId?: string, venueId?: string, communityId?: string, videoDataUrl?: string, videoUrl?: string) => void;
 }
 
 export default function CreatePostModal({ 
@@ -49,14 +50,11 @@ export default function CreatePostModal({
   const { toast } = useToast();
   const [content, setContent] = useState("");
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
-  const [selectedVideo, setSelectedVideo] = useState<string | null>(null);
+  const [uploadedVideoUrl, setUploadedVideoUrl] = useState<string | null>(null);
   const [mediaMode, setMediaMode] = useState<"photos" | "video">("photos");
   const [selectedCommunityId, setSelectedCommunityId] = useState<string>("none");
-  const videoInputRef = useRef<HTMLInputElement>(null);
   const maxLength = 280;
   const maxImages = 4;
-  const ALLOWED_VIDEO_TYPES = ["video/mp4", "video/quicktime", "video/webm"];
-  const MAX_VIDEO_SIZE = 100 * 1024 * 1024;
 
   // Fetch user's communities
   const { data: myCommunities = [] } = useQuery<CommunityWithRole[]>({
@@ -79,41 +77,11 @@ export default function CreatePostModal({
     }
   }, [open, attachedEvent, attachedVenue]);
 
-  const handleVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!ALLOWED_VIDEO_TYPES.includes(file.type)) {
-      toast({
-        title: "Unsupported format",
-        description: "Please select an MP4, MOV, or WebM video.",
-        variant: "destructive",
-      });
-      e.target.value = "";
-      return;
-    }
-    if (file.size > MAX_VIDEO_SIZE) {
-      toast({
-        title: "Video too large",
-        description: "Please select a video under 100MB.",
-        variant: "destructive",
-      });
-      e.target.value = "";
-      return;
-    }
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setSelectedVideo(reader.result as string);
-      setSelectedImages([]);
-    };
-    reader.readAsDataURL(file);
-    e.target.value = "";
-  };
-
   const switchMediaMode = (mode: "photos" | "video") => {
     if (mode === mediaMode) return;
     setMediaMode(mode);
     setSelectedImages([]);
-    setSelectedVideo(null);
+    setUploadedVideoUrl(null);
   };
 
   const handlePost = () => {
@@ -124,11 +92,12 @@ export default function CreatePostModal({
         attachedEvent?.id,
         attachedVenue?.id,
         selectedCommunityId !== "none" ? selectedCommunityId : undefined,
-        selectedVideo || undefined
+        undefined,
+        uploadedVideoUrl || undefined
       );
       setContent("");
       setSelectedImages([]);
-      setSelectedVideo(null);
+      setUploadedVideoUrl(null);
       setSelectedCommunityId("none");
       onClose();
     }
@@ -137,7 +106,7 @@ export default function CreatePostModal({
   const handleClose = () => {
     setContent("");
     setSelectedImages([]);
-    setSelectedVideo(null);
+    setUploadedVideoUrl(null);
     setMediaMode("photos");
     setSelectedCommunityId("none");
     onClose();
@@ -248,51 +217,22 @@ export default function CreatePostModal({
                 </Card>
               )}
 
-              {selectedImages.length > 0 && !selectedVideo && (
-                <div className="grid grid-cols-2 gap-2">
-                  {selectedImages.map((image, index) => (
-                    <div key={index} className="relative rounded-lg overflow-hidden border aspect-square group">
-                      <img
-                        src={image}
-                        alt={`Upload ${index + 1}`}
-                        className="w-full h-full object-cover"
-                      />
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
-                      <Button
-                        type="button"
-                        variant="destructive"
-                        size="icon"
-                        className="absolute top-1 right-1 h-7 w-7 rounded-full shadow-lg"
-                        onClick={() => setSelectedImages(selectedImages.filter((_, i) => i !== index))}
-                        data-testid={`button-remove-image-${index}`}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
+              {mediaMode === "photos" && (
+                <MultiImageUploader
+                  maxImages={maxImages}
+                  images={selectedImages}
+                  onImagesChange={setSelectedImages}
+                  compact
+                />
               )}
 
-              {selectedVideo && (
-                <div className="relative rounded-lg overflow-hidden border aspect-video bg-black">
-                  <video
-                    src={selectedVideo}
-                    className="w-full h-full object-contain"
-                    controls
-                    muted
-                    data-testid="video-preview"
-                  />
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    size="icon"
-                    className="absolute top-2 right-2 h-7 w-7 rounded-full shadow-lg"
-                    onClick={() => setSelectedVideo(null)}
-                    data-testid="button-remove-video"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
+              {mediaMode === "video" && (
+                <VideoUploader
+                  videoUrl={uploadedVideoUrl}
+                  onComplete={(objectPath) => setUploadedVideoUrl(objectPath)}
+                  onClear={() => setUploadedVideoUrl(null)}
+                  compact={!uploadedVideoUrl}
+                />
               )}
             </div>
           </div>
@@ -322,77 +262,7 @@ export default function CreatePostModal({
                 </Button>
               </div>
 
-              {mediaMode === "photos" && selectedImages.length < maxImages && !selectedVideo && (
-                <>
-                  <label htmlFor="post-image-upload">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      asChild
-                      data-testid="button-add-image"
-                    >
-                      <span className="cursor-pointer">
-                        <ImagePlus className="h-5 w-5 text-primary" />
-                      </span>
-                    </Button>
-                  </label>
-                  <input
-                    id="post-image-upload"
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    className="hidden"
-                    onChange={(e) => {
-                      const files = e.target.files;
-                      if (files) {
-                        const remainingSlots = maxImages - selectedImages.length;
-                        const filesToProcess = Array.from(files).slice(0, remainingSlots);
-                        filesToProcess.forEach((file) => {
-                          if (file.type.startsWith("image/")) {
-                            const reader = new FileReader();
-                            reader.onloadend = () => {
-                              setSelectedImages(prev => [...prev, reader.result as string].slice(0, maxImages));
-                            };
-                            reader.readAsDataURL(file);
-                          }
-                        });
-                      }
-                      e.target.value = "";
-                    }}
-                  />
-                </>
-              )}
-              {mediaMode === "video" && !selectedVideo && (
-                <>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => videoInputRef.current?.click()}
-                    data-testid="button-add-video"
-                  >
-                    <Film className="h-5 w-5 text-primary" />
-                  </Button>
-                  <input
-                    ref={videoInputRef}
-                    type="file"
-                    accept="video/mp4,video/quicktime,video/webm"
-                    className="hidden"
-                    onChange={handleVideoUpload}
-                    data-testid="input-video-upload"
-                  />
-                </>
-              )}
-              {selectedImages.length > 0 && (
-                <span className="text-xs text-muted-foreground">
-                  {selectedImages.length}/{maxImages}
-                </span>
-              )}
-              {selectedVideo && (
-                <span className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Video className="h-3 w-3" />
-                  Video attached
-                </span>
-              )}
+            
               
               {myCommunities.length > 0 && (
                 <Select value={selectedCommunityId} onValueChange={setSelectedCommunityId}>

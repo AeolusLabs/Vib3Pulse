@@ -353,9 +353,8 @@ export default function FeedPage() {
   });
 
   const createPostMutation = useMutation({
-    mutationFn: async (data: { content: string; images?: string[]; eventId?: string; venueId?: string; communityId?: string; videoDataUrl?: string }) => {
+    mutationFn: async (data: { content: string; images?: string[]; eventId?: string; venueId?: string; communityId?: string; videoUrl?: string }) => {
       let imageUrls: string[] | undefined;
-      let videoUrl: string | undefined;
 
       if (data.images && data.images.length > 0) {
         const base64Images = data.images.filter(img => img.startsWith('data:'));
@@ -367,20 +366,11 @@ export default function FeedPage() {
           }
         }
       }
-
-      if (data.videoDataUrl) {
-        const uploadRes = await apiRequest('POST', '/api/upload-video', { videoData: data.videoDataUrl });
-        if (!uploadRes.ok) {
-          throw new Error("Failed to upload video");
-        }
-        const result = await uploadRes.json();
-        videoUrl = result.videoUrl;
-      }
       
       return await apiRequest('POST', '/api/posts', {
         content: data.content,
         imageUrls,
-        videoUrl,
+        videoUrl: data.videoUrl,
         eventId: data.eventId,
         venueId: data.venueId,
         communityId: data.communityId,
@@ -606,14 +596,14 @@ export default function FeedPage() {
         attachedEvent={attachedEvent}
         attachedVenue={attachedVenue}
         defaultCommunityId={isViewingCommunity ? feedFilter : null}
-        onCreatePost={(content, images, eventId, venueId, communityId, videoDataUrl) => {
+        onCreatePost={(content, images, eventId, venueId, communityId, _videoDataUrl, videoUrl) => {
           createPostMutation.mutate({
             content,
             images,
             eventId,
             venueId,
             communityId,
-            videoDataUrl,
+            videoUrl,
           });
         }}
       />

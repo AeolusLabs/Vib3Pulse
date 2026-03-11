@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { Camera, Upload, Globe, Lock, Users, Check, X, Type, Film } from "lucide-react";
+import { Camera, Upload, Globe, Lock, Users, Check, X, Type } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +19,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { User } from "@shared/schema";
 import StoryCamera from "./StoryCamera";
+import { VideoUploader } from "./VideoUploader";
 
 interface CreateStoryModalProps {
   open: boolean;
@@ -37,7 +38,6 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
   const [showViewerSelection, setShowViewerSelection] = useState(false);
   const [caption, setCaption] = useState("");
   const videoRef = useRef<HTMLVideoElement>(null);
-  const storyVideoInputRef = useRef<HTMLInputElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const { toast } = useToast();
 
@@ -120,38 +120,6 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
     },
   });
 
-  const ALLOWED_VIDEO_TYPES = ["video/mp4", "video/quicktime", "video/webm"];
-  const MAX_VIDEO_SIZE = 100 * 1024 * 1024;
-
-  const handleVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!ALLOWED_VIDEO_TYPES.includes(file.type)) {
-      toast({
-        title: "Unsupported format",
-        description: "Please select an MP4, MOV, or WebM video.",
-        variant: "destructive",
-      });
-      if (e.target) e.target.value = "";
-      return;
-    }
-    if (file.size > MAX_VIDEO_SIZE) {
-      toast({
-        title: "File too large",
-        description: "Video must be under 100MB",
-        variant: "destructive",
-      });
-      if (e.target) e.target.value = "";
-      return;
-    }
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setSelectedStoryVideo(reader.result as string);
-      setMediaType("video");
-    };
-    reader.readAsDataURL(file);
-    if (e.target) e.target.value = "";
-  };
 
   const resetState = () => {
     setSelectedImage(null);
@@ -230,14 +198,9 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
       setIsUploading(true);
       
       if (mediaType === "video" && selectedStoryVideo) {
-        let videoUrl = selectedStoryVideo;
-        if (selectedStoryVideo.startsWith('data:')) {
-          videoUrl = await uploadMediaToStorage(selectedStoryVideo);
-        }
-        
         createStoryMutation.mutate({
-          imageUrl: videoUrl,
-          videoUrl: videoUrl,
+          imageUrl: selectedStoryVideo,
+          videoUrl: selectedStoryVideo,
           type: "video",
           privacy,
           caption: caption.trim() || undefined,
@@ -328,15 +291,17 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
                 </Button>
               </label>
 
-              <Button
-                variant="outline"
-                className="w-full h-28 flex flex-col gap-3"
-                onClick={() => storyVideoInputRef.current?.click()}
-                data-testid="button-upload-video"
-              >
-                <Film className="h-10 w-10" />
-                <span className="font-semibold">Upload Video</span>
-              </Button>
+              <VideoUploader
+                videoUrl={null}
+                onComplete={(objectPath) => {
+                  setSelectedStoryVideo(objectPath);
+                  setMediaType("video");
+                }}
+                onClear={() => {
+                  setSelectedStoryVideo(null);
+                  setMediaType("image");
+                }}
+              />
             </div>
             <input
               id="story-image-upload"
@@ -344,14 +309,6 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
               accept="image/*"
               className="hidden"
               onChange={handleImageUpload}
-            />
-            <input
-              ref={storyVideoInputRef}
-              type="file"
-              accept="video/mp4,video/quicktime,video/webm"
-              className="hidden"
-              onChange={handleVideoUpload}
-              data-testid="input-story-video-upload"
             />
           </div>
         )}

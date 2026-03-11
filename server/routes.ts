@@ -3855,6 +3855,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Set ACL policy for venue images and get normalized path
+  app.put("/api/post-media", requireAuth, async (req, res) => {
+    if (!req.body.imageURL) {
+      return res.status(400).json({ message: "imageURL is required" });
+    }
+
+    const userId = req.user!.id;
+
+    try {
+      const objectStorageService = new ObjectStorageService();
+      const objectPath = await objectStorageService.trySetObjectEntityAclPolicy(
+        req.body.imageURL,
+        {
+          owner: userId,
+          visibility: "public",
+        }
+      );
+
+      res.status(200).json({ objectPath });
+    } catch (error) {
+      console.error("Error setting post media:", error);
+      res.status(500).json({ message: "Failed to process post media" });
+    }
+  });
+
   app.put("/api/venue-images", requireAuth, async (req, res) => {
     if (!req.body.imageURL) {
       return res.status(400).json({ message: "imageURL is required" });
