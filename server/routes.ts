@@ -1448,6 +1448,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/upload-video", requireAuth, async (req, res) => {
+    try {
+      const { videoData } = req.body;
+      
+      if (!videoData || !videoData.startsWith('data:video')) {
+        return res.status(400).json({ message: "Invalid video data" });
+      }
+      
+      const objectStorageService = new ObjectStorageService();
+      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+      
+      const url = new URL(uploadURL);
+      const pathParts = url.pathname.split('/');
+      const uploadsIndex = pathParts.findIndex(p => p === 'uploads');
+      const extractedId = uploadsIndex !== -1 ? pathParts.slice(uploadsIndex).join('/') : pathParts.slice(-1)[0];
+      const stablePath = `/objects/${extractedId}`;
+      
+      const base64Data = videoData.split(',')[1];
+      const buffer = Buffer.from(base64Data, 'base64');
+      
+      const contentTypeMatch = videoData.match(/data:(video\/\w+);base64/);
+      const contentType = contentTypeMatch ? contentTypeMatch[1] : 'video/mp4';
+      
+      const uploadResponse = await fetch(uploadURL, {
+        method: 'PUT',
+        body: buffer,
+        headers: {
+          'Content-Type': contentType,
+        },
+      });
+      
+      if (!uploadResponse.ok) {
+        console.error("GCS video upload failed:", uploadResponse.status);
+        throw new Error('Failed to upload video to storage');
+      }
+      
+      try {
+        await objectStorageService.trySetObjectEntityAclPolicy(stablePath, {
+          owner: req.user!.id,
+          visibility: "public",
+        });
+      } catch (aclError) {
+        console.error("Failed to set ACL policy for video:", aclError);
+        return res.status(500).json({ message: "Failed to set video permissions. Please try again." });
+      }
+      
+      res.json({ videoUrl: stablePath });
+    } catch (error) {
+      console.error("Error uploading video:", error);
+      res.status(500).json({ message: "Failed to upload video" });
+    }
+  });
+
   // Posts
   app.get("/api/posts", async (req, res) => {
     try {
@@ -1611,30 +1664,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { imageData } = req.body;
       
-      if (!imageData || !imageData.startsWith('data:image')) {
-        return res.status(400).json({ message: "Invalid image data" });
+      const isImage = imageData && imageData.startsWith('data:image');
+      const isVideo = imageData && imageData.startsWith('data:video');
+      
+      if (!imageData || (!isImage && !isVideo)) {
+        return res.status(400).json({ message: "Invalid media data" });
       }
       
       const objectStorageService = new ObjectStorageService();
       const uploadURL = await objectStorageService.getObjectEntityUploadURL();
       
-      // Extract stable path from upload URL
       const url = new URL(uploadURL);
       const pathParts = url.pathname.split('/');
       const uploadsIndex = pathParts.findIndex(p => p === 'uploads');
       const extractedId = uploadsIndex !== -1 ? pathParts.slice(uploadsIndex).join('/') : pathParts.slice(-1)[0];
       const stablePath = `/objects/${extractedId}`;
       
-      // Convert base64 to buffer
       const base64Data = imageData.split(',')[1];
       const buffer = Buffer.from(base64Data, 'base64');
       
-      // Upload to GCS using signed URL
+      let contentType = 'image/jpeg';
+      if (isVideo) {
+        const videoTypeMatch = imageData.match(/data:(video\/\w+);base64/);
+        contentType = videoTypeMatch ? videoTypeMatch[1] : 'video/mp4';
+      } else {
+        const imageTypeMatch = imageData.match(/data:(image\/\w+);base64/);
+        contentType = imageTypeMatch ? imageTypeMatch[1] : 'image/jpeg';
+      }
+      
       const uploadResponse = await fetch(uploadURL, {
         method: 'PUT',
         body: buffer,
         headers: {
-          'Content-Type': 'image/jpeg',
+          'Content-Type': contentType,
         },
       });
       
@@ -1643,8 +1705,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         throw new Error('Failed to upload to storage');
       }
       
-      // Set ACL policy to make the image publicly readable
-      // This MUST succeed for the image to be viewable - fail the request if it doesn't
       try {
         await objectStorageService.trySetObjectEntityAclPolicy(stablePath, {
           owner: req.user!.id,
@@ -1652,14 +1712,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       } catch (aclError) {
         console.error("Error setting ACL policy:", aclError);
-        // ACL must be set for the image to be viewable - fail the upload
-        return res.status(500).json({ message: "Failed to set image permissions. Please try again." });
+        return res.status(500).json({ message: "Failed to set media permissions. Please try again." });
       }
       
-      res.json({ stablePath });
+      res.json({ stablePath, mediaType: isVideo ? 'video' : 'image' });
     } catch (error) {
-      console.error("Error uploading story image:", error);
-      res.status(500).json({ message: "Failed to upload image" });
+      console.error("Error uploading story media:", error);
+      res.status(500).json({ message: "Failed to upload media" });
     }
   });
 

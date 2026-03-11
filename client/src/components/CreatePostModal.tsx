@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
-import { ImagePlus, X, Calendar, MapPin, Building2, Users } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { ImagePlus, X, Calendar, MapPin, Building2, Users, Video, Film } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -33,7 +34,7 @@ interface CreatePostModalProps {
   attachedEvent?: Event | null;
   attachedVenue?: Venue | null;
   defaultCommunityId?: string | null;
-  onCreatePost?: (content: string, images?: string[], eventId?: string, venueId?: string, communityId?: string) => void;
+  onCreatePost?: (content: string, images?: string[], eventId?: string, venueId?: string, communityId?: string, videoDataUrl?: string) => void;
 }
 
 export default function CreatePostModal({ 
@@ -45,9 +46,12 @@ export default function CreatePostModal({
   onCreatePost 
 }: CreatePostModalProps) {
   const { data: currentUser } = useAuth();
+  const { toast } = useToast();
   const [content, setContent] = useState("");
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
+  const [selectedVideo, setSelectedVideo] = useState<string | null>(null);
   const [selectedCommunityId, setSelectedCommunityId] = useState<string>("none");
+  const videoInputRef = useRef<HTMLInputElement>(null);
   const maxLength = 280;
   const maxImages = 4;
 
@@ -72,6 +76,27 @@ export default function CreatePostModal({
     }
   }, [open, attachedEvent, attachedVenue]);
 
+  const handleVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && file.type.startsWith("video/")) {
+      if (file.size > 50 * 1024 * 1024) {
+        toast({
+          title: "Video too large",
+          description: "Please select a video under 50MB.",
+          variant: "destructive",
+        });
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setSelectedVideo(reader.result as string);
+        setSelectedImages([]);
+      };
+      reader.readAsDataURL(file);
+    }
+    e.target.value = "";
+  };
+
   const handlePost = () => {
     if (content.trim()) {
       onCreatePost?.(
@@ -79,11 +104,12 @@ export default function CreatePostModal({
         selectedImages.length > 0 ? selectedImages : undefined,
         attachedEvent?.id,
         attachedVenue?.id,
-        selectedCommunityId !== "none" ? selectedCommunityId : undefined
+        selectedCommunityId !== "none" ? selectedCommunityId : undefined,
+        selectedVideo || undefined
       );
-      console.log('Created post:', content, selectedImages.length > 0 ? `with ${selectedImages.length} images` : 'text only');
       setContent("");
       setSelectedImages([]);
+      setSelectedVideo(null);
       setSelectedCommunityId("none");
       onClose();
     }
@@ -92,6 +118,7 @@ export default function CreatePostModal({
   const handleClose = () => {
     setContent("");
     setSelectedImages([]);
+    setSelectedVideo(null);
     setSelectedCommunityId("none");
     onClose();
   };
@@ -201,7 +228,7 @@ export default function CreatePostModal({
                 </Card>
               )}
 
-              {selectedImages.length > 0 && (
+              {selectedImages.length > 0 && !selectedVideo && (
                 <div className="grid grid-cols-2 gap-2">
                   {selectedImages.map((image, index) => (
                     <div key={index} className="relative rounded-lg overflow-hidden border aspect-square group">
@@ -225,12 +252,34 @@ export default function CreatePostModal({
                   ))}
                 </div>
               )}
+
+              {selectedVideo && (
+                <div className="relative rounded-lg overflow-hidden border aspect-video bg-black">
+                  <video
+                    src={selectedVideo}
+                    className="w-full h-full object-contain"
+                    controls
+                    muted
+                    data-testid="video-preview"
+                  />
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="icon"
+                    className="absolute top-2 right-2 h-7 w-7 rounded-full shadow-lg"
+                    onClick={() => setSelectedVideo(null)}
+                    data-testid="button-remove-video"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
 
           <div className="flex items-center justify-between pt-3 border-t">
             <div className="flex items-center gap-2">
-              {selectedImages.length < maxImages && (
+              {selectedImages.length < maxImages && !selectedVideo && (
                 <>
                   <label htmlFor="post-image-upload">
                     <Button
@@ -270,9 +319,35 @@ export default function CreatePostModal({
                   />
                 </>
               )}
+              {!selectedVideo && selectedImages.length === 0 && (
+                <>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => videoInputRef.current?.click()}
+                    data-testid="button-add-video"
+                  >
+                    <Film className="h-5 w-5 text-primary" />
+                  </Button>
+                  <input
+                    ref={videoInputRef}
+                    type="file"
+                    accept="video/*"
+                    className="hidden"
+                    onChange={handleVideoUpload}
+                    data-testid="input-video-upload"
+                  />
+                </>
+              )}
               {selectedImages.length > 0 && (
                 <span className="text-xs text-muted-foreground">
                   {selectedImages.length}/{maxImages}
+                </span>
+              )}
+              {selectedVideo && (
+                <span className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Video className="h-3 w-3" />
+                  Video attached
                 </span>
               )}
               

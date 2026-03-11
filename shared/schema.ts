@@ -175,6 +175,7 @@ export const posts = pgTable("posts", {
   content: text("content").notNull(),
   imageUrl: text("image_url"), // Legacy - kept for backward compatibility
   imageUrls: text("image_urls").array().default(sql`'{}'`), // Up to 4 images
+  videoUrl: text("video_url"),
   eventId: varchar("event_id").references(() => events.id),
   venueId: varchar("venue_id").references(() => venues.id),
   communityId: varchar("community_id").references(() => communities.id),
@@ -187,6 +188,7 @@ export const insertPostSchema = createInsertSchema(posts).omit({
   imageUrl: true, // Use imageUrls instead
 }).extend({
   imageUrls: z.array(z.string()).max(4, "Maximum 4 images allowed").optional(),
+  videoUrl: z.string().optional().nullable(),
 });
 
 export type InsertPost = z.infer<typeof insertPostSchema>;
@@ -267,6 +269,7 @@ export const stories = pgTable("stories", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
   imageUrl: text("image_url").notNull(),
+  videoUrl: text("video_url"),
   caption: text("caption"),
   type: text("type").notNull().default("image"),
   privacy: text("privacy").notNull().default("public"), // "public" or "private"

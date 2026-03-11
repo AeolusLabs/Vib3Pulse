@@ -28,6 +28,7 @@ import { useAuth } from "@/hooks/useAuth";
 import CommentDialog from "@/components/CommentDialog";
 import LinkPreviewCard, { extractFirstUrl } from "@/components/LinkPreviewCard";
 import ImageGrid from "@/components/ImageGrid";
+import FeedVideoPlayer from "@/components/FeedVideoPlayer";
 import { format } from "date-fns";
 import type { Event, Venue } from "@shared/schema";
 
@@ -82,6 +83,7 @@ interface FeedPostProps {
   content: string;
   image?: string;
   imageUrls?: string[];
+  videoUrl?: string | null;
   timestamp?: string;
   createdAt?: string | Date;
   likes: number;
@@ -177,6 +179,7 @@ export default function FeedPost({
   content,
   image,
   imageUrls = [],
+  videoUrl,
   timestamp,
   createdAt,
   likes: initialLikes,
@@ -565,8 +568,13 @@ export default function FeedPost({
             ) : null;
           })()}
 
-          {/* Multiple images grid with lightbox support */}
-          {(() => {
+          {videoUrl && (
+            <div className="mt-3" data-testid={`video-post-${id}`}>
+              <FeedVideoPlayer src={videoUrl} />
+            </div>
+          )}
+
+          {!videoUrl && (() => {
             const allImages = [
               ...imageUrls,
               ...(image && !imageUrls.includes(image) ? [image] : []),

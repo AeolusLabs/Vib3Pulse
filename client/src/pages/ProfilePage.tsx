@@ -587,6 +587,7 @@ export default function ProfilePage() {
                       }}
                       content={post.content}
                       image={post.imageUrl || undefined}
+                      videoUrl={post.videoUrl || undefined}
                       createdAt={post.createdAt}
                       likes={0}
                       comments={0}
@@ -625,6 +626,7 @@ export default function ProfilePage() {
                       }}
                       content={post.content}
                       image={post.imageUrl || undefined}
+                      videoUrl={post.videoUrl || undefined}
                       createdAt={post.createdAt}
                       likes={0}
                       comments={0}
@@ -663,6 +665,7 @@ export default function ProfilePage() {
                       }}
                       content={post.content}
                       image={post.imageUrl || undefined}
+                      videoUrl={post.videoUrl || undefined}
                       createdAt={post.createdAt}
                       likes={0}
                       comments={0}

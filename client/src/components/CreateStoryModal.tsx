@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { Camera, Upload, Globe, Lock, Users, Check, X, Type } from "lucide-react";
+import { Camera, Upload, Globe, Lock, Users, Check, X, Type, Film } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,6 +28,8 @@ interface CreateStoryModalProps {
 
 export default function CreateStoryModal({ open, onClose, onCreateStory }: CreateStoryModalProps) {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedStoryVideo, setSelectedStoryVideo] = useState<string | null>(null);
+  const [mediaType, setMediaType] = useState<"image" | "video">("image");
   const [showCamera, setShowCamera] = useState(false);
   const [showFullscreenCamera, setShowFullscreenCamera] = useState(false);
   const [privacy, setPrivacy] = useState<"public" | "private">("public");
@@ -35,6 +37,7 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
   const [showViewerSelection, setShowViewerSelection] = useState(false);
   const [caption, setCaption] = useState("");
   const videoRef = useRef<HTMLVideoElement>(null);
+  const storyVideoInputRef = useRef<HTMLInputElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const { toast } = useToast();
 
@@ -71,11 +74,9 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
     throw new Error('Unable to get security token. Please refresh the page and try again.');
   };
 
-  const uploadImageToStorage = async (imageDataUrl: string): Promise<string> => {
-    // Get CSRF token (throws if unavailable)
+  const uploadMediaToStorage = async (dataUrl: string): Promise<string> => {
     const csrfToken = await getCsrfToken();
     
-    // Use server-side upload to bypass CORS issues with direct GCS uploads
     const response = await fetch('/api/stories/upload', {
       method: 'POST',
       credentials: 'include',
@@ -83,12 +84,12 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
         'Content-Type': 'application/json',
         'x-csrf-token': csrfToken,
       },
-      body: JSON.stringify({ imageData: imageDataUrl }),
+      body: JSON.stringify({ imageData: dataUrl }),
     });
     
     if (!response.ok) {
       const error = await response.json().catch(() => ({ message: 'Upload failed' }));
-      throw new Error(error.message || 'Failed to upload image');
+      throw new Error(error.message || 'Failed to upload media');
     }
     
     const { stablePath } = await response.json();
@@ -96,7 +97,7 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
   };
 
   const createStoryMutation = useMutation({
-    mutationFn: async (data: { imageUrl: string; type: string; privacy: string; caption?: string; allowedViewerIds?: string[] }) => {
+    mutationFn: async (data: { imageUrl: string; videoUrl?: string; type: string; privacy: string; caption?: string; allowedViewerIds?: string[] }) => {
       return await apiRequest('POST', '/api/stories', data);
     },
     onSuccess: () => {
@@ -119,8 +120,31 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
     },
   });
 
+  const handleVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && file.type.startsWith("video/")) {
+      if (file.size > 50 * 1024 * 1024) {
+        toast({
+          title: "File too large",
+          description: "Video must be under 50MB",
+          variant: "destructive",
+        });
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setSelectedStoryVideo(reader.result as string);
+        setMediaType("video");
+      };
+      reader.readAsDataURL(file);
+    }
+    if (e.target) e.target.value = "";
+  };
+
   const resetState = () => {
     setSelectedImage(null);
+    setSelectedStoryVideo(null);
+    setMediaType("image");
     setPrivacy("public");
     setSelectedViewers([]);
     setShowViewerSelection(false);
@@ -187,13 +211,30 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
   };
 
   const handlePostStory = async () => {
-    if (selectedImage) {
-      try {
-        setIsUploading(true);
+    const hasMedia = selectedImage || selectedStoryVideo;
+    if (!hasMedia) return;
+    
+    try {
+      setIsUploading(true);
+      
+      if (mediaType === "video" && selectedStoryVideo) {
+        let videoUrl = selectedStoryVideo;
+        if (selectedStoryVideo.startsWith('data:')) {
+          videoUrl = await uploadMediaToStorage(selectedStoryVideo);
+        }
         
+        createStoryMutation.mutate({
+          imageUrl: videoUrl,
+          videoUrl: videoUrl,
+          type: "video",
+          privacy,
+          caption: caption.trim() || undefined,
+          allowedViewerIds: privacy === "private" ? selectedViewers : undefined,
+        });
+      } else if (selectedImage) {
         let imageUrl = selectedImage;
         if (selectedImage.startsWith('data:')) {
-          imageUrl = await uploadImageToStorage(selectedImage);
+          imageUrl = await uploadMediaToStorage(selectedImage);
         }
         
         createStoryMutation.mutate({
@@ -203,16 +244,16 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
           caption: caption.trim() || undefined,
           allowedViewerIds: privacy === "private" ? selectedViewers : undefined,
         });
-      } catch (error) {
-        console.error('Error uploading story:', error);
-        toast({
-          title: "Upload Error",
-          description: "Failed to upload your story image. Please try again.",
-          variant: "destructive",
-        });
-      } finally {
-        setIsUploading(false);
       }
+    } catch (error) {
+      console.error('Error uploading story:', error);
+      toast({
+        title: "Upload Error",
+        description: "Failed to upload your story. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -249,30 +290,42 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
           </DialogDescription>
         </DialogHeader>
 
-        {!selectedImage && !showCamera && (
+        {!selectedImage && !selectedStoryVideo && !showCamera && (
           <div className="space-y-4 py-4">
             <Button
               onClick={() => setShowFullscreenCamera(true)}
-              className="w-full h-32 flex flex-col gap-3 bg-gradient-to-br from-[#D0BFFF] to-[#B0D0FF] hover:from-[#C0AFEF] hover:to-[#A0C0EF] text-black"
+              className="w-full h-28 flex flex-col gap-3 bg-gradient-to-br from-[#D0BFFF] to-[#B0D0FF] hover:from-[#C0AFEF] hover:to-[#A0C0EF] text-black"
               data-testid="button-take-photo"
             >
-              <Camera className="h-12 w-12" />
+              <Camera className="h-10 w-10" />
               <span className="font-semibold">Open Camera</span>
             </Button>
 
-            <label htmlFor="story-image-upload" className="block">
+            <div className="grid grid-cols-2 gap-3">
+              <label htmlFor="story-image-upload" className="block">
+                <Button
+                  variant="outline"
+                  className="w-full h-28 flex flex-col gap-3"
+                  asChild
+                  data-testid="button-upload-photo"
+                >
+                  <span>
+                    <Upload className="h-10 w-10" />
+                    <span className="font-semibold">Upload Photo</span>
+                  </span>
+                </Button>
+              </label>
+
               <Button
                 variant="outline"
-                className="w-full h-32 flex flex-col gap-3"
-                asChild
-                data-testid="button-upload-photo"
+                className="w-full h-28 flex flex-col gap-3"
+                onClick={() => storyVideoInputRef.current?.click()}
+                data-testid="button-upload-video"
               >
-                <span>
-                  <Upload className="h-12 w-12" />
-                  <span className="font-semibold">Upload Photo</span>
-                </span>
+                <Film className="h-10 w-10" />
+                <span className="font-semibold">Upload Video</span>
               </Button>
-            </label>
+            </div>
             <input
               id="story-image-upload"
               type="file"
@@ -280,17 +333,37 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
               className="hidden"
               onChange={handleImageUpload}
             />
+            <input
+              ref={storyVideoInputRef}
+              type="file"
+              accept="video/*"
+              className="hidden"
+              onChange={handleVideoUpload}
+              data-testid="input-story-video-upload"
+            />
           </div>
         )}
 
-        {selectedImage && !showCamera && !showViewerSelection && (
+        {(selectedImage || selectedStoryVideo) && !showCamera && !showViewerSelection && (
           <div className="space-y-4">
             <div className="relative rounded-lg overflow-hidden bg-black aspect-[3/4]">
-              <img
-                src={selectedImage}
-                alt="Story preview"
-                className="w-full h-full object-cover"
-              />
+              {mediaType === "video" && selectedStoryVideo ? (
+                <video
+                  src={selectedStoryVideo}
+                  className="w-full h-full object-cover"
+                  controls
+                  muted
+                  autoPlay
+                  loop
+                  data-testid="story-video-preview"
+                />
+              ) : (
+                <img
+                  src={selectedImage || ""}
+                  alt="Story preview"
+                  className="w-full h-full object-cover"
+                />
+              )}
               {caption && (
                 <div className="absolute bottom-4 left-4 right-4 text-center">
                   <p 
@@ -374,12 +447,16 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
 
             <div className="flex gap-2">
               <Button
-                onClick={() => setSelectedImage(null)}
+                onClick={() => {
+                  setSelectedImage(null);
+                  setSelectedStoryVideo(null);
+                  setMediaType("image");
+                }}
                 variant="outline"
                 className="flex-1"
                 data-testid="button-retake"
               >
-                Retake
+                {mediaType === "video" ? "Remove" : "Retake"}
               </Button>
               <Button
                 onClick={handlePostStory}

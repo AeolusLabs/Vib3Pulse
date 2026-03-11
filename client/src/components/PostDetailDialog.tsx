@@ -12,6 +12,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { format } from "date-fns";
 import CommentItem from "./CommentItem";
 import ImageGrid from "./ImageGrid";
+import FeedVideoPlayer from "./FeedVideoPlayer";
 
 interface PostDetailDialogProps {
   open: boolean;
@@ -26,6 +27,7 @@ interface PostDetailDialogProps {
   content: string;
   image?: string;
   imageUrls?: string[];
+  videoUrl?: string;
   createdAt?: string | Date;
 }
 
@@ -97,6 +99,7 @@ export default function PostDetailDialog({
   content,
   image,
   imageUrls,
+  videoUrl,
   createdAt,
 }: PostDetailDialogProps) {
   const allImages = [
@@ -263,7 +266,13 @@ export default function PostDetailDialog({
               </p>
             </div>
 
-            {allImages.length > 0 && (
+            {videoUrl && (
+              <div className="mt-4" data-testid={`dialog-video-${postId}`}>
+                <FeedVideoPlayer src={videoUrl} />
+              </div>
+            )}
+
+            {!videoUrl && allImages.length > 0 && (
               <div className="mt-4" data-testid={`dialog-images-${postId}`}>
                 <ImageGrid 
                   images={allImages} 

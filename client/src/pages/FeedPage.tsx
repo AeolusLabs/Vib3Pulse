@@ -184,6 +184,7 @@ type StoryWithUser = {
   id: string;
   userId: string;
   imageUrl: string;
+  videoUrl?: string | null;
   type: string;
   privacy: string;
   originalStoryId: string | null;
@@ -337,8 +338,9 @@ export default function FeedPage() {
       organizationName: firstStory.user.organizationName,
       slides: userStories.map((story: StoryWithUser) => ({
         id: story.id,
-        type: 'image' as const,
+        type: (story.type === 'video' ? 'video' : 'image') as "image" | "text" | "video",
         content: story.imageUrl,
+        videoUrl: story.videoUrl || null,
         timestamp: new Date(story.createdAt).toLocaleString(),
         likeCount: story.likeCount || 0,
         isLiked: story.isLiked || false,
@@ -351,9 +353,10 @@ export default function FeedPage() {
   });
 
   const createPostMutation = useMutation({
-    mutationFn: async (data: { content: string; images?: string[]; eventId?: string; venueId?: string; communityId?: string }) => {
-      // Upload images first if they are base64 data URLs
+    mutationFn: async (data: { content: string; images?: string[]; eventId?: string; venueId?: string; communityId?: string; videoDataUrl?: string }) => {
       let imageUrls: string[] | undefined;
+      let videoUrl: string | undefined;
+
       if (data.images && data.images.length > 0) {
         const base64Images = data.images.filter(img => img.startsWith('data:'));
         if (base64Images.length > 0) {
@@ -364,10 +367,20 @@ export default function FeedPage() {
           }
         }
       }
+
+      if (data.videoDataUrl) {
+        const uploadRes = await apiRequest('POST', '/api/upload-video', { videoData: data.videoDataUrl });
+        if (!uploadRes.ok) {
+          throw new Error("Failed to upload video");
+        }
+        const result = await uploadRes.json();
+        videoUrl = result.videoUrl;
+      }
       
       return await apiRequest('POST', '/api/posts', {
         content: data.content,
         imageUrls,
+        videoUrl,
         eventId: data.eventId,
         venueId: data.venueId,
         communityId: data.communityId,
@@ -546,6 +559,7 @@ export default function FeedPage() {
                 isLiked={false}
                 image={post.imageUrl}
                 imageUrls={post.imageUrls || []}
+                videoUrl={post.videoUrl}
                 eventId={post.eventId}
                 venueId={post.venueId}
                 community={post.community}
@@ -592,13 +606,14 @@ export default function FeedPage() {
         attachedEvent={attachedEvent}
         attachedVenue={attachedVenue}
         defaultCommunityId={isViewingCommunity ? feedFilter : null}
-        onCreatePost={(content, images, eventId, venueId, communityId) => {
+        onCreatePost={(content, images, eventId, venueId, communityId, videoDataUrl) => {
           createPostMutation.mutate({
             content,
             images,
             eventId,
             venueId,
             communityId,
+            videoDataUrl,
           });
         }}
       />
@@ -617,6 +632,7 @@ export default function FeedPage() {
           content={selectedPost.content}
           image={selectedPost.imageUrl || selectedPost.image}
           imageUrls={selectedPost.imageUrls}
+          videoUrl={selectedPost.videoUrl}
           createdAt={selectedPost.createdAt}
         />
       )}

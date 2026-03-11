@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { X, ChevronLeft, ChevronRight, Heart, Send, Trash2, Share2, Lock, RefreshCw } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { X, ChevronLeft, ChevronRight, Heart, Send, Trash2, Share2, Lock, RefreshCw, Volume2, VolumeX } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,8 +12,9 @@ import { motion, AnimatePresence } from "framer-motion";
 
 interface StorySlide {
   id: string;
-  type: "image" | "text";
+  type: "image" | "text" | "video";
   content: string;
+  videoUrl?: string | null;
   backgroundColor?: string;
   timestamp: string;
   likeCount?: number;
@@ -55,9 +56,12 @@ export default function StoryViewer({
   const [replyText, setReplyText] = useState("");
   const [showLikeAnimation, setShowLikeAnimation] = useState(false);
   const [localLikeStates, setLocalLikeStates] = useState<Record<string, { isLiked: boolean; likeCount: number }>>({});
+  const [isVideoMuted, setIsVideoMuted] = useState(true);
+  const storyVideoRef = useRef<HTMLVideoElement>(null);
 
   const SLIDE_DURATION = 5000;
   const currentStory = slides[currentSlide];
+  const isVideoSlide = currentStory?.type === "video";
 
   // Initialize local like states from slides
   useEffect(() => {
@@ -196,6 +200,54 @@ export default function StoryViewer({
   }, [currentStory, isOwnStory, localLikeStates, likeStoryMutation]);
 
   useEffect(() => {
+    if (isVideoSlide) {
+      const video = storyVideoRef.current;
+      if (!video) return;
+
+      const onTimeUpdate = () => {
+        if (video.duration) {
+          setProgress((video.currentTime / video.duration) * 100);
+        }
+      };
+      const onEnded = () => {
+        if (currentSlide < slides.length - 1) {
+          setCurrentSlide((curr) => curr + 1);
+          setProgress(0);
+        } else {
+          onNext?.();
+        }
+      };
+
+      const onError = () => {
+        if (currentSlide < slides.length - 1) {
+          setCurrentSlide((curr) => curr + 1);
+          setProgress(0);
+        } else {
+          onNext?.();
+        }
+      };
+
+      video.addEventListener("timeupdate", onTimeUpdate);
+      video.addEventListener("ended", onEnded);
+      video.addEventListener("error", onError);
+      video.addEventListener("stalled", () => {
+        const fallback = setTimeout(onError, 5000);
+        video.addEventListener("playing", () => clearTimeout(fallback), { once: true });
+      });
+
+      if (!isPaused) {
+        video.play().catch(() => {});
+      } else {
+        video.pause();
+      }
+
+      return () => {
+        video.removeEventListener("timeupdate", onTimeUpdate);
+        video.removeEventListener("ended", onEnded);
+        video.removeEventListener("error", onError);
+      };
+    }
+
     if (isPaused) return;
 
     const interval = setInterval(() => {
@@ -215,7 +267,7 @@ export default function StoryViewer({
     }, 100);
 
     return () => clearInterval(interval);
-  }, [currentSlide, slides.length, isPaused, onNext]);
+  }, [currentSlide, slides.length, isPaused, onNext, isVideoSlide]);
 
   const handlePrevious = () => {
     if (currentSlide > 0) {
@@ -312,6 +364,22 @@ export default function StoryViewer({
               </div>
             </div>
             <div className="flex items-center gap-1">
+              {isVideoSlide && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {
+                    setIsVideoMuted(!isVideoMuted);
+                    if (storyVideoRef.current) {
+                      storyVideoRef.current.muted = !isVideoMuted;
+                    }
+                  }}
+                  className="text-white hover:bg-white/20"
+                  data-testid="button-story-mute"
+                >
+                  {isVideoMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+                </Button>
+              )}
               {isOwnStory && (
                 <Button
                   variant="ghost"
@@ -346,7 +414,17 @@ export default function StoryViewer({
           onTouchEnd={() => setIsPaused(false)}
           onClick={handleTap}
         >
-          {currentStory.type === "image" ? (
+          {currentStory.type === "video" ? (
+            <video
+              ref={storyVideoRef}
+              src={currentStory.videoUrl || currentStory.content}
+              className="w-full h-full object-cover"
+              muted={isVideoMuted}
+              playsInline
+              autoPlay
+              data-testid="story-video"
+            />
+          ) : currentStory.type === "image" ? (
             <img
               src={currentStory.content}
               alt="Story"
