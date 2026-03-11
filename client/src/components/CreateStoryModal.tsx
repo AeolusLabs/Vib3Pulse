@@ -120,24 +120,36 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
     },
   });
 
+  const ALLOWED_VIDEO_TYPES = ["video/mp4", "video/quicktime", "video/webm"];
+  const MAX_VIDEO_SIZE = 100 * 1024 * 1024;
+
   const handleVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file && file.type.startsWith("video/")) {
-      if (file.size > 50 * 1024 * 1024) {
-        toast({
-          title: "File too large",
-          description: "Video must be under 50MB",
-          variant: "destructive",
-        });
-        return;
-      }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setSelectedStoryVideo(reader.result as string);
-        setMediaType("video");
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+    if (!ALLOWED_VIDEO_TYPES.includes(file.type)) {
+      toast({
+        title: "Unsupported format",
+        description: "Please select an MP4, MOV, or WebM video.",
+        variant: "destructive",
+      });
+      if (e.target) e.target.value = "";
+      return;
     }
+    if (file.size > MAX_VIDEO_SIZE) {
+      toast({
+        title: "File too large",
+        description: "Video must be under 100MB",
+        variant: "destructive",
+      });
+      if (e.target) e.target.value = "";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setSelectedStoryVideo(reader.result as string);
+      setMediaType("video");
+    };
+    reader.readAsDataURL(file);
     if (e.target) e.target.value = "";
   };
 
@@ -336,7 +348,7 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
             <input
               ref={storyVideoInputRef}
               type="file"
-              accept="video/*"
+              accept="video/mp4,video/quicktime,video/webm"
               className="hidden"
               onChange={handleVideoUpload}
               data-testid="input-story-video-upload"

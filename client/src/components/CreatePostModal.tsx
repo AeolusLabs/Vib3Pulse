@@ -50,10 +50,13 @@ export default function CreatePostModal({
   const [content, setContent] = useState("");
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [selectedVideo, setSelectedVideo] = useState<string | null>(null);
+  const [mediaMode, setMediaMode] = useState<"photos" | "video">("photos");
   const [selectedCommunityId, setSelectedCommunityId] = useState<string>("none");
   const videoInputRef = useRef<HTMLInputElement>(null);
   const maxLength = 280;
   const maxImages = 4;
+  const ALLOWED_VIDEO_TYPES = ["video/mp4", "video/quicktime", "video/webm"];
+  const MAX_VIDEO_SIZE = 100 * 1024 * 1024;
 
   // Fetch user's communities
   const { data: myCommunities = [] } = useQuery<CommunityWithRole[]>({
@@ -78,23 +81,39 @@ export default function CreatePostModal({
 
   const handleVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file && file.type.startsWith("video/")) {
-      if (file.size > 50 * 1024 * 1024) {
-        toast({
-          title: "Video too large",
-          description: "Please select a video under 50MB.",
-          variant: "destructive",
-        });
-        return;
-      }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setSelectedVideo(reader.result as string);
-        setSelectedImages([]);
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+    if (!ALLOWED_VIDEO_TYPES.includes(file.type)) {
+      toast({
+        title: "Unsupported format",
+        description: "Please select an MP4, MOV, or WebM video.",
+        variant: "destructive",
+      });
+      e.target.value = "";
+      return;
     }
+    if (file.size > MAX_VIDEO_SIZE) {
+      toast({
+        title: "Video too large",
+        description: "Please select a video under 100MB.",
+        variant: "destructive",
+      });
+      e.target.value = "";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setSelectedVideo(reader.result as string);
+      setSelectedImages([]);
+    };
+    reader.readAsDataURL(file);
     e.target.value = "";
+  };
+
+  const switchMediaMode = (mode: "photos" | "video") => {
+    if (mode === mediaMode) return;
+    setMediaMode(mode);
+    setSelectedImages([]);
+    setSelectedVideo(null);
   };
 
   const handlePost = () => {
@@ -119,6 +138,7 @@ export default function CreatePostModal({
     setContent("");
     setSelectedImages([]);
     setSelectedVideo(null);
+    setMediaMode("photos");
     setSelectedCommunityId("none");
     onClose();
   };
@@ -279,7 +299,30 @@ export default function CreatePostModal({
 
           <div className="flex items-center justify-between pt-3 border-t">
             <div className="flex items-center gap-2">
-              {selectedImages.length < maxImages && !selectedVideo && (
+              <div className="flex items-center rounded-md border overflow-visible">
+                <Button
+                  variant={mediaMode === "photos" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => switchMediaMode("photos")}
+                  className="rounded-r-none"
+                  data-testid="button-mode-photos"
+                >
+                  <ImagePlus className="h-4 w-4 mr-1" />
+                  Photos
+                </Button>
+                <Button
+                  variant={mediaMode === "video" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => switchMediaMode("video")}
+                  className="rounded-l-none"
+                  data-testid="button-mode-video"
+                >
+                  <Film className="h-4 w-4 mr-1" />
+                  Video
+                </Button>
+              </div>
+
+              {mediaMode === "photos" && selectedImages.length < maxImages && !selectedVideo && (
                 <>
                   <label htmlFor="post-image-upload">
                     <Button
@@ -319,7 +362,7 @@ export default function CreatePostModal({
                   />
                 </>
               )}
-              {!selectedVideo && selectedImages.length === 0 && (
+              {mediaMode === "video" && !selectedVideo && (
                 <>
                   <Button
                     variant="ghost"
@@ -332,7 +375,7 @@ export default function CreatePostModal({
                   <input
                     ref={videoInputRef}
                     type="file"
-                    accept="video/*"
+                    accept="video/mp4,video/quicktime,video/webm"
                     className="hidden"
                     onChange={handleVideoUpload}
                     data-testid="input-video-upload"
