@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -107,34 +107,36 @@ export function VenueGalleryManager({ venueId, imageUrls: propImageUrls, maxImag
       {localImageUrls.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           {localImageUrls.map((url, idx) => (
-            <div key={`${url}-${idx}`} className="relative aspect-video rounded-lg overflow-hidden border group">
+            <div key={`${url}-${idx}`} className="relative aspect-video rounded-lg overflow-hidden border">
               <img 
                 src={url} 
                 alt={`Gallery ${idx + 1}`} 
                 className="w-full h-full object-cover"
               />
-              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+              <div className="absolute top-1.5 right-1.5 flex gap-1">
                 <Button
                   type="button"
                   size="icon"
                   variant="secondary"
-                  className="h-8 w-8"
+                  className="h-7 w-7 rounded-full shadow-md bg-background/80 backdrop-blur-sm"
                   onClick={() => setReplaceIndex(idx)}
                   disabled={updateGalleryMutation.isPending}
                   data-testid={`button-replace-gallery-${idx}`}
+                  title="Replace image"
                 >
-                  <Replace className="h-4 w-4" />
+                  <Replace className="h-3.5 w-3.5" />
                 </Button>
                 <Button
                   type="button"
                   size="icon"
                   variant="destructive"
-                  className="h-8 w-8"
+                  className="h-7 w-7 rounded-full shadow-md"
                   onClick={() => setDeleteIndex(idx)}
                   disabled={updateGalleryMutation.isPending}
                   data-testid={`button-delete-gallery-${idx}`}
+                  title="Delete image"
                 >
-                  <Trash2 className="h-4 w-4" />
+                  <Trash2 className="h-3.5 w-3.5" />
                 </Button>
               </div>
             </div>
