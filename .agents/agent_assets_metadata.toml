@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "Hu60wZVFcU6Ot4GwvzgZd"
+uri = "file://VibePulse_Business_Brief.md"
+type = "text"
+title = "VibePulse — Business Brief"
