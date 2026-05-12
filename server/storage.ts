@@ -41,14 +41,11 @@ import {
   type InsertPostHashtag,
   type PostMention,
   type InsertPostMention,
-  type Buddy,
-  type InsertBuddy,
+  type SafetyBuddy,
+  type SafetyAlert,
+  type SafetyTimer,
   type DistressMessage,
   type InsertDistressMessage,
-  type DistressAlert,
-  type InsertDistressAlert,
-  type CheckInTimer,
-  type InsertCheckInTimer,
   type EventAnalytics,
   type InsertEventAnalytics,
   type Venue,
@@ -108,10 +105,10 @@ import {
   hashtags,
   postHashtags,
   postMentions,
-  buddies,
+  safetyBuddies,
   distressMessages,
-  distressAlerts,
-  checkInTimers,
+  safetyAlerts,
+  safetyTimers,
   eventAnalytics,
   venues,
   venueEntryNights,
@@ -292,23 +289,23 @@ export interface IStorage {
   getPostMentions(postId: string): Promise<User[]>;
   getUserMentions(userId: string): Promise<Array<Post & { user: User }>>;
 
-  setBuddy(userId: string, buddyId: string): Promise<void>;
-  getBuddy(userId: string): Promise<User | undefined>;
-  getBuddyWithStatus(userId: string): Promise<{ buddy: User; status: string } | undefined>;
-  removeBuddy(userId: string): Promise<void>;
-  respondToBuddyRequest(buddyId: string, requesterId: string, accept: boolean): Promise<void>;
-  getBuddyRequests(userId: string): Promise<Array<{ id: string; requester: User; createdAt: Date }>>;
+  // Safety system
+  setSafetyBuddy(userId: string, buddyId: string): Promise<void>;
+  getSafetyBuddy(userId: string): Promise<{ buddy: User; record: SafetyBuddy } | undefined>;
+  removeSafetyBuddy(userId: string): Promise<void>;
+  respondToSafetyBuddyRequest(buddyId: string, requesterId: string, accept: boolean): Promise<void>;
+  getSafetyBuddyRequests(userId: string): Promise<Array<{ id: string; requester: User; requestedAt: Date }>>;
   setDistressMessage(userId: string, message: string): Promise<void>;
   getDistressMessage(userId: string): Promise<string | undefined>;
-  logDistressAlert(userId: string, buddyId: string, message: string, latitude?: string, longitude?: string): Promise<string>;
-  getDistressAlerts(userId: string): Promise<any[]>;
-  resolveDistressAlert(alertId: string, userId: string, status: string): Promise<any>;
-  createCheckInTimer(userId: string, expiresAt: Date): Promise<any>;
-  getActiveCheckInTimer(userId: string): Promise<any>;
-  checkIn(userId: string): Promise<void>;
-  cancelCheckInTimer(userId: string): Promise<void>;
-  getExpiredActiveTimers(): Promise<any[]>;
-  markTimerTriggered(timerId: string): Promise<void>;
+  createSafetyAlert(params: { userId: string; buddyId: string; alertType: string; message: string; latitude?: number; longitude?: number; locationText?: string; timerId?: string }): Promise<SafetyAlert>;
+  getSafetyAlerts(userId: string): Promise<any[]>;
+  resolveSafetyAlert(alertId: string, userId: string, status: string): Promise<SafetyAlert>;
+  createSafetyTimer(params: { userId: string; durationMinutes: number; gracePeriodMinutes?: number; eventId?: string }): Promise<SafetyTimer>;
+  getActiveSafetyTimer(userId: string): Promise<SafetyTimer | null>;
+  checkInSafetyTimer(userId: string): Promise<void>;
+  cancelSafetyTimer(userId: string): Promise<void>;
+  getTimersNeedingAlert(): Promise<SafetyTimer[]>;
+  markTimerAlerted(timerId: string): Promise<void>;
 
   trackEventView(eventId: string, userId?: string): Promise<void>;
   trackEventClick(eventId: string, actionType: string, userId?: string): Promise<void>;
@@ -632,7 +629,7 @@ export class DbStorage implements IStorage {
   }
 
   async getTicketByPaymentIntent(paymentIntentId: string): Promise<Ticket | undefined> {
-    const result = await db.select().from(tickets).where(eq(tickets.stripePaymentIntentId, paymentIntentId));
+    const result = await db.select().from(tickets).where(eq(tickets.providerPaymentId, paymentIntentId));
     return result[0];
   }
 
@@ -1821,72 +1818,61 @@ export class DbStorage implements IStorage {
     return result.map(r => ({ ...r.post, user: r.user }));
   }
 
-  async setBuddy(userId: string, buddyId: string): Promise<void> {
-    await db.delete(buddies).where(eq(buddies.userId, userId));
-    await db.insert(buddies).values({ userId, buddyId, status: "pending" });
+  // ==================== SAFETY SYSTEM ====================
+
+  async setSafetyBuddy(userId: string, buddyId: string): Promise<void> {
+    await db.delete(safetyBuddies).where(eq(safetyBuddies.userId, userId));
+    await db.insert(safetyBuddies).values({ userId, buddyId, status: "pending" });
   }
 
-  async getBuddy(userId: string): Promise<User | undefined> {
+  async getSafetyBuddy(userId: string): Promise<{ buddy: User; record: SafetyBuddy } | undefined> {
     const result = await db
       .select()
-      .from(buddies)
-      .innerJoin(users, eq(buddies.buddyId, users.id))
-      .where(eq(buddies.userId, userId));
-    
+      .from(safetyBuddies)
+      .innerJoin(users, eq(safetyBuddies.buddyId, users.id))
+      .where(eq(safetyBuddies.userId, userId));
+
     if (result.length === 0) return undefined;
-    
-    const { passwordHash, ...userWithoutPassword } = result[0].users;
-    return userWithoutPassword as User;
+
+    const { passwordHash, ...buddyUser } = result[0].users;
+    return { buddy: buddyUser as User, record: result[0].safety_buddies };
   }
 
-  async getBuddyWithStatus(userId: string): Promise<{ buddy: User; status: string } | undefined> {
-    const result = await db
-      .select()
-      .from(buddies)
-      .innerJoin(users, eq(buddies.buddyId, users.id))
-      .where(eq(buddies.userId, userId));
-    
-    if (result.length === 0) return undefined;
-    
-    const { passwordHash, ...userWithoutPassword } = result[0].users;
-    return { buddy: userWithoutPassword as User, status: result[0].buddies.status };
+  async removeSafetyBuddy(userId: string): Promise<void> {
+    await db.delete(safetyBuddies).where(eq(safetyBuddies.userId, userId));
   }
 
-  async removeBuddy(userId: string): Promise<void> {
-    await db.delete(buddies).where(eq(buddies.userId, userId));
-  }
-
-  async respondToBuddyRequest(buddyId: string, requesterId: string, accept: boolean): Promise<void> {
+  async respondToSafetyBuddyRequest(buddyId: string, requesterId: string, accept: boolean): Promise<void> {
     if (accept) {
-      await db.update(buddies)
-        .set({ status: "accepted" })
-        .where(and(eq(buddies.userId, requesterId), eq(buddies.buddyId, buddyId)));
+      await db.update(safetyBuddies)
+        .set({ status: "accepted", respondedAt: new Date() })
+        .where(and(eq(safetyBuddies.userId, requesterId), eq(safetyBuddies.buddyId, buddyId)));
     } else {
-      await db.delete(buddies)
-        .where(and(eq(buddies.userId, requesterId), eq(buddies.buddyId, buddyId)));
+      await db.update(safetyBuddies)
+        .set({ status: "declined", respondedAt: new Date() })
+        .where(and(eq(safetyBuddies.userId, requesterId), eq(safetyBuddies.buddyId, buddyId)));
     }
   }
 
-  async getBuddyRequests(userId: string): Promise<Array<{ id: string; requester: User; createdAt: Date }>> {
+  async getSafetyBuddyRequests(userId: string): Promise<Array<{ id: string; requester: User; requestedAt: Date }>> {
     const result = await db
       .select()
-      .from(buddies)
-      .innerJoin(users, eq(buddies.userId, users.id))
-      .where(and(eq(buddies.buddyId, userId), eq(buddies.status, "pending")));
-    
+      .from(safetyBuddies)
+      .innerJoin(users, eq(safetyBuddies.userId, users.id))
+      .where(and(eq(safetyBuddies.buddyId, userId), eq(safetyBuddies.status, "pending")));
+
     return result.map(row => {
       const { passwordHash, ...userWithoutPassword } = row.users;
       return {
-        id: row.buddies.id,
+        id: row.safety_buddies.id,
         requester: userWithoutPassword as User,
-        createdAt: row.buddies.createdAt,
+        requestedAt: row.safety_buddies.requestedAt,
       };
     });
   }
 
   async setDistressMessage(userId: string, message: string): Promise<void> {
     const existing = await db.select().from(distressMessages).where(eq(distressMessages.userId, userId));
-    
     if (existing.length > 0) {
       await db.update(distressMessages)
         .set({ message, updatedAt: new Date() })
@@ -1898,113 +1884,154 @@ export class DbStorage implements IStorage {
 
   async getDistressMessage(userId: string): Promise<string | undefined> {
     const result = await db.select().from(distressMessages).where(eq(distressMessages.userId, userId));
-    return result.length > 0 ? result[0].message : undefined;
+    return result[0]?.message;
   }
 
-  async logDistressAlert(userId: string, buddyId: string, message: string, latitude?: string, longitude?: string): Promise<string> {
-    const result = await db.insert(distressAlerts).values({
-      userId,
-      buddyId,
-      message,
-      latitude,
-      longitude,
-      status: "active",
-    }).returning({ id: distressAlerts.id });
-    return result[0].id;
-  }
-
-  async getDistressAlerts(userId: string): Promise<any[]> {
-    const sent = await db
-      .select()
-      .from(distressAlerts)
-      .innerJoin(users, eq(distressAlerts.buddyId, users.id))
-      .where(eq(distressAlerts.userId, userId))
-      .orderBy(desc(distressAlerts.createdAt));
-    
-    const received = await db
-      .select()
-      .from(distressAlerts)
-      .innerJoin(users, eq(distressAlerts.userId, users.id))
-      .where(eq(distressAlerts.buddyId, userId))
-      .orderBy(desc(distressAlerts.createdAt));
-    
-    const sentAlerts = sent.map(row => {
-      const { passwordHash, ...userWithoutPassword } = row.users;
-      return {
-        ...row.distress_alerts,
-        type: 'sent',
-        buddy: userWithoutPassword,
-      };
-    });
-    
-    const receivedAlerts = received.map(row => {
-      const { passwordHash, ...userWithoutPassword } = row.users;
-      return {
-        ...row.distress_alerts,
-        type: 'received',
-        sender: userWithoutPassword,
-      };
-    });
-    
-    return [...sentAlerts, ...receivedAlerts].sort((a, b) => 
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
-  }
-
-  async resolveDistressAlert(alertId: string, userId: string, status: string): Promise<any> {
-    const result = await db.update(distressAlerts)
-      .set({ status, resolvedAt: new Date() })
-      .where(and(eq(distressAlerts.id, alertId), eq(distressAlerts.userId, userId)))
-      .returning();
-    return result[0];
-  }
-
-  async createCheckInTimer(userId: string, expiresAt: Date): Promise<any> {
-    await db.update(checkInTimers)
-      .set({ status: "cancelled" })
-      .where(and(eq(checkInTimers.userId, userId), eq(checkInTimers.status, "active")));
-    
-    const result = await db.insert(checkInTimers).values({
-      userId,
-      expiresAt,
+  async createSafetyAlert(params: {
+    userId: string;
+    buddyId: string;
+    alertType: string;
+    message: string;
+    latitude?: number;
+    longitude?: number;
+    locationText?: string;
+    timerId?: string;
+  }): Promise<SafetyAlert> {
+    const [result] = await db.insert(safetyAlerts).values({
+      userId: params.userId,
+      buddyId: params.buddyId,
+      alertType: params.alertType,
+      message: params.message,
+      latitude: params.latitude ?? null,
+      longitude: params.longitude ?? null,
+      locationText: params.locationText ?? null,
+      timerId: params.timerId ?? null,
       status: "active",
     }).returning();
-    return result[0];
-  }
-
-  async getActiveCheckInTimer(userId: string): Promise<any> {
-    const result = await db
-      .select()
-      .from(checkInTimers)
-      .where(and(eq(checkInTimers.userId, userId), eq(checkInTimers.status, "active")));
-    return result.length > 0 ? result[0] : null;
-  }
-
-  async checkIn(userId: string): Promise<void> {
-    await db.update(checkInTimers)
-      .set({ status: "checked_in", checkedInAt: new Date() })
-      .where(and(eq(checkInTimers.userId, userId), eq(checkInTimers.status, "active")));
-  }
-
-  async cancelCheckInTimer(userId: string): Promise<void> {
-    await db.update(checkInTimers)
-      .set({ status: "cancelled" })
-      .where(and(eq(checkInTimers.userId, userId), eq(checkInTimers.status, "active")));
-  }
-
-  async getExpiredActiveTimers(): Promise<any[]> {
-    const now = new Date();
-    const result = await db
-      .select()
-      .from(checkInTimers)
-      .where(and(eq(checkInTimers.status, "active"), lt(checkInTimers.expiresAt, now)));
     return result;
   }
 
-  async markTimerTriggered(timerId: string): Promise<void> {
-    await db.update(checkInTimers)
-      .set({ status: "triggered" })
-      .where(eq(checkInTimers.id, timerId));
+  async getSafetyAlerts(userId: string): Promise<any[]> {
+    const sent = await db
+      .select()
+      .from(safetyAlerts)
+      .innerJoin(users, eq(safetyAlerts.buddyId, users.id))
+      .where(eq(safetyAlerts.userId, userId))
+      .orderBy(desc(safetyAlerts.createdAt));
+
+    const received = await db
+      .select()
+      .from(safetyAlerts)
+      .innerJoin(users, eq(safetyAlerts.userId, users.id))
+      .where(eq(safetyAlerts.buddyId, userId))
+      .orderBy(desc(safetyAlerts.createdAt));
+
+    const sentAlerts = sent.map(row => {
+      const { passwordHash, ...buddyUser } = row.users;
+      return { ...row.safety_alerts, type: "sent", buddy: buddyUser };
+    });
+
+    const receivedAlerts = received.map(row => {
+      const { passwordHash, ...senderUser } = row.users;
+      return { ...row.safety_alerts, type: "received", sender: senderUser };
+    });
+
+    return [...sentAlerts, ...receivedAlerts].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }
+
+  async resolveSafetyAlert(alertId: string, userId: string, status: string): Promise<SafetyAlert> {
+    const [result] = await db.update(safetyAlerts)
+      .set({ status, resolvedAt: new Date() })
+      .where(and(eq(safetyAlerts.id, alertId), eq(safetyAlerts.userId, userId)))
+      .returning();
+    return result;
+  }
+
+  async createSafetyTimer(params: {
+    userId: string;
+    durationMinutes: number;
+    gracePeriodMinutes?: number;
+    eventId?: string;
+  }): Promise<SafetyTimer> {
+    const grace = params.gracePeriodMinutes ?? 5;
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + params.durationMinutes * 60_000);
+    const gracePeriodEndsAt = new Date(expiresAt.getTime() + grace * 60_000);
+
+    // Cancel any existing active timer for this user
+    await db.update(safetyTimers)
+      .set({ status: "cancelled" })
+      .where(and(eq(safetyTimers.userId, params.userId), eq(safetyTimers.status, "active")));
+
+    const [result] = await db.insert(safetyTimers).values({
+      userId: params.userId,
+      durationMinutes: params.durationMinutes,
+      gracePeriodMinutes: grace,
+      expiresAt,
+      gracePeriodEndsAt,
+      eventId: params.eventId ?? null,
+      status: "active",
+    }).returning();
+    return result;
+  }
+
+  async getActiveSafetyTimer(userId: string): Promise<SafetyTimer | null> {
+    const [result] = await db
+      .select()
+      .from(safetyTimers)
+      .where(and(
+        eq(safetyTimers.userId, userId),
+        or(eq(safetyTimers.status, "active"), eq(safetyTimers.status, "grace_period"))
+      ));
+    return result ?? null;
+  }
+
+  async checkInSafetyTimer(userId: string): Promise<void> {
+    await db.update(safetyTimers)
+      .set({ status: "checked_in", checkedInAt: new Date() })
+      .where(and(
+        eq(safetyTimers.userId, userId),
+        or(eq(safetyTimers.status, "active"), eq(safetyTimers.status, "grace_period"))
+      ));
+  }
+
+  async cancelSafetyTimer(userId: string): Promise<void> {
+    await db.update(safetyTimers)
+      .set({ status: "cancelled" })
+      .where(and(
+        eq(safetyTimers.userId, userId),
+        or(eq(safetyTimers.status, "active"), eq(safetyTimers.status, "grace_period"))
+      ));
+  }
+
+  async getTimersNeedingAlert(): Promise<SafetyTimer[]> {
+    const now = new Date();
+    // Timers in active status where grace period has ended
+    const activeExpired = await db
+      .select()
+      .from(safetyTimers)
+      .where(and(eq(safetyTimers.status, "active"), lt(safetyTimers.expiresAt, now)));
+
+    // Transition active → grace_period for timers that just expired
+    for (const timer of activeExpired) {
+      await db.update(safetyTimers)
+        .set({ status: "grace_period" })
+        .where(eq(safetyTimers.id, timer.id));
+    }
+
+    // Timers in grace_period where grace window has also ended
+    return db
+      .select()
+      .from(safetyTimers)
+      .where(and(eq(safetyTimers.status, "grace_period"), lt(safetyTimers.gracePeriodEndsAt, now)));
+  }
+
+  async markTimerAlerted(timerId: string): Promise<void> {
+    await db.update(safetyTimers)
+      .set({ status: "alerted", alertedAt: new Date() })
+      .where(eq(safetyTimers.id, timerId));
   }
 
   async trackEventView(eventId: string, userId?: string): Promise<void> {

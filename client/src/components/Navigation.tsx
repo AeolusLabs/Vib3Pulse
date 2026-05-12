@@ -15,7 +15,7 @@ import MenuTray from "./MenuTray";
 import NotificationBell from "./NotificationBell";
 import { Link, useLocation } from "wouter";
 import { useAuth, logout } from "@/hooks/useAuth";
-import { EmergencyButton } from "./buddy/EmergencyButton";
+import { EmergencyButton } from "./safety/EmergencyButton";
 
 interface NavigationProps {
   onSearch?: (query: string) => void;

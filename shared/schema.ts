@@ -115,7 +115,8 @@ export const ticketTiers = pgTable("ticket_tiers", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   eventId: varchar("event_id").notNull().references(() => events.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
-  priceCents: integer("price_cents").notNull(),
+  priceSmallestUnit: integer("price_smallest_unit").notNull(), // pence for GBP, kobo for NGN
+  currency: text("currency").notNull().default("GBP"), // 'GBP' | 'NGN'
   quantity: integer("quantity").notNull(),
   salesEndDate: timestamp("sales_end_date"),
   dayDate: timestamp("day_date"),
@@ -134,8 +135,12 @@ export const tickets = pgTable("tickets", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
   eventId: varchar("event_id").notNull().references(() => events.id),
+  ticketTierId: varchar("ticket_tier_id").references(() => ticketTiers.id),
   purchaseDate: timestamp("purchase_date").notNull().default(sql`now()`),
-  stripePaymentIntentId: text("stripe_payment_intent_id"),
+  providerPaymentId: text("provider_payment_id"),
+  paymentProvider: text("payment_provider").notNull().default("free"), // 'stripe' | 'paystack' | 'free'
+  currency: text("currency").notNull().default("GBP"), // 'GBP' | 'NGN'
+  amountPaid: integer("amount_paid").notNull().default(0), // smallest currency unit (pence / kobo)
   status: text("status").notNull().default("confirmed"),
   validationCode: varchar("validation_code").notNull().unique().default(sql`gen_random_uuid()`),
   checkedInAt: timestamp("checked_in_at"),
@@ -581,24 +586,35 @@ export const insertBookmarkSchema = createInsertSchema(bookmarks).omit({
 export type InsertBookmark = z.infer<typeof insertBookmarkSchema>;
 export type Bookmark = typeof bookmarks.$inferSelect;
 
-export const buddies = pgTable("buddies", {
+// ============================================
+// SAFETY SYSTEM — rebuilt from scratch
+// ============================================
+
+export const safetyBuddyStatus = ["pending", "accepted", "declined"] as const;
+export type SafetyBuddyStatus = typeof safetyBuddyStatus[number];
+
+// One safety buddy per user (1:1). Ready for multi-buddy by dropping the UNIQUE constraint.
+export const safetyBuddies = pgTable("safety_buddies", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").notNull().references(() => users.id),
-  buddyId: varchar("buddy_id").notNull().references(() => users.id),
-  status: text("status").notNull().default("pending"),
-  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  buddyId: varchar("buddy_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("pending"), // SafetyBuddyStatus
+  requestedAt: timestamp("requested_at").notNull().default(sql`now()`),
+  respondedAt: timestamp("responded_at"),
 }, (table) => ({
-  uniqueBuddy: unique().on(table.userId),
+  uniquePerUser: unique().on(table.userId),
 }));
 
-export const insertBuddySchema = createInsertSchema(buddies).omit({
+export const insertSafetyBuddySchema = createInsertSchema(safetyBuddies).omit({
   id: true,
-  createdAt: true,
+  requestedAt: true,
+  respondedAt: true,
 });
 
-export type InsertBuddy = z.infer<typeof insertBuddySchema>;
-export type Buddy = typeof buddies.$inferSelect;
+export type InsertSafetyBuddy = z.infer<typeof insertSafetyBuddySchema>;
+export type SafetyBuddy = typeof safetyBuddies.$inferSelect;
 
+// Pre-written SOS message shown to buddy at alert time
 export const distressMessages = pgTable("distress_messages", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id).unique(),
@@ -614,44 +630,62 @@ export const insertDistressMessageSchema = createInsertSchema(distressMessages).
 export type InsertDistressMessage = z.infer<typeof insertDistressMessageSchema>;
 export type DistressMessage = typeof distressMessages.$inferSelect;
 
-export const distressAlerts = pgTable("distress_alerts", {
+export const safetyAlertType = ["manual_sos", "timer_expiry"] as const;
+export type SafetyAlertType = typeof safetyAlertType[number];
+
+export const safetyAlertStatus = ["active", "safe", "false_alarm"] as const;
+export type SafetyAlertStatus = typeof safetyAlertStatus[number];
+
+export const safetyAlerts = pgTable("safety_alerts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
   buddyId: varchar("buddy_id").notNull().references(() => users.id),
+  alertType: text("alert_type").notNull().default("manual_sos"), // SafetyAlertType
   message: text("message").notNull(),
-  latitude: text("latitude"),
-  longitude: text("longitude"),
-  status: text("status").notNull().default("active"),
+  latitude: doublePrecision("latitude"),
+  longitude: doublePrecision("longitude"),
+  locationText: text("location_text"), // reverse-geocoded, cached at alert time
+  status: text("status").notNull().default("active"), // SafetyAlertStatus
+  timerId: varchar("timer_id"), // FK to safety_timers if timer_expiry
   resolvedAt: timestamp("resolved_at"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
-export const insertDistressAlertSchema = createInsertSchema(distressAlerts).omit({
+export const insertSafetyAlertSchema = createInsertSchema(safetyAlerts).omit({
   id: true,
   createdAt: true,
   resolvedAt: true,
 });
 
-export type InsertDistressAlert = z.infer<typeof insertDistressAlertSchema>;
-export type DistressAlert = typeof distressAlerts.$inferSelect;
+export type InsertSafetyAlert = z.infer<typeof insertSafetyAlertSchema>;
+export type SafetyAlert = typeof safetyAlerts.$inferSelect;
 
-export const checkInTimers = pgTable("check_in_timers", {
+export const safetyTimerStatus = ["active", "grace_period", "alerted", "checked_in", "cancelled"] as const;
+export type SafetyTimerStatus = typeof safetyTimerStatus[number];
+
+export const safetyTimers = pgTable("safety_timers", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").notNull().references(() => users.id),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  eventId: varchar("event_id").references(() => events.id, { onDelete: "set null" }),
+  durationMinutes: integer("duration_minutes").notNull(),
   expiresAt: timestamp("expires_at").notNull(),
+  gracePeriodMinutes: integer("grace_period_minutes").notNull().default(5),
+  gracePeriodEndsAt: timestamp("grace_period_ends_at").notNull(),
+  status: text("status").notNull().default("active"), // SafetyTimerStatus
   checkedInAt: timestamp("checked_in_at"),
-  status: text("status").notNull().default("active"),
+  alertedAt: timestamp("alerted_at"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
-export const insertCheckInTimerSchema = createInsertSchema(checkInTimers).omit({
+export const insertSafetyTimerSchema = createInsertSchema(safetyTimers).omit({
   id: true,
   createdAt: true,
   checkedInAt: true,
+  alertedAt: true,
 });
 
-export type InsertCheckInTimer = z.infer<typeof insertCheckInTimerSchema>;
-export type CheckInTimer = typeof checkInTimers.$inferSelect;
+export type InsertSafetyTimer = z.infer<typeof insertSafetyTimerSchema>;
+export type SafetyTimer = typeof safetyTimers.$inferSelect;
 
 export const eventAnalytics = pgTable("event_analytics", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -745,7 +779,10 @@ export const venueTickets = pgTable("venue_tickets", {
   userId: varchar("user_id").notNull().references(() => users.id),
   venueEntryNightId: varchar("venue_entry_night_id").notNull().references(() => venueEntryNights.id),
   purchaseDate: timestamp("purchase_date").notNull().default(sql`now()`),
-  stripePaymentIntentId: text("stripe_payment_intent_id"),
+  providerPaymentId: text("provider_payment_id"),
+  paymentProvider: text("payment_provider").notNull().default("free"), // 'stripe' | 'paystack' | 'free'
+  currency: text("currency").notNull().default("GBP"), // 'GBP' | 'NGN'
+  amountPaid: integer("amount_paid").notNull().default(0), // smallest currency unit
   status: text("status").notNull().default("confirmed"),
   validationCode: varchar("validation_code").notNull().unique().default(sql`gen_random_uuid()`),
   checkedInAt: timestamp("checked_in_at"),
@@ -930,6 +967,7 @@ export const notificationTypes = [
   "buddy_request",
   "buddy_request_response",
   "buddy_alert_resolved",
+  "buddy_timer_expiry",
   "event_rsvp",
   "ticket_purchase",
   "new_follower",
