@@ -86,6 +86,10 @@ export default {
         sans: ["var(--font-sans)"],
         serif: ["var(--font-serif)"],
         mono: ["var(--font-mono)"],
+        /* backward-compat alias — resolves to Bodoni Moda via --font-serif */
+        playfair: ["var(--font-serif)"],
+        display: ["var(--font-serif)"],
+        jost: ["var(--font-sans)"],
       },
       keyframes: {
         "accordion-down": {

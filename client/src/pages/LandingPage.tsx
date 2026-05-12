@@ -2,408 +2,531 @@ import { useState } from "react";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { 
-  Calendar, 
-  Users, 
-  Ticket, 
-  MessageCircle, 
-  TrendingUp, 
-  Heart,
-  Sparkles,
-  Music,
-  Utensils,
-  Code,
-  Palette,
-  Trophy,
-  Dumbbell,
-  MapPin,
-  ArrowRight,
-  ChevronRight,
-  ExternalLink,
-  Clock
+import { motion } from "framer-motion";
+import {
+  Calendar, Ticket, MapPin, ArrowRight, ChevronRight,
+  ExternalLink, Clock, Music, Utensils, Code, Palette,
+  Trophy, Dumbbell, Shield, Users
 } from "lucide-react";
 import { format } from "date-fns";
 import type { Event } from "@shared/schema";
+
+const inView = {
+  hidden: { opacity: 0, y: 28 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.65, ease: [0.22, 1, 0.36, 1] },
+  },
+};
+
+const heroEyebrow = {
+  hidden: { opacity: 0, y: 14 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.22, 1, 0.36, 1] } },
+};
+
+const heroHeadline = {
+  hidden: { opacity: 0, y: 52 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.85, ease: [0.22, 1, 0.36, 1] } },
+};
+
+const stagger = {
+  visible: { transition: { staggerChildren: 0.13 } },
+};
 
 export default function LandingPage() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
 
   const { data: featuredEvents = [], isLoading: isFeaturedLoading } = useQuery<Event[]>({
-    queryKey: ['/api/events/featured'],
+    queryKey: ["/api/events/featured"],
   });
 
   const { data: categoryEvents = [], isLoading: isCategoryLoading } = useQuery<Event[]>({
-    queryKey: ['/api/events/by-category', selectedCategory],
+    queryKey: ["/api/events/by-category", selectedCategory],
     enabled: !!selectedCategory,
   });
 
   const eventCategories = [
-    { 
-      icon: Music, 
-      label: "Music", 
-      value: "music",
-      gradient: "from-purple-600 to-pink-600",
-      bgGradient: "from-purple-900/40 to-pink-900/40"
-    },
-    { 
-      icon: Utensils, 
-      label: "Food & Drink", 
-      value: "food",
-      gradient: "from-orange-500 to-red-500",
-      bgGradient: "from-orange-900/40 to-red-900/40"
-    },
-    { 
-      icon: Code, 
-      label: "Tech", 
-      value: "tech",
-      gradient: "from-blue-500 to-cyan-500",
-      bgGradient: "from-blue-900/40 to-cyan-900/40"
-    },
-    { 
-      icon: Palette, 
-      label: "Arts", 
-      value: "art",
-      gradient: "from-pink-500 to-rose-500",
-      bgGradient: "from-pink-900/40 to-rose-900/40"
-    },
-    { 
-      icon: Trophy, 
-      label: "Sports", 
-      value: "sports",
-      gradient: "from-green-500 to-emerald-500",
-      bgGradient: "from-green-900/40 to-emerald-900/40"
-    },
-    { 
-      icon: Dumbbell, 
-      label: "Wellness", 
-      value: "wellness",
-      gradient: "from-teal-500 to-cyan-500",
-      bgGradient: "from-teal-900/40 to-cyan-900/40"
-    }
+    { icon: Music,    label: "Music",       value: "music"   },
+    { icon: Utensils, label: "Food & Drink", value: "food"    },
+    { icon: Code,     label: "Tech",         value: "tech"    },
+    { icon: Palette,  label: "Arts",         value: "art"     },
+    { icon: Trophy,   label: "Sports",       value: "sports"  },
+    { icon: Dumbbell, label: "Wellness",     value: "wellness" },
   ];
 
-  const features = [
+  const pillars = [
     {
+      number: "01",
       icon: Calendar,
       title: "Discover Events",
-      description: "Find amazing events tailored to your interests"
+      desc: "Find concerts, club nights, exhibitions, and more. Curated for your city and your taste.",
     },
     {
-      icon: Users,
-      title: "Build Community",
-      description: "Connect with like-minded event lovers"
-    },
-    {
+      number: "02",
       icon: Ticket,
-      title: "Easy Ticketing",
-      description: "Secure purchasing with instant confirmation"
+      title: "Buy Tickets",
+      desc: "Secure in-app ticketing with instant QR codes. Everything lives in your digital wallet.",
     },
     {
-      icon: MessageCircle,
-      title: "Direct Messaging",
-      description: "Coordinate plans with friends"
+      number: "03",
+      icon: Users,
+      title: "Plan Together",
+      desc: "Group chats, shared polls, and stories from the night. Your crew, all in one place.",
     },
     {
-      icon: TrendingUp,
-      title: "Smart Feed",
-      description: "Personalized recommendations just for you"
+      number: "04",
+      icon: Shield,
+      title: "Stay Safe",
+      desc: "Safety Buddy, check-in timers, and one-tap SOS alerts. Go out with confidence.",
     },
-    {
-      icon: Heart,
-      title: "RSVP & Share",
-      description: "Show interest and share with your network"
-    }
   ];
 
-  const handleCategoryClick = (categoryValue: string) => {
-    setSelectedCategory(categoryValue);
-  };
-
-  const handleEventClick = (event: Event) => {
-    setSelectedEvent(event);
-  };
-
   const formatEventDate = (date: Date | string) => {
-    const d = typeof date === 'string' ? new Date(date) : date;
+    const d = typeof date === "string" ? new Date(date) : date;
     return format(d, "EEE, MMM d");
   };
 
   const formatEventTime = (date: Date | string) => {
-    const d = typeof date === 'string' ? new Date(date) : date;
+    const d = typeof date === "string" ? new Date(date) : date;
     return format(d, "h:mm a");
   };
 
   return (
-    <div className="dark min-h-screen bg-[#0a0a0a] text-white">
-      <header className="sticky top-0 z-50 border-b border-white/10 bg-[#0a0a0a]/95 backdrop-blur supports-[backdrop-filter]:bg-[#0a0a0a]/80">
-        <div className="container flex h-16 items-center justify-between max-w-7xl mx-auto px-4">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-6 h-6 text-purple-400" />
-            <h1 className="font-playfair text-2xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
-              VibePulse
-            </h1>
-          </div>
-          <div className="flex items-center gap-3">
+    <div className="min-h-screen bg-[#090909] text-white font-sans">
+
+      {/* ─── Navigation ──────────────────────────────────────────────── */}
+      <header className="fixed top-0 left-0 right-0 z-50 border-b border-white/[0.06] bg-[#090909]/90 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+          <Link href="/" className="no-underline">
+            <span className="font-serif text-[1.4rem] font-bold text-white tracking-tight select-none">
+              Vib3Pulse
+            </span>
+          </Link>
+          <nav className="flex items-center gap-1">
             <Link href="/login">
-              <Button variant="ghost" className="text-white/80 hover:text-white hover:bg-white/10" data-testid="button-header-login">
-                Log In
+              <Button
+                variant="ghost"
+                className="text-white/50 hover:text-white hover:bg-white/[0.06] rounded-full px-5 h-9 text-sm transition-colors duration-200"
+                data-testid="button-header-login"
+              >
+                Sign In
               </Button>
             </Link>
             <Link href="/signup">
-              <Button className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white border-0" data-testid="button-header-signup">
-                Sign Up
+              <Button
+                className="bg-violet-600 hover:bg-violet-500 text-white rounded-full px-5 h-9 text-sm border-0 shadow-lg shadow-violet-600/20 transition-all duration-200"
+                data-testid="button-header-signup"
+              >
+                Join Free
               </Button>
             </Link>
-          </div>
+          </nav>
         </div>
       </header>
 
-      <section className="relative min-h-[80vh] flex items-center justify-center overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-purple-900/30 via-[#0a0a0a] to-pink-900/20" />
-        <div className="absolute inset-0">
-          <div className="absolute top-20 left-10 w-72 h-72 bg-purple-500/20 rounded-full blur-3xl animate-pulse" />
-          <div className="absolute bottom-20 right-10 w-96 h-96 bg-pink-500/15 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-purple-600/5 rounded-full blur-3xl" />
-        </div>
-        
-        <div className="container max-w-7xl mx-auto px-4 relative z-10">
-          <div className="max-w-4xl mx-auto text-center">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 mb-8">
-              <Sparkles className="w-4 h-4 text-purple-400" />
-              <span className="text-sm text-white/70">Discover your next experience</span>
-            </div>
-            
-            <h2 className="font-playfair text-5xl md:text-7xl lg:text-8xl font-bold mb-6 leading-tight">
-              Find Events That
-              <span className="block bg-gradient-to-r from-purple-400 via-pink-400 to-purple-400 bg-clip-text text-transparent">
-                Match Your Vibe
-              </span>
-            </h2>
-            
-            <p className="text-xl md:text-2xl text-white/60 mb-10 max-w-2xl mx-auto leading-relaxed">
-              Join thousands discovering concerts, workshops, meetups, and more. 
-              Connect with friends and never miss out.
-            </p>
-            
-            <div className="flex flex-col sm:flex-row gap-4 justify-center mb-16">
+      {/* ─── Hero ────────────────────────────────────────────────────── */}
+      <section className="relative min-h-screen flex flex-col justify-center pt-16 overflow-hidden">
+        {/* Subtle noise texture */}
+        <div
+          className="absolute inset-0 opacity-[0.018] pointer-events-none"
+          style={{
+            backgroundImage:
+              'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 200 200\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'n\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.85\' numOctaves=\'4\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23n)\'/%3E%3C/svg%3E")',
+            backgroundSize: "180px",
+          }}
+        />
+        {/* Violet glow — barely visible, atmospheric */}
+        <div className="absolute top-1/4 -left-1/4 w-[800px] h-[800px] bg-violet-600/6 rounded-full blur-[140px] pointer-events-none" />
+        <div className="absolute bottom-0 right-0 w-[500px] h-[500px] bg-violet-900/8 rounded-full blur-[120px] pointer-events-none" />
+
+        <div className="max-w-7xl mx-auto px-6 py-28 lg:py-32">
+          <motion.div
+            initial="hidden"
+            animate="visible"
+            variants={stagger}
+            className="max-w-5xl"
+          >
+            {/* Eyebrow */}
+            <motion.p
+              variants={heroEyebrow}
+              className="text-white/30 text-[0.7rem] tracking-[0.3em] uppercase mb-12 font-sans"
+            >
+              London's Nightlife Platform
+            </motion.p>
+
+            {/* Giant editorial headline */}
+            <motion.h1
+              variants={heroHeadline}
+              className="font-serif font-bold uppercase leading-[0.88] tracking-[-0.02em] text-white mb-10"
+              style={{ fontSize: "clamp(3.8rem, 13vw, 11.5rem)" }}
+            >
+              Find
+              <br />
+              Your
+              <br />
+              <span className="text-violet-400">Vib3.</span>
+            </motion.h1>
+
+            {/* Subline */}
+            <motion.p
+              variants={inView}
+              className="text-base md:text-lg text-white/45 max-w-xs leading-relaxed mb-12 font-sans"
+            >
+              Events. Tickets. Community. Safety.
+              <br />
+              All in one place.
+            </motion.p>
+
+            {/* CTAs */}
+            <motion.div
+              variants={inView}
+              className="flex flex-wrap items-center gap-3 mb-20"
+            >
               <Link href="/signup">
-                <Button size="lg" className="text-lg px-8 h-14 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white border-0 shadow-lg shadow-purple-500/25" data-testid="button-hero-signup">
-                  Get Started Free
-                  <ArrowRight className="ml-2 w-5 h-5" />
+                <Button
+                  size="lg"
+                  className="h-12 px-8 bg-violet-600 hover:bg-violet-500 text-white rounded-full border-0 font-sans font-medium text-base shadow-xl shadow-violet-600/25 transition-all duration-200 active:scale-[0.98]"
+                  data-testid="button-hero-signup"
+                >
+                  Get Started
+                  <ArrowRight className="ml-2 w-4 h-4" />
                 </Button>
               </Link>
               <Link href="/login">
-                <Button size="lg" variant="outline" className="text-lg px-8 h-14 bg-white/5 border-white/20 text-white hover:bg-white/10 hover:border-white/30" data-testid="button-hero-login">
-                  Log In
+                <Button
+                  size="lg"
+                  variant="ghost"
+                  className="h-12 px-7 text-white/50 hover:text-white hover:bg-white/[0.06] rounded-full font-sans text-base transition-all duration-200"
+                  data-testid="button-hero-login"
+                >
+                  Sign In
                 </Button>
               </Link>
-            </div>
+            </motion.div>
 
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 max-w-5xl mx-auto">
-              {eventCategories.map((category) => (
-                <button
-                  key={category.label}
-                  onClick={() => handleCategoryClick(category.value)}
-                  className={`group relative overflow-hidden rounded-xl p-4 transition-all duration-300 hover:scale-105 hover:shadow-xl cursor-pointer bg-gradient-to-br ${category.bgGradient} border border-white/10 hover:border-white/20`}
-                  data-testid={`button-category-${category.value}`}
+            {/* Category pills */}
+            <motion.div variants={inView} className="flex flex-wrap gap-2">
+              {eventCategories.map((cat) => (
+                <motion.button
+                  key={cat.value}
+                  onClick={() => setSelectedCategory(cat.value)}
+                  whileHover={{ y: -3 }}
+                  whileTap={{ scale: 0.93 }}
+                  transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                  className="flex items-center gap-2 px-4 py-2 rounded-full border border-white/[0.1] bg-white/[0.04] hover:bg-white/[0.08] hover:border-white/20 text-white/50 hover:text-white text-sm font-sans transition-colors duration-200 cursor-pointer"
+                  data-testid={`button-category-${cat.value}`}
                 >
-                  <div className={`absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-br ${category.gradient}`} style={{ opacity: 0.15 }} />
-                  <div className="relative flex flex-col items-center gap-2">
-                    <div className={`p-3 rounded-lg bg-gradient-to-br ${category.gradient}`}>
-                      <category.icon className="w-6 h-6 text-white" />
-                    </div>
-                    <span className="text-sm font-medium text-white/90">{category.label}</span>
-                  </div>
-                </button>
+                  <cat.icon className="w-3.5 h-3.5" />
+                  {cat.label}
+                </motion.button>
               ))}
-            </div>
-          </div>
+            </motion.div>
+          </motion.div>
+        </div>
+
+        {/* Scroll line */}
+        <div className="absolute bottom-10 left-1/2 -translate-x-1/2">
+          <div className="w-px h-14 bg-gradient-to-b from-transparent to-white/15" />
         </div>
       </section>
 
-      {featuredEvents.length > 0 && (
-        <section className="py-20 relative">
-          <div className="absolute inset-0 bg-gradient-to-b from-transparent via-purple-900/5 to-transparent" />
-          <div className="container max-w-7xl mx-auto px-4 relative">
-            <div className="flex items-center justify-between mb-10">
+      {/* ─── Featured Events ─────────────────────────────────────────── */}
+      {(isFeaturedLoading || featuredEvents.length > 0) && (
+        <section className="py-28">
+          <div className="max-w-7xl mx-auto px-6">
+            <div className="flex items-end justify-between mb-14">
               <div>
-                <h3 className="font-playfair text-3xl md:text-4xl font-bold text-white mb-2">
-                  Upcoming Events
-                </h3>
-                <p className="text-white/50">Don't miss out on these experiences</p>
+                <p className="text-white/25 text-[0.65rem] tracking-[0.28em] uppercase font-sans mb-3">
+                  Upcoming
+                </p>
+                <h2 className="font-serif text-4xl md:text-5xl font-bold text-white tracking-tight">
+                  Events
+                </h2>
               </div>
               <Link href="/signup">
-                <Button variant="ghost" className="text-purple-400 hover:text-purple-300 hover:bg-purple-500/10">
-                  View All
-                  <ChevronRight className="ml-1 w-4 h-4" />
-                </Button>
+                <button
+                  className="flex items-center gap-1 text-sm text-white/35 hover:text-white/70 transition-colors font-sans cursor-pointer"
+                  data-testid="button-view-all"
+                >
+                  View all
+                  <ChevronRight className="w-4 h-4" />
+                </button>
               </Link>
             </div>
 
-            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {isFeaturedLoading ? (
-                Array.from({ length: 4 }).map((_, i) => (
-                  <div key={i} className="rounded-xl bg-white/5 animate-pulse h-72" />
-                ))
-              ) : (
-                featuredEvents.slice(0, 4).map((event) => (
-                  <button
-                    key={event.id}
-                    onClick={() => handleEventClick(event)}
-                    className="group relative overflow-hidden rounded-xl bg-white/5 border border-white/10 hover:border-white/20 transition-all duration-300 hover:scale-[1.02] hover:shadow-xl text-left"
-                    data-testid={`button-event-${event.id}`}
-                  >
-                    <div className="aspect-[4/3] relative overflow-hidden">
-                      {event.imageUrl ? (
-                        <img 
-                          src={event.imageUrl} 
-                          alt={event.title}
-                          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-                        />
-                      ) : (
-                        <div className="w-full h-full bg-gradient-to-br from-purple-600/30 to-pink-600/30 flex items-center justify-center">
-                          <Calendar className="w-12 h-12 text-white/30" />
+            {/* Row 1: hero card full-width on sm+, then side-by-side on lg */}
+            {/* Row 2: remaining cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {isFeaturedLoading
+                ? Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className="rounded-2xl bg-white/[0.04] animate-pulse h-64" />
+                  ))
+                : featuredEvents.slice(0, 4).map((event, idx) => (
+                    <motion.button
+                      key={event.id}
+                      onClick={() => setSelectedEvent(event)}
+                      className={`group relative overflow-hidden rounded-2xl bg-[#111111] border border-white/[0.07] hover:border-violet-500/30 transition-all duration-300 text-left cursor-pointer ${
+                        idx === 0 ? "sm:col-span-2" : ""
+                      }`}
+                      whileHover={{ y: -3, transition: { duration: 0.2 } }}
+                      initial={{ opacity: 0, y: 20 }}
+                      whileInView={{ opacity: 1, y: 0 }}
+                      viewport={{ once: true }}
+                      transition={{ duration: 0.5, delay: idx * 0.07, ease: [0.22, 1, 0.36, 1] }}
+                      data-testid={`button-event-${event.id}`}
+                    >
+                      <div
+                        className={`relative overflow-hidden ${
+                          idx === 0 ? "aspect-[2/1] sm:aspect-[16/7]" : "aspect-[4/3]"
+                        }`}
+                      >
+                        {event.imageUrl ? (
+                          <img
+                            src={event.imageUrl}
+                            alt={event.title}
+                            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.06]"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="w-full h-full bg-gradient-to-br from-violet-900/25 to-[#0f0f0f] flex items-center justify-center">
+                            <Calendar className="w-10 h-10 text-white/10" />
+                          </div>
+                        )}
+                        {/* Gradient overlay */}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent" />
+
+                        {/* Category badge */}
+                        <div className="absolute top-3 left-3">
+                          <span className="text-[0.6rem] font-sans font-medium tracking-[0.18em] uppercase text-white/60 px-2.5 py-1 rounded-full bg-black/40 backdrop-blur-sm border border-white/[0.08]">
+                            {event.category}
+                          </span>
                         </div>
-                      )}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-                      <div className="absolute top-3 left-3">
-                        <Badge className="bg-white/20 backdrop-blur-sm text-white border-0 text-xs">
-                          {event.category}
-                        </Badge>
+
+                        {event.externalTicketUrl && (
+                          <div className="absolute top-3 right-3">
+                            <span className="text-[0.6rem] font-sans font-medium tracking-[0.18em] uppercase text-violet-300 px-2.5 py-1 rounded-full bg-violet-600/25 backdrop-blur-sm border border-violet-500/20">
+                              External
+                            </span>
+                          </div>
+                        )}
                       </div>
-                      {event.externalTicketUrl && (
-                        <div className="absolute top-3 right-3">
-                          <Badge className="bg-blue-500/80 backdrop-blur-sm text-white border-0 text-xs">
-                            <ExternalLink className="w-3 h-3 mr-1" />
-                            External
-                          </Badge>
+
+                      {/* Card content */}
+                      <div className={`absolute bottom-0 left-0 right-0 p-4 ${idx === 0 ? "p-5" : ""}`}>
+                        <h3
+                          className={`font-sans font-semibold text-white line-clamp-1 mb-1.5 group-hover:text-violet-300 transition-colors duration-200 ${
+                            idx === 0 ? "text-base sm:text-lg" : "text-sm"
+                          }`}
+                        >
+                          {event.title}
+                        </h3>
+                        <div className="flex items-center gap-3 text-white/35 text-xs font-sans">
+                          <span className="flex items-center gap-1.5">
+                            <Clock className="w-3 h-3" />
+                            {formatEventDate(event.eventDate)}
+                          </span>
+                          {event.location && (
+                            <span className="flex items-center gap-1.5 min-w-0">
+                              <MapPin className="w-3 h-3 flex-shrink-0" />
+                              <span className="truncate">{event.location}</span>
+                            </span>
+                          )}
                         </div>
-                      )}
-                    </div>
-                    <div className="p-4">
-                      <h4 className="font-semibold text-white mb-2 line-clamp-1 group-hover:text-purple-300 transition-colors">
-                        {event.title}
-                      </h4>
-                      <div className="flex items-center gap-2 text-white/50 text-sm mb-1">
-                        <Clock className="w-3.5 h-3.5" />
-                        <span>{formatEventDate(event.eventDate)} at {formatEventTime(event.eventDate)}</span>
                       </div>
-                      {event.location && (
-                        <div className="flex items-center gap-2 text-white/40 text-sm">
-                          <MapPin className="w-3.5 h-3.5" />
-                          <span className="line-clamp-1">{event.location}</span>
-                        </div>
-                      )}
-                    </div>
-                  </button>
-                ))
-              )}
+                    </motion.button>
+                  ))}
             </div>
           </div>
         </section>
       )}
 
-      <section className="py-20 relative">
-        <div className="container max-w-7xl mx-auto px-4">
-          <div className="text-center mb-16">
-            <h3 className="font-playfair text-3xl md:text-4xl font-bold text-white mb-4">
-              Everything You Need
-            </h3>
-            <p className="text-lg text-white/50 max-w-2xl mx-auto">
-              Discover, connect, and experience the best events in your area
-            </p>
-          </div>
+      {/* ─── Rule ────────────────────────────────────────────────────── */}
+      <div className="max-w-7xl mx-auto px-6">
+        <div className="h-px bg-white/[0.06]" />
+      </div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {features.map((feature) => (
-              <div 
-                key={feature.title} 
-                className="group p-6 rounded-xl bg-white/5 border border-white/10 hover:border-white/20 transition-all duration-300"
+      {/* ─── Pillars ─────────────────────────────────────────────────── */}
+      <section className="py-28">
+        <div className="max-w-7xl mx-auto px-6">
+          <p className="text-white/25 text-[0.65rem] tracking-[0.28em] uppercase font-sans mb-20">
+            Why Vib3Pulse
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+            {pillars.map((pillar, idx) => (
+              <motion.div
+                key={pillar.number}
+                initial={{ opacity: 0, y: 24 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.55, delay: idx * 0.09, ease: [0.22, 1, 0.36, 1] }}
+                className="border-l border-white/[0.07] pl-8 py-8 first:border-l-0 first:pl-0 sm:first:border-l sm:first:pl-8"
               >
-                <div className="flex items-start gap-4">
-                  <div className="p-3 rounded-lg bg-gradient-to-br from-purple-500/20 to-pink-500/20 group-hover:from-purple-500/30 group-hover:to-pink-500/30 transition-colors">
-                    <feature.icon className="w-6 h-6 text-purple-400" />
-                  </div>
-                  <div>
-                    <h4 className="text-lg font-semibold text-white mb-1">{feature.title}</h4>
-                    <p className="text-white/50 text-sm">{feature.description}</p>
-                  </div>
-                </div>
-              </div>
+                <span className="block text-white/20 font-sans text-[0.65rem] tracking-[0.22em] mb-6">
+                  {pillar.number}
+                </span>
+                <pillar.icon className="w-5 h-5 text-violet-400 mb-5" />
+                <h3 className="font-sans font-semibold text-white text-base mb-3 tracking-tight">
+                  {pillar.title}
+                </h3>
+                <p className="font-sans text-white/35 text-sm leading-relaxed">
+                  {pillar.desc}
+                </p>
+              </motion.div>
             ))}
           </div>
         </div>
       </section>
 
-      <section className="py-20 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-r from-purple-900/20 via-transparent to-pink-900/20" />
-        <div className="container max-w-4xl mx-auto px-4 text-center relative">
-          <h3 className="font-playfair text-4xl md:text-5xl font-bold text-white mb-6">
-            Ready to Find Your Vibe?
-          </h3>
-          <p className="text-xl text-white/50 mb-10">
-            Join thousands discovering amazing experiences every day
-          </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link href="/signup">
-              <Button size="lg" className="text-lg px-10 h-14 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white border-0 shadow-lg shadow-purple-500/25" data-testid="button-cta-signup">
-                Create Your Account
-                <ArrowRight className="ml-2 w-5 h-5" />
-              </Button>
-            </Link>
-            <Link href="/login">
-              <Button size="lg" variant="outline" className="text-lg px-10 h-14 bg-white/5 border-white/20 text-white hover:bg-white/10 hover:border-white/30" data-testid="button-cta-login">
-                Log In
-              </Button>
-            </Link>
-          </div>
+      {/* ─── Rule ────────────────────────────────────────────────────── */}
+      <div className="max-w-7xl mx-auto px-6">
+        <div className="h-px bg-white/[0.06]" />
+      </div>
+
+      {/* ─── Safety callout ──────────────────────────────────────────── */}
+      <section className="py-28">
+        <div className="max-w-7xl mx-auto px-6">
+          <motion.div
+            initial={{ opacity: 0, y: 24 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+            className="rounded-3xl bg-[#0e0e0e] border border-white/[0.06] p-10 md:p-16 relative overflow-hidden"
+          >
+            {/* Subtle glow */}
+            <div className="absolute top-0 right-0 w-72 h-72 bg-violet-600/5 rounded-full blur-3xl pointer-events-none" />
+
+            <div className="relative max-w-2xl">
+              <div className="flex items-center gap-2.5 mb-10">
+                <Shield className="w-4 h-4 text-violet-400" />
+                <span className="text-white/35 text-[0.65rem] font-sans tracking-[0.28em] uppercase">
+                  Safety First
+                </span>
+              </div>
+              <h2 className="font-serif text-3xl md:text-5xl lg:text-6xl font-bold text-white mb-7 leading-[1.05] tracking-tight">
+                Go Out.
+                <br />
+                <span className="text-white/30">Come Home Safe.</span>
+              </h2>
+              <p className="font-sans text-white/45 text-base md:text-lg leading-relaxed mb-10 max-w-lg">
+                Our Safety Buddy system lets you assign a trusted contact, set
+                check-in timers before you head out, and send instant SOS alerts
+                with your location. All in one tap.
+              </p>
+              <Link href="/signup">
+                <Button
+                  size="lg"
+                  variant="outline"
+                  className="h-11 px-7 rounded-full border-white/[0.15] text-white/70 bg-transparent hover:bg-white/[0.05] hover:text-white hover:border-white/25 font-sans text-sm transition-all duration-200"
+                >
+                  Learn More
+                  <ArrowRight className="ml-2 w-4 h-4" />
+                </Button>
+              </Link>
+            </div>
+          </motion.div>
         </div>
       </section>
 
-      <footer className="border-t border-white/10 py-10 bg-black/30">
-        <div className="container max-w-7xl mx-auto px-4 text-center">
-          <div className="flex items-center justify-center gap-2 mb-3">
-            <Sparkles className="w-5 h-5 text-purple-400" />
-            <span className="font-playfair text-xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">VibePulse</span>
-          </div>
-          <p className="text-white/40 text-sm">Discover events that match your vibe</p>
+      {/* ─── CTA ─────────────────────────────────────────────────────── */}
+      <section className="py-36">
+        <div className="max-w-7xl mx-auto px-6 text-center">
+          <motion.div
+            initial={{ opacity: 0, y: 32 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <p className="text-white/25 text-[0.65rem] tracking-[0.28em] uppercase font-sans mb-10">
+              Ready?
+            </p>
+            <h2
+              className="font-serif font-bold text-white uppercase tracking-tight leading-[0.9] mb-14"
+              style={{ fontSize: "clamp(2.8rem, 9vw, 8.5rem)" }}
+            >
+              Your Night
+              <br />
+              <span className="text-white/20">Starts Here.</span>
+            </h2>
+            <motion.div
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.97 }}
+              transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
+              className="inline-block"
+            >
+              <Link href="/signup">
+                <Button
+                  size="lg"
+                  className="h-14 px-12 bg-violet-600 hover:bg-violet-500 text-white rounded-full border-0 font-sans font-medium text-lg shadow-2xl shadow-violet-600/30 transition-colors duration-200"
+                  data-testid="button-cta-signup"
+                >
+                  Create Account (it's free)
+                  <ArrowRight className="ml-2 w-5 h-5" />
+                </Button>
+              </Link>
+            </motion.div>
+            <p className="mt-5 text-white/20 text-sm font-sans">
+              Already a member?{" "}
+              <Link href="/login">
+                <span className="text-violet-400/70 hover:text-violet-300 transition-colors cursor-pointer" data-testid="button-cta-login">
+                  Sign in
+                </span>
+              </Link>
+            </p>
+          </motion.div>
+        </div>
+      </section>
+
+      {/* ─── Footer ──────────────────────────────────────────────────── */}
+      <footer className="border-t border-white/[0.06] py-10">
+        <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <span className="font-serif text-xl font-bold text-white/40 tracking-tight">
+            Vib3Pulse
+          </span>
+          <p className="font-sans text-white/20 text-xs">
+            © 2025 Vib3Pulse. All rights reserved.
+          </p>
         </div>
       </footer>
 
+      {/* ─── Category Dialog ─────────────────────────────────────────── */}
       <Dialog open={!!selectedCategory} onOpenChange={() => setSelectedCategory(null)}>
-        <DialogContent className="dark bg-[#0a0a0a] border-white/10 text-white max-w-4xl max-h-[85vh]">
+        <DialogContent className="bg-[#111111] border-white/[0.08] text-white max-w-2xl max-h-[85vh]">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-3 text-2xl">
-              {eventCategories.find(c => c.value === selectedCategory)?.icon && (
-                <div className={`p-2 rounded-lg bg-gradient-to-br ${eventCategories.find(c => c.value === selectedCategory)?.gradient}`}>
-                  {(() => {
-                    const CategoryIcon = eventCategories.find(c => c.value === selectedCategory)?.icon;
-                    return CategoryIcon ? <CategoryIcon className="w-5 h-5 text-white" /> : null;
-                  })()}
-                </div>
-              )}
-              {eventCategories.find(c => c.value === selectedCategory)?.label} Events
+            <DialogTitle className="font-sans text-lg font-semibold flex items-center gap-3">
+              {(() => {
+                const cat = eventCategories.find((c) => c.value === selectedCategory);
+                if (!cat) return null;
+                const Icon = cat.icon;
+                return (
+                  <>
+                    <Icon className="w-5 h-5 text-violet-400" />
+                    {cat.label} Events
+                  </>
+                );
+              })()}
             </DialogTitle>
           </DialogHeader>
-          <ScrollArea className="max-h-[60vh] pr-4">
+
+          <ScrollArea className="max-h-[58vh] pr-2">
             {isCategoryLoading ? (
-              <div className="grid gap-4">
+              <div className="grid gap-3">
                 {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="h-24 rounded-xl bg-white/5 animate-pulse" />
+                  <div key={i} className="h-20 rounded-xl bg-white/[0.04] animate-pulse" />
                 ))}
               </div>
             ) : categoryEvents.length === 0 ? (
-              <div className="text-center py-12">
-                <Calendar className="w-16 h-16 text-white/20 mx-auto mb-4" />
-                <p className="text-white/50 text-lg">No events in this category yet</p>
-                <p className="text-white/30 text-sm mt-2">Check back later for new events</p>
+              <div className="text-center py-14">
+                <Calendar className="w-12 h-12 text-white/10 mx-auto mb-4" />
+                <p className="text-white/35 font-sans text-sm">No events in this category yet</p>
+                <p className="text-white/20 font-sans text-xs mt-1">Check back soon</p>
               </div>
             ) : (
-              <div className="grid gap-3">
+              <div className="grid gap-2">
                 {categoryEvents.map((event) => (
                   <button
                     key={event.id}
@@ -411,57 +534,62 @@ export default function LandingPage() {
                       setSelectedCategory(null);
                       setSelectedEvent(event);
                     }}
-                    className="flex gap-4 p-4 rounded-xl bg-white/5 border border-white/10 hover:border-white/20 hover:bg-white/10 transition-all text-left group"
+                    className="flex gap-4 p-4 rounded-xl bg-white/[0.03] border border-white/[0.06] hover:border-violet-500/25 hover:bg-white/[0.06] transition-all text-left group cursor-pointer"
                     data-testid={`button-category-event-${event.id}`}
                   >
-                    <div className="w-24 h-24 rounded-lg overflow-hidden flex-shrink-0">
+                    <div className="w-20 h-20 rounded-lg overflow-hidden flex-shrink-0">
                       {event.imageUrl ? (
-                        <img src={event.imageUrl} alt={event.title} className="w-full h-full object-cover" />
+                        <img
+                          src={event.imageUrl}
+                          alt={event.title}
+                          className="w-full h-full object-cover"
+                        />
                       ) : (
-                        <div className="w-full h-full bg-gradient-to-br from-purple-600/30 to-pink-600/30 flex items-center justify-center">
-                          <Calendar className="w-8 h-8 text-white/30" />
+                        <div className="w-full h-full bg-violet-900/20 flex items-center justify-center">
+                          <Calendar className="w-6 h-6 text-white/15" />
                         </div>
                       )}
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-2 mb-2">
-                        <h4 className="font-semibold text-white group-hover:text-purple-300 transition-colors line-clamp-1">
+                    <div className="flex-1 min-w-0 py-1">
+                      <div className="flex items-start justify-between gap-2 mb-1.5">
+                        <h4 className="font-sans font-medium text-white group-hover:text-violet-300 transition-colors line-clamp-1 text-sm">
                           {event.title}
                         </h4>
                         {event.externalTicketUrl && (
-                          <Badge className="bg-blue-500/80 text-white border-0 text-xs flex-shrink-0">
-                            <ExternalLink className="w-3 h-3 mr-1" />
-                            External
-                          </Badge>
+                          <span className="text-[0.6rem] text-violet-400 border border-violet-500/25 rounded-full px-2 py-0.5 flex-shrink-0 flex items-center gap-1">
+                            <ExternalLink className="w-2.5 h-2.5" />
+                            Ext
+                          </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-2 text-white/50 text-sm mb-1">
-                        <Clock className="w-3.5 h-3.5 flex-shrink-0" />
-                        <span>{formatEventDate(event.eventDate)} at {formatEventTime(event.eventDate)}</span>
+                      <div className="flex items-center gap-1.5 text-white/35 text-xs font-sans mb-1">
+                        <Clock className="w-3 h-3 flex-shrink-0" />
+                        {formatEventDate(event.eventDate)} · {formatEventTime(event.eventDate)}
                       </div>
                       {event.location && (
-                        <div className="flex items-center gap-2 text-white/40 text-sm">
-                          <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
-                          <span className="line-clamp-1">{event.location}</span>
+                        <div className="flex items-center gap-1.5 text-white/25 text-xs font-sans">
+                          <MapPin className="w-3 h-3 flex-shrink-0" />
+                          <span className="truncate">{event.location}</span>
                         </div>
                       )}
                       {event.ticketPrice !== undefined && event.ticketPrice > 0 && !event.externalTicketUrl && (
-                        <div className="flex items-center gap-2 text-purple-400 text-sm mt-1">
-                          <Ticket className="w-3.5 h-3.5 flex-shrink-0" />
-                          <span>From ${(event.ticketPrice / 100).toFixed(2)}</span>
+                        <div className="flex items-center gap-1.5 text-violet-400/70 text-xs font-sans mt-1">
+                          <Ticket className="w-3 h-3 flex-shrink-0" />
+                          From £{(event.ticketPrice / 100).toFixed(2)}
                         </div>
                       )}
                     </div>
-                    <ChevronRight className="w-5 h-5 text-white/30 group-hover:text-white/60 transition-colors flex-shrink-0 self-center" />
+                    <ChevronRight className="w-4 h-4 text-white/15 group-hover:text-white/40 transition-colors flex-shrink-0 self-center" />
                   </button>
                 ))}
               </div>
             )}
           </ScrollArea>
+
           {categoryEvents.length > 0 && (
-            <div className="pt-4 border-t border-white/10">
+            <div className="pt-3 border-t border-white/[0.06]">
               <Link href="/signup">
-                <Button className="w-full bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white border-0">
+                <Button className="w-full bg-violet-600 hover:bg-violet-500 text-white border-0 rounded-xl font-sans text-sm h-11">
                   Sign up to get tickets
                   <ArrowRight className="ml-2 w-4 h-4" />
                 </Button>
@@ -471,94 +599,99 @@ export default function LandingPage() {
         </DialogContent>
       </Dialog>
 
+      {/* ─── Event Detail Dialog ─────────────────────────────────────── */}
       <Dialog open={!!selectedEvent} onOpenChange={() => setSelectedEvent(null)}>
-        <DialogContent className="dark bg-[#0a0a0a] border-white/10 text-white max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="bg-[#111111] border-white/[0.08] text-white max-w-xl max-h-[90vh] overflow-y-auto">
           {selectedEvent && (
             <>
-              <div className="relative -mx-6 -mt-6 mb-4">
-                <div className="aspect-video relative overflow-hidden rounded-t-lg">
+              <div className="relative -mx-6 -mt-6 mb-6">
+                <div className="aspect-video relative overflow-hidden rounded-t-2xl">
                   {selectedEvent.imageUrl ? (
-                    <img 
-                      src={selectedEvent.imageUrl} 
+                    <img
+                      src={selectedEvent.imageUrl}
                       alt={selectedEvent.title}
                       className="w-full h-full object-cover"
                     />
                   ) : (
-                    <div className="w-full h-full bg-gradient-to-br from-purple-600/30 to-pink-600/30 flex items-center justify-center">
-                      <Calendar className="w-20 h-20 text-white/30" />
+                    <div className="w-full h-full bg-gradient-to-br from-violet-900/25 to-[#0f0f0f] flex items-center justify-center">
+                      <Calendar className="w-16 h-16 text-white/10" />
                     </div>
                   )}
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0a] via-transparent to-transparent" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-[#111111] via-transparent to-transparent" />
                   <div className="absolute top-4 left-4 flex gap-2">
-                    <Badge className="bg-white/20 backdrop-blur-sm text-white border-0">
+                    <span className="text-[0.6rem] font-sans font-medium tracking-[0.18em] uppercase text-white/60 px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-sm border border-white/[0.08]">
                       {selectedEvent.category}
-                    </Badge>
+                    </span>
                     {selectedEvent.externalTicketUrl && (
-                      <Badge className="bg-blue-500/80 backdrop-blur-sm text-white border-0">
-                        <ExternalLink className="w-3 h-3 mr-1" />
+                      <span className="text-[0.6rem] font-sans font-medium tracking-[0.18em] uppercase text-violet-300 px-2.5 py-1 rounded-full bg-violet-600/25 backdrop-blur-sm border border-violet-500/20">
                         External
-                      </Badge>
+                      </span>
                     )}
                   </div>
                 </div>
               </div>
-              
+
               <DialogHeader>
-                <DialogTitle className="text-2xl font-bold text-white">
+                <DialogTitle className="font-sans text-xl font-semibold text-white leading-tight">
                   {selectedEvent.title}
                 </DialogTitle>
               </DialogHeader>
 
-              <div className="space-y-4 mt-4">
-                <div className="flex items-center gap-3 text-white/70">
-                  <Clock className="w-5 h-5 text-purple-400" />
-                  <span>{format(new Date(selectedEvent.eventDate), "EEEE, MMMM d, yyyy 'at' h:mm a")}</span>
+              <div className="mt-4 space-y-3 font-sans text-sm">
+                <div className="flex items-center gap-3 text-white/50">
+                  <Clock className="w-4 h-4 text-violet-400 flex-shrink-0" />
+                  <span>
+                    {format(new Date(selectedEvent.eventDate), "EEEE, MMMM d, yyyy 'at' h:mm a")}
+                  </span>
                 </div>
-
                 {selectedEvent.location && (
-                  <div className="flex items-center gap-3 text-white/70">
-                    <MapPin className="w-5 h-5 text-purple-400" />
-                    <span>{selectedEvent.location}{selectedEvent.city && `, ${selectedEvent.city}`}</span>
+                  <div className="flex items-center gap-3 text-white/50">
+                    <MapPin className="w-4 h-4 text-violet-400 flex-shrink-0" />
+                    <span>
+                      {selectedEvent.location}
+                      {selectedEvent.city && `, ${selectedEvent.city}`}
+                    </span>
                   </div>
                 )}
-
                 {selectedEvent.ticketPrice !== undefined && !selectedEvent.externalTicketUrl && (
-                  <div className="flex items-center gap-3 text-white/70">
-                    <Ticket className="w-5 h-5 text-purple-400" />
+                  <div className="flex items-center gap-3 text-white/50">
+                    <Ticket className="w-4 h-4 text-violet-400 flex-shrink-0" />
                     <span>
-                      {selectedEvent.ticketPrice === 0 ? 'Free' : `From $${(selectedEvent.ticketPrice / 100).toFixed(2)}`}
+                      {selectedEvent.ticketPrice === 0
+                        ? "Free"
+                        : `From £${(selectedEvent.ticketPrice / 100).toFixed(2)}`}
                     </span>
                   </div>
                 )}
 
                 {selectedEvent.description && (
-                  <div className="pt-4 border-t border-white/10">
-                    <p className="text-white/60 leading-relaxed">{selectedEvent.description}</p>
+                  <div className="pt-4 border-t border-white/[0.06]">
+                    <p className="text-white/45 leading-relaxed">{selectedEvent.description}</p>
                   </div>
                 )}
 
-                <div className="pt-4 flex flex-col gap-3">
+                <div className="pt-4 flex flex-col gap-2.5">
                   {selectedEvent.externalTicketUrl ? (
-                    <a 
-                      href={selectedEvent.externalTicketUrl} 
-                      target="_blank" 
+                    <a
+                      href={selectedEvent.externalTicketUrl}
+                      target="_blank"
                       rel="noopener noreferrer"
                       className="block"
                     >
-                      <Button className="w-full bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white border-0 h-12">
+                      <Button className="w-full bg-violet-600 hover:bg-violet-500 text-white border-0 rounded-xl h-11">
                         <ExternalLink className="mr-2 w-4 h-4" />
                         Get Tickets
                       </Button>
                     </a>
                   ) : (
                     <Link href="/signup">
-                      <Button className="w-full bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white border-0 h-12">
+                      <Button className="w-full bg-violet-600 hover:bg-violet-500 text-white border-0 rounded-xl h-11">
                         Sign up to get tickets
                         <ArrowRight className="ml-2 w-4 h-4" />
                       </Button>
                     </Link>
                   )}
-                  <p className="text-center text-white/40 text-sm">
+                  <p className="text-center text-white/20 text-xs font-sans">
                     Create an account to purchase tickets and RSVP
                   </p>
                 </div>

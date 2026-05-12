@@ -1,14 +1,13 @@
 import { useState } from "react";
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { LogIn, Eye, EyeOff, Sparkles } from "lucide-react";
-import { Link } from "wouter";
+import { LogIn, Eye, EyeOff } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 
@@ -27,29 +26,17 @@ export default function LoginPage() {
 
   const form = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
-    defaultValues: {
-      username: "",
-      password: "",
-    },
+    defaultValues: { username: "", password: "" },
   });
 
   const onSubmit = async (data: LoginFormData) => {
     setIsLoading(true);
-    
     try {
       await apiRequest("POST", "/api/auth/login", data);
-
-      // Invalidate session cache so useAuth updates with new user data
       await queryClient.invalidateQueries({ queryKey: ["/api/auth/session"] });
-
-      toast({
-        title: "Welcome back!",
-        description: "You've successfully signed in.",
-      });
-
+      toast({ title: "Welcome back!", description: "You've successfully signed in." });
       const params = new URLSearchParams(window.location.search);
-      const redirect = params.get('redirect');
-      setLocation(redirect || "/discover");
+      setLocation(params.get("redirect") || "/discover");
     } catch (error: any) {
       toast({
         title: "Login failed",
@@ -62,125 +49,157 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="dark min-h-screen flex items-center justify-center p-4 bg-[#0a0a0a] relative overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-br from-purple-900/20 via-[#0a0a0a] to-pink-900/10" />
-      <div className="absolute top-20 left-10 w-72 h-72 bg-purple-500/10 rounded-full blur-3xl" />
-      <div className="absolute bottom-20 right-10 w-96 h-96 bg-pink-500/10 rounded-full blur-3xl" />
-      
-      <div className="w-full max-w-md relative z-10">
-        <div className="text-center mb-8">
-          <div className="flex items-center justify-center gap-2 mb-2">
-            <Sparkles className="w-8 h-8 text-purple-400" />
-            <h1 className="font-playfair text-4xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
-              VibePulse
+    <div className="min-h-screen bg-[#090909] flex flex-col font-sans">
+      {/* Subtle atmospheric glow */}
+      <div className="absolute top-0 left-1/3 w-[500px] h-[500px] bg-violet-600/5 rounded-full blur-[120px] pointer-events-none" />
+
+      {/* Brand header */}
+      <div className="relative z-10 px-8 pt-8">
+        <Link href="/" className="no-underline">
+          <span className="font-serif text-[1.35rem] font-bold text-white/50 hover:text-white/80 transition-colors tracking-tight">
+            Vib3Pulse
+          </span>
+        </Link>
+      </div>
+
+      {/* Main content */}
+      <div className="relative z-10 flex-1 flex items-center justify-center px-6 py-12">
+        <div className="w-full max-w-[360px]">
+
+          {/* Heading */}
+          <div className="mb-10">
+            <h1 className="font-serif text-4xl md:text-5xl font-bold text-white tracking-tight leading-tight mb-3">
+              Welcome
+              <br />
+              back.
             </h1>
+            <p className="text-white/40 text-sm leading-relaxed">
+              Sign in to your account to continue.
+            </p>
           </div>
-          <p className="text-white/60">
-            Welcome back! Sign in to continue
-          </p>
-        </div>
 
-        <Card className="bg-white/5 border-white/10 backdrop-blur-sm">
-          <CardHeader>
-            <CardTitle className="text-white">Sign In</CardTitle>
-            <CardDescription className="text-white/60">
-              Enter your credentials to access your account
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Form {...form}>
-              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                <FormField
-                  control={form.control}
-                  name="username"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className="text-white/80">Username</FormLabel>
-                      <FormControl>
+          {/* Form */}
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+
+              <FormField
+                control={form.control}
+                name="username"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-white/40 text-xs font-sans font-medium tracking-wide uppercase">
+                      Username
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="Enter your username"
+                        className="h-12 bg-white/[0.04] border-white/[0.09] text-white placeholder:text-white/20 focus-visible:ring-1 focus-visible:ring-violet-500 focus-visible:border-violet-500/50 rounded-xl font-sans text-sm transition-colors"
+                        {...field}
+                        data-testid="input-username"
+                      />
+                    </FormControl>
+                    <FormMessage className="text-xs text-red-400" />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="password"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-white/40 text-xs font-sans font-medium tracking-wide uppercase">
+                      Password
+                    </FormLabel>
+                    <FormControl>
+                      <div className="relative">
                         <Input
-                          placeholder="Enter your username"
-                          className="bg-white/5 border-white/20 text-white placeholder:text-white/40 focus:border-purple-500"
+                          type={showPassword ? "text" : "password"}
+                          placeholder="Password"
+                          className="h-12 pr-12 bg-white/[0.04] border-white/[0.09] text-white placeholder:text-white/25 focus-visible:ring-1 focus-visible:ring-violet-500 focus-visible:border-violet-500/50 rounded-xl font-sans text-sm transition-colors"
                           {...field}
-                          data-testid="input-username"
+                          data-testid="input-password"
                         />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 text-white/25 hover:text-white/60 transition-colors cursor-pointer"
+                          data-testid="button-toggle-password"
+                          aria-label={showPassword ? "Hide password" : "Show password"}
+                        >
+                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </FormControl>
+                    <FormMessage className="text-xs text-red-400" />
+                  </FormItem>
+                )}
+              />
 
-                <FormField
-                  control={form.control}
-                  name="password"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className="text-white/80">Password</FormLabel>
-                      <FormControl>
-                        <div className="flex items-center gap-2 border border-white/20 rounded-md focus-within:ring-2 focus-within:ring-purple-500 focus-within:border-purple-500 bg-white/5">
-                          <Input
-                            type={showPassword ? "text" : "password"}
-                            placeholder="Enter your password"
-                            className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 flex-1 bg-transparent text-white placeholder:text-white/40"
-                            {...field}
-                            data-testid="input-password"
-                          />
-                          <button
-                            type="button"
-                            className="text-white/40 hover:text-white/80 transition-colors p-2 mr-1"
-                            onClick={() => setShowPassword(!showPassword)}
-                            data-testid="button-toggle-password"
-                          >
-                            {showPassword ? (
-                              <EyeOff className="h-4 w-4" />
-                            ) : (
-                              <Eye className="h-4 w-4" />
-                            )}
-                          </button>
-                        </div>
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
+              <motion.div
+                whileTap={{ scale: 0.98 }}
+                transition={{ duration: 0.12, ease: [0.22, 1, 0.36, 1] }}
+                className="mt-2"
+              >
                 <Button
                   type="submit"
-                  className="w-full bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white border-0"
+                  className="w-full h-12 bg-violet-600 hover:bg-violet-500 text-white border-0 rounded-xl font-sans font-medium text-sm shadow-lg shadow-violet-600/20 transition-colors duration-200 overflow-hidden relative"
                   disabled={isLoading}
                   data-testid="button-login"
                 >
-                  {isLoading ? (
-                    "Signing in..."
-                  ) : (
-                    <>
-                      <LogIn className="w-4 h-4 mr-2" />
-                      Sign In
-                    </>
-                  )}
+                  <AnimatePresence mode="wait" initial={false}>
+                    {isLoading ? (
+                      <motion.span
+                        key="loading"
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -8 }}
+                        transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+                        className="flex items-center gap-2"
+                      >
+                        <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        Signing in…
+                      </motion.span>
+                    ) : (
+                      <motion.span
+                        key="idle"
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -8 }}
+                        transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+                        className="flex items-center"
+                      >
+                        <LogIn className="w-4 h-4 mr-2" />
+                        Sign In
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
                 </Button>
-              </form>
-            </Form>
-          </CardContent>
-          <CardFooter className="flex flex-col gap-2">
-            <Link 
+              </motion.div>
+            </form>
+          </Form>
+
+          {/* Aux links */}
+          <div className="mt-7 flex flex-col items-center gap-3">
+            <Link
               href="/forgot-password"
-              className="text-sm text-purple-400 hover:text-purple-300 hover:underline" 
+              className="text-sm text-white/30 hover:text-white/60 transition-colors font-sans"
               data-testid="link-forgot-password"
             >
               Forgot your password?
             </Link>
-            <div className="text-sm text-center text-white/50">
-              Don't have an account?{" "}
-              <Link 
+            <p className="text-sm text-white/25 font-sans">
+              New here?{" "}
+              <Link
                 href={`/signup${window.location.search}`}
-                className="text-purple-400 hover:text-purple-300 hover:underline font-medium" 
+                className="text-violet-400 hover:text-violet-300 transition-colors font-medium"
                 data-testid="link-signup"
               >
-                Sign up
+                Create account
               </Link>
-            </div>
-          </CardFooter>
-        </Card>
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   );
