@@ -490,7 +490,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               maxPrice: event.ticketPrice,
             };
           }
-          const prices = tiers.map(t => t.priceCents);
+          const prices = tiers.map(t => t.priceSmallestUnit);
           return {
             ...event,
             minPrice: Math.min(...prices),
