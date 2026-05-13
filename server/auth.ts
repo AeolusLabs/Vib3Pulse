@@ -26,6 +26,7 @@ export type SessionUser = {
   canManageVenues?: boolean | null;
   isVerified?: boolean | null;
   isOfficial?: boolean | null;
+  avatarUrl?: string | null;
 };
 
 export function userToSessionUser(user: User): SessionUser {
@@ -41,6 +42,7 @@ export function userToSessionUser(user: User): SessionUser {
     canManageVenues: user.canManageVenues,
     isVerified: user.isVerified,
     isOfficial: user.isOfficial,
+    avatarUrl: user.avatarUrl,
   };
 }
 

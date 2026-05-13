@@ -24,6 +24,7 @@ import {
   rotateCsrfToken
 } from "./security";
 import { fetchLinkPreview } from "./linkPreviewService";
+import { sendPushNotification, getVapidPublicKey } from "./pushService";
 import { registerSafetyRoutes, startSafetyTimerJob } from "./safety-routes";
 import { registerPaymentRoutes } from "./payment-routes";
 import { buddyRouter } from "./buddyRoutes";
@@ -130,8 +131,28 @@ const signupSchema = insertUserSchema.omit({ passwordHash: true }).extend({
 });
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Unified helper: DB notification + WebSocket + push notification
+  async function deliverNotification(params: {
+    userId: string;
+    type: string;
+    title: string;
+    message: string;
+    link?: string;
+    relatedUserId?: string;
+    relatedEntityId?: string;
+  }): Promise<void> {
+    await storage.createNotification(params as Parameters<typeof storage.createNotification>[0]);
+    wsManager.sendToUser(params.userId, { type: "notification", data: { type: params.type } });
+    sendPushNotification(params.userId, {
+      title: params.title,
+      body: params.message,
+      url: params.link,
+      tag: params.type,
+    }).catch(() => {});
+  }
+
   // ==================== CONFIG ROUTES ====================
-  
+
   // Expose app configuration (safe public info only)
   app.get("/api/config", (req, res) => {
     res.json({
@@ -448,7 +469,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const updatedUser = await storage.updateUser(userId, updates);
-      res.json(updatedUser);
+      // Refresh session so updated displayName/avatar immediately reflect in navigation
+      req.login(userToSessionUser(updatedUser), (err) => {
+        if (err) console.error('Session refresh error after profile update:', err);
+      });
+      const { passwordHash, ...userWithoutPassword } = updatedUser as any;
+      res.json(userWithoutPassword);
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid profile data", errors: error.errors });
@@ -1235,7 +1261,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Notify event organizer about the RSVP
       const attendee = await storage.getUser(userId);
-      await storage.createNotification({
+      await deliverNotification({
         userId: event.organizerId,
         type: "event_rsvp",
         title: "New RSVP",
@@ -1243,11 +1269,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         link: `/events/${eventId}`,
         relatedUserId: userId,
         relatedEntityId: eventId,
-      });
-      // Push real-time notification via WebSocket
-      wsManager.sendToUser(event.organizerId, {
-        type: "notification",
-        data: { type: "event_rsvp" },
       });
       
       res.json(rsvp);
@@ -1362,7 +1383,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           // Create notification for the mentioned user
           const poster = await storage.getUser(req.user!.id);
-          await storage.createNotification({
+          await deliverNotification({
             userId: mentionedUser.id,
             type: "mention",
             title: "You were mentioned",
@@ -1370,10 +1391,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             link: `/feed`,
             relatedUserId: req.user!.id,
             relatedEntityId: post.id,
-          });
-          wsManager.sendToUser(mentionedUser.id, {
-            type: "notification",
-            data: { type: "mention" },
           });
         }
       }
@@ -1387,7 +1404,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         for (const memberId of memberIds) {
           // Don't notify the poster themselves
           if (memberId !== req.user!.id) {
-            await storage.createNotification({
+            await deliverNotification({
               userId: memberId,
               type: "community_post",
               title: `New post in ${community?.name}`,
@@ -1395,10 +1412,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
               link: `/feed`,
               relatedUserId: req.user!.id,
               relatedEntityId: post.id,
-            });
-            wsManager.sendToUser(memberId, {
-              type: "notification",
-              data: { type: "community_post" },
             });
           }
         }
@@ -1602,7 +1615,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (story.userId !== userId) {
         const liker = await storage.getUser(userId);
         const likerName = liker?.displayName || liker?.username || "Someone";
-        await storage.createNotification({
+        await deliverNotification({
           userId: story.userId,
           type: "story_like",
           title: "Story Liked",
@@ -1610,11 +1623,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           link: `/stories`,
           relatedUserId: userId,
           relatedEntityId: storyId,
-        });
-        // Push real-time notification via WebSocket
-        wsManager.sendToUser(story.userId, {
-          type: "notification",
-          data: { type: "story_like" },
         });
       }
 
@@ -1701,7 +1709,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (post && post.userId !== userId) {
         const liker = await storage.getUser(userId);
         const postSnippet = post.content.length > 50 ? post.content.substring(0, 50) + "..." : post.content;
-        await storage.createNotification({
+        await deliverNotification({
           userId: post.userId,
           type: "post_like",
           title: "New Post Like",
@@ -1709,11 +1717,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           link: `/feed`,
           relatedUserId: userId,
           relatedEntityId: postId,
-        });
-        // Push real-time notification via WebSocket
-        wsManager.sendToUser(post.userId, {
-          type: "notification",
-          data: { type: "post_like" },
         });
       }
 
@@ -1775,7 +1778,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (post && post.userId !== userId) {
         const commenter = await storage.getUser(userId);
         const commentSnippet = sanitizedContent.length > 60 ? sanitizedContent.substring(0, 60) + "..." : sanitizedContent;
-        await storage.createNotification({
+        await deliverNotification({
           userId: post.userId,
           type: "post_comment",
           title: "New Comment",
@@ -1783,11 +1786,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           link: `/feed`,
           relatedUserId: userId,
           relatedEntityId: postId,
-        });
-        // Push real-time notification via WebSocket
-        wsManager.sendToUser(post.userId, {
-          type: "notification",
-          data: { type: "post_comment" },
         });
       }
       
@@ -1969,7 +1967,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const originalPost = await storage.getPost(postId);
       if (originalPost && originalPost.userId !== userId) {
         const reposter = await storage.getUser(userId);
-        await storage.createNotification({
+        await deliverNotification({
           userId: originalPost.userId,
           type: "repost",
           title: "Post Reposted",
@@ -1977,10 +1975,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           link: `/feed`,
           relatedUserId: userId,
           relatedEntityId: postId,
-        });
-        wsManager.sendToUser(originalPost.userId, {
-          type: "notification",
-          data: { type: "repost" },
         });
       }
 
@@ -2077,7 +2071,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Notify user they have a new follower
       const follower = await storage.getUser(followerId);
-      await storage.createNotification({
+      await deliverNotification({
         userId: followingId,
         type: "new_follower",
         title: "New Follower",
@@ -2085,11 +2079,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         link: `/profile/${follower?.username}`,
         relatedUserId: followerId,
         relatedEntityId: followerId,
-      });
-      // Push real-time notification via WebSocket
-      wsManager.sendToUser(followingId, {
-        type: "notification",
-        data: { type: "new_follower" },
       });
 
       res.json(follow);
@@ -2213,7 +2202,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         // Create notification for message recipient - use sanitized content
         const messageSnippet = sanitizedContent.length > 50 ? sanitizedContent.substring(0, 50) + "..." : sanitizedContent;
-        await storage.createNotification({
+        await deliverNotification({
           userId: receiverId,
           type: "new_message",
           title: "New Message",
@@ -2221,11 +2210,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           link: `/messages/${senderId}`,
           relatedUserId: senderId,
           relatedEntityId: message.id,
-        });
-        // Push real-time notification via WebSocket
-        wsManager.sendToUser(receiverId, {
-          type: "notification",
-          data: { type: "new_message" },
         });
       }
       
@@ -2415,7 +2399,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Create notification for the followed user
       const currentUser = await storage.getUser(currentUserId);
-      await storage.createNotification({
+      await deliverNotification({
         userId: targetUserId,
         type: "new_follower",
         title: "New Follower",
@@ -2667,6 +2651,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Get unread count error:", error);
       res.status(500).json({ message: "Failed to get unread count" });
+    }
+  });
+
+  // Get unread message count
+  app.get("/api/messages/unread-count", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const count = await storage.getUnreadMessageCount(userId);
+      res.json({ count });
+    } catch (error) {
+      console.error("Get unread message count error:", error);
+      res.status(500).json({ message: "Failed to get unread message count" });
+    }
+  });
+
+  // ============================================
+  // PUSH NOTIFICATIONS
+  // ============================================
+
+  // Return VAPID public key for client subscription
+  app.get("/api/push/vapid-public-key", requireAuth, (req, res) => {
+    res.json({ key: getVapidPublicKey() });
+  });
+
+  // Save push subscription
+  app.post("/api/push/subscribe", requireAuth, async (req, res) => {
+    try {
+      const { endpoint, keys } = req.body;
+      if (!endpoint || !keys?.p256dh || !keys?.auth) {
+        return res.status(400).json({ message: "Invalid subscription" });
+      }
+      await storage.upsertPushSubscription({
+        userId: req.user!.id,
+        endpoint,
+        p256dhKey: keys.p256dh,
+        authKey: keys.auth,
+      });
+      res.json({ message: "Subscribed" });
+    } catch (error) {
+      console.error("Push subscribe error:", error);
+      res.status(500).json({ message: "Failed to save subscription" });
+    }
+  });
+
+  // Remove push subscription
+  app.post("/api/push/unsubscribe", requireAuth, async (req, res) => {
+    try {
+      const { endpoint } = req.body;
+      if (!endpoint) return res.status(400).json({ message: "Endpoint required" });
+      await storage.deletePushSubscription(endpoint);
+      res.json({ message: "Unsubscribed" });
+    } catch (error) {
+      console.error("Push unsubscribe error:", error);
+      res.status(500).json({ message: "Failed to remove subscription" });
     }
   });
 

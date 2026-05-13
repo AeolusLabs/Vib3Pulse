@@ -13,6 +13,7 @@ export type AuthUser = {
   canManageVenues?: boolean | null;
   isVerified?: boolean | null;
   isOfficial?: boolean | null;
+  avatarUrl?: string | null;
 };
 
 type AuthResponse = {

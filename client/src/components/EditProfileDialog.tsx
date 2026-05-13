@@ -60,12 +60,13 @@ export default function EditProfileDialog({ user }: EditProfileDialogProps) {
 
   const updateProfileMutation = useMutation({
     mutationFn: async (data: UpdateUser) => {
-      return await apiRequest("PATCH", `/api/users/${user.id}`, data);
+      const res = await apiRequest("PATCH", `/api/users/${user.id}`, data);
+      return res.json();
     },
     onSuccess: () => {
-      // Invalidate profile query by username (used by ProfilePage)
+      // Invalidate all profile-related queries so every view refreshes
       queryClient.invalidateQueries({ queryKey: [`/api/users/${user.username}`] });
-      // Invalidate session in case display name changed
+      queryClient.invalidateQueries({ queryKey: [`/api/users/${user.id}/profile`] });
       queryClient.invalidateQueries({ queryKey: ["/api/auth/session"] });
       toast({
         title: "Success",
@@ -73,10 +74,10 @@ export default function EditProfileDialog({ user }: EditProfileDialogProps) {
       });
       setOpen(false);
     },
-    onError: () => {
+    onError: (error: any) => {
       toast({
         title: "Error",
-        description: "Failed to update profile",
+        description: error?.message || "Failed to update profile",
         variant: "destructive",
       });
     },
