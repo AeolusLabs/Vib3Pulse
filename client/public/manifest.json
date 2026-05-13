@@ -1,13 +1,16 @@
 {
+  "id": "/",
   "name": "VibePulse - Social Events Platform",
   "short_name": "VibePulse",
   "description": "Discover events, connect with people, and share experiences",
   "theme_color": "#0a0a0a",
   "background_color": "#0a0a0a",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
   "orientation": "portrait",
   "scope": "/",
   "start_url": "/",
+  "categories": ["social", "entertainment", "lifestyle"],
   "icons": [
     {
       "src": "/pwa-icon-192.png",

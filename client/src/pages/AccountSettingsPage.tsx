@@ -9,15 +9,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { Lock, User, AlertCircle, Loader2, CheckCircle } from "lucide-react";
+import { Lock, User, AlertCircle, Loader2, CheckCircle, Bell, BellOff } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { usePushNotifications } from "@/hooks/usePushNotifications";
+import { Switch } from "@/components/ui/switch";
 import type { User as UserType } from "@shared/schema";
 
 export default function AccountSettingsPage() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
+  const push = usePushNotifications();
   const { data: sessionUser, isLoading: sessionLoading } = useAuth();
 
   const [currentPassword, setCurrentPassword] = useState("");
@@ -257,6 +260,67 @@ export default function AccountSettingsPage() {
                 <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg flex items-center gap-2">
                   <AlertCircle className="h-5 w-5 text-destructive" />
                   <p className="text-sm text-destructive">You have used all your username changes.</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Bell className="h-5 w-5" />
+                Push Notifications
+              </CardTitle>
+              <CardDescription>
+                Get notified about messages, likes, and activity even when VibePulse isn't open.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {!push.isSupported ? (
+                <div className="flex items-start gap-3 p-4 bg-muted rounded-lg">
+                  <BellOff className="h-5 w-5 text-muted-foreground mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium">Not supported on this browser</p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Push notifications require a modern browser with HTTPS. Try Chrome, Edge, or Firefox on a secure connection.
+                    </p>
+                  </div>
+                </div>
+              ) : push.permission === "denied" ? (
+                <div className="flex items-start gap-3 p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
+                  <BellOff className="h-5 w-5 text-destructive mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-destructive">Notifications blocked</p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      You've blocked notifications for this site. To enable them, update your browser's site settings and reload the page.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <p className="text-sm font-medium">Enable push notifications</p>
+                    <p className="text-sm text-muted-foreground">
+                      {push.isSubscribed ? "You'll receive notifications on this device." : "Turn on to receive notifications on this device."}
+                    </p>
+                  </div>
+                  <Switch
+                    checked={push.isSubscribed}
+                    disabled={push.isLoading}
+                    onCheckedChange={async (checked) => {
+                      if (checked) {
+                        const ok = await push.subscribe();
+                        if (!ok) {
+                          toast({ title: "Could not enable notifications", description: "Please check your browser permissions.", variant: "destructive" });
+                        } else {
+                          toast({ title: "Notifications enabled" });
+                        }
+                      } else {
+                        await push.unsubscribe();
+                        toast({ title: "Notifications disabled" });
+                      }
+                    }}
+                  />
                 </div>
               )}
             </CardContent>

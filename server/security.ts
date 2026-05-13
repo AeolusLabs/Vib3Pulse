@@ -46,6 +46,7 @@ const CSRF_EXEMPT_PATHS = [
   "/webhooks/stripe",
   "/stripe/webhook",
   "/webhook",
+  "/safety/buddy-sms-reply", // Twilio/Termii inbound SMS webhook
 ];
 
 function isExemptFromCsrf(path: string): boolean {
@@ -287,6 +288,7 @@ export const securityHeaders = (req: Request, res: Response, next: NextFunction)
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: blob: https: http:",
+    "worker-src 'self'",
     "connect-src 'self' https://api.stripe.com wss: ws:",
     "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
     "object-src 'none'",

@@ -1,5 +1,6 @@
 import { Compass, LayoutGrid, Search, MessageCircle, Ticket } from "lucide-react";
 import { Link, useLocation } from "wouter";
+import { useUnreadMessagesCount, useMessageCountWebSocket } from "@/hooks/useUnreadMessagesCount";
 
 interface BottomNavigationProps {
   onCreateClick?: () => void;
@@ -7,6 +8,8 @@ interface BottomNavigationProps {
 
 export default function BottomNavigation({ onCreateClick }: BottomNavigationProps) {
   const [location] = useLocation();
+  const { data: unreadMessageCount = 0 } = useUnreadMessagesCount();
+  useMessageCountWebSocket();
 
   const navItems = [
     { icon: LayoutGrid, label: "Feed", path: "/feed", testId: "nav-feed" },
@@ -22,6 +25,7 @@ export default function BottomNavigation({ onCreateClick }: BottomNavigationProp
         {navItems.map((item) => {
           const isActive = location === item.path;
           const Icon = item.icon;
+          const showDot = item.label === "Messages" && unreadMessageCount > 0;
 
           return (
             <Link key={item.label} href={item.path}>
@@ -31,7 +35,12 @@ export default function BottomNavigation({ onCreateClick }: BottomNavigationProp
                 }`}
                 data-testid={item.testId}
               >
-                <Icon className="h-6 w-6" />
+                <span className="relative inline-flex">
+                  <Icon className="h-6 w-6" />
+                  {showDot && (
+                    <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-red-500 border-2 border-background" />
+                  )}
+                </span>
                 <span className="text-xs font-medium">{item.label}</span>
               </button>
             </Link>

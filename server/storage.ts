@@ -85,6 +85,8 @@ import {
   type InsertPollOption,
   type PollVote,
   type InsertPollVote,
+  type PushSubscription,
+  type InsertPushSubscription,
   users,
   events,
   tickets,
@@ -128,7 +130,8 @@ import {
   conversationMessages,
   polls,
   pollOptions,
-  pollVotes
+  pollVotes,
+  pushSubscriptions
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
@@ -484,7 +487,8 @@ export interface IStorage {
   getConversationParticipants(conversationId: string): Promise<Array<ConversationParticipant & { user: User }>>;
   getParticipantRole(conversationId: string, userId: string): Promise<string | undefined>;
   updateLastReadAt(conversationId: string, userId: string): Promise<void>;
-  
+  getUnreadMessageCount(userId: string): Promise<number>;
+
   // Conversation messages
   sendConversationMessage(message: InsertConversationMessage): Promise<ConversationMessage>;
   getConversationMessages(conversationId: string, limit?: number, before?: string): Promise<Array<ConversationMessage & { sender: User; replyTo?: ConversationMessage & { sender: User } }>>;
@@ -504,6 +508,13 @@ export interface IStorage {
   getMedia(id: string): Promise<{ data: string; contentType: string } | null>;
   deleteMedia(id: string): Promise<void>;
   deleteMediaByUrls(urls: string[]): Promise<void>;
+
+  // ============================================
+  // PUSH SUBSCRIPTIONS
+  // ============================================
+  upsertPushSubscription(sub: InsertPushSubscription): Promise<PushSubscription>;
+  getPushSubscriptionsByUserId(userId: string): Promise<PushSubscription[]>;
+  deletePushSubscription(endpoint: string): Promise<void>;
 }
 
 export class DbStorage implements IStorage {
@@ -3435,6 +3446,20 @@ export class DbStorage implements IStorage {
       ));
   }
 
+  async getUnreadMessageCount(userId: string): Promise<number> {
+    const result = await db.execute(sql`
+      SELECT COUNT(*) as count
+      FROM conversation_messages cm
+      JOIN conversation_participants cp
+        ON cm.conversation_id = cp.conversation_id
+        AND cp.user_id = ${userId}
+      WHERE cm.sender_id != ${userId}
+        AND cm.is_deleted = false
+        AND (cp.last_read_at IS NULL OR cm.created_at > cp.last_read_at)
+    `);
+    return Number((result.rows[0] as { count: string })?.count || 0);
+  }
+
   // Conversation messages
   async sendConversationMessage(message: InsertConversationMessage): Promise<ConversationMessage> {
     const [result] = await db.insert(conversationMessages).values(message).returning();
@@ -3796,6 +3821,35 @@ export class DbStorage implements IStorage {
     }
     
     return undefined;
+  }
+
+  async upsertPushSubscription(sub: InsertPushSubscription): Promise<PushSubscription> {
+    const [result] = await db
+      .insert(pushSubscriptions)
+      .values(sub)
+      .onConflictDoUpdate({
+        target: pushSubscriptions.endpoint,
+        set: {
+          p256dhKey: sub.p256dhKey,
+          authKey: sub.authKey,
+          userId: sub.userId,
+        },
+      })
+      .returning();
+    return result;
+  }
+
+  async getPushSubscriptionsByUserId(userId: string): Promise<PushSubscription[]> {
+    return db
+      .select()
+      .from(pushSubscriptions)
+      .where(eq(pushSubscriptions.userId, userId));
+  }
+
+  async deletePushSubscription(endpoint: string): Promise<void> {
+    await db
+      .delete(pushSubscriptions)
+      .where(eq(pushSubscriptions.endpoint, endpoint));
   }
 }
 

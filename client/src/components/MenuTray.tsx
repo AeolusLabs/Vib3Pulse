@@ -3,11 +3,13 @@ import { Home, Compass, MessageCircle, Menu, X, Building2, Search } from "lucide
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
+import { useUnreadMessagesCount } from "@/hooks/useUnreadMessagesCount";
 
 export default function MenuTray() {
   const [isOpen, setIsOpen] = useState(false);
   const [location] = useLocation();
   const { data: user } = useAuth();
+  const { data: unreadMessageCount = 0 } = useUnreadMessagesCount();
 
   return (
     <>
@@ -78,7 +80,12 @@ export default function MenuTray() {
                   onClick={() => setIsOpen(false)}
                   data-testid="link-messages"
                 >
-                  <MessageCircle className="h-4 w-4 mr-2" />
+                  <span className="relative inline-flex mr-2">
+                    <MessageCircle className="h-4 w-4" />
+                    {unreadMessageCount > 0 && (
+                      <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-red-500 border border-background" />
+                    )}
+                  </span>
                   Messages
                 </Button>
               </Link>

@@ -1060,4 +1060,25 @@ export const mediaUploads = pgTable("media_uploads", {
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
+// ============================================
+// PUSH SUBSCRIPTIONS (Web Push / VAPID)
+// ============================================
+
+export const pushSubscriptions = pgTable("push_subscriptions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  endpoint: text("endpoint").notNull().unique(),
+  p256dhKey: text("p256dh_key").notNull(),
+  authKey: text("auth_key").notNull(),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const insertPushSubscriptionSchema = createInsertSchema(pushSubscriptions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertPushSubscription = z.infer<typeof insertPushSubscriptionSchema>;
+export type PushSubscription = typeof pushSubscriptions.$inferSelect;
+
 export type MediaUpload = typeof mediaUploads.$inferSelect;

@@ -1,5 +1,5 @@
-const CACHE_NAME = "vibepulse-v1";
-const API_CACHE = "vibepulse-api-v1";
+const CACHE_NAME = "vibepulse-v2";
+const API_CACHE = "vibepulse-api-v2";
 const API_MAX_AGE_MS = 5 * 60 * 1000;
 const NETWORK_TIMEOUT_MS = 10000;
 
@@ -166,4 +166,44 @@ self.addEventListener("message", (event) => {
   if (event.data && event.data.type === "SKIP_WAITING") {
     self.skipWaiting();
   }
+});
+
+self.addEventListener("push", (event) => {
+  if (!event.data) return;
+
+  let payload;
+  try {
+    payload = event.data.json();
+  } catch {
+    payload = { title: "VibePulse", body: event.data.text(), url: "/" };
+  }
+
+  const title = payload.title || "VibePulse";
+  const options = {
+    body: payload.body || "",
+    icon: payload.icon || "/pwa-icon-192.png",
+    badge: payload.badge || "/favicon.png",
+    tag: payload.tag || "vibepulse-notification",
+    data: { url: payload.url || "/" },
+    renotify: true,
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = event.notification.data?.url || "/";
+
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((windowClients) => {
+      for (const client of windowClients) {
+        if (client.url.includes(self.location.origin) && "focus" in client) {
+          client.navigate(targetUrl);
+          return client.focus();
+        }
+      }
+      return clients.openWindow(targetUrl);
+    })
+  );
 });
