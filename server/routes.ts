@@ -460,10 +460,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       
-      // Check if user is trying to update gender
+      // Enforce one-time gender edit: only block if the submitted value
+      // actually differs from what is already stored.
       if (updates.gender !== undefined) {
         const currentUser = await storage.getUser(userId);
-        if (currentUser?.genderEditedAt) {
+        if (currentUser?.genderEditedAt && updates.gender !== currentUser.gender) {
           return res.status(400).json({ message: "Gender can only be changed once" });
         }
       }

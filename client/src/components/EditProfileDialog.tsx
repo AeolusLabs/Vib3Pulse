@@ -84,6 +84,11 @@ export default function EditProfileDialog({ user }: EditProfileDialogProps) {
   });
 
   const onSubmit = (data: UpdateUser) => {
+    // Never send gender when it's already been set — the field is locked and
+    // the server will reject the whole save if it sees gender in the payload.
+    if (hasEditedGender) {
+      delete data.gender;
+    }
     updateProfileMutation.mutate(data);
   };
 
