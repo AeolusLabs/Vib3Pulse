@@ -7,7 +7,7 @@ function getCsrfTokenFromCookie(): string | null {
   return match ? match[1] : null;
 }
 
-async function ensureCsrfToken(): Promise<string> {
+export async function ensureCsrfToken(): Promise<string> {
   let token = getCsrfTokenFromCookie();
   
   if (!token) {

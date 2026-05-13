@@ -3,7 +3,7 @@ import { X, Film, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, ensureCsrfToken } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
 
 interface VideoUploaderProps {
@@ -63,10 +63,13 @@ export function VideoUploader({
 
       setUploadProgress(20);
 
+      const csrfToken = await ensureCsrfToken();
+
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open("PUT", uploadURL);
         xhr.setRequestHeader("Content-Type", file.type);
+        xhr.setRequestHeader("x-csrf-token", csrfToken);
 
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable) {
