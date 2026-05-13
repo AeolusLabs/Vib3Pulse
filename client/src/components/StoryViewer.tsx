@@ -407,23 +407,46 @@ export default function StoryViewer({
         </div>
 
         {/* Story content */}
-        <div className="h-full flex items-center justify-center">
+        <div className="relative h-full w-full overflow-hidden">
           {currentStory.type === "video" ? (
-            <video
-              ref={storyVideoRef}
-              src={currentStory.videoUrl || currentStory.content}
-              className="w-full h-full object-cover"
-              muted={isVideoMuted}
-              playsInline
-              autoPlay
-              data-testid="story-video"
-            />
+            <>
+              {/* Blurred background fill for non-portrait videos */}
+              <video
+                src={currentStory.videoUrl || currentStory.content}
+                className="absolute inset-0 w-full h-full object-cover scale-110 blur-2xl opacity-50"
+                muted
+                playsInline
+                autoPlay
+                loop
+                aria-hidden="true"
+              />
+              {/* Main video — never cropped */}
+              <video
+                ref={storyVideoRef}
+                src={currentStory.videoUrl || currentStory.content}
+                className="relative w-full h-full object-contain"
+                muted={isVideoMuted}
+                playsInline
+                autoPlay
+                data-testid="story-video"
+              />
+            </>
           ) : currentStory.type === "image" ? (
-            <img
-              src={currentStory.content}
-              alt="Story"
-              className="w-full h-full object-cover"
-            />
+            <>
+              {/* Blurred background fill for landscape / square images */}
+              <img
+                src={currentStory.content}
+                alt=""
+                className="absolute inset-0 w-full h-full object-cover scale-110 blur-2xl opacity-60"
+                aria-hidden="true"
+              />
+              {/* Main image — never cropped */}
+              <img
+                src={currentStory.content}
+                alt="Story"
+                className="relative w-full h-full object-contain"
+              />
+            </>
           ) : (
             <div
               className="w-full h-full flex items-center justify-center p-8"
