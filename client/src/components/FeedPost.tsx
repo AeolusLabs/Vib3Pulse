@@ -1,7 +1,7 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,8 +18,20 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Heart, MessageCircle, Share2, Bookmark, Repeat2, Calendar, MapPin, Building2, MoreHorizontal, Trash2, BadgeCheck } from "lucide-react";
-import { useState, useEffect, Fragment } from "react";
+import {
+  Heart,
+  MessageCircle,
+  Share2,
+  Bookmark,
+  Repeat2,
+  Calendar,
+  MapPin,
+  Building2,
+  MoreHorizontal,
+  Trash2,
+  BadgeCheck,
+} from "lucide-react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -30,38 +42,24 @@ import LinkPreviewCard, { extractFirstUrl } from "@/components/LinkPreviewCard";
 import ImageGrid from "@/components/ImageGrid";
 import FeedVideoPlayer from "@/components/FeedVideoPlayer";
 import { format } from "date-fns";
+import { cn } from "@/lib/utils";
 import type { Event, Venue } from "@shared/schema";
 
 function formatRelativeTime(date: Date | string): string {
   const now = new Date();
-  const postDate = typeof date === 'string' ? new Date(date) : date;
+  const postDate = typeof date === "string" ? new Date(date) : date;
   const diffInSeconds = Math.floor((now.getTime() - postDate.getTime()) / 1000);
 
-  if (diffInSeconds < 60) {
-    return diffInSeconds <= 5 ? 'Just now' : `${diffInSeconds}s`;
-  }
-
+  if (diffInSeconds < 60) return diffInSeconds <= 5 ? "Just now" : `${diffInSeconds}s`;
   const diffInMinutes = Math.floor(diffInSeconds / 60);
-  if (diffInMinutes < 60) {
-    return `${diffInMinutes}m`;
-  }
-
+  if (diffInMinutes < 60) return `${diffInMinutes}m`;
   const diffInHours = Math.floor(diffInMinutes / 60);
-  if (diffInHours < 24) {
-    return `${diffInHours}h`;
-  }
-
+  if (diffInHours < 24) return `${diffInHours}h`;
   const diffInDays = Math.floor(diffInHours / 24);
-  if (diffInDays < 7) {
-    return `${diffInDays}d`;
-  }
-
+  if (diffInDays < 7) return `${diffInDays}d`;
   const diffInWeeks = Math.floor(diffInDays / 7);
-  if (diffInWeeks < 4) {
-    return `${diffInWeeks}w`;
-  }
-
-  return format(postDate, 'MMM d, yyyy');
+  if (diffInWeeks < 4) return `${diffInWeeks}w`;
+  return format(postDate, "MMM d, yyyy");
 }
 
 interface MentionedUser {
@@ -90,22 +88,21 @@ interface FeedPostProps {
   comments: number;
   isLiked?: boolean;
   isRepost?: boolean;
-  repostedBy?: {
-    name: string;
-    username: string;
-    userId?: string;
-  };
+  repostedBy?: { name: string; username: string; userId?: string };
   eventId?: string | null;
   venueId?: string | null;
   attachedEvent?: Event | null;
   attachedVenue?: Venue | null;
   community?: { id: string; name: string } | null;
   mentionedUsers?: MentionedUser[];
+  hasActiveStory?: boolean;
+  /** When true: renders flat/borderless for the main feed timeline */
+  feedMode?: boolean;
   onPostClick?: () => void;
 }
 
-function renderContentWithLinkedMentionsAndHashtags(
-  content: string, 
+function renderContent(
+  content: string,
   navigate: (path: string) => void,
   mentionedUsers: MentionedUser[] = []
 ) {
@@ -113,51 +110,37 @@ function renderContentWithLinkedMentionsAndHashtags(
   const regex = /(@\w+|#\w+)/g;
   let lastIndex = 0;
   let match;
-  let partIndex = 0;
-  
-  const userMap = new Map(mentionedUsers.map(u => [u.username.toLowerCase(), u]));
+  let i = 0;
+  const userMap = new Map(mentionedUsers.map((u) => [u.username.toLowerCase(), u]));
 
   while ((match = regex.exec(content)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(content.slice(lastIndex, match.index));
-    }
-    
+    if (match.index > lastIndex) parts.push(content.slice(lastIndex, match.index));
     const token = match[0];
-    if (token.startsWith('@')) {
+
+    if (token.startsWith("@")) {
       const username = token.slice(1);
-      const mentionedUser = userMap.get(username.toLowerCase());
-      
+      const mentioned = userMap.get(username.toLowerCase());
       parts.push(
         <button
-          key={`mention-${partIndex++}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            navigate(`/profile/${username}`);
-          }}
-          className="inline-flex items-center gap-1 text-primary hover:underline font-medium"
+          key={`m-${i++}`}
+          onClick={(e) => { e.stopPropagation(); navigate(`/profile/${username}`); }}
+          className="inline-flex items-center gap-0.5 text-primary hover:underline font-medium"
           data-testid={`mention-${username}`}
         >
-          {mentionedUser?.avatarUrl && (
-            <img 
-              src={mentionedUser.avatarUrl} 
-              alt={username}
-              className="h-4 w-4 rounded-full object-cover inline-block"
-            />
+          {mentioned?.avatarUrl && (
+            <img src={mentioned.avatarUrl} alt={username} className="h-4 w-4 rounded-full object-cover inline-block" />
           )}
           {token}
         </button>
       );
-    } else if (token.startsWith('#')) {
-      const hashtag = token.slice(1);
+    } else {
+      const tag = token.slice(1);
       parts.push(
         <button
-          key={`hashtag-${partIndex++}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            navigate(`/search?tag=${hashtag}`);
-          }}
+          key={`h-${i++}`}
+          onClick={(e) => { e.stopPropagation(); navigate(`/search?tag=${tag}`); }}
           className="text-primary hover:underline font-medium"
-          data-testid={`hashtag-${hashtag}`}
+          data-testid={`hashtag-${tag}`}
         >
           {token}
         </button>
@@ -165,11 +148,7 @@ function renderContentWithLinkedMentionsAndHashtags(
     }
     lastIndex = regex.lastIndex;
   }
-
-  if (lastIndex < content.length) {
-    parts.push(content.slice(lastIndex));
-  }
-
+  if (lastIndex < content.length) parts.push(content.slice(lastIndex));
   return parts;
 }
 
@@ -193,6 +172,8 @@ export default function FeedPost({
   attachedVenue,
   community,
   mentionedUsers = [],
+  hasActiveStory = false,
+  feedMode = false,
   onPostClick,
 }: FeedPostProps) {
   const [, navigate] = useLocation();
@@ -200,307 +181,213 @@ export default function FeedPost({
   const { data: currentUser } = useAuth();
   const [commentDialogOpen, setCommentDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [displayTime, setDisplayTime] = useState(() => 
-    createdAt ? formatRelativeTime(createdAt) : timestamp || 'Just now'
+  const [likeAnimating, setLikeAnimating] = useState(false);
+  const [displayTime, setDisplayTime] = useState(() =>
+    createdAt ? formatRelativeTime(createdAt) : timestamp || "Just now"
   );
-  
+
   const isOwnPost = currentUser?.id === author.userId;
 
   useEffect(() => {
     if (!createdAt) return;
-    
     setDisplayTime(formatRelativeTime(createdAt));
-    
-    const interval = setInterval(() => {
-      setDisplayTime(formatRelativeTime(createdAt));
-    }, 30000);
-    
+    const interval = setInterval(() => setDisplayTime(formatRelativeTime(createdAt)), 30000);
     return () => clearInterval(interval);
   }, [createdAt]);
 
-  // Fetch like status and count from API
   const { data: likeData } = useQuery<{ count: number; isLiked: boolean }>({
-    queryKey: ['/api/posts', id, 'likes'],
+    queryKey: ["/api/posts", id, "likes"],
     staleTime: 0,
   });
 
-  // Fetch comment count (always fetch to show count, not just when dialog is open)
   const { data: commentsData } = useQuery<{ comments: any[]; count: number }>({
-    queryKey: ['/api/posts', id, 'comments'],
+    queryKey: ["/api/posts", id, "comments"],
     staleTime: 0,
   });
-  
   const comments = commentsData?.comments || [];
   const commentCount = commentsData?.count ?? comments.length;
 
-  // Fetch bookmark status (we'll need to add this endpoint or track it in posts)
   const [bookmarkStatus, setBookmarkStatus] = useState(false);
 
-  // Fetch repost status and count
   const { data: repostData } = useQuery<{ hasReposted: boolean; repostCount: number }>({
-    queryKey: ['/api/posts', id, 'repost-status'],
+    queryKey: ["/api/posts", id, "repost-status"],
     queryFn: async () => {
       try {
-        const response = await fetch(`/api/posts/${id}/repost-status`);
-        if (!response.ok) return { hasReposted: false, repostCount: 0 };
-        return response.json();
+        const res = await fetch(`/api/posts/${id}/repost-status`);
+        if (!res.ok) return { hasReposted: false, repostCount: 0 };
+        return res.json();
       } catch {
         return { hasReposted: false, repostCount: 0 };
       }
     },
   });
 
-  // Fetch attached event if we have an eventId but no attachedEvent prop
   const { data: fetchedEvent } = useQuery<Event>({
-    queryKey: ['/api/events', eventId],
+    queryKey: ["/api/events", eventId],
     enabled: !!eventId && !attachedEvent,
   });
-
-  // Fetch attached venue if we have a venueId but no attachedVenue prop
   const { data: fetchedVenue } = useQuery<Venue>({
-    queryKey: ['/api/venues', venueId],
+    queryKey: ["/api/venues", venueId],
     enabled: !!venueId && !attachedVenue,
   });
-
-  // Use provided attached data or fetched data
   const displayEvent = attachedEvent || fetchedEvent;
   const displayVenue = attachedVenue || fetchedVenue;
 
-  // Like/Unlike mutations with optimistic updates
+  // ── Mutations ──────────────────────────────────────────────────────────────
+
   const likeMutation = useMutation({
-    mutationFn: async () => {
-      return await apiRequest('POST', `/api/posts/${id}/like`, {});
-    },
+    mutationFn: () => apiRequest("POST", `/api/posts/${id}/like`, {}),
     onMutate: async () => {
-      // Cancel outgoing refetches
-      await queryClient.cancelQueries({ queryKey: ['/api/posts', id, 'likes'] });
-      
-      // Snapshot previous value
-      const previousLikes = queryClient.getQueryData(['/api/posts', id, 'likes']);
-      
-      // Optimistically update
-      queryClient.setQueryData(['/api/posts', id, 'likes'], (old: any) => ({
+      await queryClient.cancelQueries({ queryKey: ["/api/posts", id, "likes"] });
+      const prev = queryClient.getQueryData(["/api/posts", id, "likes"]);
+      queryClient.setQueryData(["/api/posts", id, "likes"], (old: any) => ({
         count: (old?.count || 0) + 1,
         isLiked: true,
       }));
-      
-      return { previousLikes };
+      return { prev };
     },
-    onError: (err, variables, context) => {
-      // Rollback on error
-      if (context?.previousLikes) {
-        queryClient.setQueryData(['/api/posts', id, 'likes'], context.previousLikes);
-      }
-      toast({
-        title: "Error",
-        description: "Failed to like post",
-        variant: "destructive",
-      });
+    onError: (_, __, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(["/api/posts", id, "likes"], ctx.prev);
+      toast({ title: "Error", description: "Failed to like post", variant: "destructive" });
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/posts', id, 'likes'] });
-    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["/api/posts", id, "likes"] }),
   });
 
   const unlikeMutation = useMutation({
-    mutationFn: async () => {
-      return await apiRequest('DELETE', `/api/posts/${id}/like`, {});
-    },
+    mutationFn: () => apiRequest("DELETE", `/api/posts/${id}/like`, {}),
     onMutate: async () => {
-      await queryClient.cancelQueries({ queryKey: ['/api/posts', id, 'likes'] });
-      const previousLikes = queryClient.getQueryData(['/api/posts', id, 'likes']);
-      
-      queryClient.setQueryData(['/api/posts', id, 'likes'], (old: any) => ({
+      await queryClient.cancelQueries({ queryKey: ["/api/posts", id, "likes"] });
+      const prev = queryClient.getQueryData(["/api/posts", id, "likes"]);
+      queryClient.setQueryData(["/api/posts", id, "likes"], (old: any) => ({
         count: Math.max((old?.count || 1) - 1, 0),
         isLiked: false,
       }));
-      
-      return { previousLikes };
+      return { prev };
     },
-    onError: (err, variables, context) => {
-      if (context?.previousLikes) {
-        queryClient.setQueryData(['/api/posts', id, 'likes'], context.previousLikes);
-      }
-      toast({
-        title: "Error",
-        description: "Failed to unlike post",
-        variant: "destructive",
-      });
+    onError: (_, __, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(["/api/posts", id, "likes"], ctx.prev);
+      toast({ title: "Error", description: "Failed to unlike post", variant: "destructive" });
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/posts', id, 'likes'] });
-    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["/api/posts", id, "likes"] }),
   });
 
   const handleLike = () => {
     if (likeData?.isLiked) {
       unlikeMutation.mutate();
     } else {
+      setLikeAnimating(true);
+      setTimeout(() => setLikeAnimating(false), 400);
       likeMutation.mutate();
     }
   };
 
-  const handleAvatarClick = () => {
-    if (author.userId) {
-      navigate(`/user/${author.userId}`);
-    }
-  };
-
-  const handleShare = () => {
-    // Copy post link to clipboard
-    const postUrl = `${window.location.origin}/posts/${id}`;
-    navigator.clipboard.writeText(postUrl).then(() => {
-      toast({
-        title: "Link copied!",
-        description: "Post link copied to clipboard",
-      });
-    });
-  };
-
   const bookmarkMutation = useMutation({
-    mutationFn: async (currentlyBookmarked: boolean) => {
-      if (currentlyBookmarked) {
-        return await apiRequest('DELETE', `/api/posts/${id}/bookmark`, {});
-      } else {
-        return await apiRequest('POST', `/api/posts/${id}/bookmark`, {});
-      }
-    },
-    onMutate: async (currentlyBookmarked) => {
-      // Optimistically update local state
-      const previousState = bookmarkStatus;
+    mutationFn: (currentlyBookmarked: boolean) =>
+      currentlyBookmarked
+        ? apiRequest("DELETE", `/api/posts/${id}/bookmark`, {})
+        : apiRequest("POST", `/api/posts/${id}/bookmark`, {}),
+    onMutate: (currentlyBookmarked) => {
+      const prev = bookmarkStatus;
       setBookmarkStatus(!currentlyBookmarked);
-      return { previousState };
+      return { prev };
     },
     onSuccess: (_, currentlyBookmarked) => {
-      toast({
-        title: currentlyBookmarked ? "Removed bookmark" : "Post saved!",
-        description: currentlyBookmarked ? "Post removed from bookmarks" : "Post saved to bookmarks",
-      });
-      // Invalidate any bookmark list queries
-      queryClient.invalidateQueries({ queryKey: ['/api/bookmarks'] });
+      toast({ title: currentlyBookmarked ? "Bookmark removed" : "Saved!" });
+      queryClient.invalidateQueries({ queryKey: ["/api/bookmarks"] });
     },
-    onError: (_, __, context) => {
-      // Rollback on error
-      if (context?.previousState !== undefined) {
-        setBookmarkStatus(context.previousState);
-      }
-      toast({
-        title: "Error",
-        description: "Failed to update bookmark",
-        variant: "destructive",
-      });
+    onError: (_, __, ctx) => {
+      if (ctx?.prev !== undefined) setBookmarkStatus(ctx.prev);
+      toast({ title: "Error", description: "Failed to update bookmark", variant: "destructive" });
     },
   });
 
-  const handleBookmark = () => {
-    bookmarkMutation.mutate(bookmarkStatus);
-  };
-
-  // Repost mutation
   const repostMutation = useMutation({
-    mutationFn: async () => {
-      return await apiRequest('POST', `/api/posts/${id}/repost`, {});
-    },
+    mutationFn: () => apiRequest("POST", `/api/posts/${id}/repost`, {}),
     onMutate: async () => {
-      await queryClient.cancelQueries({ queryKey: ['/api/posts', id, 'repost-status'] });
-      const previousData = queryClient.getQueryData(['/api/posts', id, 'repost-status']);
-      queryClient.setQueryData(['/api/posts', id, 'repost-status'], (old: any) => ({
+      await queryClient.cancelQueries({ queryKey: ["/api/posts", id, "repost-status"] });
+      const prev = queryClient.getQueryData(["/api/posts", id, "repost-status"]);
+      queryClient.setQueryData(["/api/posts", id, "repost-status"], (old: any) => ({
         hasReposted: true,
         repostCount: (old?.repostCount || 0) + 1,
       }));
-      return { previousData };
+      return { prev };
     },
-    onError: (_, __, context) => {
-      if (context?.previousData) {
-        queryClient.setQueryData(['/api/posts', id, 'repost-status'], context.previousData);
-      }
-      toast({
-        title: "Error",
-        description: "Failed to repost",
-        variant: "destructive",
-      });
+    onError: (_, __, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(["/api/posts", id, "repost-status"], ctx.prev);
+      toast({ title: "Error", description: "Failed to repost", variant: "destructive" });
     },
-    onSuccess: () => {
-      toast({
-        title: "Reposted!",
-        description: "Post shared to your followers",
-      });
-    },
+    onSuccess: () => toast({ title: "Reposted!" }),
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/posts', id, 'repost-status'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/posts'] });
+      queryClient.invalidateQueries({ queryKey: ["/api/posts", id, "repost-status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/posts"] });
     },
   });
 
   const unrepostMutation = useMutation({
-    mutationFn: async () => {
-      return await apiRequest('DELETE', `/api/posts/${id}/repost`, {});
-    },
+    mutationFn: () => apiRequest("DELETE", `/api/posts/${id}/repost`, {}),
     onMutate: async () => {
-      await queryClient.cancelQueries({ queryKey: ['/api/posts', id, 'repost-status'] });
-      const previousData = queryClient.getQueryData(['/api/posts', id, 'repost-status']);
-      queryClient.setQueryData(['/api/posts', id, 'repost-status'], (old: any) => ({
+      await queryClient.cancelQueries({ queryKey: ["/api/posts", id, "repost-status"] });
+      const prev = queryClient.getQueryData(["/api/posts", id, "repost-status"]);
+      queryClient.setQueryData(["/api/posts", id, "repost-status"], (old: any) => ({
         hasReposted: false,
         repostCount: Math.max((old?.repostCount || 1) - 1, 0),
       }));
-      return { previousData };
+      return { prev };
     },
-    onError: (_, __, context) => {
-      if (context?.previousData) {
-        queryClient.setQueryData(['/api/posts', id, 'repost-status'], context.previousData);
-      }
-      toast({
-        title: "Error",
-        description: "Failed to remove repost",
-        variant: "destructive",
-      });
+    onError: (_, __, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(["/api/posts", id, "repost-status"], ctx.prev);
+      toast({ title: "Error", description: "Failed to remove repost", variant: "destructive" });
     },
-    onSuccess: () => {
-      toast({
-        title: "Repost removed",
-        description: "Repost has been removed",
-      });
-    },
+    onSuccess: () => toast({ title: "Repost removed" }),
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/posts', id, 'repost-status'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/posts'] });
+      queryClient.invalidateQueries({ queryKey: ["/api/posts", id, "repost-status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/posts"] });
     },
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async () => {
-      return await apiRequest('DELETE', `/api/posts/${id}`, {});
-    },
+    mutationFn: () => apiRequest("DELETE", `/api/posts/${id}`, {}),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/posts'] });
-      toast({
-        title: "Post deleted",
-        description: "Your post has been removed.",
-      });
+      queryClient.invalidateQueries({ queryKey: ["/api/posts"] });
+      toast({ title: "Post deleted" });
     },
-    onError: () => {
-      toast({
-        title: "Error",
-        description: "Failed to delete post. Please try again.",
-        variant: "destructive",
-      });
-    },
+    onError: () => toast({ title: "Error", description: "Failed to delete post", variant: "destructive" }),
   });
 
-  const handleRepost = () => {
-    if (repostData?.hasReposted) {
-      unrepostMutation.mutate();
-    } else {
-      repostMutation.mutate();
-    }
+  const handleShare = () => {
+    navigator.clipboard.writeText(`${window.location.origin}/posts/${id}`).then(() =>
+      toast({ title: "Link copied!" })
+    );
   };
 
+  // ── Media ──────────────────────────────────────────────────────────────────
+
+  const allImages = [
+    ...imageUrls,
+    ...(image && !imageUrls.includes(image) ? [image] : []),
+  ].filter(Boolean) as string[];
+
+  // ── Wrapper ────────────────────────────────────────────────────────────────
+
+  const wrapperClass = feedMode
+    ? "px-4 pt-4 pb-1 hover:bg-muted/20 transition-colors"
+    : "p-4 hover-elevate rounded-xl border border-border bg-card";
+
+  const Wrapper = feedMode
+    ? ({ children }: { children: React.ReactNode }) => (
+        <article className={wrapperClass} data-testid={`post-${id}`}>{children}</article>
+      )
+    : ({ children }: { children: React.ReactNode }) => (
+        <Card className="p-4 hover-elevate" data-testid={`post-${id}`}>{children}</Card>
+      );
+
   return (
-    <Card className="p-4 hover-elevate" data-testid={`post-${id}`}>
+    <Wrapper>
+      {/* Repost banner */}
       {isRepost && repostedBy && (
-        <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
+        <div className="flex items-center gap-1.5 mb-2 text-xs text-muted-foreground">
           <Repeat2 className="h-3 w-3" />
-          <button 
+          <button
             onClick={(e) => {
               e.stopPropagation();
               if (repostedBy.userId) navigate(`/user/${repostedBy.userId}`);
@@ -514,53 +401,63 @@ export default function FeedPost({
         </div>
       )}
 
-      <div 
+      <div
         className="flex gap-3 cursor-pointer"
         onClick={() => onPostClick?.()}
       >
-        <Avatar 
-          className="h-10 w-10 cursor-pointer hover-elevate" 
+        {/* Avatar with optional story ring (A4) */}
+        <div
+          className={cn(
+            "flex-shrink-0 cursor-pointer self-start",
+            hasActiveStory &&
+              "p-[2.5px] rounded-full bg-gradient-to-br from-primary via-purple-300 to-secondary"
+          )}
           onClick={(e) => {
             e.stopPropagation();
-            handleAvatarClick();
+            if (author.userId) navigate(`/user/${author.userId}`);
           }}
           data-testid={`avatar-${id}`}
         >
-          <AvatarImage src={author.avatar} alt={author.name} />
-          <AvatarFallback>
-            {author.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
-          </AvatarFallback>
-        </Avatar>
+          <div className={cn(hasActiveStory && "p-[2px] bg-background rounded-full")}>
+            <Avatar className="h-10 w-10">
+              <AvatarImage src={author.avatar} alt={author.name} />
+              <AvatarFallback className="bg-primary/10 text-primary font-semibold">
+                {author.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+              </AvatarFallback>
+            </Avatar>
+          </div>
+        </div>
 
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <p className="font-semibold text-sm" data-testid={`text-author-${id}`}>
+          {/* Compact author row (A5) */}
+          <div className="flex items-center gap-1.5 flex-wrap min-w-0 mb-1">
+            <span className="font-semibold text-sm leading-tight" data-testid={`text-author-${id}`}>
               {author.name}
-            </p>
+            </span>
             {author.isVerified && (
-              <BadgeCheck className="h-4 w-4 text-blue-500 fill-blue-500" data-testid={`badge-verified-${id}`} />
+              <BadgeCheck className="h-[15px] w-[15px] text-blue-500 fill-blue-500 flex-shrink-0" data-testid={`badge-verified-${id}`} />
             )}
-            <p className="text-xs text-muted-foreground">
-              @{author.username}
-            </p>
             {author.isOrganizer && (
-              <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">
+              <span className="text-[11px] bg-primary/10 text-primary px-1.5 py-px rounded-full font-medium flex-shrink-0">
                 Organizer
               </span>
             )}
             {community && (
-              <Badge variant="outline" className="text-xs py-0" data-testid={`community-tag-${id}`}>
-                {community.name}
+              <Badge variant="outline" className="text-[11px] py-0 flex-shrink-0" data-testid={`community-tag-${id}`}>
+                in {community.name}
               </Badge>
             )}
-            <span className="text-xs text-muted-foreground">· {displayTime}</span>
+            <span className="text-xs text-muted-foreground flex-shrink-0">
+              @{author.username} · {displayTime}
+            </span>
           </div>
 
-          <p className="mt-2 text-sm whitespace-pre-wrap break-words overflow-hidden" data-testid={`text-content-${id}`}>
-            {renderContentWithLinkedMentionsAndHashtags(content, navigate, mentionedUsers)}
+          {/* Post content (A3) */}
+          <p className="text-[15px] leading-relaxed whitespace-pre-wrap break-words" data-testid={`text-content-${id}`}>
+            {renderContent(content, navigate, mentionedUsers)}
           </p>
 
-          {/* Link preview card - show when URL detected and no attached event/venue */}
+          {/* Link preview */}
           {(() => {
             const firstUrl = extractFirstUrl(content);
             return firstUrl && !displayEvent && !displayVenue ? (
@@ -568,73 +465,65 @@ export default function FeedPost({
             ) : null;
           })()}
 
+          {/* Video */}
           {videoUrl && (
             <div className="mt-3" data-testid={`video-post-${id}`}>
               <FeedVideoPlayer src={videoUrl} />
             </div>
           )}
 
-          {!videoUrl && (() => {
-            const allImages = [
-              ...imageUrls,
-              ...(image && !imageUrls.includes(image) ? [image] : []),
-            ].filter(Boolean);
-            
-            return allImages.length > 0 ? (
-              <div className="mt-3" data-testid={`images-post-${id}`}>
-                <ImageGrid 
-                  images={allImages} 
-                  maxImages={4}
-                  postData={{
-                    id: id,
-                    likesCount: likeData?.count || initialLikes,
-                    commentsCount: initialComments,
-                    repostsCount: repostData?.repostCount || 0,
-                    isLiked: likeData?.isLiked || false,
-                    isReposted: repostData?.hasReposted || false,
-                    author: {
-                      id: author.userId || "",
-                      username: author.username,
-                      displayName: author.name,
-                      avatarUrl: author.avatar,
-                    },
-                  }}
-                  currentUser={currentUser ? {
-                    id: currentUser.id,
-                    username: currentUser.username,
-                    displayName: currentUser.displayName || currentUser.username,
-                    avatarUrl: undefined,
-                  } : null}
-                />
-              </div>
-            ) : null;
-          })()}
+          {/* Images */}
+          {!videoUrl && allImages.length > 0 && (
+            <div className="mt-3" data-testid={`images-post-${id}`}>
+              <ImageGrid
+                images={allImages}
+                maxImages={4}
+                postData={{
+                  id,
+                  likesCount: likeData?.count || initialLikes,
+                  commentsCount: initialComments,
+                  repostsCount: repostData?.repostCount || 0,
+                  isLiked: likeData?.isLiked || false,
+                  isReposted: repostData?.hasReposted || false,
+                  author: {
+                    id: author.userId || "",
+                    username: author.username,
+                    displayName: author.name,
+                    avatarUrl: author.avatar,
+                  },
+                }}
+                currentUser={
+                  currentUser
+                    ? {
+                        id: currentUser.id,
+                        username: currentUser.username,
+                        displayName: currentUser.displayName || currentUser.username,
+                        avatarUrl: undefined,
+                      }
+                    : null
+                }
+              />
+            </div>
+          )}
 
+          {/* Attached event */}
           {displayEvent && (
-            <Card 
-              className="mt-3 border-2 border-primary/30 bg-primary/5 cursor-pointer hover-elevate"
-              onClick={(e) => {
-                e.stopPropagation();
-                navigate(`/discover?event=${displayEvent.id}`);
-              }}
+            <Card
+              className="mt-3 border border-primary/25 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors"
+              onClick={(e) => { e.stopPropagation(); navigate(`/discover?event=${displayEvent.id}`); }}
               data-testid={`attached-event-${id}`}
             >
               <CardContent className="p-3">
                 <div className="flex gap-3">
                   {displayEvent.imageUrl && (
-                    <img 
-                      src={displayEvent.imageUrl} 
-                      alt={displayEvent.title}
-                      className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
-                    />
+                    <img src={displayEvent.imageUrl} alt={displayEvent.title} className="w-14 h-14 rounded-lg object-cover flex-shrink-0" />
                   )}
                   <div className="flex-1 min-w-0">
                     <Badge variant="secondary" className="mb-1 text-xs">
-                      <Calendar className="h-3 w-3 mr-1" />
-                      Event
+                      <Calendar className="h-3 w-3 mr-1" />Event
                     </Badge>
                     <h4 className="font-semibold text-sm line-clamp-1">{displayEvent.title}</h4>
-                    <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
+                    <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
                       <Calendar className="h-3 w-3" />
                       {format(new Date(displayEvent.eventDate), "MMM d, yyyy")}
                     </p>
@@ -648,28 +537,25 @@ export default function FeedPost({
             </Card>
           )}
 
+          {/* Attached venue */}
           {displayVenue && (
-            <Card 
-              className="mt-3 border-2 border-primary/30 bg-primary/5 cursor-pointer hover-elevate"
-              onClick={(e) => {
-                e.stopPropagation();
-                navigate(`/discover?venue=${displayVenue.id}`);
-              }}
+            <Card
+              className="mt-3 border border-primary/25 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors"
+              onClick={(e) => { e.stopPropagation(); navigate(`/discover?venue=${displayVenue.id}`); }}
               data-testid={`attached-venue-${id}`}
             >
               <CardContent className="p-3">
                 <div className="flex gap-3">
                   {(displayVenue.coverImageUrl || displayVenue.imageUrl) && (
-                    <img 
-                      src={displayVenue.coverImageUrl || displayVenue.imageUrl || ""} 
+                    <img
+                      src={displayVenue.coverImageUrl || displayVenue.imageUrl || ""}
                       alt={displayVenue.name}
-                      className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
+                      className="w-14 h-14 rounded-lg object-cover flex-shrink-0"
                     />
                   )}
                   <div className="flex-1 min-w-0">
                     <Badge variant="secondary" className="mb-1 text-xs">
-                      <Building2 className="h-3 w-3 mr-1" />
-                      Venue
+                      <Building2 className="h-3 w-3 mr-1" />Venue
                     </Badge>
                     <h4 className="font-semibold text-sm line-clamp-1">{displayVenue.name}</h4>
                     <p className="text-xs text-muted-foreground">{displayVenue.category}</p>
@@ -685,100 +571,117 @@ export default function FeedPost({
             </Card>
           )}
 
-          <div className="flex items-center gap-1 mt-3">
-            <Button
-              variant="ghost"
-              size="sm"
-              className={`gap-1 ${likeData?.isLiked ? 'text-primary' : ''}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleLike();
-              }}
+          {/* Action bar (A2) */}
+          <div className="flex items-center mt-2.5 -ml-2" onClick={(e) => e.stopPropagation()}>
+            {/* Like */}
+            <button
+              className={cn(
+                "group flex items-center gap-1.5 px-2 py-1.5 rounded-full text-sm transition-all duration-150",
+                likeData?.isLiked
+                  ? "text-red-500"
+                  : "text-muted-foreground hover:text-red-500 hover:bg-red-500/10"
+              )}
+              onClick={handleLike}
               disabled={likeMutation.isPending || unlikeMutation.isPending}
               data-testid={`button-like-${id}`}
             >
-              <Heart className={`h-4 w-4 ${likeData?.isLiked ? 'fill-current' : ''}`} />
-              <span className="text-xs">{likeData?.count || 0}</span>
-            </Button>
+              <Heart
+                className={cn(
+                  "h-[18px] w-[18px] transition-transform duration-150",
+                  likeData?.isLiked ? "fill-red-500" : "group-hover:scale-110",
+                  likeAnimating && "animate-heart-pop"
+                )}
+              />
+              <span className="text-xs font-medium tabular-nums">
+                {(likeData?.count || 0) > 0 ? likeData?.count || 0 : ""}
+              </span>
+            </button>
 
-            <Button
-              variant="ghost"
-              size="sm"
-              className="gap-1"
-              onClick={(e) => {
-                e.stopPropagation();
-                setCommentDialogOpen(true);
-              }}
+            {/* Comment */}
+            <button
+              className="group flex items-center gap-1.5 px-2 py-1.5 rounded-full text-sm text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all duration-150"
+              onClick={() => setCommentDialogOpen(true)}
               data-testid={`button-comment-${id}`}
             >
-              <MessageCircle className="h-4 w-4" />
-              <span className="text-xs">{commentCount}</span>
-            </Button>
+              <MessageCircle className="h-[18px] w-[18px] group-hover:scale-110 transition-transform duration-150" />
+              <span className="text-xs font-medium tabular-nums">
+                {commentCount > 0 ? commentCount : ""}
+              </span>
+            </button>
 
-            <Button
-              variant="ghost"
-              size="sm"
-              className={`gap-1 ${repostData?.hasReposted ? 'text-green-500' : ''}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleRepost();
-              }}
+            {/* Repost */}
+            <button
+              className={cn(
+                "group flex items-center gap-1.5 px-2 py-1.5 rounded-full text-sm transition-all duration-150",
+                repostData?.hasReposted
+                  ? "text-emerald-500"
+                  : "text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/10"
+              )}
+              onClick={() => repostData?.hasReposted ? unrepostMutation.mutate() : repostMutation.mutate()}
               disabled={repostMutation.isPending || unrepostMutation.isPending}
               data-testid={`button-repost-${id}`}
             >
-              <Repeat2 className={`h-4 w-4 ${repostData?.hasReposted ? 'fill-current' : ''}`} />
-              <span className="text-xs">{repostData?.repostCount || 0}</span>
-            </Button>
-
-            <Button
-              variant="ghost"
-              size="sm"
-              className="gap-1"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleShare();
-              }}
-              data-testid={`button-share-${id}`}
-            >
-              <Share2 className="h-4 w-4" />
-            </Button>
-
-            <Button
-              variant="ghost"
-              size="sm"
-              className={`gap-1 ${bookmarkStatus ? 'text-primary' : ''}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleBookmark();
-              }}
-              disabled={bookmarkMutation.isPending}
-              data-testid={`button-bookmark-${id}`}
-            >
-              <Bookmark className={`h-4 w-4 ${bookmarkStatus ? 'fill-current' : ''}`} />
-            </Button>
+              <Repeat2
+                className={cn(
+                  "h-[18px] w-[18px] transition-transform duration-150",
+                  repostData?.hasReposted ? "text-emerald-500" : "group-hover:scale-110"
+                )}
+              />
+              <span className="text-xs font-medium tabular-nums">
+                {(repostData?.repostCount || 0) > 0 ? repostData?.repostCount : ""}
+              </span>
+            </button>
 
             <div className="flex-1" />
 
+            {/* Share */}
+            <button
+              className="group p-1.5 rounded-full text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all duration-150"
+              onClick={handleShare}
+              data-testid={`button-share-${id}`}
+            >
+              <Share2 className="h-[18px] w-[18px] group-hover:scale-110 transition-transform duration-150" />
+            </button>
+
+            {/* Bookmark */}
+            <button
+              className={cn(
+                "group p-1.5 rounded-full transition-all duration-150",
+                bookmarkStatus
+                  ? "text-primary"
+                  : "text-muted-foreground hover:text-primary hover:bg-primary/10"
+              )}
+              onClick={() => bookmarkMutation.mutate(bookmarkStatus)}
+              disabled={bookmarkMutation.isPending}
+              data-testid={`button-bookmark-${id}`}
+            >
+              <Bookmark
+                className={cn(
+                  "h-[18px] w-[18px] transition-transform duration-150",
+                  bookmarkStatus ? "fill-current" : "group-hover:scale-110"
+                )}
+              />
+            </button>
+
+            {/* More (own posts) */}
             {isOwnPost && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={(e) => e.stopPropagation()}
+                  <button
+                    className="group p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all duration-150"
                     data-testid={`button-more-${id}`}
                   >
-                    <MoreHorizontal className="h-4 w-4" />
-                  </Button>
+                    <MoreHorizontal className="h-[18px] w-[18px]" />
+                  </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-                  <DropdownMenuItem 
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
                     onClick={() => setDeleteDialogOpen(true)}
                     className="text-destructive focus:text-destructive"
                     data-testid={`menu-delete-${id}`}
                   >
                     <Trash2 className="h-4 w-4 mr-2" />
-                    Delete
+                    Delete post
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -787,18 +690,14 @@ export default function FeedPost({
         </div>
       </div>
 
-      <CommentDialog
-        open={commentDialogOpen}
-        onClose={() => setCommentDialogOpen(false)}
-        postId={id}
-      />
+      <CommentDialog open={commentDialogOpen} onClose={() => setCommentDialogOpen(false)} postId={id} />
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Post</AlertDialogTitle>
+            <AlertDialogTitle>Delete post?</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this post? This action cannot be undone.
+              This can't be undone. The post will be removed permanently.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -813,6 +712,6 @@ export default function FeedPost({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Card>
+    </Wrapper>
   );
 }

@@ -269,6 +269,27 @@
     inset: -1px;
   }
 
+  /* Heart pop animation */
+  @keyframes heartPop {
+    0%   { transform: scale(1); }
+    25%  { transform: scale(1.35); }
+    50%  { transform: scale(0.88); }
+    75%  { transform: scale(1.12); }
+    100% { transform: scale(1); }
+  }
+  .animate-heart-pop {
+    animation: heartPop 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+  }
+
+  /* Carousel scrollbar hide */
+  .scrollbar-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
   /* Reduced motion */
   @media (prefers-reduced-motion: reduce) {
     * {

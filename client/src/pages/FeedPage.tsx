@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -317,6 +317,12 @@ export default function FeedPage() {
     queryKey: ['/api/stories'],
   });
 
+  // Set of user IDs who currently have active stories (for avatar story rings)
+  const userIdsWithStories = useMemo(
+    () => new Set(storiesData.map((s: StoryWithUser) => s.userId)),
+    [storiesData]
+  );
+
   // Group stories by user - only keep the most recent story per user
   const groupedStories = storiesData.reduce((acc: Map<string, StoryWithUser[]>, story) => {
     const userId = story.userId;
@@ -497,37 +503,43 @@ export default function FeedPage() {
           </ScrollArea>
         </div>
 
-        <Card className="mb-4 hover-elevate cursor-pointer" onClick={() => setCreatePostOpen(true)} data-testid="card-create-post">
-          <CardContent className="p-4">
-            <div className="flex gap-3">
-              <Avatar className="h-10 w-10 flex-shrink-0">
-                <AvatarImage 
-                  src="" 
-                  alt={currentUser?.userType === 'social' 
-                    ? (currentUser.displayName || currentUser.username) 
-                    : (currentUser?.organizationName || currentUser?.username || 'User')
-                  } 
-                />
-                <AvatarFallback className="bg-primary/10 text-primary">
-                  {currentUser?.userType === 'social'
-                    ? (currentUser.displayName?.charAt(0) || currentUser.username.charAt(0)).toUpperCase()
-                    : (currentUser?.organizationName?.charAt(0) || currentUser?.username.charAt(0) || 'U').toUpperCase()
-                  }
-                </AvatarFallback>
-              </Avatar>
-              <div className="flex-1 flex items-center gap-2">
-                <div className="flex-1 py-2 px-4 rounded-full bg-muted text-muted-foreground">
-                  What's happening?
-                </div>
-                <Button variant="ghost" size="icon" data-testid="button-add-image-quick">
-                  <ImageIcon className="h-5 w-5 text-primary" />
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        {/* Compose prompt */}
+        <div
+          className="flex gap-3 px-4 py-3 border-b border-border cursor-pointer hover:bg-muted/20 transition-colors mb-0"
+          onClick={() => setCreatePostOpen(true)}
+          data-testid="card-create-post"
+        >
+          <Avatar className="h-10 w-10 flex-shrink-0">
+            <AvatarImage
+              src=""
+              alt={
+                currentUser?.userType === "social"
+                  ? currentUser.displayName || currentUser.username
+                  : currentUser?.organizationName || currentUser?.username || "User"
+              }
+            />
+            <AvatarFallback className="bg-primary/10 text-primary font-semibold">
+              {currentUser?.userType === "social"
+                ? (currentUser.displayName?.charAt(0) || currentUser.username.charAt(0)).toUpperCase()
+                : (currentUser?.organizationName?.charAt(0) || currentUser?.username.charAt(0) || "U").toUpperCase()}
+            </AvatarFallback>
+          </Avatar>
+          <div className="flex-1 flex items-center gap-2">
+            <span className="flex-1 py-2 px-4 rounded-full bg-muted/60 text-muted-foreground text-[15px] select-none">
+              What's happening?
+            </span>
+            <button
+              className="p-2 rounded-full text-primary hover:bg-primary/10 transition-colors"
+              onClick={(e) => { e.stopPropagation(); setCreatePostOpen(true); }}
+              data-testid="button-add-image-quick"
+            >
+              <ImageIcon className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
 
-        <div className="space-y-4">
+        {/* Posts — borderless timeline (A1) */}
+        <div className="divide-y divide-border">
           {isLoading ? (
             <div className="text-center py-8">
               <p className="text-muted-foreground">Loading posts...</p>
@@ -540,7 +552,7 @@ export default function FeedPage() {
                 author={{
                   name: post.user.displayName || post.user.organizationName || post.user.username,
                   username: post.user.username,
-                  isOrganizer: post.user.userType === 'organizer',
+                  isOrganizer: post.user.userType === "organizer",
                   isVerified: post.user.isVerified,
                   userId: post.user.id,
                   avatar: post.user.avatarUrl,
@@ -557,13 +569,15 @@ export default function FeedPage() {
                 venueId={post.venueId}
                 community={post.community}
                 mentionedUsers={mentionedUsersData}
+                hasActiveStory={userIdsWithStories.has(post.user.id)}
+                feedMode={true}
                 onPostClick={() => setSelectedPost(post)}
               />
             ))
           ) : (
             <>
               {mockPosts.map((post) => (
-                <FeedPost key={post.id} {...post} onPostClick={() => setSelectedPost(post)} />
+                <FeedPost key={post.id} feedMode={true} {...post} onPostClick={() => setSelectedPost(post)} />
               ))}
             </>
           )}

@@ -228,6 +228,18 @@ export default function FeedVideoPlayer({
         </div>
       )}
 
+      {/* Muted badge — tap to unmute hint */}
+      {isMuted && isPlaying && (
+        <button
+          onClick={(e) => { e.stopPropagation(); toggleMute(); }}
+          className="absolute top-2 left-2 z-20 flex items-center gap-1 bg-black/60 hover:bg-black/80 text-white text-xs font-medium px-2 py-1 rounded-full transition-colors pointer-events-auto"
+          aria-label="Tap to unmute"
+        >
+          <VolumeX className="h-3 w-3" />
+          <span>Muted</span>
+        </button>
+      )}
+
       <div
         className={cn(
           "absolute bottom-0 left-0 right-0 z-20 transition-opacity duration-300",
