@@ -690,7 +690,17 @@ export default function FeedPost({
         </div>
       </div>
 
-      <CommentDialog open={commentDialogOpen} onClose={() => setCommentDialogOpen(false)} postId={id} />
+      <CommentDialog
+        open={commentDialogOpen}
+        onClose={() => setCommentDialogOpen(false)}
+        postId={id}
+        postSummary={{
+          authorName: author.name,
+          authorUsername: author.username,
+          authorAvatar: author.avatar,
+          content,
+        }}
+      />
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
