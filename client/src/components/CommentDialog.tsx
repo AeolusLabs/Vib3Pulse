@@ -7,13 +7,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Send } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import CommentItem from "./CommentItem";
+import MentionTextarea from "./MentionTextarea";
 
 interface CommentDialogProps {
   open: boolean;
@@ -74,13 +74,6 @@ export default function CommentDialog({ open, onClose, postId }: CommentDialogPr
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleAddComment();
-    }
-  };
-
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -125,22 +118,24 @@ export default function CommentDialog({ open, onClose, postId }: CommentDialogPr
           )}
         </ScrollArea>
 
-        <div className="px-6 py-4 border-t bg-background">
-          <div className="flex items-center gap-2">
-            <Input
-              type="text"
-              placeholder="Write a comment..."
-              value={commentText}
-              onChange={(e) => setCommentText(e.target.value)}
-              onKeyPress={handleKeyPress}
-              disabled={addCommentMutation.isPending}
-              className="flex-1"
-              data-testid="input-comment"
-            />
+        <div className="px-6 py-3 border-t bg-background">
+          <div className="flex gap-2 items-end">
+            <div className="flex-1">
+              <MentionTextarea
+                value={commentText}
+                onChange={setCommentText}
+                placeholder="Write a comment..."
+                disabled={addCommentMutation.isPending}
+                rows={2}
+                className="text-sm resize-none"
+                data-testid="input-comment"
+              />
+            </div>
             <Button
               size="icon"
               onClick={handleAddComment}
               disabled={!commentText.trim() || addCommentMutation.isPending}
+              className="mb-0.5 flex-shrink-0"
               data-testid="button-send-comment"
             >
               <Send className="h-4 w-4" />

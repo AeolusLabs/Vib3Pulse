@@ -3,8 +3,8 @@ import { ImagePlus, Calendar, MapPin, Building2, Users, Film } from "lucide-reac
 import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import MentionTextarea from "@/components/MentionTextarea";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -148,10 +148,12 @@ export default function CreatePostModal({
             </Avatar>
 
             <div className="flex-1 space-y-3">
-              <Textarea
+              <MentionTextarea
                 placeholder="What's happening?"
                 value={content}
-                onChange={(e) => setContent(e.target.value.slice(0, maxLength))}
+                onChange={setContent}
+                maxLength={maxLength}
+                rows={5}
                 className="resize-none border-0 text-lg focus-visible:ring-0 min-h-[120px]"
                 data-testid="textarea-post-content"
               />

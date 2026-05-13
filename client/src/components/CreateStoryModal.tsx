@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { Camera, Upload, Globe, Lock, Users, Check, X, Type } from "lucide-react";
-import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import MentionTextarea from "@/components/MentionTextarea";
 import {
   Dialog,
   DialogContent,
@@ -326,10 +326,10 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
                   Add caption (optional)
                 </Label>
               </div>
-              <Textarea
-                id="story-caption"
+              <MentionTextarea
                 value={caption}
-                onChange={(e) => setCaption(e.target.value.slice(0, 150))}
+                onChange={setCaption}
+                maxLength={150}
                 placeholder="Write something about your story..."
                 className="resize-none"
                 rows={2}
