@@ -6,7 +6,6 @@ import { ObjectUploader } from "@/components/ObjectUploader";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Trash2, Replace, Upload, Camera, FolderOpen } from "lucide-react";
-import type { UploadResult } from "@uppy/core";
 
 interface VenueGalleryManagerProps {
   venueId: string;
@@ -57,42 +56,17 @@ export function VenueGalleryManager({ venueId, imageUrls: propImageUrls, maxImag
     setDeleteIndex(null);
   };
 
-  const handleReplaceComplete = async (result: UploadResult<Record<string, unknown>, Record<string, unknown>>, index: number) => {
-    if (result.successful?.[0]?.uploadURL) {
-      try {
-        const response = await apiRequest("PUT", "/api/venue-images", { 
-          imageURL: result.successful[0].uploadURL 
-        });
-        const data = await response.json() as { objectPath: string };
-        
-        const newUrls = [...localImageUrls];
-        newUrls[index] = data.objectPath;
-        updateGalleryMutation.mutate(newUrls);
-        setReplaceIndex(null);
-      } catch {
-        toast({ title: "Failed to replace image", variant: "destructive" });
-      }
+  const handleReplaceComplete = (urls: string[], index: number) => {
+    if (urls[0]) {
+      const newUrls = [...localImageUrls];
+      newUrls[index] = urls[0];
+      updateGalleryMutation.mutate(newUrls);
+      setReplaceIndex(null);
     }
   };
 
-  const handleAddComplete = async (result: UploadResult<Record<string, unknown>, Record<string, unknown>>) => {
-    const newUrls: string[] = [];
-    for (const file of result.successful || []) {
-      if (file.uploadURL) {
-        try {
-          const response = await apiRequest("PUT", "/api/venue-images", { 
-            imageURL: file.uploadURL 
-          });
-          const data = await response.json() as { objectPath: string };
-          newUrls.push(data.objectPath);
-        } catch {
-          console.error("Failed to process uploaded image");
-        }
-      }
-    }
-    if (newUrls.length > 0) {
-      updateGalleryMutation.mutate([...localImageUrls, ...newUrls]);
-    }
+  const handleAddComplete = (urls: string[]) => {
+    if (urls.length > 0) updateGalleryMutation.mutate([...localImageUrls, ...urls]);
   };
 
   return (
@@ -148,12 +122,7 @@ export function VenueGalleryManager({ venueId, imageUrls: propImageUrls, maxImag
         <div className="space-y-3">
           <ObjectUploader
             maxNumberOfFiles={maxImages - localImageUrls.length}
-            maxFileSize={10485760}
-            onGetUploadParameters={async () => {
-              const response = await apiRequest("POST", "/api/objects/upload");
-              const data = await response.json() as { uploadURL: string };
-              return { method: "PUT" as const, url: data.uploadURL };
-            }}
+            maxFileSizeMB={10}
             onComplete={handleAddComplete}
             buttonVariant="outline"
             buttonSize="default"
@@ -203,13 +172,8 @@ export function VenueGalleryManager({ venueId, imageUrls: propImageUrls, maxImag
           <div className="py-4">
             <ObjectUploader
               maxNumberOfFiles={1}
-              maxFileSize={10485760}
-              onGetUploadParameters={async () => {
-                const response = await apiRequest("POST", "/api/objects/upload");
-                const data = await response.json() as { uploadURL: string };
-                return { method: "PUT" as const, url: data.uploadURL };
-              }}
-              onComplete={(result) => replaceIndex !== null && handleReplaceComplete(result, replaceIndex)}
+              maxFileSizeMB={10}
+              onComplete={(urls) => replaceIndex !== null && handleReplaceComplete(urls, replaceIndex)}
               buttonVariant="default"
               buttonSize="default"
             >

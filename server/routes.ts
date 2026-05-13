@@ -1,5 +1,7 @@
 import type { Express } from "express";
+import express from "express";
 import { createServer, type Server } from "http";
+import crypto from "crypto";
 import { storage } from "./storage";
 import { insertEventSchema, eventCreateDto, eventUpdateDto, insertTicketSchema, insertRsvpSchema, insertUserSchema, insertPostSchema, insertStorySchema, insertVenueSchema, insertVenueEntryNightSchema, venueCategories } from "@shared/schema";
 import { hashPassword, userToSessionUser } from "./auth";
@@ -24,6 +26,8 @@ import {
 import { fetchLinkPreview } from "./linkPreviewService";
 import { registerSafetyRoutes, startSafetyTimerJob } from "./safety-routes";
 import { registerPaymentRoutes } from "./payment-routes";
+import { buddyRouter } from "./buddyRoutes";
+import { startBuddyScheduler } from "./buddyScheduler";
 
 // Helper function to resolve identifier (UUID or username) to userId
 async function resolveUserId(identifier: string): Promise<string | null> {
@@ -1265,69 +1269,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/upload-images", requireAuth, async (req, res) => {
     try {
       const { images } = req.body;
-      
       if (!Array.isArray(images) || images.length === 0) {
         return res.status(400).json({ message: "No images provided" });
       }
-      
       if (images.length > 6) {
         return res.status(400).json({ message: "Maximum 6 images allowed per upload" });
       }
-      
-      const objectStorageService = new ObjectStorageService();
-      const uploadedUrls: string[] = [];
-      
+      const urls: string[] = [];
       for (const imageData of images) {
-        if (!imageData || !imageData.startsWith('data:image')) {
-          continue;
-        }
-        
-        const uploadURL = await objectStorageService.getObjectEntityUploadURL();
-        
-        // Extract stable path from upload URL
-        const url = new URL(uploadURL);
-        const pathParts = url.pathname.split('/');
-        const uploadsIndex = pathParts.findIndex(p => p === 'uploads');
-        const extractedId = uploadsIndex !== -1 ? pathParts.slice(uploadsIndex).join('/') : pathParts.slice(-1)[0];
-        const stablePath = `/objects/${extractedId}`;
-        
-        // Convert base64 to buffer
-        const base64Data = imageData.split(',')[1];
-        const buffer = Buffer.from(base64Data, 'base64');
-        
-        // Determine content type from base64 prefix
-        const contentTypeMatch = imageData.match(/data:(image\/\w+);base64/);
-        const contentType = contentTypeMatch ? contentTypeMatch[1] : 'image/jpeg';
-        
-        // Upload to GCS using signed URL
-        const uploadResponse = await fetch(uploadURL, {
-          method: 'PUT',
-          body: buffer,
-          headers: {
-            'Content-Type': contentType,
-          },
-        });
-        
-        if (!uploadResponse.ok) {
-          console.error("GCS upload failed:", uploadResponse.status);
-          continue;
-        }
-        
-        // Set ACL policy to make the image publicly readable
-        try {
-          await objectStorageService.trySetObjectEntityAclPolicy(stablePath, {
-            owner: req.user!.id,
-            visibility: "public",
-          });
-        } catch (aclError) {
-          console.error("Failed to set ACL policy:", aclError);
-        }
-        
-        // Return stable path as URL
-        uploadedUrls.push(stablePath);
+        if (!imageData || !imageData.startsWith('data:image')) continue;
+        const url = await storeMedia(imageData, req.user!.id);
+        urls.push(url);
       }
-      
-      res.json({ urls: uploadedUrls });
+      res.json({ urls });
     } catch (error) {
       console.error("Error uploading images:", error);
       res.status(500).json({ message: "Failed to upload images" });
@@ -1337,50 +1291,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/upload-video", requireAuth, async (req, res) => {
     try {
       const { videoData } = req.body;
-      
       if (!videoData || !videoData.startsWith('data:video')) {
         return res.status(400).json({ message: "Invalid video data" });
       }
-      
-      const objectStorageService = new ObjectStorageService();
-      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
-      
-      const url = new URL(uploadURL);
-      const pathParts = url.pathname.split('/');
-      const uploadsIndex = pathParts.findIndex(p => p === 'uploads');
-      const extractedId = uploadsIndex !== -1 ? pathParts.slice(uploadsIndex).join('/') : pathParts.slice(-1)[0];
-      const stablePath = `/objects/${extractedId}`;
-      
-      const base64Data = videoData.split(',')[1];
-      const buffer = Buffer.from(base64Data, 'base64');
-      
-      const contentTypeMatch = videoData.match(/data:(video\/\w+);base64/);
-      const contentType = contentTypeMatch ? contentTypeMatch[1] : 'video/mp4';
-      
-      const uploadResponse = await fetch(uploadURL, {
-        method: 'PUT',
-        body: buffer,
-        headers: {
-          'Content-Type': contentType,
-        },
-      });
-      
-      if (!uploadResponse.ok) {
-        console.error("GCS video upload failed:", uploadResponse.status);
-        throw new Error('Failed to upload video to storage');
-      }
-      
-      try {
-        await objectStorageService.trySetObjectEntityAclPolicy(stablePath, {
-          owner: req.user!.id,
-          visibility: "public",
-        });
-      } catch (aclError) {
-        console.error("Failed to set ACL policy for video:", aclError);
-        return res.status(500).json({ message: "Failed to set video permissions. Please try again." });
-      }
-      
-      res.json({ videoUrl: stablePath });
+      const videoUrl = await storeMedia(videoData, req.user!.id);
+      res.json({ videoUrl });
     } catch (error) {
       console.error("Error uploading video:", error);
       res.status(500).json({ message: "Failed to upload video" });
@@ -1514,6 +1429,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ──── Media Storage (Railway-compatible, DB-backed) ────────────────────────
+
+  // Helper: store base64 data URL in DB, return /api/media/{id} URL
+  async function storeMedia(data: string, ownerId: string): Promise<string> {
+    const contentTypeMatch = data.match(/data:([^;]+);base64/);
+    const contentType = contentTypeMatch ? contentTypeMatch[1] : 'application/octet-stream';
+    const id = await storage.saveMedia(data, contentType, ownerId);
+    return `/api/media/${id}`;
+  }
+
+  // Serve any uploaded media from DB
+  app.get("/api/media/:id", async (req, res) => {
+    try {
+      const media = await storage.getMedia(req.params.id);
+      if (!media) return res.sendStatus(404);
+      const base64 = media.data.includes(',') ? media.data.split(',')[1] : media.data;
+      const buffer = Buffer.from(base64, 'base64');
+      res.set('Content-Type', media.contentType);
+      res.set('Cache-Control', 'public, max-age=31536000, immutable');
+      res.set('Content-Length', String(buffer.length));
+      res.send(buffer);
+    } catch {
+      res.sendStatus(500);
+    }
+  });
+
+  // Central upload: accepts base64 data URL, stores in DB, returns /api/media/{id} URL
+  app.post("/api/media/upload", requireAuth, async (req, res) => {
+    try {
+      const { data } = req.body;
+      if (!data || !data.startsWith('data:')) {
+        return res.status(400).json({ message: "Invalid media data" });
+      }
+      const url = await storeMedia(data, req.user!.id);
+      res.json({ url });
+    } catch {
+      res.status(500).json({ message: "Failed to save media" });
+    }
+  });
+
   // Stories
   app.get("/api/stories", async (req, res) => {
     try {
@@ -1525,82 +1480,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get story image upload URL
+  // Get story image upload URL (legacy endpoint — kept for compatibility)
   app.get("/api/stories/upload-url", requireAuth, async (req, res) => {
-    try {
-      const objectStorageService = new ObjectStorageService();
-      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
-      
-      // Extract stable path from upload URL
-      const url = new URL(uploadURL);
-      const pathParts = url.pathname.split('/');
-      const uploadsIndex = pathParts.findIndex(p => p === 'uploads');
-      const extractedId = uploadsIndex !== -1 ? pathParts.slice(uploadsIndex).join('/') : pathParts.slice(-1)[0];
-      const stablePath = `/objects/${extractedId}`;
-      
-      res.json({ uploadURL, stablePath });
-    } catch (error) {
-      console.error("Error getting story upload URL:", error);
-      res.status(500).json({ message: "Failed to get upload URL" });
-    }
+    const tempId = crypto.randomUUID();
+    res.json({ uploadURL: `/api/media/binary-upload/${tempId}`, stablePath: null });
   });
 
   // Server-side story image upload (bypasses CORS issues)
   app.post("/api/stories/upload", requireAuth, async (req, res) => {
     try {
       const { imageData } = req.body;
-      
       const isImage = imageData && imageData.startsWith('data:image');
       const isVideo = imageData && imageData.startsWith('data:video');
-      
       if (!imageData || (!isImage && !isVideo)) {
         return res.status(400).json({ message: "Invalid media data" });
       }
-      
-      const objectStorageService = new ObjectStorageService();
-      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
-      
-      const url = new URL(uploadURL);
-      const pathParts = url.pathname.split('/');
-      const uploadsIndex = pathParts.findIndex(p => p === 'uploads');
-      const extractedId = uploadsIndex !== -1 ? pathParts.slice(uploadsIndex).join('/') : pathParts.slice(-1)[0];
-      const stablePath = `/objects/${extractedId}`;
-      
-      const base64Data = imageData.split(',')[1];
-      const buffer = Buffer.from(base64Data, 'base64');
-      
-      let contentType = 'image/jpeg';
-      if (isVideo) {
-        const videoTypeMatch = imageData.match(/data:(video\/\w+);base64/);
-        contentType = videoTypeMatch ? videoTypeMatch[1] : 'video/mp4';
-      } else {
-        const imageTypeMatch = imageData.match(/data:(image\/\w+);base64/);
-        contentType = imageTypeMatch ? imageTypeMatch[1] : 'image/jpeg';
-      }
-      
-      const uploadResponse = await fetch(uploadURL, {
-        method: 'PUT',
-        body: buffer,
-        headers: {
-          'Content-Type': contentType,
-        },
-      });
-      
-      if (!uploadResponse.ok) {
-        console.error("GCS upload failed:", uploadResponse.status, await uploadResponse.text());
-        throw new Error('Failed to upload to storage');
-      }
-      
-      try {
-        await objectStorageService.trySetObjectEntityAclPolicy(stablePath, {
-          owner: req.user!.id,
-          visibility: "public",
-        });
-      } catch (aclError) {
-        console.error("Error setting ACL policy:", aclError);
-        return res.status(500).json({ message: "Failed to set media permissions. Please try again." });
-      }
-      
+      const stablePath = await storeMedia(imageData, req.user!.id);
       res.json({ stablePath, mediaType: isVideo ? 'video' : 'image' });
     } catch (error) {
       console.error("Error uploading story media:", error);
@@ -2652,132 +2547,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Avatar upload endpoint - server-side upload to bypass CORS issues
+  // Avatar upload endpoint - server-side upload to DB storage
   app.post("/api/users/me/avatar", requireAuth, async (req, res) => {
     try {
       const { imageData } = req.body;
-      
-      // If imageData is provided, do server-side upload
-      if (imageData && imageData.startsWith('data:image')) {
-        console.log(`[Avatar Upload] Server-side upload for user ${req.user!.id}`);
-        const objectStorageService = new ObjectStorageService();
-        const uploadURL = await objectStorageService.getObjectEntityUploadURL();
-        
-        // Extract stable path from upload URL
-        const url = new URL(uploadURL);
-        const pathParts = url.pathname.split('/');
-        const uploadsIndex = pathParts.findIndex(p => p === 'uploads');
-        const extractedId = uploadsIndex !== -1 ? pathParts.slice(uploadsIndex).join('/') : pathParts.slice(-1)[0];
-        const stablePath = `/objects/${extractedId}`;
-        
-        // Convert base64 to buffer
-        const base64Data = imageData.split(',')[1];
-        const buffer = Buffer.from(base64Data, 'base64');
-        
-        // Determine content type from base64 prefix
-        const contentTypeMatch = imageData.match(/data:(image\/\w+);base64/);
-        const contentType = contentTypeMatch ? contentTypeMatch[1] : 'image/jpeg';
-        
-        // Upload to GCS using signed URL
-        const uploadResponse = await fetch(uploadURL, {
-          method: 'PUT',
-          body: buffer,
-          headers: {
-            'Content-Type': contentType,
-          },
-        });
-        
-        if (!uploadResponse.ok) {
-          console.error("[Avatar Upload] GCS upload failed:", uploadResponse.status);
-          throw new Error('Failed to upload to storage');
-        }
-        
-        // Set ACL policy to make the avatar publicly readable
-        try {
-          await objectStorageService.trySetObjectEntityAclPolicy(stablePath, {
-            owner: req.user!.id,
-            visibility: "public",
-          });
-          console.log("[Avatar Upload] ACL set to public");
-        } catch (aclError) {
-          console.error("[Avatar Upload] Failed to set ACL:", aclError);
-        }
-        
-        // Update user's avatar URL in database
-        const updatedUser = await storage.updateUser(req.user!.id, { 
-          avatarUrl: stablePath 
-        });
-        
-        console.log(`[Avatar Upload] Successfully uploaded avatar for user ${req.user!.id}`);
-        const { passwordHash, ...userWithoutPassword } = updatedUser;
-        return res.json(userWithoutPassword);
+      if (!imageData || !imageData.startsWith('data:image')) {
+        return res.status(400).json({ message: "Invalid image data" });
       }
-      
-      // Fallback: return presigned URL for client-side upload
-      console.log(`[Avatar Upload] User ${req.user!.id} requesting upload URL`);
-      const objectStorageService = new ObjectStorageService();
-      const objectId = crypto.randomUUID();
-      
-      // Get presigned URL for upload
-      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
-      console.log(`[Avatar Upload] Generated presigned URL for user ${req.user!.id}`);
-      
-      // Extract the object ID from the upload URL and create stable path
-      const url = new URL(uploadURL);
-      const pathParts = url.pathname.split('/');
-      const uploadsIndex = pathParts.findIndex(p => p === 'uploads');
-      const extractedId = uploadsIndex !== -1 ? pathParts.slice(uploadsIndex).join('/') : `uploads/${objectId}`;
-      const stablePath = `/objects/${extractedId}`;
-      
-      console.log(`[Avatar Upload] Stable path: ${stablePath}`);
-      res.json({ uploadURL, stablePath });
+      // Delete old avatar media if it was a DB-backed URL
+      const currentUser = await storage.getUser(req.user!.id);
+      if (currentUser?.avatarUrl) {
+        await storage.deleteMediaByUrls([currentUser.avatarUrl]);
+      }
+      const avatarUrl = await storeMedia(imageData, req.user!.id);
+      const updatedUser = await storage.updateUser(req.user!.id, { avatarUrl });
+      const { passwordHash, ...userWithoutPassword } = updatedUser;
+      return res.json(userWithoutPassword);
     } catch (error: any) {
       console.error("[Avatar Upload] Error:", error?.message || error);
       res.status(500).json({ message: "Failed to upload avatar. Please try again." });
     }
   });
 
-  // Update avatar URL after upload - accepts the stable path
+  // Update avatar URL after upload - accepts any path
   app.patch("/api/users/me/avatar", requireAuth, async (req, res) => {
     try {
-      console.log(`[Avatar Update] User ${req.user!.id} updating avatar`);
       const { avatarPath } = req.body;
-      if (!avatarPath) {
-        console.log("[Avatar Update] Missing avatarPath in request body");
-        return res.status(400).json({ message: "Avatar path is required" });
-      }
-
-      // Validate the path format
-      if (!avatarPath.startsWith('/objects/')) {
-        console.log(`[Avatar Update] Invalid path format: ${avatarPath}`);
-        return res.status(400).json({ message: "Invalid avatar path format" });
-      }
-
-      console.log(`[Avatar Update] Processing path: ${avatarPath}`);
-      const objectStorageService = new ObjectStorageService();
-      
-      // Verify the object exists and set ACL to public
-      try {
-        console.log("[Avatar Update] Getting object file...");
-        const objectFile = await objectStorageService.getObjectEntityFile(avatarPath);
-        console.log("[Avatar Update] Setting ACL to public...");
-        const { setObjectAclPolicy } = await import('./objectAcl');
-        await setObjectAclPolicy(objectFile, { visibility: "public", owner: req.user!.id });
-        console.log("[Avatar Update] ACL set successfully");
-      } catch (err: any) {
-        console.error("[Avatar Update] Error setting avatar ACL:", err?.message || err);
-        return res.status(400).json({ message: "Avatar upload not found or incomplete. The file may not have been uploaded successfully." });
-      }
-
-      const updatedUser = await storage.updateUser(req.user!.id, { 
-        avatarUrl: avatarPath 
-      });
-      
-      console.log(`[Avatar Update] Successfully updated avatar for user ${req.user!.id}`);
+      if (!avatarPath) return res.status(400).json({ message: "Avatar path is required" });
+      const updatedUser = await storage.updateUser(req.user!.id, { avatarUrl: avatarPath });
       const { passwordHash, ...userWithoutPassword } = updatedUser;
       res.json(userWithoutPassword);
     } catch (error: any) {
-      console.error("[Avatar Update] Error updating avatar:", error?.message || error);
       res.status(500).json({ message: "Failed to update avatar" });
     }
   });
@@ -2786,11 +2586,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/users/me/avatar", requireAuth, async (req, res) => {
     try {
       console.log(`[Avatar Delete] User ${req.user!.id} removing avatar`);
-      
-      const updatedUser = await storage.updateUser(req.user!.id, { 
-        avatarUrl: null 
-      });
-      
+      const updatedUser = await storage.updateUser(req.user!.id, { avatarUrl: null });
       console.log(`[Avatar Delete] Successfully removed avatar for user ${req.user!.id}`);
       const { passwordHash, ...userWithoutPassword } = updatedUser;
       res.json(userWithoutPassword);
@@ -2800,43 +2596,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Group avatar upload endpoint - returns presigned PUT URL and stable object path
+  // Group avatar upload endpoint
   app.post("/api/conversations/:id/avatar", requireAuth, async (req, res) => {
     try {
       const conversationId = req.params.id;
       const conversation = await storage.getConversationById(conversationId);
-      
-      if (!conversation) {
-        return res.status(404).json({ message: "Conversation not found" });
-      }
-      
-      if (!conversation.isGroup) {
-        return res.status(400).json({ message: "Avatar upload only available for group chats" });
-      }
-      
-      // Check if user is admin
+      if (!conversation) return res.status(404).json({ message: "Conversation not found" });
+      if (!conversation.isGroup) return res.status(400).json({ message: "Avatar upload only available for group chats" });
       const participant = conversation.participants.find(p => p.userId === req.user!.id);
-      if (!participant || participant.role !== 'admin') {
-        return res.status(403).json({ message: "Only group admins can update the avatar" });
+      if (!participant || participant.role !== 'admin') return res.status(403).json({ message: "Only group admins can update the avatar" });
+
+      const { imageData } = req.body;
+      if (imageData && imageData.startsWith('data:image')) {
+        // Direct upload path
+        const avatarUrl = await storeMedia(imageData, req.user!.id);
+        const updatedConversation = await storage.updateConversation(conversationId, { avatarUrl });
+        return res.json(updatedConversation);
       }
-      
-      const objectStorageService = new ObjectStorageService();
-      const objectId = crypto.randomUUID();
-      
-      // Get presigned URL for upload
-      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
-      
-      // Extract the object ID from the upload URL and create stable path
-      const url = new URL(uploadURL);
-      const pathParts = url.pathname.split('/');
-      const uploadsIndex = pathParts.findIndex(p => p === 'uploads');
-      const extractedId = uploadsIndex !== -1 ? pathParts.slice(uploadsIndex).join('/') : `uploads/${objectId}`;
-      const stablePath = `/objects/${extractedId}`;
-      
-      res.json({ uploadURL, stablePath });
+      // Return a dummy upload URL for backward compat with ObjectUploader
+      res.json({ uploadURL: '/api/media/upload', stablePath: null });
     } catch (error) {
-      console.error("Error getting group avatar upload URL:", error);
-      res.status(500).json({ message: "Failed to get upload URL" });
+      console.error("Error with group avatar:", error);
+      res.status(500).json({ message: "Failed to update avatar" });
     }
   });
 
@@ -2845,50 +2626,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const conversationId = req.params.id;
       const { avatarPath } = req.body;
-      
-      if (!avatarPath) {
-        return res.status(400).json({ message: "Avatar path is required" });
-      }
-
-      // Validate the path format
-      if (!avatarPath.startsWith('/objects/')) {
-        return res.status(400).json({ message: "Invalid avatar path format" });
-      }
-
+      if (!avatarPath) return res.status(400).json({ message: "Avatar path is required" });
       const conversation = await storage.getConversationById(conversationId);
-      if (!conversation) {
-        return res.status(404).json({ message: "Conversation not found" });
-      }
-      
-      if (!conversation.isGroup) {
-        return res.status(400).json({ message: "Avatar update only available for group chats" });
-      }
-      
-      // Check if user is admin
+      if (!conversation) return res.status(404).json({ message: "Conversation not found" });
+      if (!conversation.isGroup) return res.status(400).json({ message: "Only group chats have avatars" });
       const participant = conversation.participants.find(p => p.userId === req.user!.id);
-      if (!participant || participant.role !== 'admin') {
-        return res.status(403).json({ message: "Only group admins can update the avatar" });
-      }
-
-      const objectStorageService = new ObjectStorageService();
-      
-      // Verify the object exists and set ACL to public
-      try {
-        const objectFile = await objectStorageService.getObjectEntityFile(avatarPath);
-        const { setObjectAclPolicy } = await import('./objectAcl');
-        await setObjectAclPolicy(objectFile, { visibility: "public", owner: req.user!.id });
-      } catch (err) {
-        console.error("Error setting group avatar ACL:", err);
-        return res.status(400).json({ message: "Avatar upload not found or incomplete" });
-      }
-
-      const updatedConversation = await storage.updateConversation(conversationId, { 
-        avatarUrl: avatarPath 
-      });
-      
+      if (!participant || participant.role !== 'admin') return res.status(403).json({ message: "Only admins can update avatar" });
+      const updatedConversation = await storage.updateConversation(conversationId, { avatarUrl: avatarPath });
       res.json(updatedConversation);
     } catch (error) {
-      console.error("Error updating group avatar:", error);
       res.status(500).json({ message: "Failed to update avatar" });
     }
   });
@@ -3413,87 +3159,76 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Object Storage Routes (for venue image uploads)
-  // Get presigned URL for uploading
+  // Object Storage Routes (Railway-compatible — no GCS)
+  // Returns a fake presigned URL that points to our binary upload endpoint
   app.post("/api/objects/upload", requireAuth, async (req, res) => {
-    try {
-      const objectStorageService = new ObjectStorageService();
-      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
-      res.json({ uploadURL });
-    } catch (error) {
-      console.error("Error getting upload URL:", error);
-      res.status(500).json({ message: "Failed to get upload URL" });
-    }
+    const tempId = crypto.randomUUID();
+    res.json({ uploadURL: `/api/media/binary-upload/${tempId}` });
   });
 
-  // Serve uploaded objects (public visibility for venue images)
+  // Serve uploaded objects (legacy /objects/ paths — fallback to 404)
   app.get("/objects/:objectPath(*)", async (req, res) => {
-    const objectStorageService = new ObjectStorageService();
+    return res.sendStatus(404);
+  });
+
+  // Receives raw binary from VideoUploader XHR (replaces GCS presigned PUT)
+  const tempBinaryStore = new Map<string, { buffer: Buffer; contentType: string }>();
+
+  app.put("/api/media/binary-upload/:tempId", requireAuth, express.raw({ type: '*/*', limit: '200mb' }), async (req, res) => {
     try {
-      const objectFile = await objectStorageService.getObjectEntityFile(req.path);
-      const canAccess = await objectStorageService.canAccessObjectEntity({
-        objectFile,
-        userId: req.user?.id,
-        requestedPermission: ObjectPermission.READ,
-      });
-      if (!canAccess) {
-        return res.sendStatus(401);
-      }
-      objectStorageService.downloadObject(objectFile, res);
-    } catch (error) {
-      console.error("Error serving object:", error);
-      if (error instanceof ObjectNotFoundError) {
-        return res.sendStatus(404);
-      }
-      return res.sendStatus(500);
+      const contentType = req.headers['content-type'] || 'video/mp4';
+      tempBinaryStore.set(req.params.tempId, { buffer: req.body as Buffer, contentType });
+      // Clean up after 5 minutes
+      setTimeout(() => tempBinaryStore.delete(req.params.tempId), 5 * 60 * 1000);
+      res.sendStatus(200);
+    } catch {
+      res.sendStatus(500);
     }
   });
 
-  // Set ACL policy for venue images and get normalized path
+  // Set ACL policy for post media and get normalized path
   app.put("/api/post-media", requireAuth, async (req, res) => {
-    if (!req.body.imageURL) {
-      return res.status(400).json({ message: "imageURL is required" });
-    }
-
-    const userId = req.user!.id;
-
     try {
-      const objectStorageService = new ObjectStorageService();
-      const objectPath = await objectStorageService.trySetObjectEntityAclPolicy(
-        req.body.imageURL,
-        {
-          owner: userId,
-          visibility: "public",
-        }
-      );
-
-      res.status(200).json({ objectPath });
+      const { imageURL } = req.body;
+      if (!imageURL) return res.status(400).json({ message: "imageURL is required" });
+      // imageURL is now either a /api/media/binary-upload/{tempId} or a real URL
+      const tempIdMatch = imageURL.match(/\/api\/media\/binary-upload\/([a-f0-9-]+)$/);
+      if (tempIdMatch) {
+        const tempId = tempIdMatch[1];
+        const stored = tempBinaryStore.get(tempId);
+        if (!stored) return res.status(404).json({ message: "Upload not found or expired" });
+        const base64 = stored.buffer.toString('base64');
+        const dataUrl = `data:${stored.contentType};base64,${base64}`;
+        const objectPath = await storeMedia(dataUrl, req.user!.id);
+        tempBinaryStore.delete(tempId);
+        return res.json({ objectPath });
+      }
+      // Already a real URL — just return it
+      res.json({ objectPath: imageURL });
     } catch (error) {
-      console.error("Error setting post media:", error);
+      console.error("Error processing media:", error);
       res.status(500).json({ message: "Failed to process post media" });
     }
   });
 
   app.put("/api/venue-images", requireAuth, async (req, res) => {
-    if (!req.body.imageURL) {
-      return res.status(400).json({ message: "imageURL is required" });
-    }
-
-    const userId = req.user!.id;
-
     try {
-      const objectStorageService = new ObjectStorageService();
-      const objectPath = await objectStorageService.trySetObjectEntityAclPolicy(
-        req.body.imageURL,
-        {
-          owner: userId,
-          visibility: "public",
-        }
-      );
-
-      res.status(200).json({ objectPath });
+      const { imageURL } = req.body;
+      if (!imageURL) return res.status(400).json({ message: "imageURL is required" });
+      // Same logic as /api/post-media
+      const tempIdMatch = imageURL.match(/\/api\/media\/binary-upload\/([a-f0-9-]+)$/);
+      if (tempIdMatch) {
+        const tempId = tempIdMatch[1];
+        const stored = tempBinaryStore.get(tempId);
+        if (!stored) return res.status(404).json({ message: "Upload not found or expired" });
+        const base64 = stored.buffer.toString('base64');
+        const dataUrl = `data:${stored.contentType};base64,${base64}`;
+        const objectPath = await storeMedia(dataUrl, req.user!.id);
+        tempBinaryStore.delete(tempId);
+        return res.json({ objectPath });
+      }
+      res.json({ objectPath: imageURL });
     } catch (error) {
-      console.error("Error setting venue image:", error);
       res.status(500).json({ message: "Failed to process venue image" });
     }
   });
@@ -4276,9 +4011,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Register new route modules
   registerSafetyRoutes(app);
   registerPaymentRoutes(app);
+  app.use("/api/safety", buddyRouter);
 
-  // Start the safety timer background job (30s polling with grace period logic)
+  // Start background jobs
   startSafetyTimerJob();
+  startBuddyScheduler();
 
   return httpServer;
 }

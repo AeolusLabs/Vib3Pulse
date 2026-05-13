@@ -23,7 +23,7 @@ export function VideoUploader({
   videoUrl,
   className,
   compact = false,
-  maxSizeMB = 100,
+  maxSizeMB = 50,
 }: VideoUploaderProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);

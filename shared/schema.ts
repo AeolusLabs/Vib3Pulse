@@ -590,25 +590,29 @@ export type Bookmark = typeof bookmarks.$inferSelect;
 // SAFETY SYSTEM — rebuilt from scratch
 // ============================================
 
-export const safetyBuddyStatus = ["pending", "accepted", "declined"] as const;
-export type SafetyBuddyStatus = typeof safetyBuddyStatus[number];
+// SMS-based buddy confirmation (no app required for buddies)
+export const safetyBuddyConfirmationStatus = ["pending", "confirmed", "declined", "expired"] as const;
+export type SafetyBuddyConfirmationStatus = typeof safetyBuddyConfirmationStatus[number];
 
-// One safety buddy per user (1:1). Ready for multi-buddy by dropping the UNIQUE constraint.
 export const safetyBuddies = pgTable("safety_buddies", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  buddyId: varchar("buddy_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  status: text("status").notNull().default("pending"), // SafetyBuddyStatus
-  requestedAt: timestamp("requested_at").notNull().default(sql`now()`),
-  respondedAt: timestamp("responded_at"),
-}, (table) => ({
-  uniquePerUser: unique().on(table.userId),
-}));
+  buddyUserId: varchar("buddy_user_id").references(() => users.id, { onDelete: "set null" }), // nullable — phone-only buddies don't need an account
+  name: text("name").notNull(),
+  phoneNumber: varchar("phone_number", { length: 20 }).notNull(),
+  confirmationStatus: varchar("confirmation_status", { length: 50 }).notNull().default("pending"),
+  confirmationToken: varchar("confirmation_token", { length: 255 }).unique(),
+  tokenExpiresAt: timestamp("token_expires_at"),
+  fcmToken: text("fcm_token"),
+  isPrimary: boolean("is_primary").default(false),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
 
 export const insertSafetyBuddySchema = createInsertSchema(safetyBuddies).omit({
   id: true,
-  requestedAt: true,
-  respondedAt: true,
+  createdAt: true,
+  updatedAt: true,
 });
 
 export type InsertSafetyBuddy = z.infer<typeof insertSafetyBuddySchema>;
@@ -1043,3 +1047,17 @@ export const insertCommunityMembershipSchema = createInsertSchema(communityMembe
 
 export type InsertCommunityMembership = z.infer<typeof insertCommunityMembershipSchema>;
 export type CommunityMembership = typeof communityMemberships.$inferSelect;
+
+// ============================================
+// MEDIA UPLOADS (Railway-compatible DB storage)
+// ============================================
+
+export const mediaUploads = pgTable("media_uploads", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  ownerId: varchar("owner_id").references(() => users.id, { onDelete: 'set null' }),
+  data: text("data").notNull(),
+  contentType: varchar("content_type", { length: 100 }).notNull(),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export type MediaUpload = typeof mediaUploads.$inferSelect;

@@ -14,7 +14,6 @@ import { useToast } from "@/hooks/use-toast";
 import { X, Upload, ImageIcon, MoreVertical, Trash2, RefreshCw } from "lucide-react";
 import { ObjectUploader } from "@/components/ObjectUploader";
 import type { Venue, InsertVenue } from "@shared/schema";
-import type { UploadResult } from "@uppy/core";
 
 interface CreateVenueModalProps {
   open: boolean;
@@ -276,19 +275,10 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
                   )}
                   <ObjectUploader
                     maxNumberOfFiles={1}
-                    maxFileSize={5242880}
-                    onGetUploadParameters={async () => {
-                      const response = await apiRequest("POST", "/api/objects/upload");
-                      const data = await response.json() as { uploadURL: string };
-                      return { method: "PUT" as const, url: data.uploadURL };
-                    }}
-                    onComplete={async (result: UploadResult<Record<string, unknown>, Record<string, unknown>>) => {
-                      if (result.successful?.[0]?.uploadURL) {
-                        const response = await apiRequest("PUT", "/api/venue-images", { 
-                          imageURL: result.successful[0].uploadURL 
-                        });
-                        const data = await response.json() as { objectPath: string };
-                        setFormData(prev => ({ ...prev, imageUrl: data.objectPath }));
+                    maxFileSizeMB={5}
+                    onComplete={(urls: string[]) => {
+                      if (urls[0]) {
+                        setFormData(prev => ({ ...prev, imageUrl: urls[0] }));
                         toast({ title: "Logo uploaded successfully" });
                       }
                     }}
@@ -328,19 +318,10 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
                   )}
                   <ObjectUploader
                     maxNumberOfFiles={1}
-                    maxFileSize={10485760}
-                    onGetUploadParameters={async () => {
-                      const response = await apiRequest("POST", "/api/objects/upload");
-                      const data = await response.json() as { uploadURL: string };
-                      return { method: "PUT" as const, url: data.uploadURL };
-                    }}
-                    onComplete={async (result: UploadResult<Record<string, unknown>, Record<string, unknown>>) => {
-                      if (result.successful?.[0]?.uploadURL) {
-                        const response = await apiRequest("PUT", "/api/venue-images", { 
-                          imageURL: result.successful[0].uploadURL 
-                        });
-                        const data = await response.json() as { objectPath: string };
-                        setFormData(prev => ({ ...prev, coverImageUrl: data.objectPath }));
+                    maxFileSizeMB={10}
+                    onComplete={(urls: string[]) => {
+                      if (urls[0]) {
+                        setFormData(prev => ({ ...prev, coverImageUrl: urls[0] }));
                         toast({ title: "Cover image uploaded successfully" });
                       }
                     }}
@@ -427,29 +408,14 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
               {formData.imageUrls.length < maxGalleryImages && (
                 <ObjectUploader
                   maxNumberOfFiles={maxGalleryImages - formData.imageUrls.length}
-                  maxFileSize={10485760}
-                  onGetUploadParameters={async () => {
-                    const response = await apiRequest("POST", "/api/objects/upload");
-                    const data = await response.json() as { uploadURL: string };
-                    return { method: "PUT" as const, url: data.uploadURL };
-                  }}
-                  onComplete={async (result: UploadResult<Record<string, unknown>, Record<string, unknown>>) => {
-                    const newUrls: string[] = [];
-                    for (const file of result.successful || []) {
-                      if (file.uploadURL) {
-                        const response = await apiRequest("PUT", "/api/venue-images", { 
-                          imageURL: file.uploadURL 
-                        });
-                        const data = await response.json() as { objectPath: string };
-                        newUrls.push(data.objectPath);
-                      }
-                    }
-                    if (newUrls.length > 0) {
-                      setFormData(prev => ({ 
-                        ...prev, 
-                        imageUrls: [...prev.imageUrls, ...newUrls].slice(0, maxGalleryImages) 
+                  maxFileSizeMB={10}
+                  onComplete={(urls: string[]) => {
+                    if (urls.length > 0) {
+                      setFormData(prev => ({
+                        ...prev,
+                        imageUrls: [...prev.imageUrls, ...urls].slice(0, maxGalleryImages)
                       }));
-                      toast({ title: `${newUrls.length} image(s) uploaded successfully` });
+                      toast({ title: `${urls.length} image(s) uploaded successfully` });
                     }
                   }}
                   buttonVariant="outline"

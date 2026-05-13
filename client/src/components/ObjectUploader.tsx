@@ -1,169 +1,118 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useRef, useState, useCallback } from "react";
 import type { ReactNode } from "react";
-import Uppy from "@uppy/core";
-import DashboardModal from "@uppy/react/dashboard-modal";
-import "@uppy/core/css/style.min.css";
-import "@uppy/dashboard/css/style.min.css";
-import AwsS3 from "@uppy/aws-s3";
-import type { UploadResult } from "@uppy/core";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 
 interface ObjectUploaderProps {
   maxNumberOfFiles?: number;
-  maxFileSize?: number;
-  onGetUploadParameters: () => Promise<{
-    method: "PUT";
-    url: string;
-  }>;
-  onComplete?: (
-    result: UploadResult<Record<string, unknown>, Record<string, unknown>>
-  ) => void;
+  maxFileSizeMB?: number;
+  onComplete?: (urls: string[]) => void;
+  onError?: (error: string) => void;
   buttonClassName?: string;
   buttonVariant?: "default" | "outline" | "ghost" | "secondary";
   buttonSize?: "default" | "sm" | "lg" | "icon";
   children: ReactNode;
   disabled?: boolean;
+  // Legacy props — kept for compatibility but ignored internally
+  onGetUploadParameters?: unknown;
+  maxFileSize?: number;
+}
+
+const MAX_IMAGE_DIMENSION = 1200;
+const JPEG_QUALITY = 0.85;
+
+async function compressImage(dataUrl: string): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const ratio = Math.min(MAX_IMAGE_DIMENSION / img.width, MAX_IMAGE_DIMENSION / img.height, 1);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.width * ratio);
+      canvas.height = Math.round(img.height * ratio);
+      canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL("image/jpeg", JPEG_QUALITY));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
 }
 
 export function ObjectUploader({
   maxNumberOfFiles = 1,
-  maxFileSize = 10485760,
-  onGetUploadParameters,
+  maxFileSizeMB = 10,
   onComplete,
+  onError,
   buttonClassName,
   buttonVariant = "outline",
   buttonSize = "default",
   children,
   disabled = false,
 }: ObjectUploaderProps) {
-  const [showModal, setShowModal] = useState(false);
-  const onGetUploadParametersRef = useRef(onGetUploadParameters);
-  const onCompleteRef = useRef(onComplete);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const { toast } = useToast();
 
-  useEffect(() => {
-    onGetUploadParametersRef.current = onGetUploadParameters;
-    onCompleteRef.current = onComplete;
-  }, [onGetUploadParameters, onComplete]);
+  const handleFiles = useCallback(async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const maxBytes = maxFileSizeMB * 1024 * 1024;
+    const toProcess = Array.from(files).slice(0, maxNumberOfFiles);
+    const oversized = toProcess.filter(f => f.size > maxBytes);
+    if (oversized.length > 0) {
+      const msg = `File too large. Maximum size is ${maxFileSizeMB}MB.`;
+      toast({ title: "File too large", description: msg, variant: "destructive" });
+      onError?.(msg);
+      return;
+    }
 
-  const [uppy] = useState(() =>
-    new Uppy({
-      restrictions: {
-        maxNumberOfFiles,
-        maxFileSize,
-        allowedFileTypes: ["image/*"],
-      },
-      autoProceed: false,
-    })
-      .use(AwsS3, {
-        shouldUseMultipart: false,
-        getUploadParameters: async () => {
-          return await onGetUploadParametersRef.current();
-        },
-      })
-      .on("complete", (result) => {
-        onCompleteRef.current?.(result);
-        setShowModal(false);
-      })
-  );
-
-  useEffect(() => {
-    return () => {
-      uppy.cancelAll();
-    };
-  }, [uppy]);
-
-  const handleOpen = useCallback(() => {
-    uppy.cancelAll();
-    setShowModal(true);
-  }, [uppy]);
+    setIsUploading(true);
+    try {
+      const urls: string[] = [];
+      for (const file of toProcess) {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error("Failed to read file"));
+          reader.readAsDataURL(file);
+        });
+        const compressed = file.type.startsWith("image/") ? await compressImage(dataUrl) : dataUrl;
+        const res = await apiRequest("POST", "/api/upload-images", { images: [compressed] });
+        const data = await res.json() as { urls: string[] };
+        if (data.urls?.[0]) urls.push(data.urls[0]);
+      }
+      onComplete?.(urls);
+    } catch (err) {
+      const msg = "Upload failed. Please try again.";
+      toast({ title: "Upload failed", description: msg, variant: "destructive" });
+      onError?.(msg);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }, [maxNumberOfFiles, maxFileSizeMB, onComplete, onError, toast]);
 
   return (
     <div>
       <Button
         type="button"
-        onClick={handleOpen}
+        onClick={() => fileInputRef.current?.click()}
         className={buttonClassName}
         variant={buttonVariant}
         size={buttonSize}
-        disabled={disabled}
+        disabled={disabled || isUploading}
         data-testid="button-upload"
       >
-        {children}
+        {isUploading ? "Uploading..." : children}
       </Button>
-
-      <DashboardModal
-        uppy={uppy}
-        open={showModal}
-        onRequestClose={() => setShowModal(false)}
-        proudlyDisplayPoweredByUppy={false}
-        theme="auto"
-        note="Images only, up to 10 MB"
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple={maxNumberOfFiles > 1}
+        className="hidden"
+        onChange={e => handleFiles(e.target.files)}
+        data-testid="input-object-upload"
       />
-
-      <style>{`
-        .uppy-Dashboard-inner {
-          border-radius: 0.5rem;
-          border-color: hsl(var(--border));
-          background: hsl(var(--background));
-        }
-        .uppy-Dashboard-innerWrap {
-          background: hsl(var(--background));
-        }
-        .uppy-Dashboard-AddFiles-title {
-          color: hsl(var(--foreground));
-        }
-        .uppy-Dashboard-browse {
-          color: hsl(262 83% 58%);
-        }
-        .uppy-Dashboard-browse:hover {
-          color: hsl(262 83% 50%);
-        }
-        .uppy-Dashboard-AddFiles-info {
-          color: hsl(var(--muted-foreground));
-        }
-        .uppy-StatusBar {
-          background: hsl(var(--muted));
-        }
-        .uppy-StatusBar-actionBtn--upload {
-          background: hsl(262 83% 58%);
-          color: white;
-        }
-        .uppy-StatusBar-actionBtn--upload:hover {
-          background: hsl(262 83% 50%);
-        }
-        .uppy-Dashboard-Item-action--remove {
-          color: hsl(var(--destructive));
-        }
-        .uppy-DashboardContent-bar {
-          background: hsl(var(--muted));
-          border-color: hsl(var(--border));
-        }
-        .uppy-DashboardContent-title {
-          color: hsl(var(--foreground));
-        }
-        .uppy-c-btn-primary {
-          background: hsl(262 83% 58%);
-        }
-        .uppy-c-btn-primary:hover {
-          background: hsl(262 83% 50%);
-        }
-        .uppy-Dashboard-Item-name {
-          color: hsl(var(--foreground));
-        }
-        .uppy-Dashboard-Item-statusSize {
-          color: hsl(var(--muted-foreground));
-        }
-        .uppy-Dashboard-dropFilesHereHint {
-          color: hsl(262 83% 58%);
-          border-color: hsl(262 83% 58%);
-        }
-        [data-uppy-drag-drop-supported=true] .uppy-Dashboard-AddFiles {
-          border-color: hsl(var(--border));
-        }
-        .uppy-Dashboard-note {
-          color: hsl(var(--muted-foreground));
-        }
-      `}</style>
     </div>
   );
 }

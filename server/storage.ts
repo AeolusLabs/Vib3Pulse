@@ -42,6 +42,7 @@ import {
   type PostMention,
   type InsertPostMention,
   type SafetyBuddy,
+  type InsertSafetyBuddy,
   type SafetyAlert,
   type SafetyTimer,
   type DistressMessage,
@@ -286,12 +287,17 @@ export interface IStorage {
   getPostMentions(postId: string): Promise<User[]>;
   getUserMentions(userId: string): Promise<Array<Post & { user: User }>>;
 
-  // Safety system
-  setSafetyBuddy(userId: string, buddyId: string): Promise<void>;
-  getSafetyBuddy(userId: string): Promise<{ buddy: User; record: SafetyBuddy } | undefined>;
-  removeSafetyBuddy(userId: string): Promise<void>;
-  respondToSafetyBuddyRequest(buddyId: string, requesterId: string, accept: boolean): Promise<void>;
-  getSafetyBuddyRequests(userId: string): Promise<Array<{ id: string; requester: User; requestedAt: Date }>>;
+  // Safety buddy system (SMS-based, no app required for buddies)
+  createBuddy(params: Omit<InsertSafetyBuddy, "id">): Promise<SafetyBuddy>;
+  getBuddy(buddyId: string): Promise<SafetyBuddy | undefined>;
+  updateBuddy(buddyId: string, updates: Partial<SafetyBuddy>): Promise<SafetyBuddy>;
+  deleteBuddy(buddyId: string): Promise<void>;
+  getBuddiesByUser(userId: string): Promise<SafetyBuddy[]>;
+  getConfirmedBuddies(userId: string): Promise<SafetyBuddy[]>;
+  getPendingBuddyByPhone(userId: string, phone: string): Promise<SafetyBuddy | undefined>;
+  getPendingBuddyByPhoneGlobal(phone: string): Promise<SafetyBuddy | undefined>;
+  getBuddyByToken(token: string): Promise<SafetyBuddy | undefined>;
+  getExpiredPendingBuddies(): Promise<SafetyBuddy[]>;
   setDistressMessage(userId: string, message: string): Promise<void>;
   getDistressMessage(userId: string): Promise<string | undefined>;
   createSafetyAlert(params: { userId: string; buddyId: string; alertType: string; message: string; latitude?: number; longitude?: number; locationText?: string; timerId?: string }): Promise<SafetyAlert>;
@@ -491,6 +497,13 @@ export interface IStorage {
   unvotePoll(pollId: string, optionId: string, userId: string): Promise<void>;
   getUserPollVotes(pollId: string, userId: string): Promise<PollVote[]>;
   closePoll(pollId: string): Promise<Poll>;
+
+  // Media storage (Railway-compatible DB-backed)
+  ensureMediaUploadsTable(): Promise<void>;
+  saveMedia(data: string, contentType: string, ownerId?: string): Promise<string>;
+  getMedia(id: string): Promise<{ data: string; contentType: string } | null>;
+  deleteMedia(id: string): Promise<void>;
+  deleteMediaByUrls(urls: string[]): Promise<void>;
 }
 
 export class DbStorage implements IStorage {
@@ -1817,55 +1830,82 @@ export class DbStorage implements IStorage {
 
   // ==================== SAFETY SYSTEM ====================
 
-  async setSafetyBuddy(userId: string, buddyId: string): Promise<void> {
-    await db.delete(safetyBuddies).where(eq(safetyBuddies.userId, userId));
-    await db.insert(safetyBuddies).values({ userId, buddyId, status: "pending" });
+  async createBuddy(params: Omit<InsertSafetyBuddy, "id">): Promise<SafetyBuddy> {
+    const [result] = await db.insert(safetyBuddies).values(params as any).returning();
+    return result;
   }
 
-  async getSafetyBuddy(userId: string): Promise<{ buddy: User; record: SafetyBuddy } | undefined> {
-    const result = await db
+  async getBuddy(buddyId: string): Promise<SafetyBuddy | undefined> {
+    const [result] = await db.select().from(safetyBuddies).where(eq(safetyBuddies.id, buddyId));
+    return result;
+  }
+
+  async updateBuddy(buddyId: string, updates: Partial<SafetyBuddy>): Promise<SafetyBuddy> {
+    const [result] = await db
+      .update(safetyBuddies)
+      .set({ ...updates, updatedAt: new Date() } as any)
+      .where(eq(safetyBuddies.id, buddyId))
+      .returning();
+    if (!result) throw new Error(`Buddy ${buddyId} not found`);
+    return result;
+  }
+
+  async deleteBuddy(buddyId: string): Promise<void> {
+    await db.delete(safetyBuddies).where(eq(safetyBuddies.id, buddyId));
+  }
+
+  async getBuddiesByUser(userId: string): Promise<SafetyBuddy[]> {
+    return db.select().from(safetyBuddies).where(eq(safetyBuddies.userId, userId));
+  }
+
+  async getConfirmedBuddies(userId: string): Promise<SafetyBuddy[]> {
+    return db
       .select()
       .from(safetyBuddies)
-      .innerJoin(users, eq(safetyBuddies.buddyId, users.id))
-      .where(eq(safetyBuddies.userId, userId));
-
-    if (result.length === 0) return undefined;
-
-    const { passwordHash, ...buddyUser } = result[0].users;
-    return { buddy: buddyUser as User, record: result[0].safety_buddies };
+      .where(and(eq(safetyBuddies.userId, userId), eq(safetyBuddies.confirmationStatus, "confirmed")));
   }
 
-  async removeSafetyBuddy(userId: string): Promise<void> {
-    await db.delete(safetyBuddies).where(eq(safetyBuddies.userId, userId));
-  }
-
-  async respondToSafetyBuddyRequest(buddyId: string, requesterId: string, accept: boolean): Promise<void> {
-    if (accept) {
-      await db.update(safetyBuddies)
-        .set({ status: "accepted", respondedAt: new Date() })
-        .where(and(eq(safetyBuddies.userId, requesterId), eq(safetyBuddies.buddyId, buddyId)));
-    } else {
-      await db.update(safetyBuddies)
-        .set({ status: "declined", respondedAt: new Date() })
-        .where(and(eq(safetyBuddies.userId, requesterId), eq(safetyBuddies.buddyId, buddyId)));
-    }
-  }
-
-  async getSafetyBuddyRequests(userId: string): Promise<Array<{ id: string; requester: User; requestedAt: Date }>> {
-    const result = await db
+  async getPendingBuddyByPhone(userId: string, phone: string): Promise<SafetyBuddy | undefined> {
+    const [result] = await db
       .select()
       .from(safetyBuddies)
-      .innerJoin(users, eq(safetyBuddies.userId, users.id))
-      .where(and(eq(safetyBuddies.buddyId, userId), eq(safetyBuddies.status, "pending")));
+      .where(
+        and(
+          eq(safetyBuddies.userId, userId),
+          eq(safetyBuddies.phoneNumber, phone),
+          eq(safetyBuddies.confirmationStatus, "pending")
+        )
+      );
+    return result;
+  }
 
-    return result.map(row => {
-      const { passwordHash, ...userWithoutPassword } = row.users;
-      return {
-        id: row.safety_buddies.id,
-        requester: userWithoutPassword as User,
-        requestedAt: row.safety_buddies.requestedAt,
-      };
-    });
+  async getPendingBuddyByPhoneGlobal(phone: string): Promise<SafetyBuddy | undefined> {
+    const [result] = await db
+      .select()
+      .from(safetyBuddies)
+      .where(and(eq(safetyBuddies.phoneNumber, phone), eq(safetyBuddies.confirmationStatus, "pending")))
+      .orderBy(desc(safetyBuddies.createdAt));
+    return result;
+  }
+
+  async getBuddyByToken(token: string): Promise<SafetyBuddy | undefined> {
+    const [result] = await db
+      .select()
+      .from(safetyBuddies)
+      .where(eq(safetyBuddies.confirmationToken, token));
+    return result;
+  }
+
+  async getExpiredPendingBuddies(): Promise<SafetyBuddy[]> {
+    return db
+      .select()
+      .from(safetyBuddies)
+      .where(
+        and(
+          eq(safetyBuddies.confirmationStatus, "pending"),
+          lt(safetyBuddies.tokenExpiresAt, new Date())
+        )
+      );
   }
 
   async setDistressMessage(userId: string, message: string): Promise<void> {
@@ -3681,6 +3721,49 @@ export class DbStorage implements IStorage {
     }
 
     return { migratedConversations, migratedMessages };
+  }
+
+  async ensureMediaUploadsTable(): Promise<void> {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS media_uploads (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        owner_id VARCHAR REFERENCES users(id) ON DELETE SET NULL,
+        data TEXT NOT NULL,
+        content_type VARCHAR(100) NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT now()
+      )
+    `);
+  }
+
+  async saveMedia(data: string, contentType: string, ownerId?: string): Promise<string> {
+    const result = await db.execute(sql`
+      INSERT INTO media_uploads (owner_id, data, content_type)
+      VALUES (${ownerId ?? null}, ${data}, ${contentType})
+      RETURNING id
+    `);
+    return (result.rows[0] as { id: string }).id;
+  }
+
+  async getMedia(id: string): Promise<{ data: string; contentType: string } | null> {
+    const result = await db.execute(sql`
+      SELECT data, content_type FROM media_uploads WHERE id = ${id}
+    `);
+    if (result.rows.length === 0) return null;
+    const row = result.rows[0] as { data: string; content_type: string };
+    return { data: row.data, contentType: row.content_type };
+  }
+
+  async deleteMedia(id: string): Promise<void> {
+    await db.execute(sql`DELETE FROM media_uploads WHERE id = ${id}`);
+  }
+
+  async deleteMediaByUrls(urls: string[]): Promise<void> {
+    const ids = urls
+      .map(u => { const m = u.match(/^\/api\/media\/([a-f0-9-]+)$/); return m ? m[1] : null; })
+      .filter(Boolean) as string[];
+    for (const id of ids) {
+      await this.deleteMedia(id);
+    }
   }
 
   private async findExistingDirectConversation(userId1: string, userId2: string): Promise<Conversation | undefined> {

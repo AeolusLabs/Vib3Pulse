@@ -155,6 +155,13 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Auto-create media_uploads table (Railway compatibility — no db:push required)
+  try {
+    await storage.ensureMediaUploadsTable();
+  } catch (err) {
+    console.error('[STARTUP] media_uploads table setup failed:', err);
+  }
+
   const server = await registerRoutes(app);
 
   // Initialize WebSocket server

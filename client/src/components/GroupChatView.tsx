@@ -66,7 +66,6 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [memberToRemove, setMemberToRemove] = useState<string | null>(null);
   const [inviteCopied, setInviteCopied] = useState(false);
-  const pendingAvatarPath = useRef<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
@@ -255,19 +254,9 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
                     </AvatarFallback>
                   </Avatar>
                   <ObjectUploader
-                    onGetUploadParameters={async () => {
-                      const response = await apiRequest("POST", `/api/conversations/${conversationId}/avatar`);
-                      if (!response.ok) throw new Error("Failed to get upload URL");
-                      const data = await response.json();
-                      pendingAvatarPath.current = data.stablePath;
-                      return { method: "PUT" as const, url: data.uploadURL };
-                    }}
-                    onComplete={async (result) => {
-                      if (result.successful && result.successful.length > 0 && pendingAvatarPath.current) {
-                        const avatarPath = pendingAvatarPath.current;
-                        pendingAvatarPath.current = null;
-                        
-                        const patchResponse = await apiRequest("PATCH", `/api/conversations/${conversationId}/avatar`, { avatarPath });
+                    onComplete={async (urls: string[]) => {
+                      if (urls[0]) {
+                        const patchResponse = await apiRequest("PATCH", `/api/conversations/${conversationId}/avatar`, { avatarPath: urls[0] });
                         if (patchResponse.ok) {
                           queryClient.invalidateQueries({ queryKey: ['/api/conversations', conversationId] });
                           queryClient.invalidateQueries({ queryKey: ['/api/conversations'] });
