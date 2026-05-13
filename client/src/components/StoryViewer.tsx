@@ -14,6 +14,7 @@ interface StorySlide {
   id: string;
   type: "image" | "text" | "video";
   content: string;
+  caption?: string | null;
   videoUrl?: string | null;
   backgroundColor?: string;
   timestamp: string;
@@ -191,6 +192,8 @@ export default function StoryViewer({
     reshareStoryMutation.mutate(currentStory.id);
   };
 
+  const lastTapRef = useRef(0);
+
   const handleDoubleTap = useCallback(() => {
     if (!currentStory || isOwnStory) return;
     const currentLikeState = localLikeStates[currentStory.id];
@@ -303,15 +306,13 @@ export default function StoryViewer({
 
   const currentLikeState = localLikeStates[currentStory.id] || { isLiked: false, likeCount: 0 };
 
-  // Double tap detection for likes
-  let lastTap = 0;
   const handleTap = (e: React.MouseEvent | React.TouchEvent) => {
     const now = Date.now();
-    if (now - lastTap < 300) {
+    if (now - lastTapRef.current < 300) {
       handleDoubleTap();
       e.preventDefault();
     }
-    lastTap = now;
+    lastTapRef.current = now;
   };
 
   return (
@@ -406,14 +407,7 @@ export default function StoryViewer({
         </div>
 
         {/* Story content */}
-        <div
-          className="h-full flex items-center justify-center cursor-pointer"
-          onMouseDown={() => setIsPaused(true)}
-          onMouseUp={() => setIsPaused(false)}
-          onTouchStart={() => setIsPaused(true)}
-          onTouchEnd={() => setIsPaused(false)}
-          onClick={handleTap}
-        >
+        <div className="h-full flex items-center justify-center">
           {currentStory.type === "video" ? (
             <video
               ref={storyVideoRef}
@@ -456,16 +450,33 @@ export default function StoryViewer({
           </AnimatePresence>
         </div>
 
-        {/* Navigation - Invisible touch areas */}
+        {/* Caption overlay */}
+        {currentStory.caption && (
+          <div className="absolute bottom-28 left-4 right-4 z-20 pointer-events-none">
+            <p className="text-white text-base font-medium text-center bg-black/50 backdrop-blur-sm rounded-lg px-4 py-2 leading-snug">
+              {currentStory.caption}
+            </p>
+          </div>
+        )}
+
+        {/* Navigation - handles pause (hold) and tap-to-navigate */}
         <div className="absolute inset-0 z-10 flex pointer-events-none">
           <button
             className="flex-1 pointer-events-auto"
-            onClick={handlePrevious}
+            onMouseDown={() => setIsPaused(true)}
+            onMouseUp={() => setIsPaused(false)}
+            onTouchStart={() => setIsPaused(true)}
+            onTouchEnd={() => setIsPaused(false)}
+            onClick={(e) => { handleTap(e); handlePrevious(); }}
             data-testid="button-previous-story"
           />
           <button
             className="flex-1 pointer-events-auto"
-            onClick={handleNext}
+            onMouseDown={() => setIsPaused(true)}
+            onMouseUp={() => setIsPaused(false)}
+            onTouchStart={() => setIsPaused(true)}
+            onTouchEnd={() => setIsPaused(false)}
+            onClick={(e) => { handleTap(e); handleNext(); }}
             data-testid="button-next-story"
           />
         </div>

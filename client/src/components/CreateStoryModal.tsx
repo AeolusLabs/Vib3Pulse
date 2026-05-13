@@ -49,51 +49,25 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
 
   const [isUploading, setIsUploading] = useState(false);
 
-  // Helper to get CSRF token, fetching from server if not in cookie
-  const getCsrfToken = async (): Promise<string> => {
-    // First check if token exists in cookie
-    const match = document.cookie.match(/csrf-token=([^;]+)/);
-    if (match && match[1]) {
-      return match[1];
-    }
-    // Token not in cookie, fetch from server to initialize it
-    try {
-      const response = await fetch('/api/csrf-token', {
-        method: 'GET',
-        credentials: 'include',
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.csrfToken) {
-          return data.csrfToken;
-        }
-      }
-    } catch (error) {
-      console.error('Failed to fetch CSRF token:', error);
-    }
-    throw new Error('Unable to get security token. Please refresh the page and try again.');
-  };
-
-  const uploadMediaToStorage = async (dataUrl: string): Promise<string> => {
-    const csrfToken = await getCsrfToken();
-    
-    const response = await fetch('/api/stories/upload', {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-csrf-token': csrfToken,
-      },
-      body: JSON.stringify({ imageData: dataUrl }),
+  // Compress image client-side — works on any hosting platform (no Replit sidecar needed)
+  const compressImage = async (dataUrl: string): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX_WIDTH = 720;
+        const MAX_HEIGHT = 1280;
+        let { width, height } = img;
+        const ratio = Math.min(MAX_WIDTH / width, MAX_HEIGHT / height, 1);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(width * ratio);
+        canvas.height = Math.round(height * ratio);
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.8));
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
     });
-    
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ message: 'Upload failed' }));
-      throw new Error(error.message || 'Failed to upload media');
-    }
-    
-    const { stablePath } = await response.json();
-    return stablePath;
   };
 
   const createStoryMutation = useMutation({
@@ -193,10 +167,10 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
   const handlePostStory = async () => {
     const hasMedia = selectedImage || selectedStoryVideo;
     if (!hasMedia) return;
-    
+
     try {
       setIsUploading(true);
-      
+
       if (mediaType === "video" && selectedStoryVideo) {
         createStoryMutation.mutate({
           imageUrl: selectedStoryVideo,
@@ -207,11 +181,10 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
           allowedViewerIds: privacy === "private" ? selectedViewers : undefined,
         });
       } else if (selectedImage) {
-        let imageUrl = selectedImage;
-        if (selectedImage.startsWith('data:')) {
-          imageUrl = await uploadMediaToStorage(selectedImage);
-        }
-        
+        const imageUrl = selectedImage.startsWith('data:')
+          ? await compressImage(selectedImage)
+          : selectedImage;
+
         createStoryMutation.mutate({
           imageUrl,
           type: "image",
@@ -221,10 +194,10 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
         });
       }
     } catch (error) {
-      console.error('Error uploading story:', error);
+      console.error('Error processing story:', error);
       toast({
         title: "Upload Error",
-        description: "Failed to upload your story. Please try again.",
+        description: "Failed to prepare your story. Please try again.",
         variant: "destructive",
       });
     } finally {

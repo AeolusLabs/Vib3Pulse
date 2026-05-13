@@ -185,6 +185,7 @@ type StoryWithUser = {
   userId: string;
   imageUrl: string;
   videoUrl?: string | null;
+  caption?: string | null;
   type: string;
   privacy: string;
   originalStoryId: string | null;
@@ -198,6 +199,7 @@ type StoryWithUser = {
     displayName?: string | null;
     organizationName?: string | null;
     userType: string;
+    avatarUrl?: string | null;
   };
 };
 
@@ -331,7 +333,7 @@ export default function FeedPage() {
     return {
       id: firstStory.userId,
       username: firstStory.user.displayName || firstStory.user.organizationName || firstStory.user.username,
-      avatar: '',
+      avatar: firstStory.user.avatarUrl || '',
       isViewed: false,
       userType: firstStory.user.userType,
       displayName: firstStory.user.displayName,
@@ -341,6 +343,7 @@ export default function FeedPage() {
         type: (story.type === 'video' ? 'video' : 'image') as "image" | "text" | "video",
         content: story.imageUrl,
         videoUrl: story.videoUrl || null,
+        caption: story.caption || null,
         timestamp: new Date(story.createdAt).toLocaleString(),
         likeCount: story.likeCount || 0,
         isLiked: story.isLiked || false,
@@ -574,6 +577,7 @@ export default function FeedPage() {
       {viewingStory !== null && stories[viewingStory] && (
         <StoryViewer
           username={stories[viewingStory].username}
+          avatar={stories[viewingStory].avatar}
           slides={stories[viewingStory].slides}
           onClose={() => setViewingStory(null)}
           onNext={handleNextStory}
