@@ -42,6 +42,7 @@ type Comment = {
 
 export default function CommentDialog({ open, onClose, postId, postSummary }: CommentDialogProps) {
   const [commentText, setCommentText] = useState("");
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
   const { toast } = useToast();
   const { data: currentUser } = useAuth();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -72,6 +73,30 @@ export default function CommentDialog({ open, onClose, postId, postSummary }: Co
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [comments]);
+
+  // Keep input toolbar above the virtual keyboard
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    const update = () => {
+      const diff = window.innerHeight - (vv.height + vv.offsetTop);
+      setKeyboardOffset(Math.max(0, diff));
+    };
+
+    if (open) {
+      vv.addEventListener("resize", update);
+      vv.addEventListener("scroll", update);
+      update();
+    } else {
+      setKeyboardOffset(0);
+    }
+
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  }, [open]);
 
   const handleAddComment = () => {
     if (commentText.trim()) addCommentMutation.mutate(commentText);
@@ -106,6 +131,7 @@ export default function CommentDialog({ open, onClose, postId, postSummary }: Co
             "sm:data-[state=closed]:slide-out-to-bottom-0 sm:data-[state=open]:slide-in-from-bottom-0",
             "sm:data-[state=closed]:zoom-out-95 sm:data-[state=open]:zoom-in-95"
           )}
+          style={keyboardOffset > 0 ? { paddingBottom: keyboardOffset } : undefined}
         >
           <DialogPrimitive.Title className="sr-only">Comments</DialogPrimitive.Title>
           <DialogPrimitive.Description className="sr-only">

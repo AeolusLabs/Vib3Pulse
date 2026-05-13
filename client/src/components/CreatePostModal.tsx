@@ -81,6 +81,7 @@ export default function CreatePostModal({
   const [uploadedVideoUrl, setUploadedVideoUrl] = useState<string | null>(null);
   const [mediaMode, setMediaMode] = useState<"none" | "photos" | "video">("none");
   const [selectedCommunityId, setSelectedCommunityId] = useState<string>("none");
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
   const maxLength = 280;
 
   const { data: myCommunities = [] } = useQuery<CommunityWithRole[]>({
@@ -91,6 +92,30 @@ export default function CreatePostModal({
   useEffect(() => {
     if (open) setSelectedCommunityId(defaultCommunityId || "none");
   }, [open, defaultCommunityId]);
+
+  // Track virtual keyboard height via visualViewport so the toolbar stays above the keyboard
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    const update = () => {
+      const diff = window.innerHeight - (vv.height + vv.offsetTop);
+      setKeyboardOffset(Math.max(0, diff));
+    };
+
+    if (open) {
+      vv.addEventListener("resize", update);
+      vv.addEventListener("scroll", update);
+      update();
+    } else {
+      setKeyboardOffset(0);
+    }
+
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (open && (attachedEvent || attachedVenue)) {
@@ -172,6 +197,7 @@ export default function CreatePostModal({
             "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
             "data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
           )}
+          style={keyboardOffset > 0 ? { paddingBottom: keyboardOffset } : undefined}
         >
           <DialogPrimitive.Title className="sr-only">New Post</DialogPrimitive.Title>
           <DialogPrimitive.Description className="sr-only">
