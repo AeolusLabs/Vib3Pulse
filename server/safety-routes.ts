@@ -10,141 +10,7 @@ function requireAuth(req: Request, res: Response, next: Function) {
   next();
 }
 
-// ============================================================
-// SAFETY BUDDY ROUTES
-// ============================================================
-
 export function registerSafetyRoutes(app: Express): void {
-
-  // Set or replace safety buddy (sends a request they must accept)
-  app.post("/api/safety/buddy", requireAuth, async (req, res) => {
-    try {
-      const { buddyId } = z.object({ buddyId: z.string().min(1) }).parse(req.body);
-      const userId = req.user!.id;
-
-      if (buddyId === userId) {
-        return res.status(400).json({ message: "You cannot be your own safety buddy" });
-      }
-
-      const buddy = await storage.getUser(buddyId);
-      if (!buddy) {
-        return res.status(404).json({ message: "User not found" });
-      }
-      if (buddy.userType !== "social") {
-        return res.status(400).json({ message: "Only social users can be safety buddies" });
-      }
-
-      await storage.setSafetyBuddy(userId, buddyId);
-
-      const currentUser = await storage.getUser(userId);
-
-      // Notify the buddy in-app
-      await storage.createNotification({
-        userId: buddyId,
-        type: "buddy_request",
-        title: "Safety Buddy Request",
-        message: `${currentUser?.displayName || currentUser?.username || "Someone"} wants you as their safety buddy`,
-        link: "/safety/settings",
-        relatedUserId: userId,
-        relatedEntityId: userId,
-      });
-
-      wsManager.sendToUser(buddyId, {
-        type: "notification",
-        data: { type: "buddy_request", fromUserId: userId },
-      });
-
-      res.json({ message: "Buddy request sent" });
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "buddyId is required" });
-      }
-      console.error("[Safety] Set buddy error:", error);
-      res.status(500).json({ message: "Failed to send buddy request" });
-    }
-  });
-
-  // Get current buddy status
-  app.get("/api/safety/buddy", requireAuth, async (req, res) => {
-    try {
-      const userId = req.user!.id;
-      const result = await storage.getSafetyBuddy(userId);
-
-      if (!result) {
-        return res.json({ buddy: null, status: null });
-      }
-
-      res.json({ buddy: result.buddy, status: result.record.status });
-    } catch (error) {
-      console.error("[Safety] Get buddy error:", error);
-      res.status(500).json({ message: "Failed to get buddy" });
-    }
-  });
-
-  // Remove current buddy
-  app.delete("/api/safety/buddy", requireAuth, async (req, res) => {
-    try {
-      const userId = req.user!.id;
-      await storage.removeSafetyBuddy(userId);
-      res.json({ message: "Buddy removed" });
-    } catch (error) {
-      console.error("[Safety] Remove buddy error:", error);
-      res.status(500).json({ message: "Failed to remove buddy" });
-    }
-  });
-
-  // Get pending buddy requests (requests I've received)
-  app.get("/api/safety/buddy/requests", requireAuth, async (req, res) => {
-    try {
-      const userId = req.user!.id;
-      const requests = await storage.getSafetyBuddyRequests(userId);
-      res.json({ requests });
-    } catch (error) {
-      console.error("[Safety] Get buddy requests error:", error);
-      res.status(500).json({ message: "Failed to get buddy requests" });
-    }
-  });
-
-  // Respond to a buddy request
-  app.post("/api/safety/buddy/respond", requireAuth, async (req, res) => {
-    try {
-      const { requesterId, accept } = z.object({
-        requesterId: z.string().min(1),
-        accept: z.boolean(),
-      }).parse(req.body);
-
-      const buddyId = req.user!.id;
-      await storage.respondToSafetyBuddyRequest(buddyId, requesterId, accept);
-
-      const currentUser = await storage.getUser(buddyId);
-      const notifMessage = accept
-        ? `${currentUser?.displayName || currentUser?.username} accepted your buddy request`
-        : `${currentUser?.displayName || currentUser?.username} declined your buddy request`;
-
-      await storage.createNotification({
-        userId: requesterId,
-        type: "buddy_request_response",
-        title: accept ? "Buddy Request Accepted" : "Buddy Request Declined",
-        message: notifMessage,
-        link: "/safety/settings",
-        relatedUserId: buddyId,
-        relatedEntityId: buddyId,
-      });
-
-      wsManager.sendToUser(requesterId, {
-        type: "notification",
-        data: { type: "buddy_request_response", accepted: accept },
-      });
-
-      res.json({ message: accept ? "Request accepted" : "Request declined" });
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "requesterId and accept are required" });
-      }
-      console.error("[Safety] Respond to buddy error:", error);
-      res.status(500).json({ message: "Failed to respond to buddy request" });
-    }
-  });
 
   // ============================================================
   // DISTRESS MESSAGE
@@ -191,28 +57,13 @@ export function registerSafetyRoutes(app: Express): void {
       const { latitude, longitude, locationText } = sosSchema.parse(req.body);
       const userId = req.user!.id;
 
-      const buddyData = await storage.getSafetyBuddy(userId);
-      if (!buddyData) {
-        return res.status(400).json({ message: "No safety buddy set" });
-      }
-      if (buddyData.record.status !== "accepted") {
-        return res.status(400).json({ message: "Your buddy hasn't accepted your request yet" });
+      const confirmedBuddies = await storage.getConfirmedBuddies(userId);
+      if (confirmedBuddies.length === 0) {
+        return res.status(400).json({ message: "No confirmed safety buddies. Add and confirm a buddy first." });
       }
 
-      const buddy = buddyData.buddy;
       const distressMessage = await storage.getDistressMessage(userId);
       const alertMessage = distressMessage || "I need help! Please check on me.";
-
-      const alert = await storage.createSafetyAlert({
-        userId,
-        buddyId: buddy.id,
-        alertType: "manual_sos",
-        message: alertMessage,
-        latitude: latitude ?? undefined,
-        longitude: longitude ?? undefined,
-        locationText: locationText ?? undefined,
-      });
-
       const sender = await storage.getUser(userId);
       const senderName = sender?.displayName || sender?.username || "Your buddy";
 
@@ -220,39 +71,63 @@ export function registerSafetyRoutes(app: Express): void {
         ? ` Coordinates: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`
         : "";
 
-      // Real-time push to buddy
-      wsManager.sendToUser(buddy.id, {
-        type: "distress_alert",
-        data: {
-          alertId: alert.id,
-          senderId: userId,
-          senderName,
-          message: alertMessage,
+      const alertIds: string[] = [];
+
+      for (const buddy of confirmedBuddies) {
+        if (!buddy.buddyUserId) {
+          // Phone-only buddy — SMS alert dispatch is handled by the alert service (future layer)
+          console.log(`[Safety] SOS for ${userId} — phone-only buddy ${buddy.phoneNumber} (SMS dispatch: future layer)`);
+          continue;
+        }
+
+        // Buddy has an app account — use WebSocket + in-app notification + DB record
+        const alert = await storage.createSafetyAlert({
+          userId,
+          buddyId: buddy.buddyUserId,
           alertType: "manual_sos",
-          latitude: latitude ?? null,
-          longitude: longitude ?? null,
-          locationText: locationText ?? null,
-          timestamp: alert.createdAt.toISOString(),
-        },
-      });
+          message: alertMessage,
+          latitude: latitude ?? undefined,
+          longitude: longitude ?? undefined,
+          locationText: locationText ?? undefined,
+        });
+        alertIds.push(alert.id);
 
-      // Persistent notification
-      await storage.createNotification({
-        userId: buddy.id,
-        type: "buddy_alert",
-        title: "SOS Alert",
-        message: `${senderName} needs help!${locationPart}`,
-        link: "/safety/alerts",
-        relatedUserId: userId,
-        relatedEntityId: alert.id,
-      });
+        wsManager.sendToUser(buddy.buddyUserId, {
+          type: "distress_alert",
+          data: {
+            alertId: alert.id,
+            senderId: userId,
+            senderName,
+            message: alertMessage,
+            alertType: "manual_sos",
+            latitude: latitude ?? null,
+            longitude: longitude ?? null,
+            locationText: locationText ?? null,
+            timestamp: alert.createdAt.toISOString(),
+          },
+        });
 
-      wsManager.sendToUser(buddy.id, {
-        type: "notification",
-        data: { type: "buddy_alert" },
-      });
+        await storage.createNotification({
+          userId: buddy.buddyUserId,
+          type: "buddy_alert",
+          title: "SOS Alert",
+          message: `${senderName} needs help!${locationPart}`,
+          link: "/safety/alerts",
+          relatedUserId: userId,
+          relatedEntityId: alert.id,
+        });
 
-      res.json({ message: "SOS alert sent", alertId: alert.id, buddy: { username: buddy.username, displayName: buddy.displayName } });
+        wsManager.sendToUser(buddy.buddyUserId, {
+          type: "notification",
+          data: { type: "buddy_alert" },
+        });
+      }
+
+      res.json({
+        message: "SOS alert sent",
+        alertIds,
+        buddiesNotified: confirmedBuddies.length,
+      });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid request body" });
@@ -354,9 +229,9 @@ export function registerSafetyRoutes(app: Express): void {
       const { durationMinutes, gracePeriodMinutes, eventId } = createTimerSchema.parse(req.body);
       const userId = req.user!.id;
 
-      const buddyData = await storage.getSafetyBuddy(userId);
-      if (!buddyData || buddyData.record.status !== "accepted") {
-        return res.status(400).json({ message: "You need an accepted safety buddy to start a timer" });
+      const confirmedBuddies = await storage.getConfirmedBuddies(userId);
+      if (confirmedBuddies.length === 0) {
+        return res.status(400).json({ message: "You need at least one confirmed safety buddy to start a timer" });
       }
 
       const timer = await storage.createSafetyTimer({
@@ -412,7 +287,7 @@ export function registerSafetyRoutes(app: Express): void {
 
 // ============================================================
 // BACKGROUND JOB — fire buddy alerts when grace period ends
-// Called from server/index.ts on startup
+// Called from server/routes.ts on startup
 // ============================================================
 
 export function startSafetyTimerJob(): void {
@@ -424,60 +299,64 @@ export function startSafetyTimerJob(): void {
 
       for (const timer of timers) {
         try {
-          const buddyData = await storage.getSafetyBuddy(timer.userId);
-          if (!buddyData || buddyData.record.status !== "accepted") {
+          const confirmedBuddies = await storage.getConfirmedBuddies(timer.userId);
+          if (confirmedBuddies.length === 0) {
             await storage.markTimerAlerted(timer.id);
             continue;
           }
 
-          const buddy = buddyData.buddy;
           const distressMsg = await storage.getDistressMessage(timer.userId);
           const alertMessage = distressMsg || "I need help! Please check on me.";
-
-          const alert = await storage.createSafetyAlert({
-            userId: timer.userId,
-            buddyId: buddy.id,
-            alertType: "timer_expiry",
-            message: alertMessage,
-            timerId: timer.id,
-          });
-
-          await storage.markTimerAlerted(timer.id);
-
           const sender = await storage.getUser(timer.userId);
           const senderName = sender?.displayName || sender?.username || "Your buddy";
 
-          wsManager.sendToUser(buddy.id, {
-            type: "distress_alert",
-            data: {
-              alertId: alert.id,
-              senderId: timer.userId,
-              senderName,
-              message: alertMessage,
+          for (const buddy of confirmedBuddies) {
+            if (!buddy.buddyUserId) {
+              console.log(`[Safety] Timer ${timer.id} expired — phone-only buddy ${buddy.phoneNumber} (SMS dispatch: future layer)`);
+              continue;
+            }
+
+            const alert = await storage.createSafetyAlert({
+              userId: timer.userId,
+              buddyId: buddy.buddyUserId,
               alertType: "timer_expiry",
-              latitude: null,
-              longitude: null,
-              locationText: null,
-              timestamp: alert.createdAt.toISOString(),
-            },
-          });
+              message: alertMessage,
+              timerId: timer.id,
+            });
 
-          await storage.createNotification({
-            userId: buddy.id,
-            type: "buddy_timer_expiry",
-            title: "Check-In Timer Expired",
-            message: `${senderName} didn't check in on time — they may need help`,
-            link: "/safety/alerts",
-            relatedUserId: timer.userId,
-            relatedEntityId: alert.id,
-          });
+            wsManager.sendToUser(buddy.buddyUserId, {
+              type: "distress_alert",
+              data: {
+                alertId: alert.id,
+                senderId: timer.userId,
+                senderName,
+                message: alertMessage,
+                alertType: "timer_expiry",
+                latitude: null,
+                longitude: null,
+                locationText: null,
+                timestamp: alert.createdAt.toISOString(),
+              },
+            });
 
-          wsManager.sendToUser(buddy.id, {
-            type: "notification",
-            data: { type: "buddy_timer_expiry" },
-          });
+            await storage.createNotification({
+              userId: buddy.buddyUserId,
+              type: "buddy_timer_expiry",
+              title: "Check-In Timer Expired",
+              message: `${senderName} didn't check in on time — they may need help`,
+              link: "/safety/alerts",
+              relatedUserId: timer.userId,
+              relatedEntityId: alert.id,
+            });
 
-          console.log(`[Safety] Timer ${timer.id} expired — alert sent to buddy ${buddy.id}`);
+            wsManager.sendToUser(buddy.buddyUserId, {
+              type: "notification",
+              data: { type: "buddy_timer_expiry" },
+            });
+          }
+
+          await storage.markTimerAlerted(timer.id);
+          console.log(`[Safety] Timer ${timer.id} expired — alerts sent to ${confirmedBuddies.length} buddy(ies)`);
         } catch (err) {
           console.error(`[Safety] Error processing timer ${timer.id}:`, err);
         }

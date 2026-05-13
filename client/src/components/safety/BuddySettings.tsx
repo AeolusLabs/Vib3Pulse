@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,34 +6,44 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { useAuth } from "@/hooks/useAuth";
 import { CheckInTimer } from "./CheckInTimer";
-import type { User } from "@shared/schema";
-import { Shield, X, Search, Clock, CheckCircle, XCircle } from "lucide-react";
+import { Shield, X, Clock, CheckCircle, XCircle, Phone, UserPlus } from "lucide-react";
 
-interface BuddyResponse { buddy: User | null; status: string | null; }
-interface BuddyRequest { id: string; requester: User; requestedAt: string; }
+interface Buddy {
+  id: string;
+  userId: string;
+  name: string;
+  phoneNumber: string;
+  confirmationStatus: "pending" | "confirmed" | "declined" | "expired";
+  isPrimary: boolean;
+  createdAt: string;
+}
+
+function StatusBadge({ status }: { status: Buddy["confirmationStatus"] }) {
+  if (status === "confirmed") {
+    return <Badge variant="default"><CheckCircle className="h-3 w-3 mr-1" />Confirmed</Badge>;
+  }
+  if (status === "pending") {
+    return <Badge variant="secondary"><Clock className="h-3 w-3 mr-1" />Awaiting reply</Badge>;
+  }
+  if (status === "declined") {
+    return <Badge variant="destructive"><XCircle className="h-3 w-3 mr-1" />Declined</Badge>;
+  }
+  return <Badge variant="outline"><XCircle className="h-3 w-3 mr-1" />Expired</Badge>;
+}
 
 export function BuddySettings() {
   const { toast } = useToast();
-  const [showPicker, setShowPicker] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [showForm, setShowForm] = useState(false);
   const [distressMessage, setDistressMessage] = useState("");
-  const { data: currentUser } = useAuth();
 
-  const { data: buddyData, isLoading: buddyLoading } = useQuery<BuddyResponse>({
-    queryKey: ["/api/safety/buddy"],
-  });
-
-  const { data: requestsData } = useQuery<{ requests: BuddyRequest[] }>({
-    queryKey: ["/api/safety/buddy/requests"],
+  const { data: buddiesData, isLoading: buddiesLoading } = useQuery<{ buddies: Buddy[] }>({
+    queryKey: ["/api/safety/buddies"],
   });
 
   const { data: distressMsgData } = useQuery<{ message: string | null }>({
@@ -41,64 +51,34 @@ export function BuddySettings() {
     select: (d) => d,
   });
 
-  useEffect(() => {
-    if (distressMsgData?.message) setDistressMessage(distressMsgData.message);
-  }, [distressMsgData]);
+  // Sync distress message to local state when loaded
+  if (distressMsgData?.message && !distressMessage) {
+    setDistressMessage(distressMsgData.message);
+  }
 
-  const { data: followingList = [], isLoading: followingLoading, refetch: refetchFollowing } = useQuery<User[]>({
-    queryKey: ["/api/follows/me/following"],
-    enabled: !!currentUser?.id,
-    staleTime: 30_000,
-  });
-
-  const { data: searchResults = [], isLoading: searchLoading } = useQuery<User[]>({
-    queryKey: [`/api/users/search?q=${debouncedSearch}`],
-    enabled: debouncedSearch.length >= 2,
-  });
-
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(searchQuery), 300);
-    return () => clearTimeout(t);
-  }, [searchQuery]);
-
-  useEffect(() => {
-    if (showPicker && currentUser?.id) refetchFollowing();
-  }, [showPicker]);
-
-  const setBuddyMutation = useMutation({
-    mutationFn: (buddyId: string) => apiRequest("POST", "/api/safety/buddy", { buddyId }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/safety/buddy"] });
-      setShowPicker(false);
-      setSearchQuery("");
-      setDebouncedSearch("");
-      toast({ title: "Request sent", description: "Waiting for them to accept." });
+  const addBuddyMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/safety/buddy-assignment", { name: name.trim(), phone_number: phone.trim() }),
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/safety/buddies"] });
+      setName("");
+      setPhone("");
+      setShowForm(false);
+      toast({ title: "Invitation sent", description: data.message });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
   const removeBuddyMutation = useMutation({
-    mutationFn: () => apiRequest("DELETE", "/api/safety/buddy"),
+    mutationFn: (buddyId: string) => apiRequest("DELETE", `/api/safety/buddies/${buddyId}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/safety/buddy"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/safety/buddies"] });
       toast({ title: "Buddy removed" });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
-  const respondMutation = useMutation({
-    mutationFn: ({ requesterId, accept }: { requesterId: string; accept: boolean }) =>
-      apiRequest("POST", "/api/safety/buddy/respond", { requesterId, accept }),
-    onSuccess: (_data, vars) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/safety/buddy/requests"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/safety/buddy"] });
-      toast({ title: vars.accept ? "Request accepted — you're their buddy" : "Request declined" });
-    },
-    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
-  });
-
   const saveMessageMutation = useMutation({
-    mutationFn: (message: string) => apiRequest("POST", "/api/safety/distress-message", { message }),
+    mutationFn: (msg: string) => apiRequest("POST", "/api/safety/distress-message", { message: msg }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/safety/distress-message"] });
       toast({ title: "Message saved" });
@@ -106,180 +86,145 @@ export function BuddySettings() {
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
-  if (buddyLoading) return <div>Loading…</div>;
-
-  const buddy = buddyData?.buddy;
-  const buddyStatus = buddyData?.status;
-  const hasAcceptedBuddy = buddy && buddyStatus === "accepted";
-  const pendingRequests = requestsData?.requests ?? [];
-
-  const initials = (u: User) =>
-    ((u.displayName || u.username) ?? "?").charAt(0).toUpperCase();
-
-  const UserRow = ({ user, onSelect }: { user: User; onSelect: (u: User) => void }) => (
-    <div
-      className="flex items-center justify-between p-3 border rounded-md hover:bg-muted/40 cursor-pointer"
-      onClick={() => onSelect(user)}
-    >
-      <div className="flex items-center gap-3">
-        <Avatar className="h-9 w-9">
-          <AvatarImage src={user.avatarUrl ?? ""} alt={user.username} />
-          <AvatarFallback className="bg-primary/10 text-primary text-sm">{initials(user)}</AvatarFallback>
-        </Avatar>
-        <div>
-          <p className="font-medium text-sm">{user.displayName || user.username}</p>
-          <p className="text-xs text-muted-foreground">@{user.username}</p>
-        </div>
-      </div>
-      <Button variant="ghost" size="sm" disabled={setBuddyMutation.isPending}>Select</Button>
-    </div>
-  );
+  const buddies = buddiesData?.buddies ?? [];
+  const confirmedBuddies = buddies.filter((b) => b.confirmationStatus === "confirmed");
+  const hasConfirmedBuddy = confirmedBuddies.length > 0;
 
   return (
     <div className="space-y-4">
-      {pendingRequests.length > 0 && (
-        <Card data-testid="card-buddy-requests">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Shield className="h-4 w-4 text-primary" />
-              Buddy Requests
-            </CardTitle>
-            <CardDescription>People who want you as their safety buddy</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {pendingRequests.map((req) => (
-              <div key={req.id} className="flex items-center justify-between p-3 border rounded-md">
-                <div className="flex items-center gap-3">
-                  <Avatar className="h-9 w-9">
-                    <AvatarImage src={req.requester.avatarUrl ?? ""} />
-                    <AvatarFallback className="bg-primary/10 text-primary text-sm">{initials(req.requester)}</AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <p className="font-medium text-sm">{req.requester.displayName || req.requester.username}</p>
-                    <p className="text-xs text-muted-foreground">@{req.requester.username}</p>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Button size="sm" onClick={() => respondMutation.mutate({ requesterId: req.requester.id, accept: true })} disabled={respondMutation.isPending}>
-                    <CheckCircle className="h-3.5 w-3.5 mr-1" />Accept
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => respondMutation.mutate({ requesterId: req.requester.id, accept: false })} disabled={respondMutation.isPending}>
-                    <XCircle className="h-3.5 w-3.5 mr-1" />Decline
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
-
       <Card data-testid="card-buddy-settings">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Shield className="h-5 w-5" />
-            Safety Buddy
+            Safety Buddies
           </CardTitle>
           <CardDescription>
-            Your buddy receives your SOS alerts and timer-expiry notifications.
+            Buddies receive your SOS alerts by SMS — they don't need the app installed. Up to 5 confirmed buddies.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          {buddy ? (
-            <div className="flex items-center justify-between p-4 border rounded-md">
-              <div className="flex items-center gap-3">
-                <Avatar className="h-10 w-10">
-                  <AvatarImage src={buddy.avatarUrl ?? ""} />
-                  <AvatarFallback className="bg-primary/10 text-primary">{initials(buddy)}</AvatarFallback>
-                </Avatar>
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="font-medium">{buddy.displayName || buddy.username}</p>
-                    {buddyStatus === "pending" && (
-                      <Badge variant="secondary"><Clock className="h-3 w-3 mr-1" />Pending</Badge>
-                    )}
-                    {buddyStatus === "accepted" && (
-                      <Badge variant="default"><CheckCircle className="h-3 w-3 mr-1" />Active</Badge>
-                    )}
-                    {buddyStatus === "declined" && (
-                      <Badge variant="destructive"><XCircle className="h-3 w-3 mr-1" />Declined</Badge>
-                    )}
-                  </div>
-                  <p className="text-sm text-muted-foreground">@{buddy.username}</p>
-                  {buddyStatus === "pending" && (
-                    <p className="text-xs text-muted-foreground mt-0.5">Waiting for them to accept</p>
-                  )}
-                  {buddyStatus === "declined" && (
-                    <p className="text-xs text-muted-foreground mt-0.5">They declined — remove and try someone else</p>
-                  )}
-                </div>
-              </div>
-              <Button variant="ghost" size="icon" onClick={() => removeBuddyMutation.mutate()} disabled={removeBuddyMutation.isPending}>
-                <X className="h-4 w-4" />
-              </Button>
+        <CardContent className="space-y-4">
+          {buddiesLoading ? (
+            <div className="space-y-2">
+              <Skeleton className="h-14 w-full" />
+              <Skeleton className="h-14 w-full" />
             </div>
-          ) : showPicker ? (
-            <div className="space-y-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  type="text"
-                  placeholder="Search by username…"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
-                  autoFocus
-                />
-              </div>
-
-              {debouncedSearch.length >= 2 && (
+          ) : (
+            <>
+              {buddies.length > 0 && (
                 <div className="space-y-2">
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Search results</p>
-                  {searchLoading ? (
-                    <Skeleton className="h-14 w-full" />
-                  ) : searchResults.length === 0 ? (
-                    <p className="text-sm text-muted-foreground py-2">No users found</p>
-                  ) : (
-                    <ScrollArea className="h-40">
-                      <div className="space-y-2 pr-2">
-                        {searchResults
-                          .filter((u) => u.id !== currentUser?.id)
-                          .map((u) => <UserRow key={u.id} user={u} onSelect={(u) => setBuddyMutation.mutate(u.id)} />)}
+                  {buddies.map((buddy) => (
+                    <div
+                      key={buddy.id}
+                      className="flex items-center justify-between p-3 border rounded-md"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center">
+                          <Phone className="h-4 w-4 text-primary" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-medium text-sm">{buddy.name}</p>
+                            {buddy.isPrimary && (
+                              <Badge variant="outline" className="text-xs">Primary</Badge>
+                            )}
+                            <StatusBadge status={buddy.confirmationStatus} />
+                          </div>
+                          <p className="text-xs text-muted-foreground">{buddy.phoneNumber}</p>
+                          {buddy.confirmationStatus === "pending" && (
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              Waiting for reply — they can text YES or NO
+                            </p>
+                          )}
+                          {buddy.confirmationStatus === "declined" && (
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              They declined — remove and try again
+                            </p>
+                          )}
+                          {buddy.confirmationStatus === "expired" && (
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              Invitation expired — remove and resend
+                            </p>
+                          )}
+                        </div>
                       </div>
-                    </ScrollArea>
-                  )}
-                  <Separator />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeBuddyMutation.mutate(buddy.id)}
+                        disabled={removeBuddyMutation.isPending}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
                 </div>
               )}
 
-              <div className="space-y-2">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">People you follow</p>
-                {followingLoading ? (
-                  <div className="space-y-2">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-14 w-full" />)}</div>
-                ) : followingList.length === 0 ? (
-                  <p className="text-sm text-muted-foreground py-2">You're not following anyone yet.</p>
-                ) : (
-                  <ScrollArea className="h-48">
-                    <div className="space-y-2 pr-2">
-                      {followingList.map((u) => <UserRow key={u.id} user={u} onSelect={(u) => setBuddyMutation.mutate(u.id)} />)}
-                    </div>
-                  </ScrollArea>
-                )}
-              </div>
+              {showForm ? (
+                <div className="space-y-3 p-4 border rounded-md bg-muted/30">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="buddy-name">Buddy's name</Label>
+                    <Input
+                      id="buddy-name"
+                      placeholder="e.g. Mum"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      autoFocus
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="buddy-phone">Phone number</Label>
+                    <Input
+                      id="buddy-phone"
+                      type="tel"
+                      placeholder="+447700900000 or 07700900000"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      UK (+44) or Nigeria (+234) numbers. They'll get an SMS — no app needed.
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={() => addBuddyMutation.mutate()}
+                      disabled={!name.trim() || !phone.trim() || addBuddyMutation.isPending}
+                      data-testid="button-send-invite"
+                    >
+                      {addBuddyMutation.isPending ? "Sending…" : "Send invitation"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => { setShowForm(false); setName(""); setPhone(""); }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                buddies.length < 5 && (
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowForm(true)}
+                    data-testid="button-add-buddy"
+                  >
+                    <UserPlus className="h-4 w-4 mr-2" />
+                    Add a buddy
+                  </Button>
+                )
+              )}
 
-              <Button variant="outline" onClick={() => { setShowPicker(false); setSearchQuery(""); setDebouncedSearch(""); }}>
-                Cancel
-              </Button>
-            </div>
-          ) : (
-            <Button onClick={() => setShowPicker(true)} data-testid="button-set-buddy">
-              <Shield className="h-4 w-4 mr-2" />
-              Set Emergency Buddy
-            </Button>
+              {buddies.length === 0 && !showForm && (
+                <p className="text-sm text-muted-foreground">
+                  No buddies yet. Add someone — they'll get a text asking to confirm.
+                </p>
+              )}
+            </>
           )}
         </CardContent>
       </Card>
 
-      {hasAcceptedBuddy && <CheckInTimer />}
+      {hasConfirmedBuddy && <CheckInTimer />}
 
       <Card data-testid="card-distress-message">
         <CardHeader>
