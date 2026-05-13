@@ -163,37 +163,56 @@ export default function MentionTextarea({
       {showSuggestions && suggestions.length > 0 && (
         <div
           ref={suggestionsRef}
-          className="absolute top-full left-0 right-0 mt-1 bg-popover border rounded-lg shadow-lg z-50 max-h-52 overflow-y-auto"
+          className="absolute top-full left-0 right-0 mt-1 bg-popover border border-border rounded-xl shadow-xl z-50 max-h-72 overflow-y-auto divide-y divide-border/50"
           data-testid="mention-suggestions-dropdown"
         >
-          {suggestions.map((user, index) => (
-            <button
-              key={user.id}
-              type="button"
-              className={cn(
-                "w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors",
-                index === selectedIndex ? "bg-accent" : "hover:bg-muted"
-              )}
-              onMouseDown={(e) => {
-                e.preventDefault(); // keep textarea focus
-                insertMention(user);
-              }}
-              data-testid={`mention-suggestion-${user.username}`}
-            >
-              <Avatar className="h-7 w-7 flex-shrink-0">
-                <AvatarImage src={user.avatarUrl || ""} />
-                <AvatarFallback className="text-xs bg-primary/10 text-primary">
-                  {(user.displayName || user.organizationName || user.username)[0].toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
-              <div className="min-w-0 flex-1">
-                <p className="font-medium text-sm truncate leading-tight">
-                  {user.displayName || user.organizationName || user.username}
-                </p>
-                <p className="text-xs text-muted-foreground leading-tight">@{user.username}</p>
-              </div>
-            </button>
-          ))}
+          {suggestions.map((user, index) => {
+            const isSelected = index === selectedIndex;
+            return (
+              <button
+                key={user.id}
+                type="button"
+                className={cn(
+                  "w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors",
+                  isSelected
+                    ? "bg-primary text-primary-foreground"
+                    : "hover:bg-muted text-foreground"
+                )}
+                onMouseDown={(e) => {
+                  e.preventDefault(); // keep textarea focus
+                  insertMention(user);
+                }}
+                data-testid={`mention-suggestion-${user.username}`}
+              >
+                <Avatar className="h-8 w-8 flex-shrink-0">
+                  <AvatarImage src={user.avatarUrl || ""} />
+                  <AvatarFallback
+                    className={cn(
+                      "text-xs font-semibold",
+                      isSelected
+                        ? "bg-primary-foreground/20 text-primary-foreground"
+                        : "bg-primary/10 text-primary"
+                    )}
+                  >
+                    {(user.displayName || user.organizationName || user.username)[0].toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-sm truncate leading-tight">
+                    {user.displayName || user.organizationName || user.username}
+                  </p>
+                  <p
+                    className={cn(
+                      "text-xs leading-tight truncate",
+                      isSelected ? "text-primary-foreground/80" : "text-muted-foreground"
+                    )}
+                  >
+                    @{user.username}
+                  </p>
+                </div>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
