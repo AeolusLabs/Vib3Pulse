@@ -1,16 +1,16 @@
-import { useState, useEffect } from "react";
-import { ImagePlus, Film, Calendar, Building2, Users, Globe, X, MapPin } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Images, Calendar, Building2, Users, Globe, X, MapPin, Plus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import MentionTextarea from "@/components/MentionTextarea";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { format } from "date-fns";
 import type { Event, Venue, Community } from "@shared/schema";
-import { MultiImageUploader } from "./MultiImageUploader";
 import { VideoUploader } from "./VideoUploader";
 
 type CommunityWithRole = Community & { memberCount: number; role: string };
@@ -32,7 +32,8 @@ interface CreatePostModalProps {
   ) => void;
 }
 
-// B2: SVG circular character counter — green → amber → red
+const MAX_IMAGES = 4;
+
 function CharacterRing({ count, max }: { count: number; max: number }) {
   const r = 14;
   const circumference = 2 * Math.PI * r;
@@ -79,10 +80,14 @@ export default function CreatePostModal({
   const [content, setContent] = useState("");
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [uploadedVideoUrl, setUploadedVideoUrl] = useState<string | null>(null);
-  const [mediaMode, setMediaMode] = useState<"none" | "photos" | "video">("none");
+  const [videoFileToUpload, setVideoFileToUpload] = useState<File | null>(null);
   const [selectedCommunityId, setSelectedCommunityId] = useState<string>("none");
   const [keyboardOffset, setKeyboardOffset] = useState(0);
+  const mediaInputRef = useRef<HTMLInputElement>(null);
   const maxLength = 280;
+
+  const hasImages = selectedImages.length > 0;
+  const hasVideo = !!(videoFileToUpload || uploadedVideoUrl);
 
   const { data: myCommunities = [] } = useQuery<CommunityWithRole[]>({
     queryKey: ["/api/communities/my"],
@@ -93,16 +98,13 @@ export default function CreatePostModal({
     if (open) setSelectedCommunityId(defaultCommunityId || "none");
   }, [open, defaultCommunityId]);
 
-  // Track virtual keyboard height via visualViewport so the toolbar stays above the keyboard
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
-
     const update = () => {
       const diff = window.innerHeight - (vv.height + vv.offsetTop);
       setKeyboardOffset(Math.max(0, diff));
     };
-
     if (open) {
       vv.addEventListener("resize", update);
       vv.addEventListener("scroll", update);
@@ -110,7 +112,6 @@ export default function CreatePostModal({
     } else {
       setKeyboardOffset(0);
     }
-
     return () => {
       vv.removeEventListener("resize", update);
       vv.removeEventListener("scroll", update);
@@ -125,19 +126,58 @@ export default function CreatePostModal({
     }
   }, [open, attachedEvent, attachedVenue]);
 
-  const toggleMediaMode = (mode: "photos" | "video") => {
-    if (mediaMode === mode) {
-      setMediaMode("none");
-      if (mode === "photos") setSelectedImages([]);
-      else setUploadedVideoUrl(null);
-    } else {
-      setMediaMode(mode);
-      setSelectedImages([]);
-      setUploadedVideoUrl(null);
+  const openMediaPicker = () => {
+    if (mediaInputRef.current) {
+      mediaInputRef.current.value = "";
+      mediaInputRef.current.click();
     }
   };
 
-  // B5: cycle audience through Everyone → community1 → community2 → …
+  const handleMediaSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
+    const imageFiles = files.filter((f) => f.type.startsWith("image/"));
+    const videoFiles = files.filter((f) =>
+      ["video/mp4", "video/quicktime", "video/webm"].includes(f.type)
+    );
+
+    if (videoFiles.length > 0 && imageFiles.length === 0) {
+      // Pure video selection — clear images, start video upload
+      setSelectedImages([]);
+      setUploadedVideoUrl(null);
+      setVideoFileToUpload(videoFiles[0]);
+    } else if (imageFiles.length > 0) {
+      // Images selected — clear video, add images up to MAX_IMAGES
+      setVideoFileToUpload(null);
+      setUploadedVideoUrl(null);
+      const remaining = MAX_IMAGES - selectedImages.length;
+      if (remaining <= 0) return;
+      const toAdd = imageFiles.slice(0, remaining);
+      toAdd.forEach((file) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setSelectedImages((prev) => {
+            if (prev.length >= MAX_IMAGES) return prev;
+            return [...prev, reader.result as string];
+          });
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    e.target.value = "";
+  };
+
+  const removeImage = (index: number) => {
+    setSelectedImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const clearVideo = () => {
+    setVideoFileToUpload(null);
+    setUploadedVideoUrl(null);
+  };
+
   const cycleAudience = () => {
     if (myCommunities.length === 0) return;
     const options = ["none", ...myCommunities.map((c) => c.id)];
@@ -163,7 +203,7 @@ export default function CreatePostModal({
     setContent("");
     setSelectedImages([]);
     setUploadedVideoUrl(null);
-    setMediaMode("none");
+    setVideoFileToUpload(null);
     setSelectedCommunityId("none");
     onClose();
   };
@@ -184,10 +224,8 @@ export default function CreatePostModal({
   return (
     <DialogPrimitive.Root open={open} onOpenChange={(o) => !o && resetAndClose()}>
       <DialogPrimitive.Portal>
-        {/* Backdrop */}
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
 
-        {/* B1: full-screen on mobile, centered card on sm+ */}
         <DialogPrimitive.Content
           className={cn(
             "fixed inset-0 z-50 flex flex-col bg-background outline-none",
@@ -204,7 +242,7 @@ export default function CreatePostModal({
             Compose and share a new post with your followers.
           </DialogPrimitive.Description>
 
-          {/* ── Header ── */}
+          {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
             <button
               onClick={resetAndClose}
@@ -224,13 +262,13 @@ export default function CreatePostModal({
             </button>
           </div>
 
-          {/* ── Scrollable body ── */}
+          {/* Scrollable body */}
           <div className="flex-1 overflow-y-auto px-4 pt-4 pb-2">
             <div className="flex gap-3">
-              {/* Avatar + vertical thread line */}
+              {/* Avatar + thread line */}
               <div className="flex flex-col items-center flex-shrink-0">
                 <Avatar className="h-10 w-10">
-                  <AvatarImage src="" alt={authorName || "User"} />
+                  <AvatarImage src={currentUser?.avatarUrl || ""} alt={authorName || "User"} />
                   <AvatarFallback className="bg-primary/10 text-primary font-semibold">
                     {avatarInitial}
                   </AvatarFallback>
@@ -240,7 +278,7 @@ export default function CreatePostModal({
 
               {/* Compose area */}
               <div className="flex-1 min-w-0 pb-4">
-                {/* Author + B5: audience pill */}
+                {/* Author + audience pill */}
                 <div className="flex items-center gap-2 mb-2 flex-wrap">
                   <span className="font-semibold text-sm leading-none">{authorName}</span>
                   {myCommunities.length > 0 && (
@@ -265,7 +303,7 @@ export default function CreatePostModal({
                   )}
                 </div>
 
-                {/* B4: 18px borderless textarea */}
+                {/* Textarea */}
                 <MentionTextarea
                   placeholder="What's happening?"
                   value={content}
@@ -276,7 +314,7 @@ export default function CreatePostModal({
                   data-testid="textarea-post-content"
                 />
 
-                {/* Attached event card */}
+                {/* Attached event */}
                 {attachedEvent && (
                   <Card className="border border-primary/30 bg-primary/5 mt-3">
                     <CardContent className="p-3">
@@ -308,7 +346,7 @@ export default function CreatePostModal({
                   </Card>
                 )}
 
-                {/* Attached venue card */}
+                {/* Attached venue */}
                 {attachedVenue && (
                   <Card className="border border-primary/30 bg-primary/5 mt-3">
                     <CardContent className="p-3">
@@ -339,24 +377,55 @@ export default function CreatePostModal({
                   </Card>
                 )}
 
-                {/* Media uploaders */}
-                {mediaMode === "photos" && (
-                  <div className="mt-3">
-                    <MultiImageUploader
-                      maxImages={4}
-                      images={selectedImages}
-                      onImagesChange={setSelectedImages}
-                      compact
-                    />
+                {/* Image preview grid */}
+                {hasImages && (
+                  <div className="mt-3 space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      {selectedImages.map((img, i) => (
+                        <div key={i} className="relative rounded-lg overflow-hidden border aspect-square group">
+                          <img src={img} alt={`Upload ${i + 1}`} className="w-full h-full object-cover" />
+                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
+                          <Button
+                            type="button"
+                            variant="destructive"
+                            size="icon"
+                            className="absolute top-1 right-1 h-7 w-7 rounded-full shadow-lg"
+                            onClick={() => removeImage(i)}
+                            data-testid={`button-remove-image-${i}`}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                      {selectedImages.length < MAX_IMAGES && (
+                        <button
+                          type="button"
+                          onClick={openMediaPicker}
+                          className="aspect-square rounded-lg border-2 border-dashed border-muted-foreground/30 hover:border-primary/50 flex items-center justify-center text-muted-foreground hover:text-primary transition-colors"
+                          aria-label="Add more images"
+                          data-testid="button-add-more-images"
+                        >
+                          <Plus className="h-6 w-6" />
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {selectedImages.length}/{MAX_IMAGES} images
+                    </p>
                   </div>
                 )}
-                {mediaMode === "video" && (
+
+                {/* Video uploader — receives the file and auto-uploads */}
+                {hasVideo && (
                   <div className="mt-3">
                     <VideoUploader
+                      fileToUpload={videoFileToUpload}
                       videoUrl={uploadedVideoUrl}
-                      onComplete={(objectPath) => setUploadedVideoUrl(objectPath)}
-                      onClear={() => setUploadedVideoUrl(null)}
-                      compact={!uploadedVideoUrl}
+                      onComplete={(objectPath) => {
+                        setUploadedVideoUrl(objectPath);
+                        setVideoFileToUpload(null);
+                      }}
+                      onClear={clearVideo}
                     />
                   </div>
                 )}
@@ -364,35 +433,25 @@ export default function CreatePostModal({
             </div>
           </div>
 
-          {/* ── Footer toolbar ── */}
+          {/* Footer toolbar */}
           <div className="flex items-center justify-between px-4 py-2.5 border-t border-border flex-shrink-0">
-            {/* B3: individual icon buttons */}
             <div className="flex items-center gap-0.5">
+              {/* Single unified media button */}
               <button
-                onClick={() => toggleMediaMode("photos")}
+                onClick={openMediaPicker}
+                disabled={hasVideo}
                 className={cn(
                   "h-8 w-8 flex items-center justify-center rounded-full transition-colors",
-                  mediaMode === "photos"
+                  hasImages
                     ? "text-primary bg-primary/10"
+                    : hasVideo
+                    ? "text-muted-foreground/30 cursor-not-allowed"
                     : "text-muted-foreground hover:text-primary hover:bg-primary/10"
                 )}
-                aria-label="Add photos"
-                data-testid="button-mode-photos"
+                aria-label="Add photos or video"
+                data-testid="button-add-media"
               >
-                <ImagePlus className="h-5 w-5" />
-              </button>
-              <button
-                onClick={() => toggleMediaMode("video")}
-                className={cn(
-                  "h-8 w-8 flex items-center justify-center rounded-full transition-colors",
-                  mediaMode === "video"
-                    ? "text-primary bg-primary/10"
-                    : "text-muted-foreground hover:text-primary hover:bg-primary/10"
-                )}
-                aria-label="Add video"
-                data-testid="button-mode-video"
-              >
-                <Film className="h-5 w-5" />
+                <Images className="h-5 w-5" />
               </button>
               <button
                 disabled
@@ -410,9 +469,19 @@ export default function CreatePostModal({
               </button>
             </div>
 
-            {/* B2: character ring */}
             <CharacterRing count={content.length} max={maxLength} />
           </div>
+
+          {/* Hidden unified file input — accepts both images and videos */}
+          <input
+            ref={mediaInputRef}
+            type="file"
+            accept="image/*,video/mp4,video/quicktime,video/webm"
+            multiple
+            className="hidden"
+            onChange={handleMediaSelected}
+            data-testid="input-media-upload"
+          />
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>

@@ -4,7 +4,7 @@ import { useLocation } from "wouter";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,6 @@ import {
   Search,
   UserPlus,
   UserCheck,
-  MessageCircle,
   Calendar,
   MapPin,
   Users,
@@ -27,8 +26,6 @@ import {
   Heart,
   Ticket,
   ChevronRight,
-  Play,
-  Images
 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -642,65 +639,29 @@ function VenueResultCard({ venue, navigate }: { venue: Venue; navigate: (path: s
   );
 }
 
-function PostResultCard({ post, navigate }: { post: Post & { user: User }; navigate: (path: string) => void }) {
-  const allImages = [
-    ...(post.imageUrls || []),
-    ...(post.imageUrl && !(post.imageUrls || []).includes(post.imageUrl) ? [post.imageUrl] : []),
-  ].filter(Boolean) as string[];
-  const firstImage = allImages[0];
-
+function PostResultCard({ post }: { post: Post & { user: User }; navigate: (path: string) => void }) {
   return (
-    <Card
-      className="hover-elevate cursor-pointer overflow-hidden"
-      onClick={() => navigate(`/profile/${post.user.username}`)}
-      data-testid={`search-post-${post.id}`}
-    >
-      <CardContent className="p-4">
-        <div className="flex gap-3">
-          <Avatar className="h-10 w-10 flex-shrink-0">
-            <AvatarImage src={post.user.avatarUrl || ""} alt={post.user.displayName || post.user.username} />
-            <AvatarFallback className="bg-primary/10 text-primary">
-              {(post.user.displayName?.charAt(0) || post.user.username.charAt(0)).toUpperCase()}
-            </AvatarFallback>
-          </Avatar>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 mb-0.5">
-              <p className="font-medium text-sm truncate">{post.user.displayName || post.user.username}</p>
-              <p className="text-xs text-muted-foreground flex-shrink-0">@{post.user.username}</p>
-            </div>
-            <p className="text-sm text-foreground line-clamp-2">{post.content}</p>
-            {post.videoUrl && (
-              <div className="mt-2 relative rounded-lg overflow-hidden bg-black aspect-video max-h-40">
-                <video
-                  src={post.videoUrl}
-                  className="w-full h-full object-cover"
-                  muted
-                  preload="metadata"
-                />
-                <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                  <Play className="h-8 w-8 text-white fill-white" />
-                </div>
-              </div>
-            )}
-            {!post.videoUrl && firstImage && (
-              <div className="mt-2 relative rounded-lg overflow-hidden">
-                <img
-                  src={firstImage}
-                  alt="Post image"
-                  className="w-full max-h-40 object-cover rounded-lg"
-                />
-                {allImages.length > 1 && (
-                  <div className="absolute top-2 right-2 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded-md flex items-center gap-1">
-                    <Images className="h-3 w-3" />
-                    {allImages.length}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+    <div data-testid={`search-post-${post.id}`}>
+      <FeedPost
+        id={post.id}
+        author={{
+          name: post.user.displayName || post.user.organizationName || post.user.username,
+          username: post.user.username,
+          avatar: post.user.avatarUrl || undefined,
+          isOrganizer: post.user.userType !== "social",
+          isVerified: post.user.isOfficial || false,
+          userId: post.user.id,
+        }}
+        content={post.content}
+        imageUrls={post.imageUrls || []}
+        image={post.imageUrl || undefined}
+        videoUrl={post.videoUrl}
+        createdAt={post.createdAt}
+        likes={0}
+        comments={0}
+        feedMode={true}
+      />
+    </div>
   );
 }
 
@@ -841,6 +802,7 @@ function TrendingPostCard({ post, navigate }: { post: TrendingPost; navigate: (p
         createdAt={post.createdAt}
         likes={post.likeCount}
         comments={post.commentCount}
+        feedMode={true}
       />
     </div>
   );

@@ -32,8 +32,14 @@ export default function LoginPage() {
   const onSubmit = async (data: LoginFormData) => {
     setIsLoading(true);
     try {
-      await apiRequest("POST", "/api/auth/login", data);
-      await queryClient.invalidateQueries({ queryKey: ["/api/auth/session"] });
+      const response = await apiRequest("POST", "/api/auth/login", data);
+      const { user, csrfToken } = await response.json();
+      // Immediately hydrate the cache so AuthenticatedLayout never sees null
+      queryClient.setQueryData(["/api/auth/session"], user);
+      // Store the rotated CSRF token the server sends back on login
+      if (csrfToken) {
+        document.cookie = `csrf-token=${csrfToken}; path=/; SameSite=Strict`;
+      }
       toast({ title: "Welcome back!", description: "You've successfully signed in." });
       const params = new URLSearchParams(window.location.search);
       setLocation(params.get("redirect") || "/discover");

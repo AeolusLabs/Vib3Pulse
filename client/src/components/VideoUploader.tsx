@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { X, Film, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -13,6 +13,7 @@ interface VideoUploaderProps {
   className?: string;
   compact?: boolean;
   maxSizeMB?: number;
+  fileToUpload?: File | null;
 }
 
 const ALLOWED_VIDEO_TYPES = ["video/mp4", "video/quicktime", "video/webm"];
@@ -24,6 +25,7 @@ export function VideoUploader({
   className,
   compact = false,
   maxSizeMB = 50,
+  fileToUpload,
 }: VideoUploaderProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -109,6 +111,13 @@ export function VideoUploader({
       setUploadProgress(0);
     }
   }, [maxFileSize, maxSizeMB, onComplete, toast]);
+
+  // Auto-start upload when a file is provided directly from the unified picker
+  useEffect(() => {
+    if (fileToUpload && !localPreview && !isUploading) {
+      uploadVideo(fileToUpload);
+    }
+  }, [fileToUpload, uploadVideo, localPreview, isUploading]);
 
   const handleFileSelect = useCallback((files: FileList | null) => {
     if (!files || files.length === 0) return;

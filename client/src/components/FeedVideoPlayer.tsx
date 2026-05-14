@@ -92,10 +92,17 @@ export default function FeedVideoPlayer({
 
   useEffect(() => {
     const onFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const fs =
+        !!document.fullscreenElement ||
+        !!(document as any).webkitFullscreenElement;
+      setIsFullscreen(fs);
     };
     document.addEventListener("fullscreenchange", onFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", onFullscreenChange);
+    };
   }, []);
 
   const hideControlsLater = useCallback(() => {
@@ -139,12 +146,28 @@ export default function FeedVideoPlayer({
 
   const toggleFullscreen = useCallback(() => {
     const container = containerRef.current;
-    if (!container) return;
+    const video = videoRef.current;
 
-    if (document.fullscreenElement) {
-      document.exitFullscreen();
+    const isFs =
+      !!document.fullscreenElement ||
+      !!(document as any).webkitFullscreenElement;
+
+    if (isFs) {
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      } else if ((document as any).webkitExitFullscreen) {
+        (document as any).webkitExitFullscreen();
+      }
     } else {
-      container.requestFullscreen().catch(() => {});
+      // Prefer container fullscreen; fall back to video element for iOS Safari
+      if (container?.requestFullscreen) {
+        container.requestFullscreen().catch(() => {});
+      } else if ((container as any)?.webkitRequestFullscreen) {
+        (container as any).webkitRequestFullscreen();
+      } else if (video && (video as any).webkitEnterFullscreen) {
+        // iOS Safari native video fullscreen
+        (video as any).webkitEnterFullscreen();
+      }
     }
     revealControls();
   }, [revealControls]);
