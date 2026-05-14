@@ -168,7 +168,11 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
       )}
 
       <Dialog open={true} onOpenChange={onClose}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto p-0" data-testid="modal-event-details">
+        <DialogContent
+          className="max-w-2xl max-h-[90vh] overflow-y-auto p-0"
+          data-testid="modal-event-details"
+          onInteractOutside={(e) => { if (lightboxOpen) e.preventDefault(); }}
+        >
           {/* Hero image — shows full image uncropped, click to open fullscreen lightbox */}
           {event.imageUrl && (
             <button
