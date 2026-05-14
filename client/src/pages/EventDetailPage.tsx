@@ -32,6 +32,25 @@ export default function EventDetailPage() {
     }
   }, [eventId]);
 
+  const { data: rawTiers } = useQuery({
+    queryKey: ["/api/events", eventId, "ticket-tiers"],
+    queryFn: async () => {
+      const res = await fetch(`/api/events/${eventId}/ticket-tiers`, { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!eventId,
+  });
+
+  // Adapt DB tier shape → TicketSelector's expected shape
+  const ticketTiers = (rawTiers ?? []).map((t: any) => ({
+    id: t.id,
+    name: t.name,
+    price: t.priceSmallestUnit / 100,
+    description: "",
+    available: t.quantity,
+  }));
+
   const { data: similarEvents } = useQuery<Event[]>({
     queryKey: ["/api/events"],
     select: (events) => {
@@ -175,7 +194,7 @@ export default function EventDetailPage() {
 
           <div className="lg:col-span-1">
             <TicketSelector
-              tiers={[]}
+              tiers={ticketTiers}
               onPurchase={(selections) => console.log('Purchase:', selections)}
             />
           </div>

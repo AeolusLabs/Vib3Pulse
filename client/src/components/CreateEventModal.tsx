@@ -1,5 +1,34 @@
 import { useState, useEffect } from "react";
-import { X, Upload, Plus, Trash2, Edit2, ExternalLink } from "lucide-react";
+import { X, Upload, Plus, Trash2, Edit2, ExternalLink, Loader2 } from "lucide-react";
+
+// ── Currency helpers ──────────────────────────────────────────────────────────
+const CURRENCIES = [
+  { code: "GBP", symbol: "£", name: "British Pound" },
+  { code: "USD", symbol: "$", name: "US Dollar" },
+  { code: "EUR", symbol: "€", name: "Euro" },
+  { code: "NGN", symbol: "₦", name: "Nigerian Naira" },
+  { code: "CAD", symbol: "C$", name: "Canadian Dollar" },
+  { code: "AUD", symbol: "A$", name: "Australian Dollar" },
+  { code: "ZAR", symbol: "R", name: "South African Rand" },
+  { code: "GHS", symbol: "₵", name: "Ghanaian Cedi" },
+];
+
+function detectCurrency(): string {
+  const locale = (typeof navigator !== "undefined" && navigator.language) || "en-GB";
+  const map: Record<string, string> = {
+    "en-GB": "GBP", "en-NG": "NGN", "en-US": "USD", "en-CA": "CAD",
+    "en-AU": "AUD", "en-ZA": "ZAR", "en-GH": "GHS",
+    "fr": "EUR", "de": "EUR", "es": "EUR", "it": "EUR", "pt": "EUR", "nl": "EUR",
+  };
+  return map[locale] || map[locale.split("-")[0]] || "GBP";
+}
+
+function getCurrencySymbol(code: string): string {
+  return CURRENCIES.find(c => c.code === code)?.symbol ?? "£";
+}
+
+const ACCEPTED_IMAGE_TYPES = "image/jpeg,image/png,image/webp,image/gif";
+const BLOCKED_IMAGE_TYPES = ["image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence"];
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -57,7 +86,9 @@ interface EventFormData {
   ageRestriction: "all" | "18+" | "21+";
   parentalGuidance: "none" | "advised";
   entryType: "free" | "ticketed" | "external";
+  currency: string;
   thumbnailUrl: string;
+  thumbnailPreview: string; // base64 for local preview only
   externalTicketUrl: string;
   externalTicketLinks: ExternalTicketLink[];
   
@@ -95,11 +126,12 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
   const { toast } = useToast();
   const { data: currentUser } = useAuth();
   const [step, setStep] = useState(1);
+  const [thumbnailUploading, setThumbnailUploading] = useState(false);
   const isEditMode = !!event;
-  
+
   // Only verified/official users can add external ticket links
   const canAddExternalTicketUrl = currentUser?.isVerified || currentUser?.isOfficial;
-  
+
   const [formData, setFormData] = useState<EventFormData>({
     name: "",
     type: "",
@@ -114,7 +146,9 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
     ageRestriction: "all",
     parentalGuidance: "none",
     entryType: "free",
+    currency: detectCurrency(),
     thumbnailUrl: "",
+    thumbnailPreview: "",
     externalTicketUrl: "",
     externalTicketLinks: [],
     tickets: [],
@@ -161,13 +195,15 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
         ageRestriction: "all" as const,
         parentalGuidance: "none" as const,
         entryType: event.externalTicketUrl ? "external" as const : (event.ticketPrice > 0 ? "ticketed" as const : "free" as const),
+        currency: (event as any).currency || detectCurrency(),
         thumbnailUrl: event.imageUrl || "",
+        thumbnailPreview: event.imageUrl || "",
         externalTicketUrl: event.externalTicketUrl || "",
         externalTicketLinks: event.externalTicketUrl ? [{ id: "1", platform: "External", url: event.externalTicketUrl }] : [],
         tickets: tiers.length > 0 ? tiers.map((tier, index) => ({
           id: tier.id || String(index + 1),
           name: tier.name,
-          price: tier.priceCents / 100,
+          price: (tier.priceSmallestUnit ?? tier.priceCents ?? 0) / 100,
           quantity: tier.quantity,
           salesEndDate: tier.salesEndDate ? new Date(tier.salesEndDate).toISOString().split('T')[0] : startDateStr,
           dayDate: tier.dayDate ? new Date(tier.dayDate).toISOString().split('T')[0] : undefined,
@@ -216,7 +252,9 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
         ageRestriction: "all",
         parentalGuidance: "none",
         entryType: "free",
+        currency: detectCurrency(),
         thumbnailUrl: "",
+        thumbnailPreview: "",
         externalTicketUrl: "",
         externalTicketLinks: [],
         tickets: [],
@@ -245,7 +283,8 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
         if (formData.entryType === "ticketed" && formData.tickets.length > 0) {
           const tiers = formData.tickets.map(ticket => ({
             name: ticket.name,
-            priceCents: Math.round(ticket.price * 100),
+            priceSmallestUnit: Math.round(ticket.price * 100),
+            currency: formData.currency || "GBP",
             quantity: ticket.quantity,
             salesEndDate: ticket.salesEndDate || null,
             dayDate: ticket.dayDate || null,
@@ -316,7 +355,8 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
         if (formData.entryType === "ticketed" && formData.tickets.length > 0) {
           const tiers = formData.tickets.map(ticket => ({
             name: ticket.name,
-            priceCents: Math.round(ticket.price * 100),
+            priceSmallestUnit: Math.round(ticket.price * 100),
+            currency: formData.currency || "GBP",
             quantity: ticket.quantity,
             salesEndDate: ticket.salesEndDate || null,
             dayDate: ticket.dayDate || null,
@@ -403,11 +443,12 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
       location: formData.location,
       category: formData.type,
       ticketPrice: ticketPrice,
+      currency: formData.currency || "GBP",
       requiresRSVP: formData.requireRSVP,
       ticketsAvailable: ticketsAvailable,
       imageUrl: formData.thumbnailUrl || null,
-      externalTicketUrl: formData.entryType === "external" && formData.externalTicketLinks.length > 0 
-        ? formData.externalTicketLinks[0].url 
+      externalTicketUrl: formData.entryType === "external" && formData.externalTicketLinks.length > 0
+        ? formData.externalTicketLinks[0].url
         : (formData.externalTicketUrl || null),
       externalTicketLinks: formData.entryType === "external" ? formData.externalTicketLinks : undefined,
       createCommunity: formData.createCommunity,
@@ -434,37 +475,19 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
         img.onload = () => {
           const canvas = document.createElement('canvas');
           const ctx = canvas.getContext('2d');
-          if (!ctx) {
-            reject(new Error('Could not get canvas context'));
-            return;
-          }
+          if (!ctx) { reject(new Error('Could not get canvas context')); return; }
 
-          // Set max dimensions for thumbnail
-          const MAX_WIDTH = 800;
-          const MAX_HEIGHT = 600;
-          let width = img.width;
-          let height = img.height;
+          const MAX_WIDTH = 1200;
+          const MAX_HEIGHT = 800;
+          let { width, height } = img;
 
-          // Calculate new dimensions maintaining aspect ratio
-          if (width > height) {
-            if (width > MAX_WIDTH) {
-              height *= MAX_WIDTH / width;
-              width = MAX_WIDTH;
-            }
-          } else {
-            if (height > MAX_HEIGHT) {
-              width *= MAX_HEIGHT / height;
-              height = MAX_HEIGHT;
-            }
-          }
+          if (width > MAX_WIDTH) { height = Math.round(height * MAX_WIDTH / width); width = MAX_WIDTH; }
+          if (height > MAX_HEIGHT) { width = Math.round(width * MAX_HEIGHT / height); height = MAX_HEIGHT; }
 
           canvas.width = width;
           canvas.height = height;
           ctx.drawImage(img, 0, 0, width, height);
-
-          // Convert to base64 with compression
-          const base64 = canvas.toDataURL('image/jpeg', 0.85);
-          resolve(base64);
+          resolve(canvas.toDataURL('image/jpeg', 0.82));
         };
         img.onerror = () => reject(new Error('Failed to load image'));
         img.src = e.target?.result as string;
@@ -476,53 +499,52 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
 
   const handleThumbnailUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      try {
-        // Validate file type
-        if (!file.type.startsWith('image/')) {
-          toast({
-            title: "Invalid file",
-            description: "Please upload an image file",
-            variant: "destructive",
-          });
-          return;
-        }
+    if (!file) return;
 
-        // Validate file size (max 5MB before compression)
-        if (file.size > 5 * 1024 * 1024) {
-          toast({
-            title: "File too large",
-            description: "Please upload an image smaller than 5MB",
-            variant: "destructive",
-          });
-          return;
-        }
+    // Reset input so the same file can be re-selected after an error
+    e.target.value = "";
 
-        // Compress and convert to base64
-        const base64Url = await compressImage(file);
-        
-        // Check compressed size (base64 is ~33% larger than binary)
-        const sizeInBytes = base64Url.length * 0.75;
-        const sizeInMB = sizeInBytes / (1024 * 1024);
-        
-        if (sizeInMB > 1.5) {
-          toast({
-            title: "Image too large",
-            description: `Compressed image is ${sizeInMB.toFixed(1)}MB. Please use a smaller or simpler image.`,
-            variant: "destructive",
-          });
-          return;
-        }
-        
-        updateFormData({ thumbnailUrl: base64Url });
-      } catch (error) {
-        console.error('Error uploading image:', error);
+    try {
+      // Block HEIC/HEIF — iOS Camera Roll files that canvas cannot rasterise
+      if (BLOCKED_IMAGE_TYPES.includes(file.type.toLowerCase())) {
         toast({
-          title: "Upload failed",
-          description: "Failed to process image. Please try again.",
+          title: "Unsupported format",
+          description: "HEIC/HEIF photos are not supported. Please convert to JPEG or PNG first, or use a different photo.",
           variant: "destructive",
         });
+        return;
       }
+
+      if (!file.type.startsWith('image/')) {
+        toast({ title: "Invalid file", description: "Please upload an image file.", variant: "destructive" });
+        return;
+      }
+
+      if (file.size > 10 * 1024 * 1024) {
+        toast({ title: "File too large", description: "Please upload an image smaller than 10MB.", variant: "destructive" });
+        return;
+      }
+
+      setThumbnailUploading(true);
+
+      // Compress to JPEG base64
+      const base64 = await compressImage(file);
+
+      // Show compressed preview immediately
+      updateFormData({ thumbnailPreview: base64 });
+
+      // Upload to media endpoint — get back a /api/media/{id} URL for storage
+      const uploadRes = await apiRequest('POST', '/api/media/upload', { data: base64 });
+      if (!uploadRes.ok) throw new Error('Media upload failed');
+      const { url } = await uploadRes.json();
+
+      updateFormData({ thumbnailUrl: url, thumbnailPreview: base64 });
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      updateFormData({ thumbnailUrl: "", thumbnailPreview: "" });
+      toast({ title: "Upload failed", description: "Failed to process image. Please try again.", variant: "destructive" });
+    } finally {
+      setThumbnailUploading(false);
     }
   };
 
@@ -931,30 +953,38 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                 <input
                   type="file"
                   id="thumbnail"
-                  accept="image/*"
+                  accept={ACCEPTED_IMAGE_TYPES}
                   onChange={handleThumbnailUpload}
                   className="hidden"
+                  disabled={thumbnailUploading}
                   data-testid="input-thumbnail"
                 />
                 <label
                   htmlFor="thumbnail"
-                  className="flex flex-col items-center gap-2 cursor-pointer"
+                  className={`flex flex-col items-center gap-2 ${thumbnailUploading ? "cursor-wait" : "cursor-pointer"}`}
                 >
-                  {formData.thumbnailUrl ? (
+                  {thumbnailUploading ? (
+                    <div className="flex flex-col items-center gap-2 py-4">
+                      <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                      <p className="text-sm text-muted-foreground">Uploading image…</p>
+                    </div>
+                  ) : formData.thumbnailPreview ? (
                     <div className="relative w-full">
                       <img
-                        src={formData.thumbnailUrl}
+                        src={formData.thumbnailPreview}
                         alt="Thumbnail preview"
                         className="w-full h-48 object-cover rounded-lg"
                       />
-                      <Badge className="absolute top-2 right-2">Uploaded</Badge>
+                      <Badge className="absolute top-2 right-2 bg-green-600">
+                        {formData.thumbnailUrl ? "Uploaded" : "Processing…"}
+                      </Badge>
                     </div>
                   ) : (
                     <>
                       <Upload className="h-12 w-12 text-muted-foreground" />
                       <div className="text-center">
                         <p className="text-sm font-medium">Click to upload thumbnail</p>
-                        <p className="text-xs text-muted-foreground">PNG, JPG up to 10MB</p>
+                        <p className="text-xs text-muted-foreground">JPEG, PNG, WebP up to 10MB (not HEIC)</p>
                       </div>
                     </>
                   )}
@@ -1073,11 +1103,32 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
             ) : formData.entryType === "ticketed" ? (
               <>
                 <div className="space-y-4">
+                  {/* Currency selector */}
+                  <div className="space-y-2">
+                    <Label htmlFor="event-currency">Ticket Currency</Label>
+                    <Select
+                      value={formData.currency}
+                      onValueChange={(value) => updateFormData({ currency: value })}
+                    >
+                      <SelectTrigger id="event-currency" data-testid="select-currency">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CURRENCIES.map((c) => (
+                          <SelectItem key={c.code} value={c.code}>
+                            {c.symbol} — {c.name} ({c.code})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">Auto-detected from your browser. Change if needed.</p>
+                  </div>
+
                   <div className="flex items-center justify-between">
                     <div>
                       <h3 className="text-lg font-semibold">Ticket Tiers</h3>
                       <p className="text-sm text-muted-foreground">
-                        {formData.isMultiDay 
+                        {formData.isMultiDay
                           ? "Create tickets for specific days or an all-days pass"
                           : "Create different ticket types for your event"
                         }
@@ -1141,7 +1192,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                                 </div>
 
                                 <div className="space-y-2">
-                                  <Label>Price ($)</Label>
+                                  <Label>Price ({getCurrencySymbol(formData.currency)})</Label>
                                   <Input
                                     type="number"
                                     min="0"
@@ -1406,7 +1457,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                       >
                         <div className="flex items-center justify-between">
                           <p className="font-medium">{ticket.name}</p>
-                          <p className="font-semibold text-primary">£{ticket.price.toFixed(2)}</p>
+                          <p className="font-semibold text-primary">{getCurrencySymbol(formData.currency)}{ticket.price.toFixed(2)}</p>
                         </div>
                         <div className="flex items-center gap-4 text-sm text-muted-foreground">
                           <span>Qty: {ticket.quantity}</span>

@@ -85,6 +85,7 @@ export const events = pgTable("events", {
   longitude: doublePrecision("longitude"),
   category: text("category").notNull(),
   ticketPrice: integer("ticket_price").notNull().default(0),
+  currency: text("currency").notNull().default("GBP"),
   requiresRSVP: boolean("requires_rsvp").notNull().default(false),
   ticketsAvailable: integer("tickets_available").notNull(),
   imageUrl: text("image_url"),
@@ -108,6 +109,7 @@ export type Event = typeof events.$inferSelect;
 export const eventCreateDto = insertEventSchema.extend({
   eventDate: z.string().datetime().transform((val) => new Date(val)),
   eventEndDate: z.string().datetime().transform((val) => new Date(val)).optional().nullable(),
+  currency: z.string().optional().default("GBP"),
   createCommunity: z.boolean().optional(),
   communityName: z.string().optional(),
 });

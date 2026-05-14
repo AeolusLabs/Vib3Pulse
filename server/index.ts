@@ -6,7 +6,7 @@ import connectPgSimple from "connect-pg-simple";
 import cookieParser from "cookie-parser";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
-import { storage } from "./storage";
+import { storage, ensureSchema } from "./storage";
 import { comparePassword, userToSessionUser, type SessionUser } from "./auth";
 import { wsManager } from "./websocket";
 import { setupAdminRoutes } from "./admin-routes";
@@ -167,6 +167,13 @@ app.use((req, res, next) => {
     await storage.ensureBannerColumns();
   } catch (err) {
     console.error('[STARTUP] banner columns setup failed:', err);
+  }
+
+  // Auto-add currency column to events table (idempotent ADD COLUMN IF NOT EXISTS)
+  try {
+    await ensureSchema();
+  } catch (err) {
+    console.error('[STARTUP] events schema update failed:', err);
   }
 
   const server = await registerRoutes(app);

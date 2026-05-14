@@ -933,8 +933,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Tiers must be an array" });
       }
 
-      const tiersWithEventId = tiers.map(tier => ({
-        ...tier,
+      const tiersWithEventId = tiers.map((tier: any) => ({
+        name: tier.name,
+        priceSmallestUnit: tier.priceSmallestUnit ?? tier.priceCents ?? 0,
+        currency: tier.currency || "GBP",
+        quantity: tier.quantity,
         eventId: req.params.eventId,
         salesEndDate: tier.salesEndDate ? new Date(tier.salesEndDate) : null,
         dayDate: tier.dayDate ? new Date(tier.dayDate) : null,

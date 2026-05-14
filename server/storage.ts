@@ -137,8 +137,15 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { eq, and, gte, gt, lt, or, ilike, desc, sql, count, inArray, notInArray } from "drizzle-orm";
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const db = drizzle(pool);
+
+// Idempotent schema migration — runs at server startup to add new columns safely
+export async function ensureSchema() {
+  await pool.query(`
+    ALTER TABLE events ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'GBP'
+  `);
+}
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
