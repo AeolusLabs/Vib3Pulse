@@ -22,6 +22,9 @@ export const users = pgTable("users", {
   phoneNumber: text("phone_number"),
   canManageVenues: boolean("can_manage_venues").default(false),
   avatarUrl: text("avatar_url"),
+  bannerMode: text("banner_mode"),
+  bannerVibe: text("banner_vibe"),
+  bannerColor: text("banner_color"),
   usernameChangesRemaining: integer("username_changes_remaining").notNull().default(2),
   passwordResetToken: text("password_reset_token"),
   passwordResetExpires: timestamp("password_reset_expires"),
@@ -49,6 +52,9 @@ export const updateUserSchema = insertUserSchema.pick({
   phoneNumber: true,
   canManageVenues: true,
   avatarUrl: true,
+  bannerMode: true,
+  bannerVibe: true,
+  bannerColor: true,
 }).partial();
 
 // Gender options enum

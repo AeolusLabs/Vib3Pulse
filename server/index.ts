@@ -162,6 +162,13 @@ app.use((req, res, next) => {
     console.error('[STARTUP] media_uploads table setup failed:', err);
   }
 
+  // Auto-add banner columns to users table (idempotent ADD COLUMN IF NOT EXISTS)
+  try {
+    await storage.ensureBannerColumns();
+  } catch (err) {
+    console.error('[STARTUP] banner columns setup failed:', err);
+  }
+
   const server = await registerRoutes(app);
 
   // Initialize WebSocket server

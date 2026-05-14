@@ -504,6 +504,7 @@ export interface IStorage {
 
   // Media storage (Railway-compatible DB-backed)
   ensureMediaUploadsTable(): Promise<void>;
+  ensureBannerColumns(): Promise<void>;
   saveMedia(data: string, contentType: string, ownerId?: string): Promise<string>;
   getMedia(id: string): Promise<{ data: string; contentType: string } | null>;
   deleteMedia(id: string): Promise<void>;
@@ -3757,6 +3758,15 @@ export class DbStorage implements IStorage {
         content_type VARCHAR(100) NOT NULL,
         created_at TIMESTAMP NOT NULL DEFAULT now()
       )
+    `);
+  }
+
+  async ensureBannerColumns(): Promise<void> {
+    await db.execute(sql`
+      ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS banner_mode  TEXT,
+        ADD COLUMN IF NOT EXISTS banner_vibe  TEXT,
+        ADD COLUMN IF NOT EXISTS banner_color TEXT
     `);
   }
 

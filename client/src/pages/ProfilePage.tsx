@@ -45,6 +45,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { getBannerStyle } from "@/lib/bannerUtils";
 
 type ProfileResponse = Omit<User, "password"> & {
   events?: Event[];
@@ -365,16 +366,16 @@ export default function ProfilePage() {
         {/* Banner */}
         <div
           className="h-36 md:h-48 w-full relative overflow-hidden"
-          style={{
-            background: isSocialUser
-              ? "linear-gradient(135deg, hsl(var(--primary)/0.8) 0%, hsl(var(--primary)/0.4) 50%, hsl(var(--primary)/0.15) 100%)"
-              : "linear-gradient(135deg, hsl(var(--accent)/0.8) 0%, hsl(var(--accent)/0.4) 50%, hsl(var(--primary)/0.2) 100%)",
-          }}
+          style={{ background: getBannerStyle(profile) }}
         >
-          <div className="absolute inset-0 opacity-10" style={{
-            backgroundImage: "radial-gradient(circle at 2px 2px, currentColor 1px, transparent 0)",
-            backgroundSize: "32px 32px",
-          }} />
+          <div
+            className="absolute inset-0 opacity-10"
+            style={{
+              backgroundImage:
+                "radial-gradient(circle at 2px 2px, currentColor 1px, transparent 0)",
+              backgroundSize: "32px 32px",
+            }}
+          />
         </div>
 
         {/* Profile info */}
