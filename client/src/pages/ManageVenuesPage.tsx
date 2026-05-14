@@ -186,7 +186,7 @@ export default function ManageVenuesPage() {
             asChild
             data-testid={`button-view-as-visitor-${venue.id}`}
           >
-            <Link href={`/venues/${venue.id}`}>
+            <Link href={`/venue/${venue.id}`}>
               <Eye className="h-4 w-4 mr-2" />
               View as Visitor
             </Link>

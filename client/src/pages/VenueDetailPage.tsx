@@ -3,32 +3,30 @@ import { useParams, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
-import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import ImageLightbox from "@/components/ImageLightbox";
 import { VenueGalleryManager } from "@/components/VenueGalleryManager";
 import { useAuth } from "@/hooks/useAuth";
-import { 
-  MapPin, 
-  Phone, 
-  Globe, 
-  Clock, 
-  Music, 
-  Users, 
-  Calendar, 
-  Shield, 
+import {
+  MapPin,
+  Phone,
+  Globe,
+  Clock,
+  Music,
+  Users,
+  Calendar,
+  Shield,
   Sparkles,
   ArrowLeft,
   Ticket,
-  DollarSign,
   CheckCircle,
   AlertCircle,
-  Edit,
-  Trash2,
-  Replace
+  Accessibility,
 } from "lucide-react";
 import { format } from "date-fns";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -36,6 +34,13 @@ import { useToast } from "@/hooks/use-toast";
 import type { Venue, VenueEntryNight } from "@shared/schema";
 
 const categoryLabels: Record<string, string> = {
+  Club: "Club",
+  Pub: "Pub",
+  Lounge: "Lounge",
+  Bar: "Bar",
+  Nightclub: "Nightclub",
+  Rooftop: "Rooftop",
+  // legacy lowercase
   nightclub: "Nightclub",
   bar: "Bar",
   lounge: "Lounge",
@@ -46,21 +51,15 @@ const categoryLabels: Record<string, string> = {
   cocktail_bar: "Cocktail Bar",
   live_music: "Live Music Venue",
   comedy_club: "Comedy Club",
-  Club: "Club",
-  Pub: "Pub",
-  Lounge: "Lounge",
-  Bar: "Bar",
-  Nightclub: "Nightclub",
-  Rooftop: "Rooftop",
 };
 
-// Simulated payment form for demo mode
+// ─── Simulated payment form ───────────────────────────────────────────────────
 function SimulatedPaymentForm({
   entryNight,
   paymentIntentId,
   provider,
   onSuccess,
-  onCancel
+  onCancel,
 }: {
   entryNight: VenueEntryNight;
   paymentIntentId: string;
@@ -74,11 +73,10 @@ function SimulatedPaymentForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setProcessing(true);
-
     try {
       await apiRequest("POST", "/api/payments/venue/confirm", {
         venueEntryNightId: entryNight.id,
-        paymentIntentId: paymentIntentId,
+        paymentIntentId,
         provider,
       });
       toast({ title: "Ticket purchased successfully!" });
@@ -87,7 +85,6 @@ function SimulatedPaymentForm({
     } catch {
       toast({ title: "Failed to confirm ticket", variant: "destructive" });
     }
-
     setProcessing(false);
   };
 
@@ -119,18 +116,19 @@ function SimulatedPaymentForm({
           Cancel
         </Button>
         <Button type="submit" disabled={processing} data-testid="button-confirm-simulated-payment">
-          {processing ? "Processing..." : `Confirm Purchase`}
+          {processing ? "Processing..." : "Confirm Purchase"}
         </Button>
       </div>
     </form>
   );
 }
 
-
+// ─── Main page ────────────────────────────────────────────────────────────────
 export default function VenueDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { toast } = useToast();
   const { data: currentUser } = useAuth();
+
   const [selectedEntryNight, setSelectedEntryNight] = useState<VenueEntryNight | null>(null);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
@@ -144,17 +142,12 @@ export default function VenueDetailPage() {
     enabled: !!id,
   });
 
-  const isVenueOwner = currentUser?.id === venue?.ownerId;
-
-  const openGalleryLightbox = (index: number) => {
-    setGalleryLightboxIndex(index);
-    setGalleryLightboxOpen(true);
-  };
-
   const { data: entryNights = [], isLoading: nightsLoading } = useQuery<VenueEntryNight[]>({
     queryKey: ["/api/venues", id, "entry-nights", "upcoming"],
     enabled: !!id,
   });
+
+  const isVenueOwner = currentUser?.id === venue?.ownerId;
 
   const createPaymentMutation = useMutation({
     mutationFn: async (venueEntryNightId: string) => {
@@ -173,10 +166,6 @@ export default function VenueDetailPage() {
     },
   });
 
-  const handlePurchaseTicket = (entryNight: VenueEntryNight) => {
-    createPaymentMutation.mutate(entryNight.id);
-  };
-
   const handleClosePayment = () => {
     setSelectedEntryNight(null);
     setClientSecret(null);
@@ -193,21 +182,27 @@ export default function VenueDetailPage() {
     setTimeout(() => setShowSuccess(false), 3000);
   };
 
+  // ── Loading state ───────────────────────────────────────────────────────────
   if (venueLoading) {
     return (
       <div className="min-h-screen bg-background pb-20 md:pb-0">
         <Navigation />
-        <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <Skeleton className="h-64 w-full rounded-xl mb-8" />
-          <Skeleton className="h-8 w-64 mb-4" />
-          <Skeleton className="h-4 w-48 mb-8" />
-          <Skeleton className="h-32 w-full" />
+        <div className="h-[400px] md:h-[500px] bg-muted animate-pulse" />
+        <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 -mt-32 relative z-20">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2 space-y-4">
+              <Skeleton className="h-64 w-full rounded-xl" />
+              <Skeleton className="h-40 w-full rounded-xl" />
+            </div>
+            <Skeleton className="h-64 w-full rounded-xl" />
+          </div>
         </main>
         <BottomNavigation />
       </div>
     );
   }
 
+  // ── Not found ───────────────────────────────────────────────────────────────
   if (!venue) {
     return (
       <div className="min-h-screen bg-background pb-20 md:pb-0">
@@ -228,261 +223,336 @@ export default function VenueDetailPage() {
   }
 
   const isPromoted = venue.isPromoted && venue.promotedUntil && new Date(venue.promotedUntil) > new Date();
+  const heroImage = venue.coverImageUrl || venue.imageUrl;
+  const ownerInitials = (venue.owner?.displayName || venue.owner?.username || "?")
+    .slice(0, 2).toUpperCase();
+  const accessibilityFeatures: string[] = (venue as any).accessibilityFeatures || [];
+  const galleryImages: string[] = venue.imageUrls || [];
 
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
       <Navigation />
 
-      <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      {/* ── Hero ─────────────────────────────────────────────────────────────── */}
+      <div className="relative h-[400px] md:h-[500px] overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-t from-background/95 via-background/40 to-transparent z-10" />
+        {heroImage ? (
+          <img
+            src={heroImage}
+            alt={venue.name}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div className="w-full h-full bg-gradient-to-br from-purple-900 via-purple-800 to-pink-900" />
+        )}
+        {isPromoted && (
+          <Badge className="absolute top-4 right-4 z-20 bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-lg">
+            <Sparkles className="h-3.5 w-3.5 mr-1" />
+            Featured Venue
+          </Badge>
+        )}
+      </div>
+
+      {/* ── Main content overlapping hero ────────────────────────────────────── */}
+      <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 -mt-32 relative z-20">
+
+        {/* Back button */}
         <Link href="/discover">
-          <Button variant="ghost" className="mb-4" data-testid="button-back">
+          <Button variant="ghost" size="sm" className="mb-4 bg-background/80 backdrop-blur-sm hover:bg-background" data-testid="button-back">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Discover
           </Button>
         </Link>
 
-        {(venue.coverImageUrl || venue.imageUrl) && (
-          <div className="relative rounded-xl overflow-hidden mb-8">
-            <img
-              src={venue.coverImageUrl || venue.imageUrl || ""}
-              alt={venue.name}
-              className="w-full h-64 md:h-80 object-cover"
-            />
-            {isPromoted && (
-              <Badge className="absolute top-4 right-4 bg-gradient-to-r from-purple-500 to-pink-500 text-white">
-                <Sparkles className="h-4 w-4 mr-1" />
-                Featured Venue
-              </Badge>
-            )}
-          </div>
-        )}
-
-        {/* Gallery Images */}
-        {venue.imageUrls && venue.imageUrls.length > 0 && (
-          <div className="mb-8">
-            <h3 className="text-lg font-semibold mb-3">Gallery</h3>
-            <div className={`grid gap-2 rounded-xl overflow-hidden ${
-              venue.imageUrls.length === 1 ? 'grid-cols-1' :
-              venue.imageUrls.length === 2 ? 'grid-cols-2' :
-              venue.imageUrls.length <= 4 ? 'grid-cols-2 md:grid-cols-4' :
-              'grid-cols-2 md:grid-cols-3'
-            }`}>
-              {venue.imageUrls.map((imgUrl, idx) => (
-                <div 
-                  key={idx} 
-                  className={`relative overflow-hidden rounded-lg cursor-pointer group ${
-                    venue.imageUrls!.length === 3 && idx === 0 ? 'md:row-span-2' : ''
-                  }`}
-                  onClick={() => openGalleryLightbox(idx)}
-                  data-testid={`button-gallery-image-${idx}`}
-                >
-                  <img
-                    src={imgUrl}
-                    alt={`${venue.name} gallery ${idx + 1}`}
-                    className={`w-full object-cover transition-transform group-hover:scale-105 ${
-                      venue.imageUrls!.length === 1 ? 'h-64' :
-                      venue.imageUrls!.length === 3 && idx === 0 ? 'h-full min-h-40' :
-                      'aspect-square'
-                    }`}
-                    data-testid={`img-venue-gallery-${idx}`}
-                  />
-                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Gallery Lightbox */}
-        {venue.imageUrls && venue.imageUrls.length > 0 && (
-          <ImageLightbox
-            images={venue.imageUrls}
-            initialIndex={galleryLightboxIndex}
-            open={galleryLightboxOpen}
-            onClose={() => setGalleryLightboxOpen(false)}
-          />
-        )}
-
-        {/* Venue Owner Gallery Management */}
-        {isVenueOwner && (
-          <Card className="mb-8">
-            <CardContent className="pt-6">
-              <VenueGalleryManager
-                venueId={venue.id}
-                imageUrls={venue.imageUrls || []}
-                maxImages={6}
-              />
-            </CardContent>
-          </Card>
-        )}
-
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+          {/* ── Left / main column ─────────────────────────────────────────── */}
           <div className="lg:col-span-2 space-y-6">
-            <div>
-              <div className="flex items-start gap-3 flex-wrap mb-2">
-                <h1 className="text-3xl font-serif font-bold" data-testid="text-venue-name">{venue.name}</h1>
-                {venue.isVerified && (
-                  <Badge className="bg-blue-500 text-white">
-                    <Shield className="h-3 w-3 mr-1" />
-                    Verified
+
+            {/* Primary info card */}
+            <Card className="shadow-lg">
+              <CardContent className="p-6 md:p-8">
+
+                {/* Badges */}
+                <div className="flex flex-wrap gap-2 mb-3">
+                  <Badge variant="default">
+                    {categoryLabels[venue.category] || venue.category}
                   </Badge>
-                )}
-              </div>
-              <Badge variant="secondary" className="text-base">
-                {categoryLabels[venue.category] || venue.category}
-              </Badge>
-            </div>
+                  {venue.isVerified && (
+                    <Badge className="bg-blue-500 hover:bg-blue-600 text-white gap-1">
+                      <Shield className="h-3 w-3" />
+                      Verified
+                    </Badge>
+                  )}
+                </div>
 
-            {venue.description && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">About</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-muted-foreground" data-testid="text-venue-description">{venue.description}</p>
-                </CardContent>
-              </Card>
-            )}
+                {/* Venue name */}
+                <h1 className="font-serif text-3xl md:text-4xl font-bold mb-5" data-testid="text-venue-name">
+                  {venue.name}
+                </h1>
 
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Details</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {(venue.address || venue.city) && (
-                  <div className="flex items-center gap-3">
-                    <MapPin className="h-5 w-5 text-muted-foreground flex-shrink-0" />
-                    <span data-testid="text-venue-address">
-                      {venue.address}{venue.address && venue.city && ", "}{venue.city}
-                    </span>
+                {/* Owner row */}
+                {venue.owner && (
+                  <div className="flex items-center gap-4 mb-6 pb-6 border-b">
+                    <Avatar className="h-12 w-12 ring-2 ring-border">
+                      <AvatarImage src={venue.owner.avatarUrl || ""} alt={venue.owner.username} />
+                      <AvatarFallback className="bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 font-semibold">
+                        {ownerInitials}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold truncate">
+                        {venue.owner.displayName || venue.owner.username}
+                      </p>
+                      <p className="text-sm text-muted-foreground">Venue Owner</p>
+                    </div>
+                    {venue.phone && (
+                      <Button variant="outline" size="sm" asChild>
+                        <a href={`tel:${venue.phone}`}>
+                          <Phone className="h-4 w-4 mr-2" />
+                          Contact
+                        </a>
+                      </Button>
+                    )}
                   </div>
                 )}
-                {venue.phone && (
-                  <div className="flex items-center gap-3">
-                    <Phone className="h-5 w-5 text-muted-foreground flex-shrink-0" />
-                    <a href={`tel:${venue.phone}`} className="hover:underline" data-testid="text-venue-phone">
-                      {venue.phone}
-                    </a>
+
+                {/* Key info grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                  {(venue.address || venue.city) && (
+                    <div className="flex items-start gap-3">
+                      <MapPin className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="font-semibold text-sm">Location</p>
+                        <p className="text-sm text-muted-foreground" data-testid="text-venue-address">
+                          {venue.address}{venue.address && venue.city && ", "}{venue.city}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  {venue.hours && (
+                    <div className="flex items-start gap-3">
+                      <Clock className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="font-semibold text-sm">Hours</p>
+                        <p className="text-sm text-muted-foreground">{venue.hours}</p>
+                      </div>
+                    </div>
+                  )}
+                  {venue.ageRestriction && (
+                    <div className="flex items-start gap-3">
+                      <Users className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="font-semibold text-sm">Age Policy</p>
+                        <p className="text-sm text-muted-foreground">{venue.ageRestriction}+ only</p>
+                      </div>
+                    </div>
+                  )}
+                  {venue.dressCode && (
+                    <div className="flex items-start gap-3">
+                      <Shield className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="font-semibold text-sm">Dress Code</p>
+                        <p className="text-sm text-muted-foreground">{venue.dressCode}</p>
+                      </div>
+                    </div>
+                  )}
+                  {venue.website && (
+                    <div className="flex items-start gap-3">
+                      <Globe className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="font-semibold text-sm">Website</p>
+                        <a
+                          href={venue.website}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-primary hover:underline"
+                        >
+                          Visit Website
+                        </a>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Description */}
+                {venue.description && (
+                  <div className="mb-6 pb-6 border-b">
+                    <h3 className="font-serif text-lg font-semibold mb-2">About</h3>
+                    <p className="text-muted-foreground leading-relaxed" data-testid="text-venue-description">
+                      {venue.description}
+                    </p>
                   </div>
                 )}
-                {venue.website && (
-                  <div className="flex items-center gap-3">
-                    <Globe className="h-5 w-5 text-muted-foreground flex-shrink-0" />
-                    <a href={venue.website} target="_blank" rel="noopener noreferrer" className="hover:underline text-primary">
-                      Visit Website
-                    </a>
+
+                {/* Music types */}
+                {venue.musicTypes && venue.musicTypes.length > 0 && (
+                  <div className="mb-6">
+                    <h3 className="font-semibold text-sm flex items-center gap-2 mb-3">
+                      <Music className="h-4 w-4 text-primary" />
+                      Music
+                    </h3>
+                    <div className="flex flex-wrap gap-2">
+                      {venue.musicTypes.map(type => (
+                        <Badge key={type} variant="outline">{type}</Badge>
+                      ))}
+                    </div>
                   </div>
                 )}
-                {venue.hours && (
-                  <div className="flex items-center gap-3">
-                    <Clock className="h-5 w-5 text-muted-foreground flex-shrink-0" />
-                    <span>{venue.hours}</span>
+
+                {/* Amenities */}
+                {venue.amenities && venue.amenities.length > 0 && (
+                  <div className="mb-6">
+                    <h3 className="font-semibold text-sm mb-3">Amenities</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {venue.amenities.map(amenity => (
+                        <Badge key={amenity} variant="secondary">{amenity}</Badge>
+                      ))}
+                    </div>
                   </div>
                 )}
-                {venue.ageRestriction && (
-                  <div className="flex items-center gap-3">
-                    <Users className="h-5 w-5 text-muted-foreground flex-shrink-0" />
-                    <span>{venue.ageRestriction}+ only</span>
-                  </div>
-                )}
-                {venue.dressCode && (
-                  <div className="flex items-center gap-3">
-                    <Shield className="h-5 w-5 text-muted-foreground flex-shrink-0" />
-                    <span>Dress Code: {venue.dressCode}</span>
+
+                {/* Accessibility */}
+                {accessibilityFeatures.length > 0 && (
+                  <div>
+                    <h3 className="font-semibold text-sm flex items-center gap-2 mb-3">
+                      <Accessibility className="h-4 w-4 text-green-600 dark:text-green-400" />
+                      Accessibility
+                    </h3>
+                    <div className="flex flex-wrap gap-2">
+                      {accessibilityFeatures.map(feature => (
+                        <Badge
+                          key={feature}
+                          className="bg-green-100 text-green-800 border-green-200 hover:bg-green-100 dark:bg-green-900/30 dark:text-green-300 dark:border-green-700"
+                          variant="outline"
+                        >
+                          {feature}
+                        </Badge>
+                      ))}
+                    </div>
                   </div>
                 )}
               </CardContent>
             </Card>
 
-            {venue.musicTypes && Array.isArray(venue.musicTypes) && venue.musicTypes.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <Music className="h-5 w-5" />
-                    Music
-                  </CardTitle>
+            {/* Gallery */}
+            {galleryImages.length > 0 && (
+              <Card className="shadow-lg overflow-hidden">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg">Gallery</CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="flex flex-wrap gap-2">
-                    {venue.musicTypes.map((type) => (
-                      <Badge key={type} variant="outline">{type}</Badge>
+                <CardContent className="px-6 pb-6">
+                  <div className={`grid gap-2 rounded-xl overflow-hidden ${
+                    galleryImages.length === 1 ? "grid-cols-1" :
+                    galleryImages.length === 2 ? "grid-cols-2" :
+                    galleryImages.length <= 4 ? "grid-cols-2 md:grid-cols-4" :
+                    "grid-cols-2 md:grid-cols-3"
+                  }`}>
+                    {galleryImages.map((imgUrl, idx) => (
+                      <div
+                        key={idx}
+                        className={`relative overflow-hidden rounded-lg cursor-pointer group ${
+                          galleryImages.length === 3 && idx === 0 ? "md:row-span-2" : ""
+                        }`}
+                        onClick={() => { setGalleryLightboxIndex(idx); setGalleryLightboxOpen(true); }}
+                        data-testid={`button-gallery-image-${idx}`}
+                      >
+                        <img
+                          src={imgUrl}
+                          alt={`${venue.name} gallery ${idx + 1}`}
+                          className={`w-full object-cover transition-transform group-hover:scale-105 ${
+                            galleryImages.length === 1 ? "h-64" :
+                            galleryImages.length === 3 && idx === 0 ? "h-full min-h-40" :
+                            "aspect-square"
+                          }`}
+                          data-testid={`img-venue-gallery-${idx}`}
+                        />
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/25 transition-colors" />
+                      </div>
                     ))}
                   </div>
                 </CardContent>
               </Card>
             )}
 
-            {venue.amenities && Array.isArray(venue.amenities) && venue.amenities.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Amenities</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex flex-wrap gap-2">
-                    {venue.amenities.map((amenity) => (
-                      <Badge key={amenity} variant="secondary">{amenity}</Badge>
-                    ))}
-                  </div>
+            {/* Owner-only gallery management */}
+            {isVenueOwner && (
+              <Card className="shadow-lg">
+                <CardContent className="pt-6">
+                  <VenueGalleryManager
+                    venueId={venue.id}
+                    imageUrls={galleryImages}
+                    maxImages={6}
+                  />
                 </CardContent>
               </Card>
             )}
           </div>
 
+          {/* ── Right / sidebar ────────────────────────────────────────────── */}
           <div className="space-y-6">
-            <Card>
-              <CardHeader>
+            <Card className="shadow-lg sticky top-4">
+              <CardHeader className="pb-3">
                 <CardTitle className="text-lg flex items-center gap-2">
-                  <Ticket className="h-5 w-5" />
-                  Upcoming Entry Nights
+                  <Ticket className="h-5 w-5 text-primary" />
+                  Entry Nights
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 {nightsLoading ? (
                   <div className="space-y-3">
-                    <Skeleton className="h-20 w-full" />
-                    <Skeleton className="h-20 w-full" />
+                    <Skeleton className="h-24 w-full rounded-lg" />
+                    <Skeleton className="h-24 w-full rounded-lg" />
                   </div>
                 ) : entryNights.length === 0 ? (
-                  <p className="text-muted-foreground text-sm">No upcoming entry nights scheduled.</p>
+                  <div className="text-center py-6">
+                    <Calendar className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
+                    <p className="text-sm text-muted-foreground">No upcoming entry nights.</p>
+                  </div>
                 ) : (
                   <div className="space-y-3">
-                    {entryNights.map((night) => (
-                      <Card key={night.id} className="p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
-                              <Calendar className="h-4 w-4" />
-                              <span>{format(new Date(night.date), "EEE, MMM d 'at' h:mm a")}</span>
-                            </div>
-                            {night.name && (
-                              <p className="font-medium text-sm">{night.name}</p>
-                            )}
-                            {night.description && (
-                              <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{night.description}</p>
-                            )}
+                    {entryNights.map((night) => {
+                      const spotsLeft = night.capacity != null
+                        ? night.capacity - night.ticketsSold
+                        : null;
+                      const soldOut = spotsLeft !== null && spotsLeft <= 0;
+                      return (
+                        <div
+                          key={night.id}
+                          className="rounded-xl border bg-muted/30 p-4 space-y-3"
+                        >
+                          <div className="flex items-start gap-2 text-sm text-muted-foreground">
+                            <Calendar className="h-4 w-4 mt-0.5 flex-shrink-0 text-primary" />
+                            <span>{format(new Date(night.date), "EEE, MMM d 'at' h:mm a")}</span>
                           </div>
-                          <div className="text-right">
-                            <div className="flex items-center gap-1 text-lg font-bold mb-2">
-                              <DollarSign className="h-4 w-4" />
-                              {(night.coverPriceCents / 100).toFixed(2)}
+                          {night.name && (
+                            <p className="font-semibold text-sm">{night.name}</p>
+                          )}
+                          {night.description && (
+                            <p className="text-xs text-muted-foreground line-clamp-2">{night.description}</p>
+                          )}
+                          <div className="flex items-center justify-between pt-1">
+                            <div>
+                              <span className="text-xl font-bold">
+                                £{(night.coverPriceCents / 100).toFixed(2)}
+                              </span>
+                              {spotsLeft !== null && !soldOut && (
+                                <p className="text-xs text-muted-foreground">{spotsLeft} spots left</p>
+                              )}
                             </div>
-                            <Button 
-                              size="sm" 
-                              onClick={() => handlePurchaseTicket(night)}
-                              disabled={createPaymentMutation.isPending}
+                            <Button
+                              size="sm"
+                              onClick={() => createPaymentMutation.mutate(night.id)}
+                              disabled={createPaymentMutation.isPending || soldOut}
+                              className="bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 text-white"
                               data-testid={`button-buy-ticket-${night.id}`}
                             >
-                              Buy Ticket
+                              {soldOut ? "Sold Out" : createPaymentMutation.isPending ? "..." : "Buy Ticket"}
                             </Button>
                           </div>
                         </div>
-                        {night.capacity && (
-                          <div className="mt-2 text-xs text-muted-foreground">
-                            {night.capacity - night.ticketsSold} spots remaining
-                          </div>
-                        )}
-                      </Card>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </CardContent>
@@ -493,15 +563,24 @@ export default function VenueDetailPage() {
 
       <BottomNavigation />
 
+      {/* ── Gallery lightbox ───────────────────────────────────────────────── */}
+      {galleryImages.length > 0 && (
+        <ImageLightbox
+          images={galleryImages}
+          initialIndex={galleryLightboxIndex}
+          open={galleryLightboxOpen}
+          onClose={() => setGalleryLightboxOpen(false)}
+        />
+      )}
+
+      {/* ── Payment dialog ─────────────────────────────────────────────────── */}
       <Dialog open={!!clientSecret && !!selectedEntryNight} onOpenChange={() => handleClosePayment()}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Purchase Entry Ticket</DialogTitle>
             <DialogDescription>
               {selectedEntryNight && (
-                <>
-                  Entry to {venue.name} on {format(new Date(selectedEntryNight.date), "EEEE, MMMM d 'at' h:mm a")}
-                </>
+                <>Entry to {venue.name} on {format(new Date(selectedEntryNight.date), "EEEE, MMMM d 'at' h:mm a")}</>
               )}
             </DialogDescription>
           </DialogHeader>
@@ -517,6 +596,7 @@ export default function VenueDetailPage() {
         </DialogContent>
       </Dialog>
 
+      {/* ── Success dialog ─────────────────────────────────────────────────── */}
       <Dialog open={showSuccess} onOpenChange={setShowSuccess}>
         <DialogContent>
           <div className="text-center py-6">

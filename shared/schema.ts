@@ -736,6 +736,7 @@ export const venues = pgTable("venues", {
   website: varchar("website", { length: 255 }),
   hours: text("hours"),
   amenities: text("amenities").array().default(sql`'{}'`),
+  accessibilityFeatures: text("accessibility_features").array().default(sql`'{}'`),
   musicTypes: text("music_types").array().default(sql`'{}'`),
   dressCode: varchar("dress_code", { length: 100 }),
   ageRestriction: integer("age_restriction"),
