@@ -117,19 +117,34 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
   const handleReplaceImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files?.[0] || replacingImageIndex === null) return;
     const file = e.target.files[0];
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = reader.result as string;
-      setFormData(prev => {
-        const newImageUrls = [...prev.imageUrls];
-        newImageUrls[replacingImageIndex] = base64;
-        return { ...prev, imageUrls: newImageUrls };
-      });
-      toast({ title: "Image replaced successfully" });
-    };
-    reader.readAsDataURL(file);
+    const idx = replacingImageIndex;
     setReplacingImageIndex(null);
     if (replaceImageInputRef.current) replaceImageInputRef.current.value = "";
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const base64 = reader.result as string;
+        const res = await fetch("/api/upload-images", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ images: [base64] }),
+          credentials: "include",
+        });
+        if (!res.ok) throw new Error("Upload failed");
+        const { urls } = await res.json();
+        if (!urls?.[0]) throw new Error("No URL returned");
+        setFormData(prev => {
+          const newImageUrls = [...prev.imageUrls];
+          newImageUrls[idx] = urls[0];
+          return { ...prev, imageUrls: newImageUrls };
+        });
+        toast({ title: "Image replaced successfully" });
+      } catch {
+        toast({ title: "Failed to replace image", variant: "destructive" });
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   useEffect(() => {

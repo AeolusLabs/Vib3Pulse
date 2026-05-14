@@ -204,6 +204,12 @@ export default function DiscoverPage() {
     refetchIntervalInBackground: true,
   });
 
+  const { data: allVenues = [] } = useQuery<Venue[]>({
+    queryKey: ["/api/venues"],
+    refetchInterval: 60000,
+    refetchIntervalInBackground: true,
+  });
+
   // Nearby venues (when location available)
   const { data: nearbyVenues = [] } = useQuery<VenueWithDistance[]>({
     queryKey: ["/api/venues/nearby", latitude, longitude],
@@ -637,6 +643,68 @@ export default function DiscoverPage() {
                         </CardFooter>
                       </Card>
                     </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* All Venues */}
+            {allVenues.length > 0 && (
+              <div className="mb-8">
+                <div className="flex items-center gap-2 mb-4">
+                  <Building2 className="h-5 w-5 text-muted-foreground" />
+                  <h2 className="text-xl font-semibold">All Venues</h2>
+                  <span className="text-sm text-muted-foreground">({allVenues.length})</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6" data-testid="all-venues-grid">
+                  {allVenues.map((venue) => {
+                    const isHighlighted = sharedVenueId === String(venue.id) || highlightedId === String(venue.id);
+                    return (
+                      <Link key={venue.id} href={`/venue/${venue.id}`}>
+                        <Card
+                          className={`hover-elevate cursor-pointer overflow-hidden transition-all duration-500 ${isHighlighted ? 'ring-4 ring-primary ring-offset-2 scale-[1.02]' : ''}`}
+                          data-testid={`venue-card-${venue.id}`}
+                        >
+                          {(venue.coverImageUrl || venue.imageUrl) ? (
+                            <div className="aspect-video w-full overflow-hidden relative">
+                              <img
+                                src={venue.coverImageUrl || venue.imageUrl || ""}
+                                alt={venue.name}
+                                className="w-full h-full object-cover"
+                              />
+                            </div>
+                          ) : (
+                            <div className="aspect-video w-full bg-gradient-to-br from-purple-100 to-pink-100 dark:from-purple-950/30 dark:to-pink-950/30 flex items-center justify-center">
+                              <Building2 className="h-10 w-10 text-purple-300" />
+                            </div>
+                          )}
+                          <CardHeader className="space-y-1 pb-2">
+                            <div className="flex items-start justify-between gap-1">
+                              <h3 className="font-semibold text-base line-clamp-1" data-testid={`all-venue-name-${venue.id}`}>
+                                {venue.name}
+                              </h3>
+                            </div>
+                            <Badge variant="secondary" className="w-fit text-xs">
+                              {venue.category}
+                            </Badge>
+                          </CardHeader>
+                          <CardContent className="space-y-1 pb-3">
+                            {venue.city && (
+                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <MapPin className="h-3 w-3" />
+                                <span className="line-clamp-1">{venue.city}</span>
+                              </div>
+                            )}
+                            {venue.musicTypes && Array.isArray(venue.musicTypes) && venue.musicTypes.length > 0 && (
+                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <Music className="h-3 w-3" />
+                                <span className="line-clamp-1">{venue.musicTypes.slice(0, 2).join(", ")}</span>
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+                      </Link>
                     );
                   })}
                 </div>
