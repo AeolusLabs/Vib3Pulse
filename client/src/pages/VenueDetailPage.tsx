@@ -55,15 +55,17 @@ const categoryLabels: Record<string, string> = {
 };
 
 // Simulated payment form for demo mode
-function SimulatedPaymentForm({ 
-  entryNight, 
+function SimulatedPaymentForm({
+  entryNight,
   paymentIntentId,
-  onSuccess, 
-  onCancel 
-}: { 
-  entryNight: VenueEntryNight; 
+  provider,
+  onSuccess,
+  onCancel
+}: {
+  entryNight: VenueEntryNight;
   paymentIntentId: string;
-  onSuccess: () => void; 
+  provider: string;
+  onSuccess: () => void;
   onCancel: () => void;
 }) {
   const { toast } = useToast();
@@ -74,9 +76,10 @@ function SimulatedPaymentForm({
     setProcessing(true);
 
     try {
-      await apiRequest("POST", "/api/venue-tickets/confirm", {
-        entryNightId: entryNight.id,
+      await apiRequest("POST", "/api/payments/venue/confirm", {
+        venueEntryNightId: entryNight.id,
         paymentIntentId: paymentIntentId,
+        provider,
       });
       toast({ title: "Ticket purchased successfully!" });
       queryClient.invalidateQueries({ queryKey: ["/api/my-venue-tickets"] });
@@ -131,6 +134,7 @@ export default function VenueDetailPage() {
   const [selectedEntryNight, setSelectedEntryNight] = useState<VenueEntryNight | null>(null);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
+  const [paymentProvider, setPaymentProvider] = useState<string>("stripe");
   const [showSuccess, setShowSuccess] = useState(false);
   const [galleryLightboxOpen, setGalleryLightboxOpen] = useState(false);
   const [galleryLightboxIndex, setGalleryLightboxIndex] = useState(0);
@@ -153,14 +157,15 @@ export default function VenueDetailPage() {
   });
 
   const createPaymentMutation = useMutation({
-    mutationFn: async (entryNightId: string) => {
-      const response = await apiRequest("POST", "/api/venue-tickets/create-payment-intent", { entryNightId });
+    mutationFn: async (venueEntryNightId: string) => {
+      const response = await apiRequest("POST", "/api/payments/venue/intent", { venueEntryNightId });
       return response.json();
     },
-    onSuccess: (data, entryNightId) => {
+    onSuccess: (data, venueEntryNightId) => {
       setClientSecret(data.clientSecret);
       setPaymentIntentId(data.paymentIntentId);
-      const night = entryNights.find(n => n.id === entryNightId);
+      setPaymentProvider(data.provider ?? "stripe");
+      const night = entryNights.find(n => n.id === venueEntryNightId);
       if (night) setSelectedEntryNight(night);
     },
     onError: (error: any) => {
@@ -176,12 +181,14 @@ export default function VenueDetailPage() {
     setSelectedEntryNight(null);
     setClientSecret(null);
     setPaymentIntentId(null);
+    setPaymentProvider("stripe");
   };
 
   const handlePaymentSuccess = () => {
     setSelectedEntryNight(null);
     setClientSecret(null);
     setPaymentIntentId(null);
+    setPaymentProvider("stripe");
     setShowSuccess(true);
     setTimeout(() => setShowSuccess(false), 3000);
   };
@@ -499,9 +506,10 @@ export default function VenueDetailPage() {
             </DialogDescription>
           </DialogHeader>
           {clientSecret && selectedEntryNight && (
-            <SimulatedPaymentForm 
+            <SimulatedPaymentForm
               entryNight={selectedEntryNight}
               paymentIntentId={paymentIntentId || ""}
+              provider={paymentProvider}
               onSuccess={handlePaymentSuccess}
               onCancel={handleClosePayment}
             />

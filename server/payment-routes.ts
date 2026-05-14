@@ -268,6 +268,94 @@ export function registerPaymentRoutes(app: Express): void {
   });
 
   // ============================================================
+  // VENUE PROMOTION PAYMENT
+  // ============================================================
+
+  const PROMOTION_PRICES_PENCE: Record<number, number> = {
+    3: 999,
+    7: 1999,
+    14: 3499,
+    30: 5999,
+  };
+
+  app.post("/api/payments/venue/promote/intent", requireAuth, sensitiveOperationLimiter, async (req, res) => {
+    try {
+      const { venueId, durationDays } = z.object({
+        venueId: z.string().min(1),
+        durationDays: z.number().int().refine(d => d in PROMOTION_PRICES_PENCE, {
+          message: "Invalid promotion duration",
+        }),
+      }).parse(req.body);
+
+      const venue = await storage.getVenue(venueId);
+      if (!venue) return res.status(404).json({ message: "Venue not found" });
+      if (venue.ownerId !== req.user!.id) return res.status(403).json({ message: "You can only promote your own venues" });
+
+      const amountPence = PROMOTION_PRICES_PENCE[durationDays];
+      const currency = resolveCurrency(venue.city ?? null);
+
+      const intent = await createPaymentIntent({
+        amountSmallestUnit: amountPence,
+        currency,
+        userId: req.user!.id,
+        metadata: {
+          type: "venue_promotion",
+          venueId,
+          durationDays: String(durationDays),
+          userId: req.user!.id,
+        },
+      });
+
+      res.json({
+        clientSecret: intent.clientSecret,
+        paymentIntentId: intent.paymentIntentId,
+        provider: intent.provider,
+        currency: intent.currency,
+        amount: formatAmount(amountPence, currency),
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: error.errors[0]?.message ?? "Invalid request" });
+      }
+      console.error("[Payment] Venue promote intent error:", error);
+      res.status(500).json({ message: "Failed to create promotion payment" });
+    }
+  });
+
+  app.post("/api/payments/venue/promote/confirm", requireAuth, async (req, res) => {
+    try {
+      const { venueId, durationDays, paymentIntentId, provider } = z.object({
+        venueId: z.string().min(1),
+        durationDays: z.number().int().refine(d => d in PROMOTION_PRICES_PENCE),
+        paymentIntentId: z.string().min(1),
+        provider: z.enum(["stripe", "paystack"]),
+      }).parse(req.body);
+
+      const venue = await storage.getVenue(venueId);
+      if (!venue) return res.status(404).json({ message: "Venue not found" });
+      if (venue.ownerId !== req.user!.id) return res.status(403).json({ message: "You can only promote your own venues" });
+
+      const verified = await verifyPaymentIntent(paymentIntentId, provider);
+      if (!verified || !verified.paid) {
+        return res.status(402).json({ message: "Payment not confirmed" });
+      }
+
+      if (verified.metadata?.userId !== req.user!.id) {
+        return res.status(403).json({ message: "Payment does not belong to this account" });
+      }
+
+      const promotedVenue = await storage.promoteVenue(venueId, durationDays);
+      res.json({ message: "Venue promoted successfully", venue: promotedVenue });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "venueId, durationDays, paymentIntentId, and provider are required" });
+      }
+      console.error("[Payment] Venue promote confirm error:", error);
+      res.status(500).json({ message: "Failed to confirm venue promotion" });
+    }
+  });
+
+  // ============================================================
   // STRIPE WEBHOOK
   // ============================================================
 

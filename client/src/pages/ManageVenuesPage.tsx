@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import { useState } from "react";
-import { Edit, Trash2, BarChart3, MapPin, Clock, Music, Calendar, Megaphone, Sparkles, Building2, Plus, DollarSign, Lock } from "lucide-react";
+import { Edit, Trash2, BarChart3, MapPin, Clock, Music, Calendar, Megaphone, Sparkles, Building2, Plus, DollarSign, Lock, Eye } from "lucide-react";
 import { Link } from "wouter";
 import CreateVenueModal from "@/components/CreateVenueModal";
 import { PromoteVenueDialog } from "@/components/PromoteVenueDialog";
@@ -139,6 +139,22 @@ export default function ManageVenuesPage() {
               </p>
             )}
           </div>
+
+          {venue.imageUrls && venue.imageUrls.length > 0 && (
+            <div>
+              <p className="text-xs text-muted-foreground mb-1.5">Gallery ({venue.imageUrls.length} photo{venue.imageUrls.length !== 1 ? "s" : ""})</p>
+              <div className="flex gap-1.5 overflow-x-auto pb-1">
+                {venue.imageUrls.map((url, i) => (
+                  <img
+                    key={i}
+                    src={url}
+                    alt={`Gallery ${i + 1}`}
+                    className="h-14 w-14 rounded object-cover flex-shrink-0"
+                  />
+                ))}
+              </div>
+            </div>
+          )}
         </CardContent>
 
         <CardFooter className="flex flex-wrap gap-2 pt-4 border-t">
@@ -161,6 +177,18 @@ export default function ManageVenuesPage() {
             <Link href={`/venues/${venue.id}/entry-nights`}>
               <Calendar className="h-4 w-4 mr-2" />
               Entry Nights
+            </Link>
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            asChild
+            data-testid={`button-view-as-visitor-${venue.id}`}
+          >
+            <Link href={`/venues/${venue.id}`}>
+              <Eye className="h-4 w-4 mr-2" />
+              View as Visitor
             </Link>
           </Button>
 

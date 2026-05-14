@@ -22,16 +22,12 @@ interface CreateVenueModalProps {
 }
 
 const venueCategories = [
-  { value: "nightclub", label: "Nightclub" },
-  { value: "bar", label: "Bar" },
-  { value: "lounge", label: "Lounge" },
-  { value: "pub", label: "Pub" },
-  { value: "rooftop", label: "Rooftop" },
-  { value: "sports_bar", label: "Sports Bar" },
-  { value: "wine_bar", label: "Wine Bar" },
-  { value: "cocktail_bar", label: "Cocktail Bar" },
-  { value: "live_music", label: "Live Music Venue" },
-  { value: "comedy_club", label: "Comedy Club" },
+  { value: "Club", label: "Club" },
+  { value: "Pub", label: "Pub" },
+  { value: "Lounge", label: "Lounge" },
+  { value: "Bar", label: "Bar" },
+  { value: "Nightclub", label: "Nightclub" },
+  { value: "Rooftop", label: "Rooftop" },
 ];
 
 const musicTypeOptions = [
@@ -60,6 +56,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
     city: "",
     phone: "",
     website: "",
+    hours: "",
     dressCode: "",
     ageRestriction: "",
     musicTypes: [] as string[],
@@ -104,6 +101,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
         city: editingVenue.city || "",
         phone: editingVenue.phone || "",
         website: editingVenue.website || "",
+        hours: editingVenue.hours || "",
         dressCode: editingVenue.dressCode || "",
         ageRestriction: editingVenue.ageRestriction?.toString() || "",
         musicTypes: editingVenue.musicTypes || [],
@@ -121,6 +119,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
         city: "",
         phone: "",
         website: "",
+        hours: "",
         dressCode: "",
         ageRestriction: "",
         musicTypes: [],
@@ -165,8 +164,9 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
       city: formData.city || null,
       phone: formData.phone || null,
       website: formData.website || null,
+      hours: formData.hours || null,
       dressCode: formData.dressCode || null,
-      ageRestriction: formData.ageRestriction ? parseInt(formData.ageRestriction) : null,
+      ageRestriction: formData.ageRestriction ? (parseInt(formData.ageRestriction, 10) || null) : null,
       musicTypes: formData.musicTypes.length > 0 ? formData.musicTypes : null,
       amenities: formData.amenities.length > 0 ? formData.amenities : null,
     };
@@ -475,6 +475,17 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
                   data-testid="input-venue-website"
                 />
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="hours">Opening Hours</Label>
+              <Input
+                id="hours"
+                value={formData.hours}
+                onChange={(e) => setFormData(prev => ({ ...prev, hours: e.target.value }))}
+                placeholder="e.g., Mon–Thu 5pm–2am, Fri–Sat 5pm–4am"
+                data-testid="input-venue-hours"
+              />
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

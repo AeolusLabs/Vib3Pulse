@@ -334,6 +334,7 @@ export interface IStorage {
   getVenuesByOwner(ownerId: string): Promise<Venue[]>;
   createVenue(venue: InsertVenue): Promise<Venue>;
   updateVenue(id: string, venue: Partial<InsertVenue>): Promise<Venue>;
+  verifyVenue(id: string, isVerified: boolean): Promise<Venue>;
   deleteVenue(id: string): Promise<void>;
   getPromotedVenues(): Promise<Venue[]>;
   promoteVenue(venueId: string, durationDays: number): Promise<Venue>;
@@ -2216,6 +2217,11 @@ export class DbStorage implements IStorage {
       ...venueUpdate,
       updatedAt: new Date(),
     }).where(eq(venues.id, id)).returning();
+    return result[0];
+  }
+
+  async verifyVenue(id: string, isVerified: boolean): Promise<Venue> {
+    const result = await db.update(venues).set({ isVerified, updatedAt: new Date() }).where(eq(venues.id, id)).returning();
     return result[0];
   }
 

@@ -832,4 +832,35 @@ export function setupAdminRoutes(app: Express) {
       res.status(500).json({ message: "Failed to fix post ACLs" });
     }
   });
+
+  // ============================================
+  // VENUE VERIFICATION
+  // ============================================
+
+  app.patch("/api/admin/venues/:id/verify", requireRole("super_admin", "content_moderator"), async (req: Request, res: Response) => {
+    try {
+      const { isVerified } = z.object({ isVerified: z.boolean() }).parse(req.body);
+      const venue = await storage.getVenue(req.params.id);
+      if (!venue) return res.status(404).json({ message: "Venue not found" });
+
+      const updated = await storage.verifyVenue(req.params.id, isVerified);
+
+      await logActivity(
+        req.session.adminId!,
+        isVerified ? "verify_venue" : "unverify_venue",
+        "venue",
+        req.params.id,
+        `${isVerified ? "Verified" : "Unverified"} venue: ${venue.name}`,
+        req.ip
+      );
+
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "isVerified (boolean) is required" });
+      }
+      console.error("[Admin] Verify venue error:", error);
+      res.status(500).json({ message: "Failed to update venue verification" });
+    }
+  });
 }

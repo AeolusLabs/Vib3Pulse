@@ -2845,13 +2845,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const parts = [req.body.address, req.body.city].filter(Boolean);
         location = parts.length > 0 ? parts.join(", ") : req.body.name;
       }
-      
+
+      // Geocode address to capture lat/lng
+      let latitude: number | null = null;
+      let longitude: number | null = null;
+      const addressParts = [req.body.address, req.body.city].filter(Boolean);
+      if (addressParts.length > 0) {
+        const coords = await geocodeAddress(addressParts.join(", "));
+        if (coords) {
+          latitude = coords.latitude;
+          longitude = coords.longitude;
+        }
+      }
+
       const venueData = insertVenueSchema.parse({
         ...req.body,
         location,
         ownerId: req.user!.id,
+        latitude,
+        longitude,
       });
-      
+
       const venue = await storage.createVenue(venueData);
       res.status(201).json(venue);
     } catch (error) {
@@ -2863,17 +2877,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Update venue
   app.patch("/api/venues/:id", requireOrganizer, async (req, res) => {
     try {
+      if (!req.user!.canManageVenues) {
+        return res.status(403).json({ message: "Venue management permission required" });
+      }
+
       const venue = await storage.getVenue(req.params.id);
       if (!venue) {
         return res.status(404).json({ message: "Venue not found" });
       }
-      
+
       // Check ownership
       if (venue.ownerId !== req.user!.id) {
         return res.status(403).json({ message: "You can only update your own venues" });
       }
-      
-      const updatedVenue = await storage.updateVenue(req.params.id, req.body);
+
+      // Re-geocode if address or city changed
+      const updates = { ...req.body };
+      const addressChanged = updates.address !== undefined || updates.city !== undefined;
+      if (addressChanged) {
+        const address = updates.address ?? venue.address;
+        const city = updates.city ?? venue.city;
+        const addressParts = [address, city].filter(Boolean);
+        if (addressParts.length > 0) {
+          const coords = await geocodeAddress(addressParts.join(", "));
+          if (coords) {
+            updates.latitude = coords.latitude;
+            updates.longitude = coords.longitude;
+          }
+        }
+      }
+
+      const updatedVenue = await storage.updateVenue(req.params.id, updates);
       res.json(updatedVenue);
     } catch (error) {
       console.error("Update venue error:", error);
