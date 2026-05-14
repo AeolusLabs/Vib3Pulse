@@ -169,6 +169,13 @@ app.use((req, res, next) => {
     console.error('[STARTUP] banner columns setup failed:', err);
   }
 
+  // Auto-create ticket_tiers table if it doesn't exist (idempotent)
+  try {
+    await storage.ensureTicketTiersTable();
+  } catch (err) {
+    console.error('[STARTUP] ticket_tiers table setup failed:', err);
+  }
+
   // Auto-add currency column to events table (idempotent ADD COLUMN IF NOT EXISTS)
   try {
     await ensureSchema();

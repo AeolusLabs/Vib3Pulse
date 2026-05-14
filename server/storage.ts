@@ -512,6 +512,7 @@ export interface IStorage {
   // Media storage (Railway-compatible DB-backed)
   ensureMediaUploadsTable(): Promise<void>;
   ensureBannerColumns(): Promise<void>;
+  ensureTicketTiersTable(): Promise<void>;
   saveMedia(data: string, contentType: string, ownerId?: string): Promise<string>;
   getMedia(id: string): Promise<{ data: string; contentType: string } | null>;
   deleteMedia(id: string): Promise<void>;
@@ -3774,6 +3775,22 @@ export class DbStorage implements IStorage {
         ADD COLUMN IF NOT EXISTS banner_mode  TEXT,
         ADD COLUMN IF NOT EXISTS banner_vibe  TEXT,
         ADD COLUMN IF NOT EXISTS banner_color TEXT
+    `);
+  }
+
+  async ensureTicketTiersTable(): Promise<void> {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS ticket_tiers (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        event_id VARCHAR NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        price_smallest_unit INTEGER NOT NULL,
+        currency TEXT NOT NULL DEFAULT 'GBP',
+        quantity INTEGER NOT NULL,
+        sales_end_date TIMESTAMP,
+        day_date TIMESTAMP,
+        created_at TIMESTAMP NOT NULL DEFAULT now()
+      )
     `);
   }
 

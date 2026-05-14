@@ -467,36 +467,6 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
     }
   };
 
-  const compressImage = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-          if (!ctx) { reject(new Error('Could not get canvas context')); return; }
-
-          const MAX_WIDTH = 1200;
-          const MAX_HEIGHT = 800;
-          let { width, height } = img;
-
-          if (width > MAX_WIDTH) { height = Math.round(height * MAX_WIDTH / width); width = MAX_WIDTH; }
-          if (height > MAX_HEIGHT) { width = Math.round(width * MAX_HEIGHT / height); height = MAX_HEIGHT; }
-
-          canvas.width = width;
-          canvas.height = height;
-          ctx.drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL('image/jpeg', 0.82));
-        };
-        img.onerror = () => reject(new Error('Failed to load image'));
-        img.src = e.target?.result as string;
-      };
-      reader.onerror = () => reject(new Error('Failed to read file'));
-      reader.readAsDataURL(file);
-    });
-  };
-
   const handleThumbnailUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -505,11 +475,10 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
     e.target.value = "";
 
     try {
-      // Block HEIC/HEIF — iOS Camera Roll files that canvas cannot rasterise
       if (BLOCKED_IMAGE_TYPES.includes(file.type.toLowerCase())) {
         toast({
           title: "Unsupported format",
-          description: "HEIC/HEIF photos are not supported. Please convert to JPEG or PNG first, or use a different photo.",
+          description: "HEIC/HEIF photos are not supported. Please convert to JPEG or PNG first.",
           variant: "destructive",
         });
         return;
@@ -520,29 +489,34 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
         return;
       }
 
-      if (file.size > 10 * 1024 * 1024) {
-        toast({ title: "File too large", description: "Please upload an image smaller than 10MB.", variant: "destructive" });
+      if (file.size > 3 * 1024 * 1024) {
+        toast({ title: "File too large", description: "Please upload an image smaller than 3MB.", variant: "destructive" });
         return;
       }
 
       setThumbnailUploading(true);
 
-      // Compress to JPEG base64
-      const base64 = await compressImage(file);
+      // Object URL gives instant, accurate preview — no canvas, no black image possible
+      const previewUrl = URL.createObjectURL(file);
+      updateFormData({ thumbnailPreview: previewUrl });
 
-      // Show compressed preview immediately
-      updateFormData({ thumbnailPreview: base64 });
+      // Read raw file bytes as base64 — no canvas decode, guaranteed to match the actual photo
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => resolve(ev.target?.result as string);
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+      });
 
-      // Upload to media endpoint — get back a /api/media/{id} URL for storage
       const uploadRes = await apiRequest('POST', '/api/media/upload', { data: base64 });
       if (!uploadRes.ok) throw new Error('Media upload failed');
       const { url } = await uploadRes.json();
 
-      updateFormData({ thumbnailUrl: url, thumbnailPreview: base64 });
+      updateFormData({ thumbnailUrl: url });
     } catch (error) {
       console.error('Error uploading image:', error);
       updateFormData({ thumbnailUrl: "", thumbnailPreview: "" });
-      toast({ title: "Upload failed", description: "Failed to process image. Please try again.", variant: "destructive" });
+      toast({ title: "Upload failed", description: "Failed to upload image. Please try again.", variant: "destructive" });
     } finally {
       setThumbnailUploading(false);
     }
@@ -984,7 +958,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                       <Upload className="h-12 w-12 text-muted-foreground" />
                       <div className="text-center">
                         <p className="text-sm font-medium">Click to upload thumbnail</p>
-                        <p className="text-xs text-muted-foreground">JPEG, PNG, WebP up to 10MB (not HEIC)</p>
+                        <p className="text-xs text-muted-foreground">JPEG, PNG, WebP up to 3MB (not HEIC)</p>
                       </div>
                     </>
                   )}
