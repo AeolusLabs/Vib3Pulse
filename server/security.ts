@@ -141,7 +141,7 @@ export const apiRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => {
-    return req.path.startsWith("/api/auth/session");
+    return req.path.startsWith("/auth/session");
   },
 });
 

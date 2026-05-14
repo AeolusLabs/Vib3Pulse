@@ -28,12 +28,10 @@ export function useAuth(): UseQueryResult<AuthUser | null, Error> {
         credentials: "include",
       });
       
-      if (response.status === 401) {
-        return null;
-      }
-      
       if (!response.ok) {
-        throw new Error("Failed to fetch session");
+        // Treat all non-ok responses (401, 500, etc.) as unauthenticated
+        // so the user gets redirected to login rather than seeing an error page
+        return null;
       }
       
       const data: AuthResponse = await response.json();

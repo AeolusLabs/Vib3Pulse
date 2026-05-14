@@ -64,7 +64,7 @@ app.use(
       maxAge: 30 * 24 * 60 * 60 * 1000,
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
+      sameSite: "lax",
     },
   })
 );
@@ -105,7 +105,8 @@ passport.deserializeUser(async (id: string, done) => {
     }
     done(null, userToSessionUser(user));
   } catch (error) {
-    done(error);
+    console.error('[AUTH] deserializeUser failed, treating as unauthenticated:', error);
+    done(null, false);
   }
 });
 
