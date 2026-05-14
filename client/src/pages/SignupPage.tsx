@@ -18,6 +18,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 const EVENT_CATEGORIES = [
   "Music", "Food & Drink", "Tech", "Arts",
   "Sports", "Wellness", "Business", "Education", "Community", "Entertainment",
+  "Video Games", "Esports", "Streaming",
 ];
 
 const step1Schema = z.object({

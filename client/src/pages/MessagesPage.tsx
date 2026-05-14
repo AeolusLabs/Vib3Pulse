@@ -6,7 +6,6 @@ import BottomNavigation from "@/components/BottomNavigation";
 import CreateGroupModal from "@/components/CreateGroupModal";
 import GroupChatView from "@/components/GroupChatView";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -336,16 +335,14 @@ export default function MessagesPage() {
     return (
       <div className="min-h-screen flex flex-col bg-background">
         <Navigation onSearch={() => {}} />
-        <main className="flex-1 container mx-auto px-4 py-6 pb-20 max-w-2xl flex items-center justify-center">
-          <Card className="w-full max-w-md">
-            <CardContent className="pt-6 text-center">
-              <MessageSquare className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-              <h2 className="text-xl font-semibold mb-2">Sign in to chat</h2>
-              <p className="text-muted-foreground">
-                Message friends and create group chats
-              </p>
-            </CardContent>
-          </Card>
+        <main className="flex-1 flex items-center justify-center px-4 pb-20">
+          <div className="text-center">
+            <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+              <MessageSquare className="h-7 w-7 text-primary" />
+            </div>
+            <h2 className="text-xl font-semibold mb-2">Sign in to chat</h2>
+            <p className="text-muted-foreground text-sm">Message friends and create group chats</p>
+          </div>
         </main>
         <BottomNavigation />
       </div>
@@ -374,172 +371,161 @@ export default function MessagesPage() {
     const otherUser = otherParticipant?.user;
 
     return (
-      <div className="min-h-screen bg-background pb-20 md:pb-0 flex flex-col">
-        <Navigation onSearch={() => {}} />
+      <div className="h-dvh bg-background flex flex-col overflow-hidden">
+        {/* Sticky chat header */}
+        <div className="flex-shrink-0 border-b border-border/50 bg-background/95 backdrop-blur-sm">
+          <Navigation onSearch={() => {}} />
+          <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="rounded-full h-9 w-9 text-muted-foreground hover:text-foreground"
+              onClick={handleBack}
+              data-testid="button-back"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+            {otherUser && (
+              <>
+                <Avatar className="h-9 w-9 ring-2 ring-primary/20">
+                  <AvatarImage src={otherUser.avatarUrl || ""} alt={otherUser.displayName || otherUser.username} />
+                  <AvatarFallback className="bg-primary/10 text-primary font-semibold text-sm">
+                    {(otherUser.displayName || otherUser.organizationName || otherUser.username).charAt(0).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-sm text-foreground leading-tight truncate" data-testid="text-other-user-name">
+                    {otherUser.displayName || otherUser.organizationName || otherUser.username}
+                  </p>
+                  <p className="text-xs text-muted-foreground leading-tight">@{otherUser.username}</p>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
 
-        <main className="flex-1 flex flex-col max-w-[1200px] mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
-          <Card className="mb-4">
-            <CardHeader className="pb-4">
-              <div className="flex items-center gap-3">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={handleBack}
-                  data-testid="button-back"
-                >
-                  <ArrowLeft className="h-5 w-5" />
-                </Button>
-                
-                {otherUser && (
-                  <>
-                    <Avatar className="h-10 w-10">
-                      <AvatarImage src={otherUser.avatarUrl || ""} alt={otherUser.displayName || otherUser.username} />
-                      <AvatarFallback className="bg-primary/10 text-primary">
-                        {(otherUser.displayName || otherUser.organizationName || otherUser.username).charAt(0).toUpperCase()}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1">
-                      <h2 className="font-semibold text-foreground" data-testid="text-other-user-name">
-                        {otherUser.displayName || otherUser.organizationName || otherUser.username}
-                      </h2>
-                      <p className="text-sm text-muted-foreground">@{otherUser.username}</p>
-                    </div>
-                  </>
-                )}
+        {/* Scrollable messages */}
+        <main className="flex-1 overflow-hidden flex flex-col max-w-[1200px] mx-auto w-full px-4 sm:px-6 lg:px-8">
+          <ScrollArea className="flex-1 py-4">
+            {messagesLoading ? (
+              <div className="space-y-4">
+                {[1, 2, 3].map((i) => (
+                  <Skeleton key={i} className={`h-12 w-2/3 rounded-2xl ${i % 2 === 0 ? "ml-auto" : ""}`} />
+                ))}
               </div>
-            </CardHeader>
-          </Card>
+            ) : conversationMessages.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full py-16 text-center">
+                <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                  <MessageSquare className="h-7 w-7 text-primary" />
+                </div>
+                <p className="font-medium text-foreground">No messages yet</p>
+                <p className="text-sm text-muted-foreground mt-1">Say hello to start the conversation</p>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {conversationMessages.map((message, idx) => {
+                  const isOwnMessage = message.senderId === currentUser?.id;
+                  const prevMsg = conversationMessages[idx - 1];
+                  const showTimeDivider = !prevMsg ||
+                    new Date(message.createdAt).getTime() - new Date(prevMsg.createdAt).getTime() > 5 * 60 * 1000;
 
-          <Card className="flex-1 flex flex-col mb-4">
-            <ScrollArea className="flex-1 p-6">
-              {messagesLoading ? (
-                <div className="space-y-4">
-                  {[1, 2, 3].map((i) => (
-                    <Skeleton key={i} className="h-16 w-2/3" />
-                  ))}
-                </div>
-              ) : conversationMessages.length === 0 ? (
-                <div className="text-center py-8">
-                  <p className="text-muted-foreground">No messages yet</p>
-                  <p className="text-sm text-muted-foreground mt-2">Send a message to start the conversation</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {conversationMessages.map((message) => {
-                    const isOwnMessage = message.senderId === currentUser?.id;
-                    return (
+                  return (
+                    <div key={message.id}>
+                      {showTimeDivider && (
+                        <p className="text-center text-[11px] text-muted-foreground/60 my-3">
+                          {formatMessageTime(message.createdAt)}
+                        </p>
+                      )}
                       <div
-                        key={message.id}
-                        className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'} group`}
+                        className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'} group mb-0.5`}
                         data-testid={`message-${message.id}`}
                       >
-                        <div className={`flex items-end gap-1 max-w-[70%] ${isOwnMessage ? 'flex-row-reverse' : 'flex-row'}`}>
+                        <div className={`flex items-end gap-1.5 max-w-[75%] ${isOwnMessage ? 'flex-row-reverse' : 'flex-row'}`}>
                           <div
-                            className={`rounded-lg px-4 py-2 ${
+                            className={`px-4 py-2.5 text-sm leading-relaxed break-words ${
                               isOwnMessage
-                                ? 'bg-primary text-primary-foreground'
-                                : 'bg-muted text-foreground'
+                                ? 'bg-violet-600 text-white rounded-2xl rounded-br-sm'
+                                : 'bg-muted text-foreground rounded-2xl rounded-bl-sm'
                             }`}
                           >
                             {message.replyTo && (
-                              <div 
-                                className={`mb-2 p-2 rounded border-l-2 ${
-                                  isOwnMessage 
-                                    ? 'bg-primary-foreground/10 border-primary-foreground/50' 
-                                    : 'bg-background/50 border-foreground/30'
+                              <div
+                                className={`mb-2 px-2 py-1.5 rounded-lg border-l-2 ${
+                                  isOwnMessage
+                                    ? 'bg-white/10 border-white/50'
+                                    : 'bg-background/60 border-primary/40'
                                 }`}
                               >
-                                <p className={`text-xs font-medium ${isOwnMessage ? 'text-primary-foreground/80' : 'text-foreground/70'}`}>
-                                  <Reply className="h-3 w-3 inline mr-1" />
+                                <p className={`text-[11px] font-medium flex items-center gap-1 mb-0.5 ${isOwnMessage ? 'text-white/70' : 'text-muted-foreground'}`}>
+                                  <Reply className="h-3 w-3" />
                                   {message.replyTo.sender?.username || 'Unknown'}
                                 </p>
-                                <p className={`text-xs line-clamp-2 ${isOwnMessage ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
+                                <p className={`text-xs line-clamp-1 ${isOwnMessage ? 'text-white/60' : 'text-muted-foreground'}`}>
                                   {message.replyTo.content}
                                 </p>
                               </div>
                             )}
-                            <p className="break-words">{message.content}</p>
-                            
-                            <div className={`flex items-center gap-1 mt-1 ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
-                              <p className={`text-xs ${isOwnMessage ? 'text-primary-foreground/90' : 'text-muted-foreground'}`}>
-                                {formatMessageTime(message.createdAt)}
-                              </p>
-                            </div>
+                            {message.content}
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 opacity-30 hover:opacity-100 focus:opacity-100 transition-opacity"
-                            onClick={() => {
-                              setReplyingTo(message);
-                              inputRef.current?.focus();
-                            }}
+                          <button
+                            className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity p-1 text-muted-foreground hover:text-foreground rounded-full hover:bg-muted"
+                            onClick={() => { setReplyingTo(message); inputRef.current?.focus(); }}
                             data-testid={`button-reply-${message.id}`}
                           >
-                            <Reply className="h-4 w-4" />
-                          </Button>
+                            <Reply className="h-3.5 w-3.5" />
+                          </button>
                         </div>
                       </div>
-                    );
-                  })}
-                  <div ref={messagesEndRef} />
-                </div>
-              )}
-            </ScrollArea>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              {replyingTo && (
-                <div className="mb-3 p-3 bg-muted rounded-lg border-l-2 border-primary">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-foreground flex items-center gap-1">
-                        <Reply className="h-3 w-3" />
-                        Replying to {replyingTo.sender?.username || 'Unknown'}
-                      </p>
-                      <p className="text-sm text-muted-foreground line-clamp-2 mt-1">
-                        {replyingTo.content}
-                      </p>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 shrink-0"
-                      onClick={() => setReplyingTo(null)}
-                      data-testid="button-cancel-reply"
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
+                  );
+                })}
+                <div ref={messagesEndRef} />
+              </div>
+            )}
+          </ScrollArea>
+
+          {/* Reply banner + input bar */}
+          <div className="flex-shrink-0 pb-4 md:pb-6">
+            {replyingTo && (
+              <div className="mb-2 px-4 py-2.5 bg-muted/60 rounded-xl border border-border/40 flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-primary flex items-center gap-1 mb-0.5">
+                    <Reply className="h-3 w-3" />Replying to @{replyingTo.sender?.username || 'Unknown'}
+                  </p>
+                  <p className="text-xs text-muted-foreground line-clamp-1">{replyingTo.content}</p>
                 </div>
-              )}
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  handleSendMessage();
-                }}
-                className="flex gap-3"
-              >
-                <Input
-                  ref={inputRef}
-                  type="text"
-                  placeholder="Type a message..."
-                  value={messageText}
-                  onChange={(e) => setMessageText(e.target.value)}
-                  className="flex-1"
-                  data-testid="input-message"
-                />
-                <Button
-                  type="submit"
-                  disabled={!messageText.trim() || sendMessageMutation.isPending}
-                  data-testid="button-send"
+                <button
+                  className="text-muted-foreground hover:text-foreground p-0.5 rounded flex-shrink-0"
+                  onClick={() => setReplyingTo(null)}
+                  data-testid="button-cancel-reply"
                 >
-                  <Send className="h-4 w-4" />
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+            <form
+              onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }}
+              className="flex items-center gap-2"
+            >
+              <Input
+                ref={inputRef}
+                type="text"
+                placeholder="Type a message…"
+                value={messageText}
+                onChange={(e) => setMessageText(e.target.value)}
+                className="flex-1 h-11 rounded-full bg-muted/50 border-border/40 focus-visible:ring-1 focus-visible:ring-primary px-5 text-sm"
+                data-testid="input-message"
+              />
+              <button
+                type="submit"
+                disabled={!messageText.trim() || sendMessageMutation.isPending}
+                className="h-11 w-11 rounded-full bg-violet-600 hover:bg-violet-500 disabled:opacity-40 flex items-center justify-center text-white transition-colors flex-shrink-0"
+                data-testid="button-send"
+              >
+                <Send className="h-4 w-4" />
+              </button>
+            </form>
+          </div>
         </main>
 
         <BottomNavigation />
@@ -583,107 +569,108 @@ export default function MessagesPage() {
         </div>
 
         {conversationsLoading ? (
-          <div className="space-y-4">
+          <div className="rounded-xl border border-border/40 overflow-hidden divide-y divide-border/30">
             {[1, 2, 3].map((i) => (
-              <Skeleton key={i} className="h-20 w-full" />
+              <div key={i} className="flex items-center gap-4 p-4">
+                <Skeleton className="h-14 w-14 rounded-full flex-shrink-0" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-48" />
+                </div>
+              </div>
             ))}
           </div>
         ) : !conversations || conversations.length === 0 ? (
-          <Card>
-            <CardContent className="p-8 text-center">
-              <MessageSquare className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-              <p className="text-muted-foreground">No messages yet</p>
-              <p className="text-sm text-muted-foreground mt-2">
-                Start a conversation or create a group to chat
-              </p>
-            </CardContent>
-          </Card>
+          <div className="flex flex-col items-center justify-center py-24 text-center">
+            <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+              <MessageSquare className="h-7 w-7 text-primary" />
+            </div>
+            <p className="font-semibold text-foreground">No messages yet</p>
+            <p className="text-sm text-muted-foreground mt-1">Start a conversation or create a group to chat</p>
+          </div>
         ) : (
-          <div className="space-y-3">
+          <div className="rounded-xl border border-border/40 overflow-hidden divide-y divide-border/30">
             {conversations.map((conv) => {
               const isGroup = conv.isGroup;
               const otherParticipants = conv.participants.filter(
                 (p) => p.userId !== currentUser.id
               );
+              const hasUnread = conv.unreadCount > 0;
 
               return (
-                <Card
+                <div
                   key={conv.id}
-                  className="hover-elevate cursor-pointer"
+                  className="flex items-center gap-4 p-4 cursor-pointer hover:bg-muted/40 transition-colors"
                   onClick={() => handleSelectConversation(conv)}
                   data-testid={`conversation-${conv.id}`}
                 >
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-4">
-                      <div className="relative">
-                        {isGroup ? (
-                          <Avatar className="h-12 w-12">
-                            <AvatarImage src={conv.avatarUrl || ""} alt={conv.name || "Group"} />
-                            <AvatarFallback className="bg-primary/10 text-primary">
-                              <Users className="h-5 w-5" />
-                            </AvatarFallback>
-                          </Avatar>
-                        ) : (
-                          <Avatar className="h-12 w-12">
-                            <AvatarImage 
-                              src={otherParticipants[0]?.user.avatarUrl || ""} 
-                              alt={otherParticipants[0]?.user.displayName || otherParticipants[0]?.user.username} 
-                            />
-                            <AvatarFallback className="bg-primary/10 text-primary">
-                              {(otherParticipants[0]?.user.displayName || otherParticipants[0]?.user.username || "?")[0].toUpperCase()}
-                            </AvatarFallback>
-                          </Avatar>
-                        )}
-                        {conv.unreadCount > 0 && (
-                          <Badge 
-                            className="absolute -top-1 -right-1 h-5 min-w-[20px] flex items-center justify-center p-0 px-1.5 text-xs bg-primary"
-                            data-testid={`badge-unread-${conv.id}`}
-                          >
-                            {conv.unreadCount}
-                          </Badge>
-                        )}
-                      </div>
+                  <div className="relative flex-shrink-0">
+                    {isGroup ? (
+                      <Avatar className={`h-14 w-14 ${hasUnread ? 'ring-2 ring-violet-500/50' : ''}`}>
+                        <AvatarImage src={conv.avatarUrl || ""} alt={conv.name || "Group"} />
+                        <AvatarFallback className="bg-primary/10 text-primary">
+                          <Users className="h-5 w-5" />
+                        </AvatarFallback>
+                      </Avatar>
+                    ) : (
+                      <Avatar className={`h-14 w-14 ${hasUnread ? 'ring-2 ring-violet-500/50' : ''}`}>
+                        <AvatarImage
+                          src={otherParticipants[0]?.user.avatarUrl || ""}
+                          alt={otherParticipants[0]?.user.displayName || otherParticipants[0]?.user.username}
+                        />
+                        <AvatarFallback className="bg-primary/10 text-primary font-semibold">
+                          {(otherParticipants[0]?.user.displayName || otherParticipants[0]?.user.username || "?")[0].toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                    )}
+                    {hasUnread && (
+                      <span
+                        className="absolute -top-0.5 -right-0.5 h-5 min-w-[20px] flex items-center justify-center rounded-full bg-violet-600 text-white text-[10px] font-bold px-1"
+                        data-testid={`badge-unread-${conv.id}`}
+                      >
+                        {conv.unreadCount}
+                      </span>
+                    )}
+                  </div>
 
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between mb-1 gap-2">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <h3 className={`font-semibold truncate ${conv.unreadCount > 0 ? 'text-foreground' : 'text-foreground/90'}`}>
-                              {isGroup
-                                ? conv.name
-                                : otherParticipants[0]?.user.displayName ||
-                                  otherParticipants[0]?.user.username ||
-                                  "Unknown"}
-                            </h3>
-                            {isGroup && (
-                              <Badge variant="secondary" className="text-xs shrink-0">
-                                <Users className="h-3 w-3 mr-1" />
-                                {conv.participants.length}
-                              </Badge>
-                            )}
-                          </div>
-                          {conv.lastMessage && (
-                            <span className="text-xs text-muted-foreground shrink-0">
-                              {formatDistanceToNow(new Date(conv.lastMessage.createdAt), { addSuffix: true })}
-                            </span>
-                          )}
-                        </div>
-                        <p className={`text-sm truncate ${conv.unreadCount > 0 ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
-                          {conv.lastMessage ? (
-                            conv.lastMessage.content || 
-                            (conv.lastMessage.messageType === "poll" ? "Poll created" :
-                             conv.lastMessage.messageType === "image" ? "Sent an image" :
-                             conv.lastMessage.messageType === "event" ? "Shared an event" :
-                             conv.lastMessage.messageType === "venue" ? "Shared a venue" :
-                             conv.lastMessage.messageType === "post" ? "Shared a post" :
-                             "Sent a message")
-                          ) : (
-                            "Start the conversation"
-                          )}
-                        </p>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between mb-0.5 gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <h3 className={`truncate text-sm ${hasUnread ? 'font-bold text-foreground' : 'font-semibold text-foreground/90'}`}>
+                          {isGroup
+                            ? conv.name
+                            : otherParticipants[0]?.user.displayName ||
+                              otherParticipants[0]?.user.username ||
+                              "Unknown"}
+                        </h3>
+                        {isGroup && (
+                          <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full shrink-0 flex items-center gap-0.5">
+                            <Users className="h-2.5 w-2.5" />
+                            {conv.participants.length}
+                          </span>
+                        )}
                       </div>
+                      {conv.lastMessage && (
+                        <span className={`text-xs shrink-0 ${hasUnread ? 'text-violet-400 font-medium' : 'text-muted-foreground'}`}>
+                          {formatDistanceToNow(new Date(conv.lastMessage.createdAt), { addSuffix: true })}
+                        </span>
+                      )}
                     </div>
-                  </CardContent>
-                </Card>
+                    <p className={`text-sm truncate ${hasUnread ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
+                      {conv.lastMessage ? (
+                        conv.lastMessage.content ||
+                        (conv.lastMessage.messageType === "poll" ? "Poll created" :
+                         conv.lastMessage.messageType === "image" ? "Sent an image" :
+                         conv.lastMessage.messageType === "event" ? "Shared an event" :
+                         conv.lastMessage.messageType === "venue" ? "Shared a venue" :
+                         conv.lastMessage.messageType === "post" ? "Shared a post" :
+                         "Sent a message")
+                      ) : (
+                        "Start the conversation"
+                      )}
+                    </p>
+                  </div>
+                </div>
               );
             })}
           </div>
@@ -733,40 +720,32 @@ export default function MessagesPage() {
                   <p>No matches found</p>
                 </div>
               ) : (
-                <div className="space-y-2">
+                <div className="rounded-xl border border-border/40 overflow-hidden divide-y divide-border/30">
                   {filteredFollowing.map((user) => (
-                    <Card
+                    <div
                       key={user.id}
-                      className="hover-elevate cursor-pointer"
+                      className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-muted/40 transition-colors"
                       onClick={() => createDirectConversationMutation.mutate(user.id)}
                       data-testid={`following-user-${user.id}`}
                     >
-                      <CardContent className="p-3">
-                        <div className="flex items-center gap-3">
-                          <Avatar className="h-10 w-10">
-                            <AvatarImage src={user.avatarUrl || ""} alt={user.displayName || user.username} />
-                            <AvatarFallback className="bg-primary/10 text-primary">
-                              {(user.displayName || user.organizationName || user.username).charAt(0).toUpperCase()}
-                            </AvatarFallback>
-                          </Avatar>
-                          
-                          <div className="flex-1 min-w-0">
-                            <h3 className="font-semibold text-foreground truncate">
-                              {user.displayName || user.organizationName || user.username}
-                            </h3>
-                            <p className="text-sm text-muted-foreground truncate">
-                              @{user.username}
-                            </p>
-                          </div>
-                          
-                          {user.userType === "organizer" && (
-                            <Badge variant="default" className="bg-primary">
-                              Organizer
-                            </Badge>
-                          )}
-                        </div>
-                      </CardContent>
-                    </Card>
+                      <Avatar className="h-10 w-10 ring-2 ring-border/40">
+                        <AvatarImage src={user.avatarUrl || ""} alt={user.displayName || user.username} />
+                        <AvatarFallback className="bg-primary/10 text-primary font-semibold">
+                          {(user.displayName || user.organizationName || user.username).charAt(0).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-sm text-foreground truncate">
+                          {user.displayName || user.organizationName || user.username}
+                        </p>
+                        <p className="text-xs text-muted-foreground truncate">@{user.username}</p>
+                      </div>
+                      {user.userType === "organizer" && (
+                        <span className="text-[10px] font-semibold bg-violet-600/20 text-violet-400 px-2 py-0.5 rounded-full shrink-0">
+                          Organizer
+                        </span>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}

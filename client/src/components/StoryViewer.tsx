@@ -1,4 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+
+function formatStoryTime(timestamp: string): string {
+  const d = new Date(timestamp);
+  if (isNaN(d.getTime())) return timestamp; // already a human string (mock data)
+  const diffSecs = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (diffSecs < 60) return diffSecs <= 5 ? "Just now" : `${diffSecs}s ago`;
+  const diffMins = Math.floor(diffSecs / 60);
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return diffDays === 1 ? "Yesterday" : `${diffDays}d ago`;
+}
 import { X, ChevronLeft, ChevronRight, Heart, Send, Trash2, Share2, Lock, RefreshCw, Volume2, VolumeX } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -361,7 +374,7 @@ export default function StoryViewer({
                     </Badge>
                   )}
                 </div>
-                <p className="text-xs text-white/70">{currentStory.timestamp}</p>
+                <p className="text-xs text-white/70">{formatStoryTime(currentStory.timestamp)}</p>
               </div>
             </div>
             <div className="flex items-center gap-1">

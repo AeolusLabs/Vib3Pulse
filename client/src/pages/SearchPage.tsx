@@ -514,11 +514,11 @@ export default function SearchPage() {
 function SearchResultSection({ title, icon: Icon, children }: { title: string; icon: any; children: React.ReactNode }) {
   return (
     <div>
-      <h3 className="text-lg font-semibold flex items-center gap-2 mb-3">
-        <Icon className="h-5 w-5 text-primary" />
+      <h3 className="text-base font-semibold font-serif flex items-center gap-2 mb-3 text-foreground/80">
+        <Icon className="h-4 w-4 text-primary" />
         {title}
       </h3>
-      <div className="space-y-3">{children}</div>
+      <div className="space-y-2">{children}</div>
     </div>
   );
 }
@@ -526,116 +526,112 @@ function SearchResultSection({ title, icon: Icon, children }: { title: string; i
 function UserResultCard({ user, sessionUser, isFollowing, onFollowToggle, navigate }: { user: User; sessionUser?: { id: string } | null; isFollowing: boolean; onFollowToggle: (id: string) => void; navigate: (path: string) => void }) {
   const isSocialUser = user.userType === "social";
   const isOwnProfile = sessionUser?.id === user.id;
+  const displayName = isSocialUser ? (user.displayName || user.username) : (user.organizationName || user.username);
+  const initial = displayName.charAt(0).toUpperCase();
 
   return (
-    <Card 
-      className="hover-elevate cursor-pointer"
+    <div
+      className="flex items-center gap-3 px-4 py-3 rounded-xl border border-border/40 bg-card hover:border-primary/30 hover:bg-muted/20 transition-all duration-200 cursor-pointer"
       onClick={() => navigate(`/profile/${user.username}`)}
       data-testid={`search-user-${user.id}`}
     >
-      <CardContent className="p-4">
-        <div className="flex items-center gap-4">
-          <Avatar className="h-12 w-12 border-2 border-primary/20">
-            <AvatarImage src="" alt={isSocialUser ? (user.displayName || user.username) : (user.organizationName || user.username)} />
-            <AvatarFallback className="bg-primary/10 text-primary">
-              {isSocialUser 
-                ? (user.displayName?.charAt(0) || user.username.charAt(0)).toUpperCase()
-                : (user.organizationName?.charAt(0) || user.username.charAt(0)).toUpperCase()
-              }
-            </AvatarFallback>
-          </Avatar>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <h4 className="font-semibold truncate">
-                {isSocialUser ? (user.displayName || user.username) : (user.organizationName || user.username)}
-              </h4>
-              {!isSocialUser && <Badge className="bg-primary text-xs">Organizer</Badge>}
-            </div>
-            <p className="text-sm text-muted-foreground">@{user.username}</p>
-          </div>
-          {!isOwnProfile && sessionUser && (
-            <Button
-              size="sm"
-              variant={isFollowing ? "default" : "outline"}
-              onClick={(e) => { e.stopPropagation(); onFollowToggle(user.id); }}
-              data-testid={`button-follow-${user.id}`}
-            >
-              {isFollowing ? (
-                <>
-                  <UserCheck className="h-4 w-4 mr-1" />
-                  Following
-                </>
-              ) : (
-                <UserPlus className="h-4 w-4" />
-              )}
-            </Button>
+      <div className={`rounded-full p-[2px] flex-shrink-0 ${!isSocialUser ? "bg-gradient-to-br from-violet-500 to-purple-700" : "bg-border"}`}>
+        <Avatar className="h-12 w-12 ring-2 ring-background">
+          <AvatarImage src={user.avatarUrl || ""} alt={displayName} />
+          <AvatarFallback className="bg-primary/10 text-primary font-semibold">{initial}</AvatarFallback>
+        </Avatar>
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="font-semibold text-sm text-foreground truncate">{displayName}</span>
+          {!isSocialUser && (
+            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-violet-600/10 text-violet-400 border border-violet-600/20 flex-shrink-0">
+              Organizer
+            </span>
+          )}
+          {user.isOfficial && (
+            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 flex-shrink-0">
+              Verified
+            </span>
           )}
         </div>
-      </CardContent>
-    </Card>
+        <p className="text-xs text-muted-foreground">@{user.username}</p>
+      </div>
+      {!isOwnProfile && sessionUser && (
+        <button
+          className={`flex-shrink-0 text-xs font-semibold px-4 py-1.5 rounded-full transition-colors ${
+            isFollowing
+              ? "bg-muted text-foreground hover:bg-muted/70 border border-border"
+              : "bg-violet-600 text-white hover:bg-violet-500"
+          }`}
+          onClick={(e) => { e.stopPropagation(); onFollowToggle(user.id); }}
+          data-testid={`button-follow-${user.id}`}
+        >
+          {isFollowing ? (
+            <span className="flex items-center gap-1"><UserCheck className="h-3 w-3" />Following</span>
+          ) : (
+            <span className="flex items-center gap-1"><UserPlus className="h-3 w-3" />Follow</span>
+          )}
+        </button>
+      )}
+    </div>
   );
 }
 
 function EventResultCard({ event, navigate }: { event: Event & { organizer: User }; navigate: (path: string) => void }) {
   return (
-    <Card 
-      className="hover-elevate cursor-pointer"
+    <div
+      className="rounded-xl border border-border/40 bg-card hover:border-primary/30 hover:bg-muted/10 transition-all duration-200 cursor-pointer overflow-hidden"
       onClick={() => navigate(`/events/${event.id}`)}
       data-testid={`search-event-${event.id}`}
     >
-      <CardContent className="p-4">
-        <div className="flex gap-4">
-          {event.imageUrl && (
-            <img src={event.imageUrl} alt={event.title} className="w-20 h-20 rounded-lg object-cover" />
+      {event.imageUrl && (
+        <div className="relative aspect-[16/7] overflow-hidden">
+          <img src={event.imageUrl} alt={event.title} className="w-full h-full object-cover" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+          <span className="absolute bottom-2 left-3 text-xs font-semibold text-white/90 bg-black/40 px-2 py-0.5 rounded-full backdrop-blur-sm">
+            {format(new Date(event.eventDate), "EEE, MMM d")}
+          </span>
+          {event.ticketPrice === 0 ? (
+            <span className="absolute top-2 right-2 text-xs font-semibold text-green-400 bg-black/50 px-2 py-0.5 rounded-full backdrop-blur-sm">Free</span>
+          ) : (
+            <span className="absolute top-2 right-2 text-xs font-semibold text-white bg-black/50 px-2 py-0.5 rounded-full backdrop-blur-sm">£{(event.ticketPrice / 100).toFixed(2)}</span>
           )}
-          <div className="flex-1 min-w-0">
-            <h4 className="font-semibold truncate">{event.title}</h4>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
-              <Calendar className="h-3 w-3" />
-              <span>{format(new Date(event.eventDate), "MMM d, yyyy")}</span>
-            </div>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <MapPin className="h-3 w-3" />
-              <span className="truncate">{event.location}</span>
-            </div>
-            <div className="flex items-center gap-2 mt-2">
-              <Badge variant="secondary" className="text-xs">{event.category}</Badge>
-              {event.ticketPrice === 0 ? (
-                <Badge className="bg-green-500/10 text-green-600 text-xs">Free</Badge>
-              ) : (
-                <Badge variant="outline" className="text-xs">£{(event.ticketPrice / 100).toFixed(2)}</Badge>
-              )}
-            </div>
-          </div>
         </div>
-      </CardContent>
-    </Card>
+      )}
+      <div className="p-3">
+        <h4 className="font-semibold text-sm text-foreground truncate mb-1">{event.title}</h4>
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1 truncate"><MapPin className="h-3 w-3 flex-shrink-0" />{event.location}</span>
+          <span className="flex-shrink-0 px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">{event.category}</span>
+        </div>
+      </div>
+    </div>
   );
 }
 
 function VenueResultCard({ venue, navigate }: { venue: Venue; navigate: (path: string) => void }) {
   return (
-    <Card 
-      className="hover-elevate cursor-pointer"
+    <div
+      className="rounded-xl border border-border/40 bg-card hover:border-primary/30 hover:bg-muted/10 transition-all duration-200 cursor-pointer overflow-hidden"
       onClick={() => navigate(`/venues/${venue.id}`)}
       data-testid={`search-venue-${venue.id}`}
     >
-      <CardContent className="p-4">
-        <div className="flex gap-4">
-          {venue.imageUrl && (
-            <img src={venue.imageUrl} alt={venue.name} className="w-20 h-20 rounded-lg object-cover" />
-          )}
-          <div className="flex-1 min-w-0">
-            <h4 className="font-semibold truncate">{venue.name}</h4>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
-              <MapPin className="h-3 w-3" />
-              <span className="truncate">{venue.location}</span>
-            </div>
-            <Badge variant="secondary" className="text-xs mt-2">{venue.category}</Badge>
-          </div>
+      {venue.imageUrl && (
+        <div className="relative aspect-[16/7] overflow-hidden">
+          <img src={venue.imageUrl} alt={venue.name} className="w-full h-full object-cover" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+          <span className="absolute bottom-2 left-3 text-xs font-semibold text-white/90 bg-black/40 px-2 py-0.5 rounded-full backdrop-blur-sm capitalize">{venue.category}</span>
         </div>
-      </CardContent>
-    </Card>
+      )}
+      <div className="p-3">
+        <h4 className="font-semibold text-sm text-foreground truncate mb-1">{venue.name}</h4>
+        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+          <MapPin className="h-3 w-3 flex-shrink-0" />
+          <span className="truncate">{venue.city || venue.location}</span>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -667,118 +663,114 @@ function PostResultCard({ post }: { post: Post & { user: User }; navigate: (path
 
 function SuggestedUserCard({ user, isFollowing, onFollowToggle, isPending, navigate }: { user: User; isFollowing: boolean; onFollowToggle: (id: string) => void; isPending: boolean; navigate: (path: string) => void }) {
   const isSocialUser = user.userType === "social";
-  
+  const displayName = isSocialUser ? (user.displayName || user.username) : (user.organizationName || user.username);
+  const initial = displayName.charAt(0).toUpperCase();
+
   return (
-    <Card 
-      className="w-40 flex-shrink-0 hover-elevate cursor-pointer"
+    <div
+      className="w-44 flex-shrink-0 rounded-xl border border-border/40 bg-card hover:border-primary/30 hover:bg-muted/20 transition-all duration-200 cursor-pointer overflow-hidden"
       onClick={() => navigate(`/profile/${user.username}`)}
       data-testid={`suggested-user-${user.id}`}
     >
-      <CardContent className="p-4 text-center">
-        <Avatar className="h-16 w-16 mx-auto mb-3 border-2 border-primary/20">
-          <AvatarFallback className="bg-primary/10 text-primary text-lg">
-            {isSocialUser 
-              ? (user.displayName?.charAt(0) || user.username.charAt(0)).toUpperCase()
-              : (user.organizationName?.charAt(0) || user.username.charAt(0)).toUpperCase()
-            }
-          </AvatarFallback>
-        </Avatar>
-        <h4 className="font-semibold text-sm truncate">
-          {isSocialUser ? (user.displayName || user.username) : (user.organizationName || user.username)}
-        </h4>
-        <p className="text-xs text-muted-foreground truncate mb-3">@{user.username}</p>
-        <Button
-          size="sm"
-          className="w-full"
-          variant={isFollowing ? "secondary" : "default"}
+      <div className="p-4 flex flex-col items-center text-center">
+        <div className={`rounded-full p-[2px] mb-3 ${!isSocialUser ? "bg-gradient-to-br from-violet-500 to-purple-700" : "bg-border"}`}>
+          <Avatar className="h-16 w-16 ring-2 ring-background">
+            <AvatarImage src={user.avatarUrl || ""} alt={displayName} />
+            <AvatarFallback className="bg-primary/10 text-primary text-lg font-semibold">{initial}</AvatarFallback>
+          </Avatar>
+        </div>
+        <p className="font-semibold text-sm text-foreground truncate w-full">{displayName}</p>
+        <p className="text-xs text-muted-foreground truncate w-full mb-3">@{user.username}</p>
+        <button
+          className={`w-full text-xs font-semibold py-1.5 rounded-full transition-colors ${
+            isFollowing
+              ? "bg-muted text-foreground border border-border hover:bg-muted/70"
+              : "bg-violet-600 text-white hover:bg-violet-500"
+          }`}
           onClick={(e) => { e.stopPropagation(); onFollowToggle(user.id); }}
           disabled={isPending}
           data-testid={`button-follow-suggested-${user.id}`}
         >
           {isFollowing ? (
-            <>
-              <UserCheck className="h-3 w-3 mr-1" />
-              Following
-            </>
+            <span className="flex items-center justify-center gap-1"><UserCheck className="h-3 w-3" />Following</span>
           ) : (
-            <>
-              <UserPlus className="h-3 w-3 mr-1" />
-              Follow
-            </>
+            <span className="flex items-center justify-center gap-1"><UserPlus className="h-3 w-3" />Follow</span>
           )}
-        </Button>
-      </CardContent>
-    </Card>
+        </button>
+      </div>
+    </div>
   );
 }
 
 function TrendingEventCard({ event, navigate }: { event: TrendingEvent; navigate: (path: string) => void }) {
   return (
-    <Card 
-      className="w-72 flex-shrink-0 hover-elevate cursor-pointer overflow-hidden"
+    <div
+      className="w-72 flex-shrink-0 rounded-xl border border-border/40 bg-card hover:border-primary/30 transition-all duration-200 cursor-pointer overflow-hidden"
       onClick={() => navigate(`/events/${event.id}`)}
       data-testid={`trending-event-${event.id}`}
     >
-      {event.imageUrl && (
-        <div className="relative h-32">
+      <div className="relative h-36 bg-muted">
+        {event.imageUrl ? (
           <img src={event.imageUrl} alt={event.title} className="w-full h-full object-cover" />
-          <div className="absolute top-2 right-2">
-            <Badge className="bg-primary">{format(new Date(event.eventDate), "MMM d")}</Badge>
+        ) : (
+          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-violet-900/40 to-purple-900/20">
+            <Calendar className="h-8 w-8 text-violet-400/50" />
           </div>
-        </div>
-      )}
-      <CardContent className="p-4">
-        <h4 className="font-semibold truncate mb-1">{event.title}</h4>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-          <MapPin className="h-3 w-3" />
+        )}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
+        <span className="absolute bottom-2 left-3 text-xs font-semibold text-white bg-violet-600/80 px-2 py-0.5 rounded-full backdrop-blur-sm">
+          {format(new Date(event.eventDate), "MMM d")}
+        </span>
+        {event.ticketPrice === 0 ? (
+          <span className="absolute top-2 right-2 text-xs font-semibold text-green-400 bg-black/50 px-2 py-0.5 rounded-full backdrop-blur-sm">Free</span>
+        ) : (
+          <span className="absolute top-2 right-2 text-xs font-semibold text-white bg-black/50 px-2 py-0.5 rounded-full backdrop-blur-sm">£{(event.ticketPrice / 100).toFixed(2)}</span>
+        )}
+      </div>
+      <div className="p-3">
+        <h4 className="font-semibold text-sm text-foreground truncate mb-1">{event.title}</h4>
+        <div className="flex items-center gap-1 text-xs text-muted-foreground mb-2">
+          <MapPin className="h-3 w-3 flex-shrink-0" />
           <span className="truncate">{event.location}</span>
         </div>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <Users className="h-3 w-3" />
-              {event.rsvpCount} RSVPs
-            </span>
-            <span className="flex items-center gap-1">
-              <Ticket className="h-3 w-3" />
-              {event.ticketCount} sold
-            </span>
-          </div>
-          {event.ticketPrice === 0 ? (
-            <Badge className="bg-green-500/10 text-green-600 text-xs">Free</Badge>
-          ) : (
-            <Badge variant="outline" className="text-xs">£{(event.ticketPrice / 100).toFixed(2)}</Badge>
-          )}
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1"><Users className="h-3 w-3" />{event.rsvpCount} RSVPs</span>
+          <span className="flex items-center gap-1"><Ticket className="h-3 w-3" />{event.ticketCount} sold</span>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
 function TrendingVenueCard({ venue, navigate }: { venue: TrendingVenue; navigate: (path: string) => void }) {
   return (
-    <Card 
-      className="w-64 flex-shrink-0 hover-elevate cursor-pointer overflow-hidden"
+    <div
+      className="w-60 flex-shrink-0 rounded-xl border border-border/40 bg-card hover:border-primary/30 transition-all duration-200 cursor-pointer overflow-hidden"
       onClick={() => navigate(`/venues/${venue.id}`)}
       data-testid={`trending-venue-${venue.id}`}
     >
-      {venue.imageUrl && (
-        <div className="h-28">
+      <div className="relative h-32 bg-muted">
+        {venue.imageUrl ? (
           <img src={venue.imageUrl} alt={venue.name} className="w-full h-full object-cover" />
-        </div>
-      )}
-      <CardContent className="p-4">
-        <h4 className="font-semibold truncate mb-1">{venue.name}</h4>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-          <MapPin className="h-3 w-3" />
-          <span className="truncate">{venue.city || venue.location}</span>
-        </div>
+        ) : (
+          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-800/60 to-slate-900/40">
+            <Building2 className="h-8 w-8 text-slate-400/50" />
+          </div>
+        )}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+        <span className="absolute bottom-2 left-3 text-[10px] font-semibold text-white/90 bg-black/40 px-2 py-0.5 rounded-full backdrop-blur-sm capitalize">{venue.category}</span>
+      </div>
+      <div className="p-3">
+        <h4 className="font-semibold text-sm text-foreground truncate mb-1">{venue.name}</h4>
         <div className="flex items-center justify-between">
-          <Badge variant="secondary" className="text-xs">{venue.category}</Badge>
-          <span className="text-xs text-muted-foreground">{venue.viewCount} views</span>
+          <div className="flex items-center gap-1 text-xs text-muted-foreground truncate">
+            <MapPin className="h-3 w-3 flex-shrink-0" />
+            <span className="truncate">{venue.city || venue.location}</span>
+          </div>
+          <span className="text-xs text-muted-foreground flex-shrink-0 ml-2">{venue.viewCount} views</span>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
