@@ -355,7 +355,7 @@ export default function CreateStoryModal({ open, onClose, onCreateStory }: Creat
                     </Label>
                     <p className="text-xs text-muted-foreground">
                       {privacy === "public" 
-                        ? "Anyone on VibePulse can see this" 
+                        ? "Anyone on Vib3Pulse can see this"
                         : "Only selected followers can see this"}
                     </p>
                   </div>

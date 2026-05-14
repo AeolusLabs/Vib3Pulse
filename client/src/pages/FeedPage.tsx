@@ -350,7 +350,7 @@ export default function FeedPage() {
         content: story.imageUrl,
         videoUrl: story.videoUrl || null,
         caption: story.caption || null,
-        timestamp: new Date(story.createdAt).toLocaleString(),
+        timestamp: story.createdAt,
         likeCount: story.likeCount || 0,
         isLiked: story.isLiked || false,
         isReshare: story.isReshare || false,

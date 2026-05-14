@@ -40,7 +40,7 @@ export default function Navigation({ onSearch, onCreateEvent }: NavigationProps)
             
             <Link href="/discover" className="no-underline">
               <h1 className="font-serif text-2xl font-bold text-primary hover-elevate px-3 py-1 rounded-md" data-testid="link-home">
-                VibePulse
+                Vib3Pulse
               </h1>
             </Link>
           </div>

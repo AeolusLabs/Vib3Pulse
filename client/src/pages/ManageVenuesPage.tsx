@@ -247,7 +247,7 @@ export default function ManageVenuesPage() {
               </div>
               <CardTitle className="text-2xl">Venue Management</CardTitle>
               <CardDescription className="text-base">
-                List your club, bar, or lounge on VibePulse and start selling entry tickets
+                List your club, bar, or lounge on Vib3Pulse and start selling entry tickets
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">

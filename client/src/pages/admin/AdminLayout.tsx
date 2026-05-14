@@ -157,7 +157,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             {sidebarOpen && (
               <div className="flex items-center gap-2">
                 <Shield className="w-6 h-6 text-purple-400" />
-                <span className="font-bold text-white">VibePulse Admin</span>
+                <span className="font-bold text-white">Vib3Pulse Admin</span>
               </div>
             )}
             <Button

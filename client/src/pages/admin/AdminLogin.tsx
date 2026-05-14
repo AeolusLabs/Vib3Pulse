@@ -48,7 +48,7 @@ export default function AdminLogin() {
           <div className="mx-auto w-16 h-16 bg-purple-600/20 rounded-full flex items-center justify-center">
             <Shield className="w-8 h-8 text-purple-400" />
           </div>
-          <CardTitle className="text-2xl text-white">VibePulse Admin</CardTitle>
+          <CardTitle className="text-2xl text-white">Vib3Pulse Admin</CardTitle>
           <CardDescription className="text-slate-400">
             Staff-only access. Enter your credentials to continue.
           </CardDescription>

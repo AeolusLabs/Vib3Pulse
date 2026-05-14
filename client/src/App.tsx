@@ -180,7 +180,7 @@ function SWUpdatePrompt() {
       const registration = (event as CustomEvent).detail as ServiceWorkerRegistration;
       toast({
         title: "Update Available",
-        description: "A new version of VibePulse is available.",
+        description: "A new version of Vib3Pulse is available.",
         action: (
           <ToastAction
             altText="Refresh"

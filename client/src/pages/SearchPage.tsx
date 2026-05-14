@@ -4,7 +4,6 @@ import { useLocation } from "wouter";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -379,15 +378,15 @@ export default function SearchPage() {
                     ))}
                   </div>
                 ) : (
-                  <Card>
-                    <CardContent className="py-8 text-center">
-                      <Users className="h-12 w-12 mx-auto text-muted-foreground/30 mb-4" />
-                      <p className="text-muted-foreground">No recommendations yet</p>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Add interests and location to your profile to get personalized recommendations
-                      </p>
-                    </CardContent>
-                  </Card>
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center mb-3">
+                      <Users className="h-6 w-6 text-primary/50" />
+                    </div>
+                    <p className="text-muted-foreground text-sm font-medium">No recommendations yet</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Add interests and location to your profile to get personalized recommendations
+                    </p>
+                  </div>
                 )}
               </section>
             )}

@@ -272,7 +272,7 @@ export default function AccountSettingsPage() {
                 Push Notifications
               </CardTitle>
               <CardDescription>
-                Get notified about messages, likes, and activity even when VibePulse isn't open.
+                Get notified about messages, likes, and activity even when Vib3Pulse isn't open.
               </CardDescription>
             </CardHeader>
             <CardContent>

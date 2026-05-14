@@ -127,7 +127,7 @@ export default function AdminSetup() {
           <div className="mx-auto w-16 h-16 bg-purple-600/20 rounded-full flex items-center justify-center">
             <Shield className="w-8 h-8 text-purple-400" />
           </div>
-          <CardTitle className="text-2xl text-white">VibePulse Admin Setup</CardTitle>
+          <CardTitle className="text-2xl text-white">Vib3Pulse Admin Setup</CardTitle>
           <CardDescription className="text-slate-400">
             Create your first Super Admin account to access the admin panel.
           </CardDescription>
