@@ -41,6 +41,7 @@ import CommentDialog from "@/components/CommentDialog";
 import LinkPreviewCard, { extractFirstUrl } from "@/components/LinkPreviewCard";
 import ImageGrid from "@/components/ImageGrid";
 import FeedVideoPlayer from "@/components/FeedVideoPlayer";
+import EventDetailsModal from "@/components/EventDetailsModal";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import type { Event, Venue } from "@shared/schema";
@@ -181,6 +182,7 @@ export default function FeedPost({
   const { data: currentUser } = useAuth();
   const [commentDialogOpen, setCommentDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [eventModalEvent, setEventModalEvent] = useState<Event | null>(null);
   const [likeAnimating, setLikeAnimating] = useState(false);
   const [displayTime, setDisplayTime] = useState(() =>
     createdAt ? formatRelativeTime(createdAt) : timestamp || "Just now"
@@ -506,33 +508,35 @@ export default function FeedPost({
             </div>
           )}
 
-          {/* Attached event */}
+          {/* Attached event — full-width banner with modal on click */}
           {displayEvent && (
             <Card
-              className="mt-3 border border-primary/25 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors"
-              onClick={(e) => { e.stopPropagation(); navigate(`/discover?event=${displayEvent.id}`); }}
+              className="mt-3 border border-primary/25 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors overflow-hidden"
+              onClick={(e) => { e.stopPropagation(); setEventModalEvent(displayEvent); }}
               data-testid={`attached-event-${id}`}
             >
-              <CardContent className="p-3">
-                <div className="flex gap-3">
-                  {displayEvent.imageUrl && (
-                    <img src={displayEvent.imageUrl} alt={displayEvent.title} className="w-14 h-14 rounded-lg object-cover flex-shrink-0" />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <Badge variant="secondary" className="mb-1 text-xs">
-                      <Calendar className="h-3 w-3 mr-1" />Event
-                    </Badge>
-                    <h4 className="font-semibold text-sm line-clamp-1">{displayEvent.title}</h4>
-                    <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                      <Calendar className="h-3 w-3" />
-                      {format(new Date(displayEvent.eventDate), "MMM d, yyyy")}
-                    </p>
-                    <p className="text-xs text-muted-foreground flex items-center gap-1">
-                      <MapPin className="h-3 w-3" />
-                      <span className="line-clamp-1">{displayEvent.location}</span>
-                    </p>
-                  </div>
+              {displayEvent.imageUrl && (
+                <div className="w-full h-40 overflow-hidden">
+                  <img
+                    src={displayEvent.imageUrl}
+                    alt={displayEvent.title}
+                    className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
+                  />
                 </div>
+              )}
+              <CardContent className="p-3">
+                <Badge variant="secondary" className="mb-1.5 text-xs">
+                  <Calendar className="h-3 w-3 mr-1" />Event
+                </Badge>
+                <h4 className="font-semibold text-sm line-clamp-1">{displayEvent.title}</h4>
+                <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                  <Calendar className="h-3 w-3" />
+                  {format(new Date(displayEvent.eventDate), "MMM d, yyyy")}
+                </p>
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <MapPin className="h-3 w-3" />
+                  <span className="line-clamp-1">{displayEvent.location}</span>
+                </p>
               </CardContent>
             </Card>
           )}
@@ -689,6 +693,13 @@ export default function FeedPost({
           </div>
         </div>
       </div>
+
+      {eventModalEvent && (
+        <EventDetailsModal
+          event={eventModalEvent}
+          onClose={() => setEventModalEvent(null)}
+        />
+      )}
 
       <CommentDialog
         open={commentDialogOpen}

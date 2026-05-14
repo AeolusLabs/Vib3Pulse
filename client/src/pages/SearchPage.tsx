@@ -11,6 +11,7 @@ import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import FeedPost from "@/components/FeedPost";
+import EventDetailsModal from "@/components/EventDetailsModal";
 import {
   Search,
   UserPlus,
@@ -56,6 +57,7 @@ export default function SearchPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [activeType, setActiveType] = useState("all");
+  const [selectedEvent, setSelectedEvent] = useState<TrendingEvent | null>(null);
   const [, navigate] = useLocation();
   const { toast } = useToast();
 
@@ -443,7 +445,7 @@ export default function SearchPage() {
                       ))
                     ) : (
                       trendingEvents.slice(0, 8).map((event) => (
-                        <TrendingEventCard key={event.id} event={event} navigate={navigate} />
+                        <TrendingEventCard key={event.id} event={event} onSelect={setSelectedEvent} />
                       ))
                     )}
                   </div>
@@ -506,6 +508,13 @@ export default function SearchPage() {
       </main>
 
       <BottomNavigation />
+
+      {selectedEvent && (
+        <EventDetailsModal
+          event={selectedEvent}
+          onClose={() => setSelectedEvent(null)}
+        />
+      )}
     </div>
   );
 }
@@ -613,7 +622,7 @@ function VenueResultCard({ venue, navigate }: { venue: Venue; navigate: (path: s
   return (
     <div
       className="rounded-xl border border-border/40 bg-card hover:border-primary/30 hover:bg-muted/10 transition-all duration-200 cursor-pointer overflow-hidden"
-      onClick={() => navigate(`/venues/${venue.id}`)}
+      onClick={() => navigate(`/venue/${venue.id}`)}
       data-testid={`search-venue-${venue.id}`}
     >
       {venue.imageUrl && (
@@ -701,11 +710,11 @@ function SuggestedUserCard({ user, isFollowing, onFollowToggle, isPending, navig
   );
 }
 
-function TrendingEventCard({ event, navigate }: { event: TrendingEvent; navigate: (path: string) => void }) {
+function TrendingEventCard({ event, onSelect }: { event: TrendingEvent; onSelect: (event: TrendingEvent) => void }) {
   return (
     <div
       className="w-72 flex-shrink-0 rounded-xl border border-border/40 bg-card hover:border-primary/30 transition-all duration-200 cursor-pointer overflow-hidden"
-      onClick={() => navigate(`/events/${event.id}`)}
+      onClick={() => onSelect(event)}
       data-testid={`trending-event-${event.id}`}
     >
       <div className="relative h-36 bg-muted">
@@ -745,7 +754,7 @@ function TrendingVenueCard({ venue, navigate }: { venue: TrendingVenue; navigate
   return (
     <div
       className="w-60 flex-shrink-0 rounded-xl border border-border/40 bg-card hover:border-primary/30 transition-all duration-200 cursor-pointer overflow-hidden"
-      onClick={() => navigate(`/venues/${venue.id}`)}
+      onClick={() => navigate(`/venue/${venue.id}`)}
       data-testid={`trending-venue-${venue.id}`}
     >
       <div className="relative h-32 bg-muted">

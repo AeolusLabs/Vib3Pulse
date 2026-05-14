@@ -489,8 +489,8 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
         return;
       }
 
-      if (file.size > 3 * 1024 * 1024) {
-        toast({ title: "File too large", description: "Please upload an image smaller than 3MB.", variant: "destructive" });
+      if (file.size > 5 * 1024 * 1024) {
+        toast({ title: "File too large", description: "Please upload an image smaller than 5MB.", variant: "destructive" });
         return;
       }
 
@@ -649,19 +649,9 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <div className="flex items-center justify-between">
-            <DialogTitle className="text-2xl">
-              {isEditMode ? 'Edit Event' : 'Create Event'} - Step {step} of 3
-            </DialogTitle>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onClose}
-              data-testid="button-close-event-modal"
-            >
-              <X className="h-5 w-5" />
-            </Button>
-          </div>
+          <DialogTitle className="text-2xl">
+            {isEditMode ? 'Edit Event' : 'Create Event'} - Step {step} of 3
+          </DialogTitle>
         </DialogHeader>
 
         {/* Step indicator */}
@@ -958,7 +948,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                       <Upload className="h-12 w-12 text-muted-foreground" />
                       <div className="text-center">
                         <p className="text-sm font-medium">Click to upload thumbnail</p>
-                        <p className="text-xs text-muted-foreground">JPEG, PNG, WebP up to 3MB (not HEIC)</p>
+                        <p className="text-xs text-muted-foreground">JPEG, PNG, WebP up to 5MB (not HEIC)</p>
                       </div>
                     </>
                   )}

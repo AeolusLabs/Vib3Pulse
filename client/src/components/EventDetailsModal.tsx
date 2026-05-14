@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
-import { Calendar, MapPin, Users, Ticket, CheckCircle, Minus, Plus, ExternalLink, Share2 } from "lucide-react";
+import { Calendar, MapPin, Users, Ticket, CheckCircle, Minus, Plus, ExternalLink, Share2, X } from "lucide-react";
 import { format } from "date-fns";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Event } from "@shared/schema";
@@ -44,6 +44,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
   const [showTierSelection, setShowTierSelection] = useState(false);
   const [selectedTier, setSelectedTier] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
 
   const currency = (event as any).currency as string | undefined;
 
@@ -140,17 +141,45 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
 
   return (
     <>
+      {/* Full-screen image lightbox — renders above modal */}
+      {lightboxOpen && event.imageUrl && (
+        <div
+          className="fixed inset-0 z-[200] bg-black/92 flex items-center justify-center p-4"
+          onClick={() => setLightboxOpen(false)}
+          role="dialog"
+          aria-label="Full image view"
+        >
+          <button
+            className="absolute top-4 right-4 text-white bg-white/10 hover:bg-white/25 rounded-full p-2 transition-colors"
+            onClick={() => setLightboxOpen(false)}
+            aria-label="Close image"
+          >
+            <X className="h-6 w-6" />
+          </button>
+          <img
+            src={event.imageUrl}
+            alt={event.title}
+            className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+
       <Dialog open={true} onOpenChange={onClose}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto p-0" data-testid="modal-event-details">
-          {/* Hero image — full bleed, no padding */}
+          {/* Hero image — full bleed, clickable to open lightbox */}
           {event.imageUrl && (
-            <div className="aspect-video w-full overflow-hidden rounded-t-lg flex-shrink-0">
+            <button
+              className="aspect-video w-full overflow-hidden rounded-t-lg flex-shrink-0 cursor-zoom-in block"
+              onClick={() => setLightboxOpen(true)}
+              aria-label="View full image"
+            >
               <img
                 src={event.imageUrl}
                 alt={event.title}
-                className="w-full h-full object-cover"
+                className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
               />
-            </div>
+            </button>
           )}
 
           {/* Main content */}

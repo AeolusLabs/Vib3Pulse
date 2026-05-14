@@ -8,6 +8,7 @@ import { useState } from "react";
 import { Edit, Trash2, BarChart3, Eye, EyeOff, Calendar, MapPin, QrCode, Megaphone, Sparkles } from "lucide-react";
 import { Link } from "wouter";
 import CreateEventModal from "@/components/CreateEventModal";
+import EventDetailsModal from "@/components/EventDetailsModal";
 import { PromoteEventDialog } from "@/components/PromoteEventDialog";
 import { EventAnalytics } from "@/components/EventAnalytics";
 import yogaEvent from '@assets/generated_images/Outdoor_yoga_wellness_event_c02f75d1.png';
@@ -34,6 +35,7 @@ interface Event {
 export default function ManageEventsPage() {
   const [createEventOpen, setCreateEventOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<DBEvent | undefined>(undefined);
+  const [viewingEvent, setViewingEvent] = useState<DBEvent | null>(null);
   const [promoteEventId, setPromoteEventId] = useState<string | null>(null);
   const [promoteEventTitle, setPromoteEventTitle] = useState<string>("");
   const [showAnalyticsFor, setShowAnalyticsFor] = useState<string | null>(null);
@@ -102,14 +104,18 @@ export default function ManageEventsPage() {
     //todo: implement publish/unpublish functionality
   };
 
-  const EventManagementCard = ({ event }: { event: Event }) => (
+  const EventManagementCard = ({ event, onViewDetails }: { event: Event; onViewDetails: () => void }) => (
     <Card className="overflow-hidden">
       <CardHeader className="p-0">
-        <div className="relative h-48">
+        <div
+          className="relative h-48 cursor-pointer group"
+          onClick={onViewDetails}
+          title="View event details"
+        >
           <img
             src={event.image}
             alt={event.title}
-            className="w-full h-full object-cover"
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
           />
           <div className="absolute top-2 right-2 flex flex-col gap-1">
             {event.isPromoted && (
@@ -293,7 +299,14 @@ export default function ManageEventsPage() {
               <>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {publishedEvents.map((event) => (
-                    <EventManagementCard key={event.id} event={event} />
+                    <EventManagementCard
+                      key={event.id}
+                      event={event}
+                      onViewDetails={() => {
+                        const dbEvent = dbEvents.find(e => e.id === event.id);
+                        if (dbEvent) setViewingEvent(dbEvent);
+                      }}
+                    />
                   ))}
                 </div>
                 {publishedEvents.length === 0 && (
@@ -314,7 +327,14 @@ export default function ManageEventsPage() {
               <>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {draftEvents.map((event) => (
-                    <EventManagementCard key={event.id} event={event} />
+                    <EventManagementCard
+                      key={event.id}
+                      event={event}
+                      onViewDetails={() => {
+                        const dbEvent = dbEvents.find(e => e.id === event.id);
+                        if (dbEvent) setViewingEvent(dbEvent);
+                      }}
+                    />
                   ))}
                 </div>
                 {draftEvents.length === 0 && (
@@ -335,7 +355,14 @@ export default function ManageEventsPage() {
               <>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {pastEvents.map((event) => (
-                    <EventManagementCard key={event.id} event={event} />
+                    <EventManagementCard
+                      key={event.id}
+                      event={event}
+                      onViewDetails={() => {
+                        const dbEvent = dbEvents.find(e => e.id === event.id);
+                        if (dbEvent) setViewingEvent(dbEvent);
+                      }}
+                    />
                   ))}
                 </div>
                 {pastEvents.length === 0 && (
@@ -357,6 +384,13 @@ export default function ManageEventsPage() {
         }}
         event={editingEvent}
       />
+
+      {viewingEvent && (
+        <EventDetailsModal
+          event={viewingEvent}
+          onClose={() => setViewingEvent(null)}
+        />
+      )}
 
       {promoteEventId && (
         <PromoteEventDialog
