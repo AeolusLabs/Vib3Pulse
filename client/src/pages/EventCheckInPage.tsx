@@ -10,6 +10,8 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { format } from "date-fns";
 import type { Event, Ticket, User } from "@shared/schema";
+import Navigation from "@/components/Navigation";
+import BottomNavigation from "@/components/BottomNavigation";
 
 type TicketWithUser = Ticket & { user: User };
 
@@ -135,35 +137,35 @@ export default function EventCheckInPage() {
   const totalTickets = checkIns?.length || 0;
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-50 border-b bg-card">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-4 h-16">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => navigate("/manage-events")}
-              data-testid="button-back"
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </Button>
-            <div className="flex-1">
-              <h1 className="text-xl font-bold font-display" data-testid="heading-check-in">
-                Event Check-In
-              </h1>
-              {event && (
-                <p className="text-sm text-muted-foreground">{event.title}</p>
-              )}
-            </div>
-            <Badge variant="secondary" data-testid="badge-check-in-count">
-              <Users className="h-3 w-3 mr-1" />
-              {checkedInTickets.length} / {totalTickets}
-            </Badge>
-          </div>
-        </div>
-      </header>
+    <div className="min-h-screen bg-background pb-20 md:pb-0">
+      <Navigation />
 
       <main className="container px-4 py-6 max-w-4xl mx-auto space-y-6">
+        <div className="flex items-center gap-3 flex-wrap">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate("/manage-events")}
+            data-testid="button-back"
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Events
+          </Button>
+        </div>
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h1 className="text-3xl font-serif font-bold" data-testid="heading-check-in">
+              Event Check-In
+            </h1>
+            {event && (
+              <p className="text-muted-foreground mt-1">{event.title}</p>
+            )}
+          </div>
+          <Badge variant="secondary" className="text-sm px-3 py-1" data-testid="badge-check-in-count">
+            <Users className="h-4 w-4 mr-1" />
+            {checkedInTickets.length} / {totalTickets} checked in
+          </Badge>
+        </div>
         {/* QR Scanner Card */}
         <Card>
           <CardHeader>
@@ -287,6 +289,8 @@ export default function EventCheckInPage() {
           </CardContent>
         </Card>
       </main>
+
+      <BottomNavigation />
     </div>
   );
 }

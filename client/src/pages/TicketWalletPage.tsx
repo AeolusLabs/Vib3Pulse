@@ -3,12 +3,13 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar, MapPin, Ticket as TicketIcon, QrCode, Loader2, ArrowLeft } from "lucide-react";
+import { Calendar, MapPin, Ticket as TicketIcon, QrCode, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import type { Ticket as TicketType, Event } from "@shared/schema";
 
@@ -115,24 +116,13 @@ export default function TicketWalletPage() {
 
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
-      <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur">
-        <div className="container flex h-16 items-center gap-4 px-4">
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            onClick={() => window.history.back()}
-            data-testid="button-back"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <div className="flex items-center gap-2">
-            <TicketIcon className="h-6 w-6 text-primary" />
-            <h1 className="text-xl font-bold font-display" data-testid="heading-ticket-wallet">My Tickets</h1>
-          </div>
-        </div>
-      </header>
+      <Navigation />
 
       <main className="container px-4 py-6 max-w-4xl mx-auto">
+        <h1 className="text-3xl font-serif font-bold mb-6 flex items-center gap-3" data-testid="heading-ticket-wallet">
+          <TicketIcon className="h-7 w-7 text-primary" />
+          My Tickets
+        </h1>
         {isLoading ? (
           <div className="flex items-center justify-center py-16">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />

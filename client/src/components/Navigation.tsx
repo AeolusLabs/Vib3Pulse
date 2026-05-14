@@ -1,4 +1,4 @@
-import { Search, Plus, User, Calendar, LogOut, Ticket, Shield, AlertTriangle, Building2, Settings } from "lucide-react";
+import { Search, User, Calendar, LogOut, Ticket, Shield, AlertTriangle, Building2, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -19,10 +19,9 @@ import { EmergencyButton } from "./safety/EmergencyButton";
 
 interface NavigationProps {
   onSearch?: (query: string) => void;
-  onCreateEvent?: () => void;
 }
 
-export default function Navigation({ onSearch, onCreateEvent }: NavigationProps) {
+export default function Navigation({ onSearch }: NavigationProps) {
   const [, setLocation] = useLocation();
   const { data: user, isLoading } = useAuth();
 
@@ -59,18 +58,6 @@ export default function Navigation({ onSearch, onCreateEvent }: NavigationProps)
           </div>
 
           <div className="flex items-center gap-2">
-            {!isLoading && user?.userType === "organizer" && (
-              <Button
-                variant="default"
-                size="default"
-                onClick={onCreateEvent}
-                data-testid="button-create-event"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Create Event
-              </Button>
-            )}
-
             {!isLoading && user?.userType === "social" && <EmergencyButton />}
 
             {!isLoading && user && <NotificationBell />}

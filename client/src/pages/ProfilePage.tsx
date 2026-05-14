@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams, Link } from "wouter";
 import { differenceInYears } from "date-fns";
@@ -152,6 +152,12 @@ export default function ProfilePage() {
     },
     enabled: !!profile?.id && activeTab === "reposts",
   });
+
+  useEffect(() => {
+    if (profile?.userType === "organizer") {
+      setActiveTab("events");
+    }
+  }, [profile?.userType]);
 
   const followMutation = useMutation({
     mutationFn: async () => {
@@ -665,69 +671,99 @@ export default function ProfilePage() {
             </TabsContent>
           </Tabs>
         ) : (
-          /* Organizer events section */
-          <div className="border-t border-border mt-2">
-            <div className="px-4 pt-4 pb-2">
-              <h2 className="font-semibold text-foreground" data-testid="heading-events">
-                Events Created
-              </h2>
-            </div>
-            {profile.events && profile.events.length > 0 ? (
-              <div className="divide-y divide-border">
-                {profile.events.map((event) => (
-                  <Link key={event.id} href={`/event/${event.id}`}>
-                    <div
-                      className="flex gap-4 p-4 hover:bg-muted/40 transition-colors cursor-pointer"
-                      data-testid={`card-event-${event.id}`}
-                    >
-                      {event.imageUrl && (
-                        <div className="w-20 h-20 rounded-lg overflow-hidden flex-shrink-0 bg-muted">
-                          <img
-                            src={event.imageUrl}
-                            alt={event.title}
-                            className="w-full h-full object-cover"
-                          />
-                        </div>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-foreground line-clamp-1 mb-1" data-testid="text-event-title">
-                          {event.title}
-                        </p>
-                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
-                          <Calendar className="h-3.5 w-3.5" />
-                          {format(new Date(event.eventDate), "MMM d, yyyy · h:mm a")}
-                        </div>
-                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1.5">
-                          <MapPin className="h-3.5 w-3.5" />
-                          <span className="line-clamp-1">{event.location}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {event.ticketPrice === 0 ? (
-                            <Badge variant="secondary" className="text-xs h-5">FREE</Badge>
-                          ) : (
-                            <span className="flex items-center gap-0.5 text-xs text-primary font-semibold">
-                              <PoundSterling className="h-3 w-3" />
-                              {(event.ticketPrice / 100).toFixed(2)}
+          /* Organizer profile tabs — same visual treatment as social user */
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full mt-2">
+            <TabsList
+              className="w-full grid grid-cols-2 rounded-none border-b border-border bg-transparent h-auto p-0"
+              data-testid="profile-tabs"
+            >
+              {[
+                { value: "events", label: "Events", icon: Calendar },
+                { value: "posts", label: "Posts", icon: FileText },
+              ].map(({ value, label, icon: Icon }) => (
+                <TabsTrigger
+                  key={value}
+                  value={value}
+                  className={cn(
+                    "flex items-center gap-2 rounded-none border-b-2 border-transparent py-3 text-sm font-medium text-muted-foreground transition-colors",
+                    "data-[state=active]:border-primary data-[state=active]:text-foreground data-[state=active]:bg-transparent",
+                    "hover:bg-muted/50 hover:text-foreground"
+                  )}
+                  data-testid={`tab-${value}`}
+                >
+                  <Icon className="h-4 w-4" />
+                  {label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+
+            <TabsContent value="events" className="mt-0" data-testid="content-events">
+              {profile.events && profile.events.length > 0 ? (
+                <div className="divide-y divide-border">
+                  {profile.events.map((event) => (
+                    <Link key={event.id} href={`/event/${event.id}`}>
+                      <div
+                        className="flex gap-4 p-4 hover:bg-muted/40 transition-colors cursor-pointer"
+                        data-testid={`card-event-${event.id}`}
+                      >
+                        {event.imageUrl && (
+                          <div className="w-20 h-20 rounded-lg overflow-hidden flex-shrink-0 bg-muted">
+                            <img
+                              src={event.imageUrl}
+                              alt={event.title}
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-foreground line-clamp-1 mb-1" data-testid="text-event-title">
+                            {event.title}
+                          </p>
+                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
+                            <Calendar className="h-3.5 w-3.5" />
+                            {format(new Date(event.eventDate), "MMM d, yyyy · h:mm a")}
+                          </div>
+                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1.5">
+                            <MapPin className="h-3.5 w-3.5" />
+                            <span className="line-clamp-1">{event.location}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {event.ticketPrice === 0 ? (
+                              <Badge variant="secondary" className="text-xs h-5">FREE</Badge>
+                            ) : (
+                              <span className="flex items-center gap-0.5 text-xs text-primary font-semibold">
+                                <PoundSterling className="h-3 w-3" />
+                                {(event.ticketPrice / 100).toFixed(2)}
+                              </span>
+                            )}
+                            <span className="text-xs text-muted-foreground">
+                              {event.ticketsAvailable} available
                             </span>
-                          )}
-                          <span className="text-xs text-muted-foreground">
-                            {event.ticketsAvailable} available
-                          </span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
-                <Calendar className="h-12 w-12 text-muted-foreground/40 mb-3" />
-                <p className="text-muted-foreground font-medium" data-testid="text-no-events">
-                  No events created yet
-                </p>
-              </div>
-            )}
-          </div>
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+                  <Calendar className="h-12 w-12 text-muted-foreground/40 mb-3" />
+                  <p className="text-muted-foreground font-medium" data-testid="text-no-events">
+                    No events created yet
+                  </p>
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="posts" className="mt-0" data-testid="content-posts">
+              <PostsList
+                posts={userPosts}
+                loading={postsLoading}
+                emptyIcon={FileText}
+                emptyText="No posts yet"
+              />
+            </TabsContent>
+          </Tabs>
         )}
       </main>
 

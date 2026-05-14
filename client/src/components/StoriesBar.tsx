@@ -19,7 +19,7 @@ interface StoriesBarProps {
 
 export default function StoriesBar({ stories, onStoryClick, onCreateStory }: StoriesBarProps) {
   return (
-    <div className="bg-card border-b">
+    <div className="bg-background border-b">
       <ScrollArea className="w-full">
         <div className="flex gap-4 p-4 max-w-[1200px] mx-auto">
           <StoryCircle

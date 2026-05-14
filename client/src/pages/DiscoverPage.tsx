@@ -261,10 +261,7 @@ export default function DiscoverPage() {
 
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
-      <Navigation
-        onSearch={setSearchQuery}
-        onCreateEvent={() => setCreateEventOpen(true)}
-      />
+      <Navigation onSearch={setSearchQuery} />
       <HeroSection onSearch={setSearchQuery} onCategoryClick={setSelectedCategory} />
       
       <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">

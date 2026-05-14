@@ -8,6 +8,7 @@ import { format } from "date-fns";
 import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import type { Rsvp, Event } from "@shared/schema";
 
@@ -58,16 +59,13 @@ export default function MyRsvpsPage() {
 
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
-      <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur">
-        <div className="container flex h-16 items-center justify-between px-4">
-          <div className="flex items-center gap-2">
-            <CalendarIcon className="h-6 w-6 text-primary" />
-            <h1 className="text-xl font-bold font-display" data-testid="heading-my-rsvps">My RSVPs</h1>
-          </div>
-        </div>
-      </header>
+      <Navigation />
 
       <main className="container max-w-4xl mx-auto px-4 py-8">
+        <h1 className="text-3xl font-serif font-bold mb-6 flex items-center gap-3" data-testid="heading-my-rsvps">
+          <CalendarIcon className="h-7 w-7 text-primary" />
+          My RSVPs
+        </h1>
         {isLoading ? (
           <div className="text-center py-16">
             <p className="text-muted-foreground">Loading your RSVPs...</p>

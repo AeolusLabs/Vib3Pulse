@@ -6,8 +6,10 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { ChevronLeft, AlertTriangle, Clock, MapPin, Timer, CheckCircle, XCircle } from "lucide-react";
+import { AlertTriangle, Clock, MapPin, Timer, CheckCircle, XCircle } from "lucide-react";
 import type { User } from "@shared/schema";
+import Navigation from "@/components/Navigation";
+import BottomNavigation from "@/components/BottomNavigation";
 
 interface SafetyAlert {
   id: string;
@@ -78,14 +80,10 @@ export default function DistressAlertsPage() {
   const resolvedAlerts = alerts.filter((a) => a.status !== "active");
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="max-w-2xl mx-auto p-4 space-y-6">
-        <header className="flex items-center gap-3 py-2">
-          <Button variant="ghost" size="icon" onClick={() => window.history.back()} aria-label="Go back">
-            <ChevronLeft className="h-5 w-5" />
-          </Button>
-          <h1 className="text-xl font-semibold">Safety Alerts</h1>
-        </header>
+    <div className="min-h-screen bg-background pb-20 md:pb-0">
+      <Navigation />
+      <main className="max-w-2xl mx-auto px-4 py-8 space-y-6">
+        <h1 className="text-3xl font-serif font-bold">Safety Alerts</h1>
 
         {isLoading ? (
           <div className="space-y-3">
@@ -124,7 +122,8 @@ export default function DistressAlertsPage() {
             )}
           </div>
         )}
-      </div>
+      </main>
+      <BottomNavigation />
     </div>
   );
 }
