@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -141,16 +142,16 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
 
   return (
     <>
-      {/* Full-screen image lightbox — renders above modal */}
-      {lightboxOpen && event.imageUrl && (
+      {/* Full-screen lightbox — portalled to body so it sits above Radix's stacking context */}
+      {lightboxOpen && event.imageUrl && createPortal(
         <div
-          className="fixed inset-0 z-[200] bg-black/92 flex items-center justify-center p-4"
+          className="fixed inset-0 z-[9999] bg-black flex items-center justify-center"
           onClick={() => setLightboxOpen(false)}
           role="dialog"
           aria-label="Full image view"
         >
           <button
-            className="absolute top-4 right-4 text-white bg-white/10 hover:bg-white/25 rounded-full p-2 transition-colors"
+            className="absolute top-4 right-4 text-white bg-white/20 hover:bg-white/40 rounded-full p-2.5 transition-colors"
             onClick={() => setLightboxOpen(false)}
             aria-label="Close image"
           >
@@ -159,25 +160,26 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
           <img
             src={event.imageUrl}
             alt={event.title}
-            className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
+            className="max-w-full max-h-screen object-contain"
             onClick={(e) => e.stopPropagation()}
           />
-        </div>
+        </div>,
+        document.body
       )}
 
       <Dialog open={true} onOpenChange={onClose}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto p-0" data-testid="modal-event-details">
-          {/* Hero image — full bleed, clickable to open lightbox */}
+          {/* Hero image — shows full image uncropped, click to open fullscreen lightbox */}
           {event.imageUrl && (
             <button
-              className="aspect-video w-full overflow-hidden rounded-t-lg flex-shrink-0 cursor-zoom-in block"
+              className="w-full overflow-hidden rounded-t-lg flex-shrink-0 cursor-zoom-in block bg-black"
               onClick={() => setLightboxOpen(true)}
               aria-label="View full image"
             >
               <img
                 src={event.imageUrl}
                 alt={event.title}
-                className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
+                className="w-full max-h-72 object-contain hover:opacity-90 transition-opacity duration-200"
               />
             </button>
           )}

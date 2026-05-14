@@ -364,9 +364,11 @@ export default function FeedPost({
 
   // ── Media ──────────────────────────────────────────────────────────────────
 
+  // When a post has an attached event, skip post.imageUrl — the event card
+  // shows the current image. This prevents a stale/black image appearing above the card.
   const allImages = [
     ...imageUrls,
-    ...(image && !imageUrls.includes(image) ? [image] : []),
+    ...(image && !imageUrls.includes(image) && !eventId ? [image] : []),
   ].filter(Boolean) as string[];
 
   // ── Wrapper ────────────────────────────────────────────────────────────────
