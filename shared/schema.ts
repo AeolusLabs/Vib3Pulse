@@ -822,6 +822,28 @@ export const insertVenueTicketSchema = createInsertSchema(venueTickets).omit({
 export type InsertVenueTicket = z.infer<typeof insertVenueTicketSchema>;
 export type VenueTicket = typeof venueTickets.$inferSelect;
 
+// ============================================
+// STAFF ACCESS CODES - for event check-in delegation
+// ============================================
+
+export const eventStaffAccessCodes = pgTable("event_staff_access_codes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventId: varchar("event_id").notNull().references(() => events.id, { onDelete: "cascade" }),
+  organizerId: varchar("organizer_id").notNull().references(() => users.id),
+  code: varchar("code", { length: 6 }).notNull(),
+  scannerToken: varchar("scanner_token").unique(),
+  status: text("status").notNull().default("pending"), // 'pending' | 'active' | 'revoked'
+  expiresAt: timestamp("expires_at").notNull(),
+  validatedBy: varchar("validated_by"),
+  validatedDeviceIp: varchar("validated_device_ip"),
+  validatedDeviceUa: text("validated_device_ua"),
+  redeemedAt: timestamp("redeemed_at"),
+  scanCount: integer("scan_count").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export type EventStaffAccessCode = typeof eventStaffAccessCodes.$inferSelect;
+
 // Venue analytics for tracking views and clicks
 export const venueAnalytics = pgTable("venue_analytics", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

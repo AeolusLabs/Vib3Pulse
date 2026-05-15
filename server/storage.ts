@@ -87,6 +87,7 @@ import {
   type InsertPollVote,
   type PushSubscription,
   type InsertPushSubscription,
+  type EventStaffAccessCode,
   users,
   events,
   tickets,
@@ -131,11 +132,12 @@ import {
   polls,
   pollOptions,
   pollVotes,
-  pushSubscriptions
+  pushSubscriptions,
+  eventStaffAccessCodes
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import { eq, and, gte, gt, lt, or, ilike, desc, sql, count, inArray, notInArray } from "drizzle-orm";
+import { eq, and, gte, gt, lt, or, ilike, desc, sql, count, inArray, notInArray, isNull } from "drizzle-orm";
 
 export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const db = drizzle(pool);
@@ -144,6 +146,23 @@ const db = drizzle(pool);
 export async function ensureSchema() {
   await pool.query(`
     ALTER TABLE events ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'GBP'
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS event_staff_access_codes (
+      id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      event_id VARCHAR NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      organizer_id VARCHAR NOT NULL REFERENCES users(id),
+      code VARCHAR(6) NOT NULL,
+      scanner_token VARCHAR UNIQUE,
+      status TEXT NOT NULL DEFAULT 'pending',
+      expires_at TIMESTAMP NOT NULL,
+      validated_by VARCHAR,
+      validated_device_ip VARCHAR,
+      validated_device_ua TEXT,
+      redeemed_at TIMESTAMP,
+      scan_count INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMP NOT NULL DEFAULT now()
+    )
   `);
 }
 
@@ -676,16 +695,16 @@ export class DbStorage implements IStorage {
     return result[0];
   }
 
-  async checkInTicket(ticketId: string, organizerId: string): Promise<Ticket> {
+  async checkInTicket(ticketId: string, scannerId: string): Promise<Ticket | null> {
     const result = await db
       .update(tickets)
-      .set({ 
+      .set({
         checkedInAt: new Date(),
-        checkedInBy: organizerId,
+        checkedInBy: scannerId,
       })
-      .where(eq(tickets.id, ticketId))
+      .where(and(eq(tickets.id, ticketId), isNull(tickets.checkedInAt)))
       .returning();
-    return result[0];
+    return result[0] ?? null;
   }
 
   async getEventCheckIns(eventId: string): Promise<Array<Ticket & { user: User }>> {
@@ -2351,17 +2370,17 @@ export class DbStorage implements IStorage {
     return result[0];
   }
 
-  async checkInVenueTicket(ticketId: string, organizerId: string): Promise<VenueTicket> {
+  async checkInVenueTicket(ticketId: string, scannerId: string): Promise<VenueTicket | null> {
     const result = await db
       .update(venueTickets)
-      .set({ 
+      .set({
         checkedInAt: new Date(),
-        checkedInBy: organizerId,
-        status: 'checked_in'
+        checkedInBy: scannerId,
+        status: 'checked_in',
       })
-      .where(eq(venueTickets.id, ticketId))
+      .where(and(eq(venueTickets.id, ticketId), isNull(venueTickets.checkedInAt)))
       .returning();
-    return result[0];
+    return result[0] ?? null;
   }
 
   async incrementVenueEntryNightTicketsSold(entryNightId: string): Promise<void> {
@@ -3917,6 +3936,89 @@ export class DbStorage implements IStorage {
     await db
       .delete(pushSubscriptions)
       .where(eq(pushSubscriptions.endpoint, endpoint));
+  }
+
+  // ── Staff access codes ───────────────────────────────────────────────────
+
+  async createStaffCode(eventId: string, organizerId: string, expiresAt: Date): Promise<EventStaffAccessCode> {
+    // Generate a unique 6-digit code not currently active for this event
+    let code: string;
+    let attempts = 0;
+    while (true) {
+      code = String(Math.floor(100000 + Math.random() * 900000));
+      const existing = await db
+        .select()
+        .from(eventStaffAccessCodes)
+        .where(and(eq(eventStaffAccessCodes.code, code), eq(eventStaffAccessCodes.status, "pending")));
+      if (existing.length === 0) break;
+      if (++attempts > 20) throw new Error("Could not generate unique staff code");
+    }
+    const result = await db
+      .insert(eventStaffAccessCodes)
+      .values({ eventId, organizerId, code: code!, expiresAt })
+      .returning();
+    return result[0];
+  }
+
+  async getStaffCodeByCode(code: string): Promise<EventStaffAccessCode | undefined> {
+    const result = await db
+      .select()
+      .from(eventStaffAccessCodes)
+      .where(eq(eventStaffAccessCodes.code, code));
+    return result[0];
+  }
+
+  async redeemStaffCode(
+    id: string,
+    staffName: string,
+    ip: string,
+    ua: string,
+    scannerToken: string,
+  ): Promise<EventStaffAccessCode> {
+    const result = await db
+      .update(eventStaffAccessCodes)
+      .set({
+        status: "active",
+        scannerToken,
+        validatedBy: staffName,
+        validatedDeviceIp: ip,
+        validatedDeviceUa: ua,
+        redeemedAt: new Date(),
+      })
+      .where(and(eq(eventStaffAccessCodes.id, id), eq(eventStaffAccessCodes.status, "pending")))
+      .returning();
+    if (!result[0]) throw new Error("Code already redeemed or revoked");
+    return result[0];
+  }
+
+  async getStaffCodeByScannerToken(token: string): Promise<EventStaffAccessCode | undefined> {
+    const result = await db
+      .select()
+      .from(eventStaffAccessCodes)
+      .where(eq(eventStaffAccessCodes.scannerToken, token));
+    return result[0];
+  }
+
+  async getEventStaffCodes(eventId: string, organizerId: string): Promise<EventStaffAccessCode[]> {
+    return db
+      .select()
+      .from(eventStaffAccessCodes)
+      .where(and(eq(eventStaffAccessCodes.eventId, eventId), eq(eventStaffAccessCodes.organizerId, organizerId)))
+      .orderBy(desc(eventStaffAccessCodes.createdAt));
+  }
+
+  async revokeStaffCode(id: string, organizerId: string): Promise<void> {
+    await db
+      .update(eventStaffAccessCodes)
+      .set({ status: "revoked" })
+      .where(and(eq(eventStaffAccessCodes.id, id), eq(eventStaffAccessCodes.organizerId, organizerId)));
+  }
+
+  async incrementStaffCodeScanCount(id: string): Promise<void> {
+    await db
+      .update(eventStaffAccessCodes)
+      .set({ scanCount: sql`${eventStaffAccessCodes.scanCount} + 1` })
+      .where(eq(eventStaffAccessCodes.id, id));
   }
 }
 

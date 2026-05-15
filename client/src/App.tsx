@@ -43,6 +43,7 @@ import AdminSetup from "@/pages/admin/AdminSetup";
 import ForgotPasswordPage from "@/pages/ForgotPasswordPage";
 import ResetPasswordPage from "@/pages/ResetPasswordPage";
 import JoinGroupPage from "@/pages/JoinGroupPage";
+import ScannerPage from "@/pages/ScannerPage";
 
 function Router() {
   return (
@@ -157,7 +158,10 @@ function Router() {
       <Route path="/venue/:id" component={VenueDetailPage} />
       
       <Route path="/join/:code" component={JoinGroupPage} />
-      
+
+      {/* Staff scanner — no AuthenticatedLayout, bouncers don't have accounts */}
+      <Route path="/scanner" component={ScannerPage} />
+
       {/* Admin Panel Routes - Completely Separate from User App */}
       <Route path="/admin" component={AdminLogin} />
       <Route path="/admin/setup" component={AdminSetup} />

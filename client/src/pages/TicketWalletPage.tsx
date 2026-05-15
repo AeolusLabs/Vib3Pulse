@@ -17,7 +17,7 @@ type TicketWithEvent = TicketType & { event: Event };
 
 function TicketQRCode({ ticketId }: { ticketId: string }) {
   const [showQR, setShowQR] = useState(false);
-  const { data: qrData, isLoading } = useQuery<{ qrCode: string }>({
+  const { data: qrData, isLoading } = useQuery<{ qrCode: string; holderName: string }>({
     queryKey: [`/api/tickets/${ticketId}/qr`],
     enabled: showQR,
   });
@@ -34,16 +34,21 @@ function TicketQRCode({ ticketId }: { ticketId: string }) {
         <QrCode className="h-4 w-4 mr-2" />
         {showQR ? "Hide QR Code" : "Show QR Code"}
       </Button>
-      
+
       {showQR && (
         <div className="mt-4 flex flex-col items-center justify-center p-4 bg-background rounded-md border">
           {isLoading ? (
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
           ) : qrData?.qrCode ? (
-            <div className="space-y-2">
-              <img 
-                src={qrData.qrCode} 
-                alt="Ticket QR Code" 
+            <div className="space-y-2 flex flex-col items-center">
+              {qrData.holderName && (
+                <p className="text-sm font-medium text-center">
+                  Valid for: <span className="text-primary">{qrData.holderName}</span>
+                </p>
+              )}
+              <img
+                src={qrData.qrCode}
+                alt="Ticket QR Code"
                 className="w-64 h-64"
                 data-testid={`img-qr-${ticketId}`}
               />

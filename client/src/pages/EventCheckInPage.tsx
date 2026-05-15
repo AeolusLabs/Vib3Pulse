@@ -5,11 +5,11 @@ import { Html5Qrcode } from "html5-qrcode";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Camera, CheckCircle2, XCircle, Loader2, ArrowLeft, Users } from "lucide-react";
+import { Camera, CheckCircle2, XCircle, Loader2, ArrowLeft, Users, ShieldCheck, Plus, Trash2, Copy } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { format } from "date-fns";
-import type { Event, Ticket, User } from "@shared/schema";
+import type { Event, Ticket, User, EventStaffAccessCode } from "@shared/schema";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 
@@ -132,6 +132,39 @@ export default function EventCheckInPage() {
       stopScanning();
     };
   }, []);
+
+  const { data: staffCodes, refetch: refetchStaffCodes } = useQuery<EventStaffAccessCode[]>({
+    queryKey: [`/api/events/${eventId}/staff-codes`],
+    enabled: !!eventId,
+  });
+
+  const generateCodeMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", `/api/events/${eventId}/staff-codes`, {});
+      return response.json();
+    },
+    onSuccess: () => {
+      refetchStaffCodes();
+      toast({ title: "Code generated", description: "Share the 6-digit code with your staff." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to generate code.", variant: "destructive" });
+    },
+  });
+
+  const revokeCodeMutation = useMutation({
+    mutationFn: async (codeId: string) => {
+      const response = await apiRequest("DELETE", `/api/events/${eventId}/staff-codes/${codeId}`, undefined);
+      return response.json();
+    },
+    onSuccess: () => {
+      refetchStaffCodes();
+      toast({ title: "Code revoked", description: "Staff member can no longer scan." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to revoke code.", variant: "destructive" });
+    },
+  });
 
   const checkedInTickets = checkIns?.filter(t => t.checkedInAt) || [];
   const totalTickets = checkIns?.length || 0;
@@ -282,6 +315,98 @@ export default function EventCheckInPage() {
                       </p>
                     </div>
                     <CheckCircle2 className="h-5 w-5 text-green-600" />
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Staff Access Codes */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <ShieldCheck className="h-5 w-5" />
+                  Staff Access
+                </CardTitle>
+                <CardDescription>
+                  Generate codes for bouncers — they use /scanner to check in guests
+                </CardDescription>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => generateCodeMutation.mutate()}
+                disabled={generateCodeMutation.isPending}
+                data-testid="button-generate-staff-code"
+              >
+                {generateCodeMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Plus className="h-4 w-4 mr-1" />
+                )}
+                New Code
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {!staffCodes || staffCodes.length === 0 ? (
+              <p className="text-center text-muted-foreground py-6 text-sm">
+                No staff codes generated yet
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {staffCodes.map((sc) => (
+                  <div
+                    key={sc.id}
+                    className="flex items-center justify-between p-3 rounded-md border"
+                    data-testid={`staff-code-${sc.id}`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span
+                          className="font-mono text-lg font-bold tracking-widest cursor-pointer select-all"
+                          title="Click to copy"
+                          onClick={() => {
+                            navigator.clipboard.writeText(sc.code);
+                            toast({ title: "Copied!", description: `Code ${sc.code} copied to clipboard.` });
+                          }}
+                        >
+                          {sc.code}
+                        </span>
+                        <Badge
+                          variant={sc.status === "active" ? "default" : sc.status === "revoked" ? "destructive" : "secondary"}
+                        >
+                          {sc.status === "active" ? "Active" : sc.status === "revoked" ? "Revoked" : "Pending"}
+                        </Badge>
+                        {sc.scanCount > 0 && (
+                          <span className="text-xs text-muted-foreground">{sc.scanCount} scanned</span>
+                        )}
+                      </div>
+                      {sc.validatedBy ? (
+                        <p className="text-sm text-muted-foreground mt-0.5">
+                          {sc.validatedBy} · redeemed {sc.redeemedAt ? format(new Date(sc.redeemedAt), "h:mm a") : ""}
+                        </p>
+                      ) : (
+                        <p className="text-sm text-muted-foreground mt-0.5">
+                          Not yet used · expires {format(new Date(sc.expiresAt), "h:mm a")}
+                        </p>
+                      )}
+                    </div>
+                    {sc.status !== "revoked" && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => revokeCodeMutation.mutate(sc.id)}
+                        disabled={revokeCodeMutation.isPending}
+                        title="Revoke access"
+                        data-testid={`button-revoke-${sc.id}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
                   </div>
                 ))}
               </div>

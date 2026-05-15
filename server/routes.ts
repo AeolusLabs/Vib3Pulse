@@ -1105,17 +1105,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/tickets/:ticketId/qr", requireAuth, async (req, res) => {
     try {
       const ticket = await storage.getTicket(req.params.ticketId);
-      
+
       if (!ticket) {
         return res.status(404).json({ message: "Ticket not found" });
       }
 
-      // Verify the ticket belongs to the requesting user
       if (ticket.userId !== req.user!.id) {
         return res.status(403).json({ message: "Not authorized to view this ticket" });
       }
 
-      // Generate QR code from the validation code
+      const holder = await storage.getUser(ticket.userId);
+      const holderName = holder?.displayName || holder?.username || "Ticket Holder";
+
       const qrCodeDataUrl = await QRCode.toDataURL(ticket.validationCode, {
         errorCorrectionLevel: 'H',
         type: 'image/png',
@@ -1123,15 +1124,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         margin: 2,
       });
 
-      res.json({ qrCode: qrCodeDataUrl });
+      res.json({ qrCode: qrCodeDataUrl, holderName });
     } catch (error) {
       console.error('Error generating QR code:', error);
       res.status(500).json({ message: "Failed to generate QR code" });
     }
   });
 
-  // Validate a ticket by validation code (for organizers)
-  app.post("/api/tickets/validate", requireAuth, async (req, res) => {
+  // Validate a ticket by validation code (organizer session OR staff scanner token)
+  app.post("/api/tickets/validate", async (req, res) => {
     try {
       const requestSchema = z.object({
         validationCode: z.string().min(1),
@@ -1140,39 +1141,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const parseResult = requestSchema.safeParse(req.body);
       if (!parseResult.success) {
-        console.error('Validation error:', parseResult.error.errors);
-        console.error('Request body:', req.body);
-        return res.status(400).json({ 
+        return res.status(400).json({
           message: "Invalid request data",
-          errors: parseResult.error.errors 
+          errors: parseResult.error.errors,
         });
       }
 
       const { validationCode, eventId } = parseResult.data;
-      const organizerId = req.user!.id;
 
-      // Verify the user is the organizer of this event
-      const event = await storage.getEvent(eventId);
-      if (!event) {
-        return res.status(404).json({ message: "Event not found" });
+      // Resolve who is scanning: organizer session or staff scanner token
+      let scannerId: string;
+      let staffCodeId: string | null = null;
+
+      const scannerToken = req.headers["x-scanner-token"] as string | undefined;
+
+      if (scannerToken) {
+        const staffCode = await storage.getStaffCodeByScannerToken(scannerToken);
+        if (!staffCode || staffCode.status !== "active") {
+          return res.status(401).json({ message: "Invalid or expired scanner token" });
+        }
+        if (new Date() > staffCode.expiresAt) {
+          return res.status(401).json({ message: "Scanner token has expired" });
+        }
+        if (staffCode.eventId !== eventId) {
+          return res.status(403).json({ message: "Scanner not authorised for this event" });
+        }
+        // Use organizer's ID for checkedInBy so audit trail links to the account
+        const event = await storage.getEvent(eventId);
+        if (!event) return res.status(404).json({ message: "Event not found" });
+        scannerId = event.organizerId;
+        staffCodeId = staffCode.id;
+      } else if (req.isAuthenticated()) {
+        const event = await storage.getEvent(eventId);
+        if (!event) return res.status(404).json({ message: "Event not found" });
+        if (event.organizerId !== req.user!.id) {
+          return res.status(403).json({ message: "Not authorised to validate tickets for this event" });
+        }
+        scannerId = req.user!.id;
+      } else {
+        return res.status(401).json({ message: "Authentication required" });
       }
 
-      if (event.organizerId !== organizerId) {
-        return res.status(403).json({ message: "Not authorized to validate tickets for this event" });
-      }
-
-      // Find the ticket by validation code
       const ticket = await storage.getTicketByValidationCode(validationCode);
       if (!ticket) {
         return res.status(404).json({ message: "Invalid ticket code" });
       }
 
-      // Verify the ticket is for this event
       if (ticket.eventId !== eventId) {
         return res.status(400).json({ message: "This ticket is not for this event" });
       }
 
-      // Check if already checked in
       if (ticket.checkedInAt) {
         return res.json({
           valid: false,
@@ -1183,8 +1201,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Mark ticket as checked in
-      const updatedTicket = await storage.checkInTicket(ticket.id, organizerId);
+      // Atomic check-in — returns null if a concurrent request beat us
+      const updatedTicket = await storage.checkInTicket(ticket.id, scannerId);
+      if (!updatedTicket) {
+        return res.json({
+          valid: false,
+          alreadyCheckedIn: true,
+          message: "Ticket already used",
+          ticket,
+        });
+      }
+
+      if (staffCodeId) {
+        await storage.incrementStaffCodeScanCount(staffCodeId);
+      }
 
       res.json({
         valid: true,
@@ -1217,6 +1247,138 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error fetching check-ins:', error);
       res.status(500).json({ message: "Failed to fetch check-ins" });
+    }
+  });
+
+  // ── Staff access code routes ──────────────────────────────────────────────
+
+  // Generate a new staff code for an event
+  app.post("/api/events/:eventId/staff-codes", requireAuth, async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.eventId);
+      if (!event) return res.status(404).json({ message: "Event not found" });
+      if (event.organizerId !== req.user!.id) {
+        return res.status(403).json({ message: "Only the organiser can generate staff codes" });
+      }
+      // Codes expire at event end time OR 24 h from now, whichever is sooner
+      const eventEnd = event.eventDate ? new Date(event.eventDate) : null;
+      const in24h = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      const expiresAt = eventEnd && eventEnd < in24h ? eventEnd : in24h;
+
+      const staffCode = await storage.createStaffCode(event.id, req.user!.id, expiresAt);
+      res.json(staffCode);
+    } catch (error) {
+      console.error("Create staff code error:", error);
+      res.status(500).json({ message: "Failed to create staff code" });
+    }
+  });
+
+  // List staff codes for an event
+  app.get("/api/events/:eventId/staff-codes", requireAuth, async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.eventId);
+      if (!event) return res.status(404).json({ message: "Event not found" });
+      if (event.organizerId !== req.user!.id) {
+        return res.status(403).json({ message: "Only the organiser can view staff codes" });
+      }
+      const codes = await storage.getEventStaffCodes(event.id, req.user!.id);
+      res.json(codes);
+    } catch (error) {
+      console.error("List staff codes error:", error);
+      res.status(500).json({ message: "Failed to fetch staff codes" });
+    }
+  });
+
+  // Revoke a staff code
+  app.delete("/api/events/:eventId/staff-codes/:codeId", requireAuth, async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.eventId);
+      if (!event) return res.status(404).json({ message: "Event not found" });
+      if (event.organizerId !== req.user!.id) {
+        return res.status(403).json({ message: "Only the organiser can revoke staff codes" });
+      }
+      await storage.revokeStaffCode(req.params.codeId, req.user!.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Revoke staff code error:", error);
+      res.status(500).json({ message: "Failed to revoke staff code" });
+    }
+  });
+
+  // Bouncer redeems a 6-digit code → gets scanner token (no auth required)
+  app.post("/api/scanner/auth", async (req, res) => {
+    try {
+      const schema = z.object({
+        code: z.string().length(6),
+        staffName: z.string().min(1).max(80),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid request", errors: parsed.error.errors });
+      }
+      const { code, staffName } = parsed.data;
+
+      const staffCode = await storage.getStaffCodeByCode(code);
+      if (!staffCode) {
+        return res.status(404).json({ message: "Invalid code" });
+      }
+      if (staffCode.status === "revoked") {
+        return res.status(403).json({ message: "This code has been revoked" });
+      }
+      if (staffCode.status === "active") {
+        return res.status(409).json({ message: "This code has already been used by someone else" });
+      }
+      if (new Date() > staffCode.expiresAt) {
+        return res.status(410).json({ message: "This code has expired" });
+      }
+
+      const event = await storage.getEvent(staffCode.eventId);
+      if (!event) return res.status(404).json({ message: "Event not found" });
+
+      const scannerToken = crypto.randomBytes(32).toString("hex");
+      const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "";
+      const ua = req.headers["user-agent"] || "";
+
+      const redeemed = await storage.redeemStaffCode(staffCode.id, staffName, ip, ua, scannerToken);
+
+      res.json({
+        scannerToken: redeemed.scannerToken,
+        eventId: redeemed.eventId,
+        eventTitle: event.title,
+        staffName: redeemed.validatedBy,
+        expiresAt: redeemed.expiresAt,
+      });
+    } catch (error: any) {
+      if (error.message === "Code already redeemed or revoked") {
+        return res.status(409).json({ message: "This code has already been used" });
+      }
+      console.error("Scanner auth error:", error);
+      res.status(500).json({ message: "Failed to authenticate" });
+    }
+  });
+
+  // Verify scanner token is still valid (called on page load by bouncer)
+  app.get("/api/scanner/verify", async (req, res) => {
+    try {
+      const token = req.headers["x-scanner-token"] as string | undefined;
+      if (!token) return res.status(401).json({ valid: false });
+
+      const staffCode = await storage.getStaffCodeByScannerToken(token);
+      if (!staffCode || staffCode.status !== "active" || new Date() > staffCode.expiresAt) {
+        return res.json({ valid: false });
+      }
+      const event = await storage.getEvent(staffCode.eventId);
+      res.json({
+        valid: true,
+        eventId: staffCode.eventId,
+        eventTitle: event?.title ?? "",
+        staffName: staffCode.validatedBy,
+        expiresAt: staffCode.expiresAt,
+        scanCount: staffCode.scanCount,
+      });
+    } catch (error) {
+      console.error("Scanner verify error:", error);
+      res.status(500).json({ valid: false });
     }
   });
 
@@ -3137,14 +3299,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!venue || venue.ownerId !== req.user!.id) {
         return res.status(403).json({ message: "You can only validate tickets for your own venues" });
       }
-      
+
       const checkedInTicket = await storage.checkInVenueTicket(ticket.id, req.user!.id);
-      
-      res.json({ 
-        success: true, 
+      if (!checkedInTicket) {
+        return res.status(409).json({ message: "Ticket already used" });
+      }
+
+      res.json({
+        success: true,
         ticket: checkedInTicket,
         entryNight,
-        venue
+        venue,
       });
     } catch (error) {
       console.error("Validate venue ticket error:", error);
