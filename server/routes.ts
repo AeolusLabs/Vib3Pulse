@@ -2981,100 +2981,120 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ==================== VENUE ENTRY NIGHTS ROUTES ====================
+  // ==================== VENUE EVENTS ROUTES ====================
 
-  // Get entry nights for a venue
-  app.get("/api/venues/:venueId/entry-nights", async (req, res) => {
+  // Get all upcoming venue events across all venues (for Discover page)
+  app.get("/api/venue-events/upcoming", async (req, res) => {
     try {
-      const entryNights = await storage.getVenueEntryNights(req.params.venueId);
-      res.json(entryNights);
+      const events = await storage.getUpcomingAllVenueEvents();
+      res.json(events);
     } catch (error) {
-      console.error("Get entry nights error:", error);
-      res.status(500).json({ message: "Failed to get entry nights" });
+      console.error("Get upcoming venue events error:", error);
+      res.status(500).json({ message: "Failed to get upcoming venue events" });
     }
   });
 
-  // Get upcoming entry nights for a venue (for ticket purchasing)
-  app.get("/api/venues/:venueId/entry-nights/upcoming", async (req, res) => {
+  // Get single venue event with venue details (public detail page)
+  app.get("/api/venue-events/:id", async (req, res) => {
     try {
-      const upcomingNights = await storage.getUpcomingVenueEntryNights(req.params.venueId);
-      res.json(upcomingNights);
+      const event = await storage.getVenueEventWithVenue(req.params.id);
+      if (!event) return res.status(404).json({ message: "Venue event not found" });
+      res.json(event);
     } catch (error) {
-      console.error("Get upcoming entry nights error:", error);
-      res.status(500).json({ message: "Failed to get upcoming entry nights" });
+      console.error("Get venue event error:", error);
+      res.status(500).json({ message: "Failed to get venue event" });
     }
   });
 
-  // Create entry night
-  app.post("/api/venues/:venueId/entry-nights", requireOrganizer, async (req, res) => {
+  // Get all venue events for a venue (owner management)
+  app.get("/api/venues/:venueId/venue-events", async (req, res) => {
+    try {
+      const events = await storage.getVenueEntryNights(req.params.venueId);
+      res.json(events);
+    } catch (error) {
+      console.error("Get venue events error:", error);
+      res.status(500).json({ message: "Failed to get venue events" });
+    }
+  });
+
+  // Get upcoming venue events for a venue (visitor ticket purchase)
+  app.get("/api/venues/:venueId/venue-events/upcoming", async (req, res) => {
+    try {
+      const upcomingEvents = await storage.getUpcomingVenueEntryNights(req.params.venueId);
+      res.json(upcomingEvents);
+    } catch (error) {
+      console.error("Get upcoming venue events error:", error);
+      res.status(500).json({ message: "Failed to get upcoming venue events" });
+    }
+  });
+
+  // Create venue event
+  app.post("/api/venues/:venueId/venue-events", requireOrganizer, async (req, res) => {
     try {
       const venue = await storage.getVenue(req.params.venueId);
       if (!venue) {
         return res.status(404).json({ message: "Venue not found" });
       }
-      
       if (venue.ownerId !== req.user!.id) {
-        return res.status(403).json({ message: "You can only create entry nights for your own venues" });
+        return res.status(403).json({ message: "You can only create events for your own venues" });
       }
-      
-      const entryNightData = insertVenueEntryNightSchema.parse({
+      const eventData = insertVenueEntryNightSchema.parse({
         ...req.body,
         venueId: req.params.venueId,
       });
-      
-      const entryNight = await storage.createVenueEntryNight(entryNightData);
-      res.status(201).json(entryNight);
+      const event = await storage.createVenueEntryNight(eventData);
+      res.status(201).json(event);
     } catch (error) {
-      console.error("Create entry night error:", error);
-      res.status(400).json({ message: "Failed to create entry night" });
+      console.error("Create venue event error:", error);
+      res.status(400).json({ message: "Failed to create venue event" });
     }
   });
 
-  // Update entry night
-  app.patch("/api/entry-nights/:id", requireOrganizer, async (req, res) => {
+  // Update venue event
+  app.patch("/api/venue-events/:id", requireOrganizer, async (req, res) => {
     try {
-      const entryNight = await storage.getVenueEntryNight(req.params.id);
-      if (!entryNight) {
-        return res.status(404).json({ message: "Entry night not found" });
+      const event = await storage.getVenueEntryNight(req.params.id);
+      if (!event) {
+        return res.status(404).json({ message: "Venue event not found" });
       }
-      
-      const venue = await storage.getVenue(entryNight.venueId);
+      const venue = await storage.getVenue(event.venueId);
       if (!venue || venue.ownerId !== req.user!.id) {
-        return res.status(403).json({ message: "You can only update entry nights for your own venues" });
+        return res.status(403).json({ message: "You can only update events for your own venues" });
       }
-      
-      // Convert date string to Date object if provided
+      // Coerce date/time strings to Date objects
       const updateData = { ...req.body };
-      if (updateData.date && typeof updateData.date === 'string') {
-        updateData.date = new Date(updateData.date);
+      const dateFields = ["date", "endTime", "doorsCloseTime", "lastCallTime", "kitchenCloseTime"];
+      for (const field of dateFields) {
+        if (updateData[field] && typeof updateData[field] === "string") {
+          updateData[field] = new Date(updateData[field]);
+        } else if (updateData[field] === "") {
+          updateData[field] = null;
+        }
       }
-      
-      const updatedEntryNight = await storage.updateVenueEntryNight(req.params.id, updateData);
-      res.json(updatedEntryNight);
+      const updatedEvent = await storage.updateVenueEntryNight(req.params.id, updateData);
+      res.json(updatedEvent);
     } catch (error) {
-      console.error("Update entry night error:", error);
-      res.status(400).json({ message: "Failed to update entry night" });
+      console.error("Update venue event error:", error);
+      res.status(400).json({ message: "Failed to update venue event" });
     }
   });
 
-  // Delete entry night
-  app.delete("/api/entry-nights/:id", requireOrganizer, async (req, res) => {
+  // Delete venue event
+  app.delete("/api/venue-events/:id", requireOrganizer, async (req, res) => {
     try {
-      const entryNight = await storage.getVenueEntryNight(req.params.id);
-      if (!entryNight) {
-        return res.status(404).json({ message: "Entry night not found" });
+      const event = await storage.getVenueEntryNight(req.params.id);
+      if (!event) {
+        return res.status(404).json({ message: "Venue event not found" });
       }
-      
-      const venue = await storage.getVenue(entryNight.venueId);
+      const venue = await storage.getVenue(event.venueId);
       if (!venue || venue.ownerId !== req.user!.id) {
-        return res.status(403).json({ message: "You can only delete entry nights for your own venues" });
+        return res.status(403).json({ message: "You can only delete events for your own venues" });
       }
-      
       await storage.deleteVenueEntryNight(req.params.id);
-      res.json({ message: "Entry night deleted successfully" });
+      res.json({ message: "Venue event deleted successfully" });
     } catch (error) {
-      console.error("Delete entry night error:", error);
-      res.status(500).json({ message: "Failed to delete entry night" });
+      console.error("Delete venue event error:", error);
+      res.status(500).json({ message: "Failed to delete venue event" });
     }
   });
 

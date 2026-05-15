@@ -339,10 +339,12 @@ export interface IStorage {
   getPromotedVenues(): Promise<Venue[]>;
   promoteVenue(venueId: string, durationDays: number): Promise<Venue>;
 
-  // Venue entry nights methods
+  // Venue events methods (formerly "entry nights")
   getVenueEntryNights(venueId: string): Promise<VenueEntryNight[]>;
   getUpcomingVenueEntryNights(venueId: string): Promise<VenueEntryNight[]>;
   getVenueEntryNight(id: string): Promise<VenueEntryNight | undefined>;
+  getVenueEventWithVenue(id: string): Promise<(VenueEntryNight & { venue: Venue }) | undefined>;
+  getUpcomingAllVenueEvents(): Promise<Array<VenueEntryNight & { venue: Venue }>>;
   createVenueEntryNight(entryNight: InsertVenueEntryNight): Promise<VenueEntryNight>;
   updateVenueEntryNight(id: string, entryNight: Partial<InsertVenueEntryNight>): Promise<VenueEntryNight>;
   deleteVenueEntryNight(id: string): Promise<void>;
@@ -2290,6 +2292,31 @@ export class DbStorage implements IStorage {
 
   async deleteVenueEntryNight(id: string): Promise<void> {
     await db.delete(venueEntryNights).where(eq(venueEntryNights.id, id));
+  }
+
+  async getVenueEventWithVenue(id: string): Promise<(VenueEntryNight & { venue: Venue }) | undefined> {
+    const result = await db
+      .select()
+      .from(venueEntryNights)
+      .innerJoin(venues, eq(venueEntryNights.venueId, venues.id))
+      .where(eq(venueEntryNights.id, id));
+    if (!result[0]) return undefined;
+    return { ...result[0].venue_entry_nights, venue: result[0].venues };
+  }
+
+  async getUpcomingAllVenueEvents(): Promise<Array<VenueEntryNight & { venue: Venue }>> {
+    const now = new Date();
+    const result = await db
+      .select()
+      .from(venueEntryNights)
+      .innerJoin(venues, eq(venueEntryNights.venueId, venues.id))
+      .where(and(
+        gte(venueEntryNights.date, now),
+        eq(venueEntryNights.isActive, true)
+      ))
+      .orderBy(venueEntryNights.date)
+      .limit(20);
+    return result.map(r => ({ ...r.venue_entry_nights, venue: r.venues }));
   }
 
   // Venue tickets methods

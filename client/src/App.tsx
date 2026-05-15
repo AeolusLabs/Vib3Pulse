@@ -28,7 +28,8 @@ import DistressAlertsPage from "@/pages/DistressAlertsPage";
 import AccountSettingsPage from "@/pages/AccountSettingsPage";
 import ManageVenuesPage from "@/pages/ManageVenuesPage";
 import VenueDetailPage from "@/pages/VenueDetailPage";
-import VenueEntryNightsPage from "@/pages/VenueEntryNightsPage";
+import VenueEventsPage from "@/pages/VenueEventsPage";
+import VenueEventDetailPage from "@/pages/VenueEventDetailPage";
 import AdminLogin from "@/pages/admin/AdminLogin";
 import AdminDashboard from "@/pages/admin/AdminDashboard";
 import AdminUsers from "@/pages/admin/AdminUsers";
@@ -145,12 +146,14 @@ function Router() {
         </AuthenticatedLayout>
       </Route>
       
-      <Route path="/venues/:venueId/entry-nights">
+      <Route path="/venues/:venueId/venue-events">
         <AuthenticatedLayout>
-          <VenueEntryNightsPage />
+          <VenueEventsPage />
         </AuthenticatedLayout>
       </Route>
-      
+
+      <Route path="/venue-events/:id" component={VenueEventDetailPage} />
+
       <Route path="/venue/:id" component={VenueDetailPage} />
       
       <Route path="/join/:code" component={JoinGroupPage} />

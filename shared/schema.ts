@@ -761,12 +761,17 @@ export const insertVenueSchema = createInsertSchema(venues).omit({
 export type InsertVenue = z.infer<typeof insertVenueSchema>;
 export type Venue = typeof venues.$inferSelect;
 
-// Venue entry nights - for cover charge nights at venues
+// Venue events (formerly "entry nights") - ticketed events at venues
 export const venueEntryNights = pgTable("venue_entry_nights", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   venueId: varchar("venue_id").notNull().references(() => venues.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   date: timestamp("date").notNull(),
+  endTime: timestamp("end_time"),
+  doorsCloseTime: timestamp("doors_close_time"),
+  lastCallTime: timestamp("last_call_time"),
+  kitchenCloseTime: timestamp("kitchen_close_time"),
+  imageUrl: text("image_url"),
   coverPriceCents: integer("cover_price_cents").notNull(),
   capacity: integer("capacity"),
   ticketsSold: integer("tickets_sold").notNull().default(0),
@@ -781,6 +786,10 @@ export const insertVenueEntryNightSchema = createInsertSchema(venueEntryNights).
   createdAt: true,
 }).extend({
   date: z.coerce.date(),
+  endTime: z.coerce.date().nullable().optional(),
+  doorsCloseTime: z.coerce.date().nullable().optional(),
+  lastCallTime: z.coerce.date().nullable().optional(),
+  kitchenCloseTime: z.coerce.date().nullable().optional(),
 });
 
 export type InsertVenueEntryNight = z.infer<typeof insertVenueEntryNightSchema>;

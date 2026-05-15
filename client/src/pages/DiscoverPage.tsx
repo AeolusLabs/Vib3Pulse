@@ -10,7 +10,7 @@ import ShareModal from "@/components/ShareModal";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar, MapPin, Users, Sparkles, Building2, Music, Clock, TrendingUp, Navigation2, Loader2, XCircle, RefreshCw, Share2 } from "lucide-react";
+import { Calendar, MapPin, Users, Sparkles, Building2, Music, Clock, TrendingUp, Navigation2, Loader2, XCircle, RefreshCw, Share2, Ticket } from "lucide-react";
 import { format, isPast } from "date-fns";
 import { Link, useSearch } from "wouter";
 import { useGeolocation } from "@/hooks/useGeolocation";
@@ -206,6 +206,17 @@ export default function DiscoverPage() {
 
   const { data: allVenues = [] } = useQuery<Venue[]>({
     queryKey: ["/api/venues"],
+    refetchInterval: 60000,
+    refetchIntervalInBackground: true,
+  });
+
+  const { data: upcomingVenueEvents = [] } = useQuery<Array<any>>({
+    queryKey: ["/api/venue-events/upcoming"],
+    queryFn: async () => {
+      const res = await fetch("/api/venue-events/upcoming");
+      if (!res.ok) return [];
+      return res.json();
+    },
     refetchInterval: 60000,
     refetchIntervalInBackground: true,
   });
@@ -645,6 +656,68 @@ export default function DiscoverPage() {
                     </Link>
                     );
                   })}
+                </div>
+              </div>
+            )}
+
+            {/* Upcoming Venue Events */}
+            {upcomingVenueEvents.length > 0 && (
+              <div className="mb-8">
+                <div className="flex items-center gap-2 mb-4">
+                  <Ticket className="h-5 w-5 text-purple-500" />
+                  <h2 className="text-xl font-semibold">Upcoming Venue Events</h2>
+                  <span className="text-sm text-muted-foreground">({upcomingVenueEvents.length})</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" data-testid="venue-events-grid">
+                  {upcomingVenueEvents.map((event: any) => (
+                    <Link key={event.id} href={`/venue-events/${event.id}`}>
+                      <Card className="hover-elevate cursor-pointer overflow-hidden transition-all duration-200" data-testid={`venue-event-card-${event.id}`}>
+                        {event.imageUrl ? (
+                          <div className="aspect-video w-full overflow-hidden relative">
+                            <img src={event.imageUrl} alt={event.name} className="w-full h-full object-cover" />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
+                          </div>
+                        ) : (event.venue?.coverImageUrl || event.venue?.imageUrl) ? (
+                          <div className="aspect-video w-full overflow-hidden relative">
+                            <img src={event.venue.coverImageUrl || event.venue.imageUrl} alt={event.name} className="w-full h-full object-cover opacity-70" />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
+                          </div>
+                        ) : (
+                          <div className="aspect-video w-full bg-gradient-to-br from-purple-100 to-pink-100 dark:from-purple-950/30 dark:to-pink-950/30 flex items-center justify-center">
+                            <Ticket className="h-10 w-10 text-purple-300" />
+                          </div>
+                        )}
+                        <CardHeader className="space-y-1 pb-2">
+                          <h3 className="font-semibold text-base line-clamp-1">{event.name}</h3>
+                          {event.venue?.name && (
+                            <p className="text-xs text-muted-foreground flex items-center gap-1">
+                              <Building2 className="h-3 w-3" />{event.venue.name}
+                            </p>
+                          )}
+                        </CardHeader>
+                        <CardContent className="space-y-1 pb-3">
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Calendar className="h-3 w-3" />
+                            <span>{format(new Date(event.date), "EEE, MMM d 'at' h:mm a")}</span>
+                          </div>
+                          {(event.venue?.address || event.venue?.city) && (
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              <MapPin className="h-3 w-3" />
+                              <span className="line-clamp-1">{event.venue.address || event.venue.city}</span>
+                            </div>
+                          )}
+                          <div className="flex items-center justify-between pt-1">
+                            <span className="font-semibold text-base">£{(event.coverPriceCents / 100).toFixed(2)}</span>
+                            {event.capacity && (
+                              <span className="text-xs text-muted-foreground">
+                                {event.capacity - event.ticketsSold} left
+                              </span>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </Link>
+                  ))}
                 </div>
               </div>
             )}

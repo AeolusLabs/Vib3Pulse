@@ -143,7 +143,12 @@ export default function VenueDetailPage() {
   });
 
   const { data: entryNights = [], isLoading: nightsLoading } = useQuery<VenueEntryNight[]>({
-    queryKey: ["/api/venues", id, "entry-nights", "upcoming"],
+    queryKey: ["/api/venues", id, "venue-events", "upcoming"],
+    queryFn: async () => {
+      const res = await fetch(`/api/venues/${id}/venue-events/upcoming`);
+      if (!res.ok) return [];
+      return res.json();
+    },
     enabled: !!id,
   });
 
@@ -495,7 +500,7 @@ export default function VenueDetailPage() {
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg flex items-center gap-2">
                   <Ticket className="h-5 w-5 text-primary" />
-                  Entry Nights
+                  Venue Events
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -507,11 +512,12 @@ export default function VenueDetailPage() {
                 ) : entryNights.length === 0 ? (
                   <div className="text-center py-6">
                     <Calendar className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
-                    <p className="text-sm text-muted-foreground">No upcoming entry nights.</p>
+                    <p className="text-sm text-muted-foreground">No upcoming events.</p>
                   </div>
                 ) : (
                   <div className="space-y-3">
                     {entryNights.map((night) => {
+                      const ev = night as any;
                       const spotsLeft = night.capacity != null
                         ? night.capacity - night.ticketsSold
                         : null;
@@ -521,9 +527,20 @@ export default function VenueDetailPage() {
                           key={night.id}
                           className="rounded-xl border bg-muted/30 p-4 space-y-3"
                         >
+                          {/* Thumbnail */}
+                          {ev.imageUrl && (
+                            <img
+                              src={ev.imageUrl}
+                              alt={night.name}
+                              className="w-full h-28 object-cover rounded-lg"
+                            />
+                          )}
                           <div className="flex items-start gap-2 text-sm text-muted-foreground">
                             <Calendar className="h-4 w-4 mt-0.5 flex-shrink-0 text-primary" />
-                            <span>{format(new Date(night.date), "EEE, MMM d 'at' h:mm a")}</span>
+                            <span>
+                              {format(new Date(night.date), "EEE, MMM d 'at' h:mm a")}
+                              {ev.endTime && ` — ${format(new Date(ev.endTime), "h:mm a")}`}
+                            </span>
                           </div>
                           {night.name && (
                             <p className="font-semibold text-sm">{night.name}</p>
@@ -531,7 +548,7 @@ export default function VenueDetailPage() {
                           {night.description && (
                             <p className="text-xs text-muted-foreground line-clamp-2">{night.description}</p>
                           )}
-                          <div className="flex items-center justify-between pt-1">
+                          <div className="flex items-center justify-between pt-1 gap-2 flex-wrap">
                             <div>
                               <span className="text-xl font-bold">
                                 £{(night.coverPriceCents / 100).toFixed(2)}
@@ -540,15 +557,22 @@ export default function VenueDetailPage() {
                                 <p className="text-xs text-muted-foreground">{spotsLeft} spots left</p>
                               )}
                             </div>
-                            <Button
-                              size="sm"
-                              onClick={() => createPaymentMutation.mutate(night.id)}
-                              disabled={createPaymentMutation.isPending || soldOut}
-                              className="bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 text-white"
-                              data-testid={`button-buy-ticket-${night.id}`}
-                            >
-                              {soldOut ? "Sold Out" : createPaymentMutation.isPending ? "..." : "Buy Ticket"}
-                            </Button>
+                            <div className="flex gap-2">
+                              <Link href={`/venue-events/${night.id}`}>
+                                <Button size="sm" variant="outline" data-testid={`button-view-event-${night.id}`}>
+                                  Details
+                                </Button>
+                              </Link>
+                              <Button
+                                size="sm"
+                                onClick={() => createPaymentMutation.mutate(night.id)}
+                                disabled={createPaymentMutation.isPending || soldOut}
+                                className="bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 text-white"
+                                data-testid={`button-buy-ticket-${night.id}`}
+                              >
+                                {soldOut ? "Sold Out" : createPaymentMutation.isPending ? "..." : "Buy Ticket"}
+                              </Button>
+                            </div>
                           </div>
                         </div>
                       );

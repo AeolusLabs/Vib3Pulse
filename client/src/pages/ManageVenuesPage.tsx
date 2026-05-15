@@ -172,11 +172,11 @@ export default function ManageVenuesPage() {
             variant="outline"
             size="sm"
             asChild
-            data-testid={`button-manage-nights-${venue.id}`}
+            data-testid={`button-manage-events-${venue.id}`}
           >
-            <Link href={`/venues/${venue.id}/entry-nights`}>
+            <Link href={`/venues/${venue.id}/venue-events`}>
               <Calendar className="h-4 w-4 mr-2" />
-              Entry Nights
+              Venue Events
             </Link>
           </Button>
 
