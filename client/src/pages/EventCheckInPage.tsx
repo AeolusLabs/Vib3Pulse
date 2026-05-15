@@ -183,13 +183,13 @@ function SelectionView({
   eventId,
   eventTitle,
   onAuthenticated,
+  urlCode = "",
 }: {
   eventId: string;
   eventTitle?: string;
   onAuthenticated: (session: StaffSession) => void;
+  urlCode?: string;
 }) {
-  // If organiser shared a URL with ?code=123456, pre-fill and auto-expand
-  const urlCode = new URLSearchParams(window.location.search).get("code") ?? "";
   const [showCodeEntry, setShowCodeEntry] = useState(!!urlCode);
   const redirectUrl = `/login?redirect=${encodeURIComponent(`/events/${eventId}/check-in`)}`;
 
@@ -881,7 +881,12 @@ export default function EventCheckInPage() {
   // Reactive auth state — resolved server-side via /api/auth/session
   const { data: authUser, isLoading: authLoading } = useAuth();
 
-  const [mode, setMode] = useState<Mode>("detecting");
+  // Computed synchronously at render time — if ?code is in the URL this is a
+  // staff entry link and mode must be "code-entry" from the very first render.
+  // This value never changes during the component's lifetime.
+  const urlCode = new URLSearchParams(window.location.search).get("code") ?? "";
+
+  const [mode, setMode] = useState<Mode>(urlCode ? "code-entry" : "detecting");
   const [staffSession, setStaffSession] = useState<StaffSession | null>(null);
   const [eventTitle, setEventTitle] = useState<string | undefined>();
 
@@ -895,22 +900,16 @@ export default function EventCheckInPage() {
   }, [eventId]);
 
   // ── Bulletproof mode detection ─────────────────────────────────────────────
-  // Runs once auth settles. Uses a cancellation flag to prevent stale async
-  // updates if the component unmounts during the detection sequence.
+  // Skipped entirely when ?code is in the URL — mode was already set to
+  // "code-entry" synchronously above, and no async auth check should override it.
   useEffect(() => {
+    // ?code URL: mode already correct, detection not needed
+    if (urlCode) return;
     if (authLoading || !eventId) return;
 
     let cancelled = false;
 
     async function detectMode() {
-      // ⓪ If the URL contains ?code this is a staff entry link. Always show the
-      //    selection screen — even for organizers who may be testing the flow.
-      //    Auth-based mode detection must NOT override an explicit ?code param.
-      if (new URLSearchParams(window.location.search).get("code")) {
-        setMode("code-entry");
-        return;
-      }
-
       // ① Organiser check: session user must be an organiser AND own this event.
       //    We make a fresh fetch here rather than trusting cached event data so
       //    that ownership is always verified against the server.
@@ -974,7 +973,7 @@ export default function EventCheckInPage() {
 
     detectMode();
     return () => { cancelled = true; };
-  }, [authLoading, authUser, eventId]);
+  }, [authLoading, authUser, eventId, urlCode]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
@@ -1013,6 +1012,7 @@ export default function EventCheckInPage() {
       eventId={eventId!}
       eventTitle={eventTitle}
       onAuthenticated={handleStaffAuthenticated}
+      urlCode={urlCode}
     />
   );
 }
