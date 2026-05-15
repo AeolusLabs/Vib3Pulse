@@ -2,6 +2,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useRoute, useLocation } from "wouter";
 import { useEffect, useRef, useState } from "react";
 import { Html5Qrcode } from "html5-qrcode";
+import QRCode from "qrcode";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +21,10 @@ import {
   LogOut,
   ScanLine,
   UserCheck,
+  Copy,
+  QrCode as QrCodeIcon,
+  Download,
+  Link as LinkIcon,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, ensureCsrfToken } from "@/lib/queryClient";
@@ -91,13 +96,15 @@ function DetectingSpinner() {
 function CodeEntryForm({
   eventId,
   onAuthenticated,
+  defaultCode = "",
 }: {
   eventId: string;
   onAuthenticated: (session: StaffSession) => void;
+  defaultCode?: string;
 }) {
   const { toast } = useToast();
   const [staffName, setStaffName] = useState("");
-  const [code, setCode] = useState("");
+  const [code, setCode] = useState(defaultCode);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -181,7 +188,9 @@ function SelectionView({
   eventTitle?: string;
   onAuthenticated: (session: StaffSession) => void;
 }) {
-  const [showCodeEntry, setShowCodeEntry] = useState(false);
+  // If organiser shared a URL with ?code=123456, pre-fill and auto-expand
+  const urlCode = new URLSearchParams(window.location.search).get("code") ?? "";
+  const [showCodeEntry, setShowCodeEntry] = useState(!!urlCode);
   const redirectUrl = `/login?redirect=${encodeURIComponent(`/events/${eventId}/check-in`)}`;
 
   return (
@@ -238,7 +247,7 @@ function SelectionView({
               </div>
 
               {showCodeEntry && (
-                <CodeEntryForm eventId={eventId} onAuthenticated={onAuthenticated} />
+                <CodeEntryForm eventId={eventId} onAuthenticated={onAuthenticated} defaultCode={urlCode} />
               )}
             </CardContent>
           </Card>
@@ -425,6 +434,37 @@ function OrganizerView({
     ticket?: Ticket & { user?: User };
   } | null>(null);
   const scannerRef = useRef<Html5Qrcode | null>(null);
+
+  // Staff code QR state
+  const [expandedQRs, setExpandedQRs] = useState<Set<string>>(new Set());
+  const [qrDataUrls, setQrDataUrls] = useState<Record<string, string>>({});
+
+  const handleToggleQR = async (sc: EventStaffAccessCode) => {
+    if (!qrDataUrls[sc.id]) {
+      const url = `${window.location.origin}/events/${eventId}/check-in?code=${sc.code}`;
+      try {
+        const dataUrl = await QRCode.toDataURL(url, { width: 280, margin: 2, errorCorrectionLevel: "M" });
+        setQrDataUrls((prev) => ({ ...prev, [sc.id]: dataUrl }));
+      } catch {
+        toast({ title: "Error", description: "Could not generate QR code.", variant: "destructive" });
+        return;
+      }
+    }
+    setExpandedQRs((prev) => {
+      const next = new Set(prev);
+      next.has(sc.id) ? next.delete(sc.id) : next.add(sc.id);
+      return next;
+    });
+  };
+
+  const handleDownloadQR = (sc: EventStaffAccessCode) => {
+    const dataUrl = qrDataUrls[sc.id];
+    if (!dataUrl) return;
+    const a = document.createElement("a");
+    a.href = dataUrl;
+    a.download = `checkin-code-${sc.code}.png`;
+    a.click();
+  };
 
   const { data: event } = useQuery<Event>({
     queryKey: [`/api/events/${eventId}`],
@@ -663,7 +703,7 @@ function OrganizerView({
                   Staff Access
                 </CardTitle>
                 <CardDescription>
-                  Generate codes for bouncers — share this page link and they enter their code here
+                  Generate a code per bouncer, share the link below, they open it and enter their code
                 </CardDescription>
               </div>
               <Button
@@ -681,67 +721,144 @@ function OrganizerView({
               </Button>
             </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
+
+            {/* Shareable check-in link */}
+            <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2">
+              <LinkIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+              <p className="text-xs text-muted-foreground truncate flex-1 font-mono">
+                {window.location.origin}/events/{eventId}/check-in
+              </p>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 flex-shrink-0"
+                title="Copy check-in link"
+                data-testid="button-copy-checkin-link"
+                onClick={() => {
+                  navigator.clipboard.writeText(`${window.location.origin}/events/${eventId}/check-in`);
+                  toast({ title: "Link copied", description: "Share this with your door staff." });
+                }}
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+
+            {/* Code list */}
             {!staffCodes || staffCodes.length === 0 ? (
-              <p className="text-center text-muted-foreground py-6 text-sm">No staff codes generated yet</p>
+              <p className="text-center text-muted-foreground py-4 text-sm">
+                No staff codes yet — click "New Code" to generate one
+              </p>
             ) : (
               <div className="space-y-3">
                 {staffCodes.map((sc) => (
-                  <div
-                    key={sc.id}
-                    className="flex items-center justify-between p-3 rounded-md border"
-                    data-testid={`staff-code-${sc.id}`}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span
-                          className="font-mono text-lg font-bold tracking-widest cursor-pointer select-all"
-                          title="Click to copy"
-                          onClick={() => {
-                            navigator.clipboard.writeText(sc.code);
-                            toast({ title: "Copied!", description: `Code ${sc.code} copied.` });
-                          }}
-                        >
-                          {sc.code}
-                        </span>
-                        <Badge
-                          variant={
-                            sc.status === "active"
-                              ? "default"
-                              : sc.status === "revoked"
-                              ? "destructive"
-                              : "secondary"
-                          }
-                        >
-                          {sc.status === "active" ? "Active" : sc.status === "revoked" ? "Revoked" : "Pending"}
-                        </Badge>
-                        {sc.scanCount > 0 && (
-                          <span className="text-xs text-muted-foreground">{sc.scanCount} scanned</span>
+                  <div key={sc.id} className="rounded-md border" data-testid={`staff-code-${sc.id}`}>
+
+                    {/* Code row */}
+                    <div className="flex items-center justify-between p-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span
+                            className="font-mono text-xl font-bold tracking-[0.3em] cursor-pointer select-all"
+                            title="Click to copy code"
+                            onClick={() => {
+                              navigator.clipboard.writeText(sc.code);
+                              toast({ title: "Copied!", description: `Code ${sc.code} copied.` });
+                            }}
+                          >
+                            {sc.code}
+                          </span>
+                          <Badge
+                            variant={
+                              sc.status === "active" ? "default" : sc.status === "revoked" ? "destructive" : "secondary"
+                            }
+                          >
+                            {sc.status === "active" ? "Active" : sc.status === "revoked" ? "Revoked" : "Pending"}
+                          </Badge>
+                          {sc.scanCount > 0 && (
+                            <span className="text-xs text-muted-foreground">{sc.scanCount} scanned</span>
+                          )}
+                        </div>
+                        {sc.validatedBy ? (
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {sc.validatedBy} · redeemed {sc.redeemedAt ? format(new Date(sc.redeemedAt), "h:mm a") : ""}
+                          </p>
+                        ) : (
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            Not yet used · expires {format(new Date(sc.expiresAt), "h:mm a")}
+                          </p>
                         )}
                       </div>
-                      {sc.validatedBy ? (
-                        <p className="text-sm text-muted-foreground mt-0.5">
-                          {sc.validatedBy} · redeemed {sc.redeemedAt ? format(new Date(sc.redeemedAt), "h:mm a") : ""}
-                        </p>
-                      ) : (
-                        <p className="text-sm text-muted-foreground mt-0.5">
-                          Not yet used · expires {format(new Date(sc.expiresAt), "h:mm a")}
-                        </p>
-                      )}
+
+                      {/* Actions */}
+                      <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                        {sc.status !== "revoked" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title={expandedQRs.has(sc.id) ? "Hide QR" : "Show QR code to share"}
+                            onClick={() => handleToggleQR(sc)}
+                            data-testid={`button-qr-${sc.id}`}
+                          >
+                            <QrCodeIcon className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {sc.status !== "revoked" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-destructive hover:text-destructive"
+                            onClick={() => revokeCodeMutation.mutate(sc.id)}
+                            disabled={revokeCodeMutation.isPending}
+                            title="Revoke access"
+                            data-testid={`button-revoke-${sc.id}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                    {sc.status !== "revoked" && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-destructive hover:text-destructive"
-                        onClick={() => revokeCodeMutation.mutate(sc.id)}
-                        disabled={revokeCodeMutation.isPending}
-                        title="Revoke access"
-                        data-testid={`button-revoke-${sc.id}`}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+
+                    {/* Expanded QR section */}
+                    {expandedQRs.has(sc.id) && qrDataUrls[sc.id] && (
+                      <div className="border-t p-4 flex flex-col items-center gap-3 bg-muted/20">
+                        <img
+                          src={qrDataUrls[sc.id]}
+                          alt={`QR code for staff code ${sc.code}`}
+                          className="w-48 h-48 rounded-sm"
+                          data-testid={`img-staff-qr-${sc.id}`}
+                        />
+                        <p className="text-xs text-center text-muted-foreground max-w-[220px]">
+                          Bouncer scans this QR → opens check-in page → code pre-filled → enters name → starts scanning
+                        </p>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleDownloadQR(sc)}
+                            data-testid={`button-download-qr-${sc.id}`}
+                          >
+                            <Download className="h-4 w-4 mr-2" />
+                            Download
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              navigator.clipboard.writeText(
+                                `${window.location.origin}/events/${eventId}/check-in?code=${sc.code}`,
+                              );
+                              toast({ title: "Link copied", description: "Direct link with code pre-filled." });
+                            }}
+                            data-testid={`button-copy-code-link-${sc.id}`}
+                          >
+                            <Copy className="h-4 w-4 mr-2" />
+                            Copy link
+                          </Button>
+                        </div>
+                      </div>
                     )}
+
                   </div>
                 ))}
               </div>
