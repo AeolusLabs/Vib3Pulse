@@ -87,11 +87,8 @@ function Router() {
         </AuthenticatedLayout>
       </Route>
       
-      <Route path="/events/:id/check-in">
-        <AuthenticatedLayout>
-          <EventCheckInPage />
-        </AuthenticatedLayout>
-      </Route>
+      {/* Public — mode detection inside the page handles organiser vs staff vs unauthenticated */}
+      <Route path="/events/:id/check-in" component={EventCheckInPage} />
       
       <Route path="/my-rsvps">
         <AuthenticatedLayout>

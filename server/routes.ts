@@ -1382,6 +1382,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Event-scoped staff code redemption — bouncer submits code at a specific event URL
+  app.post("/api/events/:eventId/staff-access/validate", async (req, res) => {
+    try {
+      const schema = z.object({
+        code: z.string().length(6),
+        staffName: z.string().min(1).max(80),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid request", errors: parsed.error.errors });
+      }
+      const { code, staffName } = parsed.data;
+      const { eventId } = req.params;
+
+      const staffCode = await storage.getStaffCodeByCode(code);
+      if (!staffCode) {
+        return res.status(404).json({ message: "Invalid code" });
+      }
+      // Ensure code belongs to THIS event — prevents cross-event token reuse
+      if (staffCode.eventId !== eventId) {
+        return res.status(404).json({ message: "Invalid code" });
+      }
+      if (staffCode.status === "revoked") {
+        return res.status(403).json({ message: "This code has been revoked" });
+      }
+      if (staffCode.status === "active") {
+        return res.status(409).json({ message: "This code has already been used by someone else" });
+      }
+      if (new Date() > staffCode.expiresAt) {
+        return res.status(410).json({ message: "This code has expired" });
+      }
+
+      const event = await storage.getEvent(eventId);
+      if (!event) return res.status(404).json({ message: "Event not found" });
+
+      const scannerToken = crypto.randomBytes(32).toString("hex");
+      const ip =
+        (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+        req.socket.remoteAddress ||
+        "";
+      const ua = req.headers["user-agent"] || "";
+
+      const redeemed = await storage.redeemStaffCode(staffCode.id, staffName, ip, ua, scannerToken);
+
+      res.json({
+        scannerToken: redeemed.scannerToken,
+        eventId: redeemed.eventId,
+        eventTitle: event.title,
+        staffName: redeemed.validatedBy,
+        expiresAt: redeemed.expiresAt,
+      });
+    } catch (error: any) {
+      if (error.message === "Code already redeemed or revoked") {
+        return res.status(409).json({ message: "This code has already been used" });
+      }
+      console.error("Staff access validate error:", error);
+      res.status(500).json({ message: "Failed to authenticate" });
+    }
+  });
+
   // RSVPs
   app.get("/api/rsvps", requireAuth, async (req, res) => {
     try {
