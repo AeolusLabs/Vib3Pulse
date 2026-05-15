@@ -88,6 +88,7 @@ import {
   type PushSubscription,
   type InsertPushSubscription,
   type EventStaffAccessCode,
+  type VenueStaffAccessCode,
   users,
   events,
   tickets,
@@ -133,7 +134,8 @@ import {
   pollOptions,
   pollVotes,
   pushSubscriptions,
-  eventStaffAccessCodes
+  eventStaffAccessCodes,
+  venueStaffAccessCodes
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
@@ -151,6 +153,23 @@ export async function ensureSchema() {
     CREATE TABLE IF NOT EXISTS event_staff_access_codes (
       id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       event_id VARCHAR NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      organizer_id VARCHAR NOT NULL REFERENCES users(id),
+      code VARCHAR(6) NOT NULL,
+      scanner_token VARCHAR UNIQUE,
+      status TEXT NOT NULL DEFAULT 'pending',
+      expires_at TIMESTAMP NOT NULL,
+      validated_by VARCHAR,
+      validated_device_ip VARCHAR,
+      validated_device_ua TEXT,
+      redeemed_at TIMESTAMP,
+      scan_count INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMP NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS venue_staff_access_codes (
+      id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      venue_entry_night_id VARCHAR NOT NULL REFERENCES venue_entry_nights(id) ON DELETE CASCADE,
       organizer_id VARCHAR NOT NULL REFERENCES users(id),
       code VARCHAR(6) NOT NULL,
       scanner_token VARCHAR UNIQUE,
@@ -373,8 +392,18 @@ export interface IStorage {
   getVenueTicket(id: string): Promise<VenueTicket | undefined>;
   getVenueTicketByValidationCode(validationCode: string): Promise<VenueTicket | undefined>;
   createVenueTicket(ticket: InsertVenueTicket): Promise<VenueTicket>;
-  checkInVenueTicket(ticketId: string, organizerId: string): Promise<VenueTicket>;
+  checkInVenueTicket(ticketId: string, organizerId: string): Promise<VenueTicket | null>;
   incrementVenueEntryNightTicketsSold(entryNightId: string): Promise<void>;
+  getVenueEventCheckIns(venueEntryNightId: string): Promise<Array<VenueTicket & { user: User }>>;
+
+  // Venue staff access codes
+  createVenueStaffCode(venueEntryNightId: string, organizerId: string, expiresAt: Date): Promise<VenueStaffAccessCode>;
+  getVenueStaffCodeByCode(code: string): Promise<VenueStaffAccessCode | undefined>;
+  redeemVenueStaffCode(id: string, staffName: string, ip: string, ua: string, scannerToken: string): Promise<VenueStaffAccessCode>;
+  getVenueStaffCodeByScannerToken(token: string): Promise<VenueStaffAccessCode | undefined>;
+  getVenueEntryNightStaffCodes(venueEntryNightId: string, organizerId: string): Promise<VenueStaffAccessCode[]>;
+  revokeVenueStaffCode(id: string, organizerId: string): Promise<void>;
+  incrementVenueStaffCodeScanCount(id: string): Promise<void>;
 
   // Venue analytics methods
   trackVenueView(venueId: string, userId?: string): Promise<void>;
@@ -2389,6 +2418,94 @@ export class DbStorage implements IStorage {
       .set({ ticketsSold: sql`${venueEntryNights.ticketsSold} + 1` })
       .where(eq(venueEntryNights.id, entryNightId));
   }
+
+  async getVenueEventCheckIns(venueEntryNightId: string): Promise<Array<VenueTicket & { user: User }>> {
+    const result = await db
+      .select()
+      .from(venueTickets)
+      .innerJoin(users, eq(venueTickets.userId, users.id))
+      .where(eq(venueTickets.venueEntryNightId, venueEntryNightId))
+      .orderBy(desc(venueTickets.purchaseDate));
+    return result.map(r => ({ ...r.venue_tickets, user: r.users }));
+  }
+
+  async createVenueStaffCode(venueEntryNightId: string, organizerId: string, expiresAt: Date): Promise<VenueStaffAccessCode> {
+    let code: string;
+    let attempts = 0;
+    while (true) {
+      code = String(Math.floor(100000 + Math.random() * 900000));
+      const existing = await db
+        .select()
+        .from(venueStaffAccessCodes)
+        .where(and(eq(venueStaffAccessCodes.code, code), eq(venueStaffAccessCodes.status, "pending")));
+      if (existing.length === 0) break;
+      if (++attempts > 20) throw new Error("Could not generate unique staff code");
+    }
+    const result = await db
+      .insert(venueStaffAccessCodes)
+      .values({ venueEntryNightId, organizerId, code: code!, expiresAt })
+      .returning();
+    return result[0];
+  }
+
+  async getVenueStaffCodeByCode(code: string): Promise<VenueStaffAccessCode | undefined> {
+    const result = await db
+      .select()
+      .from(venueStaffAccessCodes)
+      .where(eq(venueStaffAccessCodes.code, code));
+    return result[0];
+  }
+
+  async redeemVenueStaffCode(id: string, staffName: string, ip: string, ua: string, scannerToken: string): Promise<VenueStaffAccessCode> {
+    const result = await db
+      .update(venueStaffAccessCodes)
+      .set({
+        status: "active",
+        scannerToken,
+        validatedBy: staffName,
+        validatedDeviceIp: ip,
+        validatedDeviceUa: ua,
+        redeemedAt: new Date(),
+      })
+      .where(and(eq(venueStaffAccessCodes.id, id), eq(venueStaffAccessCodes.status, "pending")))
+      .returning();
+    if (!result[0]) throw new Error("Code already redeemed or revoked");
+    return result[0];
+  }
+
+  async getVenueStaffCodeByScannerToken(token: string): Promise<VenueStaffAccessCode | undefined> {
+    const result = await db
+      .select()
+      .from(venueStaffAccessCodes)
+      .where(eq(venueStaffAccessCodes.scannerToken, token));
+    return result[0];
+  }
+
+  async getVenueEntryNightStaffCodes(venueEntryNightId: string, organizerId: string): Promise<VenueStaffAccessCode[]> {
+    return db
+      .select()
+      .from(venueStaffAccessCodes)
+      .where(and(
+        eq(venueStaffAccessCodes.venueEntryNightId, venueEntryNightId),
+        eq(venueStaffAccessCodes.organizerId, organizerId),
+      ))
+      .orderBy(desc(venueStaffAccessCodes.createdAt));
+  }
+
+  async revokeVenueStaffCode(id: string, organizerId: string): Promise<void> {
+    await db
+      .update(venueStaffAccessCodes)
+      .set({ status: "revoked" })
+      .where(and(eq(venueStaffAccessCodes.id, id), eq(venueStaffAccessCodes.organizerId, organizerId)));
+  }
+
+  async incrementVenueStaffCodeScanCount(id: string): Promise<void> {
+    await db
+      .update(venueStaffAccessCodes)
+      .set({ scanCount: sql`${venueStaffAccessCodes.scanCount} + 1` })
+      .where(eq(venueStaffAccessCodes.id, id));
+  }
+
 
   // Venue analytics methods
   async trackVenueView(venueId: string, userId?: string): Promise<void> {

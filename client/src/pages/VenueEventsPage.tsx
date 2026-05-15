@@ -18,7 +18,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import {
   ArrowLeft, Calendar, PoundSterling, Users, Plus, Edit, Trash2,
   Ticket, Clock, CheckCircle, XCircle, TrendingUp, Upload, ImageIcon,
-  X as XIcon, DoorOpen, UtensilsCrossed, Wine, LogOut,
+  X as XIcon, DoorOpen, UtensilsCrossed, Wine, LogOut, ScanLine,
 } from "lucide-react";
 import { format, isPast, isFuture } from "date-fns";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -325,13 +325,18 @@ export default function VenueEventsPage() {
           )}
         </CardContent>
 
-        <CardFooter className="flex gap-2 pt-4 border-t">
+        <CardFooter className="flex gap-2 pt-4 border-t flex-wrap">
           <Button variant="outline" size="sm" onClick={() => handleOpenEdit(event)} data-testid={`button-edit-event-${event.id}`}>
             <Edit className="h-4 w-4 mr-2" />Edit
           </Button>
           <Button variant="outline" size="sm" asChild>
             <Link href={`/venue-events/${event.id}`}>
               <Ticket className="h-4 w-4 mr-2" />View Public Page
+            </Link>
+          </Button>
+          <Button variant="outline" size="sm" asChild data-testid={`button-check-in-${event.id}`}>
+            <Link href={`/venue-events/${event.id}/check-in`}>
+              <ScanLine className="h-4 w-4 mr-2" />Check-In
             </Link>
           </Button>
           <Button

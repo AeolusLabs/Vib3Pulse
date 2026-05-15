@@ -44,6 +44,7 @@ import ForgotPasswordPage from "@/pages/ForgotPasswordPage";
 import ResetPasswordPage from "@/pages/ResetPasswordPage";
 import JoinGroupPage from "@/pages/JoinGroupPage";
 import ScannerPage from "@/pages/ScannerPage";
+import VenueEventCheckInPage from "@/pages/VenueEventCheckInPage";
 
 function Router() {
   return (
@@ -151,6 +152,7 @@ function Router() {
       </Route>
 
       <Route path="/venue-events/:id" component={VenueEventDetailPage} />
+      <Route path="/venue-events/:id/check-in" component={VenueEventCheckInPage} />
 
       <Route path="/venue/:id" component={VenueDetailPage} />
       

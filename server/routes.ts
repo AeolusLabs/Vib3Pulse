@@ -1358,24 +1358,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Verify scanner token is still valid (called on page load by bouncer)
+  // Checks both regular event and venue event staff code tables.
   app.get("/api/scanner/verify", async (req, res) => {
     try {
       const token = req.headers["x-scanner-token"] as string | undefined;
       if (!token) return res.status(401).json({ valid: false });
 
-      const staffCode = await storage.getStaffCodeByScannerToken(token);
-      if (!staffCode || staffCode.status !== "active" || new Date() > staffCode.expiresAt) {
-        return res.json({ valid: false });
+      // Check regular event staff codes first
+      const eventStaffCode = await storage.getStaffCodeByScannerToken(token);
+      if (eventStaffCode && eventStaffCode.status === "active" && new Date() <= eventStaffCode.expiresAt) {
+        const event = await storage.getEvent(eventStaffCode.eventId);
+        return res.json({
+          valid: true,
+          type: "event",
+          eventId: eventStaffCode.eventId,
+          eventTitle: event?.title ?? "",
+          staffName: eventStaffCode.validatedBy,
+          expiresAt: eventStaffCode.expiresAt,
+          scanCount: eventStaffCode.scanCount,
+        });
       }
-      const event = await storage.getEvent(staffCode.eventId);
-      res.json({
-        valid: true,
-        eventId: staffCode.eventId,
-        eventTitle: event?.title ?? "",
-        staffName: staffCode.validatedBy,
-        expiresAt: staffCode.expiresAt,
-        scanCount: staffCode.scanCount,
-      });
+
+      // Check venue event staff codes
+      const venueStaffCode = await storage.getVenueStaffCodeByScannerToken(token);
+      if (venueStaffCode && venueStaffCode.status === "active" && new Date() <= venueStaffCode.expiresAt) {
+        const entryNight = await storage.getVenueEntryNight(venueStaffCode.venueEntryNightId);
+        return res.json({
+          valid: true,
+          type: "venue-event",
+          eventId: venueStaffCode.venueEntryNightId,
+          eventTitle: entryNight?.name ?? "",
+          staffName: venueStaffCode.validatedBy,
+          expiresAt: venueStaffCode.expiresAt,
+          scanCount: venueStaffCode.scanCount,
+        });
+      }
+
+      res.json({ valid: false });
     } catch (error) {
       console.error("Scanner verify error:", error);
       res.status(500).json({ valid: false });
@@ -3320,6 +3339,133 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ==================== VENUE EVENT CHECK-IN ROUTES ====================
+
+  // Get all check-ins for a venue event (organizer only)
+  app.get("/api/venue-events/:id/check-ins", requireAuth, async (req, res) => {
+    try {
+      const entryNight = await storage.getVenueEntryNight(req.params.id);
+      if (!entryNight) return res.status(404).json({ message: "Venue event not found" });
+      const venue = await storage.getVenue(entryNight.venueId);
+      if (!venue || venue.ownerId !== req.user!.id) {
+        return res.status(403).json({ message: "Only the venue owner can view check-ins" });
+      }
+      const checkIns = await storage.getVenueEventCheckIns(req.params.id);
+      res.json(checkIns);
+    } catch (error) {
+      console.error("Get venue check-ins error:", error);
+      res.status(500).json({ message: "Failed to get check-ins" });
+    }
+  });
+
+  // Generate a staff code for a venue event
+  app.post("/api/venue-events/:id/staff-codes", requireAuth, async (req, res) => {
+    try {
+      const entryNight = await storage.getVenueEntryNight(req.params.id);
+      if (!entryNight) return res.status(404).json({ message: "Venue event not found" });
+      const venue = await storage.getVenue(entryNight.venueId);
+      if (!venue || venue.ownerId !== req.user!.id) {
+        return res.status(403).json({ message: "Only the venue owner can generate staff codes" });
+      }
+      const eventEnd = entryNight.date ? new Date(entryNight.date) : null;
+      const in24h = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      const expiresAt = eventEnd && eventEnd < in24h ? eventEnd : in24h;
+      const staffCode = await storage.createVenueStaffCode(entryNight.id, req.user!.id, expiresAt);
+      res.json(staffCode);
+    } catch (error) {
+      console.error("Create venue staff code error:", error);
+      res.status(500).json({ message: "Failed to create staff code" });
+    }
+  });
+
+  // List staff codes for a venue event
+  app.get("/api/venue-events/:id/staff-codes", requireAuth, async (req, res) => {
+    try {
+      const entryNight = await storage.getVenueEntryNight(req.params.id);
+      if (!entryNight) return res.status(404).json({ message: "Venue event not found" });
+      const venue = await storage.getVenue(entryNight.venueId);
+      if (!venue || venue.ownerId !== req.user!.id) {
+        return res.status(403).json({ message: "Only the venue owner can view staff codes" });
+      }
+      const codes = await storage.getVenueEntryNightStaffCodes(entryNight.id, req.user!.id);
+      res.json(codes);
+    } catch (error) {
+      console.error("List venue staff codes error:", error);
+      res.status(500).json({ message: "Failed to fetch staff codes" });
+    }
+  });
+
+  // Revoke a venue event staff code
+  app.delete("/api/venue-events/:id/staff-codes/:codeId", requireAuth, async (req, res) => {
+    try {
+      const entryNight = await storage.getVenueEntryNight(req.params.id);
+      if (!entryNight) return res.status(404).json({ message: "Venue event not found" });
+      const venue = await storage.getVenue(entryNight.venueId);
+      if (!venue || venue.ownerId !== req.user!.id) {
+        return res.status(403).json({ message: "Only the venue owner can revoke staff codes" });
+      }
+      await storage.revokeVenueStaffCode(req.params.codeId, req.user!.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Revoke venue staff code error:", error);
+      res.status(500).json({ message: "Failed to revoke staff code" });
+    }
+  });
+
+  // Venue event-scoped staff code redemption — bouncer submits code at a specific venue event URL
+  app.post("/api/venue-events/:id/staff-access/validate", async (req, res) => {
+    try {
+      const schema = z.object({
+        code: z.string().length(6),
+        staffName: z.string().min(1).max(80),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid request", errors: parsed.error.errors });
+      }
+      const { code, staffName } = parsed.data;
+      const venueEntryNightId = req.params.id;
+
+      const staffCode = await storage.getVenueStaffCodeByCode(code);
+      if (!staffCode) return res.status(404).json({ message: "Invalid code" });
+      if (staffCode.venueEntryNightId !== venueEntryNightId) {
+        return res.status(404).json({ message: "Invalid code" });
+      }
+      if (staffCode.status === "revoked") {
+        return res.status(403).json({ message: "This code has been revoked" });
+      }
+      if (staffCode.status === "active") {
+        return res.status(409).json({ message: "This code has already been used by someone else" });
+      }
+      if (new Date() > staffCode.expiresAt) {
+        return res.status(410).json({ message: "This code has expired" });
+      }
+
+      const entryNight = await storage.getVenueEntryNight(venueEntryNightId);
+      if (!entryNight) return res.status(404).json({ message: "Venue event not found" });
+
+      const scannerToken = crypto.randomBytes(32).toString("hex");
+      const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "";
+      const ua = req.headers["user-agent"] || "";
+
+      const redeemed = await storage.redeemVenueStaffCode(staffCode.id, staffName, ip, ua, scannerToken);
+
+      res.json({
+        scannerToken: redeemed.scannerToken,
+        eventId: redeemed.venueEntryNightId,
+        eventTitle: entryNight.name,
+        staffName: redeemed.validatedBy,
+        expiresAt: redeemed.expiresAt,
+      });
+    } catch (error: any) {
+      if (error.message === "Code already redeemed or revoked") {
+        return res.status(409).json({ message: "This code has already been used" });
+      }
+      console.error("Venue staff access validate error:", error);
+      res.status(500).json({ message: "Failed to authenticate" });
+    }
+  });
+
   // ==================== VENUE TICKET ROUTES ====================
 
   // Get user's venue tickets
@@ -3336,40 +3482,93 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Venue entry payment routes handled by payment-routes.ts
   // See /api/payments/venue/intent and /api/payments/venue/confirm
 
-  // Validate venue ticket (for check-in)
-  app.post("/api/venue-tickets/validate", requireOrganizer, async (req, res) => {
+  // Validate venue ticket (for check-in) — accepts organizer session or staff scanner token
+  app.post("/api/venue-tickets/validate", async (req, res) => {
     try {
-      const { validationCode } = req.body;
-      
+      const requestSchema = z.object({
+        validationCode: z.string().min(1),
+        eventId: z.string().min(1), // venueEntryNightId
+      });
+      const parseResult = requestSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.status(400).json({ message: "Invalid request data" });
+      }
+      const { validationCode, eventId: venueEntryNightId } = parseResult.data;
+
+      // Resolve scanner identity: staff token or organizer session
+      let scannerId: string;
+      let venueStaffCodeId: string | null = null;
+
+      const scannerToken = req.headers["x-scanner-token"] as string | undefined;
+
+      if (scannerToken) {
+        const venueStaffCode = await storage.getVenueStaffCodeByScannerToken(scannerToken);
+        if (!venueStaffCode || venueStaffCode.status !== "active") {
+          return res.status(401).json({ message: "Invalid or expired scanner token" });
+        }
+        if (new Date() > venueStaffCode.expiresAt) {
+          return res.status(401).json({ message: "Scanner token has expired" });
+        }
+        if (venueStaffCode.venueEntryNightId !== venueEntryNightId) {
+          return res.status(403).json({ message: "Scanner not authorised for this venue event" });
+        }
+        const entryNight = await storage.getVenueEntryNight(venueStaffCode.venueEntryNightId);
+        const venue = entryNight ? await storage.getVenue(entryNight.venueId) : null;
+        if (!venue) return res.status(404).json({ message: "Venue not found" });
+        scannerId = venue.ownerId;
+        venueStaffCodeId = venueStaffCode.id;
+      } else if (req.isAuthenticated()) {
+        const entryNight = await storage.getVenueEntryNight(venueEntryNightId);
+        if (!entryNight) return res.status(404).json({ message: "Entry night not found" });
+        const venue = await storage.getVenue(entryNight.venueId);
+        if (!venue || venue.ownerId !== req.user!.id) {
+          return res.status(403).json({ message: "You can only validate tickets for your own venues" });
+        }
+        scannerId = req.user!.id;
+      } else {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
       const ticket = await storage.getVenueTicketByValidationCode(validationCode);
       if (!ticket) {
-        return res.status(404).json({ message: "Invalid ticket" });
-      }
-      
-      if (ticket.status === "checked_in") {
-        return res.status(400).json({ message: "Ticket already used" });
-      }
-      
-      const entryNight = await storage.getVenueEntryNight(ticket.venueEntryNightId);
-      if (!entryNight) {
-        return res.status(404).json({ message: "Entry night not found" });
-      }
-      
-      const venue = await storage.getVenue(entryNight.venueId);
-      if (!venue || venue.ownerId !== req.user!.id) {
-        return res.status(403).json({ message: "You can only validate tickets for your own venues" });
+        return res.status(404).json({ valid: false, message: "Invalid ticket code" });
       }
 
-      const checkedInTicket = await storage.checkInVenueTicket(ticket.id, req.user!.id);
+      if (ticket.venueEntryNightId !== venueEntryNightId) {
+        return res.status(400).json({ valid: false, message: "This ticket is not for this venue event" });
+      }
+
+      if (ticket.checkedInAt) {
+        const ticketUser = await storage.getUser(ticket.userId);
+        return res.json({
+          valid: false,
+          alreadyCheckedIn: true,
+          message: "Ticket already used",
+          checkedInAt: ticket.checkedInAt,
+          ticket: { ...ticket, user: ticketUser },
+        });
+      }
+
+      const checkedInTicket = await storage.checkInVenueTicket(ticket.id, scannerId);
       if (!checkedInTicket) {
-        return res.status(409).json({ message: "Ticket already used" });
+        return res.json({
+          valid: false,
+          alreadyCheckedIn: true,
+          message: "Ticket already used",
+          ticket,
+        });
       }
 
+      if (venueStaffCodeId) {
+        await storage.incrementVenueStaffCodeScanCount(venueStaffCodeId);
+      }
+
+      const ticketUser = await storage.getUser(checkedInTicket.userId);
       res.json({
-        success: true,
-        ticket: checkedInTicket,
-        entryNight,
-        venue,
+        valid: true,
+        alreadyCheckedIn: false,
+        message: "Ticket validated successfully",
+        ticket: { ...checkedInTicket, user: ticketUser },
       });
     } catch (error) {
       console.error("Validate venue ticket error:", error);
