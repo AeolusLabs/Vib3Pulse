@@ -903,6 +903,14 @@ export default function EventCheckInPage() {
     let cancelled = false;
 
     async function detectMode() {
+      // ⓪ If the URL contains ?code this is a staff entry link. Always show the
+      //    selection screen — even for organizers who may be testing the flow.
+      //    Auth-based mode detection must NOT override an explicit ?code param.
+      if (new URLSearchParams(window.location.search).get("code")) {
+        setMode("code-entry");
+        return;
+      }
+
       // ① Organiser check: session user must be an organiser AND own this event.
       //    We make a fresh fetch here rather than trusting cached event data so
       //    that ownership is always verified against the server.
