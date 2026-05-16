@@ -1192,23 +1192,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (ticket.checkedInAt) {
+        const ticketUser = await storage.getUser(ticket.userId);
         return res.json({
           valid: false,
           alreadyCheckedIn: true,
           message: "Ticket already used",
           checkedInAt: ticket.checkedInAt,
-          ticket,
+          ticket: { ...ticket, user: ticketUser },
         });
       }
 
       // Atomic check-in — returns null if a concurrent request beat us
       const updatedTicket = await storage.checkInTicket(ticket.id, scannerId);
       if (!updatedTicket) {
+        const ticketUser = await storage.getUser(ticket.userId);
         return res.json({
           valid: false,
           alreadyCheckedIn: true,
           message: "Ticket already used",
-          ticket,
+          ticket: { ...ticket, user: ticketUser },
         });
       }
 
@@ -1216,11 +1218,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.incrementStaffCodeScanCount(staffCodeId);
       }
 
+      const ticketUser = await storage.getUser(updatedTicket.userId);
       res.json({
         valid: true,
         alreadyCheckedIn: false,
         message: "Ticket validated successfully",
-        ticket: updatedTicket,
+        ticket: { ...updatedTicket, user: ticketUser },
       });
     } catch (error) {
       console.error('Error validating ticket:', error);
@@ -1247,6 +1250,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error fetching check-ins:', error);
       res.status(500).json({ message: "Failed to fetch check-ins" });
+    }
+  });
+
+  // Download guestlist as CSV (organizer only)
+  app.get("/api/events/:eventId/guestlist.csv", requireAuth, async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.eventId);
+      if (!event) return res.status(404).json({ message: "Event not found" });
+      if (event.organizerId !== req.user!.id) {
+        return res.status(403).json({ message: "Not authorized" });
+      }
+      const tickets = await storage.getEventCheckIns(req.params.eventId);
+      const csvEscape = (v: string) => `"${v.replace(/"/g, '""')}"`;
+      const rows = [
+        ["Name", "Email", "Status", "Checked In At", "Ticket ID"].map(csvEscape).join(","),
+        ...tickets.map((t) => [
+          t.user.displayName || t.user.username,
+          t.user.email,
+          t.checkedInAt ? "Checked In" : "Not Arrived",
+          t.checkedInAt ? new Date(t.checkedInAt).toISOString().replace("T", " ").slice(0, 16) : "",
+          t.id,
+        ].map(csvEscape).join(",")),
+      ];
+      const eventSlug = (event.title || "guestlist").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", `attachment; filename="${eventSlug}-guestlist.csv"`);
+      res.send(rows.join("\r\n"));
+    } catch (error) {
+      console.error("Guestlist CSV error:", error);
+      res.status(500).json({ message: "Failed to generate guestlist" });
     }
   });
 
@@ -3355,6 +3388,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Get venue check-ins error:", error);
       res.status(500).json({ message: "Failed to get check-ins" });
+    }
+  });
+
+  // Download venue event guestlist as CSV (venue owner only)
+  app.get("/api/venue-events/:id/guestlist.csv", requireAuth, async (req, res) => {
+    try {
+      const entryNight = await storage.getVenueEntryNight(req.params.id);
+      if (!entryNight) return res.status(404).json({ message: "Venue event not found" });
+      const venue = await storage.getVenue(entryNight.venueId);
+      if (!venue || venue.ownerId !== req.user!.id) {
+        return res.status(403).json({ message: "Only the venue owner can download the guestlist" });
+      }
+      const tickets = await storage.getVenueEventCheckIns(req.params.id);
+      const csvEscape = (v: string) => `"${v.replace(/"/g, '""')}"`;
+      const rows = [
+        ["Name", "Email", "Status", "Checked In At", "Ticket ID"].map(csvEscape).join(","),
+        ...tickets.map((t) => [
+          t.user.displayName || t.user.username,
+          t.user.email,
+          t.checkedInAt ? "Checked In" : "Not Arrived",
+          t.checkedInAt ? new Date(t.checkedInAt).toISOString().replace("T", " ").slice(0, 16) : "",
+          t.id,
+        ].map(csvEscape).join(",")),
+      ];
+      const nightSlug = (entryNight.name || "guestlist").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", `attachment; filename="${nightSlug}-guestlist.csv"`);
+      res.send(rows.join("\r\n"));
+    } catch (error) {
+      console.error("Venue guestlist CSV error:", error);
+      res.status(500).json({ message: "Failed to generate guestlist" });
     }
   });
 

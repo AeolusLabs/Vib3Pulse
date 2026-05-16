@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import { useState } from "react";
-import { Edit, Trash2, BarChart3, Eye, EyeOff, Calendar, MapPin, QrCode, Megaphone, Sparkles } from "lucide-react";
+import { Edit, Trash2, BarChart3, Eye, EyeOff, Calendar, MapPin, QrCode, Megaphone, Sparkles, Download } from "lucide-react";
 import { Link } from "wouter";
 import CreateEventModal from "@/components/CreateEventModal";
 import EventDetailsModal from "@/components/EventDetailsModal";
@@ -198,6 +198,22 @@ export default function ManageEventsPage() {
             Check-In
           </Link>
         </Button>
+
+        {event.status !== 'draft' && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const a = document.createElement("a");
+              a.href = `/api/events/${event.id}/guestlist.csv`;
+              a.click();
+            }}
+            data-testid={`button-guestlist-${event.id}`}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Guestlist
+          </Button>
+        )}
 
         {event.status !== 'completed' && (
           <Button

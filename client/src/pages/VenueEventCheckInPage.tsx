@@ -658,11 +658,25 @@ function OrganizerView({
 
         {/* Checked-In Attendees */}
         <Card>
-          <CardHeader>
-            <CardTitle>Checked-In Attendees</CardTitle>
-            <CardDescription>
-              {checkedInTickets.length} attendee{checkedInTickets.length !== 1 ? "s" : ""} checked in
-            </CardDescription>
+          <CardHeader className="flex-row items-start justify-between gap-3">
+            <div>
+              <CardTitle>Checked-In Attendees</CardTitle>
+              <CardDescription>
+                {checkedInTickets.length} attendee{checkedInTickets.length !== 1 ? "s" : ""} checked in
+              </CardDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const a = document.createElement("a");
+                a.href = `/api/venue-events/${venueEntryNightId}/guestlist.csv`;
+                a.click();
+              }}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Download CSV
+            </Button>
           </CardHeader>
           <CardContent>
             {checkedInTickets.length === 0 ? (
