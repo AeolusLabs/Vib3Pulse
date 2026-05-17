@@ -287,12 +287,15 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
       });
       streamRef.current = stream;
 
-      // detect hardware zoom capability
+      // detect hardware zoom capability and start at widest angle
       const track = stream.getVideoTracks()[0];
       const caps  = track.getCapabilities?.() as any;
       if (caps?.zoom) {
         setHwZoomCaps({ min: caps.zoom.min, max: caps.zoom.max });
+        try { await track.applyConstraints({ advanced: [{ zoom: caps.zoom.min } as any] }); }
+        catch { /* unsupported — CSS fallback applies */ }
       }
+      setZoomLevel(0.5);
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
