@@ -45,6 +45,7 @@ import ResetPasswordPage from "@/pages/ResetPasswordPage";
 import JoinGroupPage from "@/pages/JoinGroupPage";
 import ScannerPage from "@/pages/ScannerPage";
 import VenueEventCheckInPage from "@/pages/VenueEventCheckInPage";
+import StoryDetailPage from "@/pages/StoryDetailPage";
 
 function Router() {
   return (
@@ -156,6 +157,12 @@ function Router() {
 
       <Route path="/venue/:id" component={VenueDetailPage} />
       
+      <Route path="/stories/:storyId">
+        <AuthenticatedLayout>
+          <StoryDetailPage />
+        </AuthenticatedLayout>
+      </Route>
+
       <Route path="/join/:code" component={JoinGroupPage} />
 
       {/* Staff scanner — no AuthenticatedLayout, bouncers don't have accounts */}

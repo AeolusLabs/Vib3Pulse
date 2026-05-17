@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
+import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -7,7 +8,6 @@ import type { Event, Venue, Community } from "@shared/schema";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import StoriesBar from "@/components/StoriesBar";
-import StoryViewer from "@/components/StoryViewer";
 import CreateStoryModal from "@/components/CreateStoryModal";
 import CreatePostModal from "@/components/CreatePostModal";
 import FeedPost from "@/components/FeedPost";
@@ -21,56 +21,7 @@ import CommunityModal from "@/components/CommunityModal";
 import musicFestival from '@assets/generated_images/Outdoor_music_festival_event_179040d3.png';
 import foodTasting from '@assets/generated_images/Food_and_wine_tasting_69928d9e.png';
 import techConf from '@assets/generated_images/Tech_conference_presentation_2bcf2c35.png';
-import yogaEvent from '@assets/generated_images/Outdoor_yoga_wellness_event_c02f75d1.png';
 import artGallery from '@assets/generated_images/Art_gallery_opening_8b389604.png';
-import charityRun from '@assets/generated_images/Charity_run_event_5c615e65.png';
-
-//todo: remove mock functionality
-const mockStories = [
-  { 
-    id: '1', 
-    username: 'Live Events Co', 
-    isViewed: false,
-    slides: [
-      { id: '1-1', type: 'image' as const, content: musicFestival, timestamp: '2h ago' },
-      { id: '1-2', type: 'text' as const, content: '🎵 Summer Festival lineup announced!', backgroundColor: 'hsl(262 80% 87%)', timestamp: '2h ago' }
-    ]
-  },
-  { 
-    id: '2', 
-    username: 'Wellness Warriors', 
-    isViewed: true,
-    slides: [
-      { id: '2-1', type: 'image' as const, content: yogaEvent, timestamp: '5h ago' },
-      { id: '2-2', type: 'text' as const, content: 'Join us every morning for sunrise yoga 🧘', backgroundColor: 'hsl(127 63% 49%)', timestamp: '5h ago' }
-    ]
-  },
-  { 
-    id: '3', 
-    username: 'TechForward', 
-    isViewed: false,
-    slides: [
-      { id: '3-1', type: 'image' as const, content: techConf, timestamp: '1h ago' }
-    ]
-  },
-  { 
-    id: '4', 
-    username: 'Art Collective LA', 
-    isViewed: false,
-    slides: [
-      { id: '4-1', type: 'image' as const, content: artGallery, timestamp: '3h ago' },
-      { id: '4-2', type: 'text' as const, content: 'New exhibition opening this Friday!', backgroundColor: 'hsl(340 70% 60%)', timestamp: '3h ago' }
-    ]
-  },
-  { 
-    id: '5', 
-    username: 'Community Champions', 
-    isViewed: true,
-    slides: [
-      { id: '5-1', type: 'image' as const, content: charityRun, timestamp: '8h ago' }
-    ]
-  },
-];
 
 //todo: remove mock functionality
 const mockPosts = [
@@ -213,7 +164,7 @@ type ShareData = {
 type CommunityWithRole = Community & { memberCount: number; role: string };
 
 export default function FeedPage() {
-  const [viewingStory, setViewingStory] = useState<number | null>(null);
+  const [, navigate] = useLocation();
   const [createStoryOpen, setCreateStoryOpen] = useState(false);
   const [createPostOpen, setCreatePostOpen] = useState(false);
   const [feedFilter, setFeedFilter] = useState<string>('following'); // 'following', 'all', or community ID
@@ -413,20 +364,6 @@ export default function FeedPage() {
     setAttachedVenue(null);
   };
 
-  const handleNextStory = () => {
-    if (viewingStory !== null && viewingStory < stories.length - 1) {
-      setViewingStory(viewingStory + 1);
-    } else {
-      setViewingStory(null);
-    }
-  };
-
-  const handlePreviousStory = () => {
-    if (viewingStory !== null && viewingStory > 0) {
-      setViewingStory(viewingStory - 1);
-    }
-  };
-
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
       <Navigation onSearch={() => {}} />
@@ -434,8 +371,9 @@ export default function FeedPage() {
       <StoriesBar
         stories={stories}
         onStoryClick={(storyId) => {
-          const index = stories.findIndex(s => s.id === storyId);
-          setViewingStory(index);
+          const story = stories.find(s => s.id === storyId);
+          const firstSlideId = story?.slides?.[0]?.id;
+          if (firstSlideId) navigate(`/stories/${firstSlideId}`);
         }}
         onCreateStory={() => setCreateStoryOpen(true)}
       />
@@ -587,20 +525,6 @@ export default function FeedPage() {
           <p className="text-muted-foreground text-sm">You're all caught up! 🎉</p>
         </div>
       </main>
-
-      {viewingStory !== null && stories[viewingStory] && (
-        <StoryViewer
-          username={stories[viewingStory].username}
-          avatar={stories[viewingStory].avatar}
-          slides={stories[viewingStory].slides}
-          onClose={() => setViewingStory(null)}
-          onNext={handleNextStory}
-          onPrevious={handlePreviousStory}
-          storyOwnerId={stories[viewingStory].userId}
-          displayName={stories[viewingStory].displayName}
-          userType={stories[viewingStory].userType}
-        />
-      )}
 
       <CreateStoryModal
         open={createStoryOpen}

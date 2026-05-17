@@ -64,15 +64,9 @@ const DRAW_SIZES  = [4, 8, 16, 24];
 const TEXT_COLORS = ["#FFFFFF", "#C4B0FF", "#7BB8E8", "#FFD700", "#FF6B6B", "#4ECDC4", "#000000"];
 const FONT_SIZES  = [24, 32, 48, 64];
 
-const ZOOM_LEVELS = [0.5, 1, 3] as const;
-type ZoomLevel = typeof ZOOM_LEVELS[number];
-
 const MAX_RECORD_MS = 30_000;
 const RING_R = 34;
 const RING_C = 2 * Math.PI * RING_R;
-
-/** CSS scale multiplier for digital zoom fallback */
-const CSS_SCALE: Record<ZoomLevel, number> = { 0.5: 0.9, 1: 1, 3: 2.6 };
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -181,8 +175,9 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
   const [facingMode, setFacingMode]     = useState<"user" | "environment">("user");
   const [flashEnabled, setFlashEnabled] = useState(false);
   const [cameraError, setCameraError]   = useState<string | null>(null);
-  const [zoomLevel, setZoomLevel]       = useState<ZoomLevel>(1);
+  const [zoomLevel, setZoomLevel]       = useState(1.0);
   const [hwZoomCaps, setHwZoomCaps]     = useState<{ min: number; max: number } | null>(null);
+  const [zoomIndicatorVisible, setZoomIndicatorVisible] = useState(false);
   const [showFlash, setShowFlash]       = useState(false);
 
   const videoRef  = useRef<HTMLVideoElement>(null);
@@ -221,6 +216,11 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
   const isDrawingRef    = useRef(false);
   const lastPtRef       = useRef({ x: 0, y: 0 });
   const hasDrawingRef   = useRef(false);
+
+  // pinch-to-zoom
+  const pinchStartDistRef     = useRef(0);
+  const pinchStartZoomRef     = useRef(1.0);
+  const zoomIndicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // vibe
   const [vibeTag, setVibeTag]                   = useState<VibeTagData | null>(null);
@@ -322,25 +322,57 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
 
   // ─── zoom ─────────────────────────────────────────────────────────────────
 
-  const applyZoom = async (level: ZoomLevel) => {
-    setZoomLevel(level);
+  const applyZoom = async (level: number) => {
+    const clamped = Math.max(0.5, Math.min(3.0, level));
+    setZoomLevel(clamped);
     if (!streamRef.current) return;
     const track = streamRef.current.getVideoTracks()[0];
     if (hwZoomCaps) {
-      // Map our three levels linearly across the hardware zoom range
+      // Map 0.5–3.0 linearly across the full hardware zoom range
       const { min, max } = hwZoomCaps;
-      const target =
-        level === 0.5 ? min :
-        level === 1   ? min + (max - min) * 0.15 :
-                        min + (max - min) * 0.55;
+      const target = min + ((clamped - 0.5) / 2.5) * (max - min);
       try { await track.applyConstraints({ advanced: [{ zoom: Math.round(target * 10) / 10 } as any] }); }
       catch { /* device rejected — CSS fallback still applies */ }
     }
   };
 
   const flipCamera = () => {
-    setZoomLevel(1);
     setFacingMode(m => m === "user" ? "environment" : "user");
+  };
+
+  // ─── pinch-to-zoom ────────────────────────────────────────────────────────
+
+  const onCameraFrameTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 2) {
+      pinchStartDistRef.current = Math.hypot(
+        e.touches[1].clientX - e.touches[0].clientX,
+        e.touches[1].clientY - e.touches[0].clientY,
+      );
+      pinchStartZoomRef.current = zoomLevel;
+    }
+  };
+
+  const onCameraFrameTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length !== 2 || pinchStartDistRef.current === 0) return;
+    const dist = Math.hypot(
+      e.touches[1].clientX - e.touches[0].clientX,
+      e.touches[1].clientY - e.touches[0].clientY,
+    );
+    const newZoom = Math.max(0.5, Math.min(3.0, pinchStartZoomRef.current * (dist / pinchStartDistRef.current)));
+    setZoomLevel(newZoom);
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (track && hwZoomCaps) {
+      const { min, max } = hwZoomCaps;
+      const target = min + ((newZoom - 0.5) / 2.5) * (max - min);
+      track.applyConstraints({ advanced: [{ zoom: Math.round(target * 10) / 10 } as any] }).catch(() => {});
+    }
+    setZoomIndicatorVisible(true);
+    if (zoomIndicatorTimerRef.current) clearTimeout(zoomIndicatorTimerRef.current);
+    zoomIndicatorTimerRef.current = window.setTimeout(() => setZoomIndicatorVisible(false), 1500);
+  };
+
+  const onCameraFrameTouchEnd = (e: React.TouchEvent) => {
+    if (e.touches.length < 2) pinchStartDistRef.current = 0;
   };
 
   const toggleFlash = async () => {
@@ -382,11 +414,11 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
       setTimeout(() => setShowFlash(false), 220);
     }
 
-    // Size draw canvas after paint
+    // Size draw canvas to output resolution so strokes map 1:1 onto compose canvas
     requestAnimationFrame(() => {
-      if (drawCanvasRef.current && frameRef.current) {
-        drawCanvasRef.current.width  = frameRef.current.clientWidth;
-        drawCanvasRef.current.height = frameRef.current.clientHeight;
+      if (drawCanvasRef.current) {
+        drawCanvasRef.current.width  = 1080;
+        drawCanvasRef.current.height = 1920;
       }
       setPhase("editing");
     });
@@ -465,9 +497,9 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
         stopCamera();
         hasDrawingRef.current = false;
         requestAnimationFrame(() => {
-          if (drawCanvasRef.current && frameRef.current) {
-            drawCanvasRef.current.width  = frameRef.current.clientWidth;
-            drawCanvasRef.current.height = frameRef.current.clientHeight;
+          if (drawCanvasRef.current) {
+            drawCanvasRef.current.width  = 1080;
+            drawCanvasRef.current.height = 1920;
           }
           setPhase("editing");
         });
@@ -559,6 +591,38 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
     document.addEventListener("touchmove", move); document.addEventListener("touchend", up);
   };
 
+  const dragVibeBadge = (e: React.MouseEvent | React.TouchEvent) => {
+    if (activeTool === "draw" || !vibeTag || !frameRef.current) return;
+    e.preventDefault();
+    const rect = frameRef.current.getBoundingClientRect();
+    const cx = "touches" in e ? e.touches[0].clientX : e.clientX;
+    const cy = "touches" in e ? e.touches[0].clientY : e.clientY;
+    dragOffset.current = { x: cx - rect.left - (vibeTag.x / 100) * rect.width, y: cy - rect.top - (vibeTag.y / 100) * rect.height };
+    let didMove = false;
+
+    const move = (ev: MouseEvent | TouchEvent) => {
+      ev.preventDefault();
+      const r = frameRef.current?.getBoundingClientRect();
+      if (!r) return;
+      const mx = "touches" in ev ? (ev as TouchEvent).touches[0].clientX : (ev as MouseEvent).clientX;
+      const my = "touches" in ev ? (ev as TouchEvent).touches[0].clientY : (ev as MouseEvent).clientY;
+      if (!didMove && (Math.abs(mx - cx) > 4 || Math.abs(my - cy) > 4)) didMove = true;
+      if (!didMove) return;
+      setVibeTag(v => !v ? v : {
+        ...v,
+        x: Math.max(5, Math.min(95, ((mx - r.left - dragOffset.current.x) / r.width)  * 100)),
+        y: Math.max(5, Math.min(95, ((my - r.top  - dragOffset.current.y) / r.height) * 100)),
+      });
+    };
+    const up = () => {
+      document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up);
+      document.removeEventListener("touchmove", move); document.removeEventListener("touchend", up);
+      if (!didMove) setActiveTool("vibe");
+    };
+    document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+    document.addEventListener("touchmove", move, { passive: false }); document.addEventListener("touchend", up);
+  };
+
   // ─── vibe ─────────────────────────────────────────────────────────────────
 
   const selectVibe = (mood: VibeMood) => {
@@ -583,31 +647,39 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
       const img = new Image();
       img.onload = () => {
         const iW = img.naturalWidth, iH = img.naturalHeight;
-        const ratio = Math.min(1080 / iW, 1920 / iH, 1);
+
+        // Always output 9:16 (1080×1920) — letterbox images that aren't 9:16
+        const targetW = 1080, targetH = 1920;
         const canvas = document.createElement("canvas");
-        canvas.width  = Math.round(iW * ratio);
-        canvas.height = Math.round(iH * ratio);
+        canvas.width  = targetW;
+        canvas.height = targetH;
         const ctx = canvas.getContext("2d")!;
 
+        // Black background for letterbox bars
+        ctx.fillStyle = "#000000";
+        ctx.fillRect(0, 0, targetW, targetH);
+
+        // Scale to fit within 9:16, preserving aspect ratio
+        const scale = Math.min(targetW / iW, targetH / iH, 1);
+        const scaledW = Math.round(iW * scale);
+        const scaledH = Math.round(iH * scale);
+        const ox = Math.round((targetW - scaledW) / 2);
+        const oy = Math.round((targetH - scaledH) / 2);
+
         if (FILTERS[selectedFilter].css) ctx.filter = FILTERS[selectedFilter].css;
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, iW, iH, ox, oy, scaledW, scaledH);
         ctx.filter = "none";
 
-        // bake draw strokes
+        // bake draw strokes — draw canvas is 1080×1920 so it maps 1:1 onto output
         const dc = drawCanvasRef.current;
-        if (dc && hasDrawingRef.current && dc.width > 0 && frameRef.current) {
-          const cW = frameRef.current.clientWidth, cH = frameRef.current.clientHeight;
-          const imgR = iW / iH, contR = cW / cH;
-          let dW: number, dH: number, ox: number, oy: number;
-          if (imgR < contR) { dH = cH; dW = cH * imgR; ox = (cW - dW) / 2; oy = 0; }
-          else              { dW = cW; dH = cW / imgR; ox = 0; oy = (cH - dH) / 2; }
-          ctx.drawImage(dc, ox, oy, dW, dH, 0, 0, canvas.width, canvas.height);
+        if (dc && hasDrawingRef.current && dc.width > 0) {
+          ctx.drawImage(dc, 0, 0, dc.width, dc.height, 0, 0, targetW, targetH);
         }
 
-        // bake text overlays
+        // bake text overlays — positions are % of 9:16 frame = % of output canvas
         textOverlays.forEach(ov => {
-          const x = (ov.x / 100) * canvas.width, y = (ov.y / 100) * canvas.height;
-          const fs = (ov.fontSize / 100) * canvas.width * 0.15;
+          const x = (ov.x / 100) * targetW, y = (ov.y / 100) * targetH;
+          const fs = (ov.fontSize / 100) * targetW * 0.15;
           ctx.font = `bold ${fs}px 'PT Sans', sans-serif`;
           ctx.textAlign = "center"; ctx.textBaseline = "middle";
           ctx.strokeStyle = ov.color === "#FFFFFF" ? "#000" : "#FFF";
@@ -615,10 +687,10 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
           ctx.fillStyle = ov.color; ctx.fillText(ov.text, x, y);
         });
 
-        // bake vibe tag
+        // bake vibe tag — positions are % of 9:16 frame = % of output canvas
         if (vibeTag) {
-          const vx = (vibeTag.x / 100) * canvas.width, vy = (vibeTag.y / 100) * canvas.height;
-          const fs = canvas.width * 0.044;
+          const vx = (vibeTag.x / 100) * targetW, vy = (vibeTag.y / 100) * targetH;
+          const fs = targetW * 0.044;
           const label = `${vibeTag.emoji} ${vibeTag.mood}`;
           ctx.font = `bold ${fs}px 'PT Sans', sans-serif`;
           const tw = ctx.measureText(label).width;
@@ -713,7 +785,8 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
 
   const recordingPct = Math.min((recordingMs / MAX_RECORD_MS) * 100, 100);
   const filterCss    = FILTERS[selectedFilter].css || undefined;
-  const cssScale     = CSS_SCALE[zoomLevel];
+  // Hardware zoom handles it when available; CSS scale is the fallback
+  const cssScale = hwZoomCaps ? 1 : zoomLevel;
   const canPost      = (mediaKind === "photo" && !!capturedImage) || (mediaKind === "video" && !!capturedVideoBlob);
 
   // ─── render ───────────────────────────────────────────────────────────────
@@ -773,7 +846,10 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
               <div
                 ref={frameRef}
                 className="relative overflow-hidden bg-black"
-                style={{ aspectRatio: "9/16", height: "100%", width: "auto", maxWidth: "100%" }}
+                style={{ aspectRatio: "9/16", height: "100%", width: "auto", maxWidth: "100%", touchAction: "none" }}
+                onTouchStart={onCameraFrameTouchStart}
+                onTouchMove={onCameraFrameTouchMove}
+                onTouchEnd={onCameraFrameTouchEnd}
               >
                 {/* live camera preview */}
                 <video
@@ -815,6 +891,23 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                   )}
                 </AnimatePresence>
 
+                {/* zoom level indicator — appears during pinch, fades out */}
+                <AnimatePresence>
+                  {zoomIndicatorVisible && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.85 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.85 }}
+                      transition={{ duration: 0.12, ease: E.out }}
+                      className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-20"
+                    >
+                      <div className="bg-black/55 backdrop-blur-sm text-white text-sm font-bold px-3.5 py-1.5 rounded-full tabular-nums">
+                        {zoomLevel.toFixed(1)}×
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
                 {/* camera error */}
                 {cameraError && (
                   <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/92 gap-5 p-8 z-20">
@@ -841,31 +934,6 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
               className="absolute bottom-0 left-0 right-0 z-20 pb-10 pt-3"
               style={{ background: "linear-gradient(to top, rgba(0,0,0,0.82), transparent)" }}
             >
-              {/* zoom pills — iOS-style */}
-              <div className="flex items-center justify-center gap-2 mb-5">
-                {ZOOM_LEVELS.map((z) => (
-                  <button
-                    key={z}
-                    onClick={() => applyZoom(z)}
-                    className="relative flex items-center justify-center rounded-full font-bold text-sm transition-all select-none"
-                    style={{
-                      minWidth: 48, minHeight: 36,
-                      paddingLeft: 14, paddingRight: 14,
-                      backgroundColor: zoomLevel === z ? "rgba(255,215,0,0.2)" : "rgba(0,0,0,0.45)",
-                      backdropFilter: "blur(8px)",
-                      color: zoomLevel === z ? "#FFD700" : "rgba(255,255,255,0.7)",
-                      border: zoomLevel === z ? "1.5px solid rgba(255,215,0,0.6)" : "1.5px solid rgba(255,255,255,0.15)",
-                      transform: zoomLevel === z ? "scale(1.1)" : "scale(1)",
-                      transition: reducedMotion ? "none" : `all 0.15s ${E.out}`,
-                    }}
-                    aria-pressed={zoomLevel === z}
-                    aria-label={`${z}× zoom`}
-                  >
-                    {z === 0.5 ? ".5×" : z === 1 ? "1×" : "3×"}
-                  </button>
-                ))}
-              </div>
-
               {/* shutter row */}
               <div className="flex items-center justify-between px-10">
                 {/* gallery */}
@@ -1102,20 +1170,23 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                       left: `${vibeTag.x}%`, top: `${vibeTag.y}%`,
                       transform: "translate(-50%, -50%)",
                       pointerEvents: activeTool === "draw" ? "none" : "auto",
+                      cursor: "grab",
+                      touchAction: "none",
                     }}
+                    onMouseDown={dragVibeBadge}
+                    onTouchStart={dragVibeBadge}
                   >
-                    <motion.button
+                    <motion.div
                       animate={reducedMotion ? {} : { scale: [1, 1.05, 1] }}
                       transition={{ repeat: Infinity, duration: 2.4, ease: "easeInOut" }}
-                      onClick={() => setActiveTool("vibe")}
-                      className="relative flex items-center gap-1.5 px-4 py-2 rounded-full text-white font-bold text-sm"
+                      className="relative flex items-center gap-1.5 px-4 py-2 rounded-full text-white font-bold text-sm select-none"
                       style={{
                         backgroundColor: vibeTag.color + "B0",
                         boxShadow: `0 0 20px ${vibeTag.glow}, 0 0 40px ${vibeTag.glow}`,
                         backdropFilter: "blur(6px)",
                         border: `1px solid ${vibeTag.color}50`,
                       }}
-                      aria-label="Change vibe"
+                      aria-label="Drag to reposition, tap to change vibe"
                     >
                       <span className="text-base">{vibeTag.emoji}</span>
                       <span className="tracking-wide">{vibeTag.mood}</span>
@@ -1125,7 +1196,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                         className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full"
                         style={{ backgroundColor: vibeTag.color }}
                       />
-                    </motion.button>
+                    </motion.div>
                   </div>
                 )}
               </div>
