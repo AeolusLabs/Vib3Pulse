@@ -789,7 +789,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
   const recordingPct = Math.min((recordingMs / MAX_RECORD_MS) * 100, 100);
   const filterCss    = FILTERS[selectedFilter].css || undefined;
   // Hardware zoom handles it when available; CSS scale is the fallback
-  const cssScale = hwZoomCaps ? 1 : zoomLevel;
+  const cssScale = hwZoomCaps ? 1 : Math.max(1.0, zoomLevel);
   const canPost      = (mediaKind === "photo" && !!capturedImage) || (mediaKind === "video" && !!capturedVideoBlob);
 
   // ─── render ───────────────────────────────────────────────────────────────
@@ -861,10 +861,16 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                   className="absolute inset-0 w-full h-full object-cover"
                   style={{
                     filter: filterCss,
-                    transform: `${facingMode === "user" ? "scaleX(-1) " : ""}scale(${cssScale})`,
+                    transform: `${facingMode === "user" ? "scaleX(-1) " : ""}scale(${cssScale}) scaleX(1.05)`,
                     transformOrigin: "center",
                     transition: reducedMotion ? "none" : `transform 0.22s ${E.out}`,
                   }}
+                />
+
+                {/* wide-angle vignette */}
+                <div
+                  className="absolute inset-0 pointer-events-none z-[1]"
+                  style={{ background: "radial-gradient(ellipse at 50% 50%, transparent 42%, rgba(0,0,0,0.42) 100%)" }}
                 />
 
                 {/* recording badge */}
