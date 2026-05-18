@@ -3654,6 +3654,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({
           users: [],
           events: [],
+          venueEvents: [],
           venues: [],
           posts: [],
         });

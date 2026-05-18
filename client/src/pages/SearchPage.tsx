@@ -31,11 +31,12 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { format } from "date-fns";
-import type { User, Event, Post, Venue, Story } from "@shared/schema";
+import type { User, Event, Post, Venue, Story, VenueEntryNight } from "@shared/schema";
 
 type SearchResults = {
   users: User[];
   events: Array<Event & { organizer: User }>;
+  venueEvents: Array<VenueEntryNight & { venue: Venue }>;
   venues: Venue[];
   posts: Array<Post & { user: User }>;
 };
@@ -74,7 +75,7 @@ export default function SearchPage() {
     queryKey: ['/api/search', debouncedQuery, activeType],
     queryFn: async () => {
       if (!debouncedQuery.trim() || debouncedQuery.length < 2) {
-        return { users: [], events: [], venues: [], posts: [] };
+        return { users: [], events: [], venueEvents: [], venues: [], posts: [] };
       }
       const types = activeType === "all" ? "" : `&types=${activeType}`;
       const response = await fetch(`/api/search?q=${encodeURIComponent(debouncedQuery)}${types}`);
@@ -102,6 +103,16 @@ export default function SearchPage() {
   });
 
   const isSearching = debouncedQuery.trim().length >= 2;
+
+  const { data: allEvents = [] } = useQuery<Event[]>({
+    queryKey: ['/api/events'],
+    enabled: !isSearching && (activeType === 'all' || activeType === 'events'),
+  });
+
+  const { data: allVenueEvents = [] } = useQuery<Array<VenueEntryNight & { venue: Venue }>>({
+    queryKey: ['/api/venue-events/upcoming'],
+    enabled: !isSearching && (activeType === 'all' || activeType === 'events'),
+  });
 
   // Recommended users based on similar interests and location
   const { data: recommendedUsers = [], isLoading: recommendedUsersLoading } = useQuery<User[]>({
@@ -202,15 +213,26 @@ export default function SearchPage() {
   const hasSearchResults = searchResults && (
     searchResults.users.length > 0 ||
     searchResults.events.length > 0 ||
+    searchResults.venueEvents.length > 0 ||
     searchResults.venues.length > 0 ||
     searchResults.posts.length > 0
   );
 
-  const totalResults = searchResults ? 
-    searchResults.users.length + 
-    searchResults.events.length + 
-    searchResults.venues.length + 
+  const totalResults = searchResults ?
+    searchResults.users.length +
+    searchResults.events.length +
+    searchResults.venueEvents.length +
+    searchResults.venues.length +
     searchResults.posts.length : 0;
+
+  type CombinedEvent =
+    | { kind: 'event'; date: Date; data: Event }
+    | { kind: 'venueEvent'; date: Date; data: VenueEntryNight & { venue: Venue } };
+
+  const combinedAllEvents: CombinedEvent[] = [
+    ...allEvents.map(e => ({ kind: 'event' as const, date: new Date(e.eventDate), data: e })),
+    ...allVenueEvents.map(e => ({ kind: 'venueEvent' as const, date: new Date(e.date), data: e })),
+  ].sort((a, b) => a.date.getTime() - b.date.getTime());
 
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
@@ -274,9 +296,9 @@ export default function SearchPage() {
                       Users ({searchResults.users.length})
                     </TabsTrigger>
                   )}
-                  {searchResults.events.length > 0 && (
+                  {(searchResults.events.length > 0 || searchResults.venueEvents.length > 0) && (
                     <TabsTrigger value="events" data-testid="tab-events">
-                      Events ({searchResults.events.length})
+                      Events ({searchResults.events.length + searchResults.venueEvents.length})
                     </TabsTrigger>
                   )}
                   {searchResults.venues.length > 0 && (
@@ -299,10 +321,13 @@ export default function SearchPage() {
                       ))}
                     </SearchResultSection>
                   )}
-                  {searchResults.events.length > 0 && (
+                  {(searchResults.events.length > 0 || searchResults.venueEvents.length > 0) && (
                     <SearchResultSection title="Events" icon={Calendar}>
                       {searchResults.events.map((event) => (
-                        <EventResultCard key={event.id} event={event} navigate={navigate} />
+                        <EventResultCard key={`event-${event.id}`} event={event} navigate={navigate} />
+                      ))}
+                      {searchResults.venueEvents.map((ve) => (
+                        <VenueEventResultCard key={`ve-${ve.id}`} venueEvent={ve} navigate={navigate} />
                       ))}
                     </SearchResultSection>
                   )}
@@ -330,7 +355,10 @@ export default function SearchPage() {
 
                 <TabsContent value="events" className="space-y-3">
                   {searchResults.events.map((event) => (
-                    <EventResultCard key={event.id} event={event} navigate={navigate} />
+                    <EventResultCard key={`event-${event.id}`} event={event} navigate={navigate} />
+                  ))}
+                  {searchResults.venueEvents.map((ve) => (
+                    <VenueEventResultCard key={`ve-${ve.id}`} venueEvent={ve} navigate={navigate} />
                   ))}
                 </TabsContent>
 
@@ -451,6 +479,26 @@ export default function SearchPage() {
                   </div>
                   <ScrollBar orientation="horizontal" />
                 </ScrollArea>
+              </section>
+            )}
+
+            {(activeType === "all" || activeType === "events") && combinedAllEvents.length > 0 && (
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xl font-semibold font-serif flex items-center gap-2">
+                    <Calendar className="h-5 w-5 text-primary" />
+                    All Events
+                  </h2>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {combinedAllEvents.map((item) =>
+                    item.kind === 'event' ? (
+                      <EventResultCard key={`event-${item.data.id}`} event={item.data as Event & { organizer: User }} navigate={navigate} />
+                    ) : (
+                      <VenueEventResultCard key={`ve-${item.data.id}`} venueEvent={item.data} navigate={navigate} />
+                    )
+                  )}
+                </div>
               </section>
             )}
 
@@ -586,7 +634,7 @@ function UserResultCard({ user, sessionUser, isFollowing, onFollowToggle, naviga
   );
 }
 
-function EventResultCard({ event, navigate }: { event: Event & { organizer: User }; navigate: (path: string) => void }) {
+function EventResultCard({ event, navigate }: { event: Event & { organizer?: User }; navigate: (path: string) => void }) {
   return (
     <div
       className="rounded-xl border border-border/40 bg-card hover:border-primary/30 hover:bg-muted/10 transition-all duration-200 cursor-pointer overflow-hidden"
@@ -612,6 +660,39 @@ function EventResultCard({ event, navigate }: { event: Event & { organizer: User
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
           <span className="flex items-center gap-1 truncate"><MapPin className="h-3 w-3 flex-shrink-0" />{event.location}</span>
           <span className="flex-shrink-0 px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">{event.category}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function VenueEventResultCard({ venueEvent, navigate }: { venueEvent: VenueEntryNight & { venue: Venue }; navigate: (path: string) => void }) {
+  const imageUrl = venueEvent.imageUrl || venueEvent.venue?.coverImageUrl || venueEvent.venue?.imageUrl;
+  return (
+    <div
+      className="rounded-xl border border-border/40 bg-card hover:border-primary/30 hover:bg-muted/10 transition-all duration-200 cursor-pointer overflow-hidden"
+      onClick={() => navigate(`/venue-events/${venueEvent.id}`)}
+      data-testid={`search-venue-event-${venueEvent.id}`}
+    >
+      {imageUrl && (
+        <div className="relative aspect-[16/7] overflow-hidden">
+          <img src={imageUrl} alt={venueEvent.name} className="w-full h-full object-cover" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+          <span className="absolute bottom-2 left-3 text-xs font-semibold text-white/90 bg-black/40 px-2 py-0.5 rounded-full backdrop-blur-sm">
+            {format(new Date(venueEvent.date), "EEE, MMM d")}
+          </span>
+          <span className="absolute top-2 right-2 text-xs font-semibold text-white bg-black/50 px-2 py-0.5 rounded-full backdrop-blur-sm">
+            £{(venueEvent.coverPriceCents / 100).toFixed(2)}
+          </span>
+        </div>
+      )}
+      <div className="p-3">
+        <h4 className="font-semibold text-sm text-foreground truncate mb-1">{venueEvent.name}</h4>
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          {venueEvent.venue?.name && (
+            <span className="flex items-center gap-1 truncate"><Building2 className="h-3 w-3 flex-shrink-0" />{venueEvent.venue.name}</span>
+          )}
+          <span className="flex-shrink-0 px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">Venue Event</span>
         </div>
       </div>
     </div>

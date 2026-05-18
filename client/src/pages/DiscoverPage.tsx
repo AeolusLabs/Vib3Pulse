@@ -660,65 +660,237 @@ export default function DiscoverPage() {
               </div>
             )}
 
-            {/* Upcoming Venue Events */}
-            {upcomingVenueEvents.length > 0 && (
+            {/* Upcoming Events (regular + venue events combined, sorted by date) */}
+            {(filteredEvents.length > 0 || upcomingVenueEvents.length > 0) && (
               <div className="mb-8">
                 <div className="flex items-center gap-2 mb-4">
                   <Ticket className="h-5 w-5 text-purple-500" />
-                  <h2 className="text-xl font-semibold">Upcoming Venue Events</h2>
-                  <span className="text-sm text-muted-foreground">({upcomingVenueEvents.length})</span>
+                  <h2 className="text-xl font-semibold">Upcoming Events</h2>
+                  <span className="text-sm text-muted-foreground">
+                    ({filteredEvents.length + upcomingVenueEvents.length})
+                  </span>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" data-testid="venue-events-grid">
-                  {upcomingVenueEvents.map((event: any) => (
-                    <Link key={event.id} href={`/venue-events/${event.id}`}>
-                      <Card className="hover-elevate cursor-pointer overflow-hidden transition-all duration-200" data-testid={`venue-event-card-${event.id}`}>
-                        {event.imageUrl ? (
-                          <div className="aspect-video w-full overflow-hidden relative">
-                            <img src={event.imageUrl} alt={event.name} className="w-full h-full object-cover" />
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
-                          </div>
-                        ) : (event.venue?.coverImageUrl || event.venue?.imageUrl) ? (
-                          <div className="aspect-video w-full overflow-hidden relative">
-                            <img src={event.venue.coverImageUrl || event.venue.imageUrl} alt={event.name} className="w-full h-full object-cover opacity-70" />
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
-                          </div>
-                        ) : (
-                          <div className="aspect-video w-full bg-gradient-to-br from-purple-100 to-pink-100 dark:from-purple-950/30 dark:to-pink-950/30 flex items-center justify-center">
-                            <Ticket className="h-10 w-10 text-purple-300" />
-                          </div>
-                        )}
-                        <CardHeader className="space-y-1 pb-2">
-                          <h3 className="font-semibold text-base line-clamp-1">{event.name}</h3>
-                          {event.venue?.name && (
-                            <p className="text-xs text-muted-foreground flex items-center gap-1">
-                              <Building2 className="h-3 w-3" />{event.venue.name}
-                            </p>
-                          )}
-                        </CardHeader>
-                        <CardContent className="space-y-1 pb-3">
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <Calendar className="h-3 w-3" />
-                            <span>{format(new Date(event.date), "EEE, MMM d 'at' h:mm a")}</span>
-                          </div>
-                          {(event.venue?.address || event.venue?.city) && (
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                              <MapPin className="h-3 w-3" />
-                              <span className="line-clamp-1">{event.venue.address || event.venue.city}</span>
-                            </div>
-                          )}
-                          <div className="flex items-center justify-between pt-1">
-                            <span className="font-semibold text-base">£{(event.coverPriceCents / 100).toFixed(2)}</span>
-                            {event.capacity && (
-                              <span className="text-xs text-muted-foreground">
-                                {event.capacity - event.ticketsSold} left
-                              </span>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" data-testid="upcoming-events-grid">
+                  {[
+                    ...filteredEvents.map(e => ({ kind: 'event' as const, date: new Date(e.eventDate), data: e })),
+                    ...upcomingVenueEvents.map((e: any) => ({ kind: 'venueEvent' as const, date: new Date(e.date), data: e })),
+                  ]
+                    .sort((a, b) => a.date.getTime() - b.date.getTime())
+                    .map((item) => {
+                      if (item.kind === 'event') {
+                        const event = item.data;
+                        const isEventHighlighted = sharedEventId === String(event.id) || highlightedId === String(event.id);
+                        return (
+                          <Card
+                            key={`event-${event.id}`}
+                            className={`hover-elevate cursor-pointer overflow-hidden transition-all duration-500 ${isEventHighlighted ? 'ring-4 ring-primary ring-offset-2 scale-[1.02]' : ''}`}
+                            onClick={() => setSelectedEvent(event)}
+                            data-testid={`upcoming-event-card-${event.id}`}
+                          >
+                            {event.imageUrl && (
+                              <div className="aspect-video w-full overflow-hidden">
+                                <img src={event.imageUrl} alt={event.title} className="w-full h-full object-cover" />
+                              </div>
                             )}
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </Link>
-                  ))}
+                            <CardHeader className="space-y-1 pb-2">
+                              <div className="flex items-start justify-between gap-2">
+                                <h3 className="font-semibold text-base line-clamp-2">{event.title}</h3>
+                                <Badge variant="secondary" className="text-xs">{event.category}</Badge>
+                              </div>
+                            </CardHeader>
+                            <CardContent className="space-y-1 pb-3">
+                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <Calendar className="h-3 w-3" />
+                                <span>{format(new Date(event.eventDate), "EEE, MMM d 'at' h:mm a")}</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <MapPin className="h-3 w-3" />
+                                <span className="line-clamp-1">{event.location}</span>
+                              </div>
+                              <div className="flex items-center justify-between pt-1">
+                                {event.ticketPrice === 0 ? (
+                                  <Badge variant="default" className="text-sm">Free</Badge>
+                                ) : (
+                                  <span className="font-semibold text-sm">
+                                    £{(event.ticketPrice / 100).toFixed(2)}
+                                  </span>
+                                )}
+                                <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); handleShareEvent(event, e); }}>
+                                  <Share2 className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        );
+                      } else {
+                        const event = item.data;
+                        const imgSrc = event.imageUrl || event.venue?.coverImageUrl || event.venue?.imageUrl;
+                        return (
+                          <Link key={`ve-${event.id}`} href={`/venue-events/${event.id}`}>
+                            <Card className="hover-elevate cursor-pointer overflow-hidden transition-all duration-200" data-testid={`venue-event-card-${event.id}`}>
+                              {imgSrc ? (
+                                <div className="aspect-video w-full overflow-hidden relative">
+                                  <img src={imgSrc} alt={event.name} className="w-full h-full object-cover" />
+                                  <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
+                                </div>
+                              ) : (
+                                <div className="aspect-video w-full bg-gradient-to-br from-purple-100 to-pink-100 dark:from-purple-950/30 dark:to-pink-950/30 flex items-center justify-center">
+                                  <Ticket className="h-10 w-10 text-purple-300" />
+                                </div>
+                              )}
+                              <CardHeader className="space-y-1 pb-2">
+                                <h3 className="font-semibold text-base line-clamp-1">{event.name}</h3>
+                                {event.venue?.name && (
+                                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                                    <Building2 className="h-3 w-3" />{event.venue.name}
+                                  </p>
+                                )}
+                              </CardHeader>
+                              <CardContent className="space-y-1 pb-3">
+                                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                  <Calendar className="h-3 w-3" />
+                                  <span>{format(new Date(event.date), "EEE, MMM d 'at' h:mm a")}</span>
+                                </div>
+                                {(event.venue?.address || event.venue?.city) && (
+                                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                    <MapPin className="h-3 w-3" />
+                                    <span className="line-clamp-1">{event.venue.address || event.venue.city}</span>
+                                  </div>
+                                )}
+                                <div className="flex items-center justify-between pt-1">
+                                  <span className="font-semibold text-sm">£{(event.coverPriceCents / 100).toFixed(2)}</span>
+                                  {event.capacity && (
+                                    <span className="text-xs text-muted-foreground">{event.capacity - event.ticketsSold} left</span>
+                                  )}
+                                </div>
+                              </CardContent>
+                            </Card>
+                          </Link>
+                        );
+                      }
+                    })}
                 </div>
+              </div>
+            )}
+
+            {/* All Events (sorted by proximity if location available) */}
+            <div className="mb-4">
+              <div className="flex items-center gap-2 mb-4">
+                <Calendar className="h-5 w-5 text-muted-foreground" />
+                <h2 className="text-xl font-semibold">
+                  {hasLocation ? "Events Near You" : "All Events"}
+                </h2>
+                {hasLocation && (
+                  <Badge variant="outline" className="text-xs">Sorted by distance</Badge>
+                )}
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" data-testid="events-grid">
+              {filteredEvents.map((event) => {
+                const isEventHighlighted = sharedEventId === String(event.id) || highlightedId === String(event.id);
+                return (
+                <Card
+                  key={event.id}
+                  className={`hover-elevate cursor-pointer overflow-hidden transition-all duration-500 ${isEventHighlighted ? 'ring-4 ring-primary ring-offset-2 scale-[1.02]' : ''}`}
+                  onClick={() => setSelectedEvent(event)}
+                  data-testid={`event-card-${event.id}`}
+                >
+                  {event.imageUrl && (
+                    <div className="aspect-video w-full overflow-hidden">
+                      <img
+                        src={event.imageUrl}
+                        alt={event.title}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  )}
+                  <CardHeader className="space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <h3 className="font-semibold text-lg line-clamp-2" data-testid={`event-title-${event.id}`}>
+                        {event.title}
+                      </h3>
+                      <Badge variant="secondary" data-testid={`event-category-${event.id}`}>
+                        {event.category}
+                      </Badge>
+                    </div>
+                    {hasLocation && (event as EventWithDistance).distance !== undefined && (
+                      <div className="flex items-center">
+                        {renderDistanceBadge((event as EventWithDistance).distance)}
+                      </div>
+                    )}
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Calendar className="h-4 w-4" />
+                      <span data-testid={`event-date-${event.id}`}>
+                        {format(new Date(event.eventDate), "MMM d, yyyy 'at' h:mm a")}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <MapPin className="h-4 w-4" />
+                      <span className="line-clamp-1" data-testid={`event-location-${event.id}`}>
+                        {event.location}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Users className="h-4 w-4" />
+                      <span>{event.ticketsAvailable} tickets available</span>
+                    </div>
+                  </CardContent>
+                  <CardFooter className="flex items-center justify-between gap-2">
+                    {event.externalTicketUrl ? (
+                      <Badge variant="default" className="bg-blue-500 text-base" data-testid={`event-price-${event.id}`}>
+                        External
+                      </Badge>
+                    ) : event.ticketPrice === 0 ? (
+                      <Badge variant="default" className="text-base" data-testid={`event-price-${event.id}`}>
+                        Free
+                      </Badge>
+                    ) : (
+                      <span className="font-semibold text-lg" data-testid={`event-price-${event.id}`}>
+                        {(() => {
+                          const eventWithPrices = event as EventWithDistance;
+                          const minPrice = eventWithPrices.minPrice ?? event.ticketPrice;
+                          const maxPrice = eventWithPrices.maxPrice ?? event.ticketPrice;
+                          if (minPrice === maxPrice) {
+                            return `£${(minPrice / 100).toFixed(2)}`;
+                          }
+                          return `£${(minPrice / 100).toFixed(2)} - £${(maxPrice / 100).toFixed(2)}`;
+                        })()}
+                      </span>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={(e) => handleShareEvent(event, e)}
+                        data-testid={`button-share-event-${event.id}`}
+                      >
+                        <Share2 className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedEvent(event);
+                        }}
+                        data-testid={`button-view-event-${event.id}`}
+                      >
+                        View Details
+                      </Button>
+                    </div>
+                  </CardFooter>
+                </Card>
+                );
+              })}
+            </div>
+
+            {filteredEvents.length === 0 && (
+              <div className="text-center py-16">
+                <p className="text-lg text-muted-foreground">No events found</p>
+                <p className="text-sm text-muted-foreground mt-2">
+                  Try adjusting your filters or search terms
+                </p>
               </div>
             )}
 
@@ -781,127 +953,6 @@ export default function DiscoverPage() {
                     );
                   })}
                 </div>
-              </div>
-            )}
-
-            {/* All Events (sorted by proximity if location available) */}
-            <div className="mb-4">
-              <div className="flex items-center gap-2 mb-4">
-                <Calendar className="h-5 w-5 text-muted-foreground" />
-                <h2 className="text-xl font-semibold">
-                  {hasLocation ? "Events Near You" : "All Events"}
-                </h2>
-                {hasLocation && (
-                  <Badge variant="outline" className="text-xs">Sorted by distance</Badge>
-                )}
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" data-testid="events-grid">
-              {filteredEvents.map((event) => {
-                const isEventHighlighted = sharedEventId === String(event.id) || highlightedId === String(event.id);
-                return (
-                <Card 
-                  key={event.id} 
-                  className={`hover-elevate cursor-pointer overflow-hidden transition-all duration-500 ${isEventHighlighted ? 'ring-4 ring-primary ring-offset-2 scale-[1.02]' : ''}`}
-                  onClick={() => setSelectedEvent(event)}
-                  data-testid={`event-card-${event.id}`}
-                >
-                  {event.imageUrl && (
-                    <div className="aspect-video w-full overflow-hidden">
-                      <img 
-                        src={event.imageUrl} 
-                        alt={event.title}
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                  )}
-                  <CardHeader className="space-y-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <h3 className="font-semibold text-lg line-clamp-2" data-testid={`event-title-${event.id}`}>
-                        {event.title}
-                      </h3>
-                      <Badge variant="secondary" data-testid={`event-category-${event.id}`}>
-                        {event.category}
-                      </Badge>
-                    </div>
-                    {hasLocation && (event as EventWithDistance).distance !== undefined && (
-                      <div className="flex items-center">
-                        {renderDistanceBadge((event as EventWithDistance).distance)}
-                      </div>
-                    )}
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Calendar className="h-4 w-4" />
-                      <span data-testid={`event-date-${event.id}`}>
-                        {format(new Date(event.eventDate), "MMM d, yyyy 'at' h:mm a")}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <MapPin className="h-4 w-4" />
-                      <span className="line-clamp-1" data-testid={`event-location-${event.id}`}>
-                        {event.location}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Users className="h-4 w-4" />
-                      <span>{event.ticketsAvailable} tickets available</span>
-                    </div>
-                  </CardContent>
-                  <CardFooter className="flex items-center justify-between gap-2">
-                    {event.externalTicketUrl ? (
-                      <Badge variant="default" className="bg-blue-500 text-base" data-testid={`event-price-${event.id}`}>
-                        External
-                      </Badge>
-                    ) : event.ticketPrice === 0 ? (
-                      <Badge variant="default" className="text-base" data-testid={`event-price-${event.id}`}>
-                        Free
-                      </Badge>
-                    ) : (
-                      <span className="font-semibold text-lg" data-testid={`event-price-${event.id}`}>
-                        {(() => {
-                          const eventWithPrices = event as EventWithDistance;
-                          const minPrice = eventWithPrices.minPrice ?? event.ticketPrice;
-                          const maxPrice = eventWithPrices.maxPrice ?? event.ticketPrice;
-                          if (minPrice === maxPrice) {
-                            return `£${(minPrice / 100).toFixed(2)}`;
-                          }
-                          return `£${(minPrice / 100).toFixed(2)} - £${(maxPrice / 100).toFixed(2)}`;
-                        })()}
-                      </span>
-                    )}
-                    <div className="flex items-center gap-2">
-                      <Button 
-                        size="icon"
-                        variant="ghost"
-                        onClick={(e) => handleShareEvent(event, e)}
-                        data-testid={`button-share-event-${event.id}`}
-                      >
-                        <Share2 className="h-4 w-4" />
-                      </Button>
-                      <Button 
-                        size="sm" 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedEvent(event);
-                        }}
-                        data-testid={`button-view-event-${event.id}`}
-                      >
-                        View Details
-                      </Button>
-                    </div>
-                  </CardFooter>
-                </Card>
-                );
-              })}
-            </div>
-
-            {filteredEvents.length === 0 && (
-              <div className="text-center py-16">
-                <p className="text-lg text-muted-foreground">No events found</p>
-                <p className="text-sm text-muted-foreground mt-2">
-                  Try adjusting your filters or search terms
-                </p>
               </div>
             )}
           </>

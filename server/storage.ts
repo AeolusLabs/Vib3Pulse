@@ -273,13 +273,15 @@ export interface IStorage {
   universalSearch(query: string, types?: string[]): Promise<{
     users: User[];
     events: Array<Event & { organizer: User }>;
+    venueEvents: Array<VenueEntryNight & { venue: Venue }>;
     venues: Venue[];
     posts: Array<Post & { user: User }>;
   }>;
   searchEvents(query: string): Promise<Array<Event & { organizer: User }>>;
+  searchVenueEvents(query: string): Promise<Array<VenueEntryNight & { venue: Venue }>>;
   searchVenues(query: string): Promise<Venue[]>;
   searchPosts(query: string): Promise<Array<Post & { user: User }>>;
-  
+
   // Trending methods
   getTrendingPosts(limit?: number): Promise<Array<Post & { user: User; likeCount: number; commentCount: number }>>;
   getTrendingEvents(limit?: number): Promise<Array<Event & { organizer: User; rsvpCount: number; ticketCount: number }>>;
@@ -1336,17 +1338,34 @@ export class DbStorage implements IStorage {
     });
   }
 
+  async searchVenueEvents(query: string): Promise<Array<VenueEntryNight & { venue: Venue }>> {
+    const result = await db
+      .select()
+      .from(venueEntryNights)
+      .innerJoin(venues, eq(venueEntryNights.venueId, venues.id))
+      .where(
+        or(
+          ilike(venueEntryNights.name, `%${query}%`),
+          ilike(venueEntryNights.description, `%${query}%`)
+        )
+      )
+      .orderBy(desc(venueEntryNights.date));
+    return result.map(r => ({ ...r.venue_entry_nights, venue: r.venues }));
+  }
+
   async universalSearch(query: string, types?: string[]): Promise<{
     users: User[];
     events: Array<Event & { organizer: User }>;
+    venueEvents: Array<VenueEntryNight & { venue: Venue }>;
     venues: Venue[];
     posts: Array<Post & { user: User }>;
   }> {
-    const searchTypes = types && types.length > 0 ? types : ['users', 'events', 'venues', 'posts'];
-    
-    const [userResults, eventResults, venueResults, postResults] = await Promise.all([
+    const searchTypes = types && types.length > 0 ? types : ['users', 'events', 'venueEvents', 'venues', 'posts'];
+
+    const [userResults, eventResults, venueEventResults, venueResults, postResults] = await Promise.all([
       searchTypes.includes('users') ? this.searchUsers(query) : Promise.resolve([]),
       searchTypes.includes('events') ? this.searchEvents(query) : Promise.resolve([]),
+      searchTypes.includes('venueEvents') ? this.searchVenueEvents(query) : Promise.resolve([]),
       searchTypes.includes('venues') ? this.searchVenues(query) : Promise.resolve([]),
       searchTypes.includes('posts') ? this.searchPosts(query) : Promise.resolve([]),
     ]);
@@ -1354,6 +1373,7 @@ export class DbStorage implements IStorage {
     return {
       users: userResults.slice(0, 10),
       events: eventResults.slice(0, 10),
+      venueEvents: venueEventResults.slice(0, 10),
       venues: venueResults.slice(0, 10),
       posts: postResults.slice(0, 10),
     };
