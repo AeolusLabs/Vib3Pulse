@@ -336,6 +336,24 @@ export const insertStoryAllowedViewerSchema = createInsertSchema(storyAllowedVie
 export type InsertStoryAllowedViewer = z.infer<typeof insertStoryAllowedViewerSchema>;
 export type StoryAllowedViewer = typeof storyAllowedViewers.$inferSelect;
 
+// Story views - tracks who viewed which story (one record per user per story)
+export const storyViews = pgTable("story_views", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  storyId: varchar("story_id").notNull().references(() => stories.id, { onDelete: 'cascade' }),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  viewedAt: timestamp("viewed_at").notNull().default(sql`now()`),
+}, (table) => ({
+  uniqueStoryView: unique().on(table.storyId, table.userId),
+}));
+
+export const insertStoryViewSchema = createInsertSchema(storyViews).omit({
+  id: true,
+  viewedAt: true,
+});
+
+export type InsertStoryView = z.infer<typeof insertStoryViewSchema>;
+export type StoryView = typeof storyViews.$inferSelect;
+
 export const follows = pgTable("follows", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   followerId: varchar("follower_id").notNull().references(() => users.id),

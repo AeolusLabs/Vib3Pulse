@@ -1968,6 +1968,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Story Views - record a view when the viewer opens a story slide
+  app.post("/api/stories/:storyId/view", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const storyId = req.params.storyId;
+
+      const story = await storage.getStory(storyId);
+      if (!story) {
+        return res.status(404).json({ message: "Story not found" });
+      }
+
+      // Don't record owner viewing their own story
+      if (story.userId !== userId) {
+        await storage.recordStoryView(storyId, userId);
+      }
+
+      const viewCount = await storage.getStoryViewCount(storyId);
+      res.json({ viewCount });
+    } catch (error) {
+      console.error("Record story view error:", error);
+      res.status(500).json({ message: "Failed to record view" });
+    }
+  });
+
+  // Story Interactions - viewers + likers list (owner only)
+  app.get("/api/stories/:storyId/interactions", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const storyId = req.params.storyId;
+
+      const story = await storage.getStory(storyId);
+      if (!story) {
+        return res.status(404).json({ message: "Story not found" });
+      }
+
+      if (story.userId !== userId) {
+        return res.status(403).json({ message: "Only the story owner can view interactions" });
+      }
+
+      const viewers = await storage.getStoryViewersWithLikeStatus(storyId);
+      const viewCount = viewers.length;
+      const likeCount = await storage.getStoryLikeCount(storyId);
+
+      res.json({ viewers, viewCount, likeCount });
+    } catch (error) {
+      console.error("Get story interactions error:", error);
+      res.status(500).json({ message: "Failed to get interactions" });
+    }
+  });
+
   // Post Interactions - Likes
   app.post("/api/posts/:postId/like", requireAuth, async (req, res) => {
     try {

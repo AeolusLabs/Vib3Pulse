@@ -15,6 +15,8 @@ import {
   type InsertStory,
   type StoryLike,
   type InsertStoryLike,
+  type StoryView,
+  type InsertStoryView,
   type StoryAllowedViewer,
   type InsertStoryAllowedViewer,
   type Follow,
@@ -97,6 +99,7 @@ import {
   posts,
   stories,
   storyLikes,
+  storyViews,
   storyAllowedViewers,
   follows,
   messages,
@@ -183,6 +186,15 @@ export async function ensureSchema() {
       created_at TIMESTAMP NOT NULL DEFAULT now()
     )
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS story_views (
+      id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      story_id VARCHAR NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+      user_id VARCHAR NOT NULL REFERENCES users(id),
+      viewed_at TIMESTAMP NOT NULL DEFAULT now(),
+      UNIQUE(story_id, user_id)
+    )
+  `);
 }
 
 export interface IStorage {
@@ -236,20 +248,25 @@ export interface IStorage {
   deletePost(id: string): Promise<void>;
   
   createStory(story: InsertStory, allowedViewerIds?: string[]): Promise<Story>;
-  getActiveStories(viewerId?: string): Promise<Array<Story & { user: User; likeCount: number; isLiked?: boolean; isReshare?: boolean }>>;
+  getActiveStories(viewerId?: string): Promise<Array<Story & { user: User; likeCount: number; viewCount: number; isLiked?: boolean; isReshare?: boolean }>>;
   getStory(id: string): Promise<Story | undefined>;
   getUserStories(userId: string): Promise<Story[]>;
   deleteStory(id: string): Promise<void>;
-  
+
   // Story likes
   likeStory(userId: string, storyId: string): Promise<void>;
   unlikeStory(userId: string, storyId: string): Promise<void>;
   hasUserLikedStory(userId: string, storyId: string): Promise<boolean>;
   getStoryLikeCount(storyId: string): Promise<number>;
-  
+
+  // Story views
+  recordStoryView(storyId: string, userId: string): Promise<void>;
+  getStoryViewCount(storyId: string): Promise<number>;
+  getStoryViewersWithLikeStatus(storyId: string): Promise<Array<{ user: User; viewedAt: Date; hasLiked: boolean }>>;
+
   // Story reshares
   reshareStory(userId: string, originalStoryId: string): Promise<Story>;
-  
+
   // Story allowed viewers
   setStoryAllowedViewers(storyId: string, viewerIds: string[]): Promise<void>;
   getStoryAllowedViewers(storyId: string): Promise<string[]>;
@@ -914,7 +931,7 @@ export class DbStorage implements IStorage {
     return story;
   }
 
-  async getActiveStories(viewerId?: string): Promise<Array<Story & { user: User; likeCount: number; isLiked?: boolean; isReshare?: boolean }>> {
+  async getActiveStories(viewerId?: string): Promise<Array<Story & { user: User; likeCount: number; viewCount: number; isLiked?: boolean; isReshare?: boolean }>> {
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
     
     const result = await db
@@ -937,19 +954,21 @@ export class DbStorage implements IStorage {
         return null; // Skip private stories for unauthenticated users
       }
       
-      // Get like count
+      // Get like count and view count
       const likeCount = await this.getStoryLikeCount(row.stories.id);
-      
+      const viewCount = await this.getStoryViewCount(row.stories.id);
+
       // Check if viewer has liked
       let isLiked = false;
       if (viewerId) {
         isLiked = await this.hasUserLikedStory(viewerId, row.stories.id);
       }
-      
+
       return {
         ...row.stories,
         user: userWithoutPassword as User,
         likeCount,
+        viewCount,
         isLiked,
         isReshare: !!row.stories.originalStoryId,
       };
@@ -1011,6 +1030,38 @@ export class DbStorage implements IStorage {
       .from(storyLikes)
       .where(eq(storyLikes.storyId, storyId));
     return result[0]?.count || 0;
+  }
+
+  // Story views
+  async recordStoryView(storyId: string, userId: string): Promise<void> {
+    await db.insert(storyViews).values({ storyId, userId }).onConflictDoNothing();
+  }
+
+  async getStoryViewCount(storyId: string): Promise<number> {
+    const result = await db
+      .select({ count: count() })
+      .from(storyViews)
+      .where(eq(storyViews.storyId, storyId));
+    return result[0]?.count || 0;
+  }
+
+  async getStoryViewersWithLikeStatus(storyId: string): Promise<Array<{ user: User; viewedAt: Date; hasLiked: boolean }>> {
+    const viewers = await db
+      .select()
+      .from(storyViews)
+      .innerJoin(users, eq(storyViews.userId, users.id))
+      .where(eq(storyViews.storyId, storyId))
+      .orderBy(desc(storyViews.viewedAt));
+
+    return Promise.all(viewers.map(async (row) => {
+      const { passwordHash, ...userWithoutPassword } = row.users;
+      const hasLiked = await this.hasUserLikedStory(row.users.id, storyId);
+      return {
+        user: userWithoutPassword as User,
+        viewedAt: row.story_views.viewedAt,
+        hasLiked,
+      };
+    }));
   }
 
   // Story reshares

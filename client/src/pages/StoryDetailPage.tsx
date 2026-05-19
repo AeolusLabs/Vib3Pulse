@@ -80,6 +80,7 @@ export default function StoryDetailPage() {
     caption: story.caption || null,
     timestamp: story.createdAt,
     likeCount: story.likeCount || 0,
+    viewCount: (story as any).viewCount || 0,
     isLiked: story.isLiked || false,
     isReshare: story.isReshare || false,
     privacy: story.privacy || "public",

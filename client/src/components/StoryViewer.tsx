@@ -12,12 +12,13 @@ function formatStoryTime(timestamp: string): string {
   const diffDays = Math.floor(diffHours / 24);
   return diffDays === 1 ? "Yesterday" : `${diffDays}d ago`;
 }
-import { X, ChevronLeft, ChevronRight, Heart, Send, Trash2, Share2, Lock, RefreshCw, Volume2, VolumeX } from "lucide-react";
+import { X, ChevronLeft, ChevronRight, ChevronUp, Heart, Eye, Send, Trash2, Share2, Lock, RefreshCw, Volume2, VolumeX } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import StoryInteractionsPanel from "@/components/StoryInteractionsPanel";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
@@ -32,6 +33,7 @@ interface StorySlide {
   backgroundColor?: string;
   timestamp: string;
   likeCount?: number;
+  viewCount?: number;
   isLiked?: boolean;
   isReshare?: boolean;
   privacy?: string;
@@ -71,7 +73,9 @@ export default function StoryViewer({
   const [showLikeAnimation, setShowLikeAnimation] = useState(false);
   const [localLikeStates, setLocalLikeStates] = useState<Record<string, { isLiked: boolean; likeCount: number }>>({});
   const [isVideoMuted, setIsVideoMuted] = useState(true);
+  const [showInteractionsPanel, setShowInteractionsPanel] = useState(false);
   const storyVideoRef = useRef<HTMLVideoElement>(null);
+  const holdStartRef = useRef(0);
 
   const SLIDE_DURATION = 5000;
   const currentStory = slides[currentSlide];
@@ -88,6 +92,23 @@ export default function StoryViewer({
     });
     setLocalLikeStates(initialStates);
   }, [slides]);
+
+  // Record a view whenever a new slide becomes active (non-owners only)
+  useEffect(() => {
+    if (!currentStory || isOwnStory) return;
+    apiRequest('POST', `/api/stories/${currentStory.id}/view`, undefined).catch(() => {});
+  }, [currentStory?.id, isOwnStory]);
+
+  // Live interactions data for the story owner
+  const { data: interactionsData } = useQuery<{ viewCount: number; likeCount: number }>({
+    queryKey: [`/api/stories/${currentStory?.id}/interactions`],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/stories/${currentStory!.id}/interactions`);
+      return res.json();
+    },
+    enabled: isOwnStory && !!currentStory?.id,
+    refetchInterval: 10000,
+  });
 
   const deleteStoryMutation = useMutation({
     mutationFn: async (storyId: string) => {
@@ -321,6 +342,10 @@ export default function StoryViewer({
 
   const handleTap = (e: React.MouseEvent | React.TouchEvent) => {
     const now = Date.now();
+    // Suppress navigation if this was a hold gesture (finger down > 300ms)
+    if (holdStartRef.current > 0 && now - holdStartRef.current > 300) {
+      return;
+    }
     if (now - lastTapRef.current < 300) {
       handleDoubleTap();
       e.preventDefault();
@@ -329,6 +354,7 @@ export default function StoryViewer({
   };
 
   return (
+    <>
     <div className="fixed inset-0 bg-black z-50 flex items-center justify-center">
       <div className="relative w-full h-full max-w-md mx-auto">
         {/* Progress bars - Snapchat style */}
@@ -499,88 +525,112 @@ export default function StoryViewer({
         <div className="absolute inset-0 z-10 flex pointer-events-none">
           <button
             className="flex-1 pointer-events-auto"
-            onMouseDown={() => setIsPaused(true)}
+            onMouseDown={() => { holdStartRef.current = Date.now(); setIsPaused(true); }}
             onMouseUp={() => setIsPaused(false)}
-            onTouchStart={() => setIsPaused(true)}
+            onTouchStart={() => { holdStartRef.current = Date.now(); setIsPaused(true); }}
             onTouchEnd={() => setIsPaused(false)}
             onClick={(e) => { handleTap(e); handlePrevious(); }}
             data-testid="button-previous-story"
           />
           <button
             className="flex-1 pointer-events-auto"
-            onMouseDown={() => setIsPaused(true)}
+            onMouseDown={() => { holdStartRef.current = Date.now(); setIsPaused(true); }}
             onMouseUp={() => setIsPaused(false)}
-            onTouchStart={() => setIsPaused(true)}
+            onTouchStart={() => { holdStartRef.current = Date.now(); setIsPaused(true); }}
             onTouchEnd={() => setIsPaused(false)}
             onClick={(e) => { handleTap(e); handleNext(); }}
             data-testid="button-next-story"
           />
         </div>
 
-        {/* Bottom action bar - Snapchat style */}
+        {/* Bottom action bar */}
         <div className="absolute bottom-0 left-0 right-0 z-20 p-4 pb-6 bg-gradient-to-t from-black/60 via-black/30 to-transparent">
-          {/* Like count display */}
-          {currentLikeState.likeCount > 0 && (
-            <div className="flex items-center gap-1 mb-3 ml-1">
-              <Heart className="h-4 w-4 text-red-500 fill-red-500" />
-              <span className="text-sm text-white font-medium" data-testid="text-like-count">
-                {currentLikeState.likeCount} {currentLikeState.likeCount === 1 ? 'like' : 'likes'}
-              </span>
-            </div>
-          )}
-
-          <div className="flex items-center gap-2">
-            {/* Reply input */}
-            <div className="flex-1 relative">
-              <Input
-                placeholder="Send a message..."
-                value={replyText}
-                onChange={(e) => setReplyText(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleReply()}
-                className="bg-white/10 backdrop-blur-md border-white/20 text-white placeholder:text-white/50 pr-10"
-                data-testid="input-story-reply"
-              />
-              {replyText && (
+          {isOwnStory ? (
+            /* Owner: tap to open interactions panel */
+            <button
+              className="flex items-center gap-5 w-full"
+              onClick={() => setShowInteractionsPanel(true)}
+              data-testid="button-open-interactions"
+            >
+              <div className="flex items-center gap-1.5">
+                <Eye className="h-5 w-5 text-white/80" />
+                <span className="text-white font-semibold text-sm">
+                  {interactionsData?.viewCount ?? currentStory.viewCount ?? 0}
+                </span>
+                <span className="text-white/60 text-xs">views</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Heart className="h-5 w-5 text-red-400 fill-red-400" />
+                <span className="text-white font-semibold text-sm">
+                  {interactionsData?.likeCount ?? currentLikeState.likeCount}
+                </span>
+                <span className="text-white/60 text-xs">likes</span>
+              </div>
+              <ChevronUp className="h-4 w-4 text-white/60 ml-auto" />
+            </button>
+          ) : (
+            /* Non-owner: reply + like + reshare */
+            <>
+              {currentLikeState.likeCount > 0 && (
+                <div className="flex items-center gap-1 mb-3 ml-1">
+                  <Heart className="h-4 w-4 text-red-500 fill-red-500" />
+                  <span className="text-sm text-white font-medium" data-testid="text-like-count">
+                    {currentLikeState.likeCount} {currentLikeState.likeCount === 1 ? 'like' : 'likes'}
+                  </span>
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                {/* Reply input — stopPropagation prevents nav overlay from stealing touch events */}
+                <div
+                  className="flex-1 relative"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
+                >
+                  <Input
+                    placeholder="Send a message..."
+                    value={replyText}
+                    onChange={(e) => setReplyText(e.target.value)}
+                    onFocus={() => setIsPaused(true)}
+                    onBlur={() => setIsPaused(false)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleReply()}
+                    className="bg-white/10 backdrop-blur-md border-white/20 text-white placeholder:text-white/50 pr-10"
+                    data-testid="input-story-reply"
+                  />
+                  {replyText && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={handleReply}
+                      className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 text-white hover:bg-white/20"
+                      data-testid="button-send-reply"
+                    >
+                      <Send className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={handleReply}
-                  className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 text-white hover:bg-white/20"
-                  data-testid="button-send-reply"
+                  onClick={handleLikeToggle}
+                  disabled={likeStoryMutation.isPending || unlikeStoryMutation.isPending}
+                  className={`text-white hover:bg-white/20 ${currentLikeState.isLiked ? 'text-red-500' : ''}`}
+                  data-testid="button-like-story"
                 >
-                  <Send className="h-4 w-4" />
+                  <Heart className={`h-6 w-6 ${currentLikeState.isLiked ? 'fill-red-500' : ''}`} />
                 </Button>
-              )}
-            </div>
-
-            {/* Like button */}
-            {!isOwnStory && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleLikeToggle}
-                disabled={likeStoryMutation.isPending || unlikeStoryMutation.isPending}
-                className={`text-white hover:bg-white/20 ${currentLikeState.isLiked ? 'text-red-500' : ''}`}
-                data-testid="button-like-story"
-              >
-                <Heart className={`h-6 w-6 ${currentLikeState.isLiked ? 'fill-red-500' : ''}`} />
-              </Button>
-            )}
-
-            {/* Reshare button */}
-            {!isOwnStory && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleReshare}
-                disabled={reshareStoryMutation.isPending}
-                className="text-white hover:bg-white/20"
-                data-testid="button-reshare-story"
-              >
-                <Share2 className="h-6 w-6" />
-              </Button>
-            )}
-          </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleReshare}
+                  disabled={reshareStoryMutation.isPending}
+                  className="text-white hover:bg-white/20"
+                  data-testid="button-reshare-story"
+                >
+                  <Share2 className="h-6 w-6" />
+                </Button>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Navigation arrows for desktop */}
@@ -604,5 +654,14 @@ export default function StoryViewer({
         </div>
       </div>
     </div>
+
+    {isOwnStory && currentStory && (
+      <StoryInteractionsPanel
+        storyId={currentStory.id}
+        open={showInteractionsPanel}
+        onOpenChange={setShowInteractionsPanel}
+      />
+    )}
+    </>
   );
 }
