@@ -20,7 +20,7 @@ const promotionPackages = [
     duration: 3,
     price: 9.99,
     label: "3 Days",
-    icon: Zap,
+    icon: ZapIcon,
     popular: false,
     description: "Quick visibility boost"
   },
@@ -28,7 +28,7 @@ const promotionPackages = [
     duration: 7,
     price: 19.99,
     label: "1 Week",
-    icon: Sparkles,
+    icon: SparklesIcon,
     popular: true,
     description: "Best for weekend events"
   },
@@ -36,7 +36,7 @@ const promotionPackages = [
     duration: 14,
     price: 34.99,
     label: "2 Weeks",
-    icon: Crown,
+    icon: CrownIcon,
     popular: false,
     description: "Extended exposure"
   },
@@ -44,7 +44,7 @@ const promotionPackages = [
     duration: 30,
     price: 59.99,
     label: "1 Month",
-    icon: Rocket,
+    icon: RocketIcon,
     popular: false,
     description: "Maximum impact"
   },

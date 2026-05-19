@@ -13,11 +13,11 @@ export default function BottomNavigation({ onCreateClick }: BottomNavigationProp
   useMessageCountWebSocket();
 
   const navItems = [
-    { icon: LayoutGrid, label: "Feed", path: "/feed", testId: "nav-feed" },
-    { icon: Compass, label: "Discover", path: "/discover", testId: "nav-discover" },
-    { icon: Ticket, label: "Tickets", path: "/ticket-wallet", testId: "nav-tickets" },
-    { icon: Search, label: "Search", path: "/search", testId: "nav-search" },
-    { icon: MessageCircle, label: "Messages", path: "/messages", testId: "nav-messages" },
+    { icon: LayoutGridIcon, label: "Feed", path: "/feed", testId: "nav-feed" },
+    { icon: CompassIcon, label: "Discover", path: "/discover", testId: "nav-discover" },
+    { icon: TicketIcon, label: "Tickets", path: "/ticket-wallet", testId: "nav-tickets" },
+    { icon: SearchIcon, label: "Search", path: "/search", testId: "nav-search" },
+    { icon: MessageCircleIcon, label: "Messages", path: "/messages", testId: "nav-messages" },
   ];
 
   return (

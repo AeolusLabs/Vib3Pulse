@@ -35,10 +35,10 @@ type TrendingVenue = Venue & { viewCount: number };
 type TrendingStory = Story & { user: User; likeCount: number };
 
 const typeFilters = [
-  { key: "all", label: "All", icon: Search },
-  { key: "users", label: "Users", icon: Users },
-  { key: "events", label: "Events", icon: Calendar },
-  { key: "venues", label: "Venues", icon: Building2 },
+  { key: "all", label: "All", icon: SearchIcon },
+  { key: "users", label: "Users", icon: UsersIcon },
+  { key: "events", label: "Events", icon: CalendarIcon },
+  { key: "venues", label: "Venues", icon: Building2Icon },
   { key: "posts", label: "Posts", icon: FileText },
 ];
 

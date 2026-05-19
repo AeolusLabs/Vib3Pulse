@@ -48,36 +48,36 @@ export default function LandingPage() {
   });
 
   const eventCategories = [
-    { icon: Music,    label: "Music",       value: "music"   },
-    { icon: Utensils, label: "Food & Drink", value: "food"    },
-    { icon: Code,     label: "Tech",         value: "tech"    },
-    { icon: Palette,  label: "Arts",         value: "art"     },
-    { icon: Trophy,   label: "Sports",       value: "sports"  },
-    { icon: Dumbbell, label: "Wellness",     value: "wellness" },
+    { icon: MusicIcon,   label: "Music",       value: "music"   },
+    { icon: Utensils,    label: "Food & Drink", value: "food"    },
+    { icon: Code,        label: "Tech",         value: "tech"    },
+    { icon: PaletteIcon, label: "Arts",         value: "art"     },
+    { icon: Trophy,      label: "Sports",       value: "sports"  },
+    { icon: Dumbbell,    label: "Wellness",     value: "wellness" },
   ];
 
   const pillars = [
     {
       number: "01",
-      icon: Calendar,
+      icon: CalendarIcon,
       title: "Discover Events",
       desc: "Find concerts, club nights, exhibitions, and more. Curated for your city and your taste.",
     },
     {
       number: "02",
-      icon: Ticket,
+      icon: TicketIcon,
       title: "Buy Tickets",
       desc: "Secure in-app ticketing with instant QR codes. Everything lives in your digital wallet.",
     },
     {
       number: "03",
-      icon: Users,
+      icon: UsersIcon,
       title: "Plan Together",
       desc: "Group chats, shared polls, and stories from the night. Your crew, all in one place.",
     },
     {
       number: "04",
-      icon: Shield,
+      icon: ShieldIcon,
       title: "Stay Safe",
       desc: "Safety Buddy, check-in timers, and one-tap SOS alerts. Go out with confidence.",
     },

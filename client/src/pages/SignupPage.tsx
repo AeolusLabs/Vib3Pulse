@@ -307,13 +307,13 @@ export default function SignupPage() {
                           {[
                             {
                               value: "social",
-                              icon: Users,
+                              icon: UsersIcon,
                               title: "Social User",
                               desc: "Discover events, follow friends, buy tickets, and RSVP. Perfect for attendees.",
                             },
                             {
                               value: "organizer",
-                              icon: Building2,
+                              icon: Building2Icon,
                               title: "Event Organizer",
                               desc: "Create and manage events, sell tickets, and track attendance.",
                             },

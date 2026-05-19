@@ -623,8 +623,8 @@ export default function ProfilePage() {
             >
               {[
                 { value: "posts", label: "Posts", icon: FileText },
-                { value: "likes", label: "Likes", icon: Heart },
-                { value: "reposts", label: "Reposts", icon: Repeat2 },
+                { value: "likes", label: "Likes", icon: HeartIcon },
+                { value: "reposts", label: "Reposts", icon: Repeat2Icon },
               ].map(({ value, label, icon: Icon }) => (
                 <TabsTrigger
                   key={value}
@@ -677,7 +677,7 @@ export default function ProfilePage() {
               data-testid="profile-tabs"
             >
               {[
-                { value: "events", label: "Events", icon: Calendar },
+                { value: "events", label: "Events", icon: CalendarIcon },
                 { value: "posts", label: "Posts", icon: FileText },
               ].map(({ value, label, icon: Icon }) => (
                 <TabsTrigger
