@@ -5,11 +5,12 @@ import { Progress } from "@/components/ui/progress";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { Check, ChartBar, Users, Lock, Loader2 } from "lucide-react";
+
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow } from "date-fns";
 import type { Poll, PollOption, PollVote, User } from "@shared/schema";
+import { CheckIcon, ChartBarIcon, UsersIcon, LockIcon, Loader2Icon } from "@/components/ui/icons";
 
 interface PollWithDetails extends Poll {
   options: Array<PollOption & { voteCount: number; voters: User[] }>;
@@ -69,7 +70,7 @@ export default function PollMessage({ pollId, currentUserId, isOwnMessage }: Pol
     return (
       <Card className="p-4 bg-muted/50">
         <div className="flex items-center gap-2">
-          <Loader2 className="h-4 w-4 animate-spin" />
+          <Loader2Icon className="h-4 w-4 animate-spin" />
           <span className="text-sm text-muted-foreground">Loading poll...</span>
         </div>
       </Card>
@@ -100,8 +101,8 @@ export default function PollMessage({ pollId, currentUserId, isOwnMessage }: Pol
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1">
             <div className="flex items-center gap-2 mb-1">
-              <ChartBar className="h-4 w-4 text-primary" />
-              {isClosed && <Badge variant="secondary" className="text-xs"><Lock className="h-3 w-3 mr-1" />Closed</Badge>}
+              <ChartBarIcon className="h-4 w-4 text-primary" />
+              {isClosed && <Badge variant="secondary" className="text-xs"><LockIcon className="h-3 w-3 mr-1" />Closed</Badge>}
               {poll.allowMultiple && <Badge variant="outline" className="text-xs">Multiple</Badge>}
             </div>
             <h4 className="font-medium text-sm">{poll.question}</h4>
@@ -130,7 +131,7 @@ export default function PollMessage({ pollId, currentUserId, isOwnMessage }: Pol
                 >
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-sm flex items-center gap-2">
-                      {isVoted && <Check className="h-4 w-4 text-primary" />}
+                      {isVoted && <CheckIcon className="h-4 w-4 text-primary" />}
                       {option.text}
                     </span>
                     {(hasVoted || isClosed) && (
@@ -148,7 +149,7 @@ export default function PollMessage({ pollId, currentUserId, isOwnMessage }: Pol
                     className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
                     data-testid={`show-voters-${option.id}`}
                   >
-                    <Users className="h-3 w-3" />
+                    <UsersIcon className="h-3 w-3" />
                     {option.voteCount} vote{option.voteCount !== 1 ? 's' : ''}
                   </button>
                 )}

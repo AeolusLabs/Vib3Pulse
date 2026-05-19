@@ -7,23 +7,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { 
-  BarChart3, 
-  Users, 
-  Ticket, 
-  Eye, 
-  DollarSign, 
-  Calendar,
-  TrendingUp,
-  PieChart as PieChartIcon,
-  Target,
-  Award,
-  ArrowUpRight,
-  ArrowDownRight,
-  Minus
-} from "lucide-react";
-import {
-  BarChart,
+
+import { UsersIcon, TicketIcon, EyeIcon, DollarSignIcon, CalendarIcon, TrendingUpIcon, MinusIcon, BarChart3Icon } from "@/components/ui/icons";
+import { PieChart, Target, Award, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import { BarChart,
   Bar,
   XAxis,
   YAxis,
@@ -93,7 +80,7 @@ export function OrganizerStatsModal({ organizerId, organizerName }: OrganizerSta
           className="gap-2"
           data-testid="button-view-stats"
         >
-          <BarChart3 className="h-4 w-4" />
+          <BarChart3Icon className="h-4 w-4" />
           View Stats
         </Button>
       </DialogTrigger>
@@ -101,7 +88,7 @@ export function OrganizerStatsModal({ organizerId, organizerName }: OrganizerSta
         <DialogHeader className="px-6 pt-6 pb-4 border-b bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-950/30 dark:to-indigo-950/30">
           <DialogTitle className="flex items-center gap-3 text-xl font-serif">
             <div className="p-2 bg-purple-100 dark:bg-purple-900/50 rounded-lg">
-              <TrendingUp className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+              <TrendingUpIcon className="h-5 w-5 text-purple-600 dark:text-purple-400" />
             </div>
             Analytics Dashboard
           </DialogTitle>
@@ -137,7 +124,7 @@ export function OrganizerStatsModal({ organizerId, organizerName }: OrganizerSta
                     <CardContent className="pt-4 pb-4">
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
-                          <Ticket className="h-4 w-4 text-purple-600" />
+                          <TicketIcon className="h-4 w-4 text-purple-600" />
                           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Total Sales</span>
                         </div>
                         {demographics.totalTicketsSold > 0 && (
@@ -155,7 +142,7 @@ export function OrganizerStatsModal({ organizerId, organizerName }: OrganizerSta
                     <CardContent className="pt-4 pb-4">
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
-                          <DollarSign className="h-4 w-4 text-emerald-600" />
+                          <DollarSignIcon className="h-4 w-4 text-emerald-600" />
                           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Revenue</span>
                         </div>
                         {demographics.totalRevenue > 0 && (
@@ -188,13 +175,13 @@ export function OrganizerStatsModal({ organizerId, organizerName }: OrganizerSta
                     <CardContent className="pt-4 pb-4">
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
-                          <TrendingUp className="h-4 w-4 text-amber-600" />
+                          <TrendingUpIcon className="h-4 w-4 text-amber-600" />
                           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Conversion</span>
                         </div>
                         {demographics.conversionRate >= 5 ? (
                           <ArrowUpRight className="h-4 w-4 text-green-500" />
                         ) : demographics.conversionRate > 0 ? (
-                          <Minus className="h-4 w-4 text-amber-500" />
+                          <MinusIcon className="h-4 w-4 text-amber-500" />
                         ) : null}
                       </div>
                       <p className="text-3xl font-bold text-amber-700 dark:text-amber-400" data-testid="stat-conversion">
@@ -210,7 +197,7 @@ export function OrganizerStatsModal({ organizerId, organizerName }: OrganizerSta
                   <Card>
                     <CardContent className="pt-4 pb-4 flex items-center gap-4">
                       <div className="p-3 bg-purple-100 dark:bg-purple-900/50 rounded-lg">
-                        <Calendar className="h-5 w-5 text-purple-600" />
+                        <CalendarIcon className="h-5 w-5 text-purple-600" />
                       </div>
                       <div>
                         <p className="text-2xl font-bold" data-testid="stat-total-events">{demographics.totalEvents}</p>
@@ -221,7 +208,7 @@ export function OrganizerStatsModal({ organizerId, organizerName }: OrganizerSta
                   <Card>
                     <CardContent className="pt-4 pb-4 flex items-center gap-4">
                       <div className="p-3 bg-blue-100 dark:bg-blue-900/50 rounded-lg">
-                        <Users className="h-5 w-5 text-blue-600" />
+                        <UsersIcon className="h-5 w-5 text-blue-600" />
                       </div>
                       <div>
                         <p className="text-2xl font-bold" data-testid="stat-total-rsvps">{demographics.totalRsvps}</p>
@@ -232,7 +219,7 @@ export function OrganizerStatsModal({ organizerId, organizerName }: OrganizerSta
                   <Card>
                     <CardContent className="pt-4 pb-4 flex items-center gap-4">
                       <div className="p-3 bg-amber-100 dark:bg-amber-900/50 rounded-lg">
-                        <Eye className="h-5 w-5 text-amber-600" />
+                        <EyeIcon className="h-5 w-5 text-amber-600" />
                       </div>
                       <div>
                         <p className="text-2xl font-bold" data-testid="stat-total-views">{formatCompactNumber(demographics.totalViews)}</p>
@@ -267,15 +254,15 @@ export function OrganizerStatsModal({ organizerId, organizerName }: OrganizerSta
                 <Tabs defaultValue="sales" className="w-full">
                   <TabsList className="grid w-full grid-cols-3">
                     <TabsTrigger value="sales" className="gap-2">
-                      <Ticket className="h-4 w-4" />
+                      <TicketIcon className="h-4 w-4" />
                       Ticket Sales
                     </TabsTrigger>
                     <TabsTrigger value="demographics" className="gap-2">
-                      <Users className="h-4 w-4" />
+                      <UsersIcon className="h-4 w-4" />
                       Demographics
                     </TabsTrigger>
                     <TabsTrigger value="events" className="gap-2">
-                      <Calendar className="h-4 w-4" />
+                      <CalendarIcon className="h-4 w-4" />
                       Event Performance
                     </TabsTrigger>
                   </TabsList>
@@ -287,7 +274,7 @@ export function OrganizerStatsModal({ organizerId, organizerName }: OrganizerSta
                       <Card>
                         <CardHeader className="pb-2">
                           <CardTitle className="flex items-center gap-2 text-base">
-                            <BarChart3 className="h-4 w-4 text-purple-600" />
+                            <BarChart3Icon className="h-4 w-4 text-purple-600" />
                             Sales by Event
                           </CardTitle>
                           <p className="text-xs text-muted-foreground">
@@ -335,7 +322,7 @@ export function OrganizerStatsModal({ organizerId, organizerName }: OrganizerSta
                           ) : (
                             <div className="h-72 flex items-center justify-center text-muted-foreground">
                               <div className="text-center">
-                                <Ticket className="h-10 w-10 mx-auto mb-2 opacity-50" />
+                                <TicketIcon className="h-10 w-10 mx-auto mb-2 opacity-50" />
                                 <p>No ticket sales yet</p>
                                 <p className="text-xs mt-1">Sales data appears when tickets are purchased</p>
                               </div>
@@ -348,7 +335,7 @@ export function OrganizerStatsModal({ organizerId, organizerName }: OrganizerSta
                       <Card>
                         <CardHeader className="pb-2">
                           <CardTitle className="flex items-center gap-2 text-base">
-                            <DollarSign className="h-4 w-4 text-emerald-600" />
+                            <DollarSignIcon className="h-4 w-4 text-emerald-600" />
                             Revenue by Event
                           </CardTitle>
                           <p className="text-xs text-muted-foreground">
@@ -393,7 +380,7 @@ export function OrganizerStatsModal({ organizerId, organizerName }: OrganizerSta
                           ) : (
                             <div className="h-72 flex items-center justify-center text-muted-foreground">
                               <div className="text-center">
-                                <DollarSign className="h-10 w-10 mx-auto mb-2 opacity-50" />
+                                <DollarSignIcon className="h-10 w-10 mx-auto mb-2 opacity-50" />
                                 <p>No revenue data yet</p>
                                 <p className="text-xs mt-1">Revenue appears when paid tickets are sold</p>
                               </div>
@@ -409,7 +396,7 @@ export function OrganizerStatsModal({ organizerId, organizerName }: OrganizerSta
                       <Card>
                         <CardHeader className="pb-2">
                           <CardTitle className="flex items-center gap-2 text-base">
-                            <BarChart3 className="h-4 w-4 text-indigo-600" />
+                            <BarChart3Icon className="h-4 w-4 text-indigo-600" />
                             Sales by Age Group
                           </CardTitle>
                           <p className="text-xs text-muted-foreground">
@@ -462,7 +449,7 @@ export function OrganizerStatsModal({ organizerId, organizerName }: OrganizerSta
                           ) : (
                             <div className="h-64 flex items-center justify-center text-muted-foreground">
                               <div className="text-center">
-                                <Users className="h-10 w-10 mx-auto mb-2 opacity-50" />
+                                <UsersIcon className="h-10 w-10 mx-auto mb-2 opacity-50" />
                                 <p>No age data available</p>
                                 <p className="text-xs mt-1">Age breakdown appears with ticket purchases</p>
                               </div>
@@ -550,7 +537,7 @@ export function OrganizerStatsModal({ organizerId, organizerName }: OrganizerSta
                       <Card>
                         <CardHeader className="pb-2">
                           <CardTitle className="flex items-center gap-2 text-base">
-                            <BarChart3 className="h-4 w-4 text-purple-600" />
+                            <BarChart3Icon className="h-4 w-4 text-purple-600" />
                             Audience Age Distribution
                           </CardTitle>
                           <p className="text-xs text-muted-foreground">
@@ -597,7 +584,7 @@ export function OrganizerStatsModal({ organizerId, organizerName }: OrganizerSta
                           ) : (
                             <div className="h-64 flex items-center justify-center text-muted-foreground">
                               <div className="text-center">
-                                <Users className="h-10 w-10 mx-auto mb-2 opacity-50" />
+                                <UsersIcon className="h-10 w-10 mx-auto mb-2 opacity-50" />
                                 <p>No demographic data available</p>
                                 <p className="text-xs mt-1">Data appears when users RSVP or purchase tickets</p>
                               </div>
@@ -680,7 +667,7 @@ export function OrganizerStatsModal({ organizerId, organizerName }: OrganizerSta
                       <Card>
                         <CardHeader className="pb-2">
                           <CardTitle className="flex items-center gap-2 text-base">
-                            <TrendingUp className="h-4 w-4 text-indigo-600" />
+                            <TrendingUpIcon className="h-4 w-4 text-indigo-600" />
                             Event Performance Matrix
                           </CardTitle>
                           <p className="text-xs text-muted-foreground">
@@ -774,7 +761,7 @@ export function OrganizerStatsModal({ organizerId, organizerName }: OrganizerSta
                       </Card>
                     ) : (
                       <div className="text-center py-12">
-                        <Calendar className="h-12 w-12 mx-auto mb-4 opacity-50 text-muted-foreground" />
+                        <CalendarIcon className="h-12 w-12 mx-auto mb-4 opacity-50 text-muted-foreground" />
                         <p className="text-muted-foreground">No events to display</p>
                         <p className="text-sm text-muted-foreground mt-1">Create events to see performance metrics</p>
                       </div>
@@ -787,7 +774,7 @@ export function OrganizerStatsModal({ organizerId, organizerName }: OrganizerSta
                   <CardContent className="pt-4">
                     <div className="flex items-start gap-3">
                       <div className="p-2 bg-purple-100 dark:bg-purple-900/50 rounded-lg shrink-0">
-                        <TrendingUp className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+                        <TrendingUpIcon className="h-5 w-5 text-purple-600 dark:text-purple-400" />
                       </div>
                       <div className="flex-1">
                         <h4 className="font-semibold text-purple-900 dark:text-purple-100">Key Performance Insights</h4>

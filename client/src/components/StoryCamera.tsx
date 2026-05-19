@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { X, RefreshCw, Zap, ZapOff, Type, Trash2, Check, Move } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { motion, AnimatePresence } from "framer-motion";
+import { XIcon, RefreshCwIcon, ZapIcon, ZapOffIcon, TypeIcon, Trash2Icon, CheckIcon, MoveIcon } from "@/components/ui/icons";
 
 interface TextOverlay {
   id: string;
@@ -337,7 +338,7 @@ export default function StoryCamera({ open, onClose, onCapture, onSwitchToUpload
               className="text-white hover:bg-white/20"
               data-testid="button-close-camera"
             >
-              <X className="h-6 w-6" />
+              <XIcon className="h-6 w-6" />
             </Button>
             
             {!capturedImage && (
@@ -349,7 +350,7 @@ export default function StoryCamera({ open, onClose, onCapture, onSwitchToUpload
                   className="text-white hover:bg-white/20"
                   data-testid="button-toggle-flash"
                 >
-                  {flashEnabled ? <Zap className="h-6 w-6 text-yellow-400" /> : <ZapOff className="h-6 w-6" />}
+                  {flashEnabled ? <ZapIcon className="h-6 w-6 text-yellow-400" /> : <ZapOffIcon className="h-6 w-6" />}
                 </Button>
                 <Button
                   variant="ghost"
@@ -358,7 +359,7 @@ export default function StoryCamera({ open, onClose, onCapture, onSwitchToUpload
                   className="text-white hover:bg-white/20"
                   data-testid="button-flip-camera"
                 >
-                  <RefreshCw className="h-6 w-6" />
+                  <RefreshCwIcon className="h-6 w-6" />
                 </Button>
               </div>
             )}
@@ -371,7 +372,7 @@ export default function StoryCamera({ open, onClose, onCapture, onSwitchToUpload
                 className="text-white hover:bg-white/20"
                 data-testid="button-add-text"
               >
-                <Type className="h-6 w-6" />
+                <TypeIcon className="h-6 w-6" />
               </Button>
             )}
           </div>
@@ -456,7 +457,7 @@ export default function StoryCamera({ open, onClose, onCapture, onSwitchToUpload
                         className="absolute -top-3 -right-3 bg-red-500 text-white rounded-full p-1"
                         data-testid={`button-remove-text-${overlay.id}`}
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2Icon className="h-4 w-4" />
                       </button>
                     )}
                   </div>
@@ -491,7 +492,7 @@ export default function StoryCamera({ open, onClose, onCapture, onSwitchToUpload
                   disabled={!newTextValue.trim()}
                   data-testid="button-confirm-text"
                 >
-                  <Check className="h-5 w-5" />
+                  <CheckIcon className="h-5 w-5" />
                 </Button>
               </div>
               
@@ -574,7 +575,7 @@ export default function StoryCamera({ open, onClose, onCapture, onSwitchToUpload
           {capturedImage && textOverlays.length > 0 && !isAddingText && (
             <div className="absolute bottom-32 left-0 right-0 text-center">
               <p className="text-white/60 text-sm flex items-center justify-center gap-2">
-                <Move className="h-4 w-4" />
+                <MoveIcon className="h-4 w-4" />
                 Drag text to reposition
               </p>
             </div>

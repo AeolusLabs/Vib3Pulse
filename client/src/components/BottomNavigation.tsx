@@ -1,6 +1,7 @@
-import { Compass, LayoutGrid, Search, MessageCircle, Ticket } from "lucide-react";
+
 import { Link, useLocation } from "wouter";
 import { useUnreadMessagesCount, useMessageCountWebSocket } from "@/hooks/useUnreadMessagesCount";
+import { CompassIcon, LayoutGridIcon, SearchIcon, MessageCircleIcon, TicketIcon } from "@/components/ui/icons";
 
 interface BottomNavigationProps {
   onCreateClick?: () => void;

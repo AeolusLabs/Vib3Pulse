@@ -8,10 +8,11 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { Search, Users, X, Loader2 } from "lucide-react";
+
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { User } from "@shared/schema";
+import { SearchIcon, UsersIcon, XIcon, Loader2Icon } from "@/components/ui/icons";
 
 interface CreateGroupModalProps {
   open: boolean;
@@ -94,7 +95,7 @@ export default function CreateGroupModal({ open, onOpenChange, onGroupCreated }:
       <DialogContent className="sm:max-w-md" data-testid="modal-create-group">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Users className="h-5 w-5" />
+            <UsersIcon className="h-5 w-5" />
             Create Group Chat
           </DialogTitle>
           <DialogDescription>
@@ -135,7 +136,7 @@ export default function CreateGroupModal({ open, onOpenChange, onGroupCreated }:
                     className="ml-1 hover:text-destructive"
                     data-testid={`button-remove-user-${user.id}`}
                   >
-                    <X className="h-3 w-3" />
+                    <XIcon className="h-3 w-3" />
                   </button>
                 </Badge>
               ))}
@@ -145,7 +146,7 @@ export default function CreateGroupModal({ open, onOpenChange, onGroupCreated }:
           <div className="space-y-2">
             <Label>Add Members</Label>
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search users..."
                 value={searchQuery}
@@ -211,7 +212,7 @@ export default function CreateGroupModal({ open, onOpenChange, onGroupCreated }:
               disabled={createGroupMutation.isPending || !groupName.trim() || selectedUsers.length < 1}
               data-testid="button-create-group"
             >
-              {createGroupMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {createGroupMutation.isPending && <Loader2Icon className="mr-2 h-4 w-4 animate-spin" />}
               Create Group
             </Button>
           </div>

@@ -9,9 +9,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Activity, LogIn, LogOut, UserPlus, Ban, Flag, Trash2, Check, X, Edit } from "lucide-react";
+
 import AdminLayout from "./AdminLayout";
 import { format } from "date-fns";
+import { ActivityIcon, LogInIcon, LogOutIcon, UserPlusIcon, BanIcon, FlagIcon, Trash2Icon, CheckIcon, XIcon, EditIcon } from "@/components/ui/icons";
 
 interface ActivityLog {
   id: string;
@@ -30,20 +31,20 @@ interface ActivityLog {
 }
 
 const actionIcons: Record<string, React.ReactNode> = {
-  login: <LogIn className="w-4 h-4 text-green-400" />,
-  logout: <LogOut className="w-4 h-4 text-slate-400" />,
-  create_admin: <UserPlus className="w-4 h-4 text-purple-400" />,
-  deactivate_admin: <Ban className="w-4 h-4 text-red-400" />,
-  suspend_user: <Ban className="w-4 h-4 text-amber-400" />,
-  lift_suspension: <Check className="w-4 h-4 text-green-400" />,
-  delete_user: <Trash2 className="w-4 h-4 text-red-400" />,
-  approve_event: <Check className="w-4 h-4 text-green-400" />,
-  reject_event: <X className="w-4 h-4 text-red-400" />,
-  flag_event: <Flag className="w-4 h-4 text-amber-400" />,
-  delete_event: <Trash2 className="w-4 h-4 text-red-400" />,
-  delete_story: <Trash2 className="w-4 h-4 text-red-400" />,
-  review_report: <Flag className="w-4 h-4 text-blue-400" />,
-  update_admin: <Edit className="w-4 h-4 text-blue-400" />,
+  login: <LogInIcon className="w-4 h-4 text-green-400" />,
+  logout: <LogOutIcon className="w-4 h-4 text-slate-400" />,
+  create_admin: <UserPlusIcon className="w-4 h-4 text-purple-400" />,
+  deactivate_admin: <BanIcon className="w-4 h-4 text-red-400" />,
+  suspend_user: <BanIcon className="w-4 h-4 text-amber-400" />,
+  lift_suspension: <CheckIcon className="w-4 h-4 text-green-400" />,
+  delete_user: <Trash2Icon className="w-4 h-4 text-red-400" />,
+  approve_event: <CheckIcon className="w-4 h-4 text-green-400" />,
+  reject_event: <XIcon className="w-4 h-4 text-red-400" />,
+  flag_event: <FlagIcon className="w-4 h-4 text-amber-400" />,
+  delete_event: <Trash2Icon className="w-4 h-4 text-red-400" />,
+  delete_story: <Trash2Icon className="w-4 h-4 text-red-400" />,
+  review_report: <FlagIcon className="w-4 h-4 text-blue-400" />,
+  update_admin: <EditIcon className="w-4 h-4 text-blue-400" />,
 };
 
 const actionLabels: Record<string, string> = {
@@ -81,7 +82,7 @@ export default function AdminActivity() {
         <Card className="bg-slate-800/50 border-slate-700">
           <CardHeader>
             <CardTitle className="text-white flex items-center gap-2">
-              <Activity className="w-5 h-5 text-purple-400" />
+              <ActivityIcon className="w-5 h-5 text-purple-400" />
               Recent Activity
             </CardTitle>
           </CardHeader>
@@ -107,7 +108,7 @@ export default function AdminActivity() {
                     <TableRow key={log.id} className="border-slate-700">
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          {actionIcons[log.action] || <Activity className="w-4 h-4 text-slate-400" />}
+                          {actionIcons[log.action] || <ActivityIcon className="w-4 h-4 text-slate-400" />}
                           <span className="text-white">
                             {actionLabels[log.action] || log.action}
                           </span>

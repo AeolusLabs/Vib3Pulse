@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+
 import ImageLightbox from "./ImageLightbox";
+import { ChevronLeftIcon, ChevronRightIcon } from "@/components/ui/icons";
 
 interface PostData {
   id: string;
@@ -126,7 +127,7 @@ export default function ImageGrid({ images, maxImages = 4, className = "", postD
             className="absolute left-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-full bg-black/60 text-white flex items-center justify-center hover:bg-black/80 transition-colors z-10"
             aria-label="Previous image"
           >
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronLeftIcon className="h-4 w-4" />
           </button>
         )}
         {activeSlide < displayImages.length - 1 && (
@@ -135,7 +136,7 @@ export default function ImageGrid({ images, maxImages = 4, className = "", postD
             className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-full bg-black/60 text-white flex items-center justify-center hover:bg-black/80 transition-colors z-10"
             aria-label="Next image"
           >
-            <ChevronRight className="h-4 w-4" />
+            <ChevronRightIcon className="h-4 w-4" />
           </button>
         )}
 

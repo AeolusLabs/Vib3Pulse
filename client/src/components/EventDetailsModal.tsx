@@ -6,11 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
-import { Calendar, MapPin, Users, Ticket, CheckCircle, Minus, Plus, ExternalLink, Share2, X } from "lucide-react";
+
 import { format } from "date-fns";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Event } from "@shared/schema";
 import { Card } from "@/components/ui/card";
+import { CalendarIcon, MapPinIcon, UsersIcon, TicketIcon, CheckCircleIcon, MinusIcon, PlusIcon, ExternalLinkIcon, Share2Icon, XIcon } from "@/components/ui/icons";
 
 interface EventDetailsModalProps {
   event: Event;
@@ -155,7 +156,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
             onClick={() => setLightboxOpen(false)}
             aria-label="Close image"
           >
-            <X className="h-6 w-6" />
+            <XIcon className="h-6 w-6" />
           </button>
           <img
             src={event.imageUrl}
@@ -207,7 +208,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
             {/* Details */}
             <div className="space-y-2.5">
               <div className="flex items-center gap-3">
-                <Calendar className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                <CalendarIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                 <div>
                   <p className="font-medium text-sm" data-testid="modal-event-date">
                     {format(new Date(event.eventDate), "EEEE, MMMM d, yyyy")}
@@ -220,12 +221,12 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
               </div>
 
               <div className="flex items-center gap-3">
-                <MapPin className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                <MapPinIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                 <p className="text-sm" data-testid="modal-event-location">{event.location}</p>
               </div>
 
               <div className="flex items-center gap-3">
-                <Users className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                <UsersIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                 <p className="text-sm" data-testid="modal-event-tickets-available">
                   {event.ticketsAvailable} tickets available
                 </p>
@@ -234,18 +235,18 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
               {/* Ticket pricing */}
               {hasExternalTickets ? (
                 <div className="flex items-center gap-3">
-                  <ExternalLink className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                  <ExternalLinkIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                   <Badge variant="default" className="bg-blue-500" data-testid="modal-event-price">External Tickets</Badge>
                 </div>
               ) : isFreeEvent ? (
                 <div className="flex items-center gap-3">
-                  <Ticket className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                  <TicketIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                   <Badge variant="default" className="bg-green-600" data-testid="modal-event-price">Free Event</Badge>
                 </div>
               ) : (
                 <div className="space-y-2">
                   <div className="flex items-center gap-3">
-                    <Ticket className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    <TicketIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                     <p className="text-sm font-semibold">Ticket Options</p>
                   </div>
                   {isLoadingTiers ? (
@@ -294,7 +295,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
               {hasExternalTickets ? (
                 <Button className="flex-1" asChild data-testid="button-get-external-tickets">
                   <a href={event.externalTicketUrl!} target="_blank" rel="noopener noreferrer">
-                    <ExternalLink className="h-4 w-4 mr-2" />
+                    <ExternalLinkIcon className="h-4 w-4 mr-2" />
                     Get Tickets
                   </a>
                 </Button>
@@ -306,9 +307,9 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
                   data-testid="button-rsvp"
                 >
                   {isLoadingRSVPs ? "Loading…" : hasRSVPed ? (
-                    <><CheckCircle className="h-4 w-4 mr-2" />Already RSVP'd</>
+                    <><CheckCircleIcon className="h-4 w-4 mr-2" />Already RSVP'd</>
                   ) : rsvpMutation.isPending ? "Processing…" : (
-                    <><CheckCircle className="h-4 w-4 mr-2" />RSVP for Free</>
+                    <><CheckCircleIcon className="h-4 w-4 mr-2" />RSVP for Free</>
                   )}
                 </Button>
               ) : !isFreeEvent ? (
@@ -319,7 +320,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
                   data-testid="button-purchase-ticket"
                 >
                   {isProcessing ? "Redirecting…" : event.ticketsAvailable === 0 ? "Sold Out" : (
-                    <><Ticket className="h-4 w-4 mr-2" />Purchase Ticket</>
+                    <><TicketIcon className="h-4 w-4 mr-2" />Purchase Ticket</>
                   )}
                 </Button>
               ) : (
@@ -334,7 +335,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
               )}
 
               <Button variant="outline" size="icon" onClick={handleShare} data-testid="button-share">
-                <Share2 className="h-4 w-4" />
+                <Share2Icon className="h-4 w-4" />
               </Button>
 
               <Button variant="outline" onClick={onClose} data-testid="button-close-modal">
@@ -391,7 +392,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
                   <label className="text-sm font-medium mb-2 block">Quantity</label>
                   <div className="flex items-center gap-3">
                     <Button variant="outline" size="icon" onClick={decrementQuantity} disabled={quantity <= 1} data-testid="button-decrease-quantity">
-                      <Minus className="h-4 w-4" />
+                      <MinusIcon className="h-4 w-4" />
                     </Button>
                     <span className="text-lg font-semibold w-10 text-center" data-testid="text-quantity">{quantity}</span>
                     <Button
@@ -401,7 +402,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
                       disabled={quantity >= (ticketTiers?.find((t: any) => t.id === selectedTier)?.quantity || 0)}
                       data-testid="button-increase-quantity"
                     >
-                      <Plus className="h-4 w-4" />
+                      <PlusIcon className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>

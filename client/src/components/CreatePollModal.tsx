@@ -5,9 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { ChartBar, Plus, X, Loader2 } from "lucide-react";
+
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { ChartBarIcon, PlusIcon, XIcon, Loader2Icon } from "@/components/ui/icons";
 
 interface CreatePollModalProps {
   open: boolean;
@@ -79,7 +80,7 @@ export default function CreatePollModal({ open, onOpenChange, conversationId }: 
       <DialogContent className="sm:max-w-md" data-testid="modal-create-poll">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <ChartBar className="h-5 w-5" />
+            <ChartBarIcon className="h-5 w-5" />
             Create Poll
           </DialogTitle>
           <DialogDescription>
@@ -116,7 +117,7 @@ export default function CreatePollModal({ open, onOpenChange, conversationId }: 
                     onClick={() => removeOption(index)}
                     data-testid={`button-remove-option-${index}`}
                   >
-                    <X className="h-4 w-4" />
+                    <XIcon className="h-4 w-4" />
                   </Button>
                 )}
               </div>
@@ -129,7 +130,7 @@ export default function CreatePollModal({ open, onOpenChange, conversationId }: 
                 className="w-full"
                 data-testid="button-add-option"
               >
-                <Plus className="h-4 w-4 mr-2" />
+                <PlusIcon className="h-4 w-4 mr-2" />
                 Add Option
               </Button>
             )}
@@ -163,7 +164,7 @@ export default function CreatePollModal({ open, onOpenChange, conversationId }: 
               disabled={createPollMutation.isPending}
               data-testid="button-create-poll"
             >
-              {createPollMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {createPollMutation.isPending && <Loader2Icon className="mr-2 h-4 w-4 animate-spin" />}
               Create Poll
             </Button>
           </div>

@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Users, Plus, Search } from "lucide-react";
+import { UsersIcon, PlusIcon, SearchIcon } from "@/components/ui/icons";
 
 interface CommunityModalProps {
   open: boolean;
@@ -139,7 +139,7 @@ export default function CommunityModal({ open, onClose }: CommunityModalProps) {
       <DialogContent className="max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Users className="h-5 w-5" />
+            <UsersIcon className="h-5 w-5" />
             Communities
           </DialogTitle>
         </DialogHeader>
@@ -153,7 +153,7 @@ export default function CommunityModal({ open, onClose }: CommunityModalProps) {
 
           <TabsContent value="discover" className="flex-1 overflow-auto space-y-4 mt-4">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search communities..."
                 value={searchQuery}
@@ -279,7 +279,7 @@ export default function CommunityModal({ open, onClose }: CommunityModalProps) {
                 className="w-full"
                 data-testid="button-create-community"
               >
-                <Plus className="h-4 w-4 mr-2" />
+                <PlusIcon className="h-4 w-4 mr-2" />
                 {createCommunityMutation.isPending ? "Creating..." : "Create Community"}
               </Button>
             </div>

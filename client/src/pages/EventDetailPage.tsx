@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Calendar, MapPin, Share2, ExternalLink } from "lucide-react";
+
 import { useQuery } from "@tanstack/react-query";
 import { useRoute } from "wouter";
 import { format } from "date-fns";
@@ -14,6 +14,7 @@ import EventCard from "@/components/EventCard";
 import { apiRequest } from "@/lib/queryClient";
 import type { Event, User } from "@shared/schema";
 import musicFestival from '@assets/generated_images/Outdoor_music_festival_event_179040d3.png';
+import { CalendarIcon, MapPinIcon, Share2Icon, ExternalLinkIcon } from "@/components/ui/icons";
 
 type EventWithOrganizer = Event & { organizer: User };
 
@@ -144,7 +145,7 @@ export default function EventDetailPage() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                   <div className="flex items-start gap-3">
-                    <Calendar className="h-5 w-5 text-primary mt-0.5" />
+                    <CalendarIcon className="h-5 w-5 text-primary mt-0.5" />
                     <div>
                       <p className="font-semibold">Date & Time</p>
                       <p className="text-sm text-muted-foreground" data-testid="text-date">
@@ -154,7 +155,7 @@ export default function EventDetailPage() {
                   </div>
 
                   <div className="flex items-start gap-3">
-                    <MapPin className="h-5 w-5 text-primary mt-0.5" />
+                    <MapPinIcon className="h-5 w-5 text-primary mt-0.5" />
                     <div>
                       <p className="font-semibold">Location</p>
                       <p className="text-sm text-muted-foreground" data-testid="text-location">
@@ -178,13 +179,13 @@ export default function EventDetailPage() {
                       data-testid="button-external-tickets"
                     >
                       <a href={event.externalTicketUrl} target="_blank" rel="noopener noreferrer">
-                        <ExternalLink className="h-4 w-4 mr-2" />
+                        <ExternalLinkIcon className="h-4 w-4 mr-2" />
                         Get Tickets
                       </a>
                     </Button>
                   )}
                   <Button variant="outline" size="default" data-testid="button-share">
-                    <Share2 className="h-4 w-4 mr-2" />
+                    <Share2Icon className="h-4 w-4 mr-2" />
                     Share Event
                   </Button>
                 </div>

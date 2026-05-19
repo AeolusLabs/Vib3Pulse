@@ -12,7 +12,7 @@ function formatStoryTime(timestamp: string): string {
   const diffDays = Math.floor(diffHours / 24);
   return diffDays === 1 ? "Yesterday" : `${diffDays}d ago`;
 }
-import { X, ChevronLeft, ChevronRight, ChevronUp, Heart, Eye, Send, Trash2, Share2, Lock, RefreshCw, Volume2, VolumeX } from "lucide-react";
+
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +23,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { motion, AnimatePresence } from "framer-motion";
+import { XIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpIcon, HeartIcon, EyeIcon, SendIcon, Trash2Icon, Share2Icon, LockIcon, RefreshCwIcon, Volume2Icon, VolumeXIcon } from "@/components/ui/icons";
 
 interface StorySlide {
   id: string;
@@ -391,11 +392,11 @@ export default function StoryViewer({
                     {displayName || username}
                   </p>
                   {currentStory.privacy === 'private' && (
-                    <Lock className="h-3 w-3 text-white/80" />
+                    <LockIcon className="h-3 w-3 text-white/80" />
                   )}
                   {currentStory.isReshare && (
                     <Badge variant="secondary" className="h-5 text-[10px] bg-white/20 text-white border-0">
-                      <RefreshCw className="h-2.5 w-2.5 mr-1" />
+                      <RefreshCwIcon className="h-2.5 w-2.5 mr-1" />
                       Reshared
                     </Badge>
                   )}
@@ -417,7 +418,7 @@ export default function StoryViewer({
                   className="text-white hover:bg-white/20"
                   data-testid="button-story-mute"
                 >
-                  {isVideoMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+                  {isVideoMuted ? <VolumeXIcon className="h-5 w-5" /> : <Volume2Icon className="h-5 w-5" />}
                 </Button>
               )}
               {isOwnStory && (
@@ -429,7 +430,7 @@ export default function StoryViewer({
                   className="text-white hover:bg-white/20"
                   data-testid="button-delete-story"
                 >
-                  <Trash2 className="h-5 w-5" />
+                  <Trash2Icon className="h-5 w-5" />
                 </Button>
               )}
               <Button
@@ -439,7 +440,7 @@ export default function StoryViewer({
                 className="text-white hover:bg-white/20"
                 data-testid="button-close-story"
               >
-                <X className="h-6 w-6" />
+                <XIcon className="h-6 w-6" />
               </Button>
             </div>
           </div>
@@ -506,7 +507,7 @@ export default function StoryViewer({
                 exit={{ scale: 0, opacity: 0 }}
                 className="absolute inset-0 flex items-center justify-center pointer-events-none"
               >
-                <Heart className="h-32 w-32 text-red-500 fill-red-500" />
+                <HeartIcon className="h-32 w-32 text-red-500 fill-red-500" />
               </motion.div>
             )}
           </AnimatePresence>
@@ -553,27 +554,27 @@ export default function StoryViewer({
               data-testid="button-open-interactions"
             >
               <div className="flex items-center gap-1.5">
-                <Eye className="h-5 w-5 text-white/80" />
+                <EyeIcon className="h-5 w-5 text-white/80" />
                 <span className="text-white font-semibold text-sm">
                   {interactionsData?.viewCount ?? currentStory.viewCount ?? 0}
                 </span>
                 <span className="text-white/60 text-xs">views</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <Heart className="h-5 w-5 text-red-400 fill-red-400" />
+                <HeartIcon className="h-5 w-5 text-red-400 fill-red-400" />
                 <span className="text-white font-semibold text-sm">
                   {interactionsData?.likeCount ?? currentLikeState.likeCount}
                 </span>
                 <span className="text-white/60 text-xs">likes</span>
               </div>
-              <ChevronUp className="h-4 w-4 text-white/60 ml-auto" />
+              <ChevronUpIcon className="h-4 w-4 text-white/60 ml-auto" />
             </button>
           ) : (
             /* Non-owner: reply + like + reshare */
             <>
               {currentLikeState.likeCount > 0 && (
                 <div className="flex items-center gap-1 mb-3 ml-1">
-                  <Heart className="h-4 w-4 text-red-500 fill-red-500" />
+                  <HeartIcon className="h-4 w-4 text-red-500 fill-red-500" />
                   <span className="text-sm text-white font-medium" data-testid="text-like-count">
                     {currentLikeState.likeCount} {currentLikeState.likeCount === 1 ? 'like' : 'likes'}
                   </span>
@@ -604,7 +605,7 @@ export default function StoryViewer({
                       className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 text-white hover:bg-white/20"
                       data-testid="button-send-reply"
                     >
-                      <Send className="h-4 w-4" />
+                      <SendIcon className="h-4 w-4" />
                     </Button>
                   )}
                 </div>
@@ -616,7 +617,7 @@ export default function StoryViewer({
                   className={`text-white hover:bg-white/20 ${currentLikeState.isLiked ? 'text-red-500' : ''}`}
                   data-testid="button-like-story"
                 >
-                  <Heart className={`h-6 w-6 ${currentLikeState.isLiked ? 'fill-red-500' : ''}`} />
+                  <HeartIcon className={`h-6 w-6 ${currentLikeState.isLiked ? 'fill-red-500' : ''}`} />
                 </Button>
                 <Button
                   variant="ghost"
@@ -626,7 +627,7 @@ export default function StoryViewer({
                   className="text-white hover:bg-white/20"
                   data-testid="button-reshare-story"
                 >
-                  <Share2 className="h-6 w-6" />
+                  <Share2Icon className="h-6 w-6" />
                 </Button>
               </div>
             </>
@@ -641,7 +642,7 @@ export default function StoryViewer({
             className="absolute left-2 top-1/2 -translate-y-1/2 z-20 text-white hover:bg-white/20"
             onClick={handlePrevious}
           >
-            <ChevronLeft className="h-8 w-8" />
+            <ChevronLeftIcon className="h-8 w-8" />
           </Button>
           <Button
             variant="ghost"
@@ -649,7 +650,7 @@ export default function StoryViewer({
             className="absolute right-2 top-1/2 -translate-y-1/2 z-20 text-white hover:bg-white/20"
             onClick={handleNext}
           >
-            <ChevronRight className="h-8 w-8" />
+            <ChevronRightIcon className="h-8 w-8" />
           </Button>
         </div>
       </div>

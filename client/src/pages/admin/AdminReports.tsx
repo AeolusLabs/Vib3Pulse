@@ -29,11 +29,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Check, X, Eye, AlertTriangle } from "lucide-react";
+
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import AdminLayout from "./AdminLayout";
 import { format } from "date-fns";
+import { CheckIcon, XIcon, EyeIcon, AlertTriangleIcon } from "@/components/ui/icons";
 
 interface ContentReport {
   id: string;
@@ -204,7 +205,7 @@ export default function AdminReports() {
                                 }}
                                 data-testid={`button-review-report-${report.id}`}
                               >
-                                <Eye className="w-4 h-4 mr-1" /> Review
+                                <EyeIcon className="w-4 h-4 mr-1" /> Review
                               </Button>
                             )}
                           </TableCell>

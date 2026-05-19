@@ -16,24 +16,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Calendar,
-  MapPin,
-  PoundSterling,
-  Building2,
-  Mail,
-  UserPlus,
-  UserMinus,
-  Camera,
-  FileText,
-  Heart,
-  Repeat2,
-  Loader2,
-  Trash2,
-  BadgeCheck,
-  Link2,
-  Cake,
-} from "lucide-react";
+
 import { Card, CardContent } from "@/components/ui/card";
 import { format } from "date-fns";
 import type { User, Event, Rsvp, Post } from "@shared/schema";
@@ -46,6 +29,8 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { getBannerStyle } from "@/lib/bannerUtils";
+import { CalendarIcon, MapPinIcon, PoundSterlingIcon, Building2Icon, MailIcon, UserPlusIcon, UserMinusIcon, CameraIcon, HeartIcon, Repeat2Icon, Loader2Icon, Trash2Icon, Link2Icon } from "@/components/ui/icons";
+import { FileText, BadgeCheck, Cake } from "lucide-react";
 
 type ProfileResponse = Omit<User, "password"> & {
   events?: Event[];
@@ -428,9 +413,9 @@ export default function ProfilePage() {
                       </Avatar>
                       <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                         {isUploadingAvatar ? (
-                          <Loader2 className="h-7 w-7 text-white animate-spin" />
+                          <Loader2Icon className="h-7 w-7 text-white animate-spin" />
                         ) : (
-                          <Camera className="h-7 w-7 text-white" />
+                          <CameraIcon className="h-7 w-7 text-white" />
                         )}
                       </div>
                     </button>
@@ -441,7 +426,7 @@ export default function ProfilePage() {
                       className="cursor-pointer"
                       data-testid="menu-change-photo"
                     >
-                      <Camera className="h-4 w-4 mr-2" />
+                      <CameraIcon className="h-4 w-4 mr-2" />
                       Change photo
                     </DropdownMenuItem>
                     {profile.avatarUrl && (
@@ -450,7 +435,7 @@ export default function ProfilePage() {
                         className="text-destructive focus:text-destructive cursor-pointer"
                         data-testid="menu-remove-photo"
                       >
-                        <Trash2 className="h-4 w-4 mr-2" />
+                        <Trash2Icon className="h-4 w-4 mr-2" />
                         Remove photo
                       </DropdownMenuItem>
                     )}
@@ -498,7 +483,7 @@ export default function ProfilePage() {
                     className="rounded-full font-semibold px-5"
                     data-testid="button-unfollow"
                   >
-                    <UserMinus className="h-4 w-4 mr-1.5" />
+                    <UserMinusIcon className="h-4 w-4 mr-1.5" />
                     {unfollowMutation.isPending ? "..." : "Following"}
                   </Button>
                 ) : (
@@ -509,7 +494,7 @@ export default function ProfilePage() {
                     className="rounded-full font-semibold px-5"
                     data-testid="button-follow"
                   >
-                    <UserPlus className="h-4 w-4 mr-1.5" />
+                    <UserPlusIcon className="h-4 w-4 mr-1.5" />
                     {followMutation.isPending ? "..." : "Follow"}
                   </Button>
                 )
@@ -528,7 +513,7 @@ export default function ProfilePage() {
               )}
               {isOrganizer && (
                 <Badge className="text-xs bg-primary/10 text-primary border border-primary/20 font-medium" data-testid="badge-organizer">
-                  <Building2 className="h-3 w-3 mr-1" />
+                  <Building2Icon className="h-3 w-3 mr-1" />
                   Organizer
                 </Badge>
               )}
@@ -555,13 +540,13 @@ export default function ProfilePage() {
             )}
             {profile.location && (
               <span className="flex items-center gap-1" data-testid="text-location">
-                <MapPin className="h-4 w-4" />
+                <MapPinIcon className="h-4 w-4" />
                 {profile.location}
               </span>
             )}
             {isOrganizer && profile.contactEmail && (
               <span className="flex items-center gap-1" data-testid="text-contact-email">
-                <Mail className="h-4 w-4" />
+                <MailIcon className="h-4 w-4" />
                 {profile.contactEmail}
               </span>
             )}
@@ -572,7 +557,7 @@ export default function ProfilePage() {
                 rel="noopener noreferrer"
                 className="flex items-center gap-1 text-primary hover:underline cursor-pointer"
               >
-                <Link2 className="h-4 w-4" />
+                <Link2Icon className="h-4 w-4" />
                 {profile.socialMediaLinks[0].replace(/^https?:\/\//, "")}
               </a>
             )}
@@ -670,7 +655,7 @@ export default function ProfilePage() {
               <PostsList
                 posts={likedPosts}
                 loading={likedLoading}
-                emptyIcon={Heart}
+                emptyIcon={HeartIcon}
                 emptyText="No liked posts yet"
               />
             </TabsContent>
@@ -679,7 +664,7 @@ export default function ProfilePage() {
               <PostsList
                 posts={repostedPosts}
                 loading={repostsLoading}
-                emptyIcon={Repeat2}
+                emptyIcon={Repeat2Icon}
                 emptyText="No reposts yet"
               />
             </TabsContent>
@@ -734,11 +719,11 @@ export default function ProfilePage() {
                             {event.title}
                           </p>
                           <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
-                            <Calendar className="h-3.5 w-3.5" />
+                            <CalendarIcon className="h-3.5 w-3.5" />
                             {format(new Date(event.eventDate), "MMM d, yyyy · h:mm a")}
                           </div>
                           <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1.5">
-                            <MapPin className="h-3.5 w-3.5" />
+                            <MapPinIcon className="h-3.5 w-3.5" />
                             <span className="line-clamp-1">{event.location}</span>
                           </div>
                           <div className="flex items-center gap-2">
@@ -746,7 +731,7 @@ export default function ProfilePage() {
                               <Badge variant="secondary" className="text-xs h-5">FREE</Badge>
                             ) : (
                               <span className="flex items-center gap-0.5 text-xs text-primary font-semibold">
-                                <PoundSterling className="h-3 w-3" />
+                                <PoundSterlingIcon className="h-3 w-3" />
                                 {(event.ticketPrice / 100).toFixed(2)}
                               </span>
                             )}
@@ -761,7 +746,7 @@ export default function ProfilePage() {
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
-                  <Calendar className="h-12 w-12 text-muted-foreground/40 mb-3" />
+                  <CalendarIcon className="h-12 w-12 text-muted-foreground/40 mb-3" />
                   <p className="text-muted-foreground font-medium" data-testid="text-no-events">
                     No events created yet
                   </p>

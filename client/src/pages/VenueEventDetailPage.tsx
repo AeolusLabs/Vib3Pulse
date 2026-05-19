@@ -8,16 +8,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import {
-  ArrowLeft, Calendar, MapPin, Users, Ticket, Clock,
-  DoorOpen, UtensilsCrossed, Wine, LogOut, Building2,
-  CheckCircle, AlertCircle, Sparkles, Globe, Phone,
-} from "lucide-react";
+
 import { format } from "date-fns";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import type { VenueEntryNight, Venue } from "@shared/schema";
+import { ArrowLeftIcon, CalendarIcon, MapPinIcon, UsersIcon, TicketIcon, ClockIcon, LogOutIcon, Building2Icon, CheckCircleIcon, AlertCircleIcon, SparklesIcon, GlobeIcon, PhoneIcon } from "@/components/ui/icons";
+import { DoorOpen, UtensilsCrossed, Wine } from "lucide-react";
 
 type VenueEventWithVenue = VenueEntryNight & { venue: Venue };
 
@@ -59,7 +57,7 @@ function SimulatedPaymentForm({
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="rounded-lg border border-dashed border-amber-500/50 bg-amber-50 dark:bg-amber-950/20 p-4">
         <div className="flex items-start gap-3">
-          <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+          <AlertCircleIcon className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
           <div>
             <p className="font-medium text-amber-800 dark:text-amber-200">Demo Mode</p>
             <p className="text-sm text-amber-700 dark:text-amber-300">Payments are simulated. No real charges will be made.</p>
@@ -154,7 +152,7 @@ export default function VenueEventDetailPage() {
         <main className="max-w-[900px] mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center">
           <h1 className="text-2xl font-semibold mb-4">Event not found</h1>
           <Link href="/discover">
-            <Button><ArrowLeft className="h-4 w-4 mr-2" />Back to Discover</Button>
+            <Button><ArrowLeftIcon className="h-4 w-4 mr-2" />Back to Discover</Button>
           </Link>
         </main>
         <BottomNavigation />
@@ -182,7 +180,7 @@ export default function VenueEventDetailPage() {
   timeline.push({
     time: format(new Date(event.date), "h:mm a"),
     label: "Event starts",
-    icon: <Calendar className="h-4 w-4" />,
+    icon: <CalendarIcon className="h-4 w-4" />,
     color: "text-purple-600",
   });
   if (ev.lastCallTime) {
@@ -205,7 +203,7 @@ export default function VenueEventDetailPage() {
     timeline.push({
       time: format(new Date(ev.endTime), "h:mm a"),
       label: "Event ends",
-      icon: <LogOut className="h-4 w-4" />,
+      icon: <LogOutIcon className="h-4 w-4" />,
       color: "text-rose-500",
     });
   }
@@ -224,7 +222,7 @@ export default function VenueEventDetailPage() {
         )}
         {isPromoted && (
           <Badge className="absolute top-4 right-4 z-20 bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-lg">
-            <Sparkles className="h-3.5 w-3.5 mr-1" />Featured Venue
+            <SparklesIcon className="h-3.5 w-3.5 mr-1" />Featured Venue
           </Badge>
         )}
       </div>
@@ -232,7 +230,7 @@ export default function VenueEventDetailPage() {
       <main className="max-w-[900px] mx-auto px-4 sm:px-6 lg:px-8 -mt-24 relative z-20 pb-8">
         <Link href="/discover">
           <Button variant="ghost" size="sm" className="mb-4 bg-background/80 backdrop-blur-sm hover:bg-background">
-            <ArrowLeft className="h-4 w-4 mr-2" />Back to Discover
+            <ArrowLeftIcon className="h-4 w-4 mr-2" />Back to Discover
           </Button>
         </Link>
 
@@ -256,7 +254,7 @@ export default function VenueEventDetailPage() {
                 {/* Date */}
                 <div className="flex items-center gap-3 mb-6 pb-6 border-b">
                   <div className="h-12 w-12 rounded-xl bg-purple-100 dark:bg-purple-900/40 flex items-center justify-center flex-shrink-0">
-                    <Calendar className="h-6 w-6 text-purple-600 dark:text-purple-400" />
+                    <CalendarIcon className="h-6 w-6 text-purple-600 dark:text-purple-400" />
                   </div>
                   <div>
                     <p className="font-semibold text-lg">
@@ -281,7 +279,7 @@ export default function VenueEventDetailPage() {
                 {timeline.length > 0 && (
                   <div>
                     <h3 className="font-semibold text-sm mb-4 flex items-center gap-2">
-                      <Clock className="h-4 w-4 text-primary" />
+                      <ClockIcon className="h-4 w-4 text-primary" />
                       Event Schedule
                     </h3>
                     <div className="relative pl-6 space-y-4">
@@ -309,7 +307,7 @@ export default function VenueEventDetailPage() {
             <Card className="shadow-lg">
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg flex items-center gap-2">
-                  <Building2 className="h-5 w-5 text-primary" />
+                  <Building2Icon className="h-5 w-5 text-primary" />
                   About the Venue
                 </CardTitle>
               </CardHeader>
@@ -323,7 +321,7 @@ export default function VenueEventDetailPage() {
                     />
                   ) : (
                     <div className="h-14 w-14 rounded-xl bg-purple-100 dark:bg-purple-900/40 flex items-center justify-center flex-shrink-0">
-                      <Building2 className="h-7 w-7 text-purple-500" />
+                      <Building2Icon className="h-7 w-7 text-purple-500" />
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
@@ -336,7 +334,7 @@ export default function VenueEventDetailPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t">
                   {(venue.address || venue.city) && (
                     <div className="flex items-start gap-2 text-sm">
-                      <MapPin className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
+                      <MapPinIcon className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
                       <span className="text-muted-foreground">
                         {venue.address}{venue.address && venue.city && ", "}{venue.city}
                       </span>
@@ -344,19 +342,19 @@ export default function VenueEventDetailPage() {
                   )}
                   {venue.phone && (
                     <a href={`tel:${venue.phone}`} className="flex items-start gap-2 text-sm hover:text-primary transition-colors">
-                      <Phone className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
+                      <PhoneIcon className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
                       <span>{venue.phone}</span>
                     </a>
                   )}
                   {venue.website && (
                     <a href={venue.website} target="_blank" rel="noopener noreferrer" className="flex items-start gap-2 text-sm hover:text-primary transition-colors">
-                      <Globe className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
+                      <GlobeIcon className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
                       <span className="truncate">Visit Website</span>
                     </a>
                   )}
                   {venue.hours && (
                     <div className="flex items-start gap-2 text-sm">
-                      <Clock className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
+                      <ClockIcon className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
                       <span className="text-muted-foreground">{venue.hours}</span>
                     </div>
                   )}
@@ -395,7 +393,7 @@ export default function VenueEventDetailPage() {
                     disabled={createPaymentMutation.isPending || soldOut || !event.isActive}
                     data-testid="button-buy-ticket"
                   >
-                    <Ticket className="h-4 w-4 mr-2" />
+                    <TicketIcon className="h-4 w-4 mr-2" />
                     {soldOut ? "Sold Out" : createPaymentMutation.isPending ? "Loading..." : "Buy Ticket"}
                   </Button>
                 ) : (
@@ -416,11 +414,11 @@ export default function VenueEventDetailPage() {
                 {/* Key event details */}
                 <div className="space-y-2 pt-2 border-t text-sm">
                   <div className="flex items-center gap-2 text-muted-foreground">
-                    <Calendar className="h-4 w-4 flex-shrink-0 text-primary" />
+                    <CalendarIcon className="h-4 w-4 flex-shrink-0 text-primary" />
                     <span>{format(new Date(event.date), "EEE, MMM d, yyyy")}</span>
                   </div>
                   <div className="flex items-center gap-2 text-muted-foreground">
-                    <Clock className="h-4 w-4 flex-shrink-0 text-primary" />
+                    <ClockIcon className="h-4 w-4 flex-shrink-0 text-primary" />
                     <span>
                       {format(new Date(event.date), "h:mm a")}
                       {ev.endTime && ` — ${format(new Date(ev.endTime), "h:mm a")}`}
@@ -428,13 +426,13 @@ export default function VenueEventDetailPage() {
                   </div>
                   {(venue.address || venue.city) && (
                     <div className="flex items-center gap-2 text-muted-foreground">
-                      <MapPin className="h-4 w-4 flex-shrink-0 text-primary" />
+                      <MapPinIcon className="h-4 w-4 flex-shrink-0 text-primary" />
                       <span>{venue.address || venue.city}</span>
                     </div>
                   )}
                   {event.capacity && (
                     <div className="flex items-center gap-2 text-muted-foreground">
-                      <Users className="h-4 w-4 flex-shrink-0 text-primary" />
+                      <UsersIcon className="h-4 w-4 flex-shrink-0 text-primary" />
                       <span>Capacity: {event.capacity}</span>
                     </div>
                   )}
@@ -472,7 +470,7 @@ export default function VenueEventDetailPage() {
       <Dialog open={showSuccess} onOpenChange={setShowSuccess}>
         <DialogContent>
           <div className="text-center py-6">
-            <CheckCircle className="h-16 w-16 mx-auto text-green-500 mb-4" />
+            <CheckCircleIcon className="h-16 w-16 mx-auto text-green-500 mb-4" />
             <DialogTitle className="text-2xl mb-2">Ticket Purchased!</DialogTitle>
             <DialogDescription>
               Your entry ticket has been confirmed. Check your wallet for the QR code.

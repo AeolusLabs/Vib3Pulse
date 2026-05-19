@@ -13,24 +13,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { 
-  ArrowLeft, 
-  Calendar, 
-  PoundSterling, 
-  Users, 
-  Plus, 
-  Edit, 
-  Trash2,
-  Ticket,
-  Clock,
-  CheckCircle,
-  XCircle,
-  TrendingUp
-} from "lucide-react";
+
 import { format, isPast, isFuture } from "date-fns";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Venue, VenueEntryNight, InsertVenueEntryNight } from "@shared/schema";
+import { ArrowLeftIcon, CalendarIcon, PoundSterlingIcon, UsersIcon, PlusIcon, EditIcon, Trash2Icon, TicketIcon, ClockIcon, CheckCircleIcon, XCircleIcon, TrendingUpIcon } from "@/components/ui/icons";
 
 interface EntryNightFormData {
   name: string;
@@ -184,7 +172,7 @@ export default function VenueEntryNightsPage() {
           <p className="text-muted-foreground mb-6">The venue you're looking for doesn't exist.</p>
           <Link href="/manage-venues">
             <Button>
-              <ArrowLeft className="h-4 w-4 mr-2" />
+              <ArrowLeftIcon className="h-4 w-4 mr-2" />
               Back to Venues
             </Button>
           </Link>
@@ -206,25 +194,25 @@ export default function VenueEntryNightsPage() {
             <div className="flex-1 min-w-0">
               <CardTitle className="text-lg line-clamp-1">{night.name}</CardTitle>
               <CardDescription className="flex items-center gap-2 mt-1">
-                <Calendar className="h-4 w-4" />
+                <CalendarIcon className="h-4 w-4" />
                 {format(new Date(night.date), "EEEE, MMMM d, yyyy 'at' h:mm a")}
               </CardDescription>
             </div>
             <div className="flex items-center gap-1">
               {night.isActive ? (
                 <Badge variant="default" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                  <CheckCircle className="h-3 w-3 mr-1" />
+                  <CheckCircleIcon className="h-3 w-3 mr-1" />
                   Active
                 </Badge>
               ) : (
                 <Badge variant="secondary">
-                  <XCircle className="h-3 w-3 mr-1" />
+                  <XCircleIcon className="h-3 w-3 mr-1" />
                   Inactive
                 </Badge>
               )}
               {isUpcoming && (
                 <Badge variant="outline">
-                  <Clock className="h-3 w-3 mr-1" />
+                  <ClockIcon className="h-3 w-3 mr-1" />
                   Upcoming
                 </Badge>
               )}
@@ -241,7 +229,7 @@ export default function VenueEntryNightsPage() {
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">Cover Price</p>
               <p className="text-lg font-semibold flex items-center" data-testid={`text-night-price-${night.id}`}>
-                <PoundSterling className="h-4 w-4" />
+                <PoundSterlingIcon className="h-4 w-4" />
                 {(night.coverPriceCents / 100).toFixed(2)}
               </p>
             </div>
@@ -249,7 +237,7 @@ export default function VenueEntryNightsPage() {
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">Tickets Sold</p>
               <p className="text-lg font-semibold flex items-center" data-testid={`text-night-tickets-${night.id}`}>
-                <Ticket className="h-4 w-4 mr-1" />
+                <TicketIcon className="h-4 w-4 mr-1" />
                 {night.ticketsSold}
               </p>
             </div>
@@ -258,7 +246,7 @@ export default function VenueEntryNightsPage() {
               <div className="space-y-1">
                 <p className="text-xs text-muted-foreground">Capacity</p>
                 <p className="text-lg font-semibold flex items-center" data-testid={`text-night-capacity-${night.id}`}>
-                  <Users className="h-4 w-4 mr-1" />
+                  <UsersIcon className="h-4 w-4 mr-1" />
                   {night.capacity}
                 </p>
               </div>
@@ -267,7 +255,7 @@ export default function VenueEntryNightsPage() {
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">Revenue</p>
               <p className="text-lg font-semibold flex items-center text-green-600 dark:text-green-400" data-testid={`text-night-revenue-${night.id}`}>
-                <TrendingUp className="h-4 w-4 mr-1" />
+                <TrendingUpIcon className="h-4 w-4 mr-1" />
                 £{revenue.toFixed(2)}
               </p>
             </div>
@@ -291,7 +279,7 @@ export default function VenueEntryNightsPage() {
             onClick={() => handleOpenEdit(night)}
             data-testid={`button-edit-night-${night.id}`}
           >
-            <Edit className="h-4 w-4 mr-2" />
+            <EditIcon className="h-4 w-4 mr-2" />
             Edit
           </Button>
           
@@ -302,7 +290,7 @@ export default function VenueEntryNightsPage() {
             disabled={deleteMutation.isPending}
             data-testid={`button-delete-night-${night.id}`}
           >
-            <Trash2 className="h-4 w-4 text-destructive" />
+            <Trash2Icon className="h-4 w-4 text-destructive" />
           </Button>
         </CardFooter>
       </Card>
@@ -317,7 +305,7 @@ export default function VenueEntryNightsPage() {
         <div className="flex items-center gap-4 mb-2">
           <Link href="/manage-venues">
             <Button variant="ghost" size="sm" data-testid="button-back-venues">
-              <ArrowLeft className="h-4 w-4 mr-2" />
+              <ArrowLeftIcon className="h-4 w-4 mr-2" />
               Back to Venues
             </Button>
           </Link>
@@ -333,7 +321,7 @@ export default function VenueEntryNightsPage() {
             </p>
           </div>
           <Button onClick={handleOpenCreate} data-testid="button-create-entry-night">
-            <Plus className="h-4 w-4 mr-2" />
+            <PlusIcon className="h-4 w-4 mr-2" />
             Add Entry Night
           </Button>
         </div>
@@ -357,14 +345,14 @@ export default function VenueEntryNightsPage() {
             ) : upcomingNights.length === 0 ? (
               <Card className="p-16">
                 <div className="text-center space-y-4">
-                  <Calendar className="h-16 w-16 mx-auto text-muted-foreground" />
+                  <CalendarIcon className="h-16 w-16 mx-auto text-muted-foreground" />
                   <div>
                     <h3 className="text-xl font-semibold mb-2">No upcoming entry nights</h3>
                     <p className="text-muted-foreground mb-4">
                       Create an entry night to start selling tickets
                     </p>
                     <Button onClick={handleOpenCreate}>
-                      <Plus className="h-4 w-4 mr-2" />
+                      <PlusIcon className="h-4 w-4 mr-2" />
                       Add Entry Night
                     </Button>
                   </div>
@@ -387,7 +375,7 @@ export default function VenueEntryNightsPage() {
               </div>
             ) : pastNights.length === 0 ? (
               <div className="text-center py-16">
-                <Clock className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                <ClockIcon className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
                 <p className="text-muted-foreground">No past entry nights</p>
               </div>
             ) : (

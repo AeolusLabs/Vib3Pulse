@@ -1,4 +1,4 @@
-import { Share2, MessageCircle, Newspaper } from "lucide-react";
+
 import { useLocation } from "wouter";
 import {
   Dialog,
@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { Event, Venue } from "@shared/schema";
+import { Share2Icon, MessageCircleIcon, NewspaperIcon } from "@/components/ui/icons";
 
 interface ShareModalProps {
   open: boolean;
@@ -59,7 +60,7 @@ export default function ShareModal({ open, onClose, event, venue }: ShareModalPr
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="font-serif flex items-center gap-2">
-            <Share2 className="h-5 w-5 text-primary" />
+            <Share2Icon className="h-5 w-5 text-primary" />
             Share {itemType === "event" ? "Event" : "Venue"}
           </DialogTitle>
           <DialogDescription>
@@ -75,7 +76,7 @@ export default function ShareModal({ open, onClose, event, venue }: ShareModalPr
           >
             <CardContent className="flex items-center gap-4 p-4">
               <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
-                <Newspaper className="h-6 w-6 text-primary" />
+                <NewspaperIcon className="h-6 w-6 text-primary" />
               </div>
               <div className="flex-1">
                 <h3 className="font-semibold">Share to Feed</h3>
@@ -93,7 +94,7 @@ export default function ShareModal({ open, onClose, event, venue }: ShareModalPr
           >
             <CardContent className="flex items-center gap-4 p-4">
               <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
-                <MessageCircle className="h-6 w-6 text-primary" />
+                <MessageCircleIcon className="h-6 w-6 text-primary" />
               </div>
               <div className="flex-1">
                 <h3 className="font-semibold">Send as Message</h3>

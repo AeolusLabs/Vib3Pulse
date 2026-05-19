@@ -11,8 +11,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { AlertTriangle, MapPin, Loader2 } from "lucide-react";
+
 import type { User } from "@shared/schema";
+import { AlertTriangleIcon, MapPinIcon, Loader2Icon } from "@/components/ui/icons";
 
 interface BuddyResponse {
   buddy: User | null;
@@ -100,14 +101,14 @@ export function EmergencyButton() {
         data-testid="button-emergency"
         title="Send SOS Alert"
       >
-        <AlertTriangle className="h-5 w-5" />
+        <AlertTriangleIcon className="h-5 w-5" />
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent data-testid="dialog-sos-confirm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-destructive">
-              <AlertTriangle className="h-5 w-5" />
+              <AlertTriangleIcon className="h-5 w-5" />
               Send SOS Alert?
             </DialogTitle>
             <DialogDescription className="space-y-2 pt-1">
@@ -118,17 +119,17 @@ export function EmergencyButton() {
               <div className="flex items-center gap-2 text-sm">
                 {locating ? (
                   <>
-                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    <Loader2Icon className="h-4 w-4 animate-spin text-muted-foreground" />
                     <span className="text-muted-foreground">Getting your location…</span>
                   </>
                 ) : location ? (
                   <>
-                    <MapPin className="h-4 w-4 text-green-600" />
+                    <MapPinIcon className="h-4 w-4 text-green-600" />
                     <span className="text-green-600">Location captured and will be included</span>
                   </>
                 ) : (
                   <>
-                    <MapPin className="h-4 w-4 text-yellow-600" />
+                    <MapPinIcon className="h-4 w-4 text-yellow-600" />
                     <span className="text-yellow-600">Location unavailable — alert will still be sent</span>
                   </>
                 )}
@@ -151,7 +152,7 @@ export function EmergencyButton() {
               data-testid="button-confirm-sos"
             >
               {sosMutation.isPending ? (
-                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Sending…</>
+                <><Loader2Icon className="h-4 w-4 mr-2 animate-spin" />Sending…</>
               ) : "Send SOS Now"}
             </Button>
           </DialogFooter>

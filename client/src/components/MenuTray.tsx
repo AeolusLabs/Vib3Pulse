@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Home, Compass, MessageCircle, Menu, X, Building2, Search } from "lucide-react";
+
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { useUnreadMessagesCount } from "@/hooks/useUnreadMessagesCount";
+import { HomeIcon, CompassIcon, MessageCircleIcon, MenuIcon, XIcon, Building2Icon, SearchIcon } from "@/components/ui/icons";
 
 export default function MenuTray() {
   const [isOpen, setIsOpen] = useState(false);
@@ -20,7 +21,7 @@ export default function MenuTray() {
         data-testid="button-menu-toggle"
         className="hidden md:flex"
       >
-        {isOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+        {isOpen ? <XIcon className="h-5 w-5" /> : <MenuIcon className="h-5 w-5" />}
       </Button>
 
       {isOpen && (
@@ -44,7 +45,7 @@ export default function MenuTray() {
                   onClick={() => setIsOpen(false)}
                   data-testid="link-feed"
                 >
-                  <Home className="h-4 w-4 mr-2" />
+                  <HomeIcon className="h-4 w-4 mr-2" />
                   Feed
                 </Button>
               </Link>
@@ -56,7 +57,7 @@ export default function MenuTray() {
                   onClick={() => setIsOpen(false)}
                   data-testid="link-discover"
                 >
-                  <Compass className="h-4 w-4 mr-2" />
+                  <CompassIcon className="h-4 w-4 mr-2" />
                   Discover
                 </Button>
               </Link>
@@ -68,7 +69,7 @@ export default function MenuTray() {
                   onClick={() => setIsOpen(false)}
                   data-testid="link-search"
                 >
-                  <Search className="h-4 w-4 mr-2" />
+                  <SearchIcon className="h-4 w-4 mr-2" />
                   Search
                 </Button>
               </Link>
@@ -81,7 +82,7 @@ export default function MenuTray() {
                   data-testid="link-messages"
                 >
                   <span className="relative inline-flex mr-2">
-                    <MessageCircle className="h-4 w-4" />
+                    <MessageCircleIcon className="h-4 w-4" />
                     {unreadMessageCount > 0 && (
                       <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-red-500 border border-background" />
                     )}
@@ -98,7 +99,7 @@ export default function MenuTray() {
                     onClick={() => setIsOpen(false)}
                     data-testid="link-manage-venues"
                   >
-                    <Building2 className="h-4 w-4 mr-2" />
+                    <Building2Icon className="h-4 w-4 mr-2" />
                     Manage Venues
                   </Button>
                 </Link>

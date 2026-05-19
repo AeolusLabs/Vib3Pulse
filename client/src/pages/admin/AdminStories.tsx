@@ -4,11 +4,12 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Search, Trash2, Eye, Image as ImageIcon } from "lucide-react";
+
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import AdminLayout from "./AdminLayout";
 import { format } from "date-fns";
+import { SearchIcon, Trash2Icon, EyeIcon, ImageIcon } from "@/components/ui/icons";
 
 interface Story {
   id: string;
@@ -72,7 +73,7 @@ export default function AdminStories() {
           <CardHeader>
             <div className="flex items-center gap-4">
               <div className="relative flex-1 max-w-sm">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <Input
                   placeholder="Search stories..."
                   value={searchQuery}
@@ -136,7 +137,7 @@ export default function AdminStories() {
                           className="flex-1 text-slate-400 hover:text-white"
                           data-testid={`button-view-story-${story.id}`}
                         >
-                          <Eye className="w-4 h-4 mr-1" /> View
+                          <EyeIcon className="w-4 h-4 mr-1" /> View
                         </Button>
                         <Button
                           size="sm"
@@ -149,7 +150,7 @@ export default function AdminStories() {
                           }}
                           data-testid={`button-delete-story-${story.id}`}
                         >
-                          <Trash2 className="w-4 h-4 mr-1" /> Delete
+                          <Trash2Icon className="w-4 h-4 mr-1" /> Delete
                         </Button>
                       </div>
                     </CardContent>

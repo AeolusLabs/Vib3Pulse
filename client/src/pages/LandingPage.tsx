@@ -5,13 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { motion } from "framer-motion";
-import {
-  Calendar, Ticket, MapPin, ArrowRight, ChevronRight,
-  ExternalLink, Clock, Music, Utensils, Code, Palette,
-  Trophy, Dumbbell, Shield, Users
-} from "lucide-react";
+
 import { format } from "date-fns";
 import type { Event } from "@shared/schema";
+import { CalendarIcon, TicketIcon, MapPinIcon, ArrowRightIcon, ChevronRightIcon, ExternalLinkIcon, ClockIcon, MusicIcon, PaletteIcon, ShieldIcon, UsersIcon } from "@/components/ui/icons";
+import { Utensils, Code, Trophy, Dumbbell } from "lucide-react";
 
 const inView = {
   hidden: { opacity: 0, y: 28 },
@@ -193,7 +191,7 @@ export default function LandingPage() {
                   data-testid="button-hero-signup"
                 >
                   Get Started
-                  <ArrowRight className="ml-2 w-4 h-4" />
+                  <ArrowRightIcon className="ml-2 w-4 h-4" />
                 </Button>
               </Link>
               <Link href="/login">
@@ -253,7 +251,7 @@ export default function LandingPage() {
                   data-testid="button-view-all"
                 >
                   View all
-                  <ChevronRight className="w-4 h-4" />
+                  <ChevronRightIcon className="w-4 h-4" />
                 </button>
               </Link>
             </div>
@@ -293,7 +291,7 @@ export default function LandingPage() {
                           />
                         ) : (
                           <div className="w-full h-full bg-gradient-to-br from-violet-900/25 to-[#0f0f0f] flex items-center justify-center">
-                            <Calendar className="w-10 h-10 text-white/10" />
+                            <CalendarIcon className="w-10 h-10 text-white/10" />
                           </div>
                         )}
                         {/* Gradient overlay */}
@@ -326,12 +324,12 @@ export default function LandingPage() {
                         </h3>
                         <div className="flex items-center gap-3 text-white/35 text-xs font-sans">
                           <span className="flex items-center gap-1.5">
-                            <Clock className="w-3 h-3" />
+                            <ClockIcon className="w-3 h-3" />
                             {formatEventDate(event.eventDate)}
                           </span>
                           {event.location && (
                             <span className="flex items-center gap-1.5 min-w-0">
-                              <MapPin className="w-3 h-3 flex-shrink-0" />
+                              <MapPinIcon className="w-3 h-3 flex-shrink-0" />
                               <span className="truncate">{event.location}</span>
                             </span>
                           )}
@@ -402,7 +400,7 @@ export default function LandingPage() {
 
             <div className="relative max-w-2xl">
               <div className="flex items-center gap-2.5 mb-10">
-                <Shield className="w-4 h-4 text-violet-400" />
+                <ShieldIcon className="w-4 h-4 text-violet-400" />
                 <span className="text-white/35 text-[0.65rem] font-sans tracking-[0.28em] uppercase">
                   Safety First
                 </span>
@@ -424,7 +422,7 @@ export default function LandingPage() {
                   className="h-11 px-7 rounded-full border-white/[0.15] text-white/70 bg-transparent hover:bg-white/[0.05] hover:text-white hover:border-white/25 font-sans text-sm transition-all duration-200"
                 >
                   Learn More
-                  <ArrowRight className="ml-2 w-4 h-4" />
+                  <ArrowRightIcon className="ml-2 w-4 h-4" />
                 </Button>
               </Link>
             </div>
@@ -465,7 +463,7 @@ export default function LandingPage() {
                   data-testid="button-cta-signup"
                 >
                   Create Account (it's free)
-                  <ArrowRight className="ml-2 w-5 h-5" />
+                  <ArrowRightIcon className="ml-2 w-5 h-5" />
                 </Button>
               </Link>
             </motion.div>
@@ -521,7 +519,7 @@ export default function LandingPage() {
               </div>
             ) : categoryEvents.length === 0 ? (
               <div className="text-center py-14">
-                <Calendar className="w-12 h-12 text-white/10 mx-auto mb-4" />
+                <CalendarIcon className="w-12 h-12 text-white/10 mx-auto mb-4" />
                 <p className="text-white/35 font-sans text-sm">No events in this category yet</p>
                 <p className="text-white/20 font-sans text-xs mt-1">Check back soon</p>
               </div>
@@ -546,7 +544,7 @@ export default function LandingPage() {
                         />
                       ) : (
                         <div className="w-full h-full bg-violet-900/20 flex items-center justify-center">
-                          <Calendar className="w-6 h-6 text-white/15" />
+                          <CalendarIcon className="w-6 h-6 text-white/15" />
                         </div>
                       )}
                     </div>
@@ -557,29 +555,29 @@ export default function LandingPage() {
                         </h4>
                         {event.externalTicketUrl && (
                           <span className="text-[0.6rem] text-violet-400 border border-violet-500/25 rounded-full px-2 py-0.5 flex-shrink-0 flex items-center gap-1">
-                            <ExternalLink className="w-2.5 h-2.5" />
+                            <ExternalLinkIcon className="w-2.5 h-2.5" />
                             Ext
                           </span>
                         )}
                       </div>
                       <div className="flex items-center gap-1.5 text-white/35 text-xs font-sans mb-1">
-                        <Clock className="w-3 h-3 flex-shrink-0" />
+                        <ClockIcon className="w-3 h-3 flex-shrink-0" />
                         {formatEventDate(event.eventDate)} · {formatEventTime(event.eventDate)}
                       </div>
                       {event.location && (
                         <div className="flex items-center gap-1.5 text-white/25 text-xs font-sans">
-                          <MapPin className="w-3 h-3 flex-shrink-0" />
+                          <MapPinIcon className="w-3 h-3 flex-shrink-0" />
                           <span className="truncate">{event.location}</span>
                         </div>
                       )}
                       {event.ticketPrice !== undefined && event.ticketPrice > 0 && !event.externalTicketUrl && (
                         <div className="flex items-center gap-1.5 text-violet-400/70 text-xs font-sans mt-1">
-                          <Ticket className="w-3 h-3 flex-shrink-0" />
+                          <TicketIcon className="w-3 h-3 flex-shrink-0" />
                           From £{(event.ticketPrice / 100).toFixed(2)}
                         </div>
                       )}
                     </div>
-                    <ChevronRight className="w-4 h-4 text-white/15 group-hover:text-white/40 transition-colors flex-shrink-0 self-center" />
+                    <ChevronRightIcon className="w-4 h-4 text-white/15 group-hover:text-white/40 transition-colors flex-shrink-0 self-center" />
                   </button>
                 ))}
               </div>
@@ -591,7 +589,7 @@ export default function LandingPage() {
               <Link href="/signup">
                 <Button className="w-full bg-violet-600 hover:bg-violet-500 text-white border-0 rounded-xl font-sans text-sm h-11">
                   Sign up to get tickets
-                  <ArrowRight className="ml-2 w-4 h-4" />
+                  <ArrowRightIcon className="ml-2 w-4 h-4" />
                 </Button>
               </Link>
             </div>
@@ -614,7 +612,7 @@ export default function LandingPage() {
                     />
                   ) : (
                     <div className="w-full h-full bg-gradient-to-br from-violet-900/25 to-[#0f0f0f] flex items-center justify-center">
-                      <Calendar className="w-16 h-16 text-white/10" />
+                      <CalendarIcon className="w-16 h-16 text-white/10" />
                     </div>
                   )}
                   <div className="absolute inset-0 bg-gradient-to-t from-[#111111] via-transparent to-transparent" />
@@ -639,14 +637,14 @@ export default function LandingPage() {
 
               <div className="mt-4 space-y-3 font-sans text-sm">
                 <div className="flex items-center gap-3 text-white/50">
-                  <Clock className="w-4 h-4 text-violet-400 flex-shrink-0" />
+                  <ClockIcon className="w-4 h-4 text-violet-400 flex-shrink-0" />
                   <span>
                     {format(new Date(selectedEvent.eventDate), "EEEE, MMMM d, yyyy 'at' h:mm a")}
                   </span>
                 </div>
                 {selectedEvent.location && (
                   <div className="flex items-center gap-3 text-white/50">
-                    <MapPin className="w-4 h-4 text-violet-400 flex-shrink-0" />
+                    <MapPinIcon className="w-4 h-4 text-violet-400 flex-shrink-0" />
                     <span>
                       {selectedEvent.location}
                       {selectedEvent.city && `, ${selectedEvent.city}`}
@@ -655,7 +653,7 @@ export default function LandingPage() {
                 )}
                 {selectedEvent.ticketPrice !== undefined && !selectedEvent.externalTicketUrl && (
                   <div className="flex items-center gap-3 text-white/50">
-                    <Ticket className="w-4 h-4 text-violet-400 flex-shrink-0" />
+                    <TicketIcon className="w-4 h-4 text-violet-400 flex-shrink-0" />
                     <span>
                       {selectedEvent.ticketPrice === 0
                         ? "Free"
@@ -679,7 +677,7 @@ export default function LandingPage() {
                       className="block"
                     >
                       <Button className="w-full bg-violet-600 hover:bg-violet-500 text-white border-0 rounded-xl h-11">
-                        <ExternalLink className="mr-2 w-4 h-4" />
+                        <ExternalLinkIcon className="mr-2 w-4 h-4" />
                         Get Tickets
                       </Button>
                     </a>
@@ -687,7 +685,7 @@ export default function LandingPage() {
                     <Link href="/signup">
                       <Button className="w-full bg-violet-600 hover:bg-violet-500 text-white border-0 rounded-xl h-11">
                         Sign up to get tickets
-                        <ArrowRight className="ml-2 w-4 h-4" />
+                        <ArrowRightIcon className="ml-2 w-4 h-4" />
                       </Button>
                     </Link>
                   )}

@@ -1,8 +1,9 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { UserPlus, UserCheck } from "lucide-react";
+
 import { useState } from "react";
+import { UserPlusIcon, UserCheckIcon } from "@/components/ui/icons";
 
 interface UserProfileCardProps {
   name: string;
@@ -75,12 +76,12 @@ export default function UserProfileCard({
               >
                 {isFollowing ? (
                   <>
-                    <UserCheck className="h-4 w-4 mr-2" />
+                    <UserCheckIcon className="h-4 w-4 mr-2" />
                     Following
                   </>
                 ) : (
                   <>
-                    <UserPlus className="h-4 w-4 mr-2" />
+                    <UserPlusIcon className="h-4 w-4 mr-2" />
                     Follow
                   </>
                 )}

@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { X, Upload, Plus, Trash2, Edit2, ExternalLink, Loader2 } from "lucide-react";
 
 // ── Currency helpers ──────────────────────────────────────────────────────────
 const CURRENCIES = [
@@ -55,6 +54,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Event, EventCreateDto, EventUpdateDto } from "@shared/schema";
+import { XIcon, UploadIcon, PlusIcon, Trash2Icon, Edit2Icon, ExternalLinkIcon, Loader2Icon } from "@/components/ui/icons";
 
 interface TicketTier {
   id: string;
@@ -929,7 +929,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                 >
                   {thumbnailUploading ? (
                     <div className="flex flex-col items-center gap-2 py-4">
-                      <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                      <Loader2Icon className="h-10 w-10 animate-spin text-primary" />
                       <p className="text-sm text-muted-foreground">Uploading image…</p>
                     </div>
                   ) : formData.thumbnailPreview ? (
@@ -945,7 +945,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                     </div>
                   ) : (
                     <>
-                      <Upload className="h-12 w-12 text-muted-foreground" />
+                      <UploadIcon className="h-12 w-12 text-muted-foreground" />
                       <div className="text-center">
                         <p className="text-sm font-medium">Click to upload thumbnail</p>
                         <p className="text-xs text-muted-foreground">JPEG, PNG, WebP up to 5MB (not HEIC)</p>
@@ -1024,7 +1024,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                       size="sm"
                       data-testid="button-manage-external-links"
                     >
-                      <Plus className="h-4 w-4 mr-2" />
+                      <PlusIcon className="h-4 w-4 mr-2" />
                       {formData.externalTicketLinks.length > 0 ? "Manage Links" : "Add Links"}
                     </Button>
                   </div>
@@ -1055,7 +1055,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                               }}
                               data-testid={`button-remove-link-${index}`}
                             >
-                              <Trash2 className="h-4 w-4 text-destructive" />
+                              <Trash2Icon className="h-4 w-4 text-destructive" />
                             </Button>
                           </CardContent>
                         </Card>
@@ -1103,7 +1103,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                       size="sm"
                       data-testid="button-add-ticket"
                     >
-                      <Plus className="h-4 w-4 mr-2" />
+                      <PlusIcon className="h-4 w-4 mr-2" />
                       Add Tier
                     </Button>
                   </div>
@@ -1140,7 +1140,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                                   onClick={() => removeTicket(ticket.id)}
                                   data-testid={`button-remove-ticket-${index}`}
                                 >
-                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                  <Trash2Icon className="h-4 w-4 text-destructive" />
                                 </Button>
                               </div>
 
@@ -1313,7 +1313,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                     onClick={() => setStep(1)}
                     data-testid="button-edit-step1"
                   >
-                    <Edit2 className="h-4 w-4 mr-2" />
+                    <Edit2Icon className="h-4 w-4 mr-2" />
                     Edit
                   </Button>
                 </div>
@@ -1388,7 +1388,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                     onClick={() => setStep(2)}
                     data-testid="button-edit-step2"
                   >
-                    <Edit2 className="h-4 w-4 mr-2" />
+                    <Edit2Icon className="h-4 w-4 mr-2" />
                     Edit
                   </Button>
                 </div>
@@ -1404,7 +1404,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                       >
                         <div className="flex items-center justify-between gap-2">
                           <p className="font-medium">{link.platform}</p>
-                          <ExternalLink className="h-4 w-4 text-muted-foreground" />
+                          <ExternalLinkIcon className="h-4 w-4 text-muted-foreground" />
                         </div>
                         <p className="text-sm text-muted-foreground truncate">{link.url}</p>
                       </div>
@@ -1555,7 +1555,7 @@ function ExternalLinksModalContent({ links, onSave, onCancel }: ExternalLinksMod
                   onClick={() => removeLink(link.id)}
                   data-testid={`button-remove-modal-link-${index}`}
                 >
-                  <Trash2 className="h-4 w-4 text-destructive" />
+                  <Trash2Icon className="h-4 w-4 text-destructive" />
                 </Button>
               )}
             </div>
@@ -1602,7 +1602,7 @@ function ExternalLinksModalContent({ links, onSave, onCancel }: ExternalLinksMod
         className="w-full"
         data-testid="button-add-another-link"
       >
-        <Plus className="h-4 w-4 mr-2" />
+        <PlusIcon className="h-4 w-4 mr-2" />
         Add Another Link
       </Button>
       

@@ -2,19 +2,13 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import {
-  Send,
-  Heart,
-  MessageCircle,
-  Share2,
-  ChevronDown,
-  ChevronUp,
-} from "lucide-react";
+
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNowStrict } from "date-fns";
 import { useLocation } from "wouter";
 import MentionTextarea from "./MentionTextarea";
+import { SendIcon, HeartIcon, MessageCircleIcon, Share2Icon, ChevronDownIcon, ChevronUpIcon } from "@/components/ui/icons";
 
 type Comment = {
   id: string;
@@ -235,7 +229,7 @@ export default function CommentItem({
             disabled={likeMutation.isPending}
             data-testid={`button-like-comment-${comment.id}`}
           >
-            <Heart className={`h-3.5 w-3.5 ${isLiked ? "fill-current" : ""}`} />
+            <HeartIcon className={`h-3.5 w-3.5 ${isLiked ? "fill-current" : ""}`} />
             {likeCount > 0 && <span>{likeCount}</span>}
           </Button>
 
@@ -246,7 +240,7 @@ export default function CommentItem({
             onClick={handleOpenReply}
             data-testid={`button-reply-comment-${comment.id}`}
           >
-            <MessageCircle className="h-3.5 w-3.5" />
+            <MessageCircleIcon className="h-3.5 w-3.5" />
             {replyCount > 0 && <span>{replyCount}</span>}
           </Button>
 
@@ -257,7 +251,7 @@ export default function CommentItem({
             onClick={handleShare}
             data-testid={`button-share-comment-${comment.id}`}
           >
-            <Share2 className="h-3.5 w-3.5" />
+            <Share2Icon className="h-3.5 w-3.5" />
           </Button>
         </div>
 
@@ -282,7 +276,7 @@ export default function CommentItem({
                 disabled={!replyText.trim() || replyMutation.isPending}
                 data-testid={`button-send-reply-${comment.id}`}
               >
-                <Send className="h-3.5 w-3.5" />
+                <SendIcon className="h-3.5 w-3.5" />
               </Button>
               <Button
                 size="icon"
@@ -304,9 +298,9 @@ export default function CommentItem({
             data-testid={`button-toggle-replies-${comment.id}`}
           >
             {showReplies ? (
-              <><ChevronUp className="h-3.5 w-3.5" /> Hide {replyCount === 1 ? "reply" : `${replyCount} replies`}</>
+              <><ChevronUpIcon className="h-3.5 w-3.5" /> Hide {replyCount === 1 ? "reply" : `${replyCount} replies`}</>
             ) : (
-              <><ChevronDown className="h-3.5 w-3.5" /> View {replyCount} {replyCount === 1 ? "reply" : "replies"}</>
+              <><ChevronDownIcon className="h-3.5 w-3.5" /> View {replyCount} {replyCount === 1 ? "reply" : "replies"}</>
             )}
           </button>
         )}
@@ -399,7 +393,7 @@ function ReplyItem({ reply, commentAuthorUsername, navigate }: ReplyItemProps) {
             className={`h-6 px-1.5 text-[11px] gap-1 ${replyLiked ? "text-red-500" : "text-muted-foreground"} hover:text-red-500`}
             onClick={handleLike}
           >
-            <Heart className={`h-3 w-3 ${replyLiked ? "fill-current" : ""}`} />
+            <HeartIcon className={`h-3 w-3 ${replyLiked ? "fill-current" : ""}`} />
             {replyLikeCount > 0 && <span>{replyLikeCount}</span>}
           </Button>
 
@@ -409,7 +403,7 @@ function ReplyItem({ reply, commentAuthorUsername, navigate }: ReplyItemProps) {
             className="h-6 px-1.5 text-[11px] text-muted-foreground hover:text-primary"
             onClick={handleShare}
           >
-            <Share2 className="h-3 w-3" />
+            <Share2Icon className="h-3 w-3" />
           </Button>
         </div>
       </div>

@@ -12,13 +12,12 @@ import { useState, useEffect, useRef } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import {
-  X, Upload, ImageIcon, MoreVertical, Trash2, RefreshCw,
-  Building2, MapPin, Music, Accessibility, Eye,
-} from "lucide-react";
+
 import { ObjectUploader } from "@/components/ObjectUploader";
 import ImageLightbox from "@/components/ImageLightbox";
 import type { Venue, InsertVenue } from "@shared/schema";
+import { XIcon, UploadIcon, ImageIcon, MoreVerticalIcon, Trash2Icon, RefreshCwIcon, Building2Icon, MapPinIcon, MusicIcon, EyeIcon } from "@/components/ui/icons";
+import { Accessibility } from "lucide-react";
 
 interface CreateVenueModalProps {
   open: boolean;
@@ -238,7 +237,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
           <div className="relative px-6 pt-6 pb-7 bg-gradient-to-br from-purple-600 via-purple-500 to-pink-500">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-xl bg-white/20 flex items-center justify-center">
-                <Building2 className="h-6 w-6 text-white" />
+                <Building2Icon className="h-6 w-6 text-white" />
               </div>
               <div>
                 <DialogHeader>
@@ -260,7 +259,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
               <Card>
                 <CardContent className="pt-5 space-y-4">
                   <SectionHeader
-                    icon={Building2}
+                    icon={Building2Icon}
                     title="Basic Info"
                     subtitle="Name, category, and description"
                     color="purple"
@@ -316,7 +315,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
               <Card>
                 <CardContent className="pt-5 space-y-4">
                   <SectionHeader
-                    icon={MapPin}
+                    icon={MapPinIcon}
                     title="Location & Contact"
                     subtitle="Where to find you and how to reach you"
                     color="blue"
@@ -407,7 +406,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
                               className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-destructive text-destructive-foreground shadow"
                               onClick={() => setFormData(prev => ({ ...prev, imageUrl: "" }))}
                             >
-                              <X className="h-3 w-3" />
+                              <XIcon className="h-3 w-3" />
                             </Button>
                           </div>
                         ) : (
@@ -427,7 +426,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
                           buttonVariant="outline"
                           buttonSize="sm"
                         >
-                          <Upload className="h-4 w-4 mr-2" />
+                          <UploadIcon className="h-4 w-4 mr-2" />
                           Upload Logo
                         </ObjectUploader>
                       </div>
@@ -449,7 +448,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
                               className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-destructive text-destructive-foreground shadow"
                               onClick={() => setFormData(prev => ({ ...prev, coverImageUrl: "" }))}
                             >
-                              <X className="h-3 w-3" />
+                              <XIcon className="h-3 w-3" />
                             </Button>
                           </div>
                         ) : (
@@ -469,7 +468,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
                           buttonVariant="outline"
                           buttonSize="sm"
                         >
-                          <Upload className="h-4 w-4 mr-2" />
+                          <UploadIcon className="h-4 w-4 mr-2" />
                           Upload Cover
                         </ObjectUploader>
                       </div>
@@ -514,7 +513,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
                               onClick={() => openLightbox(idx)}
                               data-testid={`button-gallery-preview-${idx}`}
                             >
-                              <Eye className="h-3.5 w-3.5" />
+                              <EyeIcon className="h-3.5 w-3.5" />
                             </Button>
 
                             {/* Actions menu */}
@@ -527,14 +526,14 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
                                   className="absolute top-1 right-1 h-7 w-7 rounded-full shadow-lg z-20"
                                   data-testid={`button-gallery-menu-${idx}`}
                                 >
-                                  <MoreVertical className="h-4 w-4" />
+                                  <MoreVerticalIcon className="h-4 w-4" />
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
                                 <DropdownMenuItem
                                   onSelect={() => openLightbox(idx)}
                                 >
-                                  <Eye className="h-4 w-4 mr-2" />
+                                  <EyeIcon className="h-4 w-4 mr-2" />
                                   View
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
@@ -545,7 +544,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
                                   }}
                                   data-testid={`menu-replace-gallery-${idx}`}
                                 >
-                                  <RefreshCw className="h-4 w-4 mr-2" />
+                                  <RefreshCwIcon className="h-4 w-4 mr-2" />
                                   Replace
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
@@ -556,7 +555,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
                                   }))}
                                   data-testid={`menu-delete-gallery-${idx}`}
                                 >
-                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  <Trash2Icon className="h-4 w-4 mr-2" />
                                   Delete
                                 </DropdownMenuItem>
                               </DropdownMenuContent>
@@ -583,7 +582,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
                         buttonSize="sm"
                         buttonClassName="w-full"
                       >
-                        <Upload className="h-4 w-4 mr-2" />
+                        <UploadIcon className="h-4 w-4 mr-2" />
                         Add Photos ({maxGalleryImages - formData.imageUrls.length} remaining)
                       </ObjectUploader>
                     )}
@@ -598,7 +597,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
               <Card>
                 <CardContent className="pt-5 space-y-4">
                   <SectionHeader
-                    icon={Music}
+                    icon={MusicIcon}
                     title="Vibe"
                     subtitle="Music, amenities, dress code, and age policy"
                     color="purple"
@@ -615,7 +614,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
                           onClick={() => toggle("musicTypes", type)}
                           data-testid={`badge-music-${type.toLowerCase().replace(/\s+/g, "-")}`}
                         >
-                          {formData.musicTypes.includes(type) && <X className="h-3 w-3 mr-1" />}
+                          {formData.musicTypes.includes(type) && <XIcon className="h-3 w-3 mr-1" />}
                           {type}
                         </Badge>
                       ))}
@@ -633,7 +632,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
                           onClick={() => toggle("amenities", amenity)}
                           data-testid={`badge-amenity-${amenity.toLowerCase().replace(/\s+/g, "-")}`}
                         >
-                          {formData.amenities.includes(amenity) && <X className="h-3 w-3 mr-1" />}
+                          {formData.amenities.includes(amenity) && <XIcon className="h-3 w-3 mr-1" />}
                           {amenity}
                         </Badge>
                       ))}
@@ -694,7 +693,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
                         onClick={() => toggle("accessibilityFeatures", feature)}
                         data-testid={`badge-access-${feature.toLowerCase().replace(/[\s/]+/g, "-")}`}
                       >
-                        {formData.accessibilityFeatures.includes(feature) && <X className="h-3 w-3 mr-1" />}
+                        {formData.accessibilityFeatures.includes(feature) && <XIcon className="h-3 w-3 mr-1" />}
                         {feature}
                       </Badge>
                     ))}

@@ -9,13 +9,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { Lock, User, AlertCircle, Loader2, CheckCircle, Bell, BellOff } from "lucide-react";
+
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { Switch } from "@/components/ui/switch";
 import type { User as UserType } from "@shared/schema";
+import { LockIcon, UserIcon, AlertCircleIcon, Loader2Icon, CheckCircleIcon, BellIcon, BellOffIcon } from "@/components/ui/icons";
 
 export default function AccountSettingsPage() {
   const [, navigate] = useLocation();
@@ -121,7 +122,7 @@ export default function AccountSettingsPage() {
   if (sessionLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <Loader2Icon className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
@@ -144,7 +145,7 @@ export default function AccountSettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Lock className="h-5 w-5" />
+                <LockIcon className="h-5 w-5" />
                 Change Password
               </CardTitle>
               <CardDescription>
@@ -196,7 +197,7 @@ export default function AccountSettingsPage() {
                 >
                   {changePasswordMutation.isPending ? (
                     <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      <Loader2Icon className="h-4 w-4 mr-2 animate-spin" />
                       Changing...
                     </>
                   ) : (
@@ -210,7 +211,7 @@ export default function AccountSettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <User className="h-5 w-5" />
+                <UserIcon className="h-5 w-5" />
                 Change Username
               </CardTitle>
               <CardDescription className="flex items-center gap-2 flex-wrap">
@@ -220,7 +221,7 @@ export default function AccountSettingsPage() {
             </CardHeader>
             <CardContent>
               <div className="mb-4 p-3 bg-muted rounded-lg flex items-start gap-2">
-                <AlertCircle className="h-5 w-5 text-muted-foreground mt-0.5 flex-shrink-0" />
+                <AlertCircleIcon className="h-5 w-5 text-muted-foreground mt-0.5 flex-shrink-0" />
                 <div className="text-sm text-muted-foreground">
                   <p>You can only change your username <strong>{usernameChangesRemaining}</strong> more time{usernameChangesRemaining !== 1 ? 's' : ''}.</p>
                   <p className="mt-1">Choose wisely as this limit cannot be reset.</p>
@@ -248,7 +249,7 @@ export default function AccountSettingsPage() {
                   >
                     {changeUsernameMutation.isPending ? (
                       <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        <Loader2Icon className="h-4 w-4 mr-2 animate-spin" />
                         Changing...
                       </>
                     ) : (
@@ -258,7 +259,7 @@ export default function AccountSettingsPage() {
                 </form>
               ) : (
                 <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg flex items-center gap-2">
-                  <AlertCircle className="h-5 w-5 text-destructive" />
+                  <AlertCircleIcon className="h-5 w-5 text-destructive" />
                   <p className="text-sm text-destructive">You have used all your username changes.</p>
                 </div>
               )}
@@ -268,7 +269,7 @@ export default function AccountSettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Bell className="h-5 w-5" />
+                <BellIcon className="h-5 w-5" />
                 Push Notifications
               </CardTitle>
               <CardDescription>
@@ -278,7 +279,7 @@ export default function AccountSettingsPage() {
             <CardContent>
               {!push.isSupported ? (
                 <div className="flex items-start gap-3 p-4 bg-muted rounded-lg">
-                  <BellOff className="h-5 w-5 text-muted-foreground mt-0.5 flex-shrink-0" />
+                  <BellOffIcon className="h-5 w-5 text-muted-foreground mt-0.5 flex-shrink-0" />
                   <div>
                     <p className="text-sm font-medium">Not supported on this browser</p>
                     <p className="text-sm text-muted-foreground mt-1">
@@ -288,7 +289,7 @@ export default function AccountSettingsPage() {
                 </div>
               ) : push.permission === "denied" ? (
                 <div className="flex items-start gap-3 p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
-                  <BellOff className="h-5 w-5 text-destructive mt-0.5 flex-shrink-0" />
+                  <BellOffIcon className="h-5 w-5 text-destructive mt-0.5 flex-shrink-0" />
                   <div>
                     <p className="text-sm font-medium text-destructive">Notifications blocked</p>
                     <p className="text-sm text-muted-foreground mt-1">

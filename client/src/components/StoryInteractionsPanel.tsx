@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Heart, Eye, Loader2 } from "lucide-react";
+
 import {
   Sheet,
   SheetContent,
@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/sheet";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { apiRequest } from "@/lib/queryClient";
+import { HeartIcon, EyeIcon, Loader2Icon } from "@/components/ui/icons";
 
 interface Viewer {
   user: {
@@ -61,7 +62,7 @@ export default function StoryInteractionsPanel({
         {/* Summary row */}
         <div className="flex items-center gap-6 mb-5 px-1">
           <div className="flex items-center gap-2">
-            <Eye className="h-5 w-5 text-white/70" />
+            <EyeIcon className="h-5 w-5 text-white/70" />
             <span className="text-white font-semibold text-lg">
               {data?.viewCount ?? 0}
             </span>
@@ -70,7 +71,7 @@ export default function StoryInteractionsPanel({
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <Heart className="h-5 w-5 text-red-500 fill-red-500" />
+            <HeartIcon className="h-5 w-5 text-red-500 fill-red-500" />
             <span className="text-white font-semibold text-lg">
               {data?.likeCount ?? 0}
             </span>
@@ -84,11 +85,11 @@ export default function StoryInteractionsPanel({
 
         {isLoading ? (
           <div className="flex justify-center py-10">
-            <Loader2 className="h-6 w-6 animate-spin text-white/40" />
+            <Loader2Icon className="h-6 w-6 animate-spin text-white/40" />
           </div>
         ) : data?.viewers.length === 0 ? (
           <div className="flex flex-col items-center py-10 gap-2">
-            <Eye className="h-10 w-10 text-white/20" />
+            <EyeIcon className="h-10 w-10 text-white/20" />
             <p className="text-white/40 text-sm">No views yet</p>
           </div>
         ) : (
@@ -116,7 +117,7 @@ export default function StoryInteractionsPanel({
                     </span>
                   </div>
                   {viewer.hasLiked && (
-                    <Heart className="h-4 w-4 text-red-500 fill-red-500 flex-shrink-0" />
+                    <HeartIcon className="h-4 w-4 text-red-500 fill-red-500 flex-shrink-0" />
                   )}
                 </li>
               );

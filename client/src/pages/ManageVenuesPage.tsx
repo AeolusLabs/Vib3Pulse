@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import { useState } from "react";
-import { Edit, Trash2, BarChart3, MapPin, Clock, Music, Calendar, Megaphone, Sparkles, Building2, Plus, DollarSign, Lock, Eye } from "lucide-react";
+
 import { Link } from "wouter";
 import CreateVenueModal from "@/components/CreateVenueModal";
 import { PromoteVenueDialog } from "@/components/PromoteVenueDialog";
@@ -15,6 +15,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import type { Venue } from "@shared/schema";
+import { EditIcon, Trash2Icon, BarChart3Icon, MapPinIcon, ClockIcon, MusicIcon, CalendarIcon, MegaphoneIcon, SparklesIcon, Building2Icon, PlusIcon, DollarSignIcon, LockIcon, EyeIcon } from "@/components/ui/icons";
 
 export default function ManageVenuesPage() {
   const { data: user, isLoading: authLoading } = useAuth();
@@ -98,7 +99,7 @@ export default function ManageVenuesPage() {
             <div className="absolute top-2 right-2 flex flex-col gap-1">
               {isPromoted && (
                 <Badge className="bg-gradient-to-r from-purple-500 to-pink-500 text-white">
-                  <Sparkles className="h-3 w-3 mr-1" />
+                  <SparklesIcon className="h-3 w-3 mr-1" />
                   Featured
                 </Badge>
               )}
@@ -123,18 +124,18 @@ export default function ManageVenuesPage() {
 
           <div className="space-y-1 text-sm text-muted-foreground">
             <p className="flex items-center gap-2" data-testid={`text-venue-address-${venue.id}`}>
-              <MapPin className="h-4 w-4 flex-shrink-0" />
+              <MapPinIcon className="h-4 w-4 flex-shrink-0" />
               <span className="line-clamp-1">{venue.address || venue.city || "Location not set"}</span>
             </p>
             {venue.musicTypes && Array.isArray(venue.musicTypes) && venue.musicTypes.length > 0 && (
               <p className="flex items-center gap-2">
-                <Music className="h-4 w-4 flex-shrink-0" />
+                <MusicIcon className="h-4 w-4 flex-shrink-0" />
                 <span className="line-clamp-1">{venue.musicTypes.slice(0, 2).join(", ")}</span>
               </p>
             )}
             {venue.ageRestriction && (
               <p className="flex items-center gap-2">
-                <Building2 className="h-4 w-4 flex-shrink-0" />
+                <Building2Icon className="h-4 w-4 flex-shrink-0" />
                 <span>{venue.ageRestriction}+ only</span>
               </p>
             )}
@@ -164,7 +165,7 @@ export default function ManageVenuesPage() {
             onClick={() => handleEditVenue(venue)}
             data-testid={`button-edit-venue-${venue.id}`}
           >
-            <Edit className="h-4 w-4 mr-2" />
+            <EditIcon className="h-4 w-4 mr-2" />
             Edit
           </Button>
           
@@ -175,7 +176,7 @@ export default function ManageVenuesPage() {
             data-testid={`button-manage-events-${venue.id}`}
           >
             <Link href={`/venues/${venue.id}/venue-events`}>
-              <Calendar className="h-4 w-4 mr-2" />
+              <CalendarIcon className="h-4 w-4 mr-2" />
               Venue Events
             </Link>
           </Button>
@@ -187,7 +188,7 @@ export default function ManageVenuesPage() {
             data-testid={`button-view-as-visitor-${venue.id}`}
           >
             <Link href={`/venue/${venue.id}`}>
-              <Eye className="h-4 w-4 mr-2" />
+              <EyeIcon className="h-4 w-4 mr-2" />
               View as Visitor
             </Link>
           </Button>
@@ -198,7 +199,7 @@ export default function ManageVenuesPage() {
             onClick={() => setShowAnalyticsFor(showAnalyticsFor === venue.id ? null : venue.id)}
             data-testid={`button-view-stats-${venue.id}`}
           >
-            <BarChart3 className="h-4 w-4 mr-2" />
+            <BarChart3Icon className="h-4 w-4 mr-2" />
             Stats
           </Button>
 
@@ -210,7 +211,7 @@ export default function ManageVenuesPage() {
               className="text-purple-600 border-purple-300 hover:bg-purple-50"
               data-testid={`button-promote-${venue.id}`}
             >
-              <Megaphone className="h-4 w-4 mr-2" />
+              <MegaphoneIcon className="h-4 w-4 mr-2" />
               Promote
             </Button>
           )}
@@ -222,7 +223,7 @@ export default function ManageVenuesPage() {
             disabled={deleteMutation.isPending}
             data-testid={`button-delete-venue-${venue.id}`}
           >
-            <Trash2 className="h-4 w-4 text-destructive" />
+            <Trash2Icon className="h-4 w-4 text-destructive" />
           </Button>
         </CardFooter>
         
@@ -271,7 +272,7 @@ export default function ManageVenuesPage() {
           <Card className="max-w-2xl mx-auto">
             <CardHeader className="text-center">
               <div className="mx-auto bg-muted rounded-full p-4 w-fit mb-4">
-                <Lock className="h-8 w-8 text-muted-foreground" />
+                <LockIcon className="h-8 w-8 text-muted-foreground" />
               </div>
               <CardTitle className="text-2xl">Venue Management</CardTitle>
               <CardDescription className="text-base">
@@ -281,28 +282,28 @@ export default function ManageVenuesPage() {
             <CardContent className="space-y-6">
               <div className="grid gap-4 text-sm">
                 <div className="flex items-start gap-3">
-                  <Building2 className="h-5 w-5 text-primary mt-0.5" />
+                  <Building2Icon className="h-5 w-5 text-primary mt-0.5" />
                   <div>
                     <p className="font-medium">List Your Venue</p>
                     <p className="text-muted-foreground">Create a profile for your venue with photos, hours, and amenities</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-3">
-                  <DollarSign className="h-5 w-5 text-primary mt-0.5" />
+                  <DollarSignIcon className="h-5 w-5 text-primary mt-0.5" />
                   <div>
                     <p className="font-medium">Sell Entry Tickets</p>
                     <p className="text-muted-foreground">Set up entry nights with cover charges and manage capacity</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-3">
-                  <Megaphone className="h-5 w-5 text-primary mt-0.5" />
+                  <MegaphoneIcon className="h-5 w-5 text-primary mt-0.5" />
                   <div>
                     <p className="font-medium">Promote Your Venue</p>
                     <p className="text-muted-foreground">Get featured on the discover page to attract more guests</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-3">
-                  <BarChart3 className="h-5 w-5 text-primary mt-0.5" />
+                  <BarChart3Icon className="h-5 w-5 text-primary mt-0.5" />
                   <div>
                     <p className="font-medium">Track Analytics</p>
                     <p className="text-muted-foreground">See views, ticket sales, and engagement metrics</p>
@@ -336,7 +337,7 @@ export default function ManageVenuesPage() {
             Manage Venues
           </h1>
           <Button onClick={() => { setEditingVenue(undefined); setCreateVenueOpen(true); }} data-testid="button-create-new-venue">
-            <Plus className="h-4 w-4 mr-2" />
+            <PlusIcon className="h-4 w-4 mr-2" />
             Add New Venue
           </Button>
         </div>
@@ -359,14 +360,14 @@ export default function ManageVenuesPage() {
             ) : venues.length === 0 ? (
               <Card className="p-16">
                 <div className="text-center space-y-4">
-                  <Building2 className="h-16 w-16 mx-auto text-muted-foreground" />
+                  <Building2Icon className="h-16 w-16 mx-auto text-muted-foreground" />
                   <div>
                     <h3 className="text-xl font-semibold mb-2">No venues yet</h3>
                     <p className="text-muted-foreground mb-4">
                       Add your first venue to start selling entry tickets
                     </p>
                     <Button onClick={() => { setEditingVenue(undefined); setCreateVenueOpen(true); }}>
-                      <Plus className="h-4 w-4 mr-2" />
+                      <PlusIcon className="h-4 w-4 mr-2" />
                       Add Your First Venue
                     </Button>
                   </div>
@@ -388,7 +389,7 @@ export default function ManageVenuesPage() {
               </div>
             ) : promotedVenues.length === 0 ? (
               <div className="text-center py-16">
-                <Sparkles className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                <SparklesIcon className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
                 <p className="text-muted-foreground">No promoted venues</p>
                 <p className="text-sm text-muted-foreground mt-2">
                   Promote your venues to get more visibility

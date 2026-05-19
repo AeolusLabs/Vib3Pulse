@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Send } from "lucide-react";
+
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "@/lib/utils";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import CommentItem from "./CommentItem";
 import MentionTextarea from "./MentionTextarea";
+import { SendIcon } from "@/components/ui/icons";
 
 interface PostSummary {
   authorName: string;
@@ -231,7 +232,7 @@ export default function CommentDialog({ open, onClose, postId, postSummary }: Co
                 data-testid="button-send-comment"
                 aria-label="Send comment"
               >
-                <Send className="h-3.5 w-3.5" />
+                <SendIcon className="h-3.5 w-3.5" />
               </button>
             </div>
           </div>

@@ -16,8 +16,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-import { Sparkles, Image as ImageIcon, Plus, Users } from "lucide-react";
+
 import CommunityModal from "@/components/CommunityModal";
+import { SparklesIcon, ImageIcon, PlusIcon, UsersIcon } from "@/components/ui/icons";
 
 type StoryWithUser = {
   id: string;
@@ -277,7 +278,7 @@ export default function FeedPage() {
               onClick={() => setCommunityModalOpen(true)}
               data-testid="button-manage-communities"
             >
-              <Users className="h-4 w-4 mr-1" />
+              <UsersIcon className="h-4 w-4 mr-1" />
               Communities
             </Button>
           </div>
@@ -299,7 +300,7 @@ export default function FeedPage() {
                 data-testid="button-filter-all"
                 className="whitespace-nowrap"
               >
-                <Sparkles className="h-4 w-4 mr-1" />
+                <SparklesIcon className="h-4 w-4 mr-1" />
                 For You
               </Button>
               {myCommunities.map((community) => (
@@ -322,7 +323,7 @@ export default function FeedPage() {
                   data-testid="button-add-community"
                   className="whitespace-nowrap"
                 >
-                  <Plus className="h-4 w-4" />
+                  <PlusIcon className="h-4 w-4" />
                 </Button>
               )}
             </div>

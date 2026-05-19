@@ -1,8 +1,9 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Minus, Plus, ShoppingCart } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
 import { useState } from "react";
+import { MinusIcon, PlusIcon, ShoppingCartIcon } from "@/components/ui/icons";
 
 interface TicketTier {
   id: string;
@@ -84,7 +85,7 @@ export default function TicketSelector({ tiers, onPurchase }: TicketSelectorProp
                   disabled={(quantities[tier.id] || 0) === 0}
                   data-testid={`button-decrease-${tier.id}`}
                 >
-                  <Minus className="h-4 w-4" />
+                  <MinusIcon className="h-4 w-4" />
                 </Button>
                 <span className="w-8 text-center font-semibold" data-testid={`text-quantity-${tier.id}`}>
                   {quantities[tier.id] || 0}
@@ -96,7 +97,7 @@ export default function TicketSelector({ tiers, onPurchase }: TicketSelectorProp
                   disabled={(quantities[tier.id] || 0) >= tier.available}
                   data-testid={`button-increase-${tier.id}`}
                 >
-                  <Plus className="h-4 w-4" />
+                  <PlusIcon className="h-4 w-4" />
                 </Button>
               </div>
             </div>
@@ -117,7 +118,7 @@ export default function TicketSelector({ tiers, onPurchase }: TicketSelectorProp
               onClick={handlePurchase}
               data-testid="button-purchase"
             >
-              <ShoppingCart className="h-4 w-4 mr-2" />
+              <ShoppingCartIcon className="h-4 w-4 mr-2" />
               Purchase Tickets ({totalTickets})
             </Button>
           </div>

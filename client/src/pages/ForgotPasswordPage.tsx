@@ -6,10 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Mail, ArrowLeft, CheckCircle } from "lucide-react";
+
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { MailIcon, ArrowLeftIcon, CheckCircleIcon } from "@/components/ui/icons";
 
 const forgotPasswordSchema = z.object({
   email: z.string().email("Please enter a valid email address"),
@@ -65,7 +66,7 @@ export default function ForgotPasswordPage() {
               <div className="text-center space-y-4">
                 <div className="flex justify-center">
                   <div className="p-3 bg-primary/10 rounded-full">
-                    <CheckCircle className="h-8 w-8 text-primary" />
+                    <CheckCircleIcon className="h-8 w-8 text-primary" />
                   </div>
                 </div>
                 <h2 className="text-xl font-semibold">Check your email</h2>
@@ -80,7 +81,7 @@ export default function ForgotPasswordPage() {
             <CardFooter className="flex flex-col gap-2">
               <Link href="/login" className="w-full">
                 <Button variant="outline" className="w-full" data-testid="button-back-to-login">
-                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  <ArrowLeftIcon className="w-4 h-4 mr-2" />
                   Back to Sign In
                 </Button>
               </Link>
@@ -142,7 +143,7 @@ export default function ForgotPasswordPage() {
                     "Sending..."
                   ) : (
                     <>
-                      <Mail className="w-4 h-4 mr-2" />
+                      <MailIcon className="w-4 h-4 mr-2" />
                       Send Reset Link
                     </>
                   )}

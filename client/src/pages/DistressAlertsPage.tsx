@@ -6,10 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { AlertTriangle, Clock, MapPin, Timer, CheckCircle, XCircle } from "lucide-react";
+
 import type { User } from "@shared/schema";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
+import { AlertTriangleIcon, ClockIcon, MapPinIcon, TimerIcon, CheckCircleIcon, XCircleIcon } from "@/components/ui/icons";
 
 interface SafetyAlert {
   id: string;
@@ -34,9 +35,9 @@ function alertTypeLabel(alert: SafetyAlert) {
 }
 
 function statusBadge(status: SafetyAlert["status"]) {
-  if (status === "active") return <Badge variant="destructive"><Clock className="h-3 w-3 mr-1" />Active</Badge>;
-  if (status === "safe") return <Badge variant="default"><CheckCircle className="h-3 w-3 mr-1" />Safe</Badge>;
-  return <Badge variant="secondary"><XCircle className="h-3 w-3 mr-1" />False Alarm</Badge>;
+  if (status === "active") return <Badge variant="destructive"><ClockIcon className="h-3 w-3 mr-1" />Active</Badge>;
+  if (status === "safe") return <Badge variant="default"><CheckCircleIcon className="h-3 w-3 mr-1" />Safe</Badge>;
+  return <Badge variant="secondary"><XCircleIcon className="h-3 w-3 mr-1" />False Alarm</Badge>;
 }
 
 function initials(u: Omit<User, "passwordHash">) {
@@ -91,7 +92,7 @@ export default function DistressAlertsPage() {
           </div>
         ) : alerts.length === 0 ? (
           <div className="text-center py-16 text-muted-foreground">
-            <AlertTriangle className="h-10 w-10 mx-auto mb-3 opacity-30" />
+            <AlertTriangleIcon className="h-10 w-10 mx-auto mb-3 opacity-30" />
             <p className="text-sm">No alerts yet</p>
           </div>
         ) : (
@@ -150,9 +151,9 @@ function AlertCard({
         <CardTitle className="flex items-center justify-between text-sm font-medium">
           <div className="flex items-center gap-2">
             {alert.alertType === "timer_expiry" ? (
-              <Timer className="h-4 w-4 text-orange-500" />
+              <TimerIcon className="h-4 w-4 text-orange-500" />
             ) : (
-              <AlertTriangle className="h-4 w-4 text-destructive" />
+              <AlertTriangleIcon className="h-4 w-4 text-destructive" />
             )}
             {alertTypeLabel(alert)}
           </div>
@@ -177,7 +178,7 @@ function AlertCard({
 
         {(alert.latitude !== null && alert.longitude !== null) && (
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <MapPin className="h-3.5 w-3.5" />
+            <MapPinIcon className="h-3.5 w-3.5" />
             {alert.locationText
               ? alert.locationText
               : `${alert.latitude.toFixed(5)}, ${alert.longitude.toFixed(5)}`}
@@ -189,7 +190,7 @@ function AlertCard({
         {alert.status === "active" && alert.type === "sent" && onResolve && onFalseAlarm && (
           <div className="flex gap-2 pt-1">
             <Button size="sm" onClick={onResolve} disabled={resolving || falseAlarming}>
-              <CheckCircle className="h-3.5 w-3.5 mr-1" />
+              <CheckCircleIcon className="h-3.5 w-3.5 mr-1" />
               I'm Safe
             </Button>
             <Button variant="outline" size="sm" onClick={onFalseAlarm} disabled={resolving || falseAlarming}>

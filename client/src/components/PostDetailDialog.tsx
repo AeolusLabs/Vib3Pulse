@@ -2,7 +2,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Heart, MessageCircle, Share2, Bookmark, Repeat2, Send } from "lucide-react";
+
 import { useState, Fragment } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -13,6 +13,7 @@ import { format } from "date-fns";
 import CommentItem from "./CommentItem";
 import ImageGrid from "./ImageGrid";
 import FeedVideoPlayer from "./FeedVideoPlayer";
+import { HeartIcon, MessageCircleIcon, Share2Icon, BookmarkIcon, Repeat2Icon, SendIcon } from "@/components/ui/icons";
 
 interface PostDetailDialogProps {
   open: boolean;
@@ -317,7 +318,7 @@ export default function PostDetailDialog({
                   disabled={likeMutation.isPending}
                   data-testid={`dialog-like-${postId}`}
                 >
-                  <Heart className={`h-5 w-5 ${likeData?.isLiked ? 'fill-current' : ''}`} />
+                  <HeartIcon className={`h-5 w-5 ${likeData?.isLiked ? 'fill-current' : ''}`} />
                   <span>{likeData?.count || 0}</span>
                 </Button>
 
@@ -327,7 +328,7 @@ export default function PostDetailDialog({
                   className="gap-2"
                   data-testid={`dialog-comment-count-${postId}`}
                 >
-                  <MessageCircle className="h-5 w-5" />
+                  <MessageCircleIcon className="h-5 w-5" />
                   <span>{comments.length}</span>
                 </Button>
 
@@ -339,7 +340,7 @@ export default function PostDetailDialog({
                   disabled={repostMutation.isPending}
                   data-testid={`dialog-repost-${postId}`}
                 >
-                  <Repeat2 className={`h-5 w-5 ${repostData?.hasReposted ? 'fill-current' : ''}`} />
+                  <Repeat2Icon className={`h-5 w-5 ${repostData?.hasReposted ? 'fill-current' : ''}`} />
                   <span>{repostData?.repostCount || 0}</span>
                 </Button>
 
@@ -349,7 +350,7 @@ export default function PostDetailDialog({
                   onClick={handleShare}
                   data-testid={`dialog-share-${postId}`}
                 >
-                  <Share2 className="h-5 w-5" />
+                  <Share2Icon className="h-5 w-5" />
                 </Button>
               </div>
             </div>
@@ -371,7 +372,7 @@ export default function PostDetailDialog({
                   disabled={!newComment.trim() || commentMutation.isPending}
                   data-testid={`dialog-comment-submit-${postId}`}
                 >
-                  <Send className="h-4 w-4" />
+                  <SendIcon className="h-4 w-4" />
                 </Button>
               </form>
 

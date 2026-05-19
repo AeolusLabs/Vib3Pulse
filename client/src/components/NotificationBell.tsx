@@ -1,4 +1,4 @@
-import { Bell, Check, CheckCheck, Heart, MessageCircle, UserPlus, Ticket, CalendarCheck, AlertTriangle, X, Shield, CheckCircle } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -19,33 +19,34 @@ import {
 import { formatDistanceToNow } from "date-fns";
 import { useLocation } from "wouter";
 import { useState } from "react";
+import { BellIcon, CheckIcon, CheckCheckIcon, HeartIcon, MessageCircleIcon, UserPlusIcon, TicketIcon, CalendarCheckIcon, AlertTriangleIcon, XIcon, ShieldIcon, CheckCircleIcon } from "@/components/ui/icons";
 
 function getNotificationIcon(type: string) {
   switch (type) {
     case "post_like":
     case "story_like":
-      return <Heart className="h-4 w-4 text-red-500" />;
+      return <HeartIcon className="h-4 w-4 text-red-500" />;
     case "post_comment":
     case "story_comment":
-      return <MessageCircle className="h-4 w-4 text-blue-500" />;
+      return <MessageCircleIcon className="h-4 w-4 text-blue-500" />;
     case "new_message":
-      return <MessageCircle className="h-4 w-4 text-primary" />;
+      return <MessageCircleIcon className="h-4 w-4 text-primary" />;
     case "new_follower":
-      return <UserPlus className="h-4 w-4 text-green-500" />;
+      return <UserPlusIcon className="h-4 w-4 text-green-500" />;
     case "event_rsvp":
-      return <CalendarCheck className="h-4 w-4 text-primary" />;
+      return <CalendarCheckIcon className="h-4 w-4 text-primary" />;
     case "ticket_purchase":
-      return <Ticket className="h-4 w-4 text-amber-500" />;
+      return <TicketIcon className="h-4 w-4 text-amber-500" />;
     case "buddy_alert":
-      return <AlertTriangle className="h-4 w-4 text-red-500" />;
+      return <AlertTriangleIcon className="h-4 w-4 text-red-500" />;
     case "buddy_request":
-      return <Shield className="h-4 w-4 text-primary" />;
+      return <ShieldIcon className="h-4 w-4 text-primary" />;
     case "buddy_request_response":
-      return <UserPlus className="h-4 w-4 text-green-500" />;
+      return <UserPlusIcon className="h-4 w-4 text-green-500" />;
     case "buddy_alert_resolved":
-      return <CheckCircle className="h-4 w-4 text-green-500" />;
+      return <CheckCircleIcon className="h-4 w-4 text-green-500" />;
     default:
-      return <Bell className="h-4 w-4 text-muted-foreground" />;
+      return <BellIcon className="h-4 w-4 text-muted-foreground" />;
   }
 }
 
@@ -145,7 +146,7 @@ export default function NotificationBell() {
           data-testid="button-notifications"
         >
           <span className="relative inline-flex">
-            <Bell className="h-5 w-5" />
+            <BellIcon className="h-5 w-5" />
             {unreadCount > 0 && (
               <Badge
                 variant="destructive"
@@ -173,7 +174,7 @@ export default function NotificationBell() {
               disabled={markAllAsRead.isPending}
               data-testid="button-mark-all-read"
             >
-              <CheckCheck className="h-4 w-4 mr-1" />
+              <CheckCheckIcon className="h-4 w-4 mr-1" />
               Mark all read
             </Button>
           )}
@@ -186,7 +187,7 @@ export default function NotificationBell() {
             </div>
           ) : notifications.length === 0 ? (
             <div className="p-8 text-center text-muted-foreground">
-              <Bell className="h-8 w-8 mx-auto mb-2 opacity-50" />
+              <BellIcon className="h-8 w-8 mx-auto mb-2 opacity-50" />
               <p>No notifications yet</p>
               <p className="text-sm mt-1">You'll see updates here when people interact with your content</p>
             </div>

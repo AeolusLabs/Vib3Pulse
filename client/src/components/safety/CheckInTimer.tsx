@@ -9,7 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Timer, CheckCircle, Clock } from "lucide-react";
+import { TimerIcon, CheckCircleIcon, ClockIcon } from "@/components/ui/icons";
 
 interface SafetyTimer {
   id: string;
@@ -100,7 +100,7 @@ export function CheckInTimer() {
     <Card data-testid="card-checkin-timer">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <Timer className="h-5 w-5" />
+          <TimerIcon className="h-5 w-5" />
           Check-In Timer
         </CardTitle>
         <CardDescription>
@@ -115,7 +115,7 @@ export function CheckInTimer() {
             <div className="text-center p-6 border rounded-md bg-muted/30 space-y-2">
               {isInGrace && (
                 <Badge variant="destructive" className="mb-1">
-                  <Clock className="h-3 w-3 mr-1" />
+                  <ClockIcon className="h-3 w-3 mr-1" />
                   Grace period — check in now!
                 </Badge>
               )}
@@ -139,7 +139,7 @@ export function CheckInTimer() {
                 disabled={checkInMutation.isPending}
                 data-testid="button-checkin"
               >
-                <CheckCircle className="h-4 w-4 mr-2" />
+                <CheckCircleIcon className="h-4 w-4 mr-2" />
                 {checkInMutation.isPending ? "Checking in…" : "I'm Safe"}
               </Button>
               <Button

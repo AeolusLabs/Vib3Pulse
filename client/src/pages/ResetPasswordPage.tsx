@@ -7,10 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Lock, Eye, EyeOff, CheckCircle, AlertCircle } from "lucide-react";
+
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { LockIcon, EyeIcon, EyeOffIcon, CheckCircleIcon, AlertCircleIcon } from "@/components/ui/icons";
 
 const resetPasswordSchema = z.object({
   newPassword: z.string().min(8, "Password must be at least 8 characters"),
@@ -93,7 +94,7 @@ export default function ResetPasswordPage() {
               <div className="text-center space-y-4">
                 <div className="flex justify-center">
                   <div className="p-3 bg-destructive/10 rounded-full">
-                    <AlertCircle className="h-8 w-8 text-destructive" />
+                    <AlertCircleIcon className="h-8 w-8 text-destructive" />
                   </div>
                 </div>
                 <h2 className="text-xl font-semibold">Invalid Reset Link</h2>
@@ -135,7 +136,7 @@ export default function ResetPasswordPage() {
               <div className="text-center space-y-4">
                 <div className="flex justify-center">
                   <div className="p-3 bg-primary/10 rounded-full">
-                    <CheckCircle className="h-8 w-8 text-primary" />
+                    <CheckCircleIcon className="h-8 w-8 text-primary" />
                   </div>
                 </div>
                 <h2 className="text-xl font-semibold">Password Reset Complete</h2>
@@ -201,9 +202,9 @@ export default function ResetPasswordPage() {
                             data-testid="button-toggle-password"
                           >
                             {showPassword ? (
-                              <EyeOff className="h-4 w-4" />
+                              <EyeOffIcon className="h-4 w-4" />
                             ) : (
-                              <Eye className="h-4 w-4" />
+                              <EyeIcon className="h-4 w-4" />
                             )}
                           </button>
                         </div>
@@ -235,9 +236,9 @@ export default function ResetPasswordPage() {
                             data-testid="button-toggle-confirm-password"
                           >
                             {showConfirmPassword ? (
-                              <EyeOff className="h-4 w-4" />
+                              <EyeOffIcon className="h-4 w-4" />
                             ) : (
-                              <Eye className="h-4 w-4" />
+                              <EyeIcon className="h-4 w-4" />
                             )}
                           </button>
                         </div>
@@ -257,7 +258,7 @@ export default function ResetPasswordPage() {
                     "Resetting..."
                   ) : (
                     <>
-                      <Lock className="w-4 h-4 mr-2" />
+                      <LockIcon className="w-4 h-4 mr-2" />
                       Reset Password
                     </>
                   )}

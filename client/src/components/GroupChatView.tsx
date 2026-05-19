@@ -32,7 +32,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Send, ArrowLeft, Users, Settings, ChartBar, MoreVertical, UserPlus, LogOut, Shield, UserMinus, Trash2, Loader2, Link2, Copy, Check, Camera } from "lucide-react";
+
 import { format, formatDistanceToNow } from "date-fns";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -42,6 +42,7 @@ import { ObjectUploader } from "./ObjectUploader";
 import { MentionInput, renderMessageWithMentions } from "./MentionInput";
 import type { User, Conversation, ConversationParticipant, ConversationMessage } from "@shared/schema";
 import type { AuthUser } from "@/hooks/useAuth";
+import { SendIcon, ArrowLeftIcon, UsersIcon, SettingsIcon, ChartBarIcon, MoreVerticalIcon, UserPlusIcon, LogOutIcon, ShieldIcon, UserMinusIcon, Trash2Icon, Loader2Icon, Link2Icon, CopyIcon, CheckIcon, CameraIcon } from "@/components/ui/icons";
 
 interface ConversationWithDetails extends Conversation {
   participants: Array<ConversationParticipant & { user: User }>;
@@ -178,7 +179,7 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
       <div className="flex flex-col h-full">
         <div className="flex items-center gap-3 p-4 border-b">
           <Button variant="ghost" size="icon" onClick={onBack}>
-            <ArrowLeft className="h-5 w-5" />
+            <ArrowLeftIcon className="h-5 w-5" />
           </Button>
           <Skeleton className="h-10 w-10 rounded-full" />
           <Skeleton className="h-5 w-32" />
@@ -212,13 +213,13 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-3 p-4 border-b">
         <Button variant="ghost" size="icon" onClick={onBack} data-testid="button-back">
-          <ArrowLeft className="h-5 w-5" />
+          <ArrowLeftIcon className="h-5 w-5" />
         </Button>
 
         <Avatar className="h-10 w-10">
           <AvatarImage src={conversation.avatarUrl || ""} alt={conversation.name || "Group"} />
           <AvatarFallback className="bg-primary/10 text-primary">
-            <Users className="h-5 w-5" />
+            <UsersIcon className="h-5 w-5" />
           </AvatarFallback>
         </Avatar>
 
@@ -232,7 +233,7 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
         <Sheet>
           <SheetTrigger asChild>
             <Button variant="ghost" size="icon" data-testid="button-group-members">
-              <Users className="h-5 w-5" />
+              <UsersIcon className="h-5 w-5" />
             </Button>
           </SheetTrigger>
           <SheetContent>
@@ -250,7 +251,7 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
                   <Avatar className="h-16 w-16">
                     <AvatarImage src={conversation.avatarUrl || ""} alt={conversation.name || "Group"} />
                     <AvatarFallback className="bg-primary/10 text-primary">
-                      <Users className="h-6 w-6" />
+                      <UsersIcon className="h-6 w-6" />
                     </AvatarFallback>
                   </Avatar>
                   <ObjectUploader
@@ -269,7 +270,7 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
                     buttonVariant="outline"
                     buttonSize="sm"
                   >
-                    <Camera className="h-4 w-4 mr-2" />
+                    <CameraIcon className="h-4 w-4 mr-2" />
                     Change Avatar
                   </ObjectUploader>
                 </div>
@@ -301,7 +302,7 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
                     </div>
                     {p.role === 'admin' && (
                       <Badge variant="secondary" className="text-xs">
-                        <Shield className="h-3 w-3 mr-1" />
+                        <ShieldIcon className="h-3 w-3 mr-1" />
                         Admin
                       </Badge>
                     )}
@@ -309,7 +310,7 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <MoreVertical className="h-4 w-4" />
+                            <MoreVerticalIcon className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
@@ -317,14 +318,14 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
                             <DropdownMenuItem
                               onClick={() => updateRoleMutation.mutate({ userId: p.userId, role: 'admin' })}
                             >
-                              <Shield className="h-4 w-4 mr-2" />
+                              <ShieldIcon className="h-4 w-4 mr-2" />
                               Make Admin
                             </DropdownMenuItem>
                           ) : (
                             <DropdownMenuItem
                               onClick={() => updateRoleMutation.mutate({ userId: p.userId, role: 'member' })}
                             >
-                              <UserMinus className="h-4 w-4 mr-2" />
+                              <UserMinusIcon className="h-4 w-4 mr-2" />
                               Remove Admin
                             </DropdownMenuItem>
                           )}
@@ -333,7 +334,7 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
                             className="text-destructive"
                             onClick={() => setMemberToRemove(p.userId)}
                           >
-                            <Trash2 className="h-4 w-4 mr-2" />
+                            <Trash2Icon className="h-4 w-4 mr-2" />
                             Remove from Group
                           </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -349,12 +350,12 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" data-testid="button-group-menu">
-              <MoreVertical className="h-5 w-5" />
+              <MoreVerticalIcon className="h-5 w-5" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => setPollModalOpen(true)}>
-              <ChartBar className="h-4 w-4 mr-2" />
+              <ChartBarIcon className="h-4 w-4 mr-2" />
               Create Poll
             </DropdownMenuItem>
             {isAdmin && (
@@ -363,9 +364,9 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
                 disabled={generateInviteMutation.isPending}
               >
                 {inviteCopied ? (
-                  <Check className="h-4 w-4 mr-2" />
+                  <CheckIcon className="h-4 w-4 mr-2" />
                 ) : (
-                  <Link2 className="h-4 w-4 mr-2" />
+                  <Link2Icon className="h-4 w-4 mr-2" />
                 )}
                 {generateInviteMutation.isPending ? "Generating..." : inviteCopied ? "Copied!" : "Copy Invite Link"}
               </DropdownMenuItem>
@@ -375,7 +376,7 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
               className="text-destructive"
               onClick={() => setConfirmLeave(true)}
             >
-              <LogOut className="h-4 w-4 mr-2" />
+              <LogOutIcon className="h-4 w-4 mr-2" />
               Leave Group
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -454,7 +455,7 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
             })
           ) : (
             <div className="flex flex-col items-center justify-center py-12 text-center">
-              <Users className="h-12 w-12 text-muted-foreground mb-4" />
+              <UsersIcon className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="font-medium">No messages yet</h3>
               <p className="text-sm text-muted-foreground">
                 Start the conversation!
@@ -480,7 +481,7 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
             onClick={() => setPollModalOpen(true)}
             data-testid="button-create-poll"
           >
-            <ChartBar className="h-5 w-5" />
+            <ChartBarIcon className="h-5 w-5" />
           </Button>
           <MentionInput
             placeholder="Type @ to mention someone..."
@@ -497,9 +498,9 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
             data-testid="button-send"
           >
             {sendMessageMutation.isPending ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
+              <Loader2Icon className="h-5 w-5 animate-spin" />
             ) : (
-              <Send className="h-5 w-5" />
+              <SendIcon className="h-5 w-5" />
             )}
           </Button>
         </form>
@@ -526,7 +527,7 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {leaveGroupMutation.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                <Loader2Icon className="h-4 w-4 animate-spin mr-2" />
               ) : null}
               Leave
             </AlertDialogAction>
@@ -549,7 +550,7 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {removeParticipantMutation.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                <Loader2Icon className="h-4 w-4 animate-spin mr-2" />
               ) : null}
               Remove
             </AlertDialogAction>

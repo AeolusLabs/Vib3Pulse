@@ -9,11 +9,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
-import { UserPlus, Users, Building2, ArrowRight, ArrowLeft, Check, Eye, EyeOff } from "lucide-react";
+
 import { motion, AnimatePresence } from "framer-motion";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { UserPlusIcon, UsersIcon, Building2Icon, ArrowRightIcon, ArrowLeftIcon, CheckIcon, EyeIcon, EyeOffIcon } from "@/components/ui/icons";
 
 const EVENT_CATEGORIES = [
   "Music", "Food & Drink", "Tech", "Arts",
@@ -178,7 +179,7 @@ export default function SignupPage() {
                       transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
                       data-testid={`step-indicator-${step}`}
                     >
-                      {done ? <Check className="w-3.5 h-3.5" /> : step}
+                      {done ? <CheckIcon className="w-3.5 h-3.5" /> : step}
                     </motion.div>
                     <span
                       className={`text-[0.6rem] tracking-[0.12em] uppercase font-sans transition-colors duration-300 ${
@@ -254,7 +255,7 @@ export default function SignupPage() {
                         <div className="relative">
                           <Input type={showPassword ? "text" : "password"} placeholder="Min. 8 characters" className={inputCls + " pr-12"} {...field} data-testid="input-password" />
                           <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-white/25 hover:text-white/60 transition-colors cursor-pointer" data-testid="button-toggle-password" aria-label="Toggle password">
-                            {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            {showPassword ? <EyeOffIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
                           </button>
                         </div>
                       </FormControl>
@@ -272,7 +273,7 @@ export default function SignupPage() {
                         <div className="relative">
                           <Input type={showConfirmPassword ? "text" : "password"} placeholder="Re-enter your password" className={inputCls + " pr-12"} {...field} data-testid="input-confirm-password" />
                           <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-white/25 hover:text-white/60 transition-colors cursor-pointer" data-testid="button-toggle-confirm-password" aria-label="Toggle confirm password">
-                            {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            {showConfirmPassword ? <EyeOffIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
                           </button>
                         </div>
                       </FormControl>
@@ -285,7 +286,7 @@ export default function SignupPage() {
                     Back to Login
                   </Button>
                   <Button type="submit" className="flex-1 h-12 bg-violet-600 hover:bg-violet-500 text-white border-0 rounded-xl font-sans font-medium text-sm shadow-lg shadow-violet-600/15" data-testid="button-next-step-1">
-                    Next <ArrowRight className="w-4 h-4 ml-2" />
+                    Next <ArrowRightIcon className="w-4 h-4 ml-2" />
                   </Button>
                 </div>
               </form>
@@ -347,10 +348,10 @@ export default function SignupPage() {
                 />
                 <div className="flex gap-3 pt-2">
                   <Button type="button" variant="outline" onClick={goBack} className="flex-1 h-12 bg-transparent border-white/[0.09] text-white/50 hover:bg-white/[0.05] hover:text-white rounded-xl font-sans text-sm" data-testid="button-back-step-2">
-                    <ArrowLeft className="w-4 h-4 mr-2" /> Back
+                    <ArrowLeftIcon className="w-4 h-4 mr-2" /> Back
                   </Button>
                   <Button type="submit" className="flex-1 h-12 bg-violet-600 hover:bg-violet-500 text-white border-0 rounded-xl font-sans font-medium text-sm shadow-lg shadow-violet-600/15" data-testid="button-next-step-2">
-                    Next <ArrowRight className="w-4 h-4 ml-2" />
+                    Next <ArrowRightIcon className="w-4 h-4 ml-2" />
                   </Button>
                 </div>
               </form>
@@ -462,7 +463,7 @@ export default function SignupPage() {
                 />
                 <div className="flex gap-3 pt-2">
                   <Button type="button" variant="outline" onClick={goBack} className="flex-1 h-12 bg-transparent border-white/[0.09] text-white/50 hover:bg-white/[0.05] hover:text-white rounded-xl font-sans text-sm" data-testid="button-back-step-3">
-                    <ArrowLeft className="w-4 h-4 mr-2" /> Back
+                    <ArrowLeftIcon className="w-4 h-4 mr-2" /> Back
                   </Button>
                   <Button type="submit" className="flex-1 h-12 bg-violet-600 hover:bg-violet-500 text-white border-0 rounded-xl font-sans font-medium text-sm shadow-lg shadow-violet-600/15 overflow-hidden relative" disabled={isLoading} data-testid="button-complete-signup">
                     <AnimatePresence mode="wait" initial={false}>
@@ -472,7 +473,7 @@ export default function SignupPage() {
                         </motion.span>
                       ) : (
                         <motion.span key="idle" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }} className="flex items-center">
-                          <UserPlus className="w-4 h-4 mr-2" />Complete Signup
+                          <UserPlusIcon className="w-4 h-4 mr-2" />Complete Signup
                         </motion.span>
                       )}
                     </AnimatePresence>
@@ -565,7 +566,7 @@ export default function SignupPage() {
                 />
                 <div className="flex gap-3 pt-2">
                   <Button type="button" variant="outline" onClick={goBack} className="flex-1 h-12 bg-transparent border-white/[0.09] text-white/50 hover:bg-white/[0.05] hover:text-white rounded-xl font-sans text-sm" data-testid="button-back-step-3">
-                    <ArrowLeft className="w-4 h-4 mr-2" /> Back
+                    <ArrowLeftIcon className="w-4 h-4 mr-2" /> Back
                   </Button>
                   <Button type="submit" className="flex-1 h-12 bg-violet-600 hover:bg-violet-500 text-white border-0 rounded-xl font-sans font-medium text-sm shadow-lg shadow-violet-600/15 overflow-hidden relative" disabled={isLoading} data-testid="button-complete-signup">
                     <AnimatePresence mode="wait" initial={false}>
@@ -575,7 +576,7 @@ export default function SignupPage() {
                         </motion.span>
                       ) : (
                         <motion.span key="idle" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }} className="flex items-center">
-                          <UserPlus className="w-4 h-4 mr-2" />Complete Signup
+                          <UserPlusIcon className="w-4 h-4 mr-2" />Complete Signup
                         </motion.span>
                       )}
                     </AnimatePresence>

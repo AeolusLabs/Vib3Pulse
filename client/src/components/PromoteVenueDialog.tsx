@@ -6,7 +6,7 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { Sparkles, Check, Zap, Crown, Rocket, AlertCircle } from "lucide-react";
+import { SparklesIcon, CheckIcon, ZapIcon, CrownIcon, RocketIcon, AlertCircleIcon } from "@/components/ui/icons";
 
 interface PromoteVenueDialogProps {
   open: boolean;
@@ -107,7 +107,7 @@ export function PromoteVenueDialog({ open, onOpenChange, venueId, venueName }: P
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="font-serif text-2xl flex items-center gap-2">
-            <Sparkles className="h-6 w-6 text-purple-500" />
+            <SparklesIcon className="h-6 w-6 text-purple-500" />
             Promote Your Venue
           </DialogTitle>
           <DialogDescription>
@@ -138,7 +138,7 @@ export function PromoteVenueDialog({ open, onOpenChange, venueId, venueName }: P
                         </Badge>
                       )}
                       {selectedPackage === pkg.duration && !pkg.popular && (
-                        <Check className="h-4 w-4 text-purple-500" />
+                        <CheckIcon className="h-4 w-4 text-purple-500" />
                       )}
                     </div>
                     <div className="font-semibold">{pkg.label}</div>
@@ -152,19 +152,19 @@ export function PromoteVenueDialog({ open, onOpenChange, venueId, venueName }: P
                 <h4 className="font-semibold text-sm">What you get:</h4>
                 <ul className="text-sm text-muted-foreground space-y-1">
                   <li className="flex items-center gap-2">
-                    <Check className="h-4 w-4 text-green-500" />
+                    <CheckIcon className="h-4 w-4 text-green-500" />
                     Featured placement on Discover page
                   </li>
                   <li className="flex items-center gap-2">
-                    <Check className="h-4 w-4 text-green-500" />
+                    <CheckIcon className="h-4 w-4 text-green-500" />
                     Priority in search results
                   </li>
                   <li className="flex items-center gap-2">
-                    <Check className="h-4 w-4 text-green-500" />
+                    <CheckIcon className="h-4 w-4 text-green-500" />
                     Special "Featured" badge
                   </li>
                   <li className="flex items-center gap-2">
-                    <Check className="h-4 w-4 text-green-500" />
+                    <CheckIcon className="h-4 w-4 text-green-500" />
                     Analytics dashboard access
                   </li>
                 </ul>
@@ -189,7 +189,7 @@ export function PromoteVenueDialog({ open, onOpenChange, venueId, venueName }: P
           <div className="space-y-4 py-4">
             <div className="rounded-lg border border-dashed border-amber-500/50 bg-amber-50 dark:bg-amber-950/20 p-4">
               <div className="flex items-start gap-3">
-                <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                <AlertCircleIcon className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
                 <div>
                   <p className="font-medium text-amber-800 dark:text-amber-200">Demo Mode</p>
                   <p className="text-sm text-amber-700 dark:text-amber-300">

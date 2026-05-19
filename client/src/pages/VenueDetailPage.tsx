@@ -12,26 +12,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import ImageLightbox from "@/components/ImageLightbox";
 import { VenueGalleryManager } from "@/components/VenueGalleryManager";
 import { useAuth } from "@/hooks/useAuth";
-import {
-  MapPin,
-  Phone,
-  Globe,
-  Clock,
-  Music,
-  Users,
-  Calendar,
-  Shield,
-  Sparkles,
-  ArrowLeft,
-  Ticket,
-  CheckCircle,
-  AlertCircle,
-  Accessibility,
-} from "lucide-react";
+
 import { format } from "date-fns";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Venue, VenueEntryNight } from "@shared/schema";
+import { MapPinIcon, PhoneIcon, GlobeIcon, ClockIcon, MusicIcon, UsersIcon, CalendarIcon, ShieldIcon, SparklesIcon, ArrowLeftIcon, TicketIcon, CheckCircleIcon, AlertCircleIcon } from "@/components/ui/icons";
+import { Accessibility } from "lucide-react";
 
 const categoryLabels: Record<string, string> = {
   Club: "Club",
@@ -92,7 +79,7 @@ function SimulatedPaymentForm({
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="rounded-lg border border-dashed border-amber-500/50 bg-amber-50 dark:bg-amber-950/20 p-4">
         <div className="flex items-start gap-3">
-          <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+          <AlertCircleIcon className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
           <div>
             <p className="font-medium text-amber-800 dark:text-amber-200">Demo Mode</p>
             <p className="text-sm text-amber-700 dark:text-amber-300">
@@ -217,7 +204,7 @@ export default function VenueDetailPage() {
           <p className="text-muted-foreground mb-6">The venue you're looking for doesn't exist.</p>
           <Link href="/discover">
             <Button>
-              <ArrowLeft className="h-4 w-4 mr-2" />
+              <ArrowLeftIcon className="h-4 w-4 mr-2" />
               Back to Discover
             </Button>
           </Link>
@@ -252,7 +239,7 @@ export default function VenueDetailPage() {
         )}
         {isPromoted && (
           <Badge className="absolute top-4 right-4 z-20 bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-lg">
-            <Sparkles className="h-3.5 w-3.5 mr-1" />
+            <SparklesIcon className="h-3.5 w-3.5 mr-1" />
             Featured Venue
           </Badge>
         )}
@@ -264,7 +251,7 @@ export default function VenueDetailPage() {
         {/* Back button */}
         <Link href="/discover">
           <Button variant="ghost" size="sm" className="mb-4 bg-background/80 backdrop-blur-sm hover:bg-background" data-testid="button-back">
-            <ArrowLeft className="h-4 w-4 mr-2" />
+            <ArrowLeftIcon className="h-4 w-4 mr-2" />
             Back to Discover
           </Button>
         </Link>
@@ -285,7 +272,7 @@ export default function VenueDetailPage() {
                   </Badge>
                   {venue.isVerified && (
                     <Badge className="bg-blue-500 hover:bg-blue-600 text-white gap-1">
-                      <Shield className="h-3 w-3" />
+                      <ShieldIcon className="h-3 w-3" />
                       Verified
                     </Badge>
                   )}
@@ -314,7 +301,7 @@ export default function VenueDetailPage() {
                     {venue.phone && (
                       <Button variant="outline" size="sm" asChild>
                         <a href={`tel:${venue.phone}`}>
-                          <Phone className="h-4 w-4 mr-2" />
+                          <PhoneIcon className="h-4 w-4 mr-2" />
                           Contact
                         </a>
                       </Button>
@@ -326,7 +313,7 @@ export default function VenueDetailPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                   {(venue.address || venue.city) && (
                     <div className="flex items-start gap-3">
-                      <MapPin className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
+                      <MapPinIcon className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
                       <div>
                         <p className="font-semibold text-sm">Location</p>
                         <p className="text-sm text-muted-foreground" data-testid="text-venue-address">
@@ -337,7 +324,7 @@ export default function VenueDetailPage() {
                   )}
                   {venue.hours && (
                     <div className="flex items-start gap-3">
-                      <Clock className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
+                      <ClockIcon className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
                       <div>
                         <p className="font-semibold text-sm">Hours</p>
                         <p className="text-sm text-muted-foreground">{venue.hours}</p>
@@ -346,7 +333,7 @@ export default function VenueDetailPage() {
                   )}
                   {venue.ageRestriction && (
                     <div className="flex items-start gap-3">
-                      <Users className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
+                      <UsersIcon className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
                       <div>
                         <p className="font-semibold text-sm">Age Policy</p>
                         <p className="text-sm text-muted-foreground">{venue.ageRestriction}+ only</p>
@@ -355,7 +342,7 @@ export default function VenueDetailPage() {
                   )}
                   {venue.dressCode && (
                     <div className="flex items-start gap-3">
-                      <Shield className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
+                      <ShieldIcon className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
                       <div>
                         <p className="font-semibold text-sm">Dress Code</p>
                         <p className="text-sm text-muted-foreground">{venue.dressCode}</p>
@@ -364,7 +351,7 @@ export default function VenueDetailPage() {
                   )}
                   {venue.website && (
                     <div className="flex items-start gap-3">
-                      <Globe className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
+                      <GlobeIcon className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
                       <div>
                         <p className="font-semibold text-sm">Website</p>
                         <a
@@ -394,7 +381,7 @@ export default function VenueDetailPage() {
                 {venue.musicTypes && venue.musicTypes.length > 0 && (
                   <div className="mb-6">
                     <h3 className="font-semibold text-sm flex items-center gap-2 mb-3">
-                      <Music className="h-4 w-4 text-primary" />
+                      <MusicIcon className="h-4 w-4 text-primary" />
                       Music
                     </h3>
                     <div className="flex flex-wrap gap-2">
@@ -499,7 +486,7 @@ export default function VenueDetailPage() {
             <Card className="shadow-lg sticky top-4">
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg flex items-center gap-2">
-                  <Ticket className="h-5 w-5 text-primary" />
+                  <TicketIcon className="h-5 w-5 text-primary" />
                   Venue Events
                 </CardTitle>
               </CardHeader>
@@ -511,7 +498,7 @@ export default function VenueDetailPage() {
                   </div>
                 ) : entryNights.length === 0 ? (
                   <div className="text-center py-6">
-                    <Calendar className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
+                    <CalendarIcon className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
                     <p className="text-sm text-muted-foreground">No upcoming events.</p>
                   </div>
                 ) : (
@@ -536,7 +523,7 @@ export default function VenueDetailPage() {
                             />
                           )}
                           <div className="flex items-start gap-2 text-sm text-muted-foreground">
-                            <Calendar className="h-4 w-4 mt-0.5 flex-shrink-0 text-primary" />
+                            <CalendarIcon className="h-4 w-4 mt-0.5 flex-shrink-0 text-primary" />
                             <span>
                               {format(new Date(night.date), "EEE, MMM d 'at' h:mm a")}
                               {ev.endTime && ` — ${format(new Date(ev.endTime), "h:mm a")}`}
@@ -624,7 +611,7 @@ export default function VenueDetailPage() {
       <Dialog open={showSuccess} onOpenChange={setShowSuccess}>
         <DialogContent>
           <div className="text-center py-6">
-            <CheckCircle className="h-16 w-16 mx-auto text-green-500 mb-4" />
+            <CheckCircleIcon className="h-16 w-16 mx-auto text-green-500 mb-4" />
             <DialogTitle className="text-2xl mb-2">Ticket Purchased!</DialogTitle>
             <DialogDescription>
               Your entry ticket has been confirmed. Check your wallet for the QR code.

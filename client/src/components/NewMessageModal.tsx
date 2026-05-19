@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { Search, Send, Calendar, MapPin, Building2, X } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -21,6 +21,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { format } from "date-fns";
 import type { Event, Venue, User } from "@shared/schema";
+import { SearchIcon, SendIcon, CalendarIcon, MapPinIcon, Building2Icon, XIcon } from "@/components/ui/icons";
 
 interface NewMessageModalProps {
   open: boolean;
@@ -164,12 +165,12 @@ export default function NewMessageModal({
                         )}
                         <div className="flex-1 min-w-0">
                           <Badge variant="secondary" className="mb-1 text-xs">
-                            <Calendar className="h-3 w-3 mr-1" />
+                            <CalendarIcon className="h-3 w-3 mr-1" />
                             Event
                           </Badge>
                           <h4 className="font-semibold text-sm line-clamp-1">{attachedEvent.title}</h4>
                           <p className="text-xs text-muted-foreground flex items-center gap-1">
-                            <MapPin className="h-3 w-3" />
+                            <MapPinIcon className="h-3 w-3" />
                             <span className="line-clamp-1">{attachedEvent.location}</span>
                           </p>
                         </div>
@@ -190,13 +191,13 @@ export default function NewMessageModal({
                         )}
                         <div className="flex-1 min-w-0">
                           <Badge variant="secondary" className="mb-1 text-xs">
-                            <Building2 className="h-3 w-3 mr-1" />
+                            <Building2Icon className="h-3 w-3 mr-1" />
                             Venue
                           </Badge>
                           <h4 className="font-semibold text-sm line-clamp-1">{attachedVenue.name}</h4>
                           {attachedVenue.city && (
                             <p className="text-xs text-muted-foreground flex items-center gap-1">
-                              <MapPin className="h-3 w-3" />
+                              <MapPinIcon className="h-3 w-3" />
                               <span className="line-clamp-1">{attachedVenue.city}</span>
                             </p>
                           )}
@@ -210,7 +211,7 @@ export default function NewMessageModal({
             
             <p className="text-sm font-medium mb-2">Select a follower to send to:</p>
             <div className="relative mb-3">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search followers..."
                 value={searchQuery}
@@ -280,7 +281,7 @@ export default function NewMessageModal({
                 onClick={() => setSelectedUser(null)}
                 data-testid="button-change-recipient"
               >
-                <X className="h-4 w-4" />
+                <XIcon className="h-4 w-4" />
               </Button>
             </div>
 
@@ -297,12 +298,12 @@ export default function NewMessageModal({
                     )}
                     <div className="flex-1 min-w-0">
                       <Badge variant="secondary" className="mb-1 text-xs">
-                        <Calendar className="h-3 w-3 mr-1" />
+                        <CalendarIcon className="h-3 w-3 mr-1" />
                         Event
                       </Badge>
                       <h4 className="font-semibold text-sm line-clamp-1">{attachedEvent.title}</h4>
                       <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
-                        <MapPin className="h-3 w-3" />
+                        <MapPinIcon className="h-3 w-3" />
                         <span className="line-clamp-1">{attachedEvent.location}</span>
                       </p>
                     </div>
@@ -324,13 +325,13 @@ export default function NewMessageModal({
                     )}
                     <div className="flex-1 min-w-0">
                       <Badge variant="secondary" className="mb-1 text-xs">
-                        <Building2 className="h-3 w-3 mr-1" />
+                        <Building2Icon className="h-3 w-3 mr-1" />
                         Venue
                       </Badge>
                       <h4 className="font-semibold text-sm line-clamp-1">{attachedVenue.name}</h4>
                       {attachedVenue.city && (
                         <p className="text-xs text-muted-foreground flex items-center gap-1">
-                          <MapPin className="h-3 w-3" />
+                          <MapPinIcon className="h-3 w-3" />
                           <span className="line-clamp-1">{attachedVenue.city}</span>
                         </p>
                       )}
@@ -357,7 +358,7 @@ export default function NewMessageModal({
                 disabled={!message.trim() || sendMessageMutation.isPending}
                 data-testid="button-send-message"
               >
-                <Send className="h-4 w-4 mr-2" />
+                <SendIcon className="h-4 w-4 mr-2" />
                 Send
               </Button>
             </div>

@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import { useState } from "react";
-import { Edit, Trash2, BarChart3, Eye, EyeOff, Calendar, MapPin, QrCode, Megaphone, Sparkles, Download } from "lucide-react";
+
 import { Link } from "wouter";
 import CreateEventModal from "@/components/CreateEventModal";
 import EventDetailsModal from "@/components/EventDetailsModal";
@@ -14,6 +14,7 @@ import { EventAnalytics } from "@/components/EventAnalytics";
 import yogaEvent from '@assets/generated_images/Outdoor_yoga_wellness_event_c02f75d1.png';
 import { useQuery } from "@tanstack/react-query";
 import type { Event as DBEvent } from "@shared/schema";
+import { EditIcon, Trash2Icon, BarChart3Icon, EyeIcon, EyeOffIcon, CalendarIcon, MapPinIcon, QrCodeIcon, MegaphoneIcon, SparklesIcon, DownloadIcon } from "@/components/ui/icons";
 
 interface Event {
   id: string;
@@ -120,7 +121,7 @@ export default function ManageEventsPage() {
           <div className="absolute top-2 right-2 flex flex-col gap-1">
             {event.isPromoted && (
               <Badge className="bg-gradient-to-r from-purple-500 to-pink-500 text-white">
-                <Sparkles className="h-3 w-3 mr-1" />
+                <SparklesIcon className="h-3 w-3 mr-1" />
                 Featured
               </Badge>
             )}
@@ -147,11 +148,11 @@ export default function ManageEventsPage() {
 
         <div className="space-y-1 text-sm text-muted-foreground">
           <p className="flex items-center gap-2" data-testid={`text-event-date-${event.id}`}>
-            <Calendar className="h-4 w-4" />
+            <CalendarIcon className="h-4 w-4" />
             {event.date} at {event.time}
           </p>
           <p className="flex items-center gap-2" data-testid={`text-event-location-${event.id}`}>
-            <MapPin className="h-4 w-4" />
+            <MapPinIcon className="h-4 w-4" />
             {event.location}
           </p>
         </div>
@@ -183,7 +184,7 @@ export default function ManageEventsPage() {
           onClick={() => handleEditEvent(event.id)}
           data-testid={`button-edit-event-${event.id}`}
         >
-          <Edit className="h-4 w-4 mr-2" />
+          <EditIcon className="h-4 w-4 mr-2" />
           Edit
         </Button>
         
@@ -194,7 +195,7 @@ export default function ManageEventsPage() {
           data-testid={`button-check-in-${event.id}`}
         >
           <Link href={`/events/${event.id}/check-in`}>
-            <QrCode className="h-4 w-4 mr-2" />
+            <QrCodeIcon className="h-4 w-4 mr-2" />
             Check-In
           </Link>
         </Button>
@@ -210,7 +211,7 @@ export default function ManageEventsPage() {
             }}
             data-testid={`button-guestlist-${event.id}`}
           >
-            <Download className="h-4 w-4 mr-2" />
+            <DownloadIcon className="h-4 w-4 mr-2" />
             Guestlist
           </Button>
         )}
@@ -224,12 +225,12 @@ export default function ManageEventsPage() {
           >
             {event.isPublished ? (
               <>
-                <EyeOff className="h-4 w-4 mr-2" />
+                <EyeOffIcon className="h-4 w-4 mr-2" />
                 Unpublish
               </>
             ) : (
               <>
-                <Eye className="h-4 w-4 mr-2" />
+                <EyeIcon className="h-4 w-4 mr-2" />
                 Publish
               </>
             )}
@@ -243,7 +244,7 @@ export default function ManageEventsPage() {
             onClick={() => setShowAnalyticsFor(showAnalyticsFor === event.id ? null : event.id)}
             data-testid={`button-view-stats-${event.id}`}
           >
-            <BarChart3 className="h-4 w-4 mr-2" />
+            <BarChart3Icon className="h-4 w-4 mr-2" />
             Stats
           </Button>
         )}
@@ -256,7 +257,7 @@ export default function ManageEventsPage() {
             className="text-purple-600 border-purple-300 hover:bg-purple-50"
             data-testid={`button-promote-${event.id}`}
           >
-            <Megaphone className="h-4 w-4 mr-2" />
+            <MegaphoneIcon className="h-4 w-4 mr-2" />
             Promote
           </Button>
         )}
@@ -267,7 +268,7 @@ export default function ManageEventsPage() {
           onClick={() => handleDeleteEvent(event.id)}
           data-testid={`button-delete-event-${event.id}`}
         >
-          <Trash2 className="h-4 w-4 text-destructive" />
+          <Trash2Icon className="h-4 w-4 text-destructive" />
         </Button>
       </CardFooter>
       

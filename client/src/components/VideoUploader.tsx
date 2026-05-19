@@ -1,10 +1,11 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { X, Film, Upload } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, ensureCsrfToken } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
+import { XIcon, FilmIcon, UploadIcon } from "@/components/ui/icons";
 
 interface VideoUploaderProps {
   onComplete: (objectPath: string) => void;
@@ -182,13 +183,13 @@ export function VideoUploader({
               onClick={handleClear}
               data-testid="button-remove-video"
             >
-              <X className="h-4 w-4" />
+              <XIcon className="h-4 w-4" />
             </Button>
           )}
         </div>
         {videoUrl && (
           <p className="text-xs text-muted-foreground flex items-center gap-1">
-            <Film className="h-3 w-3" />
+            <FilmIcon className="h-3 w-3" />
             Video attached
           </p>
         )}
@@ -207,7 +208,7 @@ export function VideoUploader({
           disabled={isUploading}
           data-testid="button-add-video"
         >
-          <Film className="h-5 w-5 text-primary" />
+          <FilmIcon className="h-5 w-5 text-primary" />
         </Button>
         <input
           ref={fileInputRef}
@@ -236,7 +237,7 @@ export function VideoUploader({
         onClick={() => fileInputRef.current?.click()}
         data-testid="dropzone-video"
       >
-        <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+        <UploadIcon className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
         <p className="text-sm text-muted-foreground mb-1">
           Drag & drop a video or click to browse
         </p>

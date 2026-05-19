@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar, MapPin, Ticket as TicketIcon, QrCode, Loader2 } from "lucide-react";
+
 import { format } from "date-fns";
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
@@ -12,6 +12,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import type { Ticket as TicketType, Event } from "@shared/schema";
+import { CalendarIcon, MapPinIcon, TicketIcon, QrCodeIcon, Loader2Icon } from "@/components/ui/icons";
 
 type TicketWithEvent = TicketType & { event: Event };
 
@@ -31,14 +32,14 @@ function TicketQRCode({ ticketId }: { ticketId: string }) {
         className="w-full"
         data-testid={`button-show-qr-${ticketId}`}
       >
-        <QrCode className="h-4 w-4 mr-2" />
+        <QrCodeIcon className="h-4 w-4 mr-2" />
         {showQR ? "Hide QR Code" : "Show QR Code"}
       </Button>
 
       {showQR && (
         <div className="mt-4 flex flex-col items-center justify-center p-4 bg-background rounded-md border">
           {isLoading ? (
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <Loader2Icon className="h-8 w-8 animate-spin text-primary" />
           ) : qrData?.qrCode ? (
             <div className="space-y-2 flex flex-col items-center">
               {qrData.holderName && (
@@ -130,7 +131,7 @@ export default function TicketWalletPage() {
         </h1>
         {isLoading ? (
           <div className="flex items-center justify-center py-16">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <Loader2Icon className="h-8 w-8 animate-spin text-primary" />
           </div>
         ) : (
           <div className="space-y-6">
@@ -165,13 +166,13 @@ export default function TicketWalletPage() {
                         </CardTitle>
                         <CardDescription className="mt-2">
                           <div className="flex items-center gap-2 mt-1">
-                            <Calendar className="h-4 w-4" />
+                            <CalendarIcon className="h-4 w-4" />
                             <span data-testid={`ticket-date-${ticket.id}`}>
                               {format(new Date(ticket.event.eventDate), "EEEE, MMMM d, yyyy 'at' h:mm a")}
                             </span>
                           </div>
                           <div className="flex items-center gap-2 mt-1">
-                            <MapPin className="h-4 w-4" />
+                            <MapPinIcon className="h-4 w-4" />
                             <span data-testid={`ticket-location-${ticket.id}`}>{ticket.event.location}</span>
                           </div>
                         </CardDescription>
@@ -211,13 +212,13 @@ export default function TicketWalletPage() {
                         </CardTitle>
                         <CardDescription className="mt-2">
                           <div className="flex items-center gap-2 mt-1">
-                            <Calendar className="h-4 w-4" />
+                            <CalendarIcon className="h-4 w-4" />
                             <span data-testid={`ticket-date-${ticket.id}`}>
                               {format(new Date(ticket.event.eventDate), "EEEE, MMMM d, yyyy 'at' h:mm a")}
                             </span>
                           </div>
                           <div className="flex items-center gap-2 mt-1">
-                            <MapPin className="h-4 w-4" />
+                            <MapPinIcon className="h-4 w-4" />
                             <span data-testid={`ticket-location-${ticket.id}`}>{ticket.event.location}</span>
                           </div>
                         </CardDescription>

@@ -6,10 +6,11 @@ import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { LogIn, Eye, EyeOff } from "lucide-react";
+
 import { motion, AnimatePresence } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { LogInIcon, EyeIcon, EyeOffIcon } from "@/components/ui/icons";
 
 const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),
@@ -133,7 +134,7 @@ export default function LoginPage() {
                           data-testid="button-toggle-password"
                           aria-label={showPassword ? "Hide password" : "Show password"}
                         >
-                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          {showPassword ? <EyeOffIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
                         </button>
                       </div>
                     </FormControl>
@@ -175,7 +176,7 @@ export default function LoginPage() {
                         transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
                         className="flex items-center"
                       >
-                        <LogIn className="w-4 h-4 mr-2" />
+                        <LogInIcon className="w-4 h-4 mr-2" />
                         Sign In
                       </motion.span>
                     )}

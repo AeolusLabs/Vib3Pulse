@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Eye, MousePointerClick, Calendar, Ticket, TrendingUp } from "lucide-react";
+
 import { Skeleton } from "@/components/ui/skeleton";
+import { EyeIcon, MousePointerClickIcon, CalendarIcon, TicketIcon, TrendingUpIcon } from "@/components/ui/icons";
 
 interface EventAnalyticsProps {
   eventId: string;
@@ -25,7 +26,7 @@ export function EventAnalytics({ eventId }: EventAnalyticsProps) {
       <Card data-testid="card-analytics-loading">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <TrendingUp className="h-5 w-5" />
+            <TrendingUpIcon className="h-5 w-5" />
             Event Analytics
           </CardTitle>
         </CardHeader>
@@ -83,7 +84,7 @@ export function EventAnalytics({ eventId }: EventAnalyticsProps) {
     <Card data-testid="card-analytics">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <TrendingUp className="h-5 w-5" />
+          <TrendingUpIcon className="h-5 w-5" />
           Event Analytics
         </CardTitle>
       </CardHeader>

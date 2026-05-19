@@ -12,26 +12,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import FeedPost from "@/components/FeedPost";
 import EventDetailsModal from "@/components/EventDetailsModal";
-import {
-  Search,
-  UserPlus,
-  UserCheck,
-  Calendar,
-  MapPin,
-  Users,
-  Building2,
-  FileText,
-  TrendingUp,
-  Sparkles,
-  Heart,
-  Ticket,
-  ChevronRight,
-} from "lucide-react";
+
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { format } from "date-fns";
 import type { User, Event, Post, Venue, Story, VenueEntryNight } from "@shared/schema";
+import { SearchIcon, UserPlusIcon, UserCheckIcon, CalendarIcon, MapPinIcon, UsersIcon, Building2Icon, TrendingUpIcon, SparklesIcon, HeartIcon, TicketIcon, ChevronRightIcon } from "@/components/ui/icons";
+import { FileText } from "lucide-react";
 
 type SearchResults = {
   users: User[];
@@ -243,7 +231,7 @@ export default function SearchPage() {
           <h1 className="text-3xl font-bold font-serif text-foreground mb-4">Search & Discover</h1>
           
           <div className="relative mb-4">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+            <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
             <Input
               type="text"
               placeholder="Search users, events, venues, posts..."
@@ -281,7 +269,7 @@ export default function SearchPage() {
               </div>
             ) : !hasSearchResults ? (
               <div className="text-center py-12">
-                <Search className="h-16 w-16 mx-auto text-muted-foreground/30 mb-4" />
+                <SearchIcon className="h-16 w-16 mx-auto text-muted-foreground/30 mb-4" />
                 <p className="text-muted-foreground">No results found for "{debouncedQuery}"</p>
                 <p className="text-sm text-muted-foreground mt-1">Try different keywords or filters</p>
               </div>
@@ -315,14 +303,14 @@ export default function SearchPage() {
 
                 <TabsContent value="all" className="space-y-6">
                   {searchResults.users.length > 0 && (
-                    <SearchResultSection title="Users" icon={Users}>
+                    <SearchResultSection title="Users" icon={UsersIcon}>
                       {searchResults.users.map((user) => (
                         <UserResultCard key={user.id} user={user} sessionUser={currentUser} isFollowing={followingIds.has(user.id)} onFollowToggle={handleFollowToggle} navigate={navigate} />
                       ))}
                     </SearchResultSection>
                   )}
                   {(searchResults.events.length > 0 || searchResults.venueEvents.length > 0) && (
-                    <SearchResultSection title="Events" icon={Calendar}>
+                    <SearchResultSection title="Events" icon={CalendarIcon}>
                       {searchResults.events.map((event) => (
                         <EventResultCard key={`event-${event.id}`} event={event} navigate={navigate} />
                       ))}
@@ -332,7 +320,7 @@ export default function SearchPage() {
                     </SearchResultSection>
                   )}
                   {searchResults.venues.length > 0 && (
-                    <SearchResultSection title="Venues" icon={Building2}>
+                    <SearchResultSection title="Venues" icon={Building2Icon}>
                       {searchResults.venues.map((venue) => (
                         <VenueResultCard key={venue.id} venue={venue} navigate={navigate} />
                       ))}
@@ -383,7 +371,7 @@ export default function SearchPage() {
               <section data-testid="section-recommended-users">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-semibold font-serif flex items-center gap-2">
-                    <Users className="h-5 w-5 text-primary" />
+                    <UsersIcon className="h-5 w-5 text-primary" />
                     Recommended for You
                   </h2>
                   <p className="text-sm text-muted-foreground">Based on your interests & location</p>
@@ -410,7 +398,7 @@ export default function SearchPage() {
                 ) : (
                   <div className="flex flex-col items-center justify-center py-12 text-center">
                     <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center mb-3">
-                      <Users className="h-6 w-6 text-primary/50" />
+                      <UsersIcon className="h-6 w-6 text-primary/50" />
                     </div>
                     <p className="text-muted-foreground text-sm font-medium">No recommendations yet</p>
                     <p className="text-xs text-muted-foreground mt-1">
@@ -426,7 +414,7 @@ export default function SearchPage() {
               <section>
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-semibold font-serif flex items-center gap-2">
-                    <Sparkles className="h-5 w-5 text-primary" />
+                    <SparklesIcon className="h-5 w-5 text-primary" />
                     {activeType === "users" ? "More Users to Follow" : "Suggested for You"}
                   </h2>
                 </div>
@@ -458,11 +446,11 @@ export default function SearchPage() {
               <section>
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-semibold font-serif flex items-center gap-2">
-                    <TrendingUp className="h-5 w-5 text-primary" />
+                    <TrendingUpIcon className="h-5 w-5 text-primary" />
                     Trending Events
                   </h2>
                   <Button variant="ghost" size="sm" onClick={() => navigate('/discover')} data-testid="link-view-all-events">
-                    View all <ChevronRight className="h-4 w-4 ml-1" />
+                    View all <ChevronRightIcon className="h-4 w-4 ml-1" />
                   </Button>
                 </div>
                 <ScrollArea className="w-full whitespace-nowrap">
@@ -486,7 +474,7 @@ export default function SearchPage() {
               <section>
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-semibold font-serif flex items-center gap-2">
-                    <Calendar className="h-5 w-5 text-primary" />
+                    <CalendarIcon className="h-5 w-5 text-primary" />
                     All Events
                   </h2>
                 </div>
@@ -506,7 +494,7 @@ export default function SearchPage() {
               <section>
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-semibold font-serif flex items-center gap-2">
-                    <Building2 className="h-5 w-5 text-primary" />
+                    <Building2Icon className="h-5 w-5 text-primary" />
                     Popular Venues
                   </h2>
                 </div>
@@ -531,11 +519,11 @@ export default function SearchPage() {
               <section>
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-semibold font-serif flex items-center gap-2">
-                    <Heart className="h-5 w-5 text-primary" />
+                    <HeartIcon className="h-5 w-5 text-primary" />
                     Trending Posts
                   </h2>
                   <Button variant="ghost" size="sm" onClick={() => navigate('/feed')} data-testid="link-view-all-posts">
-                    View all <ChevronRight className="h-4 w-4 ml-1" />
+                    View all <ChevronRightIcon className="h-4 w-4 ml-1" />
                   </Button>
                 </div>
                 <div className="space-y-3">
@@ -624,9 +612,9 @@ function UserResultCard({ user, sessionUser, isFollowing, onFollowToggle, naviga
           data-testid={`button-follow-${user.id}`}
         >
           {isFollowing ? (
-            <span className="flex items-center gap-1"><UserCheck className="h-3 w-3" />Following</span>
+            <span className="flex items-center gap-1"><UserCheckIcon className="h-3 w-3" />Following</span>
           ) : (
-            <span className="flex items-center gap-1"><UserPlus className="h-3 w-3" />Follow</span>
+            <span className="flex items-center gap-1"><UserPlusIcon className="h-3 w-3" />Follow</span>
           )}
         </button>
       )}
@@ -658,7 +646,7 @@ function EventResultCard({ event, navigate }: { event: Event & { organizer?: Use
       <div className="p-3">
         <h4 className="font-semibold text-sm text-foreground truncate mb-1">{event.title}</h4>
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1 truncate"><MapPin className="h-3 w-3 flex-shrink-0" />{event.location}</span>
+          <span className="flex items-center gap-1 truncate"><MapPinIcon className="h-3 w-3 flex-shrink-0" />{event.location}</span>
           <span className="flex-shrink-0 px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">{event.category}</span>
         </div>
       </div>
@@ -690,7 +678,7 @@ function VenueEventResultCard({ venueEvent, navigate }: { venueEvent: VenueEntry
         <h4 className="font-semibold text-sm text-foreground truncate mb-1">{venueEvent.name}</h4>
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
           {venueEvent.venue?.name && (
-            <span className="flex items-center gap-1 truncate"><Building2 className="h-3 w-3 flex-shrink-0" />{venueEvent.venue.name}</span>
+            <span className="flex items-center gap-1 truncate"><Building2Icon className="h-3 w-3 flex-shrink-0" />{venueEvent.venue.name}</span>
           )}
           <span className="flex-shrink-0 px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">Venue Event</span>
         </div>
@@ -716,7 +704,7 @@ function VenueResultCard({ venue, navigate }: { venue: Venue; navigate: (path: s
       <div className="p-3">
         <h4 className="font-semibold text-sm text-foreground truncate mb-1">{venue.name}</h4>
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
-          <MapPin className="h-3 w-3 flex-shrink-0" />
+          <MapPinIcon className="h-3 w-3 flex-shrink-0" />
           <span className="truncate">{venue.city || venue.location}</span>
         </div>
       </div>
@@ -781,9 +769,9 @@ function SuggestedUserCard({ user, isFollowing, onFollowToggle, isPending, navig
           data-testid={`button-follow-suggested-${user.id}`}
         >
           {isFollowing ? (
-            <span className="flex items-center justify-center gap-1"><UserCheck className="h-3 w-3" />Following</span>
+            <span className="flex items-center justify-center gap-1"><UserCheckIcon className="h-3 w-3" />Following</span>
           ) : (
-            <span className="flex items-center justify-center gap-1"><UserPlus className="h-3 w-3" />Follow</span>
+            <span className="flex items-center justify-center gap-1"><UserPlusIcon className="h-3 w-3" />Follow</span>
           )}
         </button>
       </div>
@@ -803,7 +791,7 @@ function TrendingEventCard({ event, onSelect }: { event: TrendingEvent; onSelect
           <img src={event.imageUrl} alt={event.title} className="w-full h-full object-cover" />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-violet-900/40 to-purple-900/20">
-            <Calendar className="h-8 w-8 text-violet-400/50" />
+            <CalendarIcon className="h-8 w-8 text-violet-400/50" />
           </div>
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
@@ -819,12 +807,12 @@ function TrendingEventCard({ event, onSelect }: { event: TrendingEvent; onSelect
       <div className="p-3">
         <h4 className="font-semibold text-sm text-foreground truncate mb-1">{event.title}</h4>
         <div className="flex items-center gap-1 text-xs text-muted-foreground mb-2">
-          <MapPin className="h-3 w-3 flex-shrink-0" />
+          <MapPinIcon className="h-3 w-3 flex-shrink-0" />
           <span className="truncate">{event.location}</span>
         </div>
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1"><Users className="h-3 w-3" />{event.rsvpCount} RSVPs</span>
-          <span className="flex items-center gap-1"><Ticket className="h-3 w-3" />{event.ticketCount} sold</span>
+          <span className="flex items-center gap-1"><UsersIcon className="h-3 w-3" />{event.rsvpCount} RSVPs</span>
+          <span className="flex items-center gap-1"><TicketIcon className="h-3 w-3" />{event.ticketCount} sold</span>
         </div>
       </div>
     </div>
@@ -843,7 +831,7 @@ function TrendingVenueCard({ venue, navigate }: { venue: TrendingVenue; navigate
           <img src={venue.imageUrl} alt={venue.name} className="w-full h-full object-cover" />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-800/60 to-slate-900/40">
-            <Building2 className="h-8 w-8 text-slate-400/50" />
+            <Building2Icon className="h-8 w-8 text-slate-400/50" />
           </div>
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
@@ -853,7 +841,7 @@ function TrendingVenueCard({ venue, navigate }: { venue: TrendingVenue; navigate
         <h4 className="font-semibold text-sm text-foreground truncate mb-1">{venue.name}</h4>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1 text-xs text-muted-foreground truncate">
-            <MapPin className="h-3 w-3 flex-shrink-0" />
+            <MapPinIcon className="h-3 w-3 flex-shrink-0" />
             <span className="truncate">{venue.city || venue.location}</span>
           </div>
           <span className="text-xs text-muted-foreground flex-shrink-0 ml-2">{venue.viewCount} views</span>

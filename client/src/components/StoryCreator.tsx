@@ -10,10 +10,7 @@
  */
 
 import { useState, useRef, useEffect, useCallback, useReducer } from "react";
-import {
-  X, RefreshCw, Zap, ZapOff, Type, Check, Pencil,
-  Sparkles, Globe, Lock, Users, Send, ImageIcon, ChevronLeft,
-} from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -23,6 +20,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { User } from "@shared/schema";
+import { XIcon, RefreshCwIcon, ZapIcon, ZapOffIcon, TypeIcon, CheckIcon, PencilIcon, SparklesIcon, GlobeIcon, LockIcon, UsersIcon, SendIcon, ImageIcon, ChevronLeftIcon } from "@/components/ui/icons";
 
 // ─── design tokens ───────────────────────────────────────────────────────────
 
@@ -820,7 +818,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                 className="w-11 h-11 rounded-full bg-black/30 backdrop-blur-sm flex items-center justify-center text-white active:scale-95 transition-transform duration-100"
                 aria-label="Close"
               >
-                <X className="h-5 w-5" />
+                <XIcon className="h-5 w-5" />
               </button>
 
               <div className="flex gap-2">
@@ -830,8 +828,8 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                   aria-label="Toggle flash"
                 >
                   {flashEnabled
-                    ? <Zap className="h-5 w-5" style={{ color: "#FFD700" }} />
-                    : <ZapOff className="h-5 w-5 opacity-70" />
+                    ? <ZapIcon className="h-5 w-5" style={{ color: "#FFD700" }} />
+                    : <ZapOffIcon className="h-5 w-5 opacity-70" />
                   }
                 </button>
                 <button
@@ -839,7 +837,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                   className="w-11 h-11 rounded-full bg-black/30 backdrop-blur-sm flex items-center justify-center text-white active:scale-95 transition-transform duration-100"
                   aria-label="Flip camera"
                 >
-                  <RefreshCw className="h-5 w-5" />
+                  <RefreshCwIcon className="h-5 w-5" />
                 </button>
               </div>
             </div>
@@ -1008,7 +1006,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                   }}
                   aria-label="Filters"
                 >
-                  <Sparkles className="h-6 w-6" style={{ color: activeTool === "filter" ? "#C4B0FF" : "rgba(255,255,255,0.8)" }} />
+                  <SparklesIcon className="h-6 w-6" style={{ color: activeTool === "filter" ? "#C4B0FF" : "rgba(255,255,255,0.8)" }} />
                 </button>
               </div>
 
@@ -1072,17 +1070,17 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                 className="w-11 h-11 rounded-full bg-black/30 backdrop-blur-sm flex items-center justify-center text-white active:scale-95 transition-transform duration-100"
                 aria-label="Retake"
               >
-                <ChevronLeft className="h-5 w-5" />
+                <ChevronLeftIcon className="h-5 w-5" />
               </button>
 
               {/* right tool strip (photos only) */}
               {mediaKind === "photo" && (
                 <div className="flex flex-col gap-2">
                   {[
-                    { tool: "text" as ActiveTool,   icon: <Type    className="h-4.5 w-4.5" />, label: "Text"    },
-                    { tool: "draw" as ActiveTool,   icon: <Pencil  className="h-4.5 w-4.5" />, label: "Draw"    },
-                    { tool: "filter" as ActiveTool, icon: <Sparkles className="h-4.5 w-4.5" />, label: "Filters" },
-                    { tool: "vibe" as ActiveTool,   icon: <Zap     className="h-4.5 w-4.5" />, label: "Vibe"    },
+                    { tool: "text" as ActiveTool,   icon: <TypeIcon    className="h-4.5 w-4.5" />, label: "Text"    },
+                    { tool: "draw" as ActiveTool,   icon: <PencilIcon  className="h-4.5 w-4.5" />, label: "Draw"    },
+                    { tool: "filter" as ActiveTool, icon: <SparklesIcon className="h-4.5 w-4.5" />, label: "Filters" },
+                    { tool: "vibe" as ActiveTool,   icon: <ZapIcon     className="h-4.5 w-4.5" />, label: "Vibe"    },
                   ].map(({ tool, icon, label }) => (
                     <button
                       key={tool}
@@ -1165,7 +1163,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                       <button onClick={e => { e.stopPropagation(); removeText(ov.id); }}
                         className="absolute -top-3 -right-3 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center"
                         aria-label="Remove text">
-                        <X className="h-3 w-3 text-white" />
+                        <XIcon className="h-3 w-3 text-white" />
                       </button>
                     )}
                   </div>
@@ -1227,7 +1225,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                     <button onClick={addText} disabled={!newTextValue.trim()}
                       className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 font-bold disabled:opacity-30"
                       style={{ backgroundColor: "#C4B0FF", color: "#000" }}>
-                      <Check className="h-5 w-5" />
+                      <CheckIcon className="h-5 w-5" />
                     </button>
                   </div>
                   <div className="flex items-center gap-3">
@@ -1359,7 +1357,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                     >
                       {isAnalyzingVibe
                         ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Detecting…</>
-                        : <><Sparkles className="h-4 w-4" /> Auto Detect</>
+                        : <><SparklesIcon className="h-4 w-4" /> Auto Detect</>
                       }
                     </button>
                     {/* remove / cancel */}
@@ -1403,8 +1401,8 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                       style={{ backgroundColor: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.12)" }}
                     >
                       {privacy === "public"
-                        ? <><Globe className="h-3.5 w-3.5" /> Public</>
-                        : <><Lock className="h-3.5 w-3.5" style={{ color: "#FFD700" }} /> {selectedViewers.length > 0 ? `${selectedViewers.length} viewers` : "Private"}</>
+                        ? <><GlobeIcon className="h-3.5 w-3.5" /> Public</>
+                        : <><LockIcon className="h-3.5 w-3.5" style={{ color: "#FFD700" }} /> {selectedViewers.length > 0 ? `${selectedViewers.length} viewers` : "Private"}</>
                       }
                     </button>
 
@@ -1424,7 +1422,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                       ) : createStoryMutation.isPending ? (
                         <><div className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin" />Posting…</>
                       ) : (
-                        <><Send className="h-4 w-4" />Your Story</>
+                        <><SendIcon className="h-4 w-4" />Your Story</>
                       )}
                     </button>
                   </div>
@@ -1445,7 +1443,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                       <p className="text-white/40 text-xs mt-0.5">Select specific followers</p>
                     </div>
                     <Button variant="ghost" size="icon" onClick={() => setShowViewerSheet(false)} className="text-white hover:bg-white/10">
-                      <X className="h-5 w-5" />
+                      <XIcon className="h-5 w-5" />
                     </Button>
                   </div>
                   <div className="flex gap-4 px-5 py-2.5 border-b border-white/5">
@@ -1474,13 +1472,13 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                               <p className="text-white text-sm font-medium truncate">{follower.displayName || follower.username}</p>
                               <p className="text-white/35 text-xs">@{follower.username}</p>
                             </div>
-                            {selectedViewers.includes(follower.id) && <Check className="h-4 w-4 shrink-0" style={{ color: "#C4B0FF" }} />}
+                            {selectedViewers.includes(follower.id) && <CheckIcon className="h-4 w-4 shrink-0" style={{ color: "#C4B0FF" }} />}
                           </div>
                         ))}
                       </div>
                     ) : (
                       <div className="flex flex-col items-center py-16 gap-3" style={{ color: "rgba(255,255,255,0.2)" }}>
-                        <Users className="h-12 w-12" />
+                        <UsersIcon className="h-12 w-12" />
                         <p className="text-sm">No followers yet</p>
                       </div>
                     )}

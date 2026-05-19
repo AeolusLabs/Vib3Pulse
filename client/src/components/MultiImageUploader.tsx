@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback } from "react";
-import { X, ImagePlus, Upload } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { XIcon, ImagePlusIcon, UploadIcon } from "@/components/ui/icons";
 
 interface MultiImageUploaderProps {
   maxImages: number;
@@ -89,7 +90,7 @@ export function MultiImageUploader({
                   onClick={() => removeImage(index)}
                   data-testid={`button-remove-image-${index}`}
                 >
-                  <X className="h-4 w-4" />
+                  <XIcon className="h-4 w-4" />
                 </Button>
               </div>
             ))}
@@ -105,7 +106,7 @@ export function MultiImageUploader({
               onClick={() => fileInputRef.current?.click()}
               data-testid="button-add-image"
             >
-              <ImagePlus className="h-5 w-5 text-primary" />
+              <ImagePlusIcon className="h-5 w-5 text-primary" />
             </Button>
             <input
               ref={fileInputRef}
@@ -148,7 +149,7 @@ export function MultiImageUploader({
                 onClick={() => removeImage(index)}
                 data-testid={`button-remove-image-${index}`}
               >
-                <X className="h-4 w-4" />
+                <XIcon className="h-4 w-4" />
               </Button>
             </div>
           ))}
@@ -169,7 +170,7 @@ export function MultiImageUploader({
           onClick={() => fileInputRef.current?.click()}
           data-testid="dropzone-images"
         >
-          <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+          <UploadIcon className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
           <p className="text-sm text-muted-foreground mb-1">
             Drag & drop images or click to browse
           </p>

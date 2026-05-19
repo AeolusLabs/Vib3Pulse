@@ -8,24 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import {
-  Camera,
-  CheckCircle2,
-  XCircle,
-  Loader2,
-  ArrowLeft,
-  Users,
-  ShieldCheck,
-  Plus,
-  Trash2,
-  LogOut,
-  ScanLine,
-  UserCheck,
-  Copy,
-  QrCode as QrCodeIcon,
-  Download,
-  Link as LinkIcon,
-} from "lucide-react";
+
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, ensureCsrfToken } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
@@ -33,6 +16,8 @@ import { format } from "date-fns";
 import type { Event, Ticket, User, EventStaffAccessCode } from "@shared/schema";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
+import { CameraIcon, CheckCircle2Icon, XCircleIcon, Loader2Icon, ArrowLeftIcon, UsersIcon, ShieldCheckIcon, PlusIcon, Trash2Icon, LogOutIcon, ScanLineIcon, UserCheckIcon, CopyIcon, QrCodeIcon, DownloadIcon } from "@/components/ui/icons";
+import { Link } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -85,7 +70,7 @@ function DetectingSpinner() {
   return (
     <div className="min-h-screen flex items-center justify-center">
       <div className="flex flex-col items-center gap-3">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <Loader2Icon className="h-8 w-8 animate-spin text-primary" />
         <p className="text-sm text-muted-foreground">Loading check-in…</p>
       </div>
     </div>
@@ -171,7 +156,7 @@ function CodeEntryForm({
         />
       </div>
       <Button type="submit" className="w-full" disabled={loading} data-testid="button-staff-activate">
-        {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <ShieldCheck className="h-4 w-4 mr-2" />}
+        {loading ? <Loader2Icon className="h-4 w-4 animate-spin mr-2" /> : <ShieldCheckIcon className="h-4 w-4 mr-2" />}
         Activate Scanner
       </Button>
     </form>
@@ -196,7 +181,7 @@ function SelectionView({
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <div className="border-b px-4 py-3 flex items-center gap-3">
-        <ShieldCheck className="h-5 w-5 text-primary" />
+        <ShieldCheckIcon className="h-5 w-5 text-primary" />
         <div>
           <p className="font-semibold text-sm">Event Check-In</p>
           {eventTitle && <p className="text-xs text-muted-foreground truncate max-w-[240px]">{eventTitle}</p>}
@@ -218,7 +203,7 @@ function SelectionView({
           >
             <CardContent className="flex items-center gap-4 p-5">
               <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                <UserCheck className="h-5 w-5 text-primary" />
+                <UserCheckIcon className="h-5 w-5 text-primary" />
               </div>
               <div>
                 <p className="font-medium">I'm the organiser</p>
@@ -238,7 +223,7 @@ function SelectionView({
                 onClick={() => !showCodeEntry && setShowCodeEntry(true)}
               >
                 <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                  <ScanLine className="h-5 w-5 text-primary" />
+                  <ScanLineIcon className="h-5 w-5 text-primary" />
                 </div>
                 <div>
                   <p className="font-medium">I'm staff / door</p>
@@ -340,7 +325,7 @@ function StaffScannerView({
       <div className="border-b px-4 py-3 flex items-center justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <ShieldCheck className="h-4 w-4 text-primary flex-shrink-0" />
+            <ShieldCheckIcon className="h-4 w-4 text-primary flex-shrink-0" />
             <span className="font-semibold text-sm truncate">{session.eventTitle}</span>
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
@@ -350,7 +335,7 @@ function StaffScannerView({
         <div className="flex items-center gap-2 flex-shrink-0">
           <Badge variant="secondary">{scanCount} scanned</Badge>
           <Button variant="ghost" size="icon" onClick={onLogout} title="Exit scanner" data-testid="button-staff-logout">
-            <LogOut className="h-4 w-4" />
+            <LogOutIcon className="h-4 w-4" />
           </Button>
         </div>
       </div>
@@ -359,7 +344,7 @@ function StaffScannerView({
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <ScanLine className="h-5 w-5" />
+              <ScanLineIcon className="h-5 w-5" />
               Scan Tickets
             </CardTitle>
           </CardHeader>
@@ -372,9 +357,9 @@ function StaffScannerView({
 
             {!isScanning && (
               <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-md">
-                <Camera className="h-12 w-12 text-muted-foreground mb-4" />
+                <CameraIcon className="h-12 w-12 text-muted-foreground mb-4" />
                 <Button onClick={startScanning} data-testid="button-staff-start-scan">
-                  <Camera className="h-4 w-4 mr-2" />
+                  <CameraIcon className="h-4 w-4 mr-2" />
                   Start Scanner
                 </Button>
               </div>
@@ -396,9 +381,9 @@ function StaffScannerView({
                 data-testid="staff-scan-result"
               >
                 {scanResult.success ? (
-                  <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0" />
+                  <CheckCircle2Icon className="h-5 w-5 text-green-600 flex-shrink-0" />
                 ) : (
-                  <XCircle className="h-5 w-5 text-red-600 flex-shrink-0" />
+                  <XCircleIcon className="h-5 w-5 text-red-600 flex-shrink-0" />
                 )}
                 <div>
                   <p className={`font-medium ${scanResult.success ? "text-green-900 dark:text-green-100" : "text-red-900 dark:text-red-100"}`}>
@@ -568,7 +553,7 @@ function OrganizerView({
       <main className="container px-4 py-6 max-w-4xl mx-auto space-y-6">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <Button variant="ghost" size="sm" onClick={() => navigate("/manage-events")} data-testid="button-back">
-            <ArrowLeft className="h-4 w-4 mr-2" />
+            <ArrowLeftIcon className="h-4 w-4 mr-2" />
             Back to Events
           </Button>
           <button
@@ -588,7 +573,7 @@ function OrganizerView({
             {event && <p className="text-muted-foreground mt-1">{event.title}</p>}
           </div>
           <Badge variant="secondary" className="text-sm px-3 py-1" data-testid="badge-check-in-count">
-            <Users className="h-4 w-4 mr-1" />
+            <UsersIcon className="h-4 w-4 mr-1" />
             {checkedInTickets.length} / {totalTickets} checked in
           </Badge>
         </div>
@@ -608,10 +593,10 @@ function OrganizerView({
               />
               {!isScanning && (
                 <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-md">
-                  <Camera className="h-12 w-12 text-muted-foreground mb-4" />
+                  <CameraIcon className="h-12 w-12 text-muted-foreground mb-4" />
                   <p className="text-sm text-muted-foreground mb-4">Click below to start scanning tickets</p>
                   <Button onClick={startScanning} disabled={validateMutation.isPending} data-testid="button-start-scan">
-                    <Camera className="h-4 w-4 mr-2" />
+                    <CameraIcon className="h-4 w-4 mr-2" />
                     Start Scanner
                   </Button>
                 </div>
@@ -634,9 +619,9 @@ function OrganizerView({
                 data-testid="scan-result"
               >
                 {scanResult.success ? (
-                  <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
+                  <CheckCircle2Icon className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
                 ) : (
-                  <XCircle className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0" />
+                  <XCircleIcon className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0" />
                 )}
                 <div className="flex-1">
                   <p className={`font-medium ${scanResult.success ? "text-green-900 dark:text-green-100" : "text-red-900 dark:text-red-100"}`}>
@@ -653,7 +638,7 @@ function OrganizerView({
 
             {validateMutation.isPending && (
               <div className="flex items-center justify-center p-4">
-                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                <Loader2Icon className="h-6 w-6 animate-spin text-primary" />
                 <span className="ml-2">Validating ticket…</span>
               </div>
             )}
@@ -678,7 +663,7 @@ function OrganizerView({
                 a.click();
               }}
             >
-              <Download className="h-4 w-4 mr-2" />
+              <DownloadIcon className="h-4 w-4 mr-2" />
               Download CSV
             </Button>
           </CardHeader>
@@ -699,7 +684,7 @@ function OrganizerView({
                         Checked in: {ticket.checkedInAt && format(new Date(ticket.checkedInAt), "h:mm a")}
                       </p>
                     </div>
-                    <CheckCircle2 className="h-5 w-5 text-green-600" />
+                    <CheckCircle2Icon className="h-5 w-5 text-green-600" />
                   </div>
                 ))}
               </div>
@@ -713,7 +698,7 @@ function OrganizerView({
             <div className="flex items-center justify-between gap-3">
               <div>
                 <CardTitle className="flex items-center gap-2">
-                  <ShieldCheck className="h-5 w-5" />
+                  <ShieldCheckIcon className="h-5 w-5" />
                   Staff Access
                 </CardTitle>
                 <CardDescription>
@@ -727,9 +712,9 @@ function OrganizerView({
                 data-testid="button-generate-staff-code"
               >
                 {generateCodeMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2Icon className="h-4 w-4 animate-spin" />
                 ) : (
-                  <Plus className="h-4 w-4 mr-1" />
+                  <PlusIcon className="h-4 w-4 mr-1" />
                 )}
                 New Code
               </Button>
@@ -754,7 +739,7 @@ function OrganizerView({
                   toast({ title: "Link copied", description: "Share this with your door staff." });
                 }}
               >
-                <Copy className="h-3.5 w-3.5" />
+                <CopyIcon className="h-3.5 w-3.5" />
               </Button>
             </div>
 
@@ -827,7 +812,7 @@ function OrganizerView({
                             title="Revoke access"
                             data-testid={`button-revoke-${sc.id}`}
                           >
-                            <Trash2 className="h-4 w-4" />
+                            <Trash2Icon className="h-4 w-4" />
                           </Button>
                         )}
                       </div>
@@ -852,7 +837,7 @@ function OrganizerView({
                             onClick={() => handleDownloadQR(sc)}
                             data-testid={`button-download-qr-${sc.id}`}
                           >
-                            <Download className="h-4 w-4 mr-2" />
+                            <DownloadIcon className="h-4 w-4 mr-2" />
                             Download
                           </Button>
                           <Button
@@ -866,7 +851,7 @@ function OrganizerView({
                             }}
                             data-testid={`button-copy-code-link-${sc.id}`}
                           >
-                            <Copy className="h-4 w-4 mr-2" />
+                            <CopyIcon className="h-4 w-4 mr-2" />
                             Copy link
                           </Button>
                         </div>

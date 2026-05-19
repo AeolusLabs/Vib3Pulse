@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Play, Pause, Volume2, VolumeX, Maximize, Minimize } from "lucide-react";
+
 import { cn } from "@/lib/utils";
+import { PlayIcon, PauseIcon, Volume2Icon, VolumeXIcon, MaximizeIcon, MinimizeIcon } from "@/components/ui/icons";
 
 interface FeedVideoPlayerProps {
   src: string;
@@ -233,9 +234,9 @@ export default function FeedVideoPlayer({
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
           <div className="bg-black/50 rounded-full p-4 animate-ping-once">
             {isPlaying ? (
-              <Play className="h-10 w-10 text-white fill-white" />
+              <PlayIcon className="h-10 w-10 text-white fill-white" />
             ) : (
-              <Pause className="h-10 w-10 text-white fill-white" />
+              <PauseIcon className="h-10 w-10 text-white fill-white" />
             )}
           </div>
         </div>
@@ -246,7 +247,7 @@ export default function FeedVideoPlayer({
           className="absolute inset-0 flex items-center justify-center pointer-events-none z-10"
         >
           <div className="bg-black/40 rounded-full p-5">
-            <Play className="h-12 w-12 text-white fill-white" />
+            <PlayIcon className="h-12 w-12 text-white fill-white" />
           </div>
         </div>
       )}
@@ -258,7 +259,7 @@ export default function FeedVideoPlayer({
           className="absolute top-2 left-2 z-20 flex items-center gap-1 bg-black/60 hover:bg-black/80 text-white text-xs font-medium px-2 py-1 rounded-full transition-colors pointer-events-auto"
           aria-label="Tap to unmute"
         >
-          <VolumeX className="h-3 w-3" />
+          <VolumeXIcon className="h-3 w-3" />
           <span>Muted</span>
         </button>
       )}
@@ -302,9 +303,9 @@ export default function FeedVideoPlayer({
               data-testid="button-play-pause"
             >
               {isPlaying ? (
-                <Pause className="h-4 w-4 fill-white" />
+                <PauseIcon className="h-4 w-4 fill-white" />
               ) : (
-                <Play className="h-4 w-4 fill-white" />
+                <PlayIcon className="h-4 w-4 fill-white" />
               )}
             </button>
             <span className="text-xs text-white/80 font-mono tabular-nums" data-testid="video-time">
@@ -319,9 +320,9 @@ export default function FeedVideoPlayer({
               data-testid="button-mute-toggle"
             >
               {isMuted ? (
-                <VolumeX className="h-4 w-4" />
+                <VolumeXIcon className="h-4 w-4" />
               ) : (
-                <Volume2 className="h-4 w-4" />
+                <Volume2Icon className="h-4 w-4" />
               )}
             </button>
             <button
@@ -330,9 +331,9 @@ export default function FeedVideoPlayer({
               data-testid="button-fullscreen"
             >
               {isFullscreen ? (
-                <Minimize className="h-4 w-4" />
+                <MinimizeIcon className="h-4 w-4" />
               ) : (
-                <Maximize className="h-4 w-4" />
+                <MaximizeIcon className="h-4 w-4" />
               )}
             </button>
           </div>
@@ -351,9 +352,9 @@ export default function FeedVideoPlayer({
         data-testid="button-mute-corner"
       >
         {isMuted ? (
-          <VolumeX className="h-4 w-4" />
+          <VolumeXIcon className="h-4 w-4" />
         ) : (
-          <Volume2 className="h-4 w-4" />
+          <Volume2Icon className="h-4 w-4" />
         )}
       </button>
 

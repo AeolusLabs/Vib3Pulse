@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ExternalLink } from "lucide-react";
+import { ExternalLinkIcon } from "@/components/ui/icons";
 
 interface LinkPreviewMetadata {
   url: string;
@@ -96,7 +96,7 @@ export default function LinkPreviewCard({ url }: LinkPreviewCardProps) {
               />
             )}
             <span className="truncate">{preview.domain}</span>
-            <ExternalLink className="w-3 h-3 shrink-0 opacity-50" />
+            <ExternalLinkIcon className="w-3 h-3 shrink-0 opacity-50" />
           </div>
         </div>
       </div>

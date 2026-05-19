@@ -1,8 +1,9 @@
-import { Search } from "lucide-react";
+
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
+import { SearchIcon } from "@/components/ui/icons";
 
 interface HeroSectionProps {
   onSearch?: (query: string) => void;
@@ -31,7 +32,7 @@ export default function HeroSection({ onSearch, onCategoryClick }: HeroSectionPr
 
         <div className="max-w-xl mx-auto mb-6">
           <div className="relative">
-            <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+            <SearchIcon className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground" />
             <Input
               type="search"
               placeholder="Search for events, organizers, or categories..."

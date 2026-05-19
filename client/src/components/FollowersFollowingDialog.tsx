@@ -13,8 +13,9 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Users, UserPlus } from "lucide-react";
+
 import type { User } from "@shared/schema";
+import { UsersIcon, UserPlusIcon } from "@/components/ui/icons";
 
 type FollowUser = Pick<User, "id" | "username" | "displayName" | "organizationName" | "userType">;
 
@@ -73,7 +74,7 @@ function EmptyState({ type }: { type: "followers" | "following" }) {
     <div className="flex flex-col items-center justify-center py-12 text-center">
       {type === "followers" ? (
         <>
-          <Users className="h-12 w-12 text-muted-foreground/50 mb-4" />
+          <UsersIcon className="h-12 w-12 text-muted-foreground/50 mb-4" />
           <p className="text-muted-foreground font-medium">No followers yet</p>
           <p className="text-sm text-muted-foreground mt-1">
             When people follow this account, they'll appear here
@@ -81,7 +82,7 @@ function EmptyState({ type }: { type: "followers" | "following" }) {
         </>
       ) : (
         <>
-          <UserPlus className="h-12 w-12 text-muted-foreground/50 mb-4" />
+          <UserPlusIcon className="h-12 w-12 text-muted-foreground/50 mb-4" />
           <p className="text-muted-foreground font-medium">Not following anyone</p>
           <p className="text-sm text-muted-foreground mt-1">
             When this account follows people, they'll appear here

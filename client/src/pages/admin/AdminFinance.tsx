@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { PoundSterling, Ticket, TrendingUp, CreditCard, Info } from "lucide-react";
+
 import AdminLayout from "./AdminLayout";
 import { Badge } from "@/components/ui/badge";
+import { PoundSterlingIcon, TicketIcon, TrendingUpIcon, CreditCardIcon, InfoIcon } from "@/components/ui/icons";
 
 interface FinanceOverview {
   totalRevenue: number;
@@ -18,14 +19,14 @@ export default function AdminFinance() {
     {
       title: "Total Revenue",
       value: finance ? `£${(finance.totalRevenue / 100).toFixed(2)}` : "£0.00",
-      icon: <PoundSterling className="w-5 h-5" />,
+      icon: <PoundSterlingIcon className="w-5 h-5" />,
       color: "bg-emerald-500/10 text-emerald-400",
       iconBg: "bg-emerald-500/20",
     },
     {
       title: "Tickets Sold",
       value: finance?.totalTicketsSold || 0,
-      icon: <Ticket className="w-5 h-5" />,
+      icon: <TicketIcon className="w-5 h-5" />,
       color: "bg-blue-500/10 text-blue-400",
       iconBg: "bg-blue-500/20",
     },
@@ -34,14 +35,14 @@ export default function AdminFinance() {
       value: finance && finance.totalTicketsSold > 0 
         ? `£${((finance.totalRevenue / finance.totalTicketsSold) / 100).toFixed(2)}`
         : "£0.00",
-      icon: <TrendingUp className="w-5 h-5" />,
+      icon: <TrendingUpIcon className="w-5 h-5" />,
       color: "bg-purple-500/10 text-purple-400",
       iconBg: "bg-purple-500/20",
     },
     {
       title: "Payment Mode",
       value: "Demo",
-      icon: <CreditCard className="w-5 h-5" />,
+      icon: <CreditCardIcon className="w-5 h-5" />,
       color: "bg-indigo-500/10 text-indigo-400",
       iconBg: "bg-indigo-500/20",
     },
@@ -104,7 +105,7 @@ export default function AdminFinance() {
               <div className="flex items-center justify-between p-4 bg-slate-700/30 rounded-lg">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 bg-amber-500/20 rounded-lg flex items-center justify-center">
-                    <Info className="w-5 h-5 text-amber-400" />
+                    <InfoIcon className="w-5 h-5 text-amber-400" />
                   </div>
                   <div>
                     <p className="text-white font-medium">Simulated Payments</p>
@@ -157,7 +158,7 @@ export default function AdminFinance() {
           <CardContent>
             <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-lg">
               <div className="flex items-start gap-3">
-                <Info className="w-5 h-5 text-amber-400 mt-0.5 flex-shrink-0" />
+                <InfoIcon className="w-5 h-5 text-amber-400 mt-0.5 flex-shrink-0" />
                 <div>
                   <p className="text-white font-medium mb-1">Simulated Payment Environment</p>
                   <p className="text-slate-400 text-sm">

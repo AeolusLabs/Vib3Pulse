@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Images, Calendar, Building2, Users, Globe, X, MapPin, Plus } from "lucide-react";
+
 import { useQuery } from "@tanstack/react-query";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import MentionTextarea from "@/components/MentionTextarea";
@@ -12,6 +12,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { format } from "date-fns";
 import type { Event, Venue, Community } from "@shared/schema";
 import { VideoUploader } from "./VideoUploader";
+import { ImagesIcon, CalendarIcon, Building2Icon, UsersIcon, GlobeIcon, XIcon, MapPinIcon, PlusIcon } from "@/components/ui/icons";
 
 type CommunityWithRole = Community & { memberCount: number; role: string };
 
@@ -249,7 +250,7 @@ export default function CreatePostModal({
               className="h-8 w-8 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               aria-label="Close"
             >
-              <X className="h-5 w-5" />
+              <XIcon className="h-5 w-5" />
             </button>
             <span className="font-semibold text-sm">New Post</span>
             <button
@@ -290,12 +291,12 @@ export default function CreatePostModal({
                     >
                       {selectedCommunity ? (
                         <>
-                          <Users className="h-3 w-3" />
+                          <UsersIcon className="h-3 w-3" />
                           {selectedCommunity.name}
                         </>
                       ) : (
                         <>
-                          <Globe className="h-3 w-3" />
+                          <GlobeIcon className="h-3 w-3" />
                           Everyone
                         </>
                       )}
@@ -328,16 +329,16 @@ export default function CreatePostModal({
                         )}
                         <div className="flex-1 min-w-0">
                           <Badge variant="secondary" className="mb-1 text-xs">
-                            <Calendar className="h-3 w-3 mr-1" />
+                            <CalendarIcon className="h-3 w-3 mr-1" />
                             Event
                           </Badge>
                           <h4 className="font-semibold text-sm line-clamp-1">{attachedEvent.title}</h4>
                           <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
-                            <Calendar className="h-3 w-3" />
+                            <CalendarIcon className="h-3 w-3" />
                             {format(new Date(attachedEvent.eventDate), "MMM d, yyyy")}
                           </p>
                           <p className="text-xs text-muted-foreground flex items-center gap-1">
-                            <MapPin className="h-3 w-3" />
+                            <MapPinIcon className="h-3 w-3" />
                             <span className="line-clamp-1">{attachedEvent.location}</span>
                           </p>
                         </div>
@@ -360,14 +361,14 @@ export default function CreatePostModal({
                         )}
                         <div className="flex-1 min-w-0">
                           <Badge variant="secondary" className="mb-1 text-xs">
-                            <Building2 className="h-3 w-3 mr-1" />
+                            <Building2Icon className="h-3 w-3 mr-1" />
                             Venue
                           </Badge>
                           <h4 className="font-semibold text-sm line-clamp-1">{attachedVenue.name}</h4>
                           <p className="text-xs text-muted-foreground">{attachedVenue.category}</p>
                           {attachedVenue.city && (
                             <p className="text-xs text-muted-foreground flex items-center gap-1">
-                              <MapPin className="h-3 w-3" />
+                              <MapPinIcon className="h-3 w-3" />
                               <span className="line-clamp-1">{attachedVenue.city}</span>
                             </p>
                           )}
@@ -393,7 +394,7 @@ export default function CreatePostModal({
                             onClick={() => removeImage(i)}
                             data-testid={`button-remove-image-${i}`}
                           >
-                            <X className="h-4 w-4" />
+                            <XIcon className="h-4 w-4" />
                           </Button>
                         </div>
                       ))}
@@ -405,7 +406,7 @@ export default function CreatePostModal({
                           aria-label="Add more images"
                           data-testid="button-add-more-images"
                         >
-                          <Plus className="h-6 w-6" />
+                          <PlusIcon className="h-6 w-6" />
                         </button>
                       )}
                     </div>
@@ -451,21 +452,21 @@ export default function CreatePostModal({
                 aria-label="Add photos or video"
                 data-testid="button-add-media"
               >
-                <Images className="h-5 w-5" />
+                <ImagesIcon className="h-5 w-5" />
               </button>
               <button
                 disabled
                 className="h-8 w-8 flex items-center justify-center rounded-full text-muted-foreground/35 cursor-not-allowed"
                 aria-label="Add event (coming soon)"
               >
-                <Calendar className="h-5 w-5" />
+                <CalendarIcon className="h-5 w-5" />
               </button>
               <button
                 disabled
                 className="h-8 w-8 flex items-center justify-center rounded-full text-muted-foreground/35 cursor-not-allowed"
                 aria-label="Add venue (coming soon)"
               >
-                <Building2 className="h-5 w-5" />
+                <Building2Icon className="h-5 w-5" />
               </button>
             </div>
 

@@ -13,7 +13,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Megaphone, Sparkles, Check } from "lucide-react";
+import { MegaphoneIcon, SparklesIcon, CheckIcon } from "@/components/ui/icons";
 
 interface PromoteEventDialogProps {
   eventId: string;
@@ -83,7 +83,7 @@ export function PromoteEventDialog({ eventId, eventTitle, isOpen, onClose }: Pro
       <DialogContent className="sm:max-w-md" data-testid="dialog-promote-event">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Megaphone className="h-5 w-5 text-primary" />
+            <MegaphoneIcon className="h-5 w-5 text-primary" />
             Promote Event
           </DialogTitle>
           <DialogDescription>
@@ -115,7 +115,7 @@ export function PromoteEventDialog({ eventId, eventTitle, isOpen, onClose }: Pro
                       <p className="text-sm text-muted-foreground">{option.description}</p>
                     </div>
                     {selectedDuration === option.days && (
-                      <Check className="h-5 w-5 text-primary" />
+                      <CheckIcon className="h-5 w-5 text-primary" />
                     )}
                   </div>
                 </Label>
@@ -126,7 +126,7 @@ export function PromoteEventDialog({ eventId, eventTitle, isOpen, onClose }: Pro
 
         <div className="bg-muted rounded-lg p-4">
           <div className="flex items-start gap-3">
-            <Sparkles className="h-5 w-5 text-primary mt-0.5" />
+            <SparklesIcon className="h-5 w-5 text-primary mt-0.5" />
             <div className="text-sm">
               <p className="font-medium">What you get:</p>
               <ul className="text-muted-foreground mt-1 space-y-1">

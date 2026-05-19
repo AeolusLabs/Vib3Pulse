@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
-import { Shield, Key, User, Mail, Lock, CheckCircle, AlertCircle } from "lucide-react";
+
 import { apiRequest } from "@/lib/queryClient";
+import { ShieldIcon, KeyIcon, UserIcon, MailIcon, LockIcon, CheckCircleIcon, AlertCircleIcon } from "@/components/ui/icons";
 
 interface SetupStatus {
   setupRequired: boolean;
@@ -102,7 +103,7 @@ export default function AdminSetup() {
         <Card className="w-full max-w-md bg-slate-800/50 border-purple-500/20 backdrop-blur">
           <CardContent className="pt-6">
             <Alert className="bg-green-500/10 border-green-500/30">
-              <CheckCircle className="w-4 h-4 text-green-400" />
+              <CheckCircleIcon className="w-4 h-4 text-green-400" />
               <AlertDescription className="text-green-300">
                 Admin accounts already exist. Setup is complete.
               </AlertDescription>
@@ -125,7 +126,7 @@ export default function AdminSetup() {
       <Card className="w-full max-w-md bg-slate-800/50 border-purple-500/20 backdrop-blur">
         <CardHeader className="text-center space-y-4">
           <div className="mx-auto w-16 h-16 bg-purple-600/20 rounded-full flex items-center justify-center">
-            <Shield className="w-8 h-8 text-purple-400" />
+            <ShieldIcon className="w-8 h-8 text-purple-400" />
           </div>
           <CardTitle className="text-2xl text-white">Vib3Pulse Admin Setup</CardTitle>
           <CardDescription className="text-slate-400">
@@ -134,7 +135,7 @@ export default function AdminSetup() {
         </CardHeader>
         <CardContent>
           <Alert className="mb-4 bg-amber-500/10 border-amber-500/30">
-            <AlertCircle className="w-4 h-4 text-amber-400" />
+            <AlertCircleIcon className="w-4 h-4 text-amber-400" />
             <AlertDescription className="text-amber-300 text-sm">
               This setup is only available once. After creating the first admin, 
               additional admins must be created from within the admin panel.
@@ -145,7 +146,7 @@ export default function AdminSetup() {
             <div className="space-y-2">
               <Label htmlFor="setupKey" className="text-slate-300">Setup Key</Label>
               <div className="relative">
-                <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                <KeyIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <Input
                   id="setupKey"
                   type="password"
@@ -165,7 +166,7 @@ export default function AdminSetup() {
             <div className="space-y-2">
               <Label htmlFor="displayName" className="text-slate-300">Display Name</Label>
               <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <Input
                   id="displayName"
                   type="text"
@@ -182,7 +183,7 @@ export default function AdminSetup() {
             <div className="space-y-2">
               <Label htmlFor="username" className="text-slate-300">Username</Label>
               <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <Input
                   id="username"
                   type="text"
@@ -199,7 +200,7 @@ export default function AdminSetup() {
             <div className="space-y-2">
               <Label htmlFor="email" className="text-slate-300">Email</Label>
               <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                <MailIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <Input
                   id="email"
                   type="email"
@@ -216,7 +217,7 @@ export default function AdminSetup() {
             <div className="space-y-2">
               <Label htmlFor="password" className="text-slate-300">Password</Label>
               <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                <LockIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <Input
                   id="password"
                   type="password"
@@ -233,7 +234,7 @@ export default function AdminSetup() {
             <div className="space-y-2">
               <Label htmlFor="confirmPassword" className="text-slate-300">Confirm Password</Label>
               <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                <LockIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <Input
                   id="confirmPassword"
                   type="password"

@@ -1,25 +1,14 @@
 import { useEffect, useState } from "react";
 import { useLocation, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { 
-  LayoutDashboard, 
-  Users, 
-  Calendar, 
-  Image, 
-  Flag, 
-  DollarSign, 
-  Shield, 
-  Activity,
-  LogOut,
-  Menu,
-  X,
-  ChevronRight
-} from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { UsersIcon, CalendarIcon, ImageIcon, FlagIcon, DollarSignIcon, ShieldIcon, ActivityIcon, LogOutIcon, MenuIcon, XIcon, ChevronRightIcon } from "@/components/ui/icons";
+import { LayoutDashboard } from "lucide-react";
 
 type AdminRole = "super_admin" | "content_moderator" | "user_support" | "event_reviewer" | "finance_manager" | "analytics_viewer";
 
@@ -50,43 +39,43 @@ const navItems: NavItem[] = [
   {
     label: "Users",
     path: "/admin/users",
-    icon: <Users className="w-5 h-5" />,
+    icon: <UsersIcon className="w-5 h-5" />,
     roles: ["super_admin", "user_support", "content_moderator"],
   },
   {
     label: "Events",
     path: "/admin/events",
-    icon: <Calendar className="w-5 h-5" />,
+    icon: <CalendarIcon className="w-5 h-5" />,
     roles: ["super_admin", "event_reviewer", "content_moderator"],
   },
   {
     label: "Stories",
     path: "/admin/stories",
-    icon: <Image className="w-5 h-5" />,
+    icon: <ImageIcon className="w-5 h-5" />,
     roles: ["super_admin", "content_moderator"],
   },
   {
     label: "Reports",
     path: "/admin/reports",
-    icon: <Flag className="w-5 h-5" />,
+    icon: <FlagIcon className="w-5 h-5" />,
     roles: ["super_admin", "content_moderator", "user_support"],
   },
   {
     label: "Finance",
     path: "/admin/finance",
-    icon: <DollarSign className="w-5 h-5" />,
+    icon: <DollarSignIcon className="w-5 h-5" />,
     roles: ["super_admin", "finance_manager"],
   },
   {
     label: "Staff",
     path: "/admin/staff",
-    icon: <Shield className="w-5 h-5" />,
+    icon: <ShieldIcon className="w-5 h-5" />,
     roles: ["super_admin"],
   },
   {
     label: "Activity Log",
     path: "/admin/activity",
-    icon: <Activity className="w-5 h-5" />,
+    icon: <ActivityIcon className="w-5 h-5" />,
     roles: ["super_admin", "user_support"],
   },
 ];
@@ -156,7 +145,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <div className="p-4 border-b border-slate-700 flex items-center justify-between">
             {sidebarOpen && (
               <div className="flex items-center gap-2">
-                <Shield className="w-6 h-6 text-purple-400" />
+                <ShieldIcon className="w-6 h-6 text-purple-400" />
                 <span className="font-bold text-white">Vib3Pulse Admin</span>
               </div>
             )}
@@ -167,7 +156,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               className="text-slate-400 hover:text-white"
               data-testid="button-toggle-sidebar"
             >
-              {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              {sidebarOpen ? <XIcon className="w-5 h-5" /> : <MenuIcon className="w-5 h-5" />}
             </Button>
           </div>
 
@@ -188,7 +177,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     {item.icon}
                     {sidebarOpen && <span>{item.label}</span>}
                     {sidebarOpen && isActive && (
-                      <ChevronRight className="w-4 h-4 ml-auto" />
+                      <ChevronRightIcon className="w-4 h-4 ml-auto" />
                     )}
                   </div>
                 </Link>
@@ -226,7 +215,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               onClick={() => logoutMutation.mutate()}
               data-testid="button-admin-logout"
             >
-              <LogOut className="w-4 h-4" />
+              <LogOutIcon className="w-4 h-4" />
               {sidebarOpen && <span className="ml-2">Logout</span>}
             </Button>
           </div>

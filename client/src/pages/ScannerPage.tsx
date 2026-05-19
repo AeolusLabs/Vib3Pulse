@@ -6,12 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Camera, CheckCircle2, XCircle, Loader2, LogOut, ScanLine, ShieldCheck } from "lucide-react";
+
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import type { User } from "@shared/schema";
+import { CameraIcon, CheckCircle2Icon, XCircleIcon, Loader2Icon, LogOutIcon, ScanLineIcon, ShieldCheckIcon } from "@/components/ui/icons";
 
 const STORAGE_KEY = "vib3_scanner_token";
 
@@ -37,7 +38,7 @@ function OrganizerRedirect() {
   }, [navigate]);
   return (
     <div className="min-h-screen flex items-center justify-center">
-      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      <Loader2Icon className="h-8 w-8 animate-spin text-primary" />
     </div>
   );
 }
@@ -116,7 +117,7 @@ function StaffScannerView({ session, onLogout }: { session: ScannerSession; onLo
       <div className="border-b px-4 py-3 flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <ShieldCheck className="h-5 w-5 text-primary" />
+            <ShieldCheckIcon className="h-5 w-5 text-primary" />
             <span className="font-semibold">Staff Scanner</span>
           </div>
           <p className="text-sm text-muted-foreground mt-0.5 truncate max-w-[220px]">{session.eventTitle}</p>
@@ -125,7 +126,7 @@ function StaffScannerView({ session, onLogout }: { session: ScannerSession; onLo
           <Badge variant="secondary">{session.staffName}</Badge>
           <Badge variant="outline">{scanCount} scanned</Badge>
           <Button variant="ghost" size="icon" onClick={onLogout} title="Exit scanner">
-            <LogOut className="h-4 w-4" />
+            <LogOutIcon className="h-4 w-4" />
           </Button>
         </div>
       </div>
@@ -134,7 +135,7 @@ function StaffScannerView({ session, onLogout }: { session: ScannerSession; onLo
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <ScanLine className="h-5 w-5" />
+              <ScanLineIcon className="h-5 w-5" />
               Scan Tickets
             </CardTitle>
             <CardDescription>
@@ -146,9 +147,9 @@ function StaffScannerView({ session, onLogout }: { session: ScannerSession; onLo
 
             {!isScanning && (
               <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-md">
-                <Camera className="h-12 w-12 text-muted-foreground mb-4" />
+                <CameraIcon className="h-12 w-12 text-muted-foreground mb-4" />
                 <Button onClick={startScanning} data-testid="button-staff-start-scan">
-                  <Camera className="h-4 w-4 mr-2" />
+                  <CameraIcon className="h-4 w-4 mr-2" />
                   Start Scanner
                 </Button>
               </div>
@@ -170,9 +171,9 @@ function StaffScannerView({ session, onLogout }: { session: ScannerSession; onLo
                 data-testid="staff-scan-result"
               >
                 {scanResult.success ? (
-                  <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0" />
+                  <CheckCircle2Icon className="h-5 w-5 text-green-600 flex-shrink-0" />
                 ) : (
-                  <XCircle className="h-5 w-5 text-red-600 flex-shrink-0" />
+                  <XCircleIcon className="h-5 w-5 text-red-600 flex-shrink-0" />
                 )}
                 <div>
                   <p className={`font-medium ${scanResult.success ? "text-green-900 dark:text-green-100" : "text-red-900 dark:text-red-100"}`}>
@@ -241,7 +242,7 @@ function CodeEntryForm({ onAuthenticated }: { onAuthenticated: (session: Scanner
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-2">
-            <ShieldCheck className="h-10 w-10 text-primary" />
+            <ShieldCheckIcon className="h-10 w-10 text-primary" />
           </div>
           <CardTitle>Staff Check-In</CardTitle>
           <CardDescription>Enter your name and the code from your organiser to start scanning.</CardDescription>
@@ -272,7 +273,7 @@ function CodeEntryForm({ onAuthenticated }: { onAuthenticated: (session: Scanner
               />
             </div>
             <Button type="submit" className="w-full" disabled={loading} data-testid="button-staff-login">
-              {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              {loading ? <Loader2Icon className="h-4 w-4 animate-spin mr-2" /> : null}
               Activate Scanner
             </Button>
           </form>
@@ -332,7 +333,7 @@ export default function ScannerPage() {
   if (!verified) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <Loader2Icon className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }

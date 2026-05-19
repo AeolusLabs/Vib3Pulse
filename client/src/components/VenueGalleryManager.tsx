@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { ObjectUploader } from "@/components/ObjectUploader";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { Trash2, Replace, Upload, Camera, FolderOpen } from "lucide-react";
+import { Trash2Icon, ReplaceIcon, UploadIcon, CameraIcon, FolderOpenIcon } from "@/components/ui/icons";
 
 interface VenueGalleryManagerProps {
   venueId: string;
@@ -98,7 +98,7 @@ export function VenueGalleryManager({ venueId, imageUrls: propImageUrls, maxImag
                   data-testid={`button-replace-gallery-${idx}`}
                   title="Replace image"
                 >
-                  <Replace className="h-3.5 w-3.5" />
+                  <ReplaceIcon className="h-3.5 w-3.5" />
                 </Button>
                 <Button
                   type="button"
@@ -110,7 +110,7 @@ export function VenueGalleryManager({ venueId, imageUrls: propImageUrls, maxImag
                   data-testid={`button-delete-gallery-${idx}`}
                   title="Delete image"
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
+                  <Trash2Icon className="h-3.5 w-3.5" />
                 </Button>
               </div>
             </div>
@@ -127,11 +127,11 @@ export function VenueGalleryManager({ venueId, imageUrls: propImageUrls, maxImag
             buttonVariant="outline"
             buttonSize="default"
           >
-            <Upload className="h-4 w-4 mr-2" />
+            <UploadIcon className="h-4 w-4 mr-2" />
             Add Photos
           </ObjectUploader>
           <p className="text-xs text-muted-foreground flex items-center gap-2">
-            <Camera className="h-3 w-3" />
+            <CameraIcon className="h-3 w-3" />
             You can take a photo or choose from your device
           </p>
         </div>
@@ -177,7 +177,7 @@ export function VenueGalleryManager({ venueId, imageUrls: propImageUrls, maxImag
               buttonVariant="default"
               buttonSize="default"
             >
-              <FolderOpen className="h-4 w-4 mr-2" />
+              <FolderOpenIcon className="h-4 w-4 mr-2" />
               Choose New Image
             </ObjectUploader>
           </div>

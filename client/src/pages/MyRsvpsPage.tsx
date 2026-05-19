@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar as CalendarIcon, MapPin, Users, X } from "lucide-react";
+
 import { format } from "date-fns";
 import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
@@ -11,6 +11,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import type { Rsvp, Event } from "@shared/schema";
+import { CalendarIcon, MapPinIcon, UsersIcon, XIcon } from "@/components/ui/icons";
 
 type RsvpWithEvent = Rsvp & { event: Event };
 
@@ -72,7 +73,7 @@ export default function MyRsvpsPage() {
           </div>
         ) : !rsvps || rsvps.length === 0 ? (
           <div className="text-center py-16 space-y-4">
-            <Users className="h-16 w-16 mx-auto text-muted-foreground opacity-50" />
+            <UsersIcon className="h-16 w-16 mx-auto text-muted-foreground opacity-50" />
             <div>
               <h2 className="text-xl font-semibold mb-2">No RSVPs Yet</h2>
               <p className="text-muted-foreground mb-4">
@@ -144,7 +145,7 @@ export default function MyRsvpsPage() {
                           </span>
                         </div>
                         <div className="flex items-center gap-2 text-muted-foreground" data-testid={`text-event-location-${rsvp.id}`}>
-                          <MapPin className="h-4 w-4" />
+                          <MapPinIcon className="h-4 w-4" />
                           <span>{rsvp.event.location}</span>
                         </div>
                         <div className="flex items-center gap-2 text-muted-foreground text-xs pt-2" data-testid={`text-rsvp-date-${rsvp.id}`}>
@@ -167,7 +168,7 @@ export default function MyRsvpsPage() {
                           disabled={cancelRsvpMutation.isPending}
                           data-testid={`button-cancel-rsvp-${rsvp.id}`}
                         >
-                          <X className="h-4 w-4 mr-2" />
+                          <XIcon className="h-4 w-4 mr-2" />
                           Cancel RSVP
                         </Button>
                       </div>
@@ -227,7 +228,7 @@ export default function MyRsvpsPage() {
                           </span>
                         </div>
                         <div className="flex items-center gap-2 text-muted-foreground" data-testid={`text-past-event-location-${rsvp.id}`}>
-                          <MapPin className="h-4 w-4" />
+                          <MapPinIcon className="h-4 w-4" />
                           <span>{rsvp.event.location}</span>
                         </div>
                       </div>

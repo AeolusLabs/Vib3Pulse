@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { X, MoreHorizontal, Download, Heart, MessageCircle, Repeat2, Share2, BarChart3, Send } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,7 @@ import {
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { XIcon, MoreHorizontalIcon, DownloadIcon, HeartIcon, MessageCircleIcon, Repeat2Icon, Share2Icon, BarChart3Icon, SendIcon } from "@/components/ui/icons";
 
 interface PostData {
   id: string;
@@ -277,7 +278,7 @@ export default function ImageLightbox({
           onClick={onClose}
           data-testid="lightbox-close"
         >
-          <X className="h-6 w-6" />
+          <XIcon className="h-6 w-6" />
         </Button>
 
         <DropdownMenu>
@@ -288,12 +289,12 @@ export default function ImageLightbox({
               className="text-white hover:bg-white/20"
               data-testid="lightbox-options"
             >
-              <MoreHorizontal className="h-6 w-6" />
+              <MoreHorizontalIcon className="h-6 w-6" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="bg-zinc-900 border-zinc-700">
             <DropdownMenuItem onClick={handleDownload} className="text-white hover:bg-white/10 cursor-pointer">
-              <Download className="h-4 w-4 mr-2" />
+              <DownloadIcon className="h-4 w-4 mr-2" />
               Download image
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -354,7 +355,7 @@ export default function ImageLightbox({
               }}
               data-testid="lightbox-comment-btn"
             >
-              <MessageCircle className="h-5 w-5" />
+              <MessageCircleIcon className="h-5 w-5" />
               <span className="text-sm">{formatCount(postData.commentsCount)}</span>
             </button>
 
@@ -363,7 +364,7 @@ export default function ImageLightbox({
               onClick={() => repostMutation.mutate()}
               data-testid="lightbox-repost-btn"
             >
-              <Repeat2 className="h-5 w-5" />
+              <Repeat2Icon className="h-5 w-5" />
               <span className="text-sm">{formatCount(repostsCount)}</span>
             </button>
 
@@ -372,7 +373,7 @@ export default function ImageLightbox({
               onClick={() => likeMutation.mutate()}
               data-testid="lightbox-like-btn"
             >
-              <Heart className={`h-5 w-5 ${isLiked ? 'fill-current' : ''}`} />
+              <HeartIcon className={`h-5 w-5 ${isLiked ? 'fill-current' : ''}`} />
               <span className="text-sm">{formatCount(likesCount)}</span>
             </button>
 
@@ -380,7 +381,7 @@ export default function ImageLightbox({
               className="flex items-center gap-1.5 text-zinc-400 hover:text-blue-400 transition-colors"
               data-testid="lightbox-views"
             >
-              <BarChart3 className="h-5 w-5" />
+              <BarChart3Icon className="h-5 w-5" />
               <span className="text-sm">{formatCount(Math.floor((postData.likesCount + postData.commentsCount + postData.repostsCount) * 15))}</span>
             </button>
 
@@ -389,7 +390,7 @@ export default function ImageLightbox({
               onClick={handleShare}
               data-testid="lightbox-share-btn"
             >
-              <Share2 className="h-5 w-5" />
+              <Share2Icon className="h-5 w-5" />
             </button>
           </div>
         </div>
@@ -429,7 +430,7 @@ export default function ImageLightbox({
                   disabled={commentMutation.isPending}
                   data-testid="lightbox-reply-submit"
                 >
-                  <Send className="h-4 w-4" />
+                  <SendIcon className="h-4 w-4" />
                 </Button>
               )}
             </div>

@@ -24,12 +24,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Send, ArrowLeft, Search, UserPlus, Reply, X, Calendar, MapPin, Building2, Users, Plus, MessageSquare, ChevronDown } from "lucide-react";
+
 import { format, formatDistanceToNow } from "date-fns";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import type { User, Message, Event, Venue, Conversation, ConversationParticipant, ConversationMessage } from "@shared/schema";
+import { SendIcon, ArrowLeftIcon, SearchIcon, UserPlusIcon, ReplyIcon, XIcon, CalendarIcon, MapPinIcon, Building2Icon, UsersIcon, PlusIcon, MessageSquareIcon, ChevronDownIcon } from "@/components/ui/icons";
 
 type ConversationWithDetails = Conversation & {
   participants: Array<ConversationParticipant & { user: User }>;
@@ -68,12 +69,12 @@ function MessageAttachedEvent({ eventId, isOwnMessage }: { eventId: string; isOw
         )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1 mb-0.5">
-            <Calendar className="h-3 w-3" />
+            <CalendarIcon className="h-3 w-3" />
             <span className="text-xs font-medium">Event</span>
           </div>
           <p className="text-sm font-medium line-clamp-1">{event.title}</p>
           <p className="text-xs opacity-70 flex items-center gap-1">
-            <MapPin className="h-3 w-3" />
+            <MapPinIcon className="h-3 w-3" />
             <span className="line-clamp-1">{event.location}</span>
           </p>
         </div>
@@ -113,13 +114,13 @@ function MessageAttachedVenue({ venueId, isOwnMessage }: { venueId: string; isOw
         )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1 mb-0.5">
-            <Building2 className="h-3 w-3" />
+            <Building2Icon className="h-3 w-3" />
             <span className="text-xs font-medium">Venue</span>
           </div>
           <p className="text-sm font-medium line-clamp-1">{venue.name}</p>
           {venue.city && (
             <p className="text-xs opacity-70 flex items-center gap-1">
-              <MapPin className="h-3 w-3" />
+              <MapPinIcon className="h-3 w-3" />
               <span className="line-clamp-1">{venue.city}</span>
             </p>
           )}
@@ -338,7 +339,7 @@ export default function MessagesPage() {
         <main className="flex-1 flex items-center justify-center px-4 pb-20">
           <div className="text-center">
             <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
-              <MessageSquare className="h-7 w-7 text-primary" />
+              <MessageSquareIcon className="h-7 w-7 text-primary" />
             </div>
             <h2 className="text-xl font-semibold mb-2">Sign in to chat</h2>
             <p className="text-muted-foreground text-sm">Message friends and create group chats</p>
@@ -383,7 +384,7 @@ export default function MessagesPage() {
               onClick={handleBack}
               data-testid="button-back"
             >
-              <ArrowLeft className="h-5 w-5" />
+              <ArrowLeftIcon className="h-5 w-5" />
             </Button>
             {otherUser && (
               <>
@@ -416,7 +417,7 @@ export default function MessagesPage() {
             ) : conversationMessages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full py-16 text-center">
                 <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-                  <MessageSquare className="h-7 w-7 text-primary" />
+                  <MessageSquareIcon className="h-7 w-7 text-primary" />
                 </div>
                 <p className="font-medium text-foreground">No messages yet</p>
                 <p className="text-sm text-muted-foreground mt-1">Say hello to start the conversation</p>
@@ -457,7 +458,7 @@ export default function MessagesPage() {
                                 }`}
                               >
                                 <p className={`text-[11px] font-medium flex items-center gap-1 mb-0.5 ${isOwnMessage ? 'text-white/70' : 'text-muted-foreground'}`}>
-                                  <Reply className="h-3 w-3" />
+                                  <ReplyIcon className="h-3 w-3" />
                                   {message.replyTo.sender?.username || 'Unknown'}
                                 </p>
                                 <p className={`text-xs line-clamp-1 ${isOwnMessage ? 'text-white/60' : 'text-muted-foreground'}`}>
@@ -472,7 +473,7 @@ export default function MessagesPage() {
                             onClick={() => { setReplyingTo(message); inputRef.current?.focus(); }}
                             data-testid={`button-reply-${message.id}`}
                           >
-                            <Reply className="h-3.5 w-3.5" />
+                            <ReplyIcon className="h-3.5 w-3.5" />
                           </button>
                         </div>
                       </div>
@@ -490,7 +491,7 @@ export default function MessagesPage() {
               <div className="mb-2 px-4 py-2.5 bg-muted/60 rounded-xl border border-border/40 flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium text-primary flex items-center gap-1 mb-0.5">
-                    <Reply className="h-3 w-3" />Replying to @{replyingTo.sender?.username || 'Unknown'}
+                    <ReplyIcon className="h-3 w-3" />Replying to @{replyingTo.sender?.username || 'Unknown'}
                   </p>
                   <p className="text-xs text-muted-foreground line-clamp-1">{replyingTo.content}</p>
                 </div>
@@ -499,7 +500,7 @@ export default function MessagesPage() {
                   onClick={() => setReplyingTo(null)}
                   data-testid="button-cancel-reply"
                 >
-                  <X className="h-4 w-4" />
+                  <XIcon className="h-4 w-4" />
                 </button>
               </div>
             )}
@@ -522,7 +523,7 @@ export default function MessagesPage() {
                 className="h-11 w-11 rounded-full bg-violet-600 hover:bg-violet-500 disabled:opacity-40 flex items-center justify-center text-white transition-colors flex-shrink-0"
                 data-testid="button-send"
               >
-                <Send className="h-4 w-4" />
+                <SendIcon className="h-4 w-4" />
               </button>
             </form>
           </div>
@@ -544,9 +545,9 @@ export default function MessagesPage() {
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button data-testid="button-new-message">
-                <Plus className="h-4 w-4 mr-2" />
+                <PlusIcon className="h-4 w-4 mr-2" />
                 New Message
-                <ChevronDown className="h-4 w-4 ml-2" />
+                <ChevronDownIcon className="h-4 w-4 ml-2" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -554,14 +555,14 @@ export default function MessagesPage() {
                 onClick={() => setNewChatDialogOpen(true)}
                 data-testid="menu-item-new-chat"
               >
-                <MessageSquare className="h-4 w-4 mr-2" />
+                <MessageSquareIcon className="h-4 w-4 mr-2" />
                 New Chat
               </DropdownMenuItem>
               <DropdownMenuItem 
                 onClick={() => setCreateGroupOpen(true)}
                 data-testid="menu-item-new-group"
               >
-                <Users className="h-4 w-4 mr-2" />
+                <UsersIcon className="h-4 w-4 mr-2" />
                 New Group
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -583,7 +584,7 @@ export default function MessagesPage() {
         ) : !conversations || conversations.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-center">
             <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-              <MessageSquare className="h-7 w-7 text-primary" />
+              <MessageSquareIcon className="h-7 w-7 text-primary" />
             </div>
             <p className="font-semibold text-foreground">No messages yet</p>
             <p className="text-sm text-muted-foreground mt-1">Start a conversation or create a group to chat</p>
@@ -609,7 +610,7 @@ export default function MessagesPage() {
                       <Avatar className={`h-14 w-14 ${hasUnread ? 'ring-2 ring-violet-500/50' : ''}`}>
                         <AvatarImage src={conv.avatarUrl || ""} alt={conv.name || "Group"} />
                         <AvatarFallback className="bg-primary/10 text-primary">
-                          <Users className="h-5 w-5" />
+                          <UsersIcon className="h-5 w-5" />
                         </AvatarFallback>
                       </Avatar>
                     ) : (
@@ -645,7 +646,7 @@ export default function MessagesPage() {
                         </h3>
                         {isGroup && (
                           <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full shrink-0 flex items-center gap-0.5">
-                            <Users className="h-2.5 w-2.5" />
+                            <UsersIcon className="h-2.5 w-2.5" />
                             {conv.participants.length}
                           </span>
                         )}
@@ -690,7 +691,7 @@ export default function MessagesPage() {
           
           <div className="space-y-4">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 type="text"
                 placeholder="Filter by name or username..."
@@ -710,13 +711,13 @@ export default function MessagesPage() {
                 </div>
               ) : followingList.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
-                  <UserPlus className="h-12 w-12 mx-auto mb-2 opacity-20" />
+                  <UserPlusIcon className="h-12 w-12 mx-auto mb-2 opacity-20" />
                   <p>You're not following anyone yet</p>
                   <p className="text-sm mt-1">Follow people to message them</p>
                 </div>
               ) : filteredFollowing.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
-                  <Search className="h-12 w-12 mx-auto mb-2 opacity-20" />
+                  <SearchIcon className="h-12 w-12 mx-auto mb-2 opacity-20" />
                   <p>No matches found</p>
                 </div>
               ) : (

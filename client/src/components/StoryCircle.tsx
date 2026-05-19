@@ -1,5 +1,5 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Plus } from "lucide-react";
+import { PlusIcon } from "@/components/ui/icons";
 
 interface StoryCircleProps {
   username: string;
@@ -61,7 +61,7 @@ export default function StoryCircle({
         </div>
         {isOwn && (
           <div className="absolute bottom-0 right-0 bg-primary rounded-full p-1 border-2 border-background">
-            <Plus className="h-3 w-3 text-primary-foreground" />
+            <PlusIcon className="h-3 w-3 text-primary-foreground" />
           </div>
         )}
       </div>

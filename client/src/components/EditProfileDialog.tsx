@@ -28,8 +28,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { Pencil, X, Lock, Sparkles, Zap, Palette } from "lucide-react";
+
 import { cn } from "@/lib/utils";
+import { PencilIcon, XIcon, LockIcon, SparklesIcon, ZapIcon, PaletteIcon } from "@/components/ui/icons";
 import {
   getBannerStyle,
   generateFingerprintGradient,
@@ -191,7 +192,7 @@ export default function EditProfileDialog({ user }: EditProfileDialogProps) {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button variant="outline" size="sm" data-testid="button-edit-profile">
-          <Pencil className="h-4 w-4 mr-2" />
+          <PencilIcon className="h-4 w-4 mr-2" />
           Edit Profile
         </Button>
       </DialogTrigger>
@@ -234,7 +235,7 @@ export default function EditProfileDialog({ user }: EditProfileDialogProps) {
               <div className="flex gap-2">
                 <ModeCard
                   id="fingerprint"
-                  icon={<Sparkles className="h-4 w-4" />}
+                  icon={<SparklesIcon className="h-4 w-4" />}
                   title="Fingerprint"
                   description="Auto-generated from your interests. Unique to you."
                   active={watchedMode === "fingerprint"}
@@ -242,7 +243,7 @@ export default function EditProfileDialog({ user }: EditProfileDialogProps) {
                 />
                 <ModeCard
                   id="vibe"
-                  icon={<Zap className="h-4 w-4" />}
+                  icon={<ZapIcon className="h-4 w-4" />}
                   title="Vibe"
                   description="Pick a mood. Change it whenever your energy shifts."
                   active={watchedMode === "vibe"}
@@ -250,7 +251,7 @@ export default function EditProfileDialog({ user }: EditProfileDialogProps) {
                 />
                 <ModeCard
                   id="custom"
-                  icon={<Palette className="h-4 w-4" />}
+                  icon={<PaletteIcon className="h-4 w-4" />}
                   title="Custom"
                   description="Choose your own colour. Full control."
                   active={watchedMode === "custom"}
@@ -364,7 +365,7 @@ export default function EditProfileDialog({ user }: EditProfileDialogProps) {
                     <FormItem>
                       <FormLabel className="flex items-center gap-2">
                         Gender
-                        {hasEditedGender && <Lock className="h-3 w-3 text-muted-foreground" />}
+                        {hasEditedGender && <LockIcon className="h-3 w-3 text-muted-foreground" />}
                       </FormLabel>
                       <FormControl>
                         <RadioGroup
@@ -451,7 +452,7 @@ export default function EditProfileDialog({ user }: EditProfileDialogProps) {
                     {(form.watch("interests") || []).map((interest) => (
                       <Badge key={interest} variant="secondary" className="gap-1" data-testid={`badge-interest-${interest}`}>
                         {interest}
-                        <X className="h-3 w-3 cursor-pointer" onClick={() => removeInterest(interest)} />
+                        <XIcon className="h-3 w-3 cursor-pointer" onClick={() => removeInterest(interest)} />
                       </Badge>
                     ))}
                   </div>

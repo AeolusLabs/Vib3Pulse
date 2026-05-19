@@ -23,11 +23,12 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { Search, Ban, UserX, Eye } from "lucide-react";
+
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import AdminLayout from "./AdminLayout";
 import { format } from "date-fns";
+import { SearchIcon, BanIcon, UserXIcon, EyeIcon } from "@/components/ui/icons";
 
 interface User {
   id: string;
@@ -110,7 +111,7 @@ export default function AdminUsers() {
           <CardHeader>
             <div className="flex items-center gap-4">
               <div className="relative flex-1 max-w-sm">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <Input
                   placeholder="Search users..."
                   value={searchQuery}
@@ -164,7 +165,7 @@ export default function AdminUsers() {
                             className="text-slate-400 hover:text-white"
                             data-testid={`button-view-user-${user.id}`}
                           >
-                            <Eye className="w-4 h-4" />
+                            <EyeIcon className="w-4 h-4" />
                           </Button>
                           <Button
                             size="sm"
@@ -176,7 +177,7 @@ export default function AdminUsers() {
                             }}
                             data-testid={`button-suspend-user-${user.id}`}
                           >
-                            <Ban className="w-4 h-4" />
+                            <BanIcon className="w-4 h-4" />
                           </Button>
                         </div>
                       </TableCell>

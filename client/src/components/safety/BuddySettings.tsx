@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { CheckInTimer } from "./CheckInTimer";
-import { Shield, X, Clock, CheckCircle, XCircle, Phone, UserPlus } from "lucide-react";
+import { ShieldIcon, XIcon, ClockIcon, CheckCircleIcon, XCircleIcon, PhoneIcon, UserPlusIcon } from "@/components/ui/icons";
 
 interface Buddy {
   id: string;
@@ -24,15 +24,15 @@ interface Buddy {
 
 function StatusBadge({ status }: { status: Buddy["confirmationStatus"] }) {
   if (status === "confirmed") {
-    return <Badge variant="default"><CheckCircle className="h-3 w-3 mr-1" />Confirmed</Badge>;
+    return <Badge variant="default"><CheckCircleIcon className="h-3 w-3 mr-1" />Confirmed</Badge>;
   }
   if (status === "pending") {
-    return <Badge variant="secondary"><Clock className="h-3 w-3 mr-1" />Awaiting reply</Badge>;
+    return <Badge variant="secondary"><ClockIcon className="h-3 w-3 mr-1" />Awaiting reply</Badge>;
   }
   if (status === "declined") {
-    return <Badge variant="destructive"><XCircle className="h-3 w-3 mr-1" />Declined</Badge>;
+    return <Badge variant="destructive"><XCircleIcon className="h-3 w-3 mr-1" />Declined</Badge>;
   }
-  return <Badge variant="outline"><XCircle className="h-3 w-3 mr-1" />Expired</Badge>;
+  return <Badge variant="outline"><XCircleIcon className="h-3 w-3 mr-1" />Expired</Badge>;
 }
 
 export function BuddySettings() {
@@ -95,7 +95,7 @@ export function BuddySettings() {
       <Card data-testid="card-buddy-settings">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Shield className="h-5 w-5" />
+            <ShieldIcon className="h-5 w-5" />
             Safety Buddies
           </CardTitle>
           <CardDescription>
@@ -119,7 +119,7 @@ export function BuddySettings() {
                     >
                       <div className="flex items-center gap-3">
                         <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center">
-                          <Phone className="h-4 w-4 text-primary" />
+                          <PhoneIcon className="h-4 w-4 text-primary" />
                         </div>
                         <div>
                           <div className="flex items-center gap-2 flex-wrap">
@@ -153,7 +153,7 @@ export function BuddySettings() {
                         onClick={() => removeBuddyMutation.mutate(buddy.id)}
                         disabled={removeBuddyMutation.isPending}
                       >
-                        <X className="h-4 w-4" />
+                        <XIcon className="h-4 w-4" />
                       </Button>
                     </div>
                   ))}
@@ -208,7 +208,7 @@ export function BuddySettings() {
                     onClick={() => setShowForm(true)}
                     data-testid="button-add-buddy"
                   >
-                    <UserPlus className="h-4 w-4 mr-2" />
+                    <UserPlusIcon className="h-4 w-4 mr-2" />
                     Add a buddy
                   </Button>
                 )

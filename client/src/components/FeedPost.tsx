@@ -18,19 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import {
-  Heart,
-  MessageCircle,
-  Share2,
-  Bookmark,
-  Repeat2,
-  Calendar,
-  MapPin,
-  Building2,
-  MoreHorizontal,
-  Trash2,
-  BadgeCheck,
-} from "lucide-react";
+
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -45,6 +33,8 @@ import EventDetailsModal from "@/components/EventDetailsModal";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import type { Event, Venue } from "@shared/schema";
+import { HeartIcon, MessageCircleIcon, Share2Icon, BookmarkIcon, Repeat2Icon, CalendarIcon, MapPinIcon, Building2Icon, MoreHorizontalIcon, Trash2Icon } from "@/components/ui/icons";
+import { BadgeCheck } from "lucide-react";
 
 function formatRelativeTime(date: Date | string): string {
   const now = new Date();
@@ -390,7 +380,7 @@ export default function FeedPost({
       {/* Repost banner */}
       {isRepost && repostedBy && (
         <div className="flex items-center gap-1.5 mb-2 text-xs text-muted-foreground">
-          <Repeat2 className="h-3 w-3" />
+          <Repeat2Icon className="h-3 w-3" />
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -528,15 +518,15 @@ export default function FeedPost({
               )}
               <CardContent className="p-3">
                 <Badge variant="secondary" className="mb-1.5 text-xs">
-                  <Calendar className="h-3 w-3 mr-1" />Event
+                  <CalendarIcon className="h-3 w-3 mr-1" />Event
                 </Badge>
                 <h4 className="font-semibold text-sm line-clamp-1">{displayEvent.title}</h4>
                 <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                  <Calendar className="h-3 w-3" />
+                  <CalendarIcon className="h-3 w-3" />
                   {format(new Date(displayEvent.eventDate), "MMM d, yyyy")}
                 </p>
                 <p className="text-xs text-muted-foreground flex items-center gap-1">
-                  <MapPin className="h-3 w-3" />
+                  <MapPinIcon className="h-3 w-3" />
                   <span className="line-clamp-1">{displayEvent.location}</span>
                 </p>
               </CardContent>
@@ -561,13 +551,13 @@ export default function FeedPost({
                   )}
                   <div className="flex-1 min-w-0">
                     <Badge variant="secondary" className="mb-1 text-xs">
-                      <Building2 className="h-3 w-3 mr-1" />Venue
+                      <Building2Icon className="h-3 w-3 mr-1" />Venue
                     </Badge>
                     <h4 className="font-semibold text-sm line-clamp-1">{displayVenue.name}</h4>
                     <p className="text-xs text-muted-foreground">{displayVenue.category}</p>
                     {displayVenue.city && (
                       <p className="text-xs text-muted-foreground flex items-center gap-1">
-                        <MapPin className="h-3 w-3" />
+                        <MapPinIcon className="h-3 w-3" />
                         <span className="line-clamp-1">{displayVenue.city}</span>
                       </p>
                     )}
@@ -609,7 +599,7 @@ export default function FeedPost({
               onClick={() => setCommentDialogOpen(true)}
               data-testid={`button-comment-${id}`}
             >
-              <MessageCircle className="h-[18px] w-[18px] group-hover:scale-110 transition-transform duration-150" />
+              <MessageCircleIcon className="h-[18px] w-[18px] group-hover:scale-110 transition-transform duration-150" />
               <span className="text-xs font-medium tabular-nums">
                 {commentCount > 0 ? commentCount : ""}
               </span>
@@ -646,7 +636,7 @@ export default function FeedPost({
               onClick={handleShare}
               data-testid={`button-share-${id}`}
             >
-              <Share2 className="h-[18px] w-[18px] group-hover:scale-110 transition-transform duration-150" />
+              <Share2Icon className="h-[18px] w-[18px] group-hover:scale-110 transition-transform duration-150" />
             </button>
 
             {/* Bookmark */}
@@ -677,7 +667,7 @@ export default function FeedPost({
                     className="group p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all duration-150"
                     data-testid={`button-more-${id}`}
                   >
-                    <MoreHorizontal className="h-[18px] w-[18px]" />
+                    <MoreHorizontalIcon className="h-[18px] w-[18px]" />
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
@@ -686,7 +676,7 @@ export default function FeedPost({
                     className="text-destructive focus:text-destructive"
                     data-testid={`menu-delete-${id}`}
                   >
-                    <Trash2 className="h-4 w-4 mr-2" />
+                    <Trash2Icon className="h-4 w-4 mr-2" />
                     Delete post
                   </DropdownMenuItem>
                 </DropdownMenuContent>

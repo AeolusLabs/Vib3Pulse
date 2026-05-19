@@ -5,10 +5,11 @@ import CreateEventModal from "@/components/CreateEventModal";
 import EventDetailsModal from "@/components/EventDetailsModal";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { Plus } from "lucide-react";
+
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Event } from "@shared/schema";
+import { PlusIcon } from "@/components/ui/icons";
 
 export default function MyEventsPage() {
   const [createOpen, setCreateOpen] = useState(false);
@@ -64,7 +65,7 @@ export default function MyEventsPage() {
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-3xl font-serif font-bold" data-testid="heading-my-events">My Events</h1>
           <Button onClick={() => setCreateOpen(true)} data-testid="button-create-event-page">
-            <Plus className="h-4 w-4 mr-2" />
+            <PlusIcon className="h-4 w-4 mr-2" />
             Create Event
           </Button>
         </div>
@@ -84,7 +85,7 @@ export default function MyEventsPage() {
               <div className="text-center py-16 space-y-4">
                 <p className="text-muted-foreground">No upcoming events</p>
                 <Button variant="outline" onClick={() => setCreateOpen(true)}>
-                  <Plus className="h-4 w-4 mr-2" />
+                  <PlusIcon className="h-4 w-4 mr-2" />
                   Create your first event
                 </Button>
               </div>

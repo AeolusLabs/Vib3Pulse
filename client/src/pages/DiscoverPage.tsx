@@ -10,11 +10,12 @@ import ShareModal from "@/components/ShareModal";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar, MapPin, Users, Sparkles, Building2, Music, Clock, TrendingUp, Navigation2, Loader2, XCircle, RefreshCw, Share2, Ticket } from "lucide-react";
+
 import { format, isPast } from "date-fns";
 import { Link, useSearch } from "wouter";
 import { useGeolocation } from "@/hooks/useGeolocation";
 import type { Event, Venue } from "@shared/schema";
+import { CalendarIcon, MapPinIcon, UsersIcon, SparklesIcon, Building2Icon, MusicIcon, ClockIcon, TrendingUpIcon, Navigation2Icon, Loader2Icon, XCircleIcon, RefreshCwIcon, Share2Icon, TicketIcon } from "@/components/ui/icons";
 
 interface EventWithDistance extends Event {
   distance?: number | null;
@@ -270,7 +271,7 @@ export default function DiscoverPage() {
     if (distance === null || distance === undefined) return null;
     return (
       <Badge variant="outline" className="text-xs bg-purple-50 dark:bg-purple-950/30 border-purple-200">
-        <Navigation2 className="h-3 w-3 mr-1" />
+        <Navigation2Icon className="h-3 w-3 mr-1" />
         {formatDistance(distance)}
       </Badge>
     );
@@ -288,7 +289,7 @@ export default function DiscoverPage() {
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-full bg-purple-200 dark:bg-purple-800">
-                  <MapPin className="h-5 w-5 text-purple-600 dark:text-purple-300" />
+                  <MapPinIcon className="h-5 w-5 text-purple-600 dark:text-purple-300" />
                 </div>
                 <div>
                   <p className="font-medium text-sm">Enable Location</p>
@@ -303,12 +304,12 @@ export default function DiscoverPage() {
               >
                 {locationLoading ? (
                   <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    <Loader2Icon className="h-4 w-4 mr-2 animate-spin" />
                     Getting location...
                   </>
                 ) : (
                   <>
-                    <Navigation2 className="h-4 w-4 mr-2" />
+                    <Navigation2Icon className="h-4 w-4 mr-2" />
                     Enable Location
                   </>
                 )}
@@ -326,7 +327,7 @@ export default function DiscoverPage() {
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-full bg-amber-200 dark:bg-amber-800">
-                  <XCircle className="h-5 w-5 text-amber-600 dark:text-amber-300" />
+                  <XCircleIcon className="h-5 w-5 text-amber-600 dark:text-amber-300" />
                 </div>
                 <div>
                   <p className="font-medium text-sm">Location Access Denied</p>
@@ -342,7 +343,7 @@ export default function DiscoverPage() {
                   onClick={clearLocation}
                   data-testid="button-clear-location"
                 >
-                  <RefreshCw className="h-4 w-4 mr-2" />
+                  <RefreshCwIcon className="h-4 w-4 mr-2" />
                   Reset & Try Again
                 </Button>
               </div>
@@ -354,7 +355,7 @@ export default function DiscoverPage() {
         {hasLocation && city && (
           <div className="mb-4 flex items-center gap-2">
             <Badge variant="outline" className="bg-green-50 dark:bg-green-950/30 border-green-300 text-green-700 dark:text-green-400">
-              <Navigation2 className="h-3 w-3 mr-1" />
+              <Navigation2Icon className="h-3 w-3 mr-1" />
               Showing events near {city}
             </Badge>
           </div>
@@ -378,7 +379,7 @@ export default function DiscoverPage() {
             {hasLocation && happeningNowEvents.length > 0 && (
               <div className="mb-8">
                 <div className="flex items-center gap-2 mb-4">
-                  <Clock className="h-5 w-5 text-orange-500" />
+                  <ClockIcon className="h-5 w-5 text-orange-500" />
                   <h2 className="text-xl font-semibold">Happening Near You Now</h2>
                   <Badge variant="secondary" className="text-xs">Within 3 hours</Badge>
                 </div>
@@ -398,7 +399,7 @@ export default function DiscoverPage() {
                             className="w-full h-full object-cover"
                           />
                           <Badge className="absolute top-2 right-2 bg-gradient-to-r from-orange-500 to-yellow-500 text-white">
-                            <Clock className="h-3 w-3 mr-1" />
+                            <ClockIcon className="h-3 w-3 mr-1" />
                             Soon
                           </Badge>
                         </div>
@@ -413,13 +414,13 @@ export default function DiscoverPage() {
                       </CardHeader>
                       <CardContent className="space-y-2">
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <Calendar className="h-4 w-4" />
+                          <CalendarIcon className="h-4 w-4" />
                           <span>
                             {format(new Date(event.eventDate), "h:mm a 'today'")}
                           </span>
                         </div>
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <MapPin className="h-4 w-4" />
+                          <MapPinIcon className="h-4 w-4" />
                           <span className="line-clamp-1">{event.location}</span>
                         </div>
                       </CardContent>
@@ -433,7 +434,7 @@ export default function DiscoverPage() {
             {city && trendingEvents.length > 0 && (
               <div className="mb-8">
                 <div className="flex items-center gap-2 mb-4">
-                  <TrendingUp className="h-5 w-5 text-blue-500" />
+                  <TrendingUpIcon className="h-5 w-5 text-blue-500" />
                   <h2 className="text-xl font-semibold">Trending in {city}</h2>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" data-testid="trending-city-grid">
@@ -452,7 +453,7 @@ export default function DiscoverPage() {
                             className="w-full h-full object-cover"
                           />
                           <Badge className="absolute top-2 right-2 bg-gradient-to-r from-blue-500 to-cyan-500 text-white">
-                            <TrendingUp className="h-3 w-3 mr-1" />
+                            <TrendingUpIcon className="h-3 w-3 mr-1" />
                             Trending
                           </Badge>
                         </div>
@@ -469,13 +470,13 @@ export default function DiscoverPage() {
                       </CardHeader>
                       <CardContent className="space-y-2">
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <Calendar className="h-4 w-4" />
+                          <CalendarIcon className="h-4 w-4" />
                           <span>
                             {format(new Date(event.eventDate), "MMM d, yyyy 'at' h:mm a")}
                           </span>
                         </div>
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <MapPin className="h-4 w-4" />
+                          <MapPinIcon className="h-4 w-4" />
                           <span className="line-clamp-1">{event.location}</span>
                         </div>
                       </CardContent>
@@ -489,7 +490,7 @@ export default function DiscoverPage() {
             {filteredPromotedEvents.length > 0 && (
               <div className="mb-8">
                 <div className="flex items-center gap-2 mb-4">
-                  <Sparkles className="h-5 w-5 text-purple-500" />
+                  <SparklesIcon className="h-5 w-5 text-purple-500" />
                   <h2 className="text-xl font-semibold">Featured Events</h2>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" data-testid="featured-events-grid">
@@ -510,7 +511,7 @@ export default function DiscoverPage() {
                             className="w-full h-full object-cover"
                           />
                           <Badge className="absolute top-2 right-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white">
-                            <Sparkles className="h-3 w-3 mr-1" />
+                            <SparklesIcon className="h-3 w-3 mr-1" />
                             Featured
                           </Badge>
                         </div>
@@ -527,13 +528,13 @@ export default function DiscoverPage() {
                       </CardHeader>
                       <CardContent className="space-y-2">
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <Calendar className="h-4 w-4" />
+                          <CalendarIcon className="h-4 w-4" />
                           <span>
                             {format(new Date(event.eventDate), "MMM d, yyyy 'at' h:mm a")}
                           </span>
                         </div>
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <MapPin className="h-4 w-4" />
+                          <MapPinIcon className="h-4 w-4" />
                           <span className="line-clamp-1">
                             {event.location}
                           </span>
@@ -564,7 +565,7 @@ export default function DiscoverPage() {
                             onClick={(e) => handleShareEvent(event, e)}
                             data-testid={`button-share-featured-event-${event.id}`}
                           >
-                            <Share2 className="h-4 w-4" />
+                            <Share2Icon className="h-4 w-4" />
                           </Button>
                           <Button 
                             size="sm" 
@@ -588,7 +589,7 @@ export default function DiscoverPage() {
             {displayVenues.length > 0 && (
               <div className="mb-8">
                 <div className="flex items-center gap-2 mb-4">
-                  <Building2 className="h-5 w-5 text-purple-500" />
+                  <Building2Icon className="h-5 w-5 text-purple-500" />
                   <h2 className="text-xl font-semibold">Featured Venues</h2>
                   {hasLocation && (
                     <Badge variant="outline" className="text-xs">Sorted by distance</Badge>
@@ -612,7 +613,7 @@ export default function DiscoverPage() {
                               className="w-full h-full object-cover"
                             />
                             <Badge className="absolute top-2 right-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white">
-                              <Sparkles className="h-3 w-3 mr-1" />
+                              <SparklesIcon className="h-3 w-3 mr-1" />
                               Featured
                             </Badge>
                           </div>
@@ -631,13 +632,13 @@ export default function DiscoverPage() {
                         <CardContent className="space-y-1 pb-2">
                           {venue.city && (
                             <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                              <MapPin className="h-3 w-3" />
+                              <MapPinIcon className="h-3 w-3" />
                               <span className="line-clamp-1">{venue.city}</span>
                             </div>
                           )}
                           {venue.musicTypes && Array.isArray(venue.musicTypes) && venue.musicTypes.length > 0 && (
                             <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                              <Music className="h-3 w-3" />
+                              <MusicIcon className="h-3 w-3" />
                               <span className="line-clamp-1">{venue.musicTypes.slice(0, 2).join(", ")}</span>
                             </div>
                           )}
@@ -649,7 +650,7 @@ export default function DiscoverPage() {
                             onClick={(e) => handleShareVenue(venue, e)}
                             data-testid={`button-share-venue-${venue.id}`}
                           >
-                            <Share2 className="h-4 w-4" />
+                            <Share2Icon className="h-4 w-4" />
                           </Button>
                         </CardFooter>
                       </Card>
@@ -664,7 +665,7 @@ export default function DiscoverPage() {
             {(filteredEvents.length > 0 || upcomingVenueEvents.length > 0) && (
               <div className="mb-8">
                 <div className="flex items-center gap-2 mb-4">
-                  <Ticket className="h-5 w-5 text-purple-500" />
+                  <TicketIcon className="h-5 w-5 text-purple-500" />
                   <h2 className="text-xl font-semibold">Upcoming Events</h2>
                   <span className="text-sm text-muted-foreground">
                     ({filteredEvents.length + upcomingVenueEvents.length})
@@ -700,11 +701,11 @@ export default function DiscoverPage() {
                             </CardHeader>
                             <CardContent className="space-y-1 pb-3">
                               <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                <Calendar className="h-3 w-3" />
+                                <CalendarIcon className="h-3 w-3" />
                                 <span>{format(new Date(event.eventDate), "EEE, MMM d 'at' h:mm a")}</span>
                               </div>
                               <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                <MapPin className="h-3 w-3" />
+                                <MapPinIcon className="h-3 w-3" />
                                 <span className="line-clamp-1">{event.location}</span>
                               </div>
                               <div className="flex items-center justify-between pt-1">
@@ -716,7 +717,7 @@ export default function DiscoverPage() {
                                   </span>
                                 )}
                                 <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); handleShareEvent(event, e); }}>
-                                  <Share2 className="h-3 w-3" />
+                                  <Share2Icon className="h-3 w-3" />
                                 </Button>
                               </div>
                             </CardContent>
@@ -735,25 +736,25 @@ export default function DiscoverPage() {
                                 </div>
                               ) : (
                                 <div className="aspect-video w-full bg-gradient-to-br from-purple-100 to-pink-100 dark:from-purple-950/30 dark:to-pink-950/30 flex items-center justify-center">
-                                  <Ticket className="h-10 w-10 text-purple-300" />
+                                  <TicketIcon className="h-10 w-10 text-purple-300" />
                                 </div>
                               )}
                               <CardHeader className="space-y-1 pb-2">
                                 <h3 className="font-semibold text-base line-clamp-1">{event.name}</h3>
                                 {event.venue?.name && (
                                   <p className="text-xs text-muted-foreground flex items-center gap-1">
-                                    <Building2 className="h-3 w-3" />{event.venue.name}
+                                    <Building2Icon className="h-3 w-3" />{event.venue.name}
                                   </p>
                                 )}
                               </CardHeader>
                               <CardContent className="space-y-1 pb-3">
                                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                  <Calendar className="h-3 w-3" />
+                                  <CalendarIcon className="h-3 w-3" />
                                   <span>{format(new Date(event.date), "EEE, MMM d 'at' h:mm a")}</span>
                                 </div>
                                 {(event.venue?.address || event.venue?.city) && (
                                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                    <MapPin className="h-3 w-3" />
+                                    <MapPinIcon className="h-3 w-3" />
                                     <span className="line-clamp-1">{event.venue.address || event.venue.city}</span>
                                   </div>
                                 )}
@@ -776,7 +777,7 @@ export default function DiscoverPage() {
             {/* All Events (sorted by proximity if location available) */}
             <div className="mb-4">
               <div className="flex items-center gap-2 mb-4">
-                <Calendar className="h-5 w-5 text-muted-foreground" />
+                <CalendarIcon className="h-5 w-5 text-muted-foreground" />
                 <h2 className="text-xl font-semibold">
                   {hasLocation ? "Events Near You" : "All Events"}
                 </h2>
@@ -821,19 +822,19 @@ export default function DiscoverPage() {
                   </CardHeader>
                   <CardContent className="space-y-2">
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Calendar className="h-4 w-4" />
+                      <CalendarIcon className="h-4 w-4" />
                       <span data-testid={`event-date-${event.id}`}>
                         {format(new Date(event.eventDate), "MMM d, yyyy 'at' h:mm a")}
                       </span>
                     </div>
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <MapPin className="h-4 w-4" />
+                      <MapPinIcon className="h-4 w-4" />
                       <span className="line-clamp-1" data-testid={`event-location-${event.id}`}>
                         {event.location}
                       </span>
                     </div>
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Users className="h-4 w-4" />
+                      <UsersIcon className="h-4 w-4" />
                       <span>{event.ticketsAvailable} tickets available</span>
                     </div>
                   </CardContent>
@@ -866,7 +867,7 @@ export default function DiscoverPage() {
                         onClick={(e) => handleShareEvent(event, e)}
                         data-testid={`button-share-event-${event.id}`}
                       >
-                        <Share2 className="h-4 w-4" />
+                        <Share2Icon className="h-4 w-4" />
                       </Button>
                       <Button
                         size="sm"
@@ -898,7 +899,7 @@ export default function DiscoverPage() {
             {allVenues.length > 0 && (
               <div className="mb-8">
                 <div className="flex items-center gap-2 mb-4">
-                  <Building2 className="h-5 w-5 text-muted-foreground" />
+                  <Building2Icon className="h-5 w-5 text-muted-foreground" />
                   <h2 className="text-xl font-semibold">All Venues</h2>
                   <span className="text-sm text-muted-foreground">({allVenues.length})</span>
                 </div>
@@ -921,7 +922,7 @@ export default function DiscoverPage() {
                             </div>
                           ) : (
                             <div className="aspect-video w-full bg-gradient-to-br from-purple-100 to-pink-100 dark:from-purple-950/30 dark:to-pink-950/30 flex items-center justify-center">
-                              <Building2 className="h-10 w-10 text-purple-300" />
+                              <Building2Icon className="h-10 w-10 text-purple-300" />
                             </div>
                           )}
                           <CardHeader className="space-y-1 pb-2">
@@ -937,13 +938,13 @@ export default function DiscoverPage() {
                           <CardContent className="space-y-1 pb-3">
                             {venue.city && (
                               <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                <MapPin className="h-3 w-3" />
+                                <MapPinIcon className="h-3 w-3" />
                                 <span className="line-clamp-1">{venue.city}</span>
                               </div>
                             )}
                             {venue.musicTypes && Array.isArray(venue.musicTypes) && venue.musicTypes.length > 0 && (
                               <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                <Music className="h-3 w-3" />
+                                <MusicIcon className="h-3 w-3" />
                                 <span className="line-clamp-1">{venue.musicTypes.slice(0, 2).join(", ")}</span>
                               </div>
                             )}

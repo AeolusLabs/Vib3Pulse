@@ -1,22 +1,12 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { 
-  Users, 
-  Calendar, 
-  Ticket, 
-  PoundSterling, 
-  UserPlus, 
-  Flag, 
-  Building,
-  TrendingUp,
-  Wrench,
-  ImageIcon,
-  Loader2
-} from "lucide-react";
+
 import AdminLayout from "./AdminLayout";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { UsersIcon, CalendarIcon, TicketIcon, PoundSterlingIcon, UserPlusIcon, FlagIcon, TrendingUpIcon, ImageIcon, Loader2Icon } from "@/components/ui/icons";
+import { Building, Wrench } from "lucide-react";
 
 interface PlatformStats {
   totalUsers: number;
@@ -63,42 +53,42 @@ export default function AdminDashboard() {
     {
       title: "Total Users",
       value: stats?.totalUsers || 0,
-      icon: <Users className="w-5 h-5" />,
+      icon: <UsersIcon className="w-5 h-5" />,
       color: "bg-blue-500/10 text-blue-400",
       iconBg: "bg-blue-500/20",
     },
     {
       title: "Total Events",
       value: stats?.totalEvents || 0,
-      icon: <Calendar className="w-5 h-5" />,
+      icon: <CalendarIcon className="w-5 h-5" />,
       color: "bg-purple-500/10 text-purple-400",
       iconBg: "bg-purple-500/20",
     },
     {
       title: "Tickets Sold",
       value: stats?.totalTicketsSold || 0,
-      icon: <Ticket className="w-5 h-5" />,
+      icon: <TicketIcon className="w-5 h-5" />,
       color: "bg-green-500/10 text-green-400",
       iconBg: "bg-green-500/20",
     },
     {
       title: "Total Revenue",
       value: `£${((stats?.totalRevenue || 0) / 100).toFixed(2)}`,
-      icon: <PoundSterling className="w-5 h-5" />,
+      icon: <PoundSterlingIcon className="w-5 h-5" />,
       color: "bg-emerald-500/10 text-emerald-400",
       iconBg: "bg-emerald-500/20",
     },
     {
       title: "New Users Today",
       value: stats?.newUsersToday || 0,
-      icon: <UserPlus className="w-5 h-5" />,
+      icon: <UserPlusIcon className="w-5 h-5" />,
       color: "bg-cyan-500/10 text-cyan-400",
       iconBg: "bg-cyan-500/20",
     },
     {
       title: "Pending Reports",
       value: stats?.pendingReports || 0,
-      icon: <Flag className="w-5 h-5" />,
+      icon: <FlagIcon className="w-5 h-5" />,
       color: stats?.pendingReports ? "bg-red-500/10 text-red-400" : "bg-slate-500/10 text-slate-400",
       iconBg: stats?.pendingReports ? "bg-red-500/20" : "bg-slate-500/20",
     },
@@ -112,7 +102,7 @@ export default function AdminDashboard() {
     {
       title: "Active Users",
       value: stats?.activeUsers || 0,
-      icon: <TrendingUp className="w-5 h-5" />,
+      icon: <TrendingUpIcon className="w-5 h-5" />,
       color: "bg-indigo-500/10 text-indigo-400",
       iconBg: "bg-indigo-500/20",
     },
@@ -179,7 +169,7 @@ export default function AdminDashboard() {
                 className="flex items-center gap-3 p-3 rounded-lg bg-slate-700/30 hover:bg-slate-700/50 transition-colors cursor-pointer"
                 data-testid="link-view-reports"
               >
-                <Flag className="w-5 h-5 text-red-400" />
+                <FlagIcon className="w-5 h-5 text-red-400" />
                 <div>
                   <p className="text-white font-medium">Review Reports</p>
                   <p className="text-sm text-slate-400">
@@ -192,7 +182,7 @@ export default function AdminDashboard() {
                 className="flex items-center gap-3 p-3 rounded-lg bg-slate-700/30 hover:bg-slate-700/50 transition-colors cursor-pointer"
                 data-testid="link-moderate-events"
               >
-                <Calendar className="w-5 h-5 text-purple-400" />
+                <CalendarIcon className="w-5 h-5 text-purple-400" />
                 <div>
                   <p className="text-white font-medium">Moderate Events</p>
                   <p className="text-sm text-slate-400">Review and approve events</p>
@@ -203,7 +193,7 @@ export default function AdminDashboard() {
                 className="flex items-center gap-3 p-3 rounded-lg bg-slate-700/30 hover:bg-slate-700/50 transition-colors cursor-pointer"
                 data-testid="link-manage-users"
               >
-                <Users className="w-5 h-5 text-blue-400" />
+                <UsersIcon className="w-5 h-5 text-blue-400" />
                 <div>
                   <p className="text-white font-medium">Manage Users</p>
                   <p className="text-sm text-slate-400">View and manage platform users</p>
@@ -273,7 +263,7 @@ export default function AdminDashboard() {
                 >
                   {fixAclMutation.isPending ? (
                     <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      <Loader2Icon className="w-4 h-4 mr-2 animate-spin" />
                       Fixing...
                     </>
                   ) : (

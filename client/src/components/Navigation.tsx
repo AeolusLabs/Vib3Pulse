@@ -1,4 +1,4 @@
-import { Search, User, Calendar, LogOut, Ticket, Shield, AlertTriangle, Building2, Settings } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -16,6 +16,7 @@ import NotificationBell from "./NotificationBell";
 import { Link, useLocation } from "wouter";
 import { useAuth, logout } from "@/hooks/useAuth";
 import { EmergencyButton } from "./safety/EmergencyButton";
+import { SearchIcon, UserIcon, CalendarIcon, LogOutIcon, TicketIcon, ShieldIcon, AlertTriangleIcon, Building2Icon, SettingsIcon } from "@/components/ui/icons";
 
 interface NavigationProps {
   onSearch?: (query: string) => void;
@@ -46,7 +47,7 @@ export default function Navigation({ onSearch }: NavigationProps) {
 
           <div className="hidden md:flex flex-1 max-w-md">
             <div className="relative w-full">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 type="search"
                 placeholder="Search events..."
@@ -84,7 +85,7 @@ export default function Navigation({ onSearch }: NavigationProps) {
                 {user && (
                   <DropdownMenuItem asChild data-testid="menu-profile">
                     <Link href={`/profile/${user.username}`}>
-                      <User className="mr-2 h-4 w-4" />
+                      <UserIcon className="mr-2 h-4 w-4" />
                       Profile
                     </Link>
                   </DropdownMenuItem>
@@ -93,14 +94,14 @@ export default function Navigation({ onSearch }: NavigationProps) {
                   <>
                     <DropdownMenuItem asChild data-testid="menu-my-events">
                       <Link href="/manage-events">
-                        <Calendar className="mr-2 h-4 w-4" />
+                        <CalendarIcon className="mr-2 h-4 w-4" />
                         My Events
                       </Link>
                     </DropdownMenuItem>
                     {user.canManageVenues && (
                       <DropdownMenuItem asChild data-testid="menu-manage-venues">
                         <Link href="/manage-venues">
-                          <Building2 className="mr-2 h-4 w-4" />
+                          <Building2Icon className="mr-2 h-4 w-4" />
                           Manage Venues
                         </Link>
                       </DropdownMenuItem>
@@ -109,13 +110,13 @@ export default function Navigation({ onSearch }: NavigationProps) {
                 )}
                 <DropdownMenuItem asChild data-testid="menu-my-tickets">
                   <Link href="/ticket-wallet">
-                    <Ticket className="mr-2 h-4 w-4" />
+                    <TicketIcon className="mr-2 h-4 w-4" />
                     My Tickets
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild data-testid="menu-rsvps">
                   <Link href="/my-rsvps">
-                    <Calendar className="mr-2 h-4 w-4" />
+                    <CalendarIcon className="mr-2 h-4 w-4" />
                     My RSVPs
                   </Link>
                 </DropdownMenuItem>
@@ -124,13 +125,13 @@ export default function Navigation({ onSearch }: NavigationProps) {
                     <DropdownMenuSeparator />
                     <DropdownMenuItem asChild data-testid="menu-buddy-settings">
                       <Link href="/buddy/settings">
-                        <Shield className="mr-2 h-4 w-4" />
+                        <ShieldIcon className="mr-2 h-4 w-4" />
                         Safety Buddy
                       </Link>
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild data-testid="menu-alerts">
                       <Link href="/buddy/alerts">
-                        <AlertTriangle className="mr-2 h-4 w-4" />
+                        <AlertTriangleIcon className="mr-2 h-4 w-4" />
                         Alert History
                       </Link>
                     </DropdownMenuItem>
@@ -139,12 +140,12 @@ export default function Navigation({ onSearch }: NavigationProps) {
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild data-testid="menu-account-settings">
                   <Link href="/account/settings">
-                    <Settings className="mr-2 h-4 w-4" />
+                    <SettingsIcon className="mr-2 h-4 w-4" />
                     Account Settings
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleLogout} data-testid="menu-logout">
-                  <LogOut className="mr-2 h-4 w-4" />
+                  <LogOutIcon className="mr-2 h-4 w-4" />
                   Log out
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -154,7 +155,7 @@ export default function Navigation({ onSearch }: NavigationProps) {
 
         <div className="md:hidden pb-3">
           <div className="relative w-full">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               type="search"
               placeholder="Search events..."

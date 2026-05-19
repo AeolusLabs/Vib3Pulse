@@ -29,11 +29,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Search, Check, X, Flag, Trash2, Eye } from "lucide-react";
+
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import AdminLayout from "./AdminLayout";
 import { format } from "date-fns";
+import { SearchIcon, CheckIcon, XIcon, FlagIcon, Trash2Icon, EyeIcon } from "@/components/ui/icons";
 
 interface Event {
   id: string;
@@ -140,7 +141,7 @@ export default function AdminEvents() {
           <CardHeader>
             <div className="flex items-center gap-4">
               <div className="relative flex-1 max-w-sm">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <Input
                   placeholder="Search events..."
                   value={searchQuery}
@@ -202,7 +203,7 @@ export default function AdminEvents() {
                             }}
                             data-testid={`button-approve-event-${event.id}`}
                           >
-                            <Check className="w-4 h-4" />
+                            <CheckIcon className="w-4 h-4" />
                           </Button>
                           <Button
                             size="sm"
@@ -215,7 +216,7 @@ export default function AdminEvents() {
                             }}
                             data-testid={`button-reject-event-${event.id}`}
                           >
-                            <X className="w-4 h-4" />
+                            <XIcon className="w-4 h-4" />
                           </Button>
                           <Button
                             size="sm"
@@ -228,7 +229,7 @@ export default function AdminEvents() {
                             }}
                             data-testid={`button-flag-event-${event.id}`}
                           >
-                            <Flag className="w-4 h-4" />
+                            <FlagIcon className="w-4 h-4" />
                           </Button>
                           <Button
                             size="sm"
@@ -241,7 +242,7 @@ export default function AdminEvents() {
                             }}
                             data-testid={`button-delete-event-${event.id}`}
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Trash2Icon className="w-4 h-4" />
                           </Button>
                         </div>
                       </TableCell>

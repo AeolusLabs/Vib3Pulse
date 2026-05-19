@@ -28,11 +28,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Shield, UserX, Edit } from "lucide-react";
+
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import AdminLayout from "./AdminLayout";
 import { format } from "date-fns";
+import { PlusIcon, ShieldIcon, UserXIcon, EditIcon } from "@/components/ui/icons";
 
 type AdminRole = "super_admin" | "content_moderator" | "user_support" | "event_reviewer" | "finance_manager" | "analytics_viewer";
 
@@ -157,7 +158,7 @@ export default function AdminStaff() {
             className="bg-purple-600 hover:bg-purple-700"
             data-testid="button-create-admin"
           >
-            <Plus className="w-4 h-4 mr-2" />
+            <PlusIcon className="w-4 h-4 mr-2" />
             Add Staff Member
           </Button>
         </div>
@@ -167,7 +168,7 @@ export default function AdminStaff() {
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center">
-                  <Shield className="w-5 h-5 text-purple-400" />
+                  <ShieldIcon className="w-5 h-5 text-purple-400" />
                 </div>
                 <div>
                   <p className="text-2xl font-bold text-white">
@@ -182,7 +183,7 @@ export default function AdminStaff() {
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-emerald-500/20 rounded-lg flex items-center justify-center">
-                  <Shield className="w-5 h-5 text-emerald-400" />
+                  <ShieldIcon className="w-5 h-5 text-emerald-400" />
                 </div>
                 <div>
                   <p className="text-2xl font-bold text-white">
@@ -197,7 +198,7 @@ export default function AdminStaff() {
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-slate-500/20 rounded-lg flex items-center justify-center">
-                  <UserX className="w-5 h-5 text-slate-400" />
+                  <UserXIcon className="w-5 h-5 text-slate-400" />
                 </div>
                 <div>
                   <p className="text-2xl font-bold text-white">
@@ -272,7 +273,7 @@ export default function AdminStaff() {
                               }}
                               data-testid={`button-deactivate-admin-${admin.id}`}
                             >
-                              <UserX className="w-4 h-4" />
+                              <UserXIcon className="w-4 h-4" />
                             </Button>
                           )}
                         </div>
