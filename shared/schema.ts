@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, integer, boolean, unique, doublePrecision } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, integer, boolean, unique, doublePrecision, check } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -92,7 +92,7 @@ export const events = pgTable("events", {
   externalTicketUrl: text("external_ticket_url"),
   isPromoted: boolean("is_promoted").notNull().default(false),
   promotedUntil: timestamp("promoted_until"),
-  communityId: varchar("community_id"),
+  communityId: varchar("community_id").references(() => communities.id, { onDelete: "set null" }),
 });
 
 export const insertEventSchema = createInsertSchema(events).omit({
@@ -1115,9 +1115,11 @@ export const communityMemberships = pgTable("community_memberships", {
   communityId: varchar("community_id").notNull().references(() => communities.id, { onDelete: "cascade" }),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   role: text("role").notNull().default("member"),
+  notificationsEnabled: boolean("notifications_enabled").notNull().default(true),
   joinedAt: timestamp("joined_at").notNull().default(sql`now()`),
 }, (table) => ({
   uniqueMembership: unique().on(table.communityId, table.userId),
+  roleCheck: check("role_check", sql`${table.role} IN ('owner', 'moderator', 'member')`),
 }));
 
 export const insertCommunityMembershipSchema = createInsertSchema(communityMemberships).omit({

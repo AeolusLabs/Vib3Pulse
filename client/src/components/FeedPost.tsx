@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/alert-dialog";
 
 import { useState, useEffect } from "react";
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -84,7 +84,7 @@ interface FeedPostProps {
   venueId?: string | null;
   attachedEvent?: Event | null;
   attachedVenue?: Venue | null;
-  community?: { id: string; name: string } | null;
+  community?: { id: string; name: string; slug?: string } | null;
   mentionedUsers?: MentionedUser[];
   hasActiveStory?: boolean;
   /** When true: renders flat/borderless for the main feed timeline */
@@ -437,9 +437,14 @@ export default function FeedPost({
               </span>
             )}
             {community && (
-              <Badge variant="outline" className="text-[11px] py-0 flex-shrink-0" data-testid={`community-tag-${id}`}>
-                in {community.name}
-              </Badge>
+              <Link
+                href={`/community/${community.slug ?? community.id}`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Badge variant="outline" className="text-[11px] py-0 flex-shrink-0 cursor-pointer hover:bg-muted/50" data-testid={`community-tag-${id}`}>
+                  in {community.name}
+                </Badge>
+              </Link>
             )}
             <span className="text-xs text-muted-foreground flex-shrink-0">
               @{author.username} · {displayTime}

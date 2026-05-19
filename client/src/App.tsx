@@ -46,6 +46,7 @@ import JoinGroupPage from "@/pages/JoinGroupPage";
 import ScannerPage from "@/pages/ScannerPage";
 import VenueEventCheckInPage from "@/pages/VenueEventCheckInPage";
 import StoryDetailPage from "@/pages/StoryDetailPage";
+import CommunityPage from "@/pages/CommunityPage";
 
 function Router() {
   return (
@@ -160,6 +161,12 @@ function Router() {
       <Route path="/stories/:storyId">
         <AuthenticatedLayout>
           <StoryDetailPage />
+        </AuthenticatedLayout>
+      </Route>
+
+      <Route path="/community/:slug">
+        <AuthenticatedLayout>
+          <CommunityPage />
         </AuthenticatedLayout>
       </Route>
 

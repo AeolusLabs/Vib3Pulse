@@ -734,24 +734,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Handle community creation if requested
+      // Handle community creation or linking
       let communityId: string | null = null;
       if (parsedData.createCommunity && parsedData.communityName) {
         const communitySlug = parsedData.communityName
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, '-')
           .replace(/^-|-$/g, '') + '-' + Date.now();
-        
+
         const newCommunity = await storage.createCommunity({
           name: parsedData.communityName,
           slug: communitySlug,
           description: `Community for ${parsedData.title || parsedData.communityName}`,
           createdByUserId: req.user!.id,
         });
-        
-        // Auto-join the creator as admin
-        await storage.joinCommunity(req.user!.id, newCommunity.id, 'admin');
+
+        // Auto-join the creator as owner
+        await storage.joinCommunity(req.user!.id, newCommunity.id, 'owner');
         communityId = newCommunity.id;
+      } else if (parsedData.communityId) {
+        // Link to an existing community — validate it exists and user is a member
+        const linkedCommunity = await storage.getCommunity(parsedData.communityId);
+        if (!linkedCommunity) {
+          return res.status(400).json({ message: "Community not found" });
+        }
+        const isMember = await storage.isCommunityMember(req.user!.id, parsedData.communityId);
+        if (!isMember) {
+          return res.status(403).json({ message: "You must be a member of the community to link an event" });
+        }
+        communityId = parsedData.communityId;
       }
       
       const sanitizedData = {
@@ -4050,7 +4061,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Community not found" });
       }
 
-      const members = await storage.getCommunityMembers(req.params.id);
+      const limit = Math.min(parseInt(String(req.query.limit ?? "50"), 10) || 50, 100);
+      const offset = parseInt(String(req.query.offset ?? "0"), 10) || 0;
+      const members = await storage.getCommunityMembers(req.params.id, limit, offset);
       res.json(members);
     } catch (error) {
       console.error("Error fetching community members:", error);
@@ -4066,7 +4079,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Community not found" });
       }
 
-      const posts = await storage.getCommunityPosts(req.params.id);
+      const limit = Math.min(parseInt(String(req.query.limit ?? "30"), 10) || 30, 100);
+      const offset = parseInt(String(req.query.offset ?? "0"), 10) || 0;
+      const posts = await storage.getCommunityPosts(req.params.id, limit, offset);
       res.json(posts);
     } catch (error) {
       console.error("Error fetching community posts:", error);
@@ -4082,6 +4097,158 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error checking membership:", error);
       res.status(500).json({ message: "Failed to check membership" });
+    }
+  });
+
+  // Toggle notification preference for current user in a community
+  app.patch("/api/communities/:id/notifications", requireAuth, async (req, res) => {
+    try {
+      const membership = await storage.getCommunityMembership(req.user!.id, req.params.id);
+      if (!membership) {
+        return res.status(403).json({ message: "You are not a member of this community" });
+      }
+      const { enabled } = req.body;
+      if (typeof enabled !== "boolean") {
+        return res.status(400).json({ message: "enabled must be a boolean" });
+      }
+      await storage.setCommunityNotifications(req.user!.id, req.params.id, enabled);
+      res.json({ notificationsEnabled: enabled });
+    } catch (error) {
+      console.error("Error updating notification preference:", error);
+      res.status(500).json({ message: "Failed to update notification preference" });
+    }
+  });
+
+  // Get community by slug
+  app.get("/api/communities/slug/:slug", async (req, res) => {
+    try {
+      const community = await storage.getCommunityBySlug(req.params.slug);
+      if (!community) {
+        return res.status(404).json({ message: "Community not found" });
+      }
+      const details = await storage.getCommunityWithDetails(community.id);
+      res.json(details);
+    } catch (error) {
+      console.error("Error fetching community by slug:", error);
+      res.status(500).json({ message: "Failed to fetch community" });
+    }
+  });
+
+  // Get events linked to a community
+  app.get("/api/communities/:id/events", async (req, res) => {
+    try {
+      const community = await storage.getCommunity(req.params.id);
+      if (!community) {
+        return res.status(404).json({ message: "Community not found" });
+      }
+      const communityEvents = await storage.getCommunityEvents(req.params.id);
+      res.json(communityEvents);
+    } catch (error) {
+      console.error("Error fetching community events:", error);
+      res.status(500).json({ message: "Failed to fetch community events" });
+    }
+  });
+
+  // Update a member's role (owner only)
+  app.patch("/api/communities/:id/members/:userId", requireAuth, async (req, res) => {
+    try {
+      const community = await storage.getCommunity(req.params.id);
+      if (!community) {
+        return res.status(404).json({ message: "Community not found" });
+      }
+
+      const callerMembership = await storage.getCommunityMembership(req.user!.id, req.params.id);
+      if (!callerMembership || callerMembership.role !== "owner") {
+        return res.status(403).json({ message: "Only the owner can change member roles" });
+      }
+
+      if (req.params.userId === req.user!.id) {
+        return res.status(400).json({ message: "Use transfer-ownership to change your own role" });
+      }
+
+      const { role } = req.body;
+      if (!["moderator", "member"].includes(role)) {
+        return res.status(400).json({ message: "Role must be 'moderator' or 'member'" });
+      }
+
+      const targetMembership = await storage.getCommunityMembership(req.params.userId, req.params.id);
+      if (!targetMembership) {
+        return res.status(404).json({ message: "Member not found" });
+      }
+
+      const updated = await storage.updateCommunityMemberRole(req.params.userId, req.params.id, role);
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating member role:", error);
+      res.status(500).json({ message: "Failed to update member role" });
+    }
+  });
+
+  // Kick a member (owner or moderator)
+  app.delete("/api/communities/:id/members/:userId", requireAuth, async (req, res) => {
+    try {
+      const community = await storage.getCommunity(req.params.id);
+      if (!community) {
+        return res.status(404).json({ message: "Community not found" });
+      }
+
+      const callerMembership = await storage.getCommunityMembership(req.user!.id, req.params.id);
+      if (!callerMembership || !["owner", "moderator"].includes(callerMembership.role)) {
+        return res.status(403).json({ message: "Only owners and moderators can remove members" });
+      }
+
+      if (req.params.userId === req.user!.id) {
+        return res.status(400).json({ message: "Use the leave endpoint to leave the community" });
+      }
+
+      const targetMembership = await storage.getCommunityMembership(req.params.userId, req.params.id);
+      if (!targetMembership) {
+        return res.status(404).json({ message: "Member not found" });
+      }
+
+      if (callerMembership.role === "moderator" && ["owner", "moderator"].includes(targetMembership.role)) {
+        return res.status(403).json({ message: "Moderators can only remove regular members" });
+      }
+
+      await storage.removeCommunityMember(req.params.userId, req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error removing community member:", error);
+      res.status(500).json({ message: "Failed to remove member" });
+    }
+  });
+
+  // Transfer community ownership (owner only)
+  app.patch("/api/communities/:id/transfer-ownership", requireAuth, async (req, res) => {
+    try {
+      const community = await storage.getCommunity(req.params.id);
+      if (!community) {
+        return res.status(404).json({ message: "Community not found" });
+      }
+
+      const callerMembership = await storage.getCommunityMembership(req.user!.id, req.params.id);
+      if (!callerMembership || callerMembership.role !== "owner") {
+        return res.status(403).json({ message: "Only the owner can transfer ownership" });
+      }
+
+      const { newOwnerId } = req.body;
+      if (!newOwnerId) {
+        return res.status(400).json({ message: "newOwnerId is required" });
+      }
+
+      const newOwnerMembership = await storage.getCommunityMembership(newOwnerId, req.params.id);
+      if (!newOwnerMembership) {
+        return res.status(404).json({ message: "New owner must be a member of this community" });
+      }
+
+      await storage.updateCommunityMemberRole(req.user!.id, req.params.id, "member");
+      await storage.updateCommunityMemberRole(newOwnerId, req.params.id, "owner");
+      await storage.updateCommunity(req.params.id, { createdByUserId: newOwnerId });
+
+      res.json({ message: "Ownership transferred successfully" });
+    } catch (error) {
+      console.error("Error transferring ownership:", error);
+      res.status(500).json({ message: "Failed to transfer ownership" });
     }
   });
 

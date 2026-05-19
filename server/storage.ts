@@ -519,21 +519,26 @@ export interface IStorage {
   createCommunity(community: InsertCommunity): Promise<Community>;
   getCommunity(id: string): Promise<Community | undefined>;
   getCommunityBySlug(slug: string): Promise<Community | undefined>;
+  getCommunityWithDetails(id: string): Promise<(Community & { memberCount: number; creator: User }) | undefined>;
   getCommunities(): Promise<Array<Community & { memberCount: number; creator: User }>>;
   getUserCommunities(userId: string): Promise<Array<Community & { memberCount: number; role: string }>>;
   updateCommunity(id: string, updates: Partial<InsertCommunity>): Promise<Community>;
   deleteCommunity(id: string): Promise<void>;
-  
+  getCommunityEvents(communityId: string): Promise<Event[]>;
+
   // Community membership
   joinCommunity(userId: string, communityId: string, role?: string): Promise<CommunityMembership>;
   leaveCommunity(userId: string, communityId: string): Promise<void>;
   isCommunityMember(userId: string, communityId: string): Promise<boolean>;
-  getCommunityMembers(communityId: string): Promise<Array<CommunityMembership & { user: User }>>;
+  getCommunityMembers(communityId: string, limit?: number, offset?: number): Promise<Array<CommunityMembership & { user: User }>>;
   getCommunityMemberIds(communityId: string): Promise<string[]>;
   getCommunityMembership(userId: string, communityId: string): Promise<CommunityMembership | undefined>;
-  
+  updateCommunityMemberRole(userId: string, communityId: string, role: string): Promise<CommunityMembership>;
+  removeCommunityMember(userId: string, communityId: string): Promise<void>;
+  setCommunityNotifications(userId: string, communityId: string, enabled: boolean): Promise<void>;
+
   // Community posts
-  getCommunityPosts(communityId: string): Promise<Array<Post & { user: User; community: Community }>>;
+  getCommunityPosts(communityId: string, limit?: number, offset?: number): Promise<Array<Post & { user: User; community: Community }>>;
   getPostsWithCommunity(): Promise<Array<Post & { user: User; community: Community | null }>>;
 
   // ============================================
@@ -3367,7 +3372,7 @@ export class DbStorage implements IStorage {
     return result.length > 0;
   }
 
-  async getCommunityMembers(communityId: string): Promise<Array<CommunityMembership & { user: User }>> {
+  async getCommunityMembers(communityId: string, limit: number = 50, offset: number = 0): Promise<Array<CommunityMembership & { user: User }>> {
     const result = await db
       .select({
         membership: communityMemberships,
@@ -3376,8 +3381,10 @@ export class DbStorage implements IStorage {
       .from(communityMemberships)
       .innerJoin(users, eq(communityMemberships.userId, users.id))
       .where(eq(communityMemberships.communityId, communityId))
-      .orderBy(desc(communityMemberships.joinedAt));
-    
+      .orderBy(desc(communityMemberships.joinedAt))
+      .limit(limit)
+      .offset(offset);
+
     return result.map(r => ({
       ...r.membership,
       user: r.user,
@@ -3388,8 +3395,21 @@ export class DbStorage implements IStorage {
     const result = await db
       .select({ userId: communityMemberships.userId })
       .from(communityMemberships)
-      .where(eq(communityMemberships.communityId, communityId));
+      .where(and(
+        eq(communityMemberships.communityId, communityId),
+        eq(communityMemberships.notificationsEnabled, true)
+      ));
     return result.map(r => r.userId);
+  }
+
+  async setCommunityNotifications(userId: string, communityId: string, enabled: boolean): Promise<void> {
+    await db
+      .update(communityMemberships)
+      .set({ notificationsEnabled: enabled })
+      .where(and(
+        eq(communityMemberships.userId, userId),
+        eq(communityMemberships.communityId, communityId)
+      ));
   }
 
   async getCommunityMembership(userId: string, communityId: string): Promise<CommunityMembership | undefined> {
@@ -3403,7 +3423,7 @@ export class DbStorage implements IStorage {
     return result[0];
   }
 
-  async getCommunityPosts(communityId: string): Promise<Array<Post & { user: User; community: Community }>> {
+  async getCommunityPosts(communityId: string, limit: number = 30, offset: number = 0): Promise<Array<Post & { user: User; community: Community }>> {
     const result = await db
       .select({
         post: posts,
@@ -3414,13 +3434,63 @@ export class DbStorage implements IStorage {
       .innerJoin(users, eq(posts.userId, users.id))
       .innerJoin(communities, eq(posts.communityId, communities.id))
       .where(eq(posts.communityId, communityId))
-      .orderBy(desc(posts.createdAt));
-    
+      .orderBy(desc(posts.createdAt))
+      .limit(limit)
+      .offset(offset);
+
     return result.map(r => ({
       ...r.post,
       user: r.user,
       community: r.community,
     }));
+  }
+
+  async getCommunityWithDetails(id: string): Promise<(Community & { memberCount: number; creator: User }) | undefined> {
+    const result = await db
+      .select({
+        community: communities,
+        creator: users,
+        memberCount: sql<number>`(SELECT COUNT(*) FROM community_memberships WHERE community_id = ${communities.id})::int`,
+      })
+      .from(communities)
+      .innerJoin(users, eq(communities.createdByUserId, users.id))
+      .where(eq(communities.id, id));
+
+    if (!result[0]) return undefined;
+    return {
+      ...result[0].community,
+      memberCount: result[0].memberCount,
+      creator: result[0].creator,
+    };
+  }
+
+  async getCommunityEvents(communityId: string): Promise<Event[]> {
+    return await db
+      .select()
+      .from(events)
+      .where(eq(events.communityId, communityId))
+      .orderBy(events.eventDate);
+  }
+
+  async updateCommunityMemberRole(userId: string, communityId: string, role: string): Promise<CommunityMembership> {
+    const result = await db
+      .update(communityMemberships)
+      .set({ role })
+      .where(and(
+        eq(communityMemberships.userId, userId),
+        eq(communityMemberships.communityId, communityId)
+      ))
+      .returning();
+    return result[0];
+  }
+
+  async removeCommunityMember(userId: string, communityId: string): Promise<void> {
+    await db
+      .delete(communityMemberships)
+      .where(and(
+        eq(communityMemberships.userId, userId),
+        eq(communityMemberships.communityId, communityId)
+      ));
   }
 
   async getPostsWithCommunity(): Promise<Array<Post & { user: User; community: Community | null }>> {
