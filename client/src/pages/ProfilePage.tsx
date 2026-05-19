@@ -101,7 +101,11 @@ export default function ProfilePage() {
     queryKey: [`/api/users/${username}`],
     queryFn: async () => {
       const res = await fetch(`/api/users/${username}`);
-      if (!res.ok) throw new Error("Failed to fetch profile");
+      if (!res.ok) {
+        const err = new Error(res.status === 404 ? "not_found" : "fetch_failed");
+        (err as any).status = res.status;
+        throw err;
+      }
       return res.json();
     },
     enabled: !!username,
@@ -279,12 +283,22 @@ export default function ProfilePage() {
   }
 
   if (error || !profile) {
+    const is404 = !error || (error as any)?.status === 404;
     return (
       <div className="min-h-screen bg-background pb-20 md:pb-0">
         <Navigation onSearch={() => {}} />
         <main className="max-w-[680px] mx-auto px-4 py-16 text-center">
-          <p className="text-muted-foreground text-lg">This account doesn't exist</p>
-          <p className="text-sm text-muted-foreground mt-1">Try searching for another.</p>
+          {is404 ? (
+            <>
+              <p className="text-muted-foreground text-lg">This account doesn't exist</p>
+              <p className="text-sm text-muted-foreground mt-1">Try searching for another.</p>
+            </>
+          ) : (
+            <>
+              <p className="text-muted-foreground text-lg">Couldn't load this profile</p>
+              <p className="text-sm text-muted-foreground mt-1">Try refreshing the page.</p>
+            </>
+          )}
         </main>
         <BottomNavigation />
       </div>

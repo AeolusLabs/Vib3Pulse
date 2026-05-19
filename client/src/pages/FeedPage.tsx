@@ -18,118 +18,6 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Sparkles, Image as ImageIcon, Plus, Users } from "lucide-react";
 import CommunityModal from "@/components/CommunityModal";
-import musicFestival from '@assets/generated_images/Outdoor_music_festival_event_179040d3.png';
-import foodTasting from '@assets/generated_images/Food_and_wine_tasting_69928d9e.png';
-import techConf from '@assets/generated_images/Tech_conference_presentation_2bcf2c35.png';
-import artGallery from '@assets/generated_images/Art_gallery_opening_8b389604.png';
-
-//todo: remove mock functionality
-const mockPosts = [
-  {
-    id: '1',
-    author: {
-      name: 'Live Events Co',
-      username: 'liveeventsco',
-      isOrganizer: true
-    },
-    content: '🎵 Excited to announce our Summer Music Festival lineup! Get your tickets now before they sell out. This is going to be the event of the year! #MusicFestival #LiveMusic',
-    image: musicFestival,
-    timestamp: '2h ago',
-    likes: 234,
-    comments: 45,
-    isLiked: false
-  },
-  {
-    id: '2',
-    author: {
-      name: 'Sarah Johnson',
-      username: 'sarahj'
-    },
-    content: 'Just got my tickets for the yoga retreat next month! Can\'t wait to disconnect and recharge 🧘‍♀️✨',
-    timestamp: '5h ago',
-    likes: 89,
-    comments: 12,
-    isLiked: true
-  },
-  {
-    id: '3',
-    author: {
-      name: 'TechForward',
-      username: 'techforward',
-      isOrganizer: true
-    },
-    content: 'Innovation never stops! Join us at the Tech Summit 2025 where we\'ll explore AI, blockchain, and the future of technology. Early bird tickets available now.',
-    image: techConf,
-    timestamp: '1h ago',
-    likes: 456,
-    comments: 78,
-    isLiked: false
-  },
-  {
-    id: '4',
-    author: {
-      name: 'Michael Chen',
-      username: 'mchen'
-    },
-    content: 'Had an amazing time at the food & wine tasting last night! The culinary experience was incredible. Highly recommend checking out their upcoming events!',
-    image: foodTasting,
-    timestamp: '3h ago',
-    likes: 124,
-    comments: 23,
-    isLiked: false
-  },
-  {
-    id: '5',
-    author: {
-      name: 'Art Collective LA',
-      username: 'artcollectivela',
-      isOrganizer: true
-    },
-    content: 'Opening reception this Friday! Come experience our new contemporary art exhibition featuring local artists. Free entry, all are welcome 🎨',
-    image: artGallery,
-    timestamp: '6h ago',
-    likes: 167,
-    comments: 34,
-    isLiked: true
-  },
-  {
-    id: '6',
-    author: {
-      name: 'Emma Rodriguez',
-      username: 'emmarodriguez'
-    },
-    content: 'Training for the charity 5K run next month! Who else is participating? Let\'s make a difference together 🏃‍♀️💪',
-    timestamp: '8h ago',
-    likes: 93,
-    comments: 19,
-    isLiked: false
-  },
-  {
-    id: '7',
-    author: {
-      name: 'Wellness Warriors',
-      username: 'wellnesswarriors',
-      isOrganizer: true
-    },
-    content: 'Morning yoga sessions are now open for registration! Join us every Saturday at sunrise for a peaceful practice in the park. First class is free 🌅',
-    timestamp: '10h ago',
-    likes: 201,
-    comments: 41,
-    isLiked: false
-  },
-  {
-    id: '8',
-    author: {
-      name: 'David Park',
-      username: 'dpark'
-    },
-    content: 'Just discovered VibePulse and I\'m loving it! So many cool events happening in the city. Already RSVP\'d to three events this month 🎉',
-    timestamp: '12h ago',
-    likes: 67,
-    comments: 8,
-    isLiked: true
-  }
-];
 
 type StoryWithUser = {
   id: string;
@@ -221,12 +109,12 @@ export default function FeedPage() {
     : null;
 
   // Use separate queries for main feed vs community feed to ensure proper reactivity
-  const { data: mainPosts = [], isLoading: isLoadingMain } = useQuery<any[]>({
+  const { data: mainPosts = [], isLoading: isLoadingMain, isError: isErrorMain } = useQuery<any[]>({
     queryKey: ['/api/posts'],
     enabled: !isViewingCommunity,
   });
 
-  const { data: communityPosts = [], isLoading: isLoadingCommunity } = useQuery<any[]>({
+  const { data: communityPosts = [], isLoading: isLoadingCommunity, isError: isErrorCommunity } = useQuery<any[]>({
     queryKey: ['/api/communities', feedFilter, 'posts'],
     queryFn: async () => {
       const res = await fetch(`/api/communities/${feedFilter}/posts`);
@@ -238,6 +126,7 @@ export default function FeedPage() {
 
   const posts = isViewingCommunity ? communityPosts : mainPosts;
   const isLoading = isViewingCommunity ? isLoadingCommunity : isLoadingMain;
+  const isError = isViewingCommunity ? isErrorCommunity : isErrorMain;
 
   // Extract unique @usernames from all posts for avatar lookup
   const mentionedUsernames = useMemo(() => {
@@ -482,6 +371,10 @@ export default function FeedPage() {
             <div className="text-center py-8">
               <p className="text-muted-foreground">Loading posts...</p>
             </div>
+          ) : isError ? (
+            <div className="text-center py-12">
+              <p className="text-muted-foreground text-sm">Failed to load posts. Try refreshing.</p>
+            </div>
           ) : posts.length > 0 ? (
             posts.map((post: any) => (
               <FeedPost
@@ -513,11 +406,15 @@ export default function FeedPage() {
               />
             ))
           ) : (
-            <>
-              {mockPosts.map((post) => (
-                <FeedPost key={post.id} feedMode={true} {...post} onPostClick={() => setSelectedPost(post)} />
-              ))}
-            </>
+            <div className="text-center py-12">
+              <p className="text-muted-foreground text-sm">
+                {isViewingCommunity
+                  ? "No posts in this community yet. Start the conversation!"
+                  : feedFilter === "following"
+                  ? "Nothing here yet — follow people to see their posts."
+                  : "No posts yet. Be the first to post!"}
+              </p>
+            </div>
           )}
         </div>
 
