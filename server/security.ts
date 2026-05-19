@@ -289,7 +289,7 @@ export const securityHeaders = (req: Request, res: Response, next: NextFunction)
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: blob: https: http:",
     "worker-src 'self'",
-    "connect-src 'self' https://api.stripe.com wss: ws:",
+    "connect-src 'self' https://api.stripe.com https://fonts.googleapis.com https://fonts.gstatic.com wss: ws:",
     "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
     "object-src 'none'",
     "base-uri 'self'",

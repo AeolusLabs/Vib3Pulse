@@ -581,7 +581,7 @@ export default function FeedPost({
               disabled={likeMutation.isPending || unlikeMutation.isPending}
               data-testid={`button-like-${id}`}
             >
-              <Heart
+              <HeartIcon
                 className={cn(
                   "h-[18px] w-[18px] transition-transform duration-150",
                   likeData?.isLiked ? "fill-red-500" : "group-hover:scale-110",
@@ -617,7 +617,7 @@ export default function FeedPost({
               disabled={repostMutation.isPending || unrepostMutation.isPending}
               data-testid={`button-repost-${id}`}
             >
-              <Repeat2
+              <Repeat2Icon
                 className={cn(
                   "h-[18px] w-[18px] transition-transform duration-150",
                   repostData?.hasReposted ? "text-emerald-500" : "group-hover:scale-110"
@@ -651,7 +651,7 @@ export default function FeedPost({
               disabled={bookmarkMutation.isPending}
               data-testid={`button-bookmark-${id}`}
             >
-              <Bookmark
+              <BookmarkIcon
                 className={cn(
                   "h-[18px] w-[18px] transition-transform duration-150",
                   bookmarkStatus ? "fill-current" : "group-hover:scale-110"

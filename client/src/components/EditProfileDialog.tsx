@@ -550,7 +550,7 @@ export default function EditProfileDialog({ user }: EditProfileDialogProps) {
                     data-testid={`badge-social-link-${index}`}
                   >
                     <span className="truncate">{link}</span>
-                    <X
+                    <XIcon
                       className="h-3 w-3 cursor-pointer flex-shrink-0"
                       onClick={() => removeSocialLink(link)}
                     />
