@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +10,8 @@ import { useToast } from "@/hooks/use-toast";
 
 import { format } from "date-fns";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import type { Event } from "@shared/schema";
+import { useAuth } from "@/hooks/useAuth";
+import type { Event, Community } from "@shared/schema";
 import { Card } from "@/components/ui/card";
 import { CalendarIcon, MapPinIcon, UsersIcon, TicketIcon, CheckCircleIcon, MinusIcon, PlusIcon, ExternalLinkIcon, Share2Icon, XIcon } from "@/components/ui/icons";
 
@@ -42,6 +44,8 @@ function EventStatusBadge({ eventDate, eventEndDate }: { eventDate: string | Dat
 
 export default function EventDetailsModal({ event, onClose }: EventDetailsModalProps) {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const [, navigate] = useLocation();
   const [isProcessing, setIsProcessing] = useState(false);
   const [showTierSelection, setShowTierSelection] = useState(false);
   const [selectedTier, setSelectedTier] = useState<string | null>(null);
@@ -49,6 +53,31 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
   const [lightboxOpen, setLightboxOpen] = useState(false);
 
   const currency = (event as any).currency as string | undefined;
+  const communityId = (event as any).communityId as string | undefined;
+
+  const { data: communityData } = useQuery<Community & { memberCount: number }>({
+    queryKey: ["/api/communities", communityId],
+    enabled: !!communityId,
+  });
+
+  const { data: communityMembership } = useQuery<{ isMember: boolean }>({
+    queryKey: ["/api/communities", communityId, "membership"],
+    enabled: !!communityId && !!user,
+  });
+
+  const joinCommunityMutation = useMutation({
+    mutationFn: () => apiRequest("POST", `/api/communities/${communityId}/join`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/communities", communityId, "membership"] });
+    },
+  });
+
+  const leaveCommunityMutation = useMutation({
+    mutationFn: () => apiRequest("DELETE", `/api/communities/${communityId}/leave`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/communities", communityId, "membership"] });
+    },
+  });
 
   const { data: rsvps, isLoading: isLoadingRSVPs } = useQuery({
     queryKey: ["/api/rsvps"],
@@ -224,6 +253,50 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
                 <MapPinIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                 <p className="text-sm" data-testid="modal-event-location">{event.location}</p>
               </div>
+
+              {communityData && (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <UsersIcon className="h-4 w-4 text-primary flex-shrink-0" />
+                    <div className="min-w-0">
+                      <button
+                        className="text-sm font-medium hover:underline truncate block text-left"
+                        onClick={() => {
+                          onClose();
+                          navigate(`/community/${(communityData as any).slug ?? communityData.id}`);
+                        }}
+                      >
+                        {communityData.name}
+                      </button>
+                      <p className="text-xs text-muted-foreground">
+                        {communityData.memberCount.toLocaleString()} {communityData.memberCount === 1 ? "member" : "members"}
+                      </p>
+                    </div>
+                  </div>
+                  {user && (
+                    communityMembership?.isMember ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="flex-shrink-0"
+                        onClick={() => leaveCommunityMutation.mutate()}
+                        disabled={leaveCommunityMutation.isPending}
+                      >
+                        {leaveCommunityMutation.isPending ? "Leaving…" : "Leave"}
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        className="flex-shrink-0"
+                        onClick={() => joinCommunityMutation.mutate()}
+                        disabled={joinCommunityMutation.isPending}
+                      >
+                        {joinCommunityMutation.isPending ? "Joining…" : "Join"}
+                      </Button>
+                    )
+                  )}
+                </div>
+              )}
 
               <div className="flex items-center gap-3">
                 <UsersIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />

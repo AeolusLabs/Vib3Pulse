@@ -3908,7 +3908,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get a specific community
   app.get("/api/communities/:id", async (req, res) => {
     try {
-      const community = await storage.getCommunity(req.params.id);
+      const community = await storage.getCommunityWithDetails(req.params.id);
       if (!community) {
         return res.status(404).json({ message: "Community not found" });
       }

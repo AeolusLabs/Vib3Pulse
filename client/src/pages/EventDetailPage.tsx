@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 
-import { useQuery } from "@tanstack/react-query";
-import { useRoute } from "wouter";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { useRoute, Link } from "wouter";
 import { format } from "date-fns";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
@@ -11,20 +11,43 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
 import TicketSelector from "@/components/TicketSelector";
 import EventCard from "@/components/EventCard";
-import { apiRequest } from "@/lib/queryClient";
-import type { Event, User } from "@shared/schema";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useAuth } from "@/hooks/useAuth";
+import type { Event, User, Community } from "@shared/schema";
 import musicFestival from '@assets/generated_images/Outdoor_music_festival_event_179040d3.png';
-import { CalendarIcon, MapPinIcon, Share2Icon, ExternalLinkIcon } from "@/components/ui/icons";
+import { CalendarIcon, MapPinIcon, Share2Icon, ExternalLinkIcon, UsersIcon } from "@/components/ui/icons";
 
-type EventWithOrganizer = Event & { organizer: User };
+type EventWithOrganizer = Event & { organizer: User; community: (Community & { memberCount: number }) | null };
 
 export default function EventDetailPage() {
   const [match, params] = useRoute("/event/:id");
   const eventId = params?.id;
+  const { user } = useAuth();
 
   const { data: event, isLoading, error } = useQuery<EventWithOrganizer>({
     queryKey: ["/api/events", eventId],
     enabled: !!eventId,
+  });
+
+  const communityId = event?.community?.id;
+
+  const { data: membership, isLoading: membershipLoading } = useQuery<{ isMember: boolean }>({
+    queryKey: ["/api/communities", communityId, "membership"],
+    enabled: !!communityId && !!user,
+  });
+
+  const joinMutation = useMutation({
+    mutationFn: () => apiRequest("POST", `/api/communities/${communityId}/join`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/communities", communityId, "membership"] });
+    },
+  });
+
+  const leaveMutation = useMutation({
+    mutationFn: () => apiRequest("DELETE", `/api/communities/${communityId}/leave`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/communities", communityId, "membership"] });
+    },
   });
 
   useEffect(() => {
@@ -174,7 +197,7 @@ export default function EventDetailPage() {
 
                 <div className="flex flex-wrap gap-2 mt-6 pt-6 border-t">
                   {event.externalTicketUrl && (
-                    <Button 
+                    <Button
                       asChild
                       data-testid="button-external-tickets"
                     >
@@ -191,6 +214,50 @@ export default function EventDetailPage() {
                 </div>
               </CardContent>
             </Card>
+
+            {event.community && (
+              <Card>
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <UsersIcon className="h-5 w-5 text-primary flex-shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-xs text-muted-foreground mb-0.5">Part of community</p>
+                        <Link
+                          href={`/community/${event.community.slug ?? event.community.id}`}
+                          className="font-semibold hover:underline truncate block"
+                        >
+                          {event.community.name}
+                        </Link>
+                        <p className="text-xs text-muted-foreground">
+                          {event.community.memberCount.toLocaleString()} {event.community.memberCount === 1 ? "member" : "members"}
+                        </p>
+                      </div>
+                    </div>
+                    {user && !membershipLoading && (
+                      membership?.isMember ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => leaveMutation.mutate()}
+                          disabled={leaveMutation.isPending}
+                        >
+                          {leaveMutation.isPending ? "Leaving…" : "Leave"}
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          onClick={() => joinMutation.mutate()}
+                          disabled={joinMutation.isPending}
+                        >
+                          {joinMutation.isPending ? "Joining…" : "Join Community"}
+                        </Button>
+                      )
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           <div className="lg:col-span-1">

@@ -211,7 +211,7 @@ export interface IStorage {
   clearPasswordResetToken(userId: string): Promise<void>;
   
   getEvents(): Promise<Event[]>;
-  getEvent(id: string): Promise<(Event & { organizer: User }) | undefined>;
+  getEvent(id: string): Promise<(Event & { organizer: User; community: (Community & { memberCount: number }) | null }) | undefined>;
   getUserEvents(userId: string): Promise<Event[]>;
   getEventsByOrganizer(organizerId: string): Promise<Event[]>;
   createEvent(event: InsertEvent): Promise<Event>;
@@ -681,19 +681,28 @@ export class DbStorage implements IStorage {
     return await db.select().from(events).orderBy(events.eventDate);
   }
 
-  async getEvent(id: string): Promise<(Event & { organizer: User }) | undefined> {
+  async getEvent(id: string): Promise<(Event & { organizer: User; community: (Community & { memberCount: number }) | null }) | undefined> {
     const result = await db
-      .select()
+      .select({
+        event: events,
+        organizer: users,
+        community: communities,
+        memberCount: sql<number>`COALESCE((SELECT COUNT(*)::int FROM community_memberships WHERE community_id = ${communities.id}), 0)`,
+      })
       .from(events)
       .innerJoin(users, eq(events.organizerId, users.id))
+      .leftJoin(communities, eq(events.communityId, communities.id))
       .where(eq(events.id, id));
-    
+
     if (!result[0]) return undefined;
-    
-    const { passwordHash, ...userWithoutPassword } = result[0].users;
+
+    const { passwordHash, ...organizerWithoutPassword } = result[0].organizer;
     return {
-      ...result[0].events,
-      organizer: userWithoutPassword as User,
+      ...result[0].event,
+      organizer: organizerWithoutPassword as User,
+      community: result[0].community
+        ? { ...result[0].community, memberCount: result[0].memberCount }
+        : null,
     };
   }
 
