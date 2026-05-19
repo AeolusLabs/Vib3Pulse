@@ -52,11 +52,15 @@ app.use(express.json({
 }));
 app.use(express.urlencoded({ extended: false, limit: '50mb' }));
 
+// SESSION_SECRET must be set in Railway env vars — see deployment docs
+const sessionSecret = process.env.SESSION_SECRET;
+if (!sessionSecret) throw new Error("SESSION_SECRET environment variable is not set");
+
 // Session configuration with strengthened security
 app.use(
   session({
     store: sessionStore,
-    secret: process.env.SESSION_SECRET || "vibepulse-secret-key-change-in-production",
+    secret: sessionSecret,
     resave: false,
     saveUninitialized: false,
     name: "vibepulse.sid",
