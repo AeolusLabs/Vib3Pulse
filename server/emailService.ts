@@ -1,9 +1,15 @@
 import { Resend } from 'resend';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const apiKey = process.env.RESEND_API_KEY;
+if (!apiKey) {
+  console.error('[EMAIL] RESEND_API_KEY is not set — emails will fail');
+} else {
+  console.log('[EMAIL] Resend initialised with key:', apiKey.slice(0, 8) + '...');
+}
+const resend = new Resend(apiKey);
 
-const APP_NAME = 'VibePulse';
-const FROM_EMAIL = 'noreply@resend.dev';
+const APP_NAME = 'Vib3Pulse';
+const FROM_EMAIL = process.env.FROM_EMAIL || 'onboarding@resend.dev';
 
 interface SendPasswordResetEmailParams {
   to: string;
@@ -65,11 +71,11 @@ This email was sent by ${APP_NAME}.
     });
 
     if (error) {
-      console.error('Error sending password reset email:', error);
+      console.error('[EMAIL] Resend error:', JSON.stringify(error, null, 2));
       return false;
     }
 
-    console.log('Password reset email sent successfully:', data?.id);
+    console.log('[EMAIL] Password reset email sent. ID:', data?.id, '| To:', to, '| From:', `${APP_NAME} <${FROM_EMAIL}>`);
     return true;
   } catch (error) {
     console.error('Exception sending password reset email:', error);

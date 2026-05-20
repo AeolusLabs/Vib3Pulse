@@ -1,10 +1,10 @@
-import type { Express } from "express";
+﻿import type { Express } from "express";
 import express from "express";
 import { createServer, type Server } from "http";
 import crypto from "crypto";
 import { storage } from "./storage";
 import { insertEventSchema, eventCreateDto, eventUpdateDto, insertTicketSchema, insertRsvpSchema, insertUserSchema, insertPostSchema, insertStorySchema, insertVenueSchema, insertVenueEntryNightSchema, venueCategories } from "@shared/schema";
-import { hashPassword, userToSessionUser } from "./auth";
+import { hashPassword, comparePassword, userToSessionUser } from "./auth";
 import { requireAuth, requireOrganizer } from "./middleware";
 import passport from "passport";
 import { wsManager } from "./websocket";
@@ -289,13 +289,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "User not found" });
       }
       
-      const bcrypt = await import("bcrypt");
-      const isValid = await bcrypt.compare(currentPassword, user.passwordHash);
+      const isValid = await comparePassword(currentPassword, user.passwordHash);
       if (!isValid) {
         return res.status(400).json({ message: "Current password is incorrect" });
       }
       
-      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      const hashedPassword = await hashPassword(newPassword);
       await storage.updateUserPassword(req.user!.id, hashedPassword);
       res.json({ message: "Password changed successfully" });
     } catch (error) {

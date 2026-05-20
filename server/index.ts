@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
 import passport from "passport";
@@ -55,6 +56,16 @@ app.use(express.urlencoded({ extended: false, limit: '50mb' }));
 // SESSION_SECRET must be set in Railway env vars — see deployment docs
 const sessionSecret = process.env.SESSION_SECRET;
 if (!sessionSecret) throw new Error("SESSION_SECRET environment variable is not set");
+
+// RESEND_API_KEY is required for password reset emails to be delivered
+if (!process.env.RESEND_API_KEY) {
+  console.warn("[STARTUP] WARNING: RESEND_API_KEY is not set — password reset emails will fail silently");
+}
+
+// In production, APP_URL must be set so reset links point to the live domain
+if (process.env.NODE_ENV === "production" && !process.env.APP_URL && !process.env.REPLIT_DEV_DOMAIN) {
+  console.warn("[STARTUP] WARNING: APP_URL is not set in production — password reset links will use localhost fallback and will not work");
+}
 
 // Session configuration with strengthened security
 app.use(
