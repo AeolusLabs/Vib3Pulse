@@ -1,14 +1,19 @@
-import type { Express, Request, Response } from "express";
+import type { Express } from "express";
 import { z } from "zod";
+import rateLimit from "express-rate-limit";
 import { storage } from "./storage.js";
 import { wsManager } from "./websocket.js";
+import { sendAlertSMS } from "./buddyService.js";
+import { requireAuth } from "./middleware.js";
 
-function requireAuth(req: Request, res: Response, next: Function) {
-  if (!req.isAuthenticated() || !req.user) {
-    return res.status(401).json({ message: "Unauthorized" });
-  }
-  next();
-}
+const sosRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  limit: 5,
+  keyGenerator: (req) => (req.user as any)?.id ?? req.ip ?? "unknown",
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { message: "Too many SOS alerts sent. Please wait before sending another." },
+});
 
 export function registerSafetyRoutes(app: Express): void {
 
@@ -52,7 +57,7 @@ export function registerSafetyRoutes(app: Express): void {
     locationText: z.string().optional().nullable(),
   });
 
-  app.post("/api/safety/sos", requireAuth, async (req, res) => {
+  app.post("/api/safety/sos", requireAuth, sosRateLimit, async (req, res) => {
     try {
       const { latitude, longitude, locationText } = sosSchema.parse(req.body);
       const userId = req.user!.id;
@@ -72,15 +77,18 @@ export function registerSafetyRoutes(app: Express): void {
         : "";
 
       const alertIds: string[] = [];
+      let actualNotified = 0;
 
       for (const buddy of confirmedBuddies) {
         if (!buddy.buddyUserId) {
-          // Phone-only buddy — SMS alert dispatch is handled by the alert service (future layer)
-          console.log(`[Safety] SOS for ${userId} — phone-only buddy ${buddy.phoneNumber} (SMS dispatch: future layer)`);
+          // Phone-only buddy — send SMS directly
+          await sendAlertSMS(buddy.phoneNumber, senderName, alertMessage, locationText ?? null);
+          console.log(`[Safety] SOS SMS sent to phone-only buddy ${buddy.phoneNumber} for user ${userId}`);
+          actualNotified++;
           continue;
         }
 
-        // Buddy has an app account — use WebSocket + in-app notification + DB record
+        // Buddy has an app account — WebSocket + in-app notification + DB record
         const alert = await storage.createSafetyAlert({
           userId,
           buddyId: buddy.buddyUserId,
@@ -91,6 +99,7 @@ export function registerSafetyRoutes(app: Express): void {
           locationText: locationText ?? undefined,
         });
         alertIds.push(alert.id);
+        actualNotified++;
 
         wsManager.sendToUser(buddy.buddyUserId, {
           type: "distress_alert",
@@ -126,7 +135,7 @@ export function registerSafetyRoutes(app: Express): void {
       res.json({
         message: "SOS alert sent",
         alertIds,
-        buddiesNotified: confirmedBuddies.length,
+        buddiesNotified: actualNotified,
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -310,9 +319,14 @@ export function startSafetyTimerJob(): void {
           const sender = await storage.getUser(timer.userId);
           const senderName = sender?.displayName || sender?.username || "Your buddy";
 
+          let timerNotified = 0;
+
           for (const buddy of confirmedBuddies) {
             if (!buddy.buddyUserId) {
-              console.log(`[Safety] Timer ${timer.id} expired — phone-only buddy ${buddy.phoneNumber} (SMS dispatch: future layer)`);
+              // Phone-only buddy — send SMS
+              await sendAlertSMS(buddy.phoneNumber, senderName, alertMessage, null);
+              console.log(`[Safety] Timer ${timer.id} expired — SMS sent to phone-only buddy ${buddy.phoneNumber}`);
+              timerNotified++;
               continue;
             }
 
@@ -323,6 +337,7 @@ export function startSafetyTimerJob(): void {
               message: alertMessage,
               timerId: timer.id,
             });
+            timerNotified++;
 
             wsManager.sendToUser(buddy.buddyUserId, {
               type: "distress_alert",
@@ -356,7 +371,7 @@ export function startSafetyTimerJob(): void {
           }
 
           await storage.markTimerAlerted(timer.id);
-          console.log(`[Safety] Timer ${timer.id} expired — alerts sent to ${confirmedBuddies.length} buddy(ies)`);
+          console.log(`[Safety] Timer ${timer.id} expired — alerts sent to ${timerNotified} buddy(ies)`);
         } catch (err) {
           console.error(`[Safety] Error processing timer ${timer.id}:`, err);
         }

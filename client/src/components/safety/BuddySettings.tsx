@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,11 +6,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { CheckInTimer } from "./CheckInTimer";
-import { ShieldIcon, XIcon, ClockIcon, CheckCircleIcon, XCircleIcon, PhoneIcon, UserPlusIcon } from "@/components/ui/icons";
+import {
+  ShieldIcon,
+  XIcon,
+  CheckCircleIcon,
+  XCircleIcon,
+  PhoneIcon,
+  UserPlusIcon,
+  ClockIcon,
+} from "@/components/ui/icons";
 
 interface Buddy {
   id: string;
@@ -22,17 +29,82 @@ interface Buddy {
   createdAt: string;
 }
 
-function StatusBadge({ status }: { status: Buddy["confirmationStatus"] }) {
-  if (status === "confirmed") {
-    return <Badge variant="default"><CheckCircleIcon className="h-3 w-3 mr-1" />Confirmed</Badge>;
-  }
-  if (status === "pending") {
-    return <Badge variant="secondary"><ClockIcon className="h-3 w-3 mr-1" />Awaiting reply</Badge>;
-  }
-  if (status === "declined") {
-    return <Badge variant="destructive"><XCircleIcon className="h-3 w-3 mr-1" />Declined</Badge>;
-  }
-  return <Badge variant="outline"><XCircleIcon className="h-3 w-3 mr-1" />Expired</Badge>;
+const STATUS_CONFIG = {
+  confirmed: {
+    dot: "bg-green-500",
+    label: "Confirmed",
+    icon: <CheckCircleIcon className="h-3 w-3" />,
+    labelClass: "text-green-700 dark:text-green-400",
+    hint: null,
+  },
+  pending: {
+    dot: "bg-amber-400 animate-pulse",
+    label: "Awaiting reply",
+    icon: <ClockIcon className="h-3 w-3" />,
+    labelClass: "text-amber-700 dark:text-amber-400",
+    hint: "They can text YES or NO",
+  },
+  declined: {
+    dot: "bg-destructive/70",
+    label: "Declined",
+    icon: <XCircleIcon className="h-3 w-3" />,
+    labelClass: "text-destructive",
+    hint: "Remove and try again",
+  },
+  expired: {
+    dot: "bg-muted-foreground/40",
+    label: "Expired",
+    icon: <XCircleIcon className="h-3 w-3" />,
+    labelClass: "text-muted-foreground",
+    hint: "Remove and resend",
+  },
+} as const;
+
+function BuddyRow({ buddy, onRemove, removing }: {
+  buddy: Buddy;
+  onRemove: () => void;
+  removing: boolean;
+}) {
+  const cfg = STATUS_CONFIG[buddy.confirmationStatus];
+  return (
+    <div className="flex items-center gap-3 p-3 rounded-xl border bg-card transition-colors hover:bg-muted/30">
+      {/* Status dot */}
+      <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${cfg.dot}`} />
+
+      {/* Info */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <p className="font-medium text-sm truncate">{buddy.name}</p>
+          {buddy.isPrimary && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
+              Primary
+            </span>
+          )}
+          <span className={`flex items-center gap-1 text-xs font-medium ${cfg.labelClass}`}>
+            {cfg.icon}
+            {cfg.label}
+          </span>
+        </div>
+        <p className="text-xs text-muted-foreground mt-0.5 truncate">{buddy.phoneNumber}</p>
+        {cfg.hint && (
+          <p className="text-xs text-muted-foreground mt-0.5 italic">{cfg.hint}</p>
+        )}
+      </div>
+
+      {/* Remove */}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+        onClick={onRemove}
+        disabled={removing}
+        aria-label={`Remove ${buddy.name}`}
+        style={{ touchAction: "manipulation" }}
+      >
+        <XIcon className="h-4 w-4" />
+      </Button>
+    </div>
+  );
 }
 
 export function BuddySettings() {
@@ -48,22 +120,26 @@ export function BuddySettings() {
 
   const { data: distressMsgData } = useQuery<{ message: string | null }>({
     queryKey: ["/api/safety/distress-message"],
-    select: (d) => d,
   });
 
-  // Sync distress message to local state when loaded
-  if (distressMsgData?.message && !distressMessage) {
-    setDistressMessage(distressMsgData.message);
-  }
+  useEffect(() => {
+    if (distressMsgData !== undefined) {
+      setDistressMessage(distressMsgData.message ?? "");
+    }
+  }, [distressMsgData]);
 
   const addBuddyMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/safety/buddy-assignment", { name: name.trim(), phone_number: phone.trim() }),
+    mutationFn: () =>
+      apiRequest("POST", "/api/safety/buddy-assignment", {
+        name: name.trim(),
+        phone_number: phone.trim(),
+      }),
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/safety/buddies"] });
       setName("");
       setPhone("");
       setShowForm(false);
-      toast({ title: "Invitation sent", description: data.message });
+      toast({ title: "Invitation sent", description: "They'll get a text to confirm." });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
@@ -78,7 +154,8 @@ export function BuddySettings() {
   });
 
   const saveMessageMutation = useMutation({
-    mutationFn: (msg: string) => apiRequest("POST", "/api/safety/distress-message", { message: msg }),
+    mutationFn: (msg: string) =>
+      apiRequest("POST", "/api/safety/distress-message", { message: msg }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/safety/distress-message"] });
       toast({ title: "Message saved" });
@@ -92,109 +169,108 @@ export function BuddySettings() {
 
   return (
     <div className="space-y-4">
+      {/* Safety Buddies card */}
       <Card data-testid="card-buddy-settings">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <ShieldIcon className="h-5 w-5" />
-            Safety Buddies
-          </CardTitle>
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <ShieldIcon className="h-5 w-5" />
+              <CardTitle>Safety Buddies</CardTitle>
+            </div>
+            {confirmedBuddies.length > 0 && (
+              <span className="flex items-center gap-1 text-xs font-medium text-green-700 dark:text-green-400 bg-green-500/10 px-2.5 py-1 rounded-full shrink-0">
+                <CheckCircleIcon className="h-3 w-3" />
+                {confirmedBuddies.length} confirmed
+              </span>
+            )}
+          </div>
           <CardDescription>
-            Buddies receive your SOS alerts by SMS — they don't need the app installed. Up to 5 confirmed buddies.
+            Buddies receive your SOS alerts by SMS — no app needed. Up to 5 confirmed buddies.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {buddiesLoading ? (
             <div className="space-y-2">
-              <Skeleton className="h-14 w-full" />
-              <Skeleton className="h-14 w-full" />
+              <Skeleton className="h-14 w-full rounded-xl" />
+              <Skeleton className="h-14 w-full rounded-xl" />
             </div>
           ) : (
             <>
+              {/* Buddy list */}
               {buddies.length > 0 && (
                 <div className="space-y-2">
-                  {buddies.map((buddy) => (
+                  {buddies.map((buddy, i) => (
                     <div
                       key={buddy.id}
-                      className="flex items-center justify-between p-3 border rounded-md"
+                      className="animate-in fade-in slide-in-from-bottom-1 duration-200 fill-mode-both"
+                      style={{ animationDelay: `${i * 50}ms` }}
                     >
-                      <div className="flex items-center gap-3">
-                        <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center">
-                          <PhoneIcon className="h-4 w-4 text-primary" />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className="font-medium text-sm">{buddy.name}</p>
-                            {buddy.isPrimary && (
-                              <Badge variant="outline" className="text-xs">Primary</Badge>
-                            )}
-                            <StatusBadge status={buddy.confirmationStatus} />
-                          </div>
-                          <p className="text-xs text-muted-foreground">{buddy.phoneNumber}</p>
-                          {buddy.confirmationStatus === "pending" && (
-                            <p className="text-xs text-muted-foreground mt-0.5">
-                              Waiting for reply — they can text YES or NO
-                            </p>
-                          )}
-                          {buddy.confirmationStatus === "declined" && (
-                            <p className="text-xs text-muted-foreground mt-0.5">
-                              They declined — remove and try again
-                            </p>
-                          )}
-                          {buddy.confirmationStatus === "expired" && (
-                            <p className="text-xs text-muted-foreground mt-0.5">
-                              Invitation expired — remove and resend
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => removeBuddyMutation.mutate(buddy.id)}
-                        disabled={removeBuddyMutation.isPending}
-                      >
-                        <XIcon className="h-4 w-4" />
-                      </Button>
+                      <BuddyRow
+                        buddy={buddy}
+                        onRemove={() => removeBuddyMutation.mutate(buddy.id)}
+                        removing={removeBuddyMutation.isPending}
+                      />
                     </div>
                   ))}
                 </div>
               )}
 
+              {/* Empty state */}
+              {buddies.length === 0 && !showForm && (
+                <div className="text-center py-6 text-muted-foreground">
+                  <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+                    <PhoneIcon className="h-5 w-5 opacity-50" />
+                  </div>
+                  <p className="text-sm font-medium">No buddies yet</p>
+                  <p className="text-xs mt-1">Add someone — they confirm by text, no app needed.</p>
+                </div>
+              )}
+
+              {/* Add buddy form */}
               {showForm ? (
-                <div className="space-y-3 p-4 border rounded-md bg-muted/30">
+                <div className="space-y-3 p-4 border rounded-xl bg-muted/20 animate-in fade-in slide-in-from-bottom-2 duration-200">
                   <div className="space-y-1.5">
-                    <Label htmlFor="buddy-name">Buddy's name</Label>
+                    <Label htmlFor="buddy-name" className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Buddy's name
+                    </Label>
                     <Input
                       id="buddy-name"
                       placeholder="e.g. Mum"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       autoFocus
+                      className="rounded-xl"
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="buddy-phone">Phone number</Label>
+                    <Label htmlFor="buddy-phone" className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Phone number
+                    </Label>
                     <Input
                       id="buddy-phone"
                       type="tel"
-                      placeholder="+447700900000 or 07700900000"
+                      placeholder="+44 7700 900000 or +234 801 234 5678"
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
+                      className="rounded-xl"
                     />
                     <p className="text-xs text-muted-foreground">
-                      UK (+44) or Nigeria (+234) numbers. They'll get an SMS — no app needed.
+                      UK (+44) and Nigeria (+234) numbers supported.
                     </p>
                   </div>
                   <div className="flex gap-2">
                     <Button
+                      className="rounded-full"
                       onClick={() => addBuddyMutation.mutate()}
                       disabled={!name.trim() || !phone.trim() || addBuddyMutation.isPending}
                       data-testid="button-send-invite"
+                      style={{ touchAction: "manipulation" }}
                     >
                       {addBuddyMutation.isPending ? "Sending…" : "Send invitation"}
                     </Button>
                     <Button
-                      variant="outline"
+                      variant="ghost"
+                      className="rounded-full"
                       onClick={() => { setShowForm(false); setName(""); setPhone(""); }}
                     >
                       Cancel
@@ -205,52 +281,51 @@ export function BuddySettings() {
                 buddies.length < 5 && (
                   <Button
                     variant="outline"
+                    className="rounded-full w-full"
                     onClick={() => setShowForm(true)}
                     data-testid="button-add-buddy"
+                    style={{ touchAction: "manipulation" }}
                   >
                     <UserPlusIcon className="h-4 w-4 mr-2" />
                     Add a buddy
                   </Button>
                 )
               )}
-
-              {buddies.length === 0 && !showForm && (
-                <p className="text-sm text-muted-foreground">
-                  No buddies yet. Add someone — they'll get a text asking to confirm.
-                </p>
-              )}
             </>
           )}
         </CardContent>
       </Card>
 
+      {/* Check-in timer — only when at least one buddy is confirmed */}
       {hasConfirmedBuddy && <CheckInTimer />}
 
+      {/* Distress message */}
       <Card data-testid="card-distress-message">
         <CardHeader>
           <CardTitle className="text-base">Distress Message</CardTitle>
           <CardDescription>
-            Sent to your buddy with every SOS alert. Default: "I need help! Please check on me."
+            Sent with every SOS alert. Default: "I need help! Please check on me."
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="distress-message">Your message</Label>
             <Textarea
               id="distress-message"
               placeholder="I need help! Please check on me."
               value={distressMessage}
               onChange={(e) => setDistressMessage(e.target.value)}
               maxLength={500}
-              className="min-h-[80px]"
+              className="min-h-[80px] rounded-xl resize-none"
             />
             <p className="text-xs text-muted-foreground text-right">{distressMessage.length}/500</p>
           </div>
           <Button
+            className="rounded-full"
             onClick={() => saveMessageMutation.mutate(distressMessage)}
-            disabled={!distressMessage.trim() || saveMessageMutation.isPending}
+            disabled={saveMessageMutation.isPending}
+            style={{ touchAction: "manipulation" }}
           >
-            Save Message
+            {saveMessageMutation.isPending ? "Saving…" : "Save message"}
           </Button>
         </CardContent>
       </Card>

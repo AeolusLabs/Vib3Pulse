@@ -15,7 +15,6 @@ import MenuTray from "./MenuTray";
 import NotificationBell from "./NotificationBell";
 import { Link, useLocation } from "wouter";
 import { useAuth, logout } from "@/hooks/useAuth";
-import { EmergencyButton } from "./safety/EmergencyButton";
 import { SearchIcon, UserIcon, CalendarIcon, LogOutIcon, TicketIcon, ShieldIcon, AlertTriangleIcon, Building2Icon, SettingsIcon } from "@/components/ui/icons";
 
 interface NavigationProps {
@@ -59,8 +58,6 @@ export default function Navigation({ onSearch }: NavigationProps) {
           </div>
 
           <div className="flex items-center gap-2">
-            {!isLoading && user?.userType === "social" && <EmergencyButton />}
-
             {!isLoading && user && <NotificationBell />}
 
             <ThemeToggle />
@@ -127,6 +124,12 @@ export default function Navigation({ onSearch }: NavigationProps) {
                       <Link href="/buddy/settings">
                         <ShieldIcon className="mr-2 h-4 w-4" />
                         Safety Buddy
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild data-testid="menu-buddy-dashboard">
+                      <Link href="/buddy/dashboard">
+                        <ShieldIcon className="mr-2 h-4 w-4" />
+                        Watching Over
                       </Link>
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild data-testid="menu-alerts">

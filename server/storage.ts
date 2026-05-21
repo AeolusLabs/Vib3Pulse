@@ -376,6 +376,12 @@ export interface IStorage {
   cancelSafetyTimer(userId: string): Promise<void>;
   getTimersNeedingAlert(): Promise<SafetyTimer[]>;
   markTimerAlerted(timerId: string): Promise<void>;
+  getWatchingOver(userId: string): Promise<Array<{
+    buddyRecord: SafetyBuddy;
+    protectedUser: Omit<User, "passwordHash">;
+    activeTimer: SafetyTimer | null;
+    recentAlerts: SafetyAlert[];
+  }>>;
 
   trackEventView(eventId: string, userId?: string): Promise<void>;
   trackEventClick(eventId: string, actionType: string, userId?: string): Promise<void>;
@@ -2225,6 +2231,50 @@ export class DbStorage implements IStorage {
     await db.update(safetyTimers)
       .set({ status: "alerted", alertedAt: new Date() })
       .where(eq(safetyTimers.id, timerId));
+  }
+
+  async getWatchingOver(userId: string): Promise<Array<{
+    buddyRecord: SafetyBuddy;
+    protectedUser: Omit<User, "passwordHash">;
+    activeTimer: SafetyTimer | null;
+    recentAlerts: SafetyAlert[];
+  }>> {
+    const buddyRecords = await db
+      .select()
+      .from(safetyBuddies)
+      .where(and(
+        eq(safetyBuddies.buddyUserId, userId),
+        eq(safetyBuddies.confirmationStatus, "confirmed")
+      ));
+
+    const results = [];
+    for (const record of buddyRecords) {
+      const [userRow] = await db.select().from(users).where(eq(users.id, record.userId)).limit(1);
+      if (!userRow) continue;
+      const { passwordHash, ...protectedUser } = userRow;
+
+      const [activeTimer] = await db
+        .select()
+        .from(safetyTimers)
+        .where(and(
+          eq(safetyTimers.userId, record.userId),
+          inArray(safetyTimers.status, ["active", "grace_period"])
+        ))
+        .limit(1);
+
+      const recentAlerts = await db
+        .select()
+        .from(safetyAlerts)
+        .where(and(
+          eq(safetyAlerts.userId, record.userId),
+          eq(safetyAlerts.buddyId, userId)
+        ))
+        .orderBy(desc(safetyAlerts.createdAt))
+        .limit(3);
+
+      results.push({ buddyRecord: record, protectedUser, activeTimer: activeTimer ?? null, recentAlerts });
+    }
+    return results;
   }
 
   async trackEventView(eventId: string, userId?: string): Promise<void> {

@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { storage } from "./storage.js";
 import { sendUKSMS } from "./twilioService.js";
-import { sendNigeriaSMS, normalizeNigerianPhone } from "./termiiService.js";
+import { sendNigeriaSMS } from "./termiiService.js";
 import type { SafetyBuddy } from "@shared/schema";
 
 const MAX_BUDDIES = 5;
@@ -69,6 +69,25 @@ async function sendBuddySMS(
   } catch (err: any) {
     // SMS failures must not crash the app
     console.error(`[BuddyService] SMS send failed to ${phone}:`, err.message);
+  }
+}
+
+export async function sendAlertSMS(
+  phone: string,
+  senderName: string,
+  alertMessage: string,
+  locationText?: string | null
+): Promise<void> {
+  const locationPart = locationText ? ` Location: ${locationText}` : "";
+  const body = `URGENT: ${senderName} needs help! "${alertMessage}"${locationPart} — Vib3Pulse Safety Alert`;
+  try {
+    if (isNigerianNumber(phone)) {
+      await sendNigeriaSMS(phone, body);
+    } else {
+      await sendUKSMS(phone, body);
+    }
+  } catch (err: any) {
+    console.error(`[BuddyService] Alert SMS failed to ${phone}:`, err.message);
   }
 }
 

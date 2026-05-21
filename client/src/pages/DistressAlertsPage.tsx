@@ -1,16 +1,21 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-
 import type { User } from "@shared/schema";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
-import { AlertTriangleIcon, ClockIcon, MapPinIcon, TimerIcon, CheckCircleIcon, XCircleIcon } from "@/components/ui/icons";
+import {
+  AlertTriangleIcon,
+  ClockIcon,
+  MapPinIcon,
+  TimerIcon,
+  CheckCircleIcon,
+  XCircleIcon,
+} from "@/components/ui/icons";
 
 interface SafetyAlert {
   id: string;
@@ -35,9 +40,29 @@ function alertTypeLabel(alert: SafetyAlert) {
 }
 
 function statusBadge(status: SafetyAlert["status"]) {
-  if (status === "active") return <Badge variant="destructive"><ClockIcon className="h-3 w-3 mr-1" />Active</Badge>;
-  if (status === "safe") return <Badge variant="default"><CheckCircleIcon className="h-3 w-3 mr-1" />Safe</Badge>;
-  return <Badge variant="secondary"><XCircleIcon className="h-3 w-3 mr-1" />False Alarm</Badge>;
+  if (status === "active")
+    return (
+      <Badge variant="destructive" className="gap-1">
+        <span className="relative flex h-2 w-2">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-60" />
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-white" />
+        </span>
+        Active
+      </Badge>
+    );
+  if (status === "safe")
+    return (
+      <Badge className="bg-green-600 text-white hover:bg-green-700 gap-1">
+        <CheckCircleIcon className="h-3 w-3" />
+        Safe
+      </Badge>
+    );
+  return (
+    <Badge variant="secondary" className="gap-1">
+      <XCircleIcon className="h-3 w-3" />
+      False Alarm
+    </Badge>
+  );
 }
 
 function initials(u: Omit<User, "passwordHash">) {
@@ -45,9 +70,18 @@ function initials(u: Omit<User, "passwordHash">) {
 }
 
 function formatDate(iso: string) {
-  return new Date(iso).toLocaleString(undefined, {
-    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-  });
+  const d = new Date(iso);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMins = Math.floor(diffMs / 60_000);
+  if (diffMins < 1) return "Just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffMins < 1440) return `${Math.floor(diffMins / 60)}h ago`;
+  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function openMapsLink(lat: number, lng: number) {
+  return `https://maps.google.com/?q=${lat},${lng}`;
 }
 
 export default function DistressAlertsPage() {
@@ -55,7 +89,10 @@ export default function DistressAlertsPage() {
 
   const { data, isLoading } = useQuery<{ alerts: SafetyAlert[] }>({
     queryKey: ["/api/safety/alerts"],
-    refetchInterval: 30_000,
+    refetchInterval: (query) => {
+      const alerts = (query.state.data as any)?.alerts ?? [];
+      return alerts.some((a: SafetyAlert) => a.status === "active") ? 15_000 : 30_000;
+    },
   });
 
   const resolveMutation = useMutation({
@@ -84,26 +121,39 @@ export default function DistressAlertsPage() {
     <div className="min-h-screen bg-background pb-20 md:pb-0">
       <Navigation />
       <main className="max-w-2xl mx-auto px-4 py-8 space-y-6">
-        <h1 className="text-3xl font-serif font-bold">Safety Alerts</h1>
+        <div className="flex items-baseline gap-3">
+          <h1 className="text-3xl font-serif font-bold">Safety Alerts</h1>
+          {activeAlerts.length > 0 && (
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-white">
+              {activeAlerts.length}
+            </span>
+          )}
+        </div>
 
         {isLoading ? (
           <div className="space-y-3">
             {[1, 2, 3].map((i) => <Skeleton key={i} className="h-28 w-full" />)}
           </div>
         ) : alerts.length === 0 ? (
-          <div className="text-center py-16 text-muted-foreground">
-            <AlertTriangleIcon className="h-10 w-10 mx-auto mb-3 opacity-30" />
-            <p className="text-sm">No alerts yet</p>
+          <div className="text-center py-20 text-muted-foreground">
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted">
+              <AlertTriangleIcon className="h-8 w-8 opacity-30" />
+            </div>
+            <p className="font-medium">No alerts yet</p>
+            <p className="text-sm mt-1 opacity-70">Alerts appear here when your SOS fires or a timer expires.</p>
           </div>
         ) : (
-          <div className="space-y-6">
+          <div className="space-y-8">
             {activeAlerts.length > 0 && (
               <section className="space-y-3">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Active</p>
-                {activeAlerts.map((alert) => (
-                  <AlertCard
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
+                  Needs action
+                </p>
+                {activeAlerts.map((alert, i) => (
+                  <ActiveAlertCard
                     key={alert.id}
                     alert={alert}
+                    style={{ animationDelay: `${i * 60}ms` }}
                     onResolve={() => resolveMutation.mutate(alert.id)}
                     onFalseAlarm={() => falseAlarmMutation.mutate(alert.id)}
                     resolving={resolveMutation.isPending}
@@ -115,9 +165,15 @@ export default function DistressAlertsPage() {
 
             {resolvedAlerts.length > 0 && (
               <section className="space-y-3">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">History</p>
-                {resolvedAlerts.map((alert) => (
-                  <AlertCard key={alert.id} alert={alert} />
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
+                  History
+                </p>
+                {resolvedAlerts.map((alert, i) => (
+                  <ResolvedAlertCard
+                    key={alert.id}
+                    alert={alert}
+                    style={{ animationDelay: `${i * 50}ms` }}
+                  />
                 ))}
               </section>
             )}
@@ -129,76 +185,167 @@ export default function DistressAlertsPage() {
   );
 }
 
-function AlertCard({
+function ActiveAlertCard({
   alert,
+  style,
   onResolve,
   onFalseAlarm,
   resolving,
   falseAlarming,
 }: {
   alert: SafetyAlert;
-  onResolve?: () => void;
-  onFalseAlarm?: () => void;
+  style?: React.CSSProperties;
+  onResolve: () => void;
+  onFalseAlarm: () => void;
   resolving?: boolean;
   falseAlarming?: boolean;
 }) {
   const other = alert.type === "sent" ? alert.buddy : alert.sender;
   const directionLabel = alert.type === "sent" ? "You alerted" : "Alerted by";
+  const isSOS = alert.alertType === "manual_sos";
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center justify-between text-sm font-medium">
-          <div className="flex items-center gap-2">
-            {alert.alertType === "timer_expiry" ? (
-              <TimerIcon className="h-4 w-4 text-orange-500" />
-            ) : (
-              <AlertTriangleIcon className="h-4 w-4 text-destructive" />
-            )}
-            {alertTypeLabel(alert)}
+    <div
+      className={[
+        "rounded-2xl border-2 p-5 space-y-4",
+        isSOS
+          ? "border-destructive/30 bg-destructive/5"
+          : "border-amber-500/30 bg-amber-500/5",
+        "animate-in fade-in slide-in-from-bottom-2 duration-300 fill-mode-both",
+      ].join(" ")}
+      style={style}
+    >
+      {/* Header row */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <div className={[
+            "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+            isSOS ? "bg-destructive/15" : "bg-amber-500/15",
+          ].join(" ")}>
+            {isSOS
+              ? <AlertTriangleIcon className="h-4 w-4 text-destructive" />
+              : <TimerIcon className="h-4 w-4 text-amber-600" />
+            }
           </div>
-          {statusBadge(alert.status)}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {other && (
-          <div className="flex items-center gap-2">
-            <Avatar className="h-7 w-7">
-              <AvatarImage src={other.avatarUrl ?? ""} />
-              <AvatarFallback className="text-xs">{initials(other)}</AvatarFallback>
-            </Avatar>
-            <div className="text-sm">
-              <span className="text-muted-foreground">{directionLabel}: </span>
-              <span className="font-medium">{other.displayName || other.username}</span>
-            </div>
+          <div>
+            <p className="font-semibold text-sm">{alertTypeLabel(alert)}</p>
+            <p className="text-xs text-muted-foreground">{formatDate(alert.createdAt)}</p>
           </div>
-        )}
+        </div>
+        {statusBadge(alert.status)}
+      </div>
 
-        <p className="text-sm">{alert.message}</p>
+      {/* Who */}
+      {other && (
+        <div className="flex items-center gap-2.5">
+          <Avatar className="h-8 w-8">
+            <AvatarImage src={other.avatarUrl ?? ""} />
+            <AvatarFallback className="text-xs">{initials(other)}</AvatarFallback>
+          </Avatar>
+          <p className="text-sm">
+            <span className="text-muted-foreground">{directionLabel}: </span>
+            <span className="font-semibold">{other.displayName || other.username}</span>
+          </p>
+        </div>
+      )}
 
-        {(alert.latitude !== null && alert.longitude !== null) && (
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <MapPinIcon className="h-3.5 w-3.5" />
-            {alert.locationText
-              ? alert.locationText
-              : `${alert.latitude.toFixed(5)}, ${alert.longitude.toFixed(5)}`}
-          </div>
-        )}
+      {/* Message */}
+      <p className="text-sm leading-relaxed">{alert.message}</p>
 
-        <p className="text-xs text-muted-foreground">{formatDate(alert.createdAt)}</p>
+      {/* Location */}
+      {alert.latitude !== null && alert.longitude !== null && (
+        <a
+          href={openMapsLink(alert.latitude, alert.longitude)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1.5 text-xs text-primary hover:underline w-fit"
+        >
+          <MapPinIcon className="h-3.5 w-3.5" />
+          {alert.locationText
+            ? alert.locationText
+            : `${alert.latitude.toFixed(5)}, ${alert.longitude.toFixed(5)}`}
+          <span className="text-muted-foreground">— open in maps</span>
+        </a>
+      )}
 
-        {alert.status === "active" && alert.type === "sent" && onResolve && onFalseAlarm && (
-          <div className="flex gap-2 pt-1">
-            <Button size="sm" onClick={onResolve} disabled={resolving || falseAlarming}>
-              <CheckCircleIcon className="h-3.5 w-3.5 mr-1" />
-              I'm Safe
-            </Button>
-            <Button variant="outline" size="sm" onClick={onFalseAlarm} disabled={resolving || falseAlarming}>
-              False Alarm
-            </Button>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+      {/* Actions — only for sent alerts the user can resolve */}
+      {alert.type === "sent" && (
+        <div className="flex flex-col gap-2 pt-1">
+          <Button
+            size="lg"
+            className="w-full rounded-full gap-2 bg-green-600 hover:bg-green-700 text-white"
+            onClick={onResolve}
+            disabled={resolving || falseAlarming}
+            data-testid="button-im-safe"
+          >
+            <CheckCircleIcon className="h-4 w-4" />
+            {resolving ? "Sending…" : "I'm Safe"}
+          </Button>
+          <Button
+            variant="outline"
+            className="w-full rounded-full"
+            onClick={onFalseAlarm}
+            disabled={resolving || falseAlarming}
+          >
+            False Alarm
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ResolvedAlertCard({
+  alert,
+  style,
+}: {
+  alert: SafetyAlert;
+  style?: React.CSSProperties;
+}) {
+  const other = alert.type === "sent" ? alert.buddy : alert.sender;
+  const directionLabel = alert.type === "sent" ? "You alerted" : "Alerted by";
+
+  return (
+    <div
+      className="rounded-xl border bg-card p-4 space-y-3 opacity-75 animate-in fade-in duration-300 fill-mode-both"
+      style={style}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          {alert.alertType === "timer_expiry"
+            ? <TimerIcon className="h-3.5 w-3.5 text-amber-500" />
+            : <AlertTriangleIcon className="h-3.5 w-3.5 text-destructive/60" />
+          }
+          <span>{alertTypeLabel(alert)}</span>
+          <span>·</span>
+          <span>{formatDate(alert.createdAt)}</span>
+        </div>
+        {statusBadge(alert.status)}
+      </div>
+
+      {other && (
+        <div className="flex items-center gap-2">
+          <Avatar className="h-6 w-6">
+            <AvatarImage src={other.avatarUrl ?? ""} />
+            <AvatarFallback className="text-[10px]">{initials(other)}</AvatarFallback>
+          </Avatar>
+          <p className="text-xs text-muted-foreground">
+            {directionLabel}: <span className="font-medium text-foreground">{other.displayName || other.username}</span>
+          </p>
+        </div>
+      )}
+
+      {alert.latitude !== null && alert.longitude !== null && (
+        <a
+          href={openMapsLink(alert.latitude, alert.longitude)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary w-fit"
+        >
+          <MapPinIcon className="h-3 w-3" />
+          {alert.locationText ?? `${alert.latitude.toFixed(4)}, ${alert.longitude.toFixed(4)}`}
+        </a>
+      )}
+    </div>
   );
 }

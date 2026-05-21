@@ -1,16 +1,10 @@
-import { Router, type Request, type Response } from "express";
+import { Router } from "express";
 import { z } from "zod";
 import { storage } from "./storage.js";
 import { wsManager } from "./websocket.js";
-import { assignBuddy, processBuddySMSReply, getConfirmedBuddies, removeBuddy } from "./buddyService.js";
+import { assignBuddy, processBuddySMSReply, removeBuddy } from "./buddyService.js";
 import { validateTwilioWebhook, parseTwilioInboundSMS } from "./twilioService.js";
-
-function requireAuth(req: Request, res: Response, next: Function) {
-  if (!req.isAuthenticated() || !req.user) {
-    return res.status(401).json({ message: "Unauthorized" });
-  }
-  next();
-}
+import { requireAuth } from "./middleware.js";
 
 const router = Router();
 
@@ -130,6 +124,19 @@ router.delete("/buddies/:buddyId", requireAuth, async (req, res) => {
     console.error("[BuddyRoutes] remove buddy error:", err);
     const status = err.message === "Forbidden" ? 403 : err.message === "Buddy not found" ? 404 : 500;
     res.status(status).json({ message: err.message || "Failed to remove buddy" });
+  }
+});
+
+// GET /api/safety/watching-over
+// Returns users who have the logged-in user as a confirmed buddy, with their active timer and recent alerts
+router.get("/watching-over", requireAuth, async (req, res) => {
+  try {
+    const userId = req.user!.id;
+    const data = await storage.getWatchingOver(userId);
+    res.json({ watching: data });
+  } catch (err: any) {
+    console.error("[BuddyRoutes] watching-over error:", err);
+    res.status(500).json({ message: "Failed to get watching-over data" });
   }
 });
 

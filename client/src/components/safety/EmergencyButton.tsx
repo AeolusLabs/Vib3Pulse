@@ -11,36 +11,55 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-
-import type { User } from "@shared/schema";
 import { AlertTriangleIcon, MapPinIcon, Loader2Icon } from "@/components/ui/icons";
 
-interface BuddyResponse {
-  buddy: User | null;
-  status: string | null;
+interface Buddy {
+  id: string;
+  name: string;
+  phoneNumber: string;
+  confirmationStatus: "pending" | "confirmed" | "declined" | "expired";
+}
+
+interface BuddiesResponse {
+  buddies: Buddy[];
+}
+
+interface SosResponse {
+  message: string;
+  alertIds: string[];
+  buddiesNotified: number;
 }
 
 export function EmergencyButton() {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
-  const [location, setLocation] = useState<{ latitude: number; longitude: number; locationText?: string } | null>(null);
+  const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [locating, setLocating] = useState(false);
 
-  const { data: buddyData } = useQuery<BuddyResponse>({ queryKey: ["/api/safety/buddy"] });
+  const { data: buddiesData } = useQuery<BuddiesResponse>({
+    queryKey: ["/api/safety/buddies"],
+  });
+
+  const confirmedBuddies = (buddiesData?.buddies ?? []).filter(
+    (b) => b.confirmationStatus === "confirmed"
+  );
 
   const sosMutation = useMutation({
-    mutationFn: async () =>
-      apiRequest("POST", "/api/safety/sos", {
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/safety/sos", {
         latitude: location?.latitude ?? null,
         longitude: location?.longitude ?? null,
-        locationText: location?.locationText ?? null,
-      }),
-    onSuccess: (data: any) => {
+        locationText: null,
+      });
+      return res.json() as Promise<SosResponse>;
+    },
+    onSuccess: (data) => {
       setOpen(false);
       setLocation(null);
+      const count = data.buddiesNotified;
       toast({
         title: "SOS Alert Sent",
-        description: `Alert sent to ${data.buddy?.displayName || data.buddy?.username || "your buddy"}`,
+        description: `Alert sent to ${count} ${count === 1 ? "buddy" : "buddies"}.`,
       });
     },
     onError: (error: any) => {
@@ -57,21 +76,16 @@ export function EmergencyButton() {
     setLocating(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setLocation({
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-        });
+        setLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
         setLocating(false);
       },
-      () => {
-        setLocating(false);
-      },
+      () => setLocating(false),
       { enableHighAccuracy: true, timeout: 10_000, maximumAge: 30_000 }
     );
   };
 
   const handlePress = () => {
-    if (!buddyData?.buddy) {
+    if (confirmedBuddies.length === 0) {
       toast({
         title: "No Safety Buddy Set",
         description: "Set an emergency buddy in Safety Settings first.",
@@ -79,17 +93,14 @@ export function EmergencyButton() {
       });
       return;
     }
-    if (buddyData.status !== "accepted") {
-      toast({
-        title: "Buddy Hasn't Accepted Yet",
-        description: "Your buddy request is still pending.",
-        variant: "destructive",
-      });
-      return;
-    }
     setOpen(true);
     requestLocation();
   };
+
+  const buddyNames =
+    confirmedBuddies.length === 1
+      ? confirmedBuddies[0].name
+      : confirmedBuddies.map((b) => b.name).join(", ");
 
   return (
     <>
@@ -113,8 +124,8 @@ export function EmergencyButton() {
             </DialogTitle>
             <DialogDescription className="space-y-2 pt-1">
               <p>
-                This will send an emergency alert to your buddy:{" "}
-                <strong>{buddyData?.buddy?.displayName || buddyData?.buddy?.username}</strong>
+                This will send an emergency alert to:{" "}
+                <strong>{buddyNames}</strong>
               </p>
               <div className="flex items-center gap-2 text-sm">
                 {locating ? (
