@@ -372,7 +372,7 @@ export default function MessagesPage() {
     const otherUser = otherParticipant?.user;
 
     return (
-      <div className="h-dvh bg-background flex flex-col overflow-hidden">
+      <div className="h-[calc(100dvh-4rem)] md:h-dvh bg-background flex flex-col overflow-hidden">
         {/* Sticky chat header */}
         <div className="flex-shrink-0 border-b border-border/50 bg-background/95 backdrop-blur-sm">
           <Navigation onSearch={() => {}} />

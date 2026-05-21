@@ -329,7 +329,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Send reset email
       const { sendPasswordResetEmail } = await import("./emailService");
-      const baseUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
+      const baseUrl = (process.env.APP_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, "");
       const resetLink = `${baseUrl}/reset-password?token=${resetToken}`;
       
       const emailSent = await sendPasswordResetEmail({

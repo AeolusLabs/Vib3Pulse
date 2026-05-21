@@ -103,9 +103,9 @@ export function useGeolocation() {
     try {
       const position = await new Promise<GeolocationPosition>((resolve, reject) => {
         navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 15000,
-          maximumAge: 60000,
+          enableHighAccuracy: false,
+          timeout: 30000,
+          maximumAge: 0,
         });
       });
 
@@ -161,6 +161,11 @@ export function useGeolocation() {
       loading: false,
       permissionStatus: "unknown",
     });
+    if ("permissions" in navigator) {
+      navigator.permissions.query({ name: "geolocation" }).then((result) => {
+        setState(prev => ({ ...prev, permissionStatus: result.state as any }));
+      }).catch(() => {});
+    }
   }, []);
 
   // Calculate distance between two points (Haversine formula)
