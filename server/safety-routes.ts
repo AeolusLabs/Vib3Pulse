@@ -9,7 +9,7 @@ import { requireAuth } from "./middleware.js";
 const sosRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   limit: 5,
-  keyGenerator: (req) => (req.user as any)?.id ?? req.ip ?? "unknown",
+  keyGenerator: (req) => (req.user as any)?.id ?? "unauthenticated",
   standardHeaders: "draft-7",
   legacyHeaders: false,
   message: { message: "Too many SOS alerts sent. Please wait before sending another." },
