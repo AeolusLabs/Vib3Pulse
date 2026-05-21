@@ -35,7 +35,11 @@ const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 // Strong ease-out — starts immediately, feels responsive
 const EASE_OUT = "cubic-bezier(0.23, 1, 0.32, 1)";
 
-export function EmergencyFAB() {
+interface EmergencyFABProps {
+  variant?: "fab" | "nav";
+}
+
+export function EmergencyFAB({ variant = "fab" }: EmergencyFABProps) {
   const { toast } = useToast();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -183,25 +187,44 @@ export function EmergencyFAB() {
 
   return (
     <>
-      {/* Floating Action Button */}
-      <button
-        onClick={handleFABClick}
-        aria-label="Send SOS Alert"
-        data-testid="fab-emergency"
-        style={{ touchAction: "manipulation" }}
-        className={[
-          "fixed bottom-[5.5rem] right-4 md:bottom-6 z-50",
-          "h-14 w-14 rounded-full shadow-xl",
-          "bg-destructive text-destructive-foreground",
-          "flex items-center justify-center",
-          "cursor-pointer select-none",
-          "transition-transform duration-150 active:scale-95",
-          "focus:outline-none focus-visible:ring-2 focus-visible:ring-destructive focus-visible:ring-offset-2",
-          fabPulseClass,
-        ].join(" ")}
-      >
-        <AlertTriangleIcon className="h-6 w-6" />
-      </button>
+      {variant === "nav" ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={handleFABClick}
+          aria-label="Buddy Alert"
+          data-testid="fab-emergency"
+          className={
+            timerInGrace
+              ? "text-destructive animate-pulse"
+              : timerIsActive
+              ? "text-destructive/70"
+              : ""
+          }
+        >
+          <AlertTriangleIcon className="h-5 w-5" />
+        </Button>
+      ) : (
+        /* Floating Action Button */
+        <button
+          onClick={handleFABClick}
+          aria-label="Send SOS Alert"
+          data-testid="fab-emergency"
+          style={{ touchAction: "manipulation" }}
+          className={[
+            "fixed bottom-[5.5rem] right-4 md:bottom-6 z-50",
+            "h-14 w-14 rounded-full shadow-xl",
+            "bg-destructive text-destructive-foreground",
+            "flex items-center justify-center",
+            "cursor-pointer select-none",
+            "transition-transform duration-150 active:scale-95",
+            "focus:outline-none focus-visible:ring-2 focus-visible:ring-destructive focus-visible:ring-offset-2",
+            fabPulseClass,
+          ].join(" ")}
+        >
+          <AlertTriangleIcon className="h-6 w-6" />
+        </button>
+      )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent

@@ -1,7 +1,6 @@
 import { useAuth } from "@/hooks/useAuth";
 import { Redirect } from "wouter";
 import { Button } from "@/components/ui/button";
-import { EmergencyFAB } from "@/components/safety/EmergencyFAB";
 
 interface AuthenticatedLayoutProps {
   children: React.ReactNode;
@@ -45,7 +44,6 @@ export default function AuthenticatedLayout({ children }: AuthenticatedLayoutPro
   return (
     <>
       {children}
-      {user.userType === "social" && <EmergencyFAB />}
     </>
   );
 }

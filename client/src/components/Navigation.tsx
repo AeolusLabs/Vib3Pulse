@@ -13,6 +13,7 @@ import {
 import ThemeToggle from "./ThemeToggle";
 import MenuTray from "./MenuTray";
 import NotificationBell from "./NotificationBell";
+import { EmergencyFAB } from "@/components/safety/EmergencyFAB";
 import { Link, useLocation } from "wouter";
 import { useAuth, logout } from "@/hooks/useAuth";
 import { SearchIcon, UserIcon, CalendarIcon, LogOutIcon, TicketIcon, ShieldIcon, AlertTriangleIcon, Building2Icon, SettingsIcon } from "@/components/ui/icons";
@@ -59,6 +60,8 @@ export default function Navigation({ onSearch }: NavigationProps) {
 
           <div className="flex items-center gap-2">
             {!isLoading && user && <NotificationBell />}
+
+            {!isLoading && user?.userType === "social" && <EmergencyFAB variant="nav" />}
 
             <ThemeToggle />
 
