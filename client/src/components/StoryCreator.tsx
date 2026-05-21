@@ -1,15 +1,13 @@
 /**
- * StoryCreator — fullscreen story capture + editing experience
+ * StoryCreator — gallery-based story creation + editing experience
  *
- * Camera: 9:16 portrait frame (industry standard for stories).
- * Zoom: 0.5×, 1×, 3× with hardware MediaStream zoom where available,
- *       CSS digital zoom (scale) as universal fallback.
+ * Pick: gallery upload (image or video from device).
  * Vibes: 8-option manual picker + auto-detect from dominant image colour.
  * Editing: text overlays, freehand draw, 7 CSS filter presets, vibe badge.
  * Post: inline caption + privacy toggle + follower sheet, all fullscreen.
  */
 
-import { useState, useRef, useEffect, useCallback, useReducer } from "react";
+import { useState, useRef } from "react";
 
 import { Button } from "@/components/ui/button";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
@@ -20,7 +18,11 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { User } from "@shared/schema";
-import { XIcon, RefreshCwIcon, ZapIcon, ZapOffIcon, TypeIcon, CheckIcon, PencilIcon, SparklesIcon, GlobeIcon, LockIcon, UsersIcon, SendIcon, ImageIcon, ChevronLeftIcon } from "@/components/ui/icons";
+import {
+  XIcon, TypeIcon, CheckIcon, PencilIcon, SparklesIcon,
+  GlobeIcon, LockIcon, UsersIcon, SendIcon, ImageIcon,
+  ChevronLeftIcon, FilmIcon, UploadIcon,
+} from "@/components/ui/icons";
 
 // ─── design tokens ───────────────────────────────────────────────────────────
 
@@ -62,10 +64,6 @@ const DRAW_SIZES  = [4, 8, 16, 24];
 const TEXT_COLORS = ["#FFFFFF", "#C4B0FF", "#7BB8E8", "#FFD700", "#FF6B6B", "#4ECDC4", "#000000"];
 const FONT_SIZES  = [24, 32, 48, 64];
 
-const MAX_RECORD_MS = 30_000;
-const RING_R = 34;
-const RING_C = 2 * Math.PI * RING_R;
-
 // ─── types ────────────────────────────────────────────────────────────────────
 
 interface TextOverlay {
@@ -87,7 +85,7 @@ interface VibeTagData {
 }
 
 type ActiveTool = "none" | "text" | "draw" | "filter" | "vibe";
-type Phase      = "camera" | "editing";
+type Phase      = "pick" | "editing";
 type MediaKind  = "photo" | "video";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -153,6 +151,17 @@ const vibeItemVariants = {
   show:   { opacity: 1, scale: 1,    y: 0,  transition: { duration: 0.25, ease: E.out } },
 };
 
+/** Staggered pick-screen entry — each child staggers 50ms apart */
+const pickContainerVariants = {
+  hidden: {},
+  show:   { transition: { staggerChildren: 0.05, delayChildren: 0.08 } },
+};
+
+const pickItemVariants = {
+  hidden: { opacity: 0, y: 18 },
+  show:   { opacity: 1, y: 0, transition: { duration: 0.32, ease: E.out } },
+};
+
 // ─── component ────────────────────────────────────────────────────────────────
 
 interface StoryCreatorProps {
@@ -162,33 +171,12 @@ interface StoryCreatorProps {
 }
 
 export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
-  const { toast }        = useToast();
-  const reducedMotion    = useReducedMotion();
+  const { toast }     = useToast();
+  const reducedMotion = useReducedMotion();
 
   // phase ────────────────────────────────────────────────────────────────────
-  const [phase, setPhase]         = useState<Phase>("camera");
+  const [phase, setPhase]         = useState<Phase>("pick");
   const [mediaKind, setMediaKind] = useState<MediaKind>("photo");
-
-  // camera ───────────────────────────────────────────────────────────────────
-  const [facingMode, setFacingMode]     = useState<"user" | "environment">("user");
-  const [flashEnabled, setFlashEnabled] = useState(false);
-  const [cameraError, setCameraError]   = useState<string | null>(null);
-  const [zoomLevel, setZoomLevel]       = useState(1.0);
-  const [hwZoomCaps, setHwZoomCaps]     = useState<{ min: number; max: number } | null>(null);
-  const [zoomIndicatorVisible, setZoomIndicatorVisible] = useState(false);
-  const [showFlash, setShowFlash]       = useState(false);
-
-  const videoRef  = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-
-  // recording ────────────────────────────────────────────────────────────────
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingMs, setRecordingMs] = useState(0);
-  const mediaRecorderRef  = useRef<MediaRecorder | null>(null);
-  const recordChunksRef   = useRef<Blob[]>([]);
-  const recordTimerRef    = useRef<ReturnType<typeof setInterval> | null>(null);
-  const holdTimerRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const recordStartRef    = useRef(0);
 
   // captured media ───────────────────────────────────────────────────────────
   const [capturedImage, setCapturedImage]         = useState<string | null>(null);
@@ -210,33 +198,27 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
   // draw
   const [drawColor, setDrawColor] = useState(DRAW_COLORS[0]);
   const [drawSize, setDrawSize]   = useState(DRAW_SIZES[1]);
-  const drawCanvasRef   = useRef<HTMLCanvasElement>(null);
-  const isDrawingRef    = useRef(false);
-  const lastPtRef       = useRef({ x: 0, y: 0 });
-  const hasDrawingRef   = useRef(false);
-
-  // pinch-to-zoom
-  const pinchStartDistRef     = useRef(0);
-  const pinchStartZoomRef     = useRef(1.0);
-  const zoomIndicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const drawCanvasRef  = useRef<HTMLCanvasElement>(null);
+  const isDrawingRef   = useRef(false);
+  const lastPtRef      = useRef({ x: 0, y: 0 });
+  const hasDrawingRef  = useRef(false);
 
   // vibe
-  const [vibeTag, setVibeTag]                   = useState<VibeTagData | null>(null);
-  const [isAnalyzingVibe, setIsAnalyzingVibe]   = useState(false);
+  const [vibeTag, setVibeTag]                 = useState<VibeTagData | null>(null);
+  const [isAnalyzingVibe, setIsAnalyzingVibe] = useState(false);
 
   // posting ──────────────────────────────────────────────────────────────────
-  const [caption, setCaption]               = useState("");
-  const [privacy, setPrivacy]               = useState<"public" | "private">("public");
+  const [caption, setCaption]                 = useState("");
+  const [privacy, setPrivacy]                 = useState<"public" | "private">("public");
   const [selectedViewers, setSelectedViewers] = useState<string[]>([]);
   const [showViewerSheet, setShowViewerSheet] = useState(false);
-  const [isPosting, setIsPosting]           = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isPosting, setIsPosting]             = useState(false);
+  const [uploadProgress, setUploadProgress]   = useState(0);
 
   // refs ─────────────────────────────────────────────────────────────────────
-  const frameRef      = useRef<HTMLDivElement>(null); // the 9:16 media frame
-  const captureCanvas = useRef<HTMLCanvasElement>(null);
-  const galleryInput  = useRef<HTMLInputElement>(null);
-  const dragOffset    = useRef({ x: 0, y: 0 });
+  const frameRef     = useRef<HTMLDivElement>(null);
+  const galleryInput = useRef<HTMLInputElement>(null);
+  const dragOffset   = useRef({ x: 0, y: 0 });
 
   // ─── queries ──────────────────────────────────────────────────────────────
 
@@ -252,7 +234,10 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
     }) => apiRequest("POST", "/api/stories", payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/stories"] });
-      toast({ title: "Story posted!", description: privacy === "private" ? "Shared with selected viewers." : "Shared with everyone." });
+      toast({
+        title: "Story posted!",
+        description: privacy === "private" ? "Shared with selected viewers." : "Shared with everyone.",
+      });
       handleClose();
     },
     onError: () => {
@@ -260,228 +245,6 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
       setIsPosting(false);
     },
   });
-
-  // ─── camera ───────────────────────────────────────────────────────────────
-
-  const stopCamera = useCallback(() => {
-    streamRef.current?.getTracks().forEach(t => t.stop());
-    streamRef.current = null;
-  }, []);
-
-  const startCamera = useCallback(async () => {
-    setCameraError(null);
-    setHwZoomCaps(null);
-    streamRef.current?.getTracks().forEach(t => t.stop());
-
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setCameraError("Camera not available. Use the gallery button to upload.");
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode, width: { ideal: 1080 }, height: { ideal: 1920 }, aspectRatio: { ideal: 9/16 } },
-        audio: false,
-      });
-      streamRef.current = stream;
-
-      // detect hardware zoom capability and start at widest angle
-      const track = stream.getVideoTracks()[0];
-      const caps  = track.getCapabilities?.() as any;
-      if (caps?.zoom) {
-        setHwZoomCaps({ min: caps.zoom.min, max: caps.zoom.max });
-        try { await track.applyConstraints({ advanced: [{ zoom: caps.zoom.min } as any] }); }
-        catch { /* unsupported — CSS fallback applies */ }
-      }
-      setZoomLevel(0.5);
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
-    } catch (err: any) {
-      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-        setCameraError("Camera permission denied. Allow camera access in your browser settings.");
-      } else if (err.name === "NotFoundError") {
-        setCameraError("No camera found. Use the gallery button below.");
-      } else if (err.name === "OverconstrainedError") {
-        try {
-          const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-          streamRef.current = s;
-          if (videoRef.current) { videoRef.current.srcObject = s; await videoRef.current.play(); }
-        } catch { setCameraError("Unable to access camera. Use the gallery button."); }
-      } else {
-        setCameraError("Unable to access camera. Please check permissions.");
-      }
-    }
-  }, [facingMode]);
-
-  useEffect(() => {
-    if (open && phase === "camera") startCamera();
-    return () => { if (!open) stopCamera(); };
-  }, [open, phase, startCamera, stopCamera]);
-
-  // ─── zoom ─────────────────────────────────────────────────────────────────
-
-  const applyZoom = async (level: number) => {
-    const clamped = Math.max(0.5, Math.min(3.0, level));
-    setZoomLevel(clamped);
-    if (!streamRef.current) return;
-    const track = streamRef.current.getVideoTracks()[0];
-    if (hwZoomCaps) {
-      // Map 0.5–3.0 linearly across the full hardware zoom range
-      const { min, max } = hwZoomCaps;
-      const target = min + ((clamped - 0.5) / 2.5) * (max - min);
-      try { await track.applyConstraints({ advanced: [{ zoom: Math.round(target * 10) / 10 } as any] }); }
-      catch { /* device rejected — CSS fallback still applies */ }
-    }
-  };
-
-  const flipCamera = () => {
-    setFacingMode(m => m === "user" ? "environment" : "user");
-  };
-
-  // ─── pinch-to-zoom ────────────────────────────────────────────────────────
-
-  const onCameraFrameTouchStart = (e: React.TouchEvent) => {
-    if (e.touches.length === 2) {
-      pinchStartDistRef.current = Math.hypot(
-        e.touches[1].clientX - e.touches[0].clientX,
-        e.touches[1].clientY - e.touches[0].clientY,
-      );
-      pinchStartZoomRef.current = zoomLevel;
-    }
-  };
-
-  const onCameraFrameTouchMove = (e: React.TouchEvent) => {
-    if (e.touches.length !== 2 || pinchStartDistRef.current === 0) return;
-    const dist = Math.hypot(
-      e.touches[1].clientX - e.touches[0].clientX,
-      e.touches[1].clientY - e.touches[0].clientY,
-    );
-    const newZoom = Math.max(0.5, Math.min(3.0, pinchStartZoomRef.current * (dist / pinchStartDistRef.current)));
-    setZoomLevel(newZoom);
-    const track = streamRef.current?.getVideoTracks()[0];
-    if (track && hwZoomCaps) {
-      const { min, max } = hwZoomCaps;
-      const target = min + ((newZoom - 0.5) / 2.5) * (max - min);
-      track.applyConstraints({ advanced: [{ zoom: Math.round(target * 10) / 10 } as any] }).catch(() => {});
-    }
-    setZoomIndicatorVisible(true);
-    if (zoomIndicatorTimerRef.current) clearTimeout(zoomIndicatorTimerRef.current);
-    zoomIndicatorTimerRef.current = window.setTimeout(() => setZoomIndicatorVisible(false), 1500);
-  };
-
-  const onCameraFrameTouchEnd = (e: React.TouchEvent) => {
-    if (e.touches.length < 2) pinchStartDistRef.current = 0;
-  };
-
-  const toggleFlash = async () => {
-    if (!streamRef.current) return;
-    const track = streamRef.current.getVideoTracks()[0];
-    const caps  = track.getCapabilities?.() as any;
-    if (caps?.torch) {
-      try { await track.applyConstraints({ advanced: [{ torch: !flashEnabled } as any] }); setFlashEnabled(f => !f); }
-      catch { toast({ title: "Flash not supported on this device." }); }
-    } else {
-      toast({ title: "Flash not supported on this device." });
-    }
-  };
-
-  // ─── capture ──────────────────────────────────────────────────────────────
-
-  const capturePhoto = () => {
-    const video  = videoRef.current;
-    const canvas = captureCanvas.current;
-    if (!video || !canvas || video.videoWidth === 0) return;
-
-    canvas.width  = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext("2d")!;
-
-    if (facingMode === "user") { ctx.translate(canvas.width, 0); ctx.scale(-1, 1); }
-    if (FILTERS[selectedFilter].css) ctx.filter = FILTERS[selectedFilter].css;
-    ctx.drawImage(video, 0, 0);
-
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
-    stopCamera();
-    setCapturedImage(dataUrl);
-    setMediaKind("photo");
-    hasDrawingRef.current = false;
-
-    // Capture flash
-    if (!reducedMotion) {
-      setShowFlash(true);
-      setTimeout(() => setShowFlash(false), 220);
-    }
-
-    // Size draw canvas to output resolution so strokes map 1:1 onto compose canvas
-    requestAnimationFrame(() => {
-      if (drawCanvasRef.current) {
-        drawCanvasRef.current.width  = 1080;
-        drawCanvasRef.current.height = 1920;
-      }
-      setPhase("editing");
-    });
-  };
-
-  // ─── video recording ──────────────────────────────────────────────────────
-
-  const stopRecording = useCallback(() => {
-    if (recordTimerRef.current) { clearInterval(recordTimerRef.current); recordTimerRef.current = null; }
-    mediaRecorderRef.current?.stop();
-    mediaRecorderRef.current = null;
-    setIsRecording(false);
-    setRecordingMs(0);
-  }, []);
-
-  const startRecording = () => {
-    if (!streamRef.current) return;
-    if (!window.MediaRecorder) { toast({ title: "Video recording not supported in this browser." }); return; }
-
-    const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9"
-               : MediaRecorder.isTypeSupported("video/webm")            ? "video/webm"
-               : MediaRecorder.isTypeSupported("video/mp4")             ? "video/mp4"
-               : "";
-
-    recordChunksRef.current = [];
-    const recorder = new MediaRecorder(streamRef.current, mime ? { mimeType: mime } : undefined);
-    recorder.ondataavailable = e => { if (e.data.size > 0) recordChunksRef.current.push(e.data); };
-    recorder.onstop = () => {
-      const blob = new Blob(recordChunksRef.current, { type: mime || "video/webm" });
-      const url  = URL.createObjectURL(blob);
-      setCapturedVideoUrl(url);
-      setCapturedVideoBlob(blob);
-      setMediaKind("video");
-      stopCamera();
-      setPhase("editing");
-    };
-
-    recorder.start(100);
-    mediaRecorderRef.current = recorder;
-    setIsRecording(true);
-    setRecordingMs(0);
-    recordStartRef.current = Date.now();
-    recordTimerRef.current = setInterval(() => {
-      const elapsed = Date.now() - recordStartRef.current;
-      setRecordingMs(elapsed);
-      if (elapsed >= MAX_RECORD_MS) stopRecording();
-    }, 100);
-  };
-
-  const onShutterDown = () => {
-    holdTimerRef.current = setTimeout(() => { holdTimerRef.current = null; startRecording(); }, 280);
-  };
-  const onShutterUp = () => {
-    if (holdTimerRef.current) { clearTimeout(holdTimerRef.current); holdTimerRef.current = null; capturePhoto(); }
-    else if (isRecording) stopRecording();
-  };
-
-  useEffect(() => () => {
-    if (recordTimerRef.current) clearInterval(recordTimerRef.current);
-    if (holdTimerRef.current)   clearTimeout(holdTimerRef.current);
-    if (capturedVideoUrl)       URL.revokeObjectURL(capturedVideoUrl);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── gallery ──────────────────────────────────────────────────────────────
 
@@ -495,7 +258,6 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
       reader.onloadend = () => {
         setCapturedImage(reader.result as string);
         setMediaKind("photo");
-        stopCamera();
         hasDrawingRef.current = false;
         requestAnimationFrame(() => {
           if (drawCanvasRef.current) {
@@ -510,7 +272,6 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
       setCapturedVideoUrl(URL.createObjectURL(file));
       setCapturedVideoBlob(file);
       setMediaKind("video");
-      stopCamera();
       setPhase("editing");
     }
   };
@@ -554,7 +315,10 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
 
   const addText = () => {
     if (!newTextValue.trim()) return;
-    const ov: TextOverlay = { id: Date.now().toString(), text: newTextValue.trim(), x: 50, y: 50, fontSize: textFontSize, color: textColor };
+    const ov: TextOverlay = {
+      id: Date.now().toString(), text: newTextValue.trim(),
+      x: 50, y: 50, fontSize: textFontSize, color: textColor,
+    };
     setTextOverlays(p => [...p, ov]);
     setNewTextValue(""); setIsAddingText(false); setSelectedTextId(ov.id); setActiveTool("none");
   };
@@ -649,18 +413,15 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
       img.onload = () => {
         const iW = img.naturalWidth, iH = img.naturalHeight;
 
-        // Always output 9:16 (1080×1920) — letterbox images that aren't 9:16
         const targetW = 1080, targetH = 1920;
         const canvas = document.createElement("canvas");
         canvas.width  = targetW;
         canvas.height = targetH;
         const ctx = canvas.getContext("2d")!;
 
-        // Black background for letterbox bars
         ctx.fillStyle = "#000000";
         ctx.fillRect(0, 0, targetW, targetH);
 
-        // Scale to fit within 9:16, preserving aspect ratio
         const scale = Math.min(targetW / iW, targetH / iH, 1);
         const scaledW = Math.round(iW * scale);
         const scaledH = Math.round(iH * scale);
@@ -671,13 +432,11 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
         ctx.drawImage(img, 0, 0, iW, iH, ox, oy, scaledW, scaledH);
         ctx.filter = "none";
 
-        // bake draw strokes — draw canvas is 1080×1920 so it maps 1:1 onto output
         const dc = drawCanvasRef.current;
         if (dc && hasDrawingRef.current && dc.width > 0) {
           ctx.drawImage(dc, 0, 0, dc.width, dc.height, 0, 0, targetW, targetH);
         }
 
-        // bake text overlays — positions are % of 9:16 frame = % of output canvas
         textOverlays.forEach(ov => {
           const x = (ov.x / 100) * targetW, y = (ov.y / 100) * targetH;
           const fs = (ov.fontSize / 100) * targetW * 0.15;
@@ -688,7 +447,6 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
           ctx.fillStyle = ov.color; ctx.fillText(ov.text, x, y);
         });
 
-        // bake vibe tag — positions are % of 9:16 frame = % of output canvas
         if (vibeTag) {
           const vx = (vibeTag.x / 100) * targetW, vy = (vibeTag.y / 100) * targetH;
           const fs = targetW * 0.044;
@@ -759,36 +517,33 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
   // ─── reset ────────────────────────────────────────────────────────────────
 
   const fullReset = () => {
-    setPhase("camera"); setMediaKind("photo");
+    setPhase("pick"); setMediaKind("photo");
     setCapturedImage(null);
     if (capturedVideoUrl) URL.revokeObjectURL(capturedVideoUrl);
     setCapturedVideoUrl(null); setCapturedVideoBlob(null);
     setActiveTool("none"); setSelectedFilter(0);
     setTextOverlays([]); setIsAddingText(false); setNewTextValue(""); setSelectedTextId(null);
-    setVibeTag(null); setIsAnalyzingVibe(false); setZoomLevel(1); setHwZoomCaps(null);
+    setVibeTag(null); setIsAnalyzingVibe(false);
     setCaption(""); setPrivacy("public"); setSelectedViewers([]); setShowViewerSheet(false);
-    setIsPosting(false); setUploadProgress(0); setFlashEnabled(false); setCameraError(null); setShowFlash(false);
+    setIsPosting(false); setUploadProgress(0);
     clearDraw();
   };
 
-  const handleClose = () => { stopCamera(); fullReset(); onClose(); };
+  const handleClose = () => { fullReset(); onClose(); };
 
   const handleRetake = () => {
     if (capturedVideoUrl) URL.revokeObjectURL(capturedVideoUrl);
     setCapturedImage(null); setCapturedVideoUrl(null); setCapturedVideoBlob(null);
     setActiveTool("none"); setSelectedFilter(0); setTextOverlays([]); setVibeTag(null);
-    setCaption(""); setIsPosting(false); clearDraw(); setPhase("camera");
+    setCaption(""); setIsPosting(false); clearDraw(); setPhase("pick");
   };
 
   if (!open) return null;
 
   // ─── derived ──────────────────────────────────────────────────────────────
 
-  const recordingPct = Math.min((recordingMs / MAX_RECORD_MS) * 100, 100);
-  const filterCss    = FILTERS[selectedFilter].css || undefined;
-  // Hardware zoom handles it when available; CSS scale is the fallback
-  const cssScale = hwZoomCaps ? 1 : Math.max(1.0, zoomLevel);
-  const canPost      = (mediaKind === "photo" && !!capturedImage) || (mediaKind === "video" && !!capturedVideoBlob);
+  const filterCss = FILTERS[selectedFilter].css || undefined;
+  const canPost   = (mediaKind === "photo" && !!capturedImage) || (mediaKind === "video" && !!capturedVideoBlob);
 
   // ─── render ───────────────────────────────────────────────────────────────
 
@@ -803,254 +558,94 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
       >
 
         {/* ═══════════════════════════════════════════════════════════════════
-            CAMERA PHASE
+            PICK PHASE — gallery upload
         ══════════════════════════════════════════════════════════════════════ */}
-        {phase === "camera" && (
+        {phase === "pick" && (
           <div className="relative w-full h-full flex flex-col">
 
-            {/* top bar — close / flash / flip */}
-            <div
-              className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 pt-10 pb-8"
-              style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.72), transparent)" }}
-            >
+            {/* top bar */}
+            <div className="absolute top-0 left-0 right-0 z-20 px-5 pt-12 pb-4">
               <button
                 onClick={handleClose}
-                className="w-11 h-11 rounded-full bg-black/30 backdrop-blur-sm flex items-center justify-center text-white active:scale-95 transition-transform duration-100"
+                className="w-11 h-11 rounded-full bg-white/8 border border-white/10 flex items-center justify-center text-white active:scale-95 transition-transform duration-100"
                 aria-label="Close"
               >
                 <XIcon className="h-5 w-5" />
               </button>
-
-              <div className="flex gap-2">
-                <button
-                  onClick={toggleFlash}
-                  className="w-11 h-11 rounded-full bg-black/30 backdrop-blur-sm flex items-center justify-center text-white active:scale-95 transition-transform duration-100"
-                  aria-label="Toggle flash"
-                >
-                  {flashEnabled
-                    ? <ZapIcon className="h-5 w-5" style={{ color: "#FFD700" }} />
-                    : <ZapOffIcon className="h-5 w-5 opacity-70" />
-                  }
-                </button>
-                <button
-                  onClick={flipCamera}
-                  className="w-11 h-11 rounded-full bg-black/30 backdrop-blur-sm flex items-center justify-center text-white active:scale-95 transition-transform duration-100"
-                  aria-label="Flip camera"
-                >
-                  <RefreshCwIcon className="h-5 w-5" />
-                </button>
-              </div>
             </div>
 
-            {/* 9:16 camera frame — centered, never 1:1 */}
-            <div className="flex-1 flex items-center justify-center bg-[#0A0A0A]">
-              <div
-                ref={frameRef}
-                className="relative overflow-hidden bg-black"
-                style={{ aspectRatio: "9/16", height: "100%", width: "auto", maxWidth: "100%", touchAction: "none" }}
-                onTouchStart={onCameraFrameTouchStart}
-                onTouchMove={onCameraFrameTouchMove}
-                onTouchEnd={onCameraFrameTouchEnd}
+            {/* center content */}
+            <div className="flex-1 flex flex-col items-center justify-center px-8">
+              <motion.div
+                variants={reducedMotion ? {} : pickContainerVariants}
+                initial="hidden"
+                animate="show"
+                className="w-full max-w-sm flex flex-col items-center gap-8"
               >
-                {/* live camera preview */}
-                <video
-                  ref={videoRef}
-                  autoPlay playsInline muted
-                  className="absolute inset-0 w-full h-full object-cover"
-                  style={{
-                    filter: filterCss,
-                    transform: `${facingMode === "user" ? "scaleX(-1) " : ""}scale(${cssScale}) scaleX(1.05)`,
-                    transformOrigin: "center",
-                    transition: reducedMotion ? "none" : `transform 0.22s ${E.out}`,
-                  }}
-                />
 
-                {/* wide-angle vignette */}
-                <div
-                  className="absolute inset-0 pointer-events-none z-[1]"
-                  style={{ background: "radial-gradient(ellipse at 50% 50%, transparent 42%, rgba(0,0,0,0.42) 100%)" }}
-                />
-
-                {/* recording badge */}
-                {isRecording && (
-                  <div className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-red-600/90 backdrop-blur-sm px-4 py-1.5 rounded-full z-10">
-                    <motion.div
-                      animate={reducedMotion ? {} : { opacity: [1, 0.3, 1] }}
-                      transition={{ repeat: Infinity, duration: 1 }}
-                      className="w-2 h-2 rounded-full bg-white"
-                    />
-                    <span className="text-white text-sm font-semibold tabular-nums tracking-wide">
-                      {Math.ceil((MAX_RECORD_MS - recordingMs) / 1000)}s
-                    </span>
-                  </div>
-                )}
-
-                {/* capture flash */}
-                <AnimatePresence>
-                  {showFlash && (
-                    <motion.div
-                      initial={{ opacity: 1 }}
-                      animate={{ opacity: 0 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ duration: 0.22, ease: E.out }}
-                      className="absolute inset-0 bg-white pointer-events-none z-30"
-                    />
-                  )}
-                </AnimatePresence>
-
-                {/* zoom level indicator — appears during pinch, fades out */}
-                <AnimatePresence>
-                  {zoomIndicatorVisible && (
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.85 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.85 }}
-                      transition={{ duration: 0.12, ease: E.out }}
-                      className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-20"
-                    >
-                      <div className="bg-black/55 backdrop-blur-sm text-white text-sm font-bold px-3.5 py-1.5 rounded-full tabular-nums">
-                        {zoomLevel.toFixed(1)}×
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                {/* camera error */}
-                {cameraError && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/92 gap-5 p-8 z-20">
-                    <p className="text-white text-center leading-relaxed text-sm max-w-xs">{cameraError}</p>
-                    <button
-                      onClick={startCamera}
-                      className="w-full max-w-xs py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl text-sm font-medium transition-colors"
-                    >
-                      Try Again
-                    </button>
-                    <button
-                      onClick={() => galleryInput.current?.click()}
-                      className="w-full max-w-xs py-3 border border-white/20 text-white rounded-xl text-sm font-medium hover:bg-white/10 transition-colors flex items-center justify-center gap-2"
-                    >
-                      <ImageIcon className="h-4 w-4" /> Open Gallery
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* bottom controls */}
-            <div
-              className="absolute bottom-0 left-0 right-0 z-20 pb-10 pt-3"
-              style={{ background: "linear-gradient(to top, rgba(0,0,0,0.82), transparent)" }}
-            >
-              {/* shutter row */}
-              <div className="flex items-center justify-between px-10">
-                {/* gallery */}
-                <button
-                  onClick={() => galleryInput.current?.click()}
-                  className="w-14 h-14 rounded-2xl border border-white/25 bg-white/10 backdrop-blur-sm flex items-center justify-center active:scale-95 transition-transform duration-100"
-                  aria-label="Open gallery"
-                >
-                  <ImageIcon className="h-6 w-6 text-white/80" />
-                </button>
-
-                {/* shutter */}
-                <div className="relative flex items-center justify-center">
-                  {isRecording && (
-                    <svg
-                      className="absolute -rotate-90"
-                      width={84} height={84} viewBox="0 0 84 84"
-                      style={{ pointerEvents: "none" }}
-                      aria-hidden="true"
-                    >
-                      <circle cx={42} cy={42} r={RING_R} fill="none" stroke="rgba(255,255,255,0.18)" strokeWidth={4.5} />
-                      <circle
-                        cx={42} cy={42} r={RING_R} fill="none" stroke="#FF4D4D" strokeWidth={4.5}
-                        strokeDasharray={RING_C}
-                        strokeDashoffset={RING_C * (1 - recordingPct / 100)}
-                        strokeLinecap="round"
-                        style={{ transition: reducedMotion ? "none" : "stroke-dashoffset 0.1s linear" }}
-                      />
-                    </svg>
-                  )}
-                  <button
-                    onPointerDown={onShutterDown}
-                    onPointerUp={onShutterUp}
-                    onPointerLeave={onShutterUp}
-                    className="w-[72px] h-[72px] rounded-full border-[4.5px] flex items-center justify-center select-none touch-none"
-                    style={{
-                      borderColor: isRecording ? "#FF4D4D" : "rgba(255,255,255,0.9)",
-                      transition: `border-color 0.2s ${E.out}`,
-                    }}
-                    aria-label={isRecording ? "Stop recording" : "Capture"}
-                  >
-                    <div
-                      style={{
-                        width:  isRecording ? 24 : 60,
-                        height: isRecording ? 24 : 60,
-                        backgroundColor: isRecording ? "#FF4D4D" : "#FFFFFF",
-                        borderRadius: isRecording ? 5 : 9999,
-                        transition: reducedMotion ? "none" : `all 0.18s ${E.out}`,
-                      }}
-                    />
-                  </button>
-                </div>
-
-                {/* filter toggle */}
-                <button
-                  onClick={() => setActiveTool(t => t === "filter" ? "none" : "filter")}
-                  className="w-14 h-14 rounded-2xl flex items-center justify-center active:scale-95 transition-transform duration-100"
-                  style={{
-                    border: activeTool === "filter" ? "1.5px solid rgba(196,176,255,0.8)" : "1.5px solid rgba(255,255,255,0.25)",
-                    backgroundColor: activeTool === "filter" ? "rgba(196,176,255,0.2)" : "rgba(255,255,255,0.08)",
-                    backdropFilter: "blur(8px)",
-                    transition: `all 0.15s ${E.out}`,
-                  }}
-                  aria-label="Filters"
-                >
-                  <SparklesIcon className="h-6 w-6" style={{ color: activeTool === "filter" ? "#C4B0FF" : "rgba(255,255,255,0.8)" }} />
-                </button>
-              </div>
-
-              <p className="text-white/30 text-[10px] text-center mt-4 tracking-[0.2em] uppercase">
-                Tap · Hold for video
-              </p>
-            </div>
-
-            {/* camera filter strip */}
-            <AnimatePresence>
-              {activeTool === "filter" && (
-                <motion.div
-                  variants={panelVariants} initial="hidden" animate="show" exit="hidden"
-                  className="absolute bottom-36 left-0 right-0 z-20"
-                >
+                {/* icon stack — image + film overlapping */}
+                <motion.div variants={reducedMotion ? {} : pickItemVariants} className="relative">
                   <div
-                    className="flex gap-3 px-4 overflow-x-auto pb-1"
-                    style={{ scrollbarWidth: "none" } as React.CSSProperties}
+                    className="w-24 h-24 rounded-3xl flex items-center justify-center"
+                    style={{
+                      background: "linear-gradient(135deg, rgba(196,176,255,0.12) 0%, rgba(123,184,232,0.08) 100%)",
+                      border: "1px solid rgba(196,176,255,0.2)",
+                    }}
                   >
-                    {FILTERS.map((f, i) => (
-                      <button key={f.name} onClick={() => { setSelectedFilter(i); setActiveTool("none"); }}
-                        className="flex-shrink-0 flex flex-col items-center gap-1.5">
-                        <div
-                          className="w-14 h-14 rounded-xl overflow-hidden"
-                          style={{
-                            border: selectedFilter === i ? "2px solid #FFF" : "2px solid rgba(255,255,255,0.15)",
-                            filter: f.css || undefined,
-                            opacity: selectedFilter === i ? 1 : 0.6,
-                            backgroundColor: "#444",
-                            transition: `all 0.15s ${E.out}`,
-                          }}
-                        >
-                          <div className="w-full h-full bg-gradient-to-br from-[#9B89C4] to-[#4CAF7D]" />
-                        </div>
-                        <span className="text-[10px] font-medium tracking-wide uppercase"
-                          style={{ color: selectedFilter === i ? "#FFF" : "rgba(255,255,255,0.45)" }}>
-                          {f.name}
-                        </span>
-                      </button>
-                    ))}
+                    <ImageIcon className="h-10 w-10" style={{ color: "rgba(196,176,255,0.7)" }} />
+                  </div>
+                  {/* video badge offset */}
+                  <div
+                    className="absolute -bottom-2 -right-2 w-9 h-9 rounded-xl flex items-center justify-center"
+                    style={{
+                      background: "rgba(123,184,232,0.15)",
+                      border: "1px solid rgba(123,184,232,0.3)",
+                      backdropFilter: "blur(8px)",
+                    }}
+                  >
+                    <FilmIcon className="h-4 w-4" style={{ color: "#7BB8E8" }} />
                   </div>
                 </motion.div>
-              )}
-            </AnimatePresence>
+
+                {/* text block */}
+                <motion.div variants={reducedMotion ? {} : pickItemVariants} className="text-center space-y-2.5">
+                  <h2 className="text-white text-[1.6rem] font-bold tracking-tight leading-tight">
+                    Add to Your Story
+                  </h2>
+                  <p className="text-white/40 text-sm leading-relaxed">
+                    Pick a photo or video from your gallery
+                  </p>
+                </motion.div>
+
+                {/* primary CTA */}
+                <motion.div variants={reducedMotion ? {} : pickItemVariants} className="w-full space-y-3">
+                  <button
+                    onClick={() => galleryInput.current?.click()}
+                    className="w-full py-4 rounded-full font-bold text-[0.95rem] text-[#0A0A0A] flex items-center justify-center gap-2.5 active:scale-[0.97] transition-transform"
+                    style={{
+                      backgroundColor: "#C4B0FF",
+                      transition: `transform 0.12s ${E.out}`,
+                    }}
+                    aria-label="Open gallery"
+                  >
+                    <UploadIcon className="h-4 w-4" />
+                    Choose from Gallery
+                  </button>
+
+                  {/* supported formats hint */}
+                  <p className="text-white/20 text-xs text-center tracking-wide">
+                    Photos · Videos up to 30 seconds
+                  </p>
+                </motion.div>
+
+              </motion.div>
+            </div>
+
+            {/* bottom glow line — visual ground */}
+            <div
+              className="absolute bottom-0 left-0 right-0 h-32 pointer-events-none"
+              style={{ background: "linear-gradient(to top, rgba(196,176,255,0.04), transparent)" }}
+            />
           </div>
         )}
 
@@ -1068,7 +663,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
               <button
                 onClick={handleRetake}
                 className="w-11 h-11 rounded-full bg-black/30 backdrop-blur-sm flex items-center justify-center text-white active:scale-95 transition-transform duration-100"
-                aria-label="Retake"
+                aria-label="Back to gallery"
               >
                 <ChevronLeftIcon className="h-5 w-5" />
               </button>
@@ -1077,10 +672,10 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
               {mediaKind === "photo" && (
                 <div className="flex flex-col gap-2">
                   {[
-                    { tool: "text" as ActiveTool,   icon: <TypeIcon    className="h-4.5 w-4.5" />, label: "Text"    },
-                    { tool: "draw" as ActiveTool,   icon: <PencilIcon  className="h-4.5 w-4.5" />, label: "Draw"    },
+                    { tool: "text"   as ActiveTool, icon: <TypeIcon     className="h-4.5 w-4.5" />, label: "Text"    },
+                    { tool: "draw"   as ActiveTool, icon: <PencilIcon   className="h-4.5 w-4.5" />, label: "Draw"    },
                     { tool: "filter" as ActiveTool, icon: <SparklesIcon className="h-4.5 w-4.5" />, label: "Filters" },
-                    { tool: "vibe" as ActiveTool,   icon: <ZapIcon     className="h-4.5 w-4.5" />, label: "Vibe"    },
+                    { tool: "vibe"   as ActiveTool, icon: <SparklesIcon className="h-4.5 w-4.5" />, label: "Vibe"    },
                   ].map(({ tool, icon, label }) => (
                     <button
                       key={tool}
@@ -1116,7 +711,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
               >
                 {/* base image */}
                 {mediaKind === "photo" && capturedImage && (
-                  <img src={capturedImage} alt="Captured" draggable={false}
+                  <img src={capturedImage} alt="Selected" draggable={false}
                     className="absolute inset-0 w-full h-full object-contain select-none"
                     style={{ filter: filterCss }}
                   />
@@ -1349,7 +944,6 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                   </motion.div>
 
                   <div className="px-5 pb-8 flex gap-3">
-                    {/* auto-detect */}
                     <button
                       onClick={autoDetectVibe}
                       disabled={isAnalyzingVibe || !capturedImage}
@@ -1360,7 +954,6 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                         : <><SparklesIcon className="h-4 w-4" /> Auto Detect</>
                       }
                     </button>
-                    {/* remove / cancel */}
                     {vibeTag ? (
                       <button onClick={() => { setVibeTag(null); setActiveTool("none"); }}
                         className="px-5 py-3 rounded-2xl bg-red-500/15 border border-red-500/30 text-red-400 text-sm font-medium">
@@ -1496,9 +1089,8 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
           </div>
         )}
 
-        {/* hidden inputs */}
+        {/* hidden gallery input */}
         <input ref={galleryInput} type="file" accept="image/*,video/*" className="hidden" onChange={handleGallerySelect} />
-        <canvas ref={captureCanvas} className="hidden" />
       </motion.div>
     </AnimatePresence>
   );
