@@ -1,10 +1,12 @@
 import crypto from "crypto";
 import { storage } from "./storage.js";
+import { wsManager } from "./websocket.js";
 import { sendUKSMS } from "./twilioService.js";
 import { sendNigeriaSMS } from "./termiiService.js";
 import type { SafetyBuddy } from "@shared/schema";
 
-const MAX_BUDDIES = 5;
+const MAX_PHONE_BUDDIES = 5;
+const MAX_APP_BUDDIES = 5;
 const TOKEN_TTL_HOURS = 48;
 
 // Normalize any phone number to E.164 format
@@ -100,8 +102,8 @@ export async function assignBuddy(
 
   // Enforce max 5 confirmed buddies
   const confirmed = await storage.getConfirmedBuddies(userId);
-  if (confirmed.length >= MAX_BUDDIES) {
-    throw new Error(`Maximum of ${MAX_BUDDIES} confirmed buddies allowed`);
+  if (confirmed.length >= MAX_PHONE_BUDDIES) {
+    throw new Error(`Maximum of ${MAX_PHONE_BUDDIES} confirmed buddies allowed`);
   }
 
   // Don't allow duplicate pending invitation to same number
@@ -215,4 +217,113 @@ export async function removeBuddy(userId: string, buddyId: string): Promise<void
   if (!buddy) throw new Error("Buddy not found");
   if (buddy.userId !== userId) throw new Error("Forbidden");
   await storage.deleteBuddy(buddyId);
+}
+
+export async function assignAppBuddy(
+  userId: string,
+  targetUserId: string,
+  name: string
+): Promise<SafetyBuddy> {
+  if (userId === targetUserId) throw new Error("You cannot add yourself as a buddy");
+
+  const appCount = await storage.getAppBuddyCount(userId);
+  if (appCount >= MAX_APP_BUDDIES) {
+    throw new Error(`Maximum of ${MAX_APP_BUDDIES} in-app buddies allowed`);
+  }
+
+  // Check not already an app buddy with this user (any status)
+  const existingBuddies = await storage.getBuddiesByUser(userId);
+  const alreadyExists = existingBuddies.find((b) => b.buddyUserId === targetUserId);
+  if (alreadyExists) throw new Error("You have already sent a buddy request to this person");
+
+  const buddy = await storage.createBuddy({
+    userId,
+    buddyUserId: targetUserId,
+    name,
+    phoneNumber: null,
+    confirmationStatus: "pending",
+    confirmationToken: null,
+    tokenExpiresAt: null,
+    isPrimary: false,
+  });
+
+  const requester = await storage.getUser(userId);
+  const requesterName = requester?.displayName || requester?.username || "Someone";
+
+  // Notify the target user in-app
+  await storage.createNotification({
+    userId: targetUserId,
+    type: "buddy_request",
+    title: "Safety Buddy Request",
+    message: `${requesterName} wants you to be their safety buddy on Vib3Pulse.`,
+    link: "/buddy/settings",
+  });
+
+  wsManager.sendToUser(targetUserId, {
+    type: "notification",
+    data: { type: "buddy_request", fromUserId: userId, fromName: requesterName },
+  });
+
+  console.log(`[BuddyService] App buddy request sent from ${userId} to ${targetUserId}`);
+  return buddy;
+}
+
+export async function acceptBuddyRequest(
+  buddyId: string,
+  acceptingUserId: string
+): Promise<void> {
+  const buddy = await storage.getBuddy(buddyId);
+  if (!buddy) throw new Error("Buddy request not found");
+  if (buddy.buddyUserId !== acceptingUserId) throw new Error("Forbidden");
+  if (buddy.confirmationStatus !== "pending") throw new Error("Request is no longer pending");
+
+  await storage.updateBuddy(buddyId, { confirmationStatus: "confirmed" });
+
+  const accepter = await storage.getUser(acceptingUserId);
+  const accepterName = accepter?.displayName || accepter?.username || "Your buddy";
+
+  await storage.createNotification({
+    userId: buddy.userId,
+    type: "buddy_request_response",
+    title: "Buddy Request Accepted!",
+    message: `${accepterName} accepted your safety buddy request.`,
+    link: "/buddy/settings",
+  });
+
+  wsManager.sendToUser(buddy.userId, {
+    type: "notification",
+    data: { type: "buddy_confirmed", buddyId },
+  });
+
+  console.log(`[BuddyService] App buddy ${buddyId} accepted by ${acceptingUserId}`);
+}
+
+export async function declineBuddyRequest(
+  buddyId: string,
+  decliningUserId: string
+): Promise<void> {
+  const buddy = await storage.getBuddy(buddyId);
+  if (!buddy) throw new Error("Buddy request not found");
+  if (buddy.buddyUserId !== decliningUserId) throw new Error("Forbidden");
+  if (buddy.confirmationStatus !== "pending") throw new Error("Request is no longer pending");
+
+  await storage.updateBuddy(buddyId, { confirmationStatus: "declined" });
+
+  const decliner = await storage.getUser(decliningUserId);
+  const declinerName = decliner?.displayName || decliner?.username || "Your buddy";
+
+  await storage.createNotification({
+    userId: buddy.userId,
+    type: "buddy_request_response",
+    title: "Buddy Request Declined",
+    message: `${declinerName} declined your safety buddy request.`,
+    link: "/buddy/settings",
+  });
+
+  wsManager.sendToUser(buddy.userId, {
+    type: "notification",
+    data: { type: "buddy_declined", buddyId },
+  });
+
+  console.log(`[BuddyService] App buddy ${buddyId} declined by ${decliningUserId}`);
 }

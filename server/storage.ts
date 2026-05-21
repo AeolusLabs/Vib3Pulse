@@ -142,7 +142,7 @@ import {
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import { eq, and, gte, gt, lt, or, ilike, desc, sql, count, inArray, notInArray, isNull } from "drizzle-orm";
+import { eq, and, gte, gt, lt, or, ilike, desc, sql, count, inArray, notInArray, isNull, isNotNull } from "drizzle-orm";
 
 export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const db = drizzle(pool);
@@ -382,6 +382,15 @@ export interface IStorage {
     activeTimer: SafetyTimer | null;
     recentAlerts: SafetyAlert[];
   }>>;
+  getFollowingForBuddy(userId: string): Promise<Array<{
+    user: Omit<User, "passwordHash">;
+    existingBuddy: SafetyBuddy | null;
+  }>>;
+  getPendingIncomingBuddyRequests(userId: string): Promise<Array<SafetyBuddy & {
+    requester: Omit<User, "passwordHash">;
+  }>>;
+  getPhoneBuddyCount(userId: string): Promise<number>;
+  getAppBuddyCount(userId: string): Promise<number>;
 
   trackEventView(eventId: string, userId?: string): Promise<void>;
   trackEventClick(eventId: string, actionType: string, userId?: string): Promise<void>;
@@ -2275,6 +2284,76 @@ export class DbStorage implements IStorage {
       results.push({ buddyRecord: record, protectedUser, activeTimer: activeTimer ?? null, recentAlerts });
     }
     return results;
+  }
+
+  async getFollowingForBuddy(userId: string): Promise<Array<{
+    user: Omit<User, "passwordHash">;
+    existingBuddy: SafetyBuddy | null;
+  }>> {
+    // People this user follows who have app accounts
+    const following = await db
+      .select()
+      .from(follows)
+      .innerJoin(users, eq(follows.followingId, users.id))
+      .where(eq(follows.followerId, userId));
+
+    // Existing buddy records for this user (any status)
+    const existingBuddies = await db
+      .select()
+      .from(safetyBuddies)
+      .where(eq(safetyBuddies.userId, userId));
+
+    return following.map((row) => {
+      const { passwordHash, ...user } = row.users;
+      const existingBuddy = existingBuddies.find(
+        (b) => b.buddyUserId === user.id
+      ) ?? null;
+      return { user, existingBuddy };
+    });
+  }
+
+  async getPendingIncomingBuddyRequests(userId: string): Promise<Array<SafetyBuddy & {
+    requester: Omit<User, "passwordHash">;
+  }>> {
+    const rows = await db
+      .select()
+      .from(safetyBuddies)
+      .innerJoin(users, eq(safetyBuddies.userId, users.id))
+      .where(and(
+        eq(safetyBuddies.buddyUserId, userId),
+        eq(safetyBuddies.confirmationStatus, "pending")
+      ))
+      .orderBy(desc(safetyBuddies.createdAt));
+
+    return rows.map((row) => {
+      const { passwordHash, ...requester } = row.users;
+      return { ...row.safety_buddies, requester };
+    });
+  }
+
+  async getPhoneBuddyCount(userId: string): Promise<number> {
+    const result = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(safetyBuddies)
+      .where(and(
+        eq(safetyBuddies.userId, userId),
+        isNotNull(safetyBuddies.phoneNumber),
+        eq(safetyBuddies.confirmationStatus, "confirmed")
+      ));
+    return result[0]?.count ?? 0;
+  }
+
+  async getAppBuddyCount(userId: string): Promise<number> {
+    const result = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(safetyBuddies)
+      .where(and(
+        eq(safetyBuddies.userId, userId),
+        isNotNull(safetyBuddies.buddyUserId),
+        isNull(safetyBuddies.phoneNumber),
+        eq(safetyBuddies.confirmationStatus, "confirmed")
+      ));
+    return result[0]?.count ?? 0;
   }
 
   async trackEventView(eventId: string, userId?: string): Promise<void> {

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { storage } from "./storage.js";
 import { wsManager } from "./websocket.js";
-import { assignBuddy, processBuddySMSReply, removeBuddy } from "./buddyService.js";
+import { assignBuddy, assignAppBuddy, acceptBuddyRequest, declineBuddyRequest, processBuddySMSReply, removeBuddy } from "./buddyService.js";
 import { validateTwilioWebhook, parseTwilioInboundSMS } from "./twilioService.js";
 import { requireAuth } from "./middleware.js";
 
@@ -60,7 +60,7 @@ router.post("/buddy-sms-reply", async (req, res) => {
     if (result.updated && result.userId) {
       // Notify the user in-app that their buddy replied
       const buddies = await storage.getBuddiesByUser(result.userId);
-      const updatedBuddy = buddies.find(b => b.phoneNumber === from || b.phoneNumber.endsWith(from.replace(/^\+/, "")));
+      const updatedBuddy = buddies.find(b => b.phoneNumber && (b.phoneNumber === from || b.phoneNumber.endsWith(from.replace(/^\+/, ""))));
       const status = updatedBuddy?.confirmationStatus;
       const name = updatedBuddy?.name ?? "Your buddy";
 
@@ -137,6 +137,84 @@ router.get("/watching-over", requireAuth, async (req, res) => {
   } catch (err: any) {
     console.error("[BuddyRoutes] watching-over error:", err);
     res.status(500).json({ message: "Failed to get watching-over data" });
+  }
+});
+
+// GET /api/safety/followers-for-buddy
+// Returns users the current user follows, with existing buddy status if any
+router.get("/followers-for-buddy", requireAuth, async (req, res) => {
+  try {
+    const userId = req.user!.id;
+    const results = await storage.getFollowingForBuddy(userId);
+    res.json({ followers: results });
+  } catch (err: any) {
+    console.error("[BuddyRoutes] followers-for-buddy error:", err);
+    res.status(500).json({ message: "Failed to get followers" });
+  }
+});
+
+// GET /api/safety/buddy-requests
+// Returns pending in-app buddy requests sent TO the current user
+router.get("/buddy-requests", requireAuth, async (req, res) => {
+  try {
+    const userId = req.user!.id;
+    const requests = await storage.getPendingIncomingBuddyRequests(userId);
+    res.json({ requests });
+  } catch (err: any) {
+    console.error("[BuddyRoutes] buddy-requests error:", err);
+    res.status(500).json({ message: "Failed to get buddy requests" });
+  }
+});
+
+// POST /api/safety/buddy-assignment/app
+// Assign a follower as an in-app buddy — sends in-app notification
+router.post("/buddy-assignment/app", requireAuth, async (req, res) => {
+  try {
+    const { targetUserId, name } = z.object({
+      targetUserId: z.string().min(1),
+      name: z.string().min(1).max(100),
+    }).parse(req.body);
+
+    const userId = req.user!.id;
+    const buddy = await assignAppBuddy(userId, targetUserId, name);
+
+    res.status(201).json({
+      message: "Buddy request sent. They'll get a notification to confirm.",
+      buddy,
+    });
+  } catch (err: any) {
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ message: "targetUserId and name are required" });
+    }
+    console.error("[BuddyRoutes] buddy-assignment/app error:", err);
+    const status = err.message?.includes("Maximum") || err.message?.includes("already sent") || err.message?.includes("yourself") ? 400 : 500;
+    res.status(status).json({ message: err.message || "Failed to send buddy request" });
+  }
+});
+
+// POST /api/safety/buddy-requests/:buddyId/accept
+router.post("/buddy-requests/:buddyId/accept", requireAuth, async (req, res) => {
+  try {
+    const userId = req.user!.id;
+    await acceptBuddyRequest(req.params.buddyId, userId);
+    res.json({ message: "Buddy request accepted" });
+  } catch (err: any) {
+    console.error("[BuddyRoutes] accept buddy-request error:", err);
+    const status = err.message === "Forbidden" ? 403 : err.message === "Buddy request not found" ? 404 : 400;
+    res.status(status).json({ message: err.message || "Failed to accept request" });
+  }
+});
+
+// POST /api/safety/buddy-requests/:buddyId/decline
+router.post("/buddy-requests/:buddyId/decline", requireAuth, async (req, res) => {
+  try {
+    const userId = req.user!.id;
+    await declineBuddyRequest(req.params.buddyId, userId);
+    res.json({ message: "Buddy request declined" });
+  } catch (err: any) {
+    console.error("[BuddyRoutes] decline buddy-request error:", err);
+    const status = err.message === "Forbidden" ? 403 : err.message === "Buddy request not found" ? 404 : 400;
+    res.status(status).json({ message: err.message || "Failed to decline request" });
   }
 });
 

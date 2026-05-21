@@ -623,9 +623,9 @@ export type SafetyBuddyConfirmationStatus = typeof safetyBuddyConfirmationStatus
 export const safetyBuddies = pgTable("safety_buddies", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  buddyUserId: varchar("buddy_user_id").references(() => users.id, { onDelete: "set null" }), // nullable — phone-only buddies don't need an account
+  buddyUserId: varchar("buddy_user_id").references(() => users.id, { onDelete: "set null" }), // null for phone-only buddies
   name: text("name").notNull(),
-  phoneNumber: varchar("phone_number", { length: 20 }).notNull(),
+  phoneNumber: varchar("phone_number", { length: 20 }), // null for app-only buddies (buddyUserId set)
   confirmationStatus: varchar("confirmation_status", { length: 50 }).notNull().default("pending"),
   confirmationToken: varchar("confirmation_token", { length: 255 }).unique(),
   tokenExpiresAt: timestamp("token_expires_at"),
