@@ -1,4 +1,12 @@
 import "dotenv/config";
+import * as Sentry from "@sentry/node";
+
+Sentry.init({
+  dsn: process.env.SENTRY_DSN,
+  environment: process.env.NODE_ENV || "development",
+  // If SENTRY_DSN is undefined, Sentry is disabled — no crash
+});
+
 import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
 import passport from "passport";
@@ -203,6 +211,9 @@ app.use((req, res, next) => {
 
   // Initialize WebSocket server
   wsManager.initialize(server, sessionStore);
+
+  // Sentry error handler must come before the custom error handler
+  Sentry.setupExpressErrorHandler(app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
