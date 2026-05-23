@@ -35,7 +35,7 @@ import AdminLayout from "./AdminLayout";
 import { format } from "date-fns";
 import { PlusIcon, ShieldIcon, UserXIcon, EditIcon } from "@/components/ui/icons";
 
-type AdminRole = "super_admin" | "content_moderator" | "user_support" | "event_reviewer" | "finance_manager" | "analytics_viewer";
+type AdminRole = "super_admin" | "content_moderator" | "user_support" | "event_reviewer" | "finance_manager";
 
 interface AdminUser {
   id: string;
@@ -54,7 +54,6 @@ const roleLabels: Record<AdminRole, string> = {
   user_support: "User Support",
   event_reviewer: "Event Reviewer",
   finance_manager: "Finance Manager",
-  analytics_viewer: "Analytics Viewer",
 };
 
 const roleColors: Record<AdminRole, string> = {
@@ -63,12 +62,14 @@ const roleColors: Record<AdminRole, string> = {
   user_support: "border-green-500 text-green-400",
   event_reviewer: "border-amber-500 text-amber-400",
   finance_manager: "border-emerald-500 text-emerald-400",
-  analytics_viewer: "border-slate-500 text-slate-400",
 };
 
 export default function AdminStaff() {
   const { toast } = useToast();
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [selectedAdmin, setSelectedAdmin] = useState<AdminUser | null>(null);
+  const [editRole, setEditRole] = useState<AdminRole>("content_moderator");
   const [formData, setFormData] = useState({
     username: "",
     email: "",
@@ -87,26 +88,29 @@ export default function AdminStaff() {
       return response.json();
     },
     onSuccess: () => {
-      toast({
-        title: "Admin created",
-        description: "The new admin account has been created successfully",
-      });
+      toast({ title: "Admin created", description: "The new admin account has been created successfully" });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users/admins"] });
       setCreateDialogOpen(false);
-      setFormData({
-        username: "",
-        email: "",
-        password: "",
-        displayName: "",
-        role: "content_moderator",
-      });
+      setFormData({ username: "", email: "", password: "", displayName: "", role: "content_moderator" });
     },
     onError: (error: any) => {
-      toast({
-        title: "Failed to create admin",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "Failed to create admin", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const editMutation = useMutation({
+    mutationFn: async ({ id, role }: { id: string; role: AdminRole }) => {
+      const response = await apiRequest("PATCH", `/api/admin/users/admins/${id}`, { role });
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Role updated", description: "Admin role has been updated successfully" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users/admins"] });
+      setEditDialogOpen(false);
+      setSelectedAdmin(null);
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to update role", description: error.message, variant: "destructive" });
     },
   });
 
@@ -116,31 +120,26 @@ export default function AdminStaff() {
       return response.json();
     },
     onSuccess: () => {
-      toast({
-        title: "Admin deactivated",
-        description: "The admin account has been deactivated",
-      });
+      toast({ title: "Admin deactivated", description: "The admin account has been deactivated" });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users/admins"] });
     },
     onError: (error: any) => {
-      toast({
-        title: "Failed to deactivate admin",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "Failed to deactivate admin", description: error.message, variant: "destructive" });
     },
   });
 
   const handleCreate = () => {
     if (!formData.username || !formData.email || !formData.password || !formData.displayName) {
-      toast({
-        title: "Missing fields",
-        description: "Please fill in all required fields",
-        variant: "destructive",
-      });
+      toast({ title: "Missing fields", description: "Please fill in all required fields", variant: "destructive" });
       return;
     }
     createMutation.mutate(formData);
+  };
+
+  const openEditDialog = (admin: AdminUser) => {
+    setSelectedAdmin(admin);
+    setEditRole(admin.role);
+    setEditDialogOpen(true);
   };
 
   return (
@@ -149,9 +148,7 @@ export default function AdminStaff() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-white">Staff Management</h1>
-            <p className="text-slate-400 mt-1">
-              Manage admin users and their access levels
-            </p>
+            <p className="text-slate-400 mt-1">Manage admin users and their access levels</p>
           </div>
           <Button
             onClick={() => setCreateDialogOpen(true)}
@@ -171,9 +168,7 @@ export default function AdminStaff() {
                   <ShieldIcon className="w-5 h-5 text-purple-400" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-white">
-                    {admins?.filter(a => a.isActive).length || 0}
-                  </p>
+                  <p className="text-2xl font-bold text-white">{admins?.filter(a => a.isActive).length || 0}</p>
                   <p className="text-sm text-slate-400">Active Staff</p>
                 </div>
               </div>
@@ -186,9 +181,7 @@ export default function AdminStaff() {
                   <ShieldIcon className="w-5 h-5 text-emerald-400" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-white">
-                    {admins?.filter(a => a.role === 'super_admin').length || 0}
-                  </p>
+                  <p className="text-2xl font-bold text-white">{admins?.filter(a => a.role === 'super_admin').length || 0}</p>
                   <p className="text-sm text-slate-400">Super Admins</p>
                 </div>
               </div>
@@ -201,9 +194,7 @@ export default function AdminStaff() {
                   <UserXIcon className="w-5 h-5 text-slate-400" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-white">
-                    {admins?.filter(a => !a.isActive).length || 0}
-                  </p>
+                  <p className="text-2xl font-bold text-white">{admins?.filter(a => !a.isActive).length || 0}</p>
                   <p className="text-sm text-slate-400">Deactivated</p>
                 </div>
               </div>
@@ -241,26 +232,34 @@ export default function AdminStaff() {
                       </TableCell>
                       <TableCell className="text-slate-300">{admin.email}</TableCell>
                       <TableCell>
-                        <Badge variant="outline" className={roleColors[admin.role]}>
-                          {roleLabels[admin.role]}
+                        <Badge variant="outline" className={roleColors[admin.role] || "border-slate-500 text-slate-400"}>
+                          {roleLabels[admin.role] || admin.role}
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <Badge 
-                          variant="outline" 
+                        <Badge
+                          variant="outline"
                           className={admin.isActive ? "border-green-500 text-green-400" : "border-red-500 text-red-400"}
                         >
                           {admin.isActive ? "Active" : "Inactive"}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-slate-400">
-                        {admin.lastLoginAt 
-                          ? format(new Date(admin.lastLoginAt), 'MMM d, h:mm a')
-                          : "Never"
-                        }
+                        {admin.lastLoginAt ? format(new Date(admin.lastLoginAt), 'MMM d, h:mm a') : "Never"}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-2">
+                          {admin.role !== 'super_admin' && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-slate-400 hover:text-white"
+                              onClick={() => openEditDialog(admin)}
+                              data-testid={`button-edit-admin-${admin.id}`}
+                            >
+                              <EditIcon className="w-4 h-4" />
+                            </Button>
+                          )}
                           {admin.isActive && admin.role !== 'super_admin' && (
                             <Button
                               size="sm"
@@ -286,6 +285,7 @@ export default function AdminStaff() {
           </CardContent>
         </Card>
 
+        {/* Create Staff Dialog */}
         <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
           <DialogContent className="bg-slate-800 border-slate-700">
             <DialogHeader>
@@ -339,8 +339,8 @@ export default function AdminStaff() {
               </div>
               <div className="space-y-2">
                 <Label className="text-slate-300">Role</Label>
-                <Select 
-                  value={formData.role} 
+                <Select
+                  value={formData.role}
                   onValueChange={(v: AdminRole) => setFormData({ ...formData, role: v })}
                 >
                   <SelectTrigger className="bg-slate-700/50 border-slate-600 text-white">
@@ -351,7 +351,6 @@ export default function AdminStaff() {
                     <SelectItem value="user_support">User Support</SelectItem>
                     <SelectItem value="event_reviewer">Event Reviewer</SelectItem>
                     <SelectItem value="finance_manager">Finance Manager</SelectItem>
-                    <SelectItem value="analytics_viewer">Analytics Viewer</SelectItem>
                     <SelectItem value="super_admin">Super Admin</SelectItem>
                   </SelectContent>
                 </Select>
@@ -361,16 +360,11 @@ export default function AdminStaff() {
                   {formData.role === 'user_support' && "Can manage users, view reports, and access activity logs"}
                   {formData.role === 'event_reviewer' && "Can review and approve events"}
                   {formData.role === 'finance_manager' && "Can view financial reports and revenue data"}
-                  {formData.role === 'analytics_viewer' && "Read-only access to platform analytics"}
                 </p>
               </div>
             </div>
             <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => setCreateDialogOpen(false)}
-                className="border-slate-600"
-              >
+              <Button variant="outline" onClick={() => setCreateDialogOpen(false)} className="border-slate-600">
                 Cancel
               </Button>
               <Button
@@ -380,6 +374,47 @@ export default function AdminStaff() {
                 data-testid="button-confirm-create-admin"
               >
                 {createMutation.isPending ? "Creating..." : "Create Admin"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Role Dialog */}
+        <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+          <DialogContent className="bg-slate-800 border-slate-700">
+            <DialogHeader>
+              <DialogTitle className="text-white">Edit Role</DialogTitle>
+              <DialogDescription className="text-slate-400">
+                Change the role for <span className="text-white font-medium">@{selectedAdmin?.username}</span>.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label className="text-slate-300">Role</Label>
+                <Select value={editRole} onValueChange={(v: AdminRole) => setEditRole(v)}>
+                  <SelectTrigger className="bg-slate-700/50 border-slate-600 text-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-800 border-slate-700">
+                    <SelectItem value="content_moderator">Content Moderator</SelectItem>
+                    <SelectItem value="user_support">User Support</SelectItem>
+                    <SelectItem value="event_reviewer">Event Reviewer</SelectItem>
+                    <SelectItem value="finance_manager">Finance Manager</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditDialogOpen(false)} className="border-slate-600">
+                Cancel
+              </Button>
+              <Button
+                onClick={() => selectedAdmin && editMutation.mutate({ id: selectedAdmin.id, role: editRole })}
+                disabled={editMutation.isPending || editRole === selectedAdmin?.role}
+                className="bg-purple-600 hover:bg-purple-700"
+                data-testid="button-confirm-edit-role"
+              >
+                {editMutation.isPending ? "Saving..." : "Save Role"}
               </Button>
             </DialogFooter>
           </DialogContent>

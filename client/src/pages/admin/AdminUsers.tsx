@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -28,7 +28,13 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import AdminLayout from "./AdminLayout";
 import { format } from "date-fns";
-import { SearchIcon, BanIcon, UserXIcon, EyeIcon } from "@/components/ui/icons";
+import { SearchIcon, BanIcon, EyeIcon, Trash2Icon, CheckCircleIcon } from "@/components/ui/icons";
+
+interface ActiveSuspension {
+  id: string;
+  reason: string;
+  isPermanent: boolean;
+}
 
 interface User {
   id: string;
@@ -37,12 +43,14 @@ interface User {
   displayName: string | null;
   userType: string;
   createdAt: string;
+  activeSuspension: ActiveSuspension | null;
 }
 
 export default function AdminUsers() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [suspendDialogOpen, setSuspendDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [suspendReason, setSuspendReason] = useState("");
   const [isPermanent, setIsPermanent] = useState(false);
@@ -60,10 +68,7 @@ export default function AdminUsers() {
       return response.json();
     },
     onSuccess: () => {
-      toast({
-        title: "User suspended",
-        description: "The user has been suspended successfully",
-      });
+      toast({ title: "User suspended", description: "The user has been suspended successfully" });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
       setSuspendDialogOpen(false);
       setSelectedUser(null);
@@ -71,11 +76,37 @@ export default function AdminUsers() {
       setIsPermanent(false);
     },
     onError: (error: any) => {
-      toast({
-        title: "Failed to suspend user",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "Failed to suspend user", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const liftMutation = useMutation({
+    mutationFn: async ({ userId, suspensionId }: { userId: string; suspensionId: string }) => {
+      const response = await apiRequest("POST", `/api/admin/users/${userId}/suspensions/${suspensionId}/lift`);
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Suspension lifted", description: "The user's suspension has been removed" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to lift suspension", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      const response = await apiRequest("DELETE", `/api/admin/users/${userId}`);
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({ title: "User deleted", description: "The user account has been permanently deleted" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      setDeleteDialogOpen(false);
+      setSelectedUser(null);
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to delete user", description: error.message, variant: "destructive" });
     },
   });
 
@@ -87,11 +118,7 @@ export default function AdminUsers() {
 
   const handleSuspend = () => {
     if (selectedUser && suspendReason.trim()) {
-      suspendMutation.mutate({
-        userId: selectedUser.id,
-        reason: suspendReason,
-        isPermanent,
-      });
+      suspendMutation.mutate({ userId: selectedUser.id, reason: suspendReason, isPermanent });
     }
   };
 
@@ -101,9 +128,7 @@ export default function AdminUsers() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-white">User Management</h1>
-            <p className="text-slate-400 mt-1">
-              {data?.total || 0} total users
-            </p>
+            <p className="text-slate-400 mt-1">{data?.total || 0} total users</p>
           </div>
         </div>
 
@@ -132,6 +157,7 @@ export default function AdminUsers() {
                     <TableHead className="text-slate-400">User</TableHead>
                     <TableHead className="text-slate-400">Email</TableHead>
                     <TableHead className="text-slate-400">Type</TableHead>
+                    <TableHead className="text-slate-400">Status</TableHead>
                     <TableHead className="text-slate-400">Joined</TableHead>
                     <TableHead className="text-slate-400 text-right">Actions</TableHead>
                   </TableRow>
@@ -147,12 +173,19 @@ export default function AdminUsers() {
                       </TableCell>
                       <TableCell className="text-slate-300">{user.email}</TableCell>
                       <TableCell>
-                        <Badge 
-                          variant="outline" 
+                        <Badge
+                          variant="outline"
                           className={user.userType === 'organizer' ? 'border-purple-500 text-purple-400' : 'border-slate-500 text-slate-400'}
                         >
                           {user.userType}
                         </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {user.activeSuspension ? (
+                          <Badge variant="outline" className="border-red-500 text-red-400">Suspended</Badge>
+                        ) : (
+                          <Badge variant="outline" className="border-green-500 text-green-400">Active</Badge>
+                        )}
                       </TableCell>
                       <TableCell className="text-slate-400">
                         {format(new Date(user.createdAt), 'MMM d, yyyy')}
@@ -167,17 +200,36 @@ export default function AdminUsers() {
                           >
                             <EyeIcon className="w-4 h-4" />
                           </Button>
+                          {user.activeSuspension ? (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-green-400 hover:text-green-300"
+                              onClick={() => liftMutation.mutate({ userId: user.id, suspensionId: user.activeSuspension!.id })}
+                              disabled={liftMutation.isPending}
+                              data-testid={`button-lift-suspension-${user.id}`}
+                            >
+                              <CheckCircleIcon className="w-4 h-4" />
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-amber-400 hover:text-amber-300"
+                              onClick={() => { setSelectedUser(user); setSuspendDialogOpen(true); }}
+                              data-testid={`button-suspend-user-${user.id}`}
+                            >
+                              <BanIcon className="w-4 h-4" />
+                            </Button>
+                          )}
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="text-amber-400 hover:text-amber-300"
-                            onClick={() => {
-                              setSelectedUser(user);
-                              setSuspendDialogOpen(true);
-                            }}
-                            data-testid={`button-suspend-user-${user.id}`}
+                            className="text-red-400 hover:text-red-300"
+                            onClick={() => { setSelectedUser(user); setDeleteDialogOpen(true); }}
+                            data-testid={`button-delete-user-${user.id}`}
                           >
-                            <BanIcon className="w-4 h-4" />
+                            <Trash2Icon className="w-4 h-4" />
                           </Button>
                         </div>
                       </TableCell>
@@ -189,6 +241,7 @@ export default function AdminUsers() {
           </CardContent>
         </Card>
 
+        {/* Suspend Dialog */}
         <Dialog open={suspendDialogOpen} onOpenChange={setSuspendDialogOpen}>
           <DialogContent className="bg-slate-800 border-slate-700">
             <DialogHeader>
@@ -221,11 +274,7 @@ export default function AdminUsers() {
               </div>
             </div>
             <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => setSuspendDialogOpen(false)}
-                className="border-slate-600"
-              >
+              <Button variant="outline" onClick={() => setSuspendDialogOpen(false)} className="border-slate-600">
                 Cancel
               </Button>
               <Button
@@ -235,6 +284,31 @@ export default function AdminUsers() {
                 data-testid="button-confirm-suspend"
               >
                 {suspendMutation.isPending ? "Suspending..." : "Suspend User"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Dialog */}
+        <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <DialogContent className="bg-slate-800 border-slate-700">
+            <DialogHeader>
+              <DialogTitle className="text-white">Delete User</DialogTitle>
+              <DialogDescription className="text-slate-400">
+                Permanently delete <span className="text-white font-medium">@{selectedUser?.username}</span>. This cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} className="border-slate-600">
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => selectedUser && deleteMutation.mutate(selectedUser.id)}
+                disabled={deleteMutation.isPending}
+                data-testid="button-confirm-delete-user"
+              >
+                {deleteMutation.isPending ? "Deleting..." : "Delete Permanently"}
               </Button>
             </DialogFooter>
           </DialogContent>

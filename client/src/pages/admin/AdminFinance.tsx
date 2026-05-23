@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 import AdminLayout from "./AdminLayout";
 import { Badge } from "@/components/ui/badge";
-import { PoundSterlingIcon, TicketIcon, TrendingUpIcon, CreditCardIcon, InfoIcon } from "@/components/ui/icons";
+import { PoundSterlingIcon, TicketIcon, TrendingUpIcon, CreditCardIcon, InfoIcon, AlertTriangleIcon } from "@/components/ui/icons";
 
 interface FinanceOverview {
   totalRevenue: number;
@@ -51,6 +52,13 @@ export default function AdminFinance() {
   return (
     <AdminLayout>
       <div className="space-y-6">
+        <Alert className="border-red-500/50 bg-red-500/10">
+          <AlertTriangleIcon className="w-4 h-4 text-red-400" />
+          <AlertDescription className="text-red-300 font-medium">
+            DEMO DATA ONLY — Real revenue tracking coming after Paystack setup
+          </AlertDescription>
+        </Alert>
+
         <div>
           <h1 className="text-2xl font-bold text-white">Finance Overview</h1>
           <p className="text-slate-400 mt-1">

@@ -486,6 +486,7 @@ export interface IStorage {
   suspendUser(suspension: InsertUserSuspension): Promise<UserSuspension>;
   getUserSuspensions(userId: string): Promise<UserSuspension[]>;
   getActiveSuspension(userId: string): Promise<UserSuspension | undefined>;
+  getBulkActiveSuspensions(userIds: string[]): Promise<UserSuspension[]>;
   liftSuspension(suspensionId: string): Promise<UserSuspension>;
   getAllSuspensions(): Promise<Array<UserSuspension & { user: User; admin: AdminUser }>>;
 
@@ -3197,6 +3198,24 @@ export class DbStorage implements IStorage {
     return result[0];
   }
 
+  async getBulkActiveSuspensions(userIds: string[]): Promise<UserSuspension[]> {
+    if (userIds.length === 0) return [];
+    const now = new Date();
+    return await db
+      .select()
+      .from(userSuspensions)
+      .where(
+        and(
+          inArray(userSuspensions.userId, userIds),
+          eq(userSuspensions.isActive, true),
+          or(
+            eq(userSuspensions.isPermanent, true),
+            gte(userSuspensions.suspendedUntil, now)
+          )
+        )
+      );
+  }
+
   async liftSuspension(suspensionId: string): Promise<UserSuspension> {
     const result = await db
       .update(userSuspensions)
@@ -3274,30 +3293,20 @@ export class DbStorage implements IStorage {
     const [pendingReportCount] = await db.select({ count: count() }).from(contentReports).where(eq(contentReports.status, 'pending'));
     const [newUserCount] = await db.select({ count: count() }).from(users).where(gte(users.createdAt, today));
     const [organizerCount] = await db.select({ count: count() }).from(users).where(eq(users.userType, 'organizer'));
+    const [verifiedCount] = await db.select({ count: count() }).from(users).where(eq(users.isVerified, true));
     
-    // Calculate revenue from tickets - get events and sum ticketPrice * ticketCount per event
-    const ticketRevenue = await db
-      .select({
-        eventId: tickets.eventId,
-        count: count(),
-      })
+    const [revenueResult] = await db
+      .select({ total: sql<number>`COALESCE(SUM(${events.ticketPrice}), 0)` })
       .from(tickets)
-      .groupBy(tickets.eventId);
-    
-    let totalRevenue = 0;
-    for (const t of ticketRevenue) {
-      const event = await db.select().from(events).where(eq(events.id, t.eventId));
-      if (event[0]) {
-        totalRevenue += (event[0].ticketPrice || 0) * Number(t.count);
-      }
-    }
+      .innerJoin(events, eq(tickets.eventId, events.id));
+    const totalRevenue = Number(revenueResult?.total || 0);
 
     return {
       totalUsers: Number(userCount?.count || 0),
       totalEvents: Number(eventCount?.count || 0),
       totalTicketsSold: Number(ticketCount?.count || 0),
       totalRevenue,
-      activeUsers: Number(userCount?.count || 0),
+      activeUsers: Number(verifiedCount?.count || 0),
       newUsersToday: Number(newUserCount?.count || 0),
       pendingReports: Number(pendingReportCount?.count || 0),
       activeOrganizers: Number(organizerCount?.count || 0),

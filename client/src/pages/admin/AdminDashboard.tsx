@@ -100,7 +100,7 @@ export default function AdminDashboard() {
       iconBg: "bg-amber-500/20",
     },
     {
-      title: "Active Users",
+      title: "Verified Users",
       value: stats?.activeUsers || 0,
       icon: <TrendingUpIcon className="w-5 h-5" />,
       color: "bg-indigo-500/10 text-indigo-400",

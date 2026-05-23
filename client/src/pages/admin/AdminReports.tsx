@@ -61,7 +61,8 @@ export default function AdminReports() {
   const [reviewStatus, setReviewStatus] = useState<"reviewed" | "dismissed" | "actioned">("reviewed");
 
   const { data: reports, isLoading } = useQuery<ContentReport[]>({
-    queryKey: ["/api/admin/reports", selectedTab === "all" ? undefined : selectedTab],
+    queryKey: ["/api/admin/reports", selectedTab],
+    queryFn: () => apiRequest("GET", `/api/admin/reports?status=${selectedTab}`).then(r => r.json()),
   });
 
   const reviewMutation = useMutation({

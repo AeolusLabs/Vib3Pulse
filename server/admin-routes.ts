@@ -480,11 +480,19 @@ export function setupAdminRoutes(app: Express) {
       const offset = parseInt(req.query.offset as string) || 0;
       const users = await storage.getAllUsers(limit, offset);
       const totalCount = await storage.getUserCount();
-      
-      // Remove password hashes
+
       const usersWithoutPasswords = users.map(({ passwordHash, ...rest }) => rest);
-      
-      res.json({ users: usersWithoutPasswords, total: totalCount });
+
+      const userIds = usersWithoutPasswords.map(u => u.id);
+      const activeSuspensions = await storage.getBulkActiveSuspensions(userIds);
+      const suspensionMap = new Map(activeSuspensions.map(s => [s.userId, { id: s.id, reason: s.reason, isPermanent: s.isPermanent }]));
+
+      const usersWithSuspensions = usersWithoutPasswords.map(u => ({
+        ...u,
+        activeSuspension: suspensionMap.get(u.id) || null,
+      }));
+
+      res.json({ users: usersWithSuspensions, total: totalCount });
     } catch (error) {
       res.status(500).json({ message: "Failed to get users" });
     }
