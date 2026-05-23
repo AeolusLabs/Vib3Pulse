@@ -3191,6 +3191,7 @@ export class DbStorage implements IStorage {
           eq(userSuspensions.isActive, true),
           or(
             eq(userSuspensions.isPermanent, true),
+            isNull(userSuspensions.suspendedUntil),
             gte(userSuspensions.suspendedUntil, now)
           )
         )
@@ -3210,6 +3211,7 @@ export class DbStorage implements IStorage {
           eq(userSuspensions.isActive, true),
           or(
             eq(userSuspensions.isPermanent, true),
+            isNull(userSuspensions.suspendedUntil),
             gte(userSuspensions.suspendedUntil, now)
           )
         )
