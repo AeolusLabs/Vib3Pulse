@@ -1,0 +1,9 @@
+SAFETY BUDDY FEATURE — TERMS OF USE
+
+- Notifies your emergency contact with your location when you trigger an SOS alert or a check-in timer expires
+- NOT an emergency service — it does not contact police, ambulance, or fire services
+- Does not monitor, escalate, or guarantee any response from your buddy
+- In a real emergency, call the appropriate service directly:
+    UK: 999  |  Nigeria: 112  |  US: 911  |  EU / International: 112
+- We are not liable for non-response, delayed delivery, or any failure of this feature
+- By enabling the Safety Buddy feature you accept these limitations

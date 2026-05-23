@@ -7,7 +7,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { UsersIcon, CalendarIcon, ImageIcon, FlagIcon, DollarSignIcon, ShieldIcon, ActivityIcon, LogOutIcon, MenuIcon, XIcon, ChevronRightIcon } from "@/components/ui/icons";
+import { UsersIcon, CalendarIcon, ImageIcon, FlagIcon, DollarSignIcon, ShieldIcon, ActivityIcon, LogOutIcon, MenuIcon, XIcon, ChevronRightIcon, AlertTriangleIcon } from "@/components/ui/icons";
 import { LayoutDashboard } from "lucide-react";
 
 type AdminRole = "super_admin" | "content_moderator" | "user_support" | "event_reviewer" | "finance_manager" | "analytics_viewer";
@@ -76,6 +76,12 @@ const navItems: NavItem[] = [
     label: "Activity Log",
     path: "/admin/activity",
     icon: <ActivityIcon className="w-5 h-5" />,
+    roles: ["super_admin", "user_support"],
+  },
+  {
+    label: "SOS Alerts",
+    path: "/admin/sos",
+    icon: <AlertTriangleIcon className="w-5 h-5 text-amber-400" />,
     roles: ["super_admin", "user_support"],
   },
 ];

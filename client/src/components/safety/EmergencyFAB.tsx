@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { AlertTriangleIcon, MapPinIcon, Loader2Icon, ShieldIcon } from "@/components/ui/icons";
+import { EMERGENCY_FALLBACK } from "@/lib/emergencyNumbers";
 
 interface Buddy {
   id: string;
@@ -290,6 +291,10 @@ export function EmergencyFAB({ variant = "fab" }: EmergencyFABProps) {
                   </div>
                 </DialogDescription>
               </DialogHeader>
+
+              <p className="text-xs rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 px-3 py-2">
+                ⚠️ For emergencies, call {EMERGENCY_FALLBACK}. This notifies {buddyNames} only — we cannot guarantee a response.
+              </p>
 
               <div className="flex items-center justify-between pt-2">
                 <Button

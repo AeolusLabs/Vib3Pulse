@@ -369,6 +369,7 @@ export interface IStorage {
   getDistressMessage(userId: string): Promise<string | undefined>;
   createSafetyAlert(params: { userId: string; buddyId: string; alertType: string; message: string; latitude?: number; longitude?: number; locationText?: string; timerId?: string }): Promise<SafetyAlert>;
   getSafetyAlerts(userId: string): Promise<any[]>;
+  getAllSafetyAlerts(limit: number): Promise<any[]>;
   resolveSafetyAlert(alertId: string, userId: string, status: string): Promise<SafetyAlert>;
   createSafetyTimer(params: { userId: string; durationMinutes: number; gracePeriodMinutes?: number; eventId?: string }): Promise<SafetyTimer>;
   getActiveSafetyTimer(userId: string): Promise<SafetyTimer | null>;
@@ -4415,6 +4416,23 @@ export class DbStorage implements IStorage {
       .update(eventStaffAccessCodes)
       .set({ scanCount: sql`${eventStaffAccessCodes.scanCount} + 1` })
       .where(eq(eventStaffAccessCodes.id, id));
+  }
+
+  async getAllSafetyAlerts(limit: number): Promise<any[]> {
+    const rows = await db
+      .select({
+        id: safetyAlerts.id,
+        username: users.username,
+        latitude: safetyAlerts.latitude,
+        longitude: safetyAlerts.longitude,
+        status: safetyAlerts.status,
+        createdAt: safetyAlerts.createdAt,
+      })
+      .from(safetyAlerts)
+      .innerJoin(users, eq(safetyAlerts.userId, users.id))
+      .orderBy(desc(safetyAlerts.createdAt))
+      .limit(limit);
+    return rows;
   }
 }
 

@@ -863,4 +863,15 @@ export function setupAdminRoutes(app: Express) {
       res.status(500).json({ message: "Failed to update venue verification" });
     }
   });
+
+  // ── SOS Alerts (monitoring only) ────────────────────────────────────────
+  app.get("/api/admin/safety-alerts", requireAdmin, requireRole("super_admin", "user_support"), async (req, res) => {
+    try {
+      const alerts = await storage.getAllSafetyAlerts(100);
+      res.json({ alerts });
+    } catch (error) {
+      console.error("[Admin] Safety alerts error:", error);
+      res.status(500).json({ message: "Failed to fetch safety alerts" });
+    }
+  });
 }

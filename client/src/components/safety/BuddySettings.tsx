@@ -406,6 +406,10 @@ export function BuddySettings() {
 
   return (
     <div className="space-y-4">
+      <p className="text-xs text-muted-foreground bg-muted rounded-xl px-4 py-3">
+        This feature notifies your contact with your location. It is <strong>NOT</strong> an emergency service — in an emergency, call 999 (UK), 112 (Nigeria/EU), or 911 (US).
+      </p>
+
       {/* Incoming buddy requests */}
       {(incomingRequests.length > 0 || requestsLoading) && (
         <Card>
