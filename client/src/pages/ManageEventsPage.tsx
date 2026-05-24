@@ -33,6 +33,7 @@ interface Event {
   isPublished: boolean;
   isPromoted: boolean;
   promotedUntil: Date | null;
+  moderationStatus: string;
 }
 
 export default function ManageEventsPage() {
@@ -104,6 +105,7 @@ export default function ManageEventsPage() {
       isPublished: event.isPublished ?? true,
       isPromoted: isCurrentlyPromoted || false,
       promotedUntil: promotedUntil,
+      moderationStatus: event.moderationStatus ?? 'pending',
     };
   };
 
@@ -160,8 +162,17 @@ export default function ManageEventsPage() {
                 Featured
               </Badge>
             )}
-            {event.status === 'published' && (
+            {event.moderationStatus === 'pending' && (
+              <Badge className="bg-amber-500 text-white">Awaiting Review</Badge>
+            )}
+            {event.moderationStatus === 'approved' && event.status === 'published' && (
               <Badge className="bg-green-500">Published</Badge>
+            )}
+            {event.moderationStatus === 'rejected' && (
+              <Badge className="bg-red-500 text-white">Rejected</Badge>
+            )}
+            {event.moderationStatus === 'flagged' && (
+              <Badge className="bg-orange-500 text-white">Flagged</Badge>
             )}
             {event.status === 'draft' && (
               <Badge variant="secondary">Draft</Badge>
@@ -180,6 +191,21 @@ export default function ManageEventsPage() {
           </h3>
           <Badge variant="secondary" className="mt-1">{event.type}</Badge>
         </div>
+        {event.moderationStatus === 'pending' && (
+          <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+            Under review — not yet visible to attendees.
+          </div>
+        )}
+        {event.moderationStatus === 'rejected' && (
+          <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1">
+            Rejected — this event is not visible to attendees. Contact support for details.
+          </div>
+        )}
+        {event.moderationStatus === 'flagged' && (
+          <div className="text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded px-2 py-1">
+            Flagged for review — visibility may be restricted.
+          </div>
+        )}
 
         <div className="space-y-1 text-sm text-muted-foreground">
           <p className="flex items-center gap-2" data-testid={`text-event-date-${event.id}`}>

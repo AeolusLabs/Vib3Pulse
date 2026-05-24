@@ -650,6 +650,37 @@ export function setupAdminRoutes(app: Express) {
     }
   });
 
+  // Moderate venue entry night
+  app.post("/api/admin/venue-events/:id/moderate", requireRole("super_admin", "event_reviewer", "content_moderator"), async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const { action, reason } = z.object({
+        action: z.enum(["approved", "rejected", "flagged"]),
+        reason: z.string().optional(),
+      }).parse(req.body);
+
+      await storage.moderateVenueEvent(id, action);
+
+      await logActivity(
+        req.session.adminId!,
+        `${action}_venue_event`,
+        "venue_event",
+        id,
+        `${action} venue event: ${reason || "No reason provided"}`,
+        req.ip
+      );
+
+      res.json({ message: `Venue event ${action}` });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid input", errors: error.errors });
+      }
+      console.error('[ADMIN] Failed to moderate venue event:', error);
+      const msg = error instanceof Error ? error.message : "Failed to moderate venue event";
+      res.status(500).json({ message: msg });
+    }
+  });
+
   // Delete event
   app.delete("/api/admin/events/:id", requireRole("super_admin", "content_moderator"), async (req: Request, res: Response) => {
     try {

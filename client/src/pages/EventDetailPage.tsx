@@ -139,6 +139,21 @@ export default function EventDetailPage() {
     );
   }
 
+  const isOrganizer = user?.id === event.organizerId;
+  const modStatus = (event as any).moderationStatus;
+  if (!isOrganizer && modStatus && modStatus !== 'approved') {
+    return (
+      <div className="min-h-screen bg-background pb-20 md:pb-0">
+        <Navigation />
+        <div className="container mx-auto px-4 py-16 text-center space-y-2">
+          <p className="text-lg font-semibold">Event not available</p>
+          <p className="text-muted-foreground">This event is currently under review and is not publicly accessible.</p>
+        </div>
+        <BottomNavigation />
+      </div>
+    );
+  }
+
   const eventDate = new Date(event.eventDate);
   const formattedDate = format(eventDate, "EEEE, MMMM d, yyyy");
   const formattedTime = format(eventDate, "h:mm a");

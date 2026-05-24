@@ -93,6 +93,7 @@ export const events = pgTable("events", {
   isPromoted: boolean("is_promoted").notNull().default(false),
   promotedUntil: timestamp("promoted_until"),
   isPublished: boolean("is_published").notNull().default(true),
+  moderationStatus: text("moderation_status").notNull().default("pending"),
   communityId: varchar("community_id").references(() => communities.id, { onDelete: "set null" }),
 });
 
@@ -796,6 +797,7 @@ export const venueEntryNights = pgTable("venue_entry_nights", {
   ticketsSold: integer("tickets_sold").notNull().default(0),
   description: text("description"),
   isActive: boolean("is_active").notNull().default(true),
+  moderationStatus: text("moderation_status").notNull().default("pending"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 

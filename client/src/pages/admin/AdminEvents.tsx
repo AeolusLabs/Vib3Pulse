@@ -40,6 +40,7 @@ interface Event {
   ticketPrice: number;
   ticketsAvailable: number;
   moderationStatus: string;
+  sourceType?: 'event' | 'venue_entry';
   organizer: {
     id: string;
     username: string;
@@ -70,8 +71,11 @@ export default function AdminEvents() {
   });
 
   const moderateMutation = useMutation({
-    mutationFn: async (data: { eventId: string; action: string; reason?: string }) => {
-      const response = await apiRequest("POST", `/api/admin/events/${data.eventId}/moderate`, {
+    mutationFn: async (data: { eventId: string; action: string; reason?: string; sourceType?: string }) => {
+      const endpoint = data.sourceType === 'venue_entry'
+        ? `/api/admin/venue-events/${data.eventId}/moderate`
+        : `/api/admin/events/${data.eventId}/moderate`;
+      const response = await apiRequest("POST", endpoint, {
         action: data.action,
         reason: data.reason,
       });
@@ -126,6 +130,7 @@ export default function AdminEvents() {
         eventId: selectedEvent.id,
         action: moderationAction,
         reason: moderationReason || undefined,
+        sourceType: selectedEvent.sourceType,
       });
     }
   };
@@ -197,7 +202,12 @@ export default function AdminEvents() {
                     <TableRow key={event.id} className="border-slate-700">
                       <TableCell>
                         <div>
-                          <p className="font-medium text-white">{event.title}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium text-white">{event.title}</p>
+                            {event.sourceType === 'venue_entry' && (
+                              <Badge variant="outline" className="border-blue-500 text-blue-400 text-xs">Venue</Badge>
+                            )}
+                          </div>
                           <p className="text-sm text-slate-400 truncate max-w-[200px]">{event.location}</p>
                         </div>
                       </TableCell>

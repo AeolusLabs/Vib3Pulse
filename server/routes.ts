@@ -1597,6 +1597,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Event not found" });
       }
 
+      if (event.moderationStatus !== 'approved') {
+        return res.status(403).json({ message: "This event is not yet available for RSVP" });
+      }
+
       // Only allow RSVPs for free events
       if (event.ticketPrice > 0) {
         return res.status(400).json({ message: "This is a paid event, please purchase a ticket instead" });

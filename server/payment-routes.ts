@@ -49,6 +49,10 @@ export function registerPaymentRoutes(app: Express): void {
         return res.status(404).json({ message: "Event not found" });
       }
 
+      if (event.moderationStatus !== 'approved') {
+        return res.status(403).json({ message: "This event is not yet available for ticket purchase" });
+      }
+
       let amountSmallestUnit = event.ticketPrice;
       let tierName = event.title;
 

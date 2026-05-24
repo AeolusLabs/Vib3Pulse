@@ -156,6 +156,22 @@ export async function ensureSchema() {
     ALTER TABLE events ADD COLUMN IF NOT EXISTS is_published BOOLEAN NOT NULL DEFAULT true
   `);
   await pool.query(`
+    ALTER TABLE events ADD COLUMN IF NOT EXISTS moderation_status TEXT NOT NULL DEFAULT 'pending'
+  `);
+  // Backfill: existing published events are already live — mark them approved
+  await pool.query(`
+    UPDATE events SET moderation_status = 'approved'
+    WHERE is_published = true AND moderation_status = 'pending'
+  `);
+  await pool.query(`
+    ALTER TABLE venue_entry_nights ADD COLUMN IF NOT EXISTS moderation_status TEXT NOT NULL DEFAULT 'pending'
+  `);
+  // Backfill: existing active venue entry nights are already live — mark them approved
+  await pool.query(`
+    UPDATE venue_entry_nights SET moderation_status = 'approved'
+    WHERE is_active = true AND moderation_status = 'pending'
+  `);
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS event_staff_access_codes (
       id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       event_id VARCHAR NOT NULL REFERENCES events(id) ON DELETE CASCADE,
@@ -516,9 +532,10 @@ export interface IStorage {
   getUserCount(): Promise<number>;
   deleteUser(id: string): Promise<void>;
 
-  // Event management for admins  
-  getAllEventsAdmin(limit?: number, offset?: number): Promise<Array<Event & { organizer: User; moderationStatus: string }>>;
+  // Event management for admins
+  getAllEventsAdmin(limit?: number, offset?: number): Promise<Array<Event & { organizer: User; moderationStatus: string; sourceType: 'event' | 'venue_entry' }>>;
   deleteEvent(id: string): Promise<void>;
+  moderateVenueEvent(venueEntryNightId: string, action: string): Promise<void>;
 
   // Story management for admins
   getAllStoriesAdmin(limit?: number): Promise<Array<Story & { user: User }>>;
@@ -700,7 +717,9 @@ export class DbStorage implements IStorage {
   }
 
   async getEvents(): Promise<Event[]> {
-    return await db.select().from(events).where(eq(events.isPublished, true)).orderBy(events.eventDate);
+    return await db.select().from(events)
+      .where(and(eq(events.isPublished, true), eq(events.moderationStatus, 'approved')))
+      .orderBy(events.eventDate);
   }
 
   async getEvent(id: string): Promise<(Event & { organizer: User; community: (Community & { memberCount: number }) | null }) | undefined> {
@@ -2586,7 +2605,8 @@ export class DbStorage implements IStorage {
       .innerJoin(venues, eq(venueEntryNights.venueId, venues.id))
       .where(and(
         gte(venueEntryNights.date, now),
-        eq(venueEntryNights.isActive, true)
+        eq(venueEntryNights.isActive, true),
+        eq(venueEntryNights.moderationStatus, 'approved')
       ))
       .orderBy(venueEntryNights.date)
       .limit(20);
@@ -3254,7 +3274,12 @@ export class DbStorage implements IStorage {
 
   async moderateEvent(moderation: InsertEventModeration): Promise<EventModeration> {
     const result = await db.insert(eventModerations).values(moderation).returning();
+    await db.update(events).set({ moderationStatus: moderation.action }).where(eq(events.id, moderation.eventId));
     return result[0];
+  }
+
+  async moderateVenueEvent(venueEntryNightId: string, action: string): Promise<void> {
+    await db.update(venueEntryNights).set({ moderationStatus: action }).where(eq(venueEntryNights.id, venueEntryNightId));
   }
 
   async getEventModerations(eventId: string): Promise<Array<EventModeration & { admin: AdminUser }>> {
@@ -3343,8 +3368,8 @@ export class DbStorage implements IStorage {
     await db.delete(users).where(eq(users.id, id));
   }
 
-  async getAllEventsAdmin(limit: number = 50, offset: number = 0): Promise<Array<Event & { organizer: User; moderationStatus: string }>> {
-    const result = await db
+  async getAllEventsAdmin(limit: number = 50, offset: number = 0): Promise<Array<Event & { organizer: User; moderationStatus: string; sourceType: 'event' | 'venue_entry' }>> {
+    const eventRows = await db
       .select()
       .from(events)
       .innerJoin(users, eq(events.organizerId, users.id))
@@ -3352,26 +3377,56 @@ export class DbStorage implements IStorage {
       .limit(limit)
       .offset(offset);
 
-    const eventIds = result.map(r => r.events.id);
-    const statusMap = new Map<string, string>();
+    const venueRows = await db
+      .select({
+        venueEntry: venueEntryNights,
+        venue: venues,
+        organizer: users,
+      })
+      .from(venueEntryNights)
+      .innerJoin(venues, eq(venueEntryNights.venueId, venues.id))
+      .innerJoin(users, eq(venues.ownerId, users.id))
+      .orderBy(desc(venueEntryNights.date))
+      .limit(limit)
+      .offset(offset);
 
-    if (eventIds.length > 0) {
-      const mods = await db
-        .select({ eventId: eventModerations.eventId, action: eventModerations.action })
-        .from(eventModerations)
-        .where(inArray(eventModerations.eventId, eventIds))
-        .orderBy(desc(eventModerations.createdAt));
-
-      for (const mod of mods) {
-        if (!statusMap.has(mod.eventId)) statusMap.set(mod.eventId, mod.action);
-      }
-    }
-
-    return result.map(r => ({
+    const mappedEvents = eventRows.map(r => ({
       ...r.events,
       organizer: r.users,
-      moderationStatus: statusMap.get(r.events.id) || 'pending',
+      moderationStatus: r.events.moderationStatus,
+      sourceType: 'event' as const,
     }));
+
+    const mappedVenueEntries = venueRows.map(r => ({
+      id: r.venueEntry.id,
+      organizerId: r.venue.ownerId,
+      title: `[Venue] ${r.venueEntry.name}`,
+      description: r.venueEntry.description || '',
+      eventDate: r.venueEntry.date,
+      eventEndDate: r.venueEntry.endTime ?? null,
+      location: r.venue.address || r.venue.name,
+      city: r.venue.city ?? null,
+      latitude: null,
+      longitude: null,
+      category: 'venue',
+      ticketPrice: r.venueEntry.coverPriceCents,
+      currency: 'GBP',
+      requiresRSVP: false,
+      ticketsAvailable: r.venueEntry.capacity ?? 0,
+      imageUrl: r.venueEntry.imageUrl ?? null,
+      externalTicketUrl: null,
+      isPromoted: false,
+      promotedUntil: null,
+      isPublished: r.venueEntry.isActive,
+      moderationStatus: r.venueEntry.moderationStatus,
+      communityId: null,
+      organizer: r.organizer,
+      sourceType: 'venue_entry' as const,
+    }));
+
+    return [...mappedEvents, ...mappedVenueEntries].sort(
+      (a, b) => new Date(b.eventDate).getTime() - new Date(a.eventDate).getTime()
+    );
   }
 
   async deleteEvent(id: string): Promise<void> {
