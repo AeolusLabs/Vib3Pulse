@@ -617,7 +617,7 @@ export function setupAdminRoutes(app: Express) {
     try {
       const { id } = req.params;
       const moderateSchema = z.object({
-        action: z.enum(["approve", "reject", "flag"]),
+        action: z.enum(["approved", "rejected", "flagged"]),
         reason: z.string().optional(),
       });
 

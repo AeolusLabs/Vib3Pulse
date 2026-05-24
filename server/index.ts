@@ -154,9 +154,7 @@ app.use("/api", apiRateLimiter);
 // Apply CSRF protection to all API routes (after session is established)
 app.use("/api", csrfProtection);
 
-// Setup admin routes - registered after CSRF middleware so admin routes are protected
-setupAdminRoutes(app);
-
+// Request logging — must be before setupAdminRoutes so admin requests are captured
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
@@ -186,6 +184,9 @@ app.use((req, res, next) => {
 
   next();
 });
+
+// Setup admin routes - after logging so admin requests are captured, after CSRF so admin routes are protected
+setupAdminRoutes(app);
 
 (async () => {
   // Auto-create media_uploads table (Railway compatibility — no db:push required)

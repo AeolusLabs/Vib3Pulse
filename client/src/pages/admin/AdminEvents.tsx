@@ -62,7 +62,7 @@ export default function AdminEvents() {
   const [activeTab, setActiveTab] = useState("all");
   const [moderateDialogOpen, setModerateDialogOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
-  const [moderationAction, setModerationAction] = useState<"approve" | "reject" | "flag">("approve");
+  const [moderationAction, setModerationAction] = useState<"approved" | "rejected" | "flagged">("approved");
   const [moderationReason, setModerationReason] = useState("");
 
   const { data: events, isLoading } = useQuery<Event[]>({
@@ -78,7 +78,7 @@ export default function AdminEvents() {
       return response.json();
     },
     onSuccess: () => {
-      toast({ title: "Event moderated", description: `Event has been ${moderationAction}ed successfully` });
+      toast({ title: "Event moderated", description: `Event has been ${moderationAction} successfully` });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/events"] });
       setModerateDialogOpen(false);
       setSelectedEvent(null);
@@ -216,7 +216,7 @@ export default function AdminEvents() {
                           <Button
                             size="sm" variant="ghost"
                             className="text-green-400 hover:text-green-300"
-                            onClick={() => { setSelectedEvent(event); setModerationAction("approve"); setModerateDialogOpen(true); }}
+                            onClick={() => { setSelectedEvent(event); setModerationAction("approved"); setModerateDialogOpen(true); }}
                             data-testid={`button-approve-event-${event.id}`}
                           >
                             <CheckIcon className="w-4 h-4" />
@@ -224,7 +224,7 @@ export default function AdminEvents() {
                           <Button
                             size="sm" variant="ghost"
                             className="text-red-400 hover:text-red-300"
-                            onClick={() => { setSelectedEvent(event); setModerationAction("reject"); setModerateDialogOpen(true); }}
+                            onClick={() => { setSelectedEvent(event); setModerationAction("rejected"); setModerateDialogOpen(true); }}
                             data-testid={`button-reject-event-${event.id}`}
                           >
                             <XIcon className="w-4 h-4" />
@@ -232,7 +232,7 @@ export default function AdminEvents() {
                           <Button
                             size="sm" variant="ghost"
                             className="text-amber-400 hover:text-amber-300"
-                            onClick={() => { setSelectedEvent(event); setModerationAction("flag"); setModerateDialogOpen(true); }}
+                            onClick={() => { setSelectedEvent(event); setModerationAction("flagged"); setModerateDialogOpen(true); }}
                             data-testid={`button-flag-event-${event.id}`}
                           >
                             <FlagIcon className="w-4 h-4" />
@@ -260,9 +260,9 @@ export default function AdminEvents() {
             <DialogHeader>
               <DialogTitle className="text-white capitalize">{moderationAction} Event</DialogTitle>
               <DialogDescription className="text-slate-400">
-                {moderationAction === "approve" && "Approve this event to make it visible on the platform."}
-                {moderationAction === "reject"  && "Reject this event. It will not be visible on the platform."}
-                {moderationAction === "flag"    && "Flag this event for further review."}
+                {moderationAction === "approved" && "Approve this event to make it visible on the platform."}
+                {moderationAction === "rejected"  && "Reject this event. It will not be visible on the platform."}
+                {moderationAction === "flagged"    && "Flag this event for further review."}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
@@ -289,12 +289,12 @@ export default function AdminEvents() {
                 Cancel
               </Button>
               <Button
-                variant={moderationAction === "approve" ? "default" : moderationAction === "reject" ? "destructive" : "outline"}
+                variant={moderationAction === "approved" ? "default" : moderationAction === "rejected" ? "destructive" : "outline"}
                 onClick={handleModerate}
                 disabled={moderateMutation.isPending}
                 className={
-                  moderationAction === "approve" ? "bg-green-600 hover:bg-green-700" :
-                  moderationAction === "flag"    ? "border-amber-500 text-amber-400 hover:bg-amber-500/10" : ""
+                  moderationAction === "approved" ? "bg-green-600 hover:bg-green-700" :
+                  moderationAction === "flagged"  ? "border-amber-500 text-amber-400 hover:bg-amber-500/10" : ""
                 }
                 data-testid="button-confirm-moderation"
               >
