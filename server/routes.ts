@@ -1021,6 +1021,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Publish / unpublish organizer's own event
+  app.patch("/api/events/:id/publish", requireOrganizer, async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.id);
+      if (!event) {
+        return res.status(404).json({ message: "Event not found" });
+      }
+      if (event.organizerId !== req.user!.id) {
+        return res.status(403).json({ message: "Not authorized to update this event" });
+      }
+      const { published } = req.body;
+      if (typeof published !== "boolean") {
+        return res.status(400).json({ message: "published must be a boolean" });
+      }
+      const updated = await storage.setEventPublished(req.params.id, published);
+      res.json(updated);
+    } catch (error) {
+      console.error('Error updating event publish state:', error);
+      res.status(500).json({ message: "Failed to update event" });
+    }
+  });
+
+  // Delete organizer's own event
+  app.delete("/api/events/:id", requireOrganizer, async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.id);
+      if (!event) {
+        return res.status(404).json({ message: "Event not found" });
+      }
+      if (event.organizerId !== req.user!.id) {
+        return res.status(403).json({ message: "Not authorized to delete this event" });
+      }
+      await storage.deleteEvent(req.params.id);
+      res.json({ message: "Event deleted" });
+    } catch (error) {
+      console.error('Error deleting event:', error);
+      res.status(500).json({ message: "Failed to delete event" });
+    }
+  });
+
   // Event Promotion & Analytics
   app.post("/api/events/:id/promote", requireOrganizer, async (req, res) => {
     try {

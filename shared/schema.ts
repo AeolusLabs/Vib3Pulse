@@ -92,6 +92,7 @@ export const events = pgTable("events", {
   externalTicketUrl: text("external_ticket_url"),
   isPromoted: boolean("is_promoted").notNull().default(false),
   promotedUntil: timestamp("promoted_until"),
+  isPublished: boolean("is_published").notNull().default(true),
   communityId: varchar("community_id").references(() => communities.id, { onDelete: "set null" }),
 });
 

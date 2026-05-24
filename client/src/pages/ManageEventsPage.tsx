@@ -12,7 +12,9 @@ import EventDetailsModal from "@/components/EventDetailsModal";
 import { PromoteEventDialog } from "@/components/PromoteEventDialog";
 import { EventAnalytics } from "@/components/EventAnalytics";
 import yogaEvent from '@assets/generated_images/Outdoor_yoga_wellness_event_c02f75d1.png';
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import type { Event as DBEvent } from "@shared/schema";
 import { EditIcon, Trash2Icon, BarChart3Icon, EyeIcon, EyeOffIcon, CalendarIcon, MapPinIcon, QrCodeIcon, MegaphoneIcon, SparklesIcon, DownloadIcon } from "@/components/ui/icons";
 
@@ -34,16 +36,49 @@ interface Event {
 }
 
 export default function ManageEventsPage() {
+  const { toast } = useToast();
   const [createEventOpen, setCreateEventOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<DBEvent | undefined>(undefined);
   const [viewingEvent, setViewingEvent] = useState<DBEvent | null>(null);
   const [promoteEventId, setPromoteEventId] = useState<string | null>(null);
   const [promoteEventTitle, setPromoteEventTitle] = useState<string>("");
   const [showAnalyticsFor, setShowAnalyticsFor] = useState<string | null>(null);
-  
+
   // Fetch real events from API
   const { data: dbEvents = [], isLoading } = useQuery<DBEvent[]>({
     queryKey: ["/api/events/my-events"],
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (eventId: string) => {
+      await apiRequest("DELETE", `/api/events/${eventId}`);
+    },
+    onSuccess: () => {
+      toast({ title: "Event deleted", description: "Your event has been removed." });
+      queryClient.invalidateQueries({ queryKey: ["/api/events/my-events"] });
+    },
+    onError: (error: any) => {
+      toast({ title: "Delete failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const publishMutation = useMutation({
+    mutationFn: async ({ eventId, published }: { eventId: string; published: boolean }) => {
+      const res = await apiRequest("PATCH", `/api/events/${eventId}/publish`, { published });
+      return res.json();
+    },
+    onSuccess: (_, variables) => {
+      toast({
+        title: variables.published ? "Event published" : "Event unpublished",
+        description: variables.published
+          ? "Your event is now visible to attendees."
+          : "Your event is now hidden from attendees.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/events/my-events"] });
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to update", description: error.message, variant: "destructive" });
+    },
   });
 
   // Transform DB events to UI format
@@ -66,7 +101,7 @@ export default function ManageEventsPage() {
       ticketsSold: 0,
       totalTickets: event.ticketsAvailable,
       revenue: 0,
-      isPublished: true,
+      isPublished: event.isPublished ?? true,
       isPromoted: isCurrentlyPromoted || false,
       promotedUntil: promotedUntil,
     };
@@ -91,8 +126,9 @@ export default function ManageEventsPage() {
   };
 
   const handleDeleteEvent = (eventId: string) => {
-    console.log('Delete event:', eventId);
-    //todo: implement delete functionality
+    if (window.confirm("Are you sure you want to delete this event? This cannot be undone.")) {
+      deleteMutation.mutate(eventId);
+    }
   };
 
   const handleViewStats = (eventId: string) => {
@@ -101,8 +137,7 @@ export default function ManageEventsPage() {
   };
 
   const handleTogglePublish = (eventId: string, currentStatus: boolean) => {
-    console.log('Toggle publish for event:', eventId, !currentStatus);
-    //todo: implement publish/unpublish functionality
+    publishMutation.mutate({ eventId, published: !currentStatus });
   };
 
   const EventManagementCard = ({ event, onViewDetails }: { event: Event; onViewDetails: () => void }) => (

@@ -153,6 +153,9 @@ export async function ensureSchema() {
     ALTER TABLE events ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'GBP'
   `);
   await pool.query(`
+    ALTER TABLE events ADD COLUMN IF NOT EXISTS is_published BOOLEAN NOT NULL DEFAULT true
+  `);
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS event_staff_access_codes (
       id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       event_id VARCHAR NOT NULL REFERENCES events(id) ON DELETE CASCADE,
@@ -216,6 +219,7 @@ export interface IStorage {
   getEventsByOrganizer(organizerId: string): Promise<Event[]>;
   createEvent(event: InsertEvent): Promise<Event>;
   updateEvent(id: string, event: Partial<InsertEvent>): Promise<Event>;
+  setEventPublished(id: string, published: boolean): Promise<Event>;
   
   getUserTickets(userId: string): Promise<Array<Ticket & { event: Event }>>;
   getTicket(id: string): Promise<Ticket | undefined>;
@@ -605,6 +609,7 @@ export interface IStorage {
   ensureMediaUploadsTable(): Promise<void>;
   ensureBannerColumns(): Promise<void>;
   ensureTicketTiersTable(): Promise<void>;
+  ensureEventModerationsTable(): Promise<void>;
   saveMedia(data: string, contentType: string, ownerId?: string): Promise<string>;
   getMedia(id: string): Promise<{ data: string; contentType: string } | null>;
   deleteMedia(id: string): Promise<void>;
@@ -695,7 +700,7 @@ export class DbStorage implements IStorage {
   }
 
   async getEvents(): Promise<Event[]> {
-    return await db.select().from(events).orderBy(events.eventDate);
+    return await db.select().from(events).where(eq(events.isPublished, true)).orderBy(events.eventDate);
   }
 
   async getEvent(id: string): Promise<(Event & { organizer: User; community: (Community & { memberCount: number }) | null }) | undefined> {
@@ -738,6 +743,11 @@ export class DbStorage implements IStorage {
 
   async updateEvent(id: string, eventUpdate: Partial<InsertEvent>): Promise<Event> {
     const result = await db.update(events).set(eventUpdate).where(eq(events.id, id)).returning();
+    return result[0];
+  }
+
+  async setEventPublished(id: string, published: boolean): Promise<Event> {
+    const result = await db.update(events).set({ isPublished: published }).where(eq(events.id, id)).returning();
     return result[0];
   }
 
@@ -3365,6 +3375,16 @@ export class DbStorage implements IStorage {
   }
 
   async deleteEvent(id: string): Promise<void> {
+    // Null out nullable FK references so related records (posts, messages, etc.) survive
+    await db.update(posts).set({ eventId: null }).where(eq(posts.eventId, id));
+    await db.update(messages).set({ eventId: null }).where(eq(messages.eventId, id));
+    await db.update(conversationMessages).set({ eventId: null }).where(eq(conversationMessages.eventId, id));
+    await db.update(pollOptions).set({ eventId: null }).where(eq(pollOptions.eventId, id));
+    // Delete NOT-NULL FK-constrained children (no cascade configured)
+    await db.delete(eventModerations).where(eq(eventModerations.eventId, id));
+    await db.delete(rsvps).where(eq(rsvps.eventId, id));
+    await db.delete(tickets).where(eq(tickets.eventId, id));
+    // Delete the event — ticket_tiers cascade automatically
     await db.delete(events).where(eq(events.id, id));
   }
 
@@ -4265,6 +4285,19 @@ export class DbStorage implements IStorage {
         quantity INTEGER NOT NULL,
         sales_end_date TIMESTAMP,
         day_date TIMESTAMP,
+        created_at TIMESTAMP NOT NULL DEFAULT now()
+      )
+    `);
+  }
+
+  async ensureEventModerationsTable(): Promise<void> {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS event_moderations (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        event_id VARCHAR NOT NULL REFERENCES events(id),
+        admin_id VARCHAR NOT NULL REFERENCES admin_users(id),
+        action TEXT NOT NULL,
+        reason TEXT,
         created_at TIMESTAMP NOT NULL DEFAULT now()
       )
     `);

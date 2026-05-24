@@ -145,9 +145,6 @@ passport.deserializeUser(async (id: string, done) => {
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Setup admin routes (separate authentication system)
-setupAdminRoutes(app);
-
 // CSRF token endpoint - must be before CSRF protection middleware
 app.get("/api/csrf-token", csrfTokenEndpoint);
 
@@ -156,6 +153,9 @@ app.use("/api", apiRateLimiter);
 
 // Apply CSRF protection to all API routes (after session is established)
 app.use("/api", csrfProtection);
+
+// Setup admin routes - registered after CSRF middleware so admin routes are protected
+setupAdminRoutes(app);
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -207,6 +207,13 @@ app.use((req, res, next) => {
     await storage.ensureTicketTiersTable();
   } catch (err) {
     console.error('[STARTUP] ticket_tiers table setup failed:', err);
+  }
+
+  // Auto-create event_moderations table if it doesn't exist (idempotent)
+  try {
+    await storage.ensureEventModerationsTable();
+  } catch (err) {
+    console.error('[STARTUP] event_moderations table setup failed:', err);
   }
 
   // Auto-add currency column to events table (idempotent ADD COLUMN IF NOT EXISTS)
