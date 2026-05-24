@@ -265,12 +265,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
-  app.get("/api/auth/session", (req, res) => {
+  app.get("/api/auth/session", async (req, res) => {
     if (req.isAuthenticated()) {
-      res.json({ user: req.user });
-    } else {
-      res.status(401).json({ message: "Not authenticated" });
+      return res.json({ user: req.user });
     }
+
+    // Distinguish a suspended account from a plain unauthenticated state so
+    // the client can show the right UI rather than silently bouncing to login.
+    const sessionUserId = (req.session as any)?.passport?.user as string | undefined;
+    if (sessionUserId) {
+      try {
+        const suspension = await storage.getActiveSuspension(sessionUserId);
+        if (suspension) {
+          return res.status(403).json({ message: "Account suspended", suspended: true });
+        }
+      } catch {
+        // DB error — fall through to generic 401
+      }
+    }
+
+    res.status(401).json({ message: "Not authenticated" });
   });
 
   // Change password

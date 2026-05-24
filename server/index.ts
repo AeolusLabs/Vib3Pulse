@@ -109,6 +109,11 @@ passport.use(
         return done(null, false, { message: "Invalid username or password" });
       }
 
+      const suspension = await storage.getActiveSuspension(user.id);
+      if (suspension) {
+        return done(null, false, { message: "Account suspended" });
+      }
+
       return done(null, userToSessionUser(user));
     } catch (error) {
       return done(error);
@@ -124,6 +129,10 @@ passport.deserializeUser(async (id: string, done) => {
   try {
     const user = await storage.getUser(id);
     if (!user) {
+      return done(null, false);
+    }
+    const suspension = await storage.getActiveSuspension(id);
+    if (suspension) {
       return done(null, false);
     }
     done(null, userToSessionUser(user));

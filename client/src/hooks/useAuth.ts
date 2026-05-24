@@ -27,13 +27,18 @@ export function useAuth(): UseQueryResult<AuthUser | null, Error> {
       const response = await fetch("/api/auth/session", {
         credentials: "include",
       });
-      
+
+      if (response.status === 403) {
+        const body = await response.json().catch(() => ({}));
+        if (body.suspended) {
+          throw new Error("ACCOUNT_SUSPENDED");
+        }
+      }
+
       if (!response.ok) {
-        // Treat all non-ok responses (401, 500, etc.) as unauthenticated
-        // so the user gets redirected to login rather than seeing an error page
         return null;
       }
-      
+
       const data: AuthResponse = await response.json();
       return data.user;
     },
