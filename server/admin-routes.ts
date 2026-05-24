@@ -277,7 +277,13 @@ export function setupAdminRoutes(app: Express) {
       await logActivity(admin.id, "login", "admin", admin.id, "Admin logged in", req.ip);
 
       const { passwordHash, ...adminWithoutPassword } = admin;
-      res.json({ admin: adminWithoutPassword });
+      req.session.save((err) => {
+        if (err) {
+          console.error('[ADMIN] Session save failed on login:', err);
+          return res.status(500).json({ message: "Login failed" });
+        }
+        res.json({ admin: adminWithoutPassword });
+      });
     } catch (error) {
       console.error("Admin login error:", error);
       res.status(500).json({ message: "Login failed" });
@@ -638,7 +644,9 @@ export function setupAdminRoutes(app: Express) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid input", errors: error.errors });
       }
-      res.status(500).json({ message: "Failed to moderate event" });
+      console.error('[ADMIN] Failed to moderate event:', error);
+      const msg = error instanceof Error ? error.message : "Failed to moderate event";
+      res.status(500).json({ message: msg });
     }
   });
 
@@ -660,7 +668,9 @@ export function setupAdminRoutes(app: Express) {
 
       res.json({ message: "Event deleted" });
     } catch (error) {
-      res.status(500).json({ message: "Failed to delete event" });
+      console.error('[ADMIN] Failed to delete event:', error);
+      const msg = error instanceof Error ? error.message : "Failed to delete event";
+      res.status(500).json({ message: msg });
     }
   });
 

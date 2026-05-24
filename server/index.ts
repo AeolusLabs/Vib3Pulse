@@ -212,8 +212,9 @@ app.use((req, res, next) => {
   // Auto-create event_moderations table if it doesn't exist (idempotent)
   try {
     await storage.ensureEventModerationsTable();
+    console.log('[STARTUP] event_moderations table ready');
   } catch (err) {
-    console.error('[STARTUP] event_moderations table setup failed:', err);
+    console.error('[STARTUP] event_moderations table setup FAILED — admin moderation will not work:', err);
   }
 
   // Auto-add currency column to events table (idempotent ADD COLUMN IF NOT EXISTS)
