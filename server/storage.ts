@@ -513,7 +513,7 @@ export interface IStorage {
   deleteUser(id: string): Promise<void>;
 
   // Event management for admins  
-  getAllEventsAdmin(limit?: number, offset?: number): Promise<Array<Event & { organizer: User }>>;
+  getAllEventsAdmin(limit?: number, offset?: number): Promise<Array<Event & { organizer: User; moderationStatus: string }>>;
   deleteEvent(id: string): Promise<void>;
 
   // Story management for admins
@@ -3333,7 +3333,7 @@ export class DbStorage implements IStorage {
     await db.delete(users).where(eq(users.id, id));
   }
 
-  async getAllEventsAdmin(limit: number = 50, offset: number = 0): Promise<Array<Event & { organizer: User }>> {
+  async getAllEventsAdmin(limit: number = 50, offset: number = 0): Promise<Array<Event & { organizer: User; moderationStatus: string }>> {
     const result = await db
       .select()
       .from(events)
@@ -3341,10 +3341,26 @@ export class DbStorage implements IStorage {
       .orderBy(desc(events.eventDate))
       .limit(limit)
       .offset(offset);
-    
+
+    const eventIds = result.map(r => r.events.id);
+    const statusMap = new Map<string, string>();
+
+    if (eventIds.length > 0) {
+      const mods = await db
+        .select({ eventId: eventModerations.eventId, action: eventModerations.action })
+        .from(eventModerations)
+        .where(inArray(eventModerations.eventId, eventIds))
+        .orderBy(desc(eventModerations.createdAt));
+
+      for (const mod of mods) {
+        if (!statusMap.has(mod.eventId)) statusMap.set(mod.eventId, mod.action);
+      }
+    }
+
     return result.map(r => ({
       ...r.events,
       organizer: r.users,
+      moderationStatus: statusMap.get(r.events.id) || 'pending',
     }));
   }
 

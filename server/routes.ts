@@ -1096,6 +1096,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Report an event
+  app.post("/api/events/:id/report", requireAuth, async (req, res) => {
+    try {
+      const { reason, description } = req.body;
+      if (!reason || typeof reason !== "string") {
+        return res.status(400).json({ message: "Reason is required" });
+      }
+      await storage.createContentReport({
+        reporterId: req.user!.id,
+        contentType: "event",
+        contentId: req.params.id,
+        reason,
+        description: description || null,
+      });
+      res.json({ message: "Report submitted" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to submit report" });
+    }
+  });
+
   // Tickets
   app.get("/api/tickets", requireAuth, async (req, res) => {
     try {

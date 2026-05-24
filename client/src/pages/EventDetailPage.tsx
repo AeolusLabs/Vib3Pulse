@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useRoute, Link } from "wouter";
@@ -9,13 +9,23 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import TicketSelector from "@/components/TicketSelector";
 import EventCard from "@/components/EventCard";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
 import type { Event, User, Community } from "@shared/schema";
 import musicFestival from '@assets/generated_images/Outdoor_music_festival_event_179040d3.png';
-import { CalendarIcon, MapPinIcon, Share2Icon, ExternalLinkIcon, UsersIcon } from "@/components/ui/icons";
+import { CalendarIcon, MapPinIcon, Share2Icon, ExternalLinkIcon, UsersIcon, FlagIcon } from "@/components/ui/icons";
 
 type EventWithOrganizer = Event & { organizer: User; community: (Community & { memberCount: number }) | null };
 
@@ -47,6 +57,17 @@ export default function EventDetailPage() {
     mutationFn: () => apiRequest("DELETE", `/api/communities/${communityId}/leave`, {}),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/communities", communityId, "membership"] });
+    },
+  });
+
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportReason, setReportReason] = useState("");
+
+  const reportMutation = useMutation({
+    mutationFn: () => apiRequest("POST", `/api/events/${eventId}/report`, { reason: reportReason }),
+    onSuccess: () => {
+      setReportOpen(false);
+      setReportReason("");
     },
   });
 
@@ -197,10 +218,7 @@ export default function EventDetailPage() {
 
                 <div className="flex flex-wrap gap-2 mt-6 pt-6 border-t">
                   {event.externalTicketUrl && (
-                    <Button
-                      asChild
-                      data-testid="button-external-tickets"
-                    >
+                    <Button asChild data-testid="button-external-tickets">
                       <a href={event.externalTicketUrl} target="_blank" rel="noopener noreferrer">
                         <ExternalLinkIcon className="h-4 w-4 mr-2" />
                         Get Tickets
@@ -211,6 +229,18 @@ export default function EventDetailPage() {
                     <Share2Icon className="h-4 w-4 mr-2" />
                     Share Event
                   </Button>
+                  {user && user.id !== event.organizer.id && (
+                    <Button
+                      variant="ghost"
+                      size="default"
+                      className="text-muted-foreground hover:text-destructive"
+                      onClick={() => setReportOpen(true)}
+                      data-testid="button-report-event"
+                    >
+                      <FlagIcon className="h-4 w-4 mr-2" />
+                      Report
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -290,6 +320,36 @@ export default function EventDetailPage() {
           </div>
         )}
       </main>
+
+      <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Report Event</DialogTitle>
+            <DialogDescription>
+              Tell us why you're reporting <span className="font-medium">{event.title}</span>.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <Label>Reason</Label>
+            <Textarea
+              value={reportReason}
+              onChange={(e) => setReportReason(e.target.value)}
+              placeholder="Describe the issue (e.g. spam, misleading info, inappropriate content)..."
+              rows={3}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReportOpen(false)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={() => reportMutation.mutate()}
+              disabled={!reportReason.trim() || reportMutation.isPending}
+            >
+              {reportMutation.isPending ? "Submitting..." : "Submit Report"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <BottomNavigation />
     </div>
