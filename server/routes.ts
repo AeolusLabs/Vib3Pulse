@@ -1951,6 +1951,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/stories/:storyId", async (req, res) => {
+    try {
+      const { storyId } = req.params;
+      const story = await storage.getStory(storyId);
+      if (!story) return res.status(404).json({ message: "Story not found" });
+
+      const user = await storage.getUser(story.userId);
+      if (!user) return res.status(404).json({ message: "Story not found" });
+
+      const { passwordHash, ...userWithoutPassword } = user;
+      const likeCount = await storage.getStoryLikeCount(storyId);
+      const viewCount = await storage.getStoryViewCount(storyId);
+      let isLiked = false;
+      if (req.user?.id) {
+        isLiked = await storage.hasUserLikedStory(req.user.id, storyId);
+      }
+
+      res.json({
+        ...story,
+        user: userWithoutPassword,
+        likeCount,
+        viewCount,
+        isLiked,
+        isReshare: !!story.originalStoryId,
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch story" });
+    }
+  });
+
   app.delete("/api/stories/:id", requireAuth, async (req, res) => {
     try {
       const stories = await storage.getUserStories(req.user!.id);

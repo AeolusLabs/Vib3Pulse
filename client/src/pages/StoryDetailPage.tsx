@@ -30,14 +30,23 @@ export default function StoryDetailPage() {
   const { storyId } = useParams<{ storyId: string }>();
   const [, navigate] = useLocation();
 
-  const { data: allStories = [], isLoading } = useQuery<StoryWithUser[]>({
-    queryKey: ["/api/stories"],
+  // Fetch the story directly by ID — bypasses the 24-hour expiry filter on /api/stories
+  const { data: targetStory, isLoading: isStoryLoading } = useQuery<StoryWithUser | null>({
+    queryKey: ["/api/stories", storyId],
+    queryFn: async () => {
+      const res = await fetch(`/api/stories/${storyId}`, { credentials: "include" });
+      if (res.status === 404) return null;
+      if (!res.ok) throw new Error("Failed to fetch story");
+      return res.json();
+    },
+    retry: false,
   });
 
-  const targetStory = useMemo(
-    () => allStories.find((s) => s.id === storyId),
-    [allStories, storyId]
-  );
+  // Active stories list — used only for prev/next group navigation
+  const { data: allStories = [] } = useQuery<StoryWithUser[]>({
+    queryKey: ["/api/stories"],
+    enabled: !!targetStory,
+  });
 
   // Stories grouped by user, preserving insertion order
   const groupedList = useMemo(() => {
@@ -55,12 +64,12 @@ export default function StoryDetailPage() {
   );
 
   useEffect(() => {
-    if (!isLoading && allStories.length > 0 && !targetStory) {
+    if (!isStoryLoading && targetStory === null) {
       navigate("/feed");
     }
-  }, [isLoading, allStories.length, targetStory, navigate]);
+  }, [isStoryLoading, targetStory, navigate]);
 
-  if (isLoading) {
+  if (isStoryLoading || targetStory === undefined) {
     return (
       <div className="fixed inset-0 bg-black flex items-center justify-center">
         <p className="text-white/60 text-sm">Loading...</p>
@@ -68,9 +77,10 @@ export default function StoryDetailPage() {
     );
   }
 
-  if (!targetStory || currentGroupIndex === -1) return null;
+  if (!targetStory) return null;
 
-  const currentGroup = groupedList[currentGroupIndex];
+  // If the story is in the active list, use its full group for slides; otherwise show it standalone
+  const currentGroup = currentGroupIndex !== -1 ? groupedList[currentGroupIndex] : [targetStory];
 
   const slides = currentGroup.map((story) => ({
     id: story.id,
@@ -88,6 +98,7 @@ export default function StoryDetailPage() {
   }));
 
   const handleNext = () => {
+    if (currentGroupIndex === -1) { navigate("/feed"); return; }
     const nextGroup = groupedList[currentGroupIndex + 1];
     if (nextGroup) {
       navigate(`/stories/${nextGroup[0].id}`);
@@ -97,10 +108,9 @@ export default function StoryDetailPage() {
   };
 
   const handlePrevious = () => {
+    if (currentGroupIndex === -1) return;
     const prevGroup = groupedList[currentGroupIndex - 1];
-    if (prevGroup) {
-      navigate(`/stories/${prevGroup[0].id}`);
-    }
+    if (prevGroup) navigate(`/stories/${prevGroup[0].id}`);
   };
 
   return (

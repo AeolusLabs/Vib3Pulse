@@ -138,14 +138,15 @@ export default function FeedPage() {
   const notificationCommentId = new URLSearchParams(search).get("comment");
   useEffect(() => {
     if (!notificationPostId) return;
-    // Clean the URL immediately so the back button doesn't re-trigger this
+    // Snapshot comment ID before navigate() clears the search string
+    const commentId = notificationCommentId;
     navigate("/feed", { replace: true });
     fetch(`/api/posts/${notificationPostId}`, { credentials: "include" })
       .then((res) => (res.ok ? res.json() : null))
       .then((post) => {
         if (post) {
           setSelectedPost(post);
-          if (notificationCommentId) setHighlightCommentId(notificationCommentId);
+          if (commentId) setHighlightCommentId(commentId);
         }
       })
       .catch(console.error);

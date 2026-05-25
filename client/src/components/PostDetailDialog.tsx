@@ -135,7 +135,7 @@ export default function PostDetailDialog({
     if (!el) return;
     const scrollTimer = setTimeout(() => {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 300);
+    }, 600);
     const fadeTimer = setTimeout(() => {
       setHighlightActive(false);
     }, 2800);
