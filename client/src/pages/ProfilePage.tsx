@@ -31,6 +31,8 @@ import { cn } from "@/lib/utils";
 import { getBannerStyle } from "@/lib/bannerUtils";
 import { CalendarIcon, MapPinIcon, PoundSterlingIcon, Building2Icon, MailIcon, UserPlusIcon, UserMinusIcon, CameraIcon, HeartIcon, Repeat2Icon, Loader2Icon, Trash2Icon, Link2Icon } from "@/components/ui/icons";
 import { FileText, BadgeCheck, Cake } from "lucide-react";
+import { useOrganizerRating } from "@/hooks/use-ratings";
+import RatingDisplay from "@/components/RatingDisplay";
 
 type ProfileResponse = Omit<User, "password"> & {
   events?: Event[];
@@ -111,6 +113,10 @@ export default function ProfilePage() {
     },
     enabled: !!profile?.id,
   });
+
+  const { data: organizerRating } = useOrganizerRating(
+    profile?.userType === "organizer" ? profile?.id : undefined
+  );
 
   const { data: userPosts, isLoading: postsLoading } = useQuery<PostWithUser[]>({
     queryKey: ["/api/users", profile?.id, "posts"],
@@ -610,6 +616,21 @@ export default function ProfilePage() {
                   </button>
                 }
               />
+            </div>
+          )}
+
+          {/* Organizer average rating */}
+          {isOrganizer && organizerRating !== undefined && (
+            <div className="flex items-center gap-2 text-sm mt-1" data-testid="organizer-rating">
+              <RatingDisplay
+                averageRating={organizerRating.averageRating}
+                totalRatings={organizerRating.totalRatings}
+              />
+              {organizerRating.eventsRated > 0 && (
+                <span className="text-muted-foreground text-xs">
+                  from {organizerRating.eventsRated} {organizerRating.eventsRated === 1 ? "event" : "events"}
+                </span>
+              )}
             </div>
           )}
         </div>

@@ -148,9 +148,22 @@ export const apiRateLimiter = rateLimit({
 export const sensitiveOperationLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 20,
-  message: { 
+  message: {
     message: "Too many sensitive operations. Please try again later.",
     code: "RATE_LIMITED"
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+export const ratingSubmitLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  keyGenerator: (req) => (req.user as any)?.id ?? req.ip ?? "anonymous",
+  message: {
+    error: "RATE_LIMITED",
+    message: "Too many requests, try again later",
+    statusCode: 429,
   },
   standardHeaders: true,
   legacyHeaders: false,

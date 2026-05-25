@@ -28,6 +28,7 @@ import { sendPushNotification, getVapidPublicKey } from "./pushService";
 import { registerSafetyRoutes, startSafetyTimerJob } from "./safety-routes";
 import { registerPaymentRoutes } from "./payment-routes";
 import { buddyRouter } from "./buddyRoutes";
+import { registerRatingRoutes } from "./rating-routes";
 import { startBuddyScheduler } from "./buddyScheduler";
 
 // Helper function to resolve identifier (UUID or username) to userId
@@ -4889,6 +4890,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerSafetyRoutes(app);
   registerPaymentRoutes(app);
   app.use("/api/safety", buddyRouter);
+  registerRatingRoutes(app);
 
   // Start background jobs
   startSafetyTimerJob();

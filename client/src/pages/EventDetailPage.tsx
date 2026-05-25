@@ -23,6 +23,9 @@ import TicketSelector from "@/components/TicketSelector";
 import EventCard from "@/components/EventCard";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
+import { useEventRatings, useUserEventRating } from "@/hooks/use-ratings";
+import RatingDisplay from "@/components/RatingDisplay";
+import RatingInput from "@/components/RatingInput";
 import type { Event, User, Community } from "@shared/schema";
 import musicFestival from '@assets/generated_images/Outdoor_music_festival_event_179040d3.png';
 import { CalendarIcon, MapPinIcon, Share2Icon, ExternalLinkIcon, UsersIcon, FlagIcon } from "@/components/ui/icons";
@@ -33,6 +36,7 @@ export default function EventDetailPage() {
   const [match, params] = useRoute("/event/:id");
   const eventId = params?.id;
   const { user } = useAuth();
+  const { data: sessionUser } = useAuth();
 
   const { data: event, isLoading, error } = useQuery<EventWithOrganizer>({
     queryKey: ["/api/events", eventId],
@@ -107,6 +111,9 @@ export default function EventDetailPage() {
     enabled: !!event,
   });
 
+  const { data: ratingStats } = useEventRatings(eventId);
+  const { data: userRating } = useUserEventRating(sessionUser ? eventId : undefined);
+
   if (!match || !eventId) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -158,6 +165,7 @@ export default function EventDetailPage() {
   const formattedDate = format(eventDate, "EEEE, MMMM d, yyyy");
   const formattedTime = format(eventDate, "h:mm a");
   const organizerInitials = event.organizer.username.slice(0, 2).toUpperCase();
+  const eventEnded = new Date(event.eventEndDate ?? event.eventDate) < new Date();
 
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
@@ -229,6 +237,42 @@ export default function EventDetailPage() {
                   <p className="text-foreground whitespace-pre-wrap" data-testid="text-description">
                     {event.description}
                   </p>
+                </div>
+
+                {/* Ratings section */}
+                <div className="mt-6 pt-6 border-t space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-serif text-lg font-semibold">Ratings</h3>
+                    <RatingDisplay
+                      averageRating={ratingStats?.averageRating ?? null}
+                      totalRatings={ratingStats?.totalRatings ?? 0}
+                    />
+                  </div>
+
+                  {ratingStats && ratingStats.totalRatings > 0 && (
+                    <div className="space-y-1.5">
+                      {[5, 4, 3, 2, 1].map((star) => {
+                        const cnt = ratingStats.distribution[star] ?? 0;
+                        const pct = (cnt / ratingStats.totalRatings) * 100;
+                        return (
+                          <div key={star} className="flex items-center gap-2 text-xs">
+                            <span className="w-4 text-right text-muted-foreground">{star}★</span>
+                            <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-yellow-400 rounded-full transition-all"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                            <span className="w-5 text-right text-muted-foreground">{cnt}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {sessionUser && eventEnded && userRating?.hasRated === false && (
+                    <RatingInput eventId={eventId!} organizerId={event.organizerId} />
+                  )}
                 </div>
 
                 <div className="flex flex-wrap gap-2 mt-6 pt-6 border-t">

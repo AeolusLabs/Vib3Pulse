@@ -138,7 +138,9 @@ import {
   pollVotes,
   pushSubscriptions,
   eventStaffAccessCodes,
-  venueStaffAccessCodes
+  venueStaffAccessCodes,
+  type EventRating,
+  eventRatings,
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
@@ -213,6 +215,23 @@ export async function ensureSchema() {
       viewed_at TIMESTAMP NOT NULL DEFAULT now(),
       UNIQUE(story_id, user_id)
     )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS event_ratings (
+      id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      event_id VARCHAR NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      user_id VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+      created_at TIMESTAMP NOT NULL DEFAULT now(),
+      updated_at TIMESTAMP,
+      UNIQUE(event_id, user_id)
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_event_ratings_event_id ON event_ratings(event_id)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_event_ratings_user_id ON event_ratings(user_id)
   `);
 }
 
@@ -638,6 +657,12 @@ export interface IStorage {
   upsertPushSubscription(sub: InsertPushSubscription): Promise<PushSubscription>;
   getPushSubscriptionsByUserId(userId: string): Promise<PushSubscription[]>;
   deletePushSubscription(endpoint: string): Promise<void>;
+
+  // Event ratings
+  createEventRating(eventId: string, userId: string, rating: number): Promise<EventRating>;
+  getUserEventRating(eventId: string, userId: string): Promise<EventRating | null>;
+  getEventRatingStats(eventId: string): Promise<{ averageRating: number | null; totalRatings: number; distribution: Record<number, number> }>;
+  getOrganizerRating(organizerId: string): Promise<{ averageRating: number | null; totalRatings: number; eventsRated: number }>;
 }
 
 export class DbStorage implements IStorage {
@@ -4548,6 +4573,70 @@ export class DbStorage implements IStorage {
       .orderBy(desc(safetyAlerts.createdAt))
       .limit(limit);
     return rows;
+  }
+
+  // ── Event ratings ────────────────────────────────────────────────────────
+
+  async createEventRating(eventId: string, userId: string, rating: number): Promise<EventRating> {
+    const [result] = await db
+      .insert(eventRatings)
+      .values({ eventId, userId, rating })
+      .returning();
+    return result;
+  }
+
+  async getUserEventRating(eventId: string, userId: string): Promise<EventRating | null> {
+    const result = await db
+      .select()
+      .from(eventRatings)
+      .where(and(eq(eventRatings.eventId, eventId), eq(eventRatings.userId, userId)))
+      .limit(1);
+    return result[0] ?? null;
+  }
+
+  async getEventRatingStats(eventId: string): Promise<{ averageRating: number | null; totalRatings: number; distribution: Record<number, number> }> {
+    const result = await db.execute(sql`
+      SELECT
+        AVG(rating)::NUMERIC(3,2)                        AS average_rating,
+        COUNT(*)                                          AS total_ratings,
+        COUNT(*) FILTER (WHERE rating = 1)               AS one_star,
+        COUNT(*) FILTER (WHERE rating = 2)               AS two_star,
+        COUNT(*) FILTER (WHERE rating = 3)               AS three_star,
+        COUNT(*) FILTER (WHERE rating = 4)               AS four_star,
+        COUNT(*) FILTER (WHERE rating = 5)               AS five_star
+      FROM event_ratings
+      WHERE event_id = ${eventId}
+    `);
+    const row = result.rows[0] as any;
+    return {
+      averageRating: row.average_rating ? parseFloat(row.average_rating) : null,
+      totalRatings: parseInt(row.total_ratings, 10),
+      distribution: {
+        1: parseInt(row.one_star, 10),
+        2: parseInt(row.two_star, 10),
+        3: parseInt(row.three_star, 10),
+        4: parseInt(row.four_star, 10),
+        5: parseInt(row.five_star, 10),
+      },
+    };
+  }
+
+  async getOrganizerRating(organizerId: string): Promise<{ averageRating: number | null; totalRatings: number; eventsRated: number }> {
+    const result = await db.execute(sql`
+      SELECT
+        AVG(er.rating)::NUMERIC(3,2)  AS average_rating,
+        COUNT(er.id)                  AS total_ratings,
+        COUNT(DISTINCT er.event_id)   AS events_rated
+      FROM event_ratings er
+      JOIN events e ON e.id = er.event_id
+      WHERE e.organizer_id = ${organizerId}
+    `);
+    const row = result.rows[0] as any;
+    return {
+      averageRating: row.average_rating ? parseFloat(row.average_rating) : null,
+      totalRatings: parseInt(row.total_ratings, 10),
+      eventsRated: parseInt(row.events_rated, 10),
+    };
   }
 }
 

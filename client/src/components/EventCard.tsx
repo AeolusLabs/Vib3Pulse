@@ -4,6 +4,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { CalendarIcon, MapPinIcon, UserIcon, TicketIcon, SettingsIcon } from "@/components/ui/icons";
+import { useEventRatings } from "@/hooks/use-ratings";
+import RatingDisplay from "@/components/RatingDisplay";
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
   GBP: "£", USD: "$", EUR: "€", NGN: "₦", CAD: "C$", AUD: "A$", ZAR: "R", GHS: "₵",
@@ -42,6 +44,7 @@ interface EventCardProps {
 }
 
 export default function EventCard({
+  id,
   title,
   image,
   date,
@@ -53,6 +56,8 @@ export default function EventCard({
   isOwner,
   onClick,
 }: EventCardProps) {
+  const { data: ratingStats } = useEventRatings(id);
+
   return (
     <Card
       className="overflow-hidden hover-elevate cursor-pointer transition-all"
@@ -113,6 +118,11 @@ export default function EventCard({
           <div className="font-serif font-semibold text-lg text-primary" data-testid="text-price">
             {formatEventPrice(price, currency)}
           </div>
+          <RatingDisplay
+            averageRating={ratingStats?.averageRating ?? null}
+            totalRatings={ratingStats?.totalRatings ?? 0}
+            size="sm"
+          />
         </div>
         <Button variant={isOwner ? "outline" : "secondary"} size="sm" data-testid="button-view-event">
           {isOwner ? (

@@ -1167,3 +1167,28 @@ export type InsertPushSubscription = z.infer<typeof insertPushSubscriptionSchema
 export type PushSubscription = typeof pushSubscriptions.$inferSelect;
 
 export type MediaUpload = typeof mediaUploads.$inferSelect;
+
+// ============================================
+// EVENT RATINGS
+// ============================================
+
+export const eventRatings = pgTable("event_ratings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventId: varchar("event_id").notNull().references(() => events.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  rating: integer("rating").notNull(),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at"),
+}, (table) => ({
+  uniqueEventUserRating: unique().on(table.eventId, table.userId),
+  ratingCheck: check("rating_check", sql`${table.rating} >= 1 AND ${table.rating} <= 5`),
+}));
+
+export const insertEventRatingSchema = createInsertSchema(eventRatings).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertEventRating = z.infer<typeof insertEventRatingSchema>;
+export type EventRating = typeof eventRatings.$inferSelect;
