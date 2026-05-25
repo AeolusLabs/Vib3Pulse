@@ -9,7 +9,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { UsersIcon, TicketIcon, EyeIcon, DollarSignIcon, CalendarIcon, TrendingUpIcon, MinusIcon, BarChart3Icon } from "@/components/ui/icons";
-import { PieChart, Target, Award, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import { PieChart as PieChartIcon, Target, Award, ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { BarChart,
   Bar,
   XAxis,
