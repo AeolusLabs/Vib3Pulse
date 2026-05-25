@@ -25,6 +25,7 @@ export { default as CircleIcon } from "./circle-icon";
 export { default as ClockIcon } from "./clock-icon";
 export { default as CompassIcon } from "./compass-icon";
 export { default as CopyIcon } from "./copy-icon";
+export { default as CropIcon } from "./crop-icon";
 export { default as CreditCardIcon } from "./credit-card-icon";
 export { default as CrownIcon } from "./crown-icon";
 export { default as DollarSignIcon } from "./dollar-sign-icon";

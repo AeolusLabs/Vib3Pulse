@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, integer, boolean, unique, doublePrecision, check } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, integer, boolean, unique, doublePrecision, check, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -289,14 +289,26 @@ export const stories = pgTable("stories", {
   type: text("type").notNull().default("image"),
   privacy: text("privacy").notNull().default("public"), // "public" or "private"
   originalStoryId: varchar("original_story_id").references((): any => stories.id), // For reshared stories
+  cropParams: jsonb("crop_params"),
   expiresAt: timestamp("expires_at").default(sql`now() + interval '24 hours'`),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
+
+export const cropParamsSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  width: z.number(),
+  height: z.number(),
+});
+
+export type CropParams = z.infer<typeof cropParamsSchema>;
 
 export const insertStorySchema = createInsertSchema(stories).omit({
   id: true,
   createdAt: true,
   expiresAt: true,
+}).extend({
+  cropParams: cropParamsSchema.nullable().optional(),
 });
 
 export type InsertStory = z.infer<typeof insertStorySchema>;
@@ -355,6 +367,23 @@ export const insertStoryViewSchema = createInsertSchema(storyViews).omit({
 
 export type InsertStoryView = z.infer<typeof insertStoryViewSchema>;
 export type StoryView = typeof storyViews.$inferSelect;
+
+// Story replies - messages sent by viewers in response to a story
+export const storyReplies = pgTable("story_replies", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  storyId: varchar("story_id").notNull().references(() => stories.id, { onDelete: "cascade" }),
+  senderId: varchar("sender_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  content: text("content").notNull(),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const insertStoryReplySchema = createInsertSchema(storyReplies).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertStoryReply = z.infer<typeof insertStoryReplySchema>;
+export type StoryReply = typeof storyReplies.$inferSelect;
 
 export const follows = pgTable("follows", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1049,6 +1078,7 @@ export const notificationTypes = [
   "post_comment",
   "story_like",
   "story_comment",
+  "story_reply",
   "new_message",
   "buddy_alert",
   "buddy_request",

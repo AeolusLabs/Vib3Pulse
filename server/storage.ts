@@ -19,6 +19,8 @@ import {
   type InsertStoryView,
   type StoryAllowedViewer,
   type InsertStoryAllowedViewer,
+  type StoryReply,
+  type InsertStoryReply,
   type Follow,
   type InsertFollow,
   type Message,
@@ -101,6 +103,7 @@ import {
   storyLikes,
   storyViews,
   storyAllowedViewers,
+  storyReplies,
   follows,
   messages,
   likes,
@@ -310,6 +313,9 @@ export interface IStorage {
   setStoryAllowedViewers(storyId: string, viewerIds: string[]): Promise<void>;
   getStoryAllowedViewers(storyId: string): Promise<string[]>;
   canViewStory(viewerId: string, storyId: string): Promise<boolean>;
+
+  // Story replies
+  createStoryReply(storyId: string, senderId: string, content: string): Promise<StoryReply>;
   
   followUser(followerId: string, followingId: string): Promise<Follow>;
   unfollowUser(followerId: string, followingId: string): Promise<void>;
@@ -1060,7 +1066,7 @@ export class DbStorage implements IStorage {
     }));
     
     // Filter out null values (private stories viewer can't see)
-    return storiesWithData.filter(s => s !== null) as Array<Story & { user: User; likeCount: number; isLiked?: boolean; isReshare?: boolean }>;
+    return (storiesWithData.filter(s => s !== null)) as any as Array<Story & { user: User; likeCount: number; viewCount: number; isLiked?: boolean; isReshare?: boolean }>;
   }
 
   async getStory(id: string): Promise<Story | undefined> {
@@ -1191,16 +1197,25 @@ export class DbStorage implements IStorage {
   async canViewStory(viewerId: string, storyId: string): Promise<boolean> {
     const story = await this.getStory(storyId);
     if (!story) return false;
-    
+
     // Story owner can always view
     if (story.userId === viewerId) return true;
-    
+
     // Public stories can be viewed by anyone
     if (story.privacy === 'public') return true;
-    
+
     // Private stories require viewer to be in allowed list
     const allowedViewers = await this.getStoryAllowedViewers(storyId);
     return allowedViewers.includes(viewerId);
+  }
+
+  // Story replies
+  async createStoryReply(storyId: string, senderId: string, content: string): Promise<StoryReply> {
+    const result = await db
+      .insert(storyReplies)
+      .values({ storyId, senderId, content })
+      .returning();
+    return result[0];
   }
 
   async followUser(followerId: string, followingId: string): Promise<Follow> {

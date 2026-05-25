@@ -39,6 +39,7 @@ interface StorySlide {
   isReshare?: boolean;
   privacy?: string;
   originalStoryId?: string | null;
+  cropParams?: { x: number; y: number; w: number; h: number } | null;
 }
 
 interface StoryViewerProps {
@@ -202,6 +203,35 @@ export default function StoryViewer({
     },
   });
 
+  const replyMutation = useMutation({
+    mutationFn: async ({ storyId, content }: { storyId: string; content: string }) => {
+      const res = await apiRequest("POST", `/api/stories/${storyId}/reply`, { content });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Failed to send reply");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      setReplyText("");
+      setIsPaused(false);
+      toast({ title: "Reply sent" });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to send reply",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleReply = () => {
+    const content = replyText.trim();
+    if (!content || !currentStory) return;
+    replyMutation.mutate({ storyId: currentStory.id, content });
+  };
+
   const handleDeleteStory = () => {
     if (confirm("Are you sure you want to delete this story?")) {
       const currentStoryId = slides[currentSlide]?.id;
@@ -322,16 +352,6 @@ export default function StoryViewer({
       setProgress(0);
     } else {
       onNext?.();
-    }
-  };
-
-  const handleReply = () => {
-    if (replyText.trim()) {
-      toast({
-        title: "Reply sent",
-        description: `Your reply has been sent to ${username}`,
-      });
-      setReplyText("");
     }
   };
 
@@ -460,16 +480,37 @@ export default function StoryViewer({
                 loop
                 aria-hidden="true"
               />
-              {/* Main video — never cropped */}
-              <video
-                ref={storyVideoRef}
-                src={currentStory.videoUrl || currentStory.content}
-                className="relative w-full h-full object-contain"
-                muted={isVideoMuted}
-                playsInline
-                autoPlay
-                data-testid="story-video"
-              />
+              {/* Main video — cropped if cropParams present */}
+              {currentStory.cropParams ? (
+                <div className="absolute inset-0 overflow-hidden">
+                  <video
+                    ref={storyVideoRef}
+                    src={currentStory.videoUrl || currentStory.content}
+                    style={{
+                      position: "absolute",
+                      left: `${-(currentStory.cropParams.x / currentStory.cropParams.w) * 100}%`,
+                      top:  `${-(currentStory.cropParams.y / currentStory.cropParams.h) * 100}%`,
+                      width:  `${(100 / currentStory.cropParams.w) * 100}%`,
+                      height: `${(100 / currentStory.cropParams.h) * 100}%`,
+                      objectFit: "contain",
+                    }}
+                    muted={isVideoMuted}
+                    playsInline
+                    autoPlay
+                    data-testid="story-video"
+                  />
+                </div>
+              ) : (
+                <video
+                  ref={storyVideoRef}
+                  src={currentStory.videoUrl || currentStory.content}
+                  className="relative w-full h-full object-contain"
+                  muted={isVideoMuted}
+                  playsInline
+                  autoPlay
+                  data-testid="story-video"
+                />
+              )}
             </>
           ) : currentStory.type === "image" ? (
             <>
@@ -592,20 +633,22 @@ export default function StoryViewer({
                     value={replyText}
                     onChange={(e) => setReplyText(e.target.value)}
                     onFocus={() => setIsPaused(true)}
-                    onBlur={() => setIsPaused(false)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleReply()}
-                    className="bg-white/10 backdrop-blur-md border-white/20 text-white placeholder:text-white/50 pr-10"
+                    onBlur={() => { if (!replyMutation.isPending) setIsPaused(false); }}
+                    onKeyDown={(e) => e.key === "Enter" && handleReply()}
+                    disabled={replyMutation.isPending}
+                    className="bg-white/10 backdrop-blur-md border-white/20 text-white placeholder:text-white/50 pr-10 disabled:opacity-60"
                     data-testid="input-story-reply"
                   />
-                  {replyText && (
+                  {(replyText || replyMutation.isPending) && (
                     <Button
                       variant="ghost"
                       size="icon"
                       onClick={handleReply}
-                      className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 text-white hover:bg-white/20"
+                      disabled={replyMutation.isPending || !replyText.trim()}
+                      className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 text-white hover:bg-white/20 disabled:opacity-50"
                       data-testid="button-send-reply"
                     >
-                      <SendIcon className="h-4 w-4" />
+                      <SendIcon className={`h-4 w-4 ${replyMutation.isPending ? "animate-pulse" : ""}`} />
                     </Button>
                   )}
                 </div>

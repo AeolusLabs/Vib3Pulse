@@ -8,6 +8,7 @@
  */
 
 import { useState, useRef } from "react";
+import { useVideoSplitter, captureVideoThumbnail } from "@/hooks/useVideoSplitter";
 
 import { Button } from "@/components/ui/button";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
@@ -21,7 +22,7 @@ import type { User } from "@shared/schema";
 import {
   XIcon, TypeIcon, CheckIcon, PencilIcon, SparklesIcon,
   GlobeIcon, LockIcon, UsersIcon, SendIcon, ImageIcon,
-  ChevronLeftIcon, FilmIcon, UploadIcon,
+  ChevronLeftIcon, FilmIcon, UploadIcon, CropIcon,
 } from "@/components/ui/icons";
 
 // ─── design tokens ───────────────────────────────────────────────────────────
@@ -84,7 +85,7 @@ interface VibeTagData {
   y: number;
 }
 
-type ActiveTool = "none" | "text" | "draw" | "filter" | "vibe";
+type ActiveTool = "none" | "text" | "draw" | "filter" | "vibe" | "crop";
 type Phase      = "pick" | "editing";
 type MediaKind  = "photo" | "video";
 
@@ -215,6 +216,21 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
   const [isPosting, setIsPosting]             = useState(false);
   const [uploadProgress, setUploadProgress]   = useState(0);
 
+  // crop
+  const [cropRect, setCropRect] = useState({ x: 10, y: 10, w: 80, h: 80 });
+  const [videoCropParams, setVideoCropParams] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+
+  // video split
+  const { split: splitVideo, isProcessing: isSplitting, progress: splitProgress } = useVideoSplitter();
+  const [videoDuration, setVideoDuration]           = useState(0);
+  const [splitSegments, setSplitSegments]           = useState<Blob[]>([]);
+  const [segmentThumbs, setSegmentThumbs]           = useState<string[]>([]);
+  const [activeSegments, setActiveSegments]         = useState<boolean[]>([]);
+  const [showSegmentPreview, setShowSegmentPreview] = useState(false);
+  const [segmentPostIdx, setSegmentPostIdx]         = useState(0);
+  const cropDragRef     = useRef<{ mode: "move" | "nw" | "ne" | "sw" | "se"; startX: number; startY: number; startCrop: { x: number; y: number; w: number; h: number } } | null>(null);
+  const cropOverlayRef  = useRef<HTMLDivElement>(null);
+
   // refs ─────────────────────────────────────────────────────────────────────
   const frameRef     = useRef<HTMLDivElement>(null);
   const galleryInput = useRef<HTMLInputElement>(null);
@@ -231,6 +247,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
     mutationFn: async (payload: {
       imageUrl: string; videoUrl?: string; type: string;
       privacy: string; caption?: string; allowedViewerIds?: string[];
+      cropParams?: { x: number; y: number; w: number; h: number } | null;
     }) => apiRequest("POST", "/api/stories", payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/stories"] });
@@ -269,10 +286,31 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
       };
       reader.readAsDataURL(file);
     } else if (file.type.startsWith("video/")) {
-      setCapturedVideoUrl(URL.createObjectURL(file));
-      setCapturedVideoBlob(file);
-      setMediaKind("video");
-      setPhase("editing");
+      const tempUrl = URL.createObjectURL(file);
+      const probe = document.createElement("video");
+      probe.preload = "metadata";
+      probe.onloadedmetadata = () => {
+        const dur = probe.duration;
+        URL.revokeObjectURL(tempUrl);
+        if (!isFinite(dur) || dur <= 0) {
+          toast({ title: "Invalid video", description: "Could not read that video file.", variant: "destructive" });
+          return;
+        }
+        if (dur > 5 * 60) {
+          toast({ title: "Video too long", description: "Maximum video length is 5 minutes.", variant: "destructive" });
+          return;
+        }
+        setVideoDuration(dur);
+        setCapturedVideoUrl(URL.createObjectURL(file));
+        setCapturedVideoBlob(file);
+        setMediaKind("video");
+        setPhase("editing");
+      };
+      probe.onerror = () => {
+        URL.revokeObjectURL(tempUrl);
+        toast({ title: "Invalid video", description: "Could not read that video file.", variant: "destructive" });
+      };
+      probe.src = tempUrl;
     }
   };
 
@@ -404,6 +442,80 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
     setIsAnalyzingVibe(false);
   };
 
+  // ─── crop ─────────────────────────────────────────────────────────────────
+
+  const startCropDrag = (e: React.PointerEvent, mode: "move" | "nw" | "ne" | "sw" | "se") => {
+    e.stopPropagation();
+    cropOverlayRef.current?.setPointerCapture(e.pointerId);
+    cropDragRef.current = { mode, startX: e.clientX, startY: e.clientY, startCrop: { ...cropRect } };
+  };
+
+  const onCropPointerMove = (e: React.PointerEvent) => {
+    if (!cropDragRef.current || !frameRef.current) return;
+    const { mode, startX, startY, startCrop } = cropDragRef.current;
+    const frame = frameRef.current.getBoundingClientRect();
+    const dx = ((e.clientX - startX) / frame.width) * 100;
+    const dy = ((e.clientY - startY) / frame.height) * 100;
+    const min = 10;
+    let { x, y, w, h } = startCrop;
+    if (mode === "move") {
+      x = Math.max(0, Math.min(100 - w, startCrop.x + dx));
+      y = Math.max(0, Math.min(100 - h, startCrop.y + dy));
+    } else {
+      if (mode === "nw" || mode === "ne") {
+        const newY = Math.min(startCrop.y + startCrop.h - min, startCrop.y + dy);
+        h = startCrop.h - (newY - startCrop.y); y = newY;
+      }
+      if (mode === "sw" || mode === "se") { h = Math.max(min, startCrop.h + dy); }
+      if (mode === "nw" || mode === "sw") {
+        const newX = Math.min(startCrop.x + startCrop.w - min, startCrop.x + dx);
+        w = startCrop.w - (newX - startCrop.x); x = newX;
+      }
+      if (mode === "ne" || mode === "se") { w = Math.max(min, startCrop.w + dx); }
+      x = Math.max(0, x); y = Math.max(0, y);
+      w = Math.min(100 - x, w); h = Math.min(100 - y, h);
+    }
+    setCropRect({ x, y, w, h });
+  };
+
+  const onCropPointerUp = () => { cropDragRef.current = null; };
+
+  const confirmCrop = () => {
+    if (mediaKind === "video") {
+      setVideoCropParams({ ...cropRect });
+      setCropRect({ x: 10, y: 10, w: 80, h: 80 });
+      setActiveTool("none");
+      return;
+    }
+    if (!capturedImage || !frameRef.current) return;
+    const frame = frameRef.current.getBoundingClientRect();
+    const img = new Image();
+    img.onload = () => {
+      const iW = img.naturalWidth, iH = img.naturalHeight;
+      const fW = frame.width, fH = frame.height;
+      const scale = Math.min(fW / iW, fH / iH);
+      const scaledW = iW * scale, scaledH = iH * scale;
+      const ox = (fW - scaledW) / 2, oy = (fH - scaledH) / 2;
+      const cxPx = (cropRect.x / 100) * fW, cyPx = (cropRect.y / 100) * fH;
+      const cwPx = (cropRect.w / 100) * fW, chPx = (cropRect.h / 100) * fH;
+      const imgLeft  = Math.max(0, cxPx - ox);
+      const imgTop   = Math.max(0, cyPx - oy);
+      const imgRight = Math.min(scaledW, cxPx + cwPx - ox);
+      const imgBot   = Math.min(scaledH, cyPx + chPx - oy);
+      if (imgRight <= imgLeft || imgBot <= imgTop) return;
+      const srcX = imgLeft / scale, srcY = imgTop / scale;
+      const srcW = (imgRight - imgLeft) / scale, srcH = (imgBot - imgTop) / scale;
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(srcW); canvas.height = Math.round(srcH);
+      canvas.getContext("2d")!.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, canvas.width, canvas.height);
+      setCapturedImage(canvas.toDataURL("image/jpeg", 0.92));
+      setCropRect({ x: 10, y: 10, w: 80, h: 80 });
+      setActiveTool("none");
+      clearDraw(); setTextOverlays([]);
+    };
+    img.src = capturedImage;
+  };
+
   // ─── compose final image ──────────────────────────────────────────────────
 
   const composeFinal = (): Promise<string> =>
@@ -491,7 +603,38 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
   };
 
   const handlePost = async () => {
-    if (isPosting || createStoryMutation.isPending) return;
+    if (isPosting || createStoryMutation.isPending || isSplitting) return;
+
+    // Long video → split flow
+    if (mediaKind === "video" && capturedVideoBlob && videoDuration > 15) {
+      setIsPosting(true);
+      try {
+        // Generate thumbnails from original blob (fast, doesn't need real-time)
+        const thumbUrl = capturedVideoUrl!;
+        const segCount = Math.ceil(videoDuration / 15);
+        const thumbPromises = Array.from({ length: segCount }, (_, i) =>
+          captureVideoThumbnail(thumbUrl, i * 15 + Math.min(1, (videoDuration - i * 15) / 2))
+        );
+
+        // Split video (real-time, shows progress modal via isSplitting)
+        const [segments, thumbs] = await Promise.all([
+          splitVideo(capturedVideoBlob),
+          Promise.all(thumbPromises),
+        ]);
+
+        setSplitSegments(segments);
+        setSegmentThumbs(thumbs);
+        setActiveSegments(segments.map(() => true));
+        setIsPosting(false);
+        setShowSegmentPreview(true);
+      } catch (err: any) {
+        toast({ title: "Could not split video", description: err.message, variant: "destructive" });
+        setIsPosting(false);
+      }
+      return;
+    }
+
+    // Single story (image or short video)
     setIsPosting(true); setUploadProgress(0);
     try {
       if (mediaKind === "video" && capturedVideoBlob) {
@@ -500,6 +643,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
           imageUrl: objectPath, videoUrl: objectPath, type: "video",
           privacy, caption: caption.trim() || undefined,
           allowedViewerIds: privacy === "private" ? selectedViewers : undefined,
+          cropParams: videoCropParams ?? undefined,
         });
       } else if (capturedImage) {
         createStoryMutation.mutate({
@@ -514,6 +658,32 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
     }
   };
 
+  const postSegments = async () => {
+    setShowSegmentPreview(false);
+    const toPost = splitSegments.filter((_, i) => activeSegments[i]);
+    if (toPost.length === 0) { handleClose(); return; }
+    setIsPosting(true); setSegmentPostIdx(0);
+    try {
+      for (let i = 0; i < toPost.length; i++) {
+        setSegmentPostIdx(i + 1); setUploadProgress(0);
+        const objectPath = await uploadVideoBlob(toPost[i]);
+        const res = await apiRequest("POST", "/api/stories", {
+          imageUrl: objectPath, videoUrl: objectPath, type: "video",
+          privacy, caption: caption.trim() || undefined,
+          allowedViewerIds: privacy === "private" ? selectedViewers : undefined,
+          cropParams: videoCropParams ?? undefined,
+        });
+        if (!res.ok) throw new Error(`Story ${i + 1} failed to post`);
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/stories"] });
+      toast({ title: `${toPost.length} ${toPost.length === 1 ? "story" : "stories"} posted!` });
+      handleClose();
+    } catch (err: any) {
+      toast({ title: "Upload failed", description: err.message, variant: "destructive" });
+      setIsPosting(false);
+    }
+  };
+
   // ─── reset ────────────────────────────────────────────────────────────────
 
   const fullReset = () => {
@@ -521,11 +691,12 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
     setCapturedImage(null);
     if (capturedVideoUrl) URL.revokeObjectURL(capturedVideoUrl);
     setCapturedVideoUrl(null); setCapturedVideoBlob(null);
-    setActiveTool("none"); setSelectedFilter(0);
+    setActiveTool("none"); setSelectedFilter(0); setCropRect({ x: 10, y: 10, w: 80, h: 80 }); setVideoCropParams(null);
     setTextOverlays([]); setIsAddingText(false); setNewTextValue(""); setSelectedTextId(null);
     setVibeTag(null); setIsAnalyzingVibe(false);
     setCaption(""); setPrivacy("public"); setSelectedViewers([]); setShowViewerSheet(false);
     setIsPosting(false); setUploadProgress(0);
+    setVideoDuration(0); setSplitSegments([]); setSegmentThumbs([]); setActiveSegments([]); setShowSegmentPreview(false); setSegmentPostIdx(0);
     clearDraw();
   };
 
@@ -534,8 +705,10 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
   const handleRetake = () => {
     if (capturedVideoUrl) URL.revokeObjectURL(capturedVideoUrl);
     setCapturedImage(null); setCapturedVideoUrl(null); setCapturedVideoBlob(null);
-    setActiveTool("none"); setSelectedFilter(0); setTextOverlays([]); setVibeTag(null);
-    setCaption(""); setIsPosting(false); clearDraw(); setPhase("pick");
+    setActiveTool("none"); setSelectedFilter(0); setVideoCropParams(null); setTextOverlays([]); setVibeTag(null);
+    setCaption(""); setIsPosting(false);
+    setVideoDuration(0); setSplitSegments([]); setSegmentThumbs([]); setActiveSegments([]); setShowSegmentPreview(false);
+    clearDraw(); setPhase("pick");
   };
 
   if (!open) return null;
@@ -634,7 +807,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
 
                   {/* supported formats hint */}
                   <p className="text-white/20 text-xs text-center tracking-wide">
-                    Photos · Videos up to 30 seconds
+                    Photos · Videos up to 5 minutes (auto-split into 15s clips)
                   </p>
                 </motion.div>
 
@@ -668,38 +841,54 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                 <ChevronLeftIcon className="h-5 w-5" />
               </button>
 
-              {/* right tool strip (photos only) */}
-              {mediaKind === "photo" && (
-                <div className="flex flex-col gap-2">
-                  {[
-                    { tool: "text"   as ActiveTool, icon: <TypeIcon     className="h-4.5 w-4.5" />, label: "Text"    },
-                    { tool: "draw"   as ActiveTool, icon: <PencilIcon   className="h-4.5 w-4.5" />, label: "Draw"    },
-                    { tool: "filter" as ActiveTool, icon: <SparklesIcon className="h-4.5 w-4.5" />, label: "Filters" },
-                    { tool: "vibe"   as ActiveTool, icon: <SparklesIcon className="h-4.5 w-4.5" />, label: "Vibe"    },
-                  ].map(({ tool, icon, label }) => (
-                    <button
-                      key={tool}
-                      onClick={() => {
-                        if (tool === "text") { setActiveTool(t => t === "text" ? "none" : "text"); setIsAddingText(true); }
-                        else setActiveTool(t => t === tool ? "none" : tool);
-                      }}
-                      className="w-10 h-10 rounded-full flex items-center justify-center text-white transition-all"
-                      style={{
-                        backgroundColor: activeTool === tool ? "rgba(255,255,255,0.22)" : "rgba(0,0,0,0.45)",
-                        backdropFilter: "blur(8px)",
-                        boxShadow: activeTool === tool ? "0 0 0 2px rgba(255,255,255,0.6)" : "none",
-                        transition: `all 0.15s ${E.out}`,
-                      }}
-                      aria-label={label} aria-pressed={activeTool === tool}
-                    >
-                      {tool === "vibe" && vibeTag
-                        ? <span className="text-sm">{vibeTag.emoji}</span>
-                        : icon
-                      }
-                    </button>
-                  ))}
-                </div>
-              )}
+              {/* right tool strip */}
+              <div className="flex flex-col gap-2">
+                {/* photo-only tools */}
+                {mediaKind === "photo" && [
+                  { tool: "text"   as ActiveTool, icon: <TypeIcon     className="h-4.5 w-4.5" />, label: "Text"    },
+                  { tool: "draw"   as ActiveTool, icon: <PencilIcon   className="h-4.5 w-4.5" />, label: "Draw"    },
+                  { tool: "filter" as ActiveTool, icon: <SparklesIcon className="h-4.5 w-4.5" />, label: "Filters" },
+                  { tool: "vibe"   as ActiveTool, icon: <SparklesIcon className="h-4.5 w-4.5" />, label: "Vibe"    },
+                ].map(({ tool, icon, label }) => (
+                  <button
+                    key={tool}
+                    onClick={() => {
+                      if (tool === "text") { setActiveTool(t => t === "text" ? "none" : "text"); setIsAddingText(true); }
+                      else setActiveTool(t => t === tool ? "none" : tool);
+                    }}
+                    className="w-10 h-10 rounded-full flex items-center justify-center text-white transition-all"
+                    style={{
+                      backgroundColor: activeTool === tool ? "rgba(255,255,255,0.22)" : "rgba(0,0,0,0.45)",
+                      backdropFilter: "blur(8px)",
+                      boxShadow: activeTool === tool ? "0 0 0 2px rgba(255,255,255,0.6)" : "none",
+                      transition: `all 0.15s ${E.out}`,
+                    }}
+                    aria-label={label} aria-pressed={activeTool === tool}
+                  >
+                    {tool === "vibe" && vibeTag ? <span className="text-sm">{vibeTag.emoji}</span> : icon}
+                  </button>
+                ))}
+                {/* crop — photo and video */}
+                <button
+                  onClick={() => {
+                    if (activeTool === "crop") { setActiveTool("none"); }
+                    else {
+                      if (videoCropParams) setCropRect(videoCropParams);
+                      setActiveTool("crop");
+                    }
+                  }}
+                  className="w-10 h-10 rounded-full flex items-center justify-center text-white transition-all"
+                  style={{
+                    backgroundColor: activeTool === "crop" ? "rgba(255,255,255,0.22)" : "rgba(0,0,0,0.45)",
+                    backdropFilter: "blur(8px)",
+                    boxShadow: activeTool === "crop" ? "0 0 0 2px rgba(255,255,255,0.6)" : "none",
+                    transition: `all 0.15s ${E.out}`,
+                  }}
+                  aria-label="Crop" aria-pressed={activeTool === "crop"}
+                >
+                  <CropIcon className="h-4.5 w-4.5" />
+                </button>
+              </div>
             </div>
 
             {/* 9:16 media frame */}
@@ -718,10 +907,26 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                 )}
                 {/* base video */}
                 {mediaKind === "video" && capturedVideoUrl && (
-                  <video src={capturedVideoUrl} autoPlay muted loop playsInline
-                    className="absolute inset-0 w-full h-full object-contain"
-                    style={{ filter: filterCss }}
-                  />
+                  videoCropParams && activeTool !== "crop" ? (
+                    <div className="absolute inset-0 overflow-hidden">
+                      <video src={capturedVideoUrl} autoPlay muted loop playsInline
+                        style={{
+                          position: "absolute",
+                          left:   `${-(videoCropParams.x / videoCropParams.w) * 100}%`,
+                          top:    `${-(videoCropParams.y / videoCropParams.h) * 100}%`,
+                          width:  `${(100 / videoCropParams.w) * 100}%`,
+                          height: `${(100 / videoCropParams.h) * 100}%`,
+                          objectFit: "contain",
+                          filter: filterCss,
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <video src={capturedVideoUrl} autoPlay muted loop playsInline
+                      className="absolute inset-0 w-full h-full object-contain"
+                      style={{ filter: filterCss }}
+                    />
+                  )
                 )}
 
                 {/* draw canvas (photos only) */}
@@ -743,13 +948,13 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                 {textOverlays.map(ov => (
                   <div
                     key={ov.id}
-                    className={`absolute select-none ${activeTool !== "draw" ? "cursor-move" : "pointer-events-none"} ${selectedTextId === ov.id ? "ring-2 ring-white/50 rounded-lg p-1" : ""}`}
+                    className={`absolute select-none ${activeTool !== "draw" && activeTool !== "crop" ? "cursor-move" : "pointer-events-none"} ${selectedTextId === ov.id ? "ring-2 ring-white/50 rounded-lg p-1" : ""}`}
                     style={{
                       left: `${ov.x}%`, top: `${ov.y}%`, transform: "translate(-50%, -50%)",
                       fontSize: ov.fontSize, color: ov.color, fontWeight: "bold",
                       fontFamily: "'PT Sans', sans-serif",
                       textShadow: ov.color === "#FFFFFF" ? "2px 2px 6px rgba(0,0,0,0.9)" : "2px 2px 6px rgba(0,0,0,0.5)",
-                      pointerEvents: activeTool === "draw" ? "none" : "auto",
+                      pointerEvents: activeTool === "draw" || activeTool === "crop" ? "none" : "auto",
                     }}
                     onMouseDown={e => dragText(e, ov.id)} onTouchStart={e => dragText(e, ov.id)}
                   >
@@ -771,7 +976,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                     style={{
                       left: `${vibeTag.x}%`, top: `${vibeTag.y}%`,
                       transform: "translate(-50%, -50%)",
-                      pointerEvents: activeTool === "draw" ? "none" : "auto",
+                      pointerEvents: activeTool === "draw" || activeTool === "crop" ? "none" : "auto",
                       cursor: "grab",
                       touchAction: "none",
                     }}
@@ -799,6 +1004,71 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                         style={{ backgroundColor: vibeTag.color }}
                       />
                     </motion.div>
+                  </div>
+                )}
+
+                {/* crop overlay */}
+                {activeTool === "crop" && (
+                  <div
+                    ref={cropOverlayRef}
+                    className="absolute inset-0"
+                    style={{ touchAction: "none" }}
+                    onPointerMove={onCropPointerMove}
+                    onPointerUp={onCropPointerUp}
+                    onPointerLeave={onCropPointerUp}
+                  >
+                    {/* crop rect — box-shadow dims everything outside */}
+                    <div
+                      className="absolute"
+                      style={{
+                        left: `${cropRect.x}%`, top: `${cropRect.y}%`,
+                        width: `${cropRect.w}%`, height: `${cropRect.h}%`,
+                        boxShadow: "0 0 0 9999px rgba(0,0,0,0.58)",
+                        border: "1.5px solid rgba(255,255,255,0.85)",
+                        cursor: "move",
+                        touchAction: "none",
+                      }}
+                      onPointerDown={e => startCropDrag(e, "move")}
+                    >
+                      {/* rule-of-thirds grid */}
+                      <div className="absolute inset-0 pointer-events-none grid grid-cols-3 grid-rows-3">
+                        {Array.from({ length: 9 }).map((_, i) => (
+                          <div key={i} style={{
+                            borderRight:  i % 3 !== 2 ? "0.5px solid rgba(255,255,255,0.28)" : "none",
+                            borderBottom: Math.floor(i / 3) !== 2 ? "0.5px solid rgba(255,255,255,0.28)" : "none",
+                          }} />
+                        ))}
+                      </div>
+
+                      {/* corner handles */}
+                      {(["nw", "ne", "sw", "se"] as const).map(h => (
+                        <div
+                          key={h}
+                          className="absolute w-6 h-6"
+                          style={{
+                            top:    h.includes("n") ? -4 : undefined,
+                            bottom: h.includes("s") ? -4 : undefined,
+                            left:   h.includes("w") ? -4 : undefined,
+                            right:  h.includes("e") ? -4 : undefined,
+                            cursor: h === "nw" || h === "se" ? "nwse-resize" : "nesw-resize",
+                            touchAction: "none",
+                          }}
+                          onPointerDown={e => { e.stopPropagation(); startCropDrag(e, h); }}
+                        >
+                          <div className="absolute" style={{
+                            top:    h.includes("n") ? 0 : undefined,
+                            bottom: h.includes("s") ? 0 : undefined,
+                            left:   h.includes("w") ? 0 : undefined,
+                            right:  h.includes("e") ? 0 : undefined,
+                            width: 14, height: 14,
+                            borderTop:    h.includes("n") ? "2.5px solid #fff" : "none",
+                            borderBottom: h.includes("s") ? "2.5px solid #fff" : "none",
+                            borderLeft:   h.includes("w") ? "2.5px solid #fff" : "none",
+                            borderRight:  h.includes("e") ? "2.5px solid #fff" : "none",
+                          }} />
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -969,6 +1239,29 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                 </motion.div>
               )}
 
+              {/* crop controls */}
+              {activeTool === "crop" && !isAddingText && (
+                <motion.div key="crop" variants={panelVariants} initial="hidden" animate="show" exit="hidden"
+                  className="absolute bottom-0 left-0 right-0 bg-[#111]/96 backdrop-blur-md rounded-t-2xl px-4 pt-5 pb-8 z-40 space-y-3">
+                  <p className="text-white/40 text-xs text-center">Drag to move · Pull corners to resize</p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setActiveTool("none")}
+                      className="flex-1 py-3 rounded-2xl border border-white/15 text-white/60 text-sm font-medium"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={confirmCrop}
+                      className="flex-1 py-3 rounded-2xl font-bold text-sm"
+                      style={{ backgroundColor: "#C4B0FF", color: "#0A0A0A" }}
+                    >
+                      Apply Crop
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+
               {/* default bottom bar */}
               {activeTool === "none" && !isAddingText && (
                 <motion.div key="bar" variants={panelVariants} initial="hidden" animate="show" exit="hidden"
@@ -1002,7 +1295,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                     {/* post */}
                     <button
                       onClick={handlePost}
-                      disabled={!canPost || isPosting || createStoryMutation.isPending}
+                      disabled={!canPost || isPosting || createStoryMutation.isPending || isSplitting}
                       className="flex-1 flex items-center justify-center gap-2 rounded-full py-3 font-bold text-sm transition-all active:scale-95 disabled:opacity-40"
                       style={{
                         backgroundColor: "#C4B0FF",
@@ -1010,13 +1303,136 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                         transition: `all 0.12s ${E.out}`,
                       }}
                     >
-                      {isPosting ? (
+                      {isSplitting ? (
+                        <><div className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin" />Splitting…</>
+                      ) : isPosting && segmentPostIdx > 0 ? (
+                        <><div className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin" />Story {segmentPostIdx}…</>
+                      ) : isPosting ? (
                         <><div className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin" />{uploadProgress > 0 ? `${uploadProgress}%` : "Uploading…"}</>
                       ) : createStoryMutation.isPending ? (
                         <><div className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin" />Posting…</>
+                      ) : videoDuration > 15 ? (
+                        <><SendIcon className="h-4 w-4" />{Math.ceil(videoDuration / 15)} Stories</>
                       ) : (
                         <><SendIcon className="h-4 w-4" />Your Story</>
                       )}
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* ── splitting progress overlay ──────────────────────────────── */}
+            <AnimatePresence>
+              {isSplitting && splitProgress && (
+                <motion.div
+                  key="splitting"
+                  initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  className="absolute inset-0 z-[60] bg-black/85 flex flex-col items-center justify-center gap-6 px-8"
+                >
+                  <div className="w-14 h-14 rounded-full border-4 border-white/15 border-t-[#C4B0FF] animate-spin" />
+                  <div className="text-center space-y-1">
+                    <p className="text-white font-semibold text-base">Splitting video…</p>
+                    <p className="text-white/50 text-sm">
+                      Segment {splitProgress.segment} of {splitProgress.total}
+                    </p>
+                  </div>
+                  {/* progress bar */}
+                  <div className="w-full max-w-xs h-1.5 bg-white/10 rounded-full overflow-hidden">
+                    <motion.div
+                      className="h-full rounded-full"
+                      style={{ backgroundColor: "#C4B0FF" }}
+                      animate={{ width: `${(splitProgress.segment / splitProgress.total) * 100}%` }}
+                      transition={{ duration: 0.3, ease: "easeOut" }}
+                    />
+                  </div>
+                  <p className="text-white/30 text-xs text-center">Recording in real time — this takes as long as the clip</p>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* ── segment preview carousel ────────────────────────────────── */}
+            <AnimatePresence>
+              {showSegmentPreview && (
+                <motion.div
+                  key="segments"
+                  variants={sheetVariants} initial="hidden" animate="show" exit="hidden"
+                  className="absolute inset-0 z-50 bg-[#0F0F0F] flex flex-col"
+                >
+                  {/* header */}
+                  <div className="flex items-center justify-between px-5 py-4 border-b border-white/8">
+                    <div>
+                      <h3 className="text-white font-semibold">Review Your Stories</h3>
+                      <p className="text-white/40 text-xs mt-0.5">
+                        {activeSegments.filter(Boolean).length} clip{activeSegments.filter(Boolean).length !== 1 ? "s" : ""} ready · tap × to discard
+                      </p>
+                    </div>
+                    <Button variant="ghost" size="icon" onClick={() => setShowSegmentPreview(false)} className="text-white hover:bg-white/10">
+                      <XIcon className="h-5 w-5" />
+                    </Button>
+                  </div>
+
+                  {/* horizontal thumbnail strip */}
+                  <div className="flex-1 flex items-center">
+                    <div className="flex gap-3 px-5 overflow-x-auto py-6" style={{ scrollbarWidth: "none" } as React.CSSProperties}>
+                      {splitSegments.map((_, i) => {
+                        const active = activeSegments[i];
+                        const dur = Math.min(15, videoDuration - i * 15);
+                        return (
+                          <div
+                            key={i}
+                            className="relative flex-shrink-0 rounded-xl overflow-hidden transition-opacity duration-200"
+                            style={{
+                              width: 90, height: 160,
+                              opacity: active ? 1 : 0.3,
+                              border: active ? "2px solid rgba(196,176,255,0.7)" : "2px solid rgba(255,255,255,0.1)",
+                            }}
+                          >
+                            {/* thumbnail */}
+                            {segmentThumbs[i] ? (
+                              <img src={segmentThumbs[i]} alt={`Clip ${i + 1}`} className="absolute inset-0 w-full h-full object-cover" />
+                            ) : (
+                              <div className="absolute inset-0 bg-white/5 flex items-center justify-center">
+                                <div className="w-5 h-5 border-2 border-white/20 border-t-white/60 rounded-full animate-spin" />
+                              </div>
+                            )}
+
+                            {/* clip number + duration */}
+                            <div className="absolute bottom-0 left-0 right-0 px-2 py-1.5 bg-gradient-to-t from-black/80 to-transparent">
+                              <p className="text-white text-[10px] font-semibold">#{i + 1}</p>
+                              <p className="text-white/60 text-[9px]">{Math.round(dur)}s</p>
+                            </div>
+
+                            {/* discard / restore button */}
+                            <button
+                              onClick={() => setActiveSegments(p => p.map((v, j) => j === i ? !v : v))}
+                              className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full flex items-center justify-center text-white"
+                              style={{ backgroundColor: active ? "rgba(239,68,68,0.85)" : "rgba(196,176,255,0.85)" }}
+                              aria-label={active ? "Discard clip" : "Restore clip"}
+                            >
+                              {active
+                                ? <XIcon className="h-3.5 w-3.5" />
+                                : <span className="text-[10px] font-bold">+</span>
+                              }
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* footer */}
+                  <div className="p-5 border-t border-white/8 space-y-3">
+                    {activeSegments.filter(Boolean).length === 0 && (
+                      <p className="text-center text-white/30 text-xs">All clips discarded — nothing to post.</p>
+                    )}
+                    <button
+                      onClick={postSegments}
+                      disabled={activeSegments.filter(Boolean).length === 0}
+                      className="w-full py-3.5 rounded-2xl font-bold text-sm transition-all active:scale-95 disabled:opacity-30"
+                      style={{ backgroundColor: "#C4B0FF", color: "#0A0A0A" }}
+                    >
+                      Post {activeSegments.filter(Boolean).length} {activeSegments.filter(Boolean).length === 1 ? "Story" : "Stories"}
                     </button>
                   </div>
                 </motion.div>

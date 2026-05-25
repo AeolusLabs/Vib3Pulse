@@ -16,6 +16,7 @@ type StoryWithUser = {
   likeCount: number;
   isLiked?: boolean;
   isReshare?: boolean;
+  cropParams?: { x: number; y: number; w: number; h: number } | null;
   user: {
     id: string;
     username: string;
@@ -95,6 +96,7 @@ export default function StoryDetailPage() {
     isReshare: story.isReshare || false,
     privacy: story.privacy || "public",
     originalStoryId: story.originalStoryId,
+    cropParams: story.cropParams || null,
   }));
 
   const handleNext = () => {

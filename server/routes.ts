@@ -3,7 +3,7 @@ import express from "express";
 import { createServer, type Server } from "http";
 import crypto from "crypto";
 import { storage } from "./storage";
-import { insertEventSchema, eventCreateDto, eventUpdateDto, insertTicketSchema, insertRsvpSchema, insertUserSchema, insertPostSchema, insertStorySchema, insertVenueSchema, insertVenueEntryNightSchema, venueCategories } from "@shared/schema";
+import { insertEventSchema, eventCreateDto, eventUpdateDto, insertTicketSchema, insertRsvpSchema, insertUserSchema, insertPostSchema, insertStorySchema, insertStoryReplySchema, insertVenueSchema, insertVenueEntryNightSchema, venueCategories } from "@shared/schema";
 import { hashPassword, comparePassword, userToSessionUser } from "./auth";
 import { requireAuth, requireOrganizer } from "./middleware";
 import passport from "passport";
@@ -2143,6 +2143,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Get story interactions error:", error);
       res.status(500).json({ message: "Failed to get interactions" });
+    }
+  });
+
+  // Story Replies - viewer sends a message in response to a story
+  app.post("/api/stories/:storyId/reply", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const { storyId } = req.params;
+
+      const story = await storage.getStory(storyId);
+      if (!story) {
+        return res.status(404).json({ message: "Story not found" });
+      }
+
+      if (story.userId === userId) {
+        return res.status(400).json({ message: "Cannot reply to your own story" });
+      }
+
+      const canView = await storage.canViewStory(userId, storyId);
+      if (!canView) {
+        return res.status(403).json({ message: "Not authorized to view this story" });
+      }
+
+      const { content } = insertStoryReplySchema.omit({ storyId: true, senderId: true }).parse(req.body);
+
+      const reply = await storage.createStoryReply(storyId, userId, content);
+
+      const sender = await storage.getUser(userId);
+      const senderName = sender?.displayName || sender?.username || "Someone";
+      await deliverNotification({
+        userId: story.userId,
+        type: "story_reply",
+        title: "Story Reply",
+        message: `${senderName} replied to your story`,
+        link: `/stories/${storyId}`,
+        relatedUserId: userId,
+        relatedEntityId: storyId,
+      });
+
+      res.status(201).json(reply);
+    } catch (error) {
+      console.error("Story reply error:", error);
+      res.status(400).json({ message: "Failed to send reply" });
     }
   });
 
