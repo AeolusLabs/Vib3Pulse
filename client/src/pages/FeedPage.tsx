@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -54,6 +54,7 @@ type CommunityWithRole = Community & { memberCount: number; role: string };
 
 export default function FeedPage() {
   const [, navigate] = useLocation();
+  const search = useSearch();
   const [createStoryOpen, setCreateStoryOpen] = useState(false);
   const [createPostOpen, setCreatePostOpen] = useState(false);
   const [feedFilter, setFeedFilter] = useState<string>('following'); // 'following', 'all', or community ID
@@ -128,6 +129,18 @@ export default function FeedPage() {
   const posts = isViewingCommunity ? communityPosts : mainPosts;
   const isLoading = isViewingCommunity ? isLoadingCommunity : isLoadingMain;
   const isError = isViewingCommunity ? isErrorCommunity : isErrorMain;
+
+  // Open a specific post when arriving from a notification link (/feed?post=<id>)
+  const notificationPostId = new URLSearchParams(search).get("post");
+  useEffect(() => {
+    if (!notificationPostId || posts.length === 0) return;
+    const target = posts.find((p: any) => p.id === notificationPostId);
+    if (target) {
+      setSelectedPost(target);
+      // Strip the query param so the back button doesn't re-open the dialog
+      navigate("/feed", { replace: true });
+    }
+  }, [notificationPostId, posts]);
 
   // Extract unique @usernames from all posts for avatar lookup
   const mentionedUsernames = useMemo(() => {

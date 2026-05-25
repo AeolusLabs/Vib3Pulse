@@ -1631,11 +1631,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         type: "event_rsvp",
         title: "New RSVP",
         message: `${attendee?.displayName || attendee?.username || "Someone"} RSVPed to ${event.title}`,
-        link: `/events/${eventId}`,
+        link: `/event/${eventId}`,
         relatedUserId: userId,
         relatedEntityId: eventId,
       });
-      
+
       res.json(rsvp);
     } catch (error) {
       res.status(400).json({ message: "Failed to create RSVP" });
@@ -1753,7 +1753,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             type: "mention",
             title: "You were mentioned",
             message: `${poster?.displayName || poster?.username || "Someone"} mentioned you in a post`,
-            link: `/feed`,
+            link: `/feed?post=${post.id}`,
             relatedUserId: req.user!.id,
             relatedEntityId: post.id,
           });
@@ -1774,7 +1774,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               type: "community_post",
               title: `New post in ${community?.name}`,
               message: `${poster?.displayName || poster?.username || "Someone"} posted in ${community?.name}`,
-              link: `/feed`,
+              link: `/feed?post=${post.id}`,
               relatedUserId: req.user!.id,
               relatedEntityId: post.id,
             });
@@ -1985,7 +1985,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           type: "story_like",
           title: "Story Liked",
           message: `${likerName} liked your story`,
-          link: `/stories`,
+          link: `/stories/${storyId}`,
           relatedUserId: userId,
           relatedEntityId: storyId,
         });
@@ -2129,7 +2129,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           type: "post_like",
           title: "New Post Like",
           message: `${liker?.displayName || liker?.username || "Someone"} liked your post: "${postSnippet}"`,
-          link: `/feed`,
+          link: `/feed?post=${postId}`,
           relatedUserId: userId,
           relatedEntityId: postId,
         });
@@ -2198,7 +2198,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           type: "post_comment",
           title: "New Comment",
           message: `${commenter?.displayName || commenter?.username || "Someone"} commented: "${commentSnippet}"`,
-          link: `/feed`,
+          link: `/feed?post=${postId}`,
           relatedUserId: userId,
           relatedEntityId: postId,
         });
@@ -2387,7 +2387,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           type: "repost",
           title: "Post Reposted",
           message: `${reposter?.displayName || reposter?.username || "Someone"} reposted your post`,
-          link: `/feed`,
+          link: `/feed?post=${postId}`,
           relatedUserId: userId,
           relatedEntityId: postId,
         });
