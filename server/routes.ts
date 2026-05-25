@@ -1707,6 +1707,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/posts/:postId", async (req, res) => {
+    try {
+      const post = await storage.getPost(req.params.postId);
+      if (!post) return res.status(404).json({ message: "Post not found" });
+      const user = await storage.getUser(post.userId);
+      res.json({ ...post, user });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch post" });
+    }
+  });
+
   app.post("/api/posts", requireAuth, async (req, res) => {
     try {
       const postData = insertPostSchema.omit({ userId: true }).parse(req.body);
@@ -2198,9 +2209,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           type: "post_comment",
           title: "New Comment",
           message: `${commenter?.displayName || commenter?.username || "Someone"} commented: "${commentSnippet}"`,
-          link: `/feed?post=${postId}`,
+          link: `/feed?post=${postId}&comment=${comment.id}`,
           relatedUserId: userId,
-          relatedEntityId: postId,
+          relatedEntityId: comment.id,
         });
       }
       

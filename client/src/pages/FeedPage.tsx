@@ -59,6 +59,7 @@ export default function FeedPage() {
   const [createPostOpen, setCreatePostOpen] = useState(false);
   const [feedFilter, setFeedFilter] = useState<string>('following'); // 'following', 'all', or community ID
   const [selectedPost, setSelectedPost] = useState<any | null>(null);
+  const [highlightCommentId, setHighlightCommentId] = useState<string | null>(null);
   const [attachedEvent, setAttachedEvent] = useState<Event | null>(null);
   const [attachedVenue, setAttachedVenue] = useState<Venue | null>(null);
   const [communityModalOpen, setCommunityModalOpen] = useState(false);
@@ -130,17 +131,25 @@ export default function FeedPage() {
   const isLoading = isViewingCommunity ? isLoadingCommunity : isLoadingMain;
   const isError = isViewingCommunity ? isErrorCommunity : isErrorMain;
 
-  // Open a specific post when arriving from a notification link (/feed?post=<id>)
+  // Open a specific post (and optionally highlight a comment) when arriving
+  // from a notification link: /feed?post=<postId>&comment=<commentId>
+  // Fetches the post directly by ID so it works regardless of the active feed filter.
   const notificationPostId = new URLSearchParams(search).get("post");
+  const notificationCommentId = new URLSearchParams(search).get("comment");
   useEffect(() => {
-    if (!notificationPostId || posts.length === 0) return;
-    const target = posts.find((p: any) => p.id === notificationPostId);
-    if (target) {
-      setSelectedPost(target);
-      // Strip the query param so the back button doesn't re-open the dialog
-      navigate("/feed", { replace: true });
-    }
-  }, [notificationPostId, posts]);
+    if (!notificationPostId) return;
+    // Clean the URL immediately so the back button doesn't re-trigger this
+    navigate("/feed", { replace: true });
+    fetch(`/api/posts/${notificationPostId}`, { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((post) => {
+        if (post) {
+          setSelectedPost(post);
+          if (notificationCommentId) setHighlightCommentId(notificationCommentId);
+        }
+      })
+      .catch(console.error);
+  }, [notificationPostId]);
 
   // Extract unique @usernames from all posts for avatar lookup
   const mentionedUsernames = useMemo(() => {
@@ -464,7 +473,7 @@ export default function FeedPage() {
       {selectedPost && (
         <PostDetailDialog
           open={!!selectedPost}
-          onClose={() => setSelectedPost(null)}
+          onClose={() => { setSelectedPost(null); setHighlightCommentId(null); }}
           postId={selectedPost.id}
           author={{
             name: selectedPost.user?.displayName || selectedPost.user?.organizationName || selectedPost.user?.username || selectedPost.author?.name || 'Unknown',
@@ -477,6 +486,7 @@ export default function FeedPage() {
           imageUrls={selectedPost.imageUrls}
           videoUrl={selectedPost.videoUrl}
           createdAt={selectedPost.createdAt}
+          highlightCommentId={highlightCommentId ?? undefined}
         />
       )}
 

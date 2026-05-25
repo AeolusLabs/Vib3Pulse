@@ -3,7 +3,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-import { useState, Fragment } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -30,6 +30,7 @@ interface PostDetailDialogProps {
   imageUrls?: string[];
   videoUrl?: string;
   createdAt?: string | Date;
+  highlightCommentId?: string;
 }
 
 function renderContentWithLinkedMentionsAndHashtags(
@@ -102,6 +103,7 @@ export default function PostDetailDialog({
   imageUrls,
   videoUrl,
   createdAt,
+  highlightCommentId,
 }: PostDetailDialogProps) {
   const allImages = [
     ...(imageUrls || []),
@@ -111,13 +113,37 @@ export default function PostDetailDialog({
   const { toast } = useToast();
   const { data: currentUser } = useAuth();
   const [newComment, setNewComment] = useState('');
+  const [highlightActive, setHighlightActive] = useState(true);
+  const commentRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   const { data: commentsData, isLoading: commentsLoading } = useQuery<{ comments: any[]; count: number }>({
     queryKey: ['/api/posts', postId, 'comments'],
     enabled: open,
   });
-  
+
   const comments = commentsData?.comments || [];
+
+  // Reset highlight pulse whenever targeting a new comment
+  useEffect(() => {
+    setHighlightActive(true);
+  }, [highlightCommentId]);
+
+  // Once comments have loaded, scroll to the targeted comment and schedule fade-out
+  useEffect(() => {
+    if (!highlightCommentId || commentsLoading || comments.length === 0) return;
+    const el = commentRefs.current.get(highlightCommentId);
+    if (!el) return;
+    const scrollTimer = setTimeout(() => {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 300);
+    const fadeTimer = setTimeout(() => {
+      setHighlightActive(false);
+    }, 2800);
+    return () => {
+      clearTimeout(scrollTimer);
+      clearTimeout(fadeTimer);
+    };
+  }, [highlightCommentId, commentsLoading, comments.length]);
 
   const { data: likeData } = useQuery<{ count: number; isLiked: boolean }>({
     queryKey: ['/api/posts', postId, 'likes'],
@@ -382,25 +408,40 @@ export default function PostDetailDialog({
                 <p className="text-sm text-muted-foreground">No comments yet. Be the first to comment!</p>
               ) : (
                 <div className="space-y-4">
-                  {comments.map((comment: any) => (
-                    <CommentItem
-                      key={comment.id}
-                      comment={comment}
-                      postId={postId}
-                      onNavigate={(path) => {
-                        navigate(path);
-                        onClose();
-                      }}
-                      renderContent={(content) => (
-                        <>
-                          {renderContentWithLinkedMentionsAndHashtags(content, (path) => {
+                  {comments.map((comment: any) => {
+                    const isHighlighted = comment.id === highlightCommentId;
+                    return (
+                      <div
+                        key={comment.id}
+                        ref={(el) => {
+                          if (el) commentRefs.current.set(comment.id, el);
+                          else commentRefs.current.delete(comment.id);
+                        }}
+                        className={`rounded-lg transition-[background-color] duration-1000 ${
+                          isHighlighted && highlightActive
+                            ? "bg-primary/10"
+                            : "bg-transparent"
+                        }`}
+                      >
+                        <CommentItem
+                          comment={comment}
+                          postId={postId}
+                          onNavigate={(path) => {
                             navigate(path);
                             onClose();
-                          })}
-                        </>
-                      )}
-                    />
-                  ))}
+                          }}
+                          renderContent={(content) => (
+                            <>
+                              {renderContentWithLinkedMentionsAndHashtags(content, (path) => {
+                                navigate(path);
+                                onClose();
+                              })}
+                            </>
+                          )}
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
