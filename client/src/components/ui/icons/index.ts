@@ -114,5 +114,6 @@ export { default as XIcon } from "./x-icon";
 export { default as XCircleIcon } from "./x-circle-icon";
 export { default as ZapIcon } from "./zap-icon";
 export { default as ZapOffIcon } from "./zap-off-icon";
+export { ScissorsIcon } from "./scissors-icon";
 export { default as PlugConnectedIcon } from "../plug-connected-icon";
 export type { AnimatedIconProps, AnimatedIconHandle } from "../types";

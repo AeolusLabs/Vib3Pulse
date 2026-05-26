@@ -30,7 +30,13 @@ export async function captureVideoThumbnail(blobUrl: string, seekSecs: number): 
   });
 }
 
-function recordSegment(
+/**
+ * Records a segment of `video` starting at `start` for `segDuration` seconds.
+ * The video element must be in the DOM (Chrome requires this for captureStream).
+ * Exported so useVideoTrimmer can reuse the same MediaRecorder primitive without
+ * duplicating codec detection or chunk accumulation logic.
+ */
+export function recordVideoSegment(
   video: HTMLVideoElement,
   start: number,
   segDuration: number,
@@ -41,35 +47,42 @@ function recordSegment(
     const onSeeked = () => {
       video.removeEventListener("seeked", onSeeked);
 
-      const stream: MediaStream =
-        (video as any).captureStream?.() ||
-        (video as any).mozCaptureStream?.();
+      // One RAF tick ensures the decoded frame is painted before capture starts,
+      // preventing black/stale frames at the head of the recorded segment.
+      requestAnimationFrame(() => {
+        const stream: MediaStream =
+          (video as any).captureStream?.() ||
+          (video as any).mozCaptureStream?.();
 
-      if (!stream) {
-        reject(new Error("captureStream is not supported in this browser"));
-        return;
-      }
+        if (!stream) {
+          reject(new Error("captureStream is not supported in this browser"));
+          return;
+        }
 
-      const mimeType =
-        MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9" :
-        MediaRecorder.isTypeSupported("video/webm;codecs=vp8") ? "video/webm;codecs=vp8" :
-        "video/webm";
+        const mimeType =
+          MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9" :
+          MediaRecorder.isTypeSupported("video/webm;codecs=vp8") ? "video/webm;codecs=vp8" :
+          "video/webm";
 
-      const recorder = new MediaRecorder(stream, { mimeType });
-      const chunks: Blob[] = [];
+        const recorder = new MediaRecorder(stream, { mimeType });
+        const chunks: Blob[] = [];
 
-      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-      recorder.onstop = () => {
-        video.pause();
-        resolve(new Blob(chunks, { type: recorder.mimeType || "video/webm" }));
-      };
-      recorder.onerror = () => reject(new Error("MediaRecorder error during segment capture"));
+        recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+        recorder.onstop = () => {
+          video.pause();
+          resolve(new Blob(chunks, { type: recorder.mimeType || "video/webm" }));
+        };
+        recorder.onerror = () => reject(new Error("MediaRecorder error during segment capture"));
 
-      recorder.start(200);
-      video.play().catch(reject);
-      setTimeout(() => {
-        if (recorder.state === "recording") recorder.stop();
-      }, (segDuration + 0.4) * 1000);
+        recorder.start(200);
+        video.play().catch(reject);
+
+        // Wall-clock timeout as the stop signal. The +0.4s buffer prevents
+        // 0-byte output on devices that are slow to deliver the final frame.
+        setTimeout(() => {
+          if (recorder.state === "recording") recorder.stop();
+        }, (segDuration + 0.4) * 1000);
+      });
     };
 
     video.addEventListener("seeked", onSeeked);
@@ -82,7 +95,7 @@ export function useVideoSplitter() {
 
   const split = useCallback(async (
     blob: Blob,
-    segDurationSecs = 15,
+    segDurationSecs = 60,
   ): Promise<Blob[]> => {
     const supported =
       typeof MediaRecorder !== "undefined" &&
@@ -128,7 +141,7 @@ export function useVideoSplitter() {
         setProgress({ segment: i + 1, total: totalSegments });
         const start = i * segDurationSecs;
         const segDur = Math.min(totalDuration - start, segDurationSecs);
-        segments.push(await recordSegment(video, start, segDur));
+        segments.push(await recordVideoSegment(video, start, segDur));
       }
 
       return segments;

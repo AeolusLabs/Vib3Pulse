@@ -9,6 +9,7 @@
 
 import { useState, useRef } from "react";
 import { useVideoSplitter, captureVideoThumbnail } from "@/hooks/useVideoSplitter";
+import { VideoTrimPanel } from "@/components/VideoTrimPanel";
 
 import { Button } from "@/components/ui/button";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
@@ -22,7 +23,7 @@ import type { User } from "@shared/schema";
 import {
   XIcon, TypeIcon, CheckIcon, PencilIcon, SparklesIcon,
   GlobeIcon, LockIcon, UsersIcon, SendIcon, ImageIcon,
-  ChevronLeftIcon, FilmIcon, UploadIcon, CropIcon,
+  ChevronLeftIcon, FilmIcon, UploadIcon, CropIcon, ScissorsIcon,
 } from "@/components/ui/icons";
 
 // ─── design tokens ───────────────────────────────────────────────────────────
@@ -85,7 +86,7 @@ interface VibeTagData {
   y: number;
 }
 
-type ActiveTool = "none" | "text" | "draw" | "filter" | "vibe" | "crop";
+type ActiveTool = "none" | "text" | "draw" | "filter" | "vibe" | "crop" | "trim";
 type Phase      = "pick" | "editing";
 type MediaKind  = "photo" | "video";
 
@@ -230,6 +231,9 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
   const [activeSegments, setActiveSegments]         = useState<boolean[]>([]);
   const [showSegmentPreview, setShowSegmentPreview] = useState(false);
   const [segmentPostIdx, setSegmentPostIdx]         = useState(0);
+
+  // video trim
+  const [showTrimPanel, setShowTrimPanel] = useState(false);
   // refs ─────────────────────────────────────────────────────────────────────
   const frameRef     = useRef<HTMLDivElement>(null);
   const galleryInput = useRef<HTMLInputElement>(null);
@@ -631,14 +635,14 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
     if (isPosting || createStoryMutation.isPending || isSplitting) return;
 
     // Long video → split flow
-    if (mediaKind === "video" && capturedVideoBlob && videoDuration > 15) {
+    if (mediaKind === "video" && capturedVideoBlob && videoDuration > 60) {
       setIsPosting(true);
       try {
         // Generate thumbnails from original blob (fast, doesn't need real-time)
         const thumbUrl = capturedVideoUrl!;
-        const segCount = Math.ceil(videoDuration / 15);
+        const segCount = Math.ceil(videoDuration / 60);
         const thumbPromises = Array.from({ length: segCount }, (_, i) =>
-          captureVideoThumbnail(thumbUrl, i * 15 + Math.min(1, (videoDuration - i * 15) / 2))
+          captureVideoThumbnail(thumbUrl, i * 60 + Math.min(1, (videoDuration - i * 60) / 2))
         );
 
         // Split video (real-time, shows progress modal via isSplitting)
@@ -722,6 +726,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
     setCaption(""); setPrivacy("public"); setSelectedViewers([]); setShowViewerSheet(false);
     setIsPosting(false); setUploadProgress(0);
     setVideoDuration(0); setSplitSegments([]); setSegmentThumbs([]); setActiveSegments([]); setShowSegmentPreview(false); setSegmentPostIdx(0);
+    setShowTrimPanel(false);
     clearDraw();
   };
 
@@ -733,6 +738,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
     setActiveTool("none"); setSelectedFilter(0); setCropRect({ x: 5, y: 5, w: 90, h: 90 }); setVideoCropParams(null); setAspectLock(null); setIsCropDragging(false); setTextOverlays([]); setVibeTag(null);
     setCaption(""); setIsPosting(false);
     setVideoDuration(0); setSplitSegments([]); setSegmentThumbs([]); setActiveSegments([]); setShowSegmentPreview(false);
+    setShowTrimPanel(false);
     clearDraw(); setPhase("pick");
   };
 
@@ -832,7 +838,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
 
                   {/* supported formats hint */}
                   <p className="text-white/20 text-xs text-center tracking-wide">
-                    Photos · Videos up to 5 minutes (auto-split into 15s clips)
+                    Photos · Videos up to 5 minutes (auto-split into 60s clips)
                   </p>
                 </motion.div>
 
@@ -914,6 +920,21 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                 >
                   <CropIcon className="h-4.5 w-4.5" />
                 </button>
+                {/* trim — video only */}
+                {mediaKind === "video" && (
+                  <button
+                    onClick={() => setShowTrimPanel(true)}
+                    className="w-10 h-10 rounded-full flex items-center justify-center text-white transition-all"
+                    style={{
+                      backgroundColor: "rgba(0,0,0,0.45)",
+                      backdropFilter: "blur(8px)",
+                      transition: `all 0.15s ${E.out}`,
+                    }}
+                    aria-label="Trim video"
+                  >
+                    <ScissorsIcon className="h-4.5 w-4.5" />
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1393,8 +1414,8 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                         <><div className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin" />{uploadProgress > 0 ? `${uploadProgress}%` : "Uploading…"}</>
                       ) : createStoryMutation.isPending ? (
                         <><div className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin" />Posting…</>
-                      ) : videoDuration > 15 ? (
-                        <><SendIcon className="h-4 w-4" />{Math.ceil(videoDuration / 15)} Stories</>
+                      ) : videoDuration > 60 ? (
+                        <><SendIcon className="h-4 w-4" />{Math.ceil(videoDuration / 60)} Stories</>
                       ) : (
                         <><SendIcon className="h-4 w-4" />Your Story</>
                       )}
@@ -1459,7 +1480,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                     <div className="flex gap-3 px-5 overflow-x-auto py-6" style={{ scrollbarWidth: "none" } as React.CSSProperties}>
                       {splitSegments.map((_, i) => {
                         const active = activeSegments[i];
-                        const dur = Math.min(15, videoDuration - i * 15);
+                        const dur = Math.min(60, videoDuration - i * 60);
                         return (
                           <div
                             key={i}
@@ -1518,6 +1539,28 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                     </button>
                   </div>
                 </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* ── trim panel ──────────────────────────────────────────────── */}
+            <AnimatePresence>
+              {showTrimPanel && capturedVideoUrl && (
+                <VideoTrimPanel
+                  videoUrl={capturedVideoUrl}
+                  duration={videoDuration}
+                  onConfirm={(blob, newDuration) => {
+                    const oldUrl = capturedVideoUrl;
+                    const newUrl = URL.createObjectURL(blob);
+                    setCapturedVideoBlob(blob);
+                    setCapturedVideoUrl(newUrl);
+                    setVideoDuration(newDuration);
+                    setShowTrimPanel(false);
+                    // Delay revocation so the panel exit animation (350ms) completes
+                    // before the video element loses access to the old object URL.
+                    setTimeout(() => URL.revokeObjectURL(oldUrl), 500);
+                  }}
+                  onCancel={() => setShowTrimPanel(false)}
+                />
               )}
             </AnimatePresence>
 
