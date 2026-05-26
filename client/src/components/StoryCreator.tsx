@@ -273,7 +273,17 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
     if (!file) return;
     e.target.value = "";
 
-    if (file.type.startsWith("image/")) {
+    // Some Android devices and the iOS Files app report file.type = "" for
+    // perfectly valid video files. Fall back to the file extension so those
+    // files don't silently vanish into the else-branch below.
+    const mime = file.type;
+    const ext  = file.name.split(".").pop()?.toLowerCase() ?? "";
+    const VIDEO_EXTS = ["mp4", "mov", "webm", "m4v", "mkv", "avi", "3gp"];
+
+    const isImage = mime.startsWith("image/");
+    const isVideo = mime.startsWith("video/") || (!isImage && VIDEO_EXTS.includes(ext));
+
+    if (isImage) {
       const reader = new FileReader();
       reader.onloadend = () => {
         setCapturedImage(reader.result as string);
@@ -288,10 +298,11 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
         });
       };
       reader.readAsDataURL(file);
-    } else if (file.type.startsWith("video/")) {
+    } else if (isVideo) {
       const tempUrl = URL.createObjectURL(file);
-      const probe = document.createElement("video");
+      const probe   = document.createElement("video");
       probe.preload = "metadata";
+
       probe.onloadedmetadata = () => {
         const dur = probe.duration;
         URL.revokeObjectURL(tempUrl);
@@ -309,11 +320,18 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
         setMediaKind("video");
         setPhase("editing");
       };
+
       probe.onerror = () => {
         URL.revokeObjectURL(tempUrl);
-        toast({ title: "Invalid video", description: "Could not read that video file.", variant: "destructive" });
+        toast({ title: "Unsupported video", description: "This video format can't be played in your browser. Try an MP4 or MOV file.", variant: "destructive" });
       };
+
       probe.src = tempUrl;
+      // Explicitly call load() — required on some Android browsers and
+      // mobile WebViews that don't trigger onloadedmetadata from src alone.
+      probe.load();
+    } else {
+      toast({ title: "Unsupported file", description: "Please select a photo or video.", variant: "destructive" });
     }
   };
 
