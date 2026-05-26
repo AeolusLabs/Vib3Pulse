@@ -239,6 +239,9 @@ export async function ensureSchema() {
   await pool.query(`
     DROP TABLE IF EXISTS story_replies
   `);
+  await pool.query(`
+    ALTER TABLE conversation_messages ADD COLUMN IF NOT EXISTS story_id VARCHAR REFERENCES stories(id) ON DELETE SET NULL
+  `);
 }
 
 export interface IStorage {
@@ -636,7 +639,7 @@ export interface IStorage {
 
   // Conversation messages
   sendConversationMessage(message: InsertConversationMessage): Promise<ConversationMessage>;
-  getConversationMessages(conversationId: string, limit?: number, before?: string): Promise<Array<ConversationMessage & { sender: User; replyTo?: ConversationMessage & { sender: User } }>>;
+  getConversationMessages(conversationId: string, limit?: number, before?: string): Promise<Array<ConversationMessage & { sender: User; replyTo?: ConversationMessage & { sender: User }; story?: Story & { user: User } }>>;
   deleteConversationMessage(messageId: string): Promise<void>;
   
   // Polls
@@ -4050,12 +4053,9 @@ export class DbStorage implements IStorage {
     return result;
   }
 
-  async getConversationMessages(conversationId: string, limit: number = 50, before?: string): Promise<Array<ConversationMessage & { sender: User; replyTo?: ConversationMessage & { sender: User } }>> {
-    let query = db
-      .select({
-        message: conversationMessages,
-        sender: users,
-      })
+  async getConversationMessages(conversationId: string, limit: number = 50, before?: string): Promise<Array<ConversationMessage & { sender: User; replyTo?: ConversationMessage & { sender: User }; story?: Story & { user: User } }>> {
+    const result = await db
+      .select({ message: conversationMessages, sender: users })
       .from(conversationMessages)
       .innerJoin(users, eq(conversationMessages.senderId, users.id))
       .where(and(
@@ -4064,43 +4064,52 @@ export class DbStorage implements IStorage {
       ))
       .orderBy(desc(conversationMessages.createdAt))
       .limit(limit);
-    
-    const result = await query;
-    
-    // Handle reply-to messages
-    const messagesWithReplies: Array<ConversationMessage & { sender: User; replyTo?: ConversationMessage & { sender: User } }> = [];
-    
-    for (const r of result) {
-      let replyTo: (ConversationMessage & { sender: User }) | undefined;
-      
-      if (r.message.replyToId) {
-        const replyResult = await db
-          .select({
-            message: conversationMessages,
-            sender: users,
-          })
-          .from(conversationMessages)
-          .innerJoin(users, eq(conversationMessages.senderId, users.id))
-          .where(eq(conversationMessages.id, r.message.replyToId))
-          .limit(1);
-        
-        if (replyResult[0]) {
-          replyTo = {
-            ...replyResult[0].message,
-            sender: replyResult[0].sender,
-          };
-        }
+
+    // Batch-fetch stories for story_reply messages — one query regardless of thread length
+    const storyIds = [...new Set(
+      result
+        .filter(r => r.message.messageType === 'story_reply' && r.message.storyId)
+        .map(r => r.message.storyId!)
+    )];
+
+    const storiesById = new Map<string, Story & { user: User }>();
+    if (storyIds.length > 0) {
+      const storyRows = await db
+        .select({ story: stories, storyUser: users })
+        .from(stories)
+        .innerJoin(users, eq(stories.userId, users.id))
+        .where(inArray(stories.id, storyIds));
+      for (const row of storyRows) {
+        storiesById.set(row.story.id, { ...row.story, user: row.storyUser });
       }
-      
-      messagesWithReplies.push({
-        ...r.message,
-        sender: r.sender,
-        replyTo,
-      });
     }
-    
+
+    // Collect replyTo IDs and batch-fetch them
+    const replyToIds = [...new Set(
+      result.filter(r => r.message.replyToId).map(r => r.message.replyToId!)
+    )];
+
+    const replyToById = new Map<string, ConversationMessage & { sender: User }>();
+    if (replyToIds.length > 0) {
+      const replyRows = await db
+        .select({ message: conversationMessages, sender: users })
+        .from(conversationMessages)
+        .innerJoin(users, eq(conversationMessages.senderId, users.id))
+        .where(inArray(conversationMessages.id, replyToIds));
+      for (const row of replyRows) {
+        replyToById.set(row.message.id, { ...row.message, sender: row.sender });
+      }
+    }
+
+    const messagesWithData: Array<ConversationMessage & { sender: User; replyTo?: ConversationMessage & { sender: User }; story?: Story & { user: User } }> = result.map(r => ({
+      ...r.message,
+      sender: r.sender,
+      replyTo: r.message.replyToId ? replyToById.get(r.message.replyToId) : undefined,
+      story: r.message.storyId ? storiesById.get(r.message.storyId) : undefined,
+    }));
+
     // Return in chronological order (oldest first)
-    return messagesWithReplies.reverse();
+    return messagesWithData.reverse();
   }
 
   async deleteConversationMessage(messageId: string): Promise<void> {

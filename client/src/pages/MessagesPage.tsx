@@ -29,8 +29,8 @@ import { format, formatDistanceToNow } from "date-fns";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
-import type { User, Message, Event, Venue, Conversation, ConversationParticipant, ConversationMessage } from "@shared/schema";
-import { SendIcon, ArrowLeftIcon, SearchIcon, UserPlusIcon, ReplyIcon, XIcon, CalendarIcon, MapPinIcon, Building2Icon, UsersIcon, PlusIcon, MessageSquareIcon, ChevronDownIcon } from "@/components/ui/icons";
+import type { User, Message, Event, Venue, Conversation, ConversationParticipant, ConversationMessage, Story } from "@shared/schema";
+import { SendIcon, ArrowLeftIcon, SearchIcon, UserPlusIcon, ReplyIcon, XIcon, CalendarIcon, MapPinIcon, Building2Icon, UsersIcon, PlusIcon, MessageSquareIcon, ChevronDownIcon, ImageIcon, PlayIcon } from "@/components/ui/icons";
 
 type ConversationWithDetails = Conversation & {
   participants: Array<ConversationParticipant & { user: User }>;
@@ -133,7 +133,68 @@ function MessageAttachedVenue({ venueId, isOwnMessage }: { venueId: string; isOw
 type ConversationMessageWithSender = ConversationMessage & {
   sender: User;
   replyTo?: ConversationMessage & { sender: User };
+  story?: Story & { user: User };
 };
+
+function StoryReplyCard({ story, isOwnMessage }: { story?: Story & { user: User }; isOwnMessage: boolean }) {
+  const [, navigate] = useLocation();
+  const isExpired = story ? new Date(story.expiresAt) < new Date() : true;
+  const isAvailable = !!story && !isExpired;
+
+  return (
+    <div className="mb-2.5">
+      <div
+        role={isAvailable ? "button" : undefined}
+        tabIndex={isAvailable ? 0 : undefined}
+        className={`relative w-28 rounded-xl overflow-hidden select-none ${
+          isAvailable
+            ? "cursor-pointer active:scale-[0.97] transition-transform"
+            : "cursor-default opacity-60"
+        }`}
+        onClick={(e) => {
+          if (!isAvailable) return;
+          e.stopPropagation();
+          navigate(`/stories/${story!.id}`);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && isAvailable) navigate(`/stories/${story!.id}`);
+        }}
+      >
+        <div className="aspect-[9/16] bg-black/30">
+          {isAvailable ? (
+            <img src={story!.imageUrl} alt="Story" className="w-full h-full object-cover" />
+          ) : (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
+              <ImageIcon className={`h-5 w-5 ${isOwnMessage ? "text-white/40" : "text-muted-foreground/60"}`} />
+              <p className={`text-[10px] ${isOwnMessage ? "text-white/40" : "text-muted-foreground/60"}`}>
+                Story expired
+              </p>
+            </div>
+          )}
+        </div>
+        {isAvailable && (
+          <>
+            {story!.type === "video" && (
+              <div className="absolute top-1.5 left-1.5">
+                <div className="bg-black/50 rounded-full p-1">
+                  <PlayIcon className="h-3 w-3 text-white" />
+                </div>
+              </div>
+            )}
+            <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/70 to-transparent px-2 py-2">
+              <p className="text-white text-[10px] font-medium leading-tight truncate">
+                @{story!.user.username}
+              </p>
+            </div>
+          </>
+        )}
+      </div>
+      <p className={`text-[10px] mt-1 ${isOwnMessage ? "text-white/50" : "text-muted-foreground"}`}>
+        Replied to story
+      </p>
+    </div>
+  );
+}
 
 export default function MessagesPage() {
   const { conversationId } = useParams<{ conversationId?: string }>();
@@ -449,6 +510,9 @@ export default function MessagesPage() {
                                 : 'bg-muted text-foreground rounded-2xl rounded-bl-sm'
                             }`}
                           >
+                            {message.messageType === 'story_reply' && (
+                              <StoryReplyCard story={message.story} isOwnMessage={isOwnMessage} />
+                            )}
                             {message.replyTo && (
                               <div
                                 className={`mb-2 px-2 py-1.5 rounded-lg border-l-2 ${

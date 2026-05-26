@@ -2169,7 +2169,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         conversationId: conversation.id,
         senderId: userId,
         content,
-        messageType: "text",
+        messageType: "story_reply",
+        storyId,
       });
 
       // Notification is best-effort — a failure here must not roll back the sent message
