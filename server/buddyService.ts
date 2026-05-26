@@ -47,9 +47,6 @@ function isNigerianNumber(phone: string): boolean {
   return phone.startsWith("+234");
 }
 
-function isUKNumber(phone: string): boolean {
-  return phone.startsWith("+44");
-}
 
 async function sendBuddySMS(
   phone: string,
@@ -59,18 +56,10 @@ async function sendBuddySMS(
   const ukTemplate = `${userName} is going to ${eventName} and has added you as their safety buddy on Vib3Pulse. If they need help, we will text you their location — no app needed. Reply YES to confirm or NO to decline. Vib3Pulse`;
   const ngTemplate = `${userName} is going to ${eventName} and has added you as their safety buddy on Vib3Pulse. If they need help, we go text you their location — no app needed. Reply YES to confirm or NO to decline. Vib3Pulse`;
 
-  try {
-    if (isNigerianNumber(phone)) {
-      await sendNigeriaSMS(phone, ngTemplate);
-    } else if (isUKNumber(phone)) {
-      await sendUKSMS(phone, ukTemplate);
-    } else {
-      // Default to Twilio for unknown regions
-      await sendUKSMS(phone, ukTemplate);
-    }
-  } catch (err: any) {
-    // SMS failures must not crash the app
-    console.error(`[BuddyService] SMS send failed to ${phone}:`, err.message);
+  if (isNigerianNumber(phone)) {
+    await sendNigeriaSMS(phone, ngTemplate);
+  } else {
+    await sendUKSMS(phone, ukTemplate);
   }
 }
 
@@ -132,8 +121,9 @@ export async function assignBuddy(
   // Get current event name if they have an upcoming ticket — fall back to a generic placeholder
   const eventName = "their next event";
 
-  // Fire SMS (non-blocking — errors logged but don't fail the request)
-  sendBuddySMS(phone, displayName, eventName).catch(() => {});
+  sendBuddySMS(phone, displayName, eventName).catch((err: any) => {
+    console.error(`[BuddyService] SMS send failed to ${phone}:`, err.message);
+  });
 
   console.log(`[BuddyService] Invitation sent to ${phone} for user ${userId}, token expires ${expiresAt.toISOString()}`);
 

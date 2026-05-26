@@ -21,7 +21,7 @@ router.post("/buddy-assignment", requireAuth, async (req, res) => {
     const buddy = await assignBuddy(userId, name, phone_number);
 
     res.status(201).json({
-      message: `SMS sent to ${buddy.phoneNumber}. They need to reply YES to confirm.`,
+      message: `Buddy added. A confirmation SMS has been dispatched to ${buddy.phoneNumber} — they need to reply YES to confirm.`,
       buddy,
     });
   } catch (err: any) {
