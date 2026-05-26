@@ -146,7 +146,7 @@ function StoryReplyCard({ story, isOwnMessage }: { story?: Story & { user: User 
       <div
         role={isAvailable ? "button" : undefined}
         tabIndex={isAvailable ? 0 : undefined}
-        className={`relative w-28 rounded-xl overflow-hidden select-none ${
+        className={`relative w-28 h-[198px] rounded-xl overflow-hidden select-none bg-black/30 ${
           isAvailable
             ? "cursor-pointer active:scale-[0.97] transition-transform"
             : "cursor-default opacity-60"
@@ -160,18 +160,16 @@ function StoryReplyCard({ story, isOwnMessage }: { story?: Story & { user: User 
           if (e.key === "Enter" && isAvailable) navigate(`/stories/${story!.id}`);
         }}
       >
-        <div className="aspect-[9/16] bg-black/30">
-          {isAvailable ? (
-            <img src={story!.imageUrl} alt="Story" className="w-full h-full object-cover" />
-          ) : (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
-              <ImageIcon className={`h-5 w-5 ${isOwnMessage ? "text-white/40" : "text-muted-foreground/60"}`} />
-              <p className={`text-[10px] ${isOwnMessage ? "text-white/40" : "text-muted-foreground/60"}`}>
-                Story expired
-              </p>
-            </div>
-          )}
-        </div>
+        {isAvailable ? (
+          <img src={story!.imageUrl} alt="Story" className="absolute inset-0 w-full h-full object-cover" />
+        ) : (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
+            <ImageIcon className={`h-5 w-5 ${isOwnMessage ? "text-white/40" : "text-muted-foreground/60"}`} />
+            <p className={`text-[10px] ${isOwnMessage ? "text-white/40" : "text-muted-foreground/60"}`}>
+              Story expired
+            </p>
+          </div>
+        )}
         {isAvailable && (
           <>
             {story!.type === "video" && (
