@@ -1,8 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useEffect } from "react";
+import { useAuth } from "@/hooks/useAuth";
 
 export function useUnreadMessagesCount() {
+  const { data: user } = useAuth();
   return useQuery<number>({
     queryKey: ["/api/messages/unread-count"],
     queryFn: async () => {
@@ -13,8 +15,9 @@ export function useUnreadMessagesCount() {
       const data = await response.json();
       return data.count;
     },
+    enabled: !!user,
     staleTime: 15000,
-    refetchInterval: 30000,
+    refetchInterval: !!user ? 30000 : false,
   });
 }
 
