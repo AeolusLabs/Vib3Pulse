@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import crypto from "crypto";
 import sanitizeHtml from "sanitize-html";
 
@@ -159,7 +159,7 @@ export const sensitiveOperationLimiter = rateLimit({
 export const ratingSubmitLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 5,
-  keyGenerator: (req) => (req.user as any)?.id ?? req.ip ?? "anonymous",
+  keyGenerator: (req) => (req.user as any)?.id ?? ipKeyGenerator(req.ip ?? ""),
   message: {
     error: "RATE_LIMITED",
     message: "Too many requests, try again later",
