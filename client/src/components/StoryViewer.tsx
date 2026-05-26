@@ -46,6 +46,7 @@ interface StoryViewerProps {
   username: string;
   avatar?: string;
   slides: StorySlide[];
+  initialSlide?: number;
   onClose: () => void;
   onNext?: () => void;
   onPrevious?: () => void;
@@ -58,6 +59,7 @@ export default function StoryViewer({
   username,
   avatar,
   slides,
+  initialSlide = 0,
   onClose,
   onNext,
   onPrevious,
@@ -68,7 +70,7 @@ export default function StoryViewer({
   const { data: currentUser } = useAuth();
   const { toast } = useToast();
   const isOwnStory = currentUser?.id === storyOwnerId;
-  const [currentSlide, setCurrentSlide] = useState(0);
+  const [currentSlide, setCurrentSlide] = useState(initialSlide);
   const [progress, setProgress] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [replyText, setReplyText] = useState("");
@@ -470,16 +472,6 @@ export default function StoryViewer({
         <div className="relative h-full w-full overflow-hidden">
           {currentStory.type === "video" ? (
             <>
-              {/* Blurred background fill for non-portrait videos */}
-              <video
-                src={currentStory.videoUrl || currentStory.content}
-                className="absolute inset-0 w-full h-full object-cover scale-110 blur-2xl opacity-50"
-                muted
-                playsInline
-                autoPlay
-                loop
-                aria-hidden="true"
-              />
               {/* Main video — cropped if cropParams present */}
               {currentStory.cropParams ? (
                 <div className="absolute inset-0 overflow-hidden">

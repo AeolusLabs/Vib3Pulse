@@ -2,6 +2,7 @@ import { useEffect, useMemo } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import StoryViewer from "@/components/StoryViewer";
+import { queryClient } from "@/lib/queryClient";
 
 type StoryWithUser = {
   id: string;
@@ -31,7 +32,12 @@ export default function StoryDetailPage() {
   const { storyId } = useParams<{ storyId: string }>();
   const [, navigate] = useLocation();
 
-  // Fetch the story directly by ID — bypasses the 24-hour expiry filter on /api/stories
+  // Seed from the all-stories cache (populated by FeedPage) — avoids a serial waterfall fetch
+  const cachedStory = (queryClient.getQueryData<StoryWithUser[]>(["/api/stories"]) ?? [])
+    .find((s) => s.id === storyId);
+
+  // Only hit the network when the story isn't already in the all-stories cache.
+  // Falls back to the individual endpoint for expired/private stories from deep links.
   const { data: targetStory, isLoading: isStoryLoading } = useQuery<StoryWithUser | null>({
     queryKey: ["/api/stories", storyId],
     queryFn: async () => {
@@ -40,13 +46,14 @@ export default function StoryDetailPage() {
       if (!res.ok) throw new Error("Failed to fetch story");
       return res.json();
     },
+    initialData: cachedStory,
+    enabled: !cachedStory,
     retry: false,
   });
 
-  // Active stories list — used only for prev/next group navigation
+  // Run in parallel with targetStory — no longer gated on it resolving first
   const { data: allStories = [] } = useQuery<StoryWithUser[]>({
     queryKey: ["/api/stories"],
-    enabled: !!targetStory,
   });
 
   // Stories grouped by user, preserving insertion order
@@ -82,6 +89,9 @@ export default function StoryDetailPage() {
 
   // If the story is in the active list, use its full group for slides; otherwise show it standalone
   const currentGroup = currentGroupIndex !== -1 ? groupedList[currentGroupIndex] : [targetStory];
+
+  // Start at the correct slide for deep-linked story IDs mid-group
+  const initialSlide = Math.max(0, currentGroup.findIndex((s: StoryWithUser) => s.id === storyId));
 
   const slides = currentGroup.map((story) => ({
     id: story.id,
@@ -120,6 +130,7 @@ export default function StoryDetailPage() {
       username={targetStory.user.username}
       avatar={targetStory.user.avatarUrl ?? undefined}
       slides={slides}
+      initialSlide={initialSlide}
       onClose={() => navigate("/feed")}
       onNext={handleNext}
       onPrevious={currentGroupIndex > 0 ? handlePrevious : undefined}
