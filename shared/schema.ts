@@ -368,23 +368,6 @@ export const insertStoryViewSchema = createInsertSchema(storyViews).omit({
 export type InsertStoryView = z.infer<typeof insertStoryViewSchema>;
 export type StoryView = typeof storyViews.$inferSelect;
 
-// Story replies - messages sent by viewers in response to a story
-export const storyReplies = pgTable("story_replies", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  storyId: varchar("story_id").notNull().references(() => stories.id, { onDelete: "cascade" }),
-  senderId: varchar("sender_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  content: text("content").notNull(),
-  createdAt: timestamp("created_at").notNull().default(sql`now()`),
-});
-
-export const insertStoryReplySchema = createInsertSchema(storyReplies).omit({
-  id: true,
-  createdAt: true,
-});
-
-export type InsertStoryReply = z.infer<typeof insertStoryReplySchema>;
-export type StoryReply = typeof storyReplies.$inferSelect;
-
 export const follows = pgTable("follows", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   followerId: varchar("follower_id").notNull().references(() => users.id),
@@ -429,6 +412,7 @@ export const conversations = pgTable("conversations", {
   name: text("name"), // Only for group chats
   avatarUrl: text("avatar_url"), // Group avatar
   inviteCode: text("invite_code").unique(), // Unique invite code for joining group
+  directKey: varchar("direct_key").unique(), // Sorted "userA:userB" key for race-safe direct conversation lookup
   createdById: varchar("created_by_id").references(() => users.id),
   lastMessageAt: timestamp("last_message_at"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),

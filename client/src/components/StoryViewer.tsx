@@ -639,18 +639,16 @@ export default function StoryViewer({
                     className="bg-white/10 backdrop-blur-md border-white/20 text-white placeholder:text-white/50 pr-10 disabled:opacity-60"
                     data-testid="input-story-reply"
                   />
-                  {(replyText || replyMutation.isPending) && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={handleReply}
-                      disabled={replyMutation.isPending || !replyText.trim()}
-                      className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 text-white hover:bg-white/20 disabled:opacity-50"
-                      data-testid="button-send-reply"
-                    >
-                      <SendIcon className={`h-4 w-4 ${replyMutation.isPending ? "animate-pulse" : ""}`} />
-                    </Button>
-                  )}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleReply}
+                    disabled={replyMutation.isPending || !replyText.trim()}
+                    className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 text-white hover:bg-white/20 disabled:opacity-50"
+                    data-testid="button-send-reply"
+                  >
+                    <SendIcon className={`h-4 w-4 ${replyMutation.isPending ? "animate-pulse" : ""}`} />
+                  </Button>
                 </div>
                 <Button
                   variant="ghost"

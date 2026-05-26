@@ -19,8 +19,6 @@ import {
   type InsertStoryView,
   type StoryAllowedViewer,
   type InsertStoryAllowedViewer,
-  type StoryReply,
-  type InsertStoryReply,
   type Follow,
   type InsertFollow,
   type Message,
@@ -103,7 +101,6 @@ import {
   storyLikes,
   storyViews,
   storyAllowedViewers,
-  storyReplies,
   follows,
   messages,
   likes,
@@ -236,6 +233,12 @@ export async function ensureSchema() {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_event_ratings_user_id ON event_ratings(user_id)
   `);
+  await pool.query(`
+    ALTER TABLE conversations ADD COLUMN IF NOT EXISTS direct_key VARCHAR UNIQUE
+  `);
+  await pool.query(`
+    DROP TABLE IF EXISTS story_replies
+  `);
 }
 
 export interface IStorage {
@@ -314,9 +317,6 @@ export interface IStorage {
   getStoryAllowedViewers(storyId: string): Promise<string[]>;
   canViewStory(viewerId: string, storyId: string): Promise<boolean>;
 
-  // Story replies
-  createStoryReply(storyId: string, senderId: string, content: string): Promise<StoryReply>;
-  
   followUser(followerId: string, followingId: string): Promise<Follow>;
   unfollowUser(followerId: string, followingId: string): Promise<void>;
   isFollowing(followerId: string, followingId: string): Promise<boolean>;
@@ -1207,15 +1207,6 @@ export class DbStorage implements IStorage {
     // Private stories require viewer to be in allowed list
     const allowedViewers = await this.getStoryAllowedViewers(storyId);
     return allowedViewers.includes(viewerId);
-  }
-
-  // Story replies
-  async createStoryReply(storyId: string, senderId: string, content: string): Promise<StoryReply> {
-    const result = await db
-      .insert(storyReplies)
-      .values({ storyId, senderId, content })
-      .returning();
-    return result[0];
   }
 
   async followUser(followerId: string, followingId: string): Promise<Follow> {
@@ -3932,41 +3923,27 @@ export class DbStorage implements IStorage {
   }
 
   async getOrCreateDirectConversation(userId1: string, userId2: string): Promise<Conversation> {
-    // Find existing direct conversation between these two users
-    const user1Convs = await db
-      .select({ conversationId: conversationParticipants.conversationId })
-      .from(conversationParticipants)
-      .where(eq(conversationParticipants.userId, userId1));
-    
-    const user2Convs = await db
-      .select({ conversationId: conversationParticipants.conversationId })
-      .from(conversationParticipants)
-      .where(eq(conversationParticipants.userId, userId2));
-    
-    const sharedConvIds = user1Convs
-      .map(c => c.conversationId)
-      .filter(id => user2Convs.some(c => c.conversationId === id));
-    
-    // Check if any shared conversation is a direct (non-group) conversation with exactly 2 participants
-    for (const convId of sharedConvIds) {
-      const conv = await db.select().from(conversations).where(eq(conversations.id, convId));
-      if (conv[0] && !conv[0].isGroup) {
-        const [participantCount] = await db
-          .select({ count: count() })
-          .from(conversationParticipants)
-          .where(eq(conversationParticipants.conversationId, convId));
-        
-        if (participantCount?.count === 2) {
-          return conv[0];
-        }
-      }
-    }
-    
-    // Create new direct conversation
-    return this.createConversation(
-      { isGroup: false, createdById: userId1 },
-      [userId1, userId2]
-    );
+    // Deterministic key regardless of argument order — prevents duplicate direct threads
+    const directKey = [userId1, userId2].sort().join(':');
+
+    // Upsert the conversation row — ON CONFLICT DO NOTHING is the race-safe guard
+    await db.insert(conversations)
+      .values({ directKey, isGroup: false, createdById: userId1 })
+      .onConflictDoNothing();
+
+    const [conversation] = await db.select()
+      .from(conversations)
+      .where(eq(conversations.directKey, directKey));
+
+    // Ensure both users are participants — uniqueParticipant constraint makes this idempotent
+    await db.insert(conversationParticipants)
+      .values([
+        { conversationId: conversation.id, userId: userId1, role: 'member', lastReadAt: new Date() },
+        { conversationId: conversation.id, userId: userId2, role: 'member', lastReadAt: new Date() },
+      ])
+      .onConflictDoNothing();
+
+    return conversation;
   }
 
   // Conversation participants

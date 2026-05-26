@@ -3,7 +3,7 @@ import express from "express";
 import { createServer, type Server } from "http";
 import crypto from "crypto";
 import { storage } from "./storage";
-import { insertEventSchema, eventCreateDto, eventUpdateDto, insertTicketSchema, insertRsvpSchema, insertUserSchema, insertPostSchema, insertStorySchema, insertStoryReplySchema, insertVenueSchema, insertVenueEntryNightSchema, venueCategories } from "@shared/schema";
+import { insertEventSchema, eventCreateDto, eventUpdateDto, insertTicketSchema, insertRsvpSchema, insertUserSchema, insertPostSchema, insertStorySchema, insertVenueSchema, insertVenueEntryNightSchema, venueCategories } from "@shared/schema";
 import { hashPassword, comparePassword, userToSessionUser } from "./auth";
 import { requireAuth, requireOrganizer } from "./middleware";
 import passport from "passport";
@@ -2146,43 +2146,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Story Replies - viewer sends a message in response to a story
+  // Story Replies — sends as a real DM in the replier's conversation thread with the story owner
   app.post("/api/stories/:storyId/reply", requireAuth, async (req, res) => {
     try {
       const userId = req.user!.id;
       const { storyId } = req.params;
 
       const story = await storage.getStory(storyId);
-      if (!story) {
-        return res.status(404).json({ message: "Story not found" });
-      }
-
-      if (story.userId === userId) {
-        return res.status(400).json({ message: "Cannot reply to your own story" });
-      }
+      if (!story) return res.status(404).json({ message: "Story not found" });
+      if (story.userId === userId) return res.status(400).json({ message: "Cannot reply to your own story" });
 
       const canView = await storage.canViewStory(userId, storyId);
-      if (!canView) {
-        return res.status(403).json({ message: "Not authorized to view this story" });
-      }
+      if (!canView) return res.status(403).json({ message: "Not authorized to view this story" });
 
-      const { content } = insertStoryReplySchema.omit({ storyId: true, senderId: true }).parse(req.body);
+      const content = typeof req.body.content === 'string' ? req.body.content.trim() : '';
+      if (!content) return res.status(400).json({ message: "Content is required" });
 
-      const reply = await storage.createStoryReply(storyId, userId, content);
+      // Get or create the direct conversation thread between replier and story owner
+      const conversation = await storage.getOrCreateDirectConversation(userId, story.userId);
 
-      const sender = await storage.getUser(userId);
-      const senderName = sender?.displayName || sender?.username || "Someone";
-      await deliverNotification({
-        userId: story.userId,
-        type: "story_reply",
-        title: "Story Reply",
-        message: `${senderName} replied to your story`,
-        link: `/stories/${storyId}`,
-        relatedUserId: userId,
-        relatedEntityId: storyId,
+      await storage.sendConversationMessage({
+        conversationId: conversation.id,
+        senderId: userId,
+        content,
+        messageType: "text",
       });
 
-      res.status(201).json(reply);
+      // Notification is best-effort — a failure here must not roll back the sent message
+      try {
+        const sender = await storage.getUser(userId);
+        const senderName = sender?.displayName || sender?.username || "Someone";
+        await deliverNotification({
+          userId: story.userId,
+          type: "story_reply",
+          title: "Story Reply",
+          message: `${senderName} replied to your story`,
+          link: `/messages/${conversation.id}`,
+          relatedUserId: userId,
+          relatedEntityId: storyId,
+        });
+      } catch (notifErr) {
+        console.error("Story reply notification failed:", notifErr);
+      }
+
+      res.status(201).json({ conversationId: conversation.id });
     } catch (error) {
       console.error("Story reply error:", error);
       res.status(400).json({ message: "Failed to send reply" });
