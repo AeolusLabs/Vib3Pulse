@@ -217,8 +217,10 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
   const [uploadProgress, setUploadProgress]   = useState(0);
 
   // crop
-  const [cropRect, setCropRect] = useState({ x: 10, y: 10, w: 80, h: 80 });
+  const [cropRect, setCropRect] = useState({ x: 5, y: 5, w: 90, h: 90 });
   const [videoCropParams, setVideoCropParams] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [aspectLock, setAspectLock] = useState<number | null>(null);
+  const [isCropDragging, setIsCropDragging] = useState(false);
 
   // video split
   const { split: splitVideo, isProcessing: isSplitting, progress: splitProgress } = useVideoSplitter();
@@ -228,9 +230,6 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
   const [activeSegments, setActiveSegments]         = useState<boolean[]>([]);
   const [showSegmentPreview, setShowSegmentPreview] = useState(false);
   const [segmentPostIdx, setSegmentPostIdx]         = useState(0);
-  const cropDragRef     = useRef<{ mode: "move" | "nw" | "ne" | "sw" | "se"; startX: number; startY: number; startCrop: { x: number; y: number; w: number; h: number } } | null>(null);
-  const cropOverlayRef  = useRef<HTMLDivElement>(null);
-
   // refs ─────────────────────────────────────────────────────────────────────
   const frameRef     = useRef<HTMLDivElement>(null);
   const galleryInput = useRef<HTMLInputElement>(null);
@@ -446,44 +445,67 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
 
   const startCropDrag = (e: React.PointerEvent, mode: "move" | "nw" | "ne" | "sw" | "se") => {
     e.stopPropagation();
-    cropOverlayRef.current?.setPointerCapture(e.pointerId);
-    cropDragRef.current = { mode, startX: e.clientX, startY: e.clientY, startCrop: { ...cropRect } };
-  };
+    e.preventDefault();
+    const startX   = e.clientX;
+    const startY   = e.clientY;
+    const startCrop = { ...cropRect };
+    const lock      = aspectLock;
+    const frame     = frameRef.current?.getBoundingClientRect();
+    const frameAspect = frame ? frame.width / frame.height : 9 / 16;
+    const MIN = 10;
+    setIsCropDragging(true);
 
-  const onCropPointerMove = (e: React.PointerEvent) => {
-    if (!cropDragRef.current || !frameRef.current) return;
-    const { mode, startX, startY, startCrop } = cropDragRef.current;
-    const frame = frameRef.current.getBoundingClientRect();
-    const dx = ((e.clientX - startX) / frame.width) * 100;
-    const dy = ((e.clientY - startY) / frame.height) * 100;
-    const min = 10;
-    let { x, y, w, h } = startCrop;
-    if (mode === "move") {
-      x = Math.max(0, Math.min(100 - w, startCrop.x + dx));
-      y = Math.max(0, Math.min(100 - h, startCrop.y + dy));
-    } else {
-      if (mode === "nw" || mode === "ne") {
-        const newY = Math.min(startCrop.y + startCrop.h - min, startCrop.y + dy);
-        h = startCrop.h - (newY - startCrop.y); y = newY;
-      }
-      if (mode === "sw" || mode === "se") { h = Math.max(min, startCrop.h + dy); }
-      if (mode === "nw" || mode === "sw") {
-        const newX = Math.min(startCrop.x + startCrop.w - min, startCrop.x + dx);
-        w = startCrop.w - (newX - startCrop.x); x = newX;
-      }
-      if (mode === "ne" || mode === "se") { w = Math.max(min, startCrop.w + dx); }
-      x = Math.max(0, x); y = Math.max(0, y);
-      w = Math.min(100 - x, w); h = Math.min(100 - y, h);
-    }
-    setCropRect({ x, y, w, h });
-  };
+    const onMove = (ev: PointerEvent) => {
+      if (!frame) return;
+      const dx = ((ev.clientX - startX) / frame.width)  * 100;
+      const dy = ((ev.clientY - startY) / frame.height) * 100;
+      let { x, y, w, h } = startCrop;
 
-  const onCropPointerUp = () => { cropDragRef.current = null; };
+      if (mode === "move") {
+        x = Math.max(0, Math.min(100 - w, startCrop.x + dx));
+        y = Math.max(0, Math.min(100 - h, startCrop.y + dy));
+      } else {
+        if (mode === "nw" || mode === "ne") {
+          const newY = Math.min(startCrop.y + startCrop.h - MIN, startCrop.y + dy);
+          h = startCrop.h - (newY - startCrop.y);
+          y = newY;
+        }
+        if (mode === "sw" || mode === "se") { h = Math.max(MIN, startCrop.h + dy); }
+        if (mode === "nw" || mode === "sw") {
+          const newX = Math.min(startCrop.x + startCrop.w - MIN, startCrop.x + dx);
+          w = startCrop.w - (newX - startCrop.x);
+          x = newX;
+        }
+        if (mode === "ne" || mode === "se") { w = Math.max(MIN, startCrop.w + dx); }
+
+        if (lock !== null) {
+          const lockedH = w * frameAspect / lock;
+          if (mode === "nw" || mode === "ne") y = (startCrop.y + startCrop.h) - lockedH;
+          h = lockedH;
+        }
+
+        x = Math.max(0, x);
+        y = Math.max(0, y);
+        w = Math.min(100 - x, w);
+        h = Math.min(100 - y, h);
+      }
+      setCropRect({ x, y, w, h });
+    };
+
+    const onUp = () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup",   onUp);
+      setIsCropDragging(false);
+    };
+
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup",   onUp);
+  };
 
   const confirmCrop = () => {
     if (mediaKind === "video") {
       setVideoCropParams({ ...cropRect });
-      setCropRect({ x: 10, y: 10, w: 80, h: 80 });
+      setCropRect({ x: 5, y: 5, w: 90, h: 90 });
       setActiveTool("none");
       return;
     }
@@ -502,14 +524,17 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
       const imgTop   = Math.max(0, cyPx - oy);
       const imgRight = Math.min(scaledW, cxPx + cwPx - ox);
       const imgBot   = Math.min(scaledH, cyPx + chPx - oy);
-      if (imgRight <= imgLeft || imgBot <= imgTop) return;
+      if (imgRight <= imgLeft || imgBot <= imgTop) {
+        toast({ title: "Crop outside image", description: "Move the crop area over the photo and try again.", variant: "destructive" });
+        return;
+      }
       const srcX = imgLeft / scale, srcY = imgTop / scale;
       const srcW = (imgRight - imgLeft) / scale, srcH = (imgBot - imgTop) / scale;
       const canvas = document.createElement("canvas");
       canvas.width = Math.round(srcW); canvas.height = Math.round(srcH);
       canvas.getContext("2d")!.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, canvas.width, canvas.height);
       setCapturedImage(canvas.toDataURL("image/jpeg", 0.92));
-      setCropRect({ x: 10, y: 10, w: 80, h: 80 });
+      setCropRect({ x: 5, y: 5, w: 90, h: 90 });
       setActiveTool("none");
       clearDraw(); setTextOverlays([]);
     };
@@ -691,7 +716,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
     setCapturedImage(null);
     if (capturedVideoUrl) URL.revokeObjectURL(capturedVideoUrl);
     setCapturedVideoUrl(null); setCapturedVideoBlob(null);
-    setActiveTool("none"); setSelectedFilter(0); setCropRect({ x: 10, y: 10, w: 80, h: 80 }); setVideoCropParams(null);
+    setActiveTool("none"); setSelectedFilter(0); setCropRect({ x: 5, y: 5, w: 90, h: 90 }); setVideoCropParams(null); setAspectLock(null); setIsCropDragging(false);
     setTextOverlays([]); setIsAddingText(false); setNewTextValue(""); setSelectedTextId(null);
     setVibeTag(null); setIsAnalyzingVibe(false);
     setCaption(""); setPrivacy("public"); setSelectedViewers([]); setShowViewerSheet(false);
@@ -705,7 +730,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
   const handleRetake = () => {
     if (capturedVideoUrl) URL.revokeObjectURL(capturedVideoUrl);
     setCapturedImage(null); setCapturedVideoUrl(null); setCapturedVideoBlob(null);
-    setActiveTool("none"); setSelectedFilter(0); setVideoCropParams(null); setTextOverlays([]); setVibeTag(null);
+    setActiveTool("none"); setSelectedFilter(0); setCropRect({ x: 5, y: 5, w: 90, h: 90 }); setVideoCropParams(null); setAspectLock(null); setIsCropDragging(false); setTextOverlays([]); setVibeTag(null);
     setCaption(""); setIsPosting(false);
     setVideoDuration(0); setSplitSegments([]); setSegmentThumbs([]); setActiveSegments([]); setShowSegmentPreview(false);
     clearDraw(); setPhase("pick");
@@ -874,6 +899,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                     if (activeTool === "crop") { setActiveTool("none"); }
                     else {
                       if (videoCropParams) setCropRect(videoCropParams);
+                      setAspectLock(null);
                       setActiveTool("crop");
                     }
                   }}
@@ -1007,24 +1033,18 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                   </div>
                 )}
 
-                {/* crop overlay */}
+                {/* crop overlay — pointer handlers live on document via startCropDrag */}
                 {activeTool === "crop" && (
-                  <div
-                    ref={cropOverlayRef}
-                    className="absolute inset-0"
-                    style={{ touchAction: "none" }}
-                    onPointerMove={onCropPointerMove}
-                    onPointerUp={onCropPointerUp}
-                    onPointerLeave={onCropPointerUp}
-                  >
+                  <div className="absolute inset-0" style={{ touchAction: "none" }}>
                     {/* crop rect — box-shadow dims everything outside */}
                     <div
                       className="absolute"
                       style={{
                         left: `${cropRect.x}%`, top: `${cropRect.y}%`,
                         width: `${cropRect.w}%`, height: `${cropRect.h}%`,
-                        boxShadow: "0 0 0 9999px rgba(0,0,0,0.58)",
-                        border: "1.5px solid rgba(255,255,255,0.85)",
+                        boxShadow: "0 0 0 9999px rgba(0,0,0,0.68)",
+                        border: "1.5px solid rgba(255,255,255,0.9)",
+                        filter: "drop-shadow(0 0 1px rgba(0,0,0,0.6))",
                         cursor: "move",
                         touchAction: "none",
                       }}
@@ -1034,45 +1054,130 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                       <div className="absolute inset-0 pointer-events-none grid grid-cols-3 grid-rows-3">
                         {Array.from({ length: 9 }).map((_, i) => (
                           <div key={i} style={{
-                            borderRight:  i % 3 !== 2 ? "0.5px solid rgba(255,255,255,0.28)" : "none",
-                            borderBottom: Math.floor(i / 3) !== 2 ? "0.5px solid rgba(255,255,255,0.28)" : "none",
+                            borderRight:  i % 3 !== 2 ? "0.5px solid rgba(255,255,255,0.25)" : "none",
+                            borderBottom: Math.floor(i / 3) !== 2 ? "0.5px solid rgba(255,255,255,0.25)" : "none",
                           }} />
                         ))}
                       </div>
 
-                      {/* corner handles */}
-                      {(["nw", "ne", "sw", "se"] as const).map(h => (
-                        <div
-                          key={h}
-                          className="absolute w-6 h-6"
-                          style={{
-                            top:    h.includes("n") ? -4 : undefined,
-                            bottom: h.includes("s") ? -4 : undefined,
-                            left:   h.includes("w") ? -4 : undefined,
-                            right:  h.includes("e") ? -4 : undefined,
-                            cursor: h === "nw" || h === "se" ? "nwse-resize" : "nesw-resize",
-                            touchAction: "none",
-                          }}
-                          onPointerDown={e => { e.stopPropagation(); startCropDrag(e, h); }}
-                        >
-                          <div className="absolute" style={{
-                            top:    h.includes("n") ? 0 : undefined,
-                            bottom: h.includes("s") ? 0 : undefined,
-                            left:   h.includes("w") ? 0 : undefined,
-                            right:  h.includes("e") ? 0 : undefined,
-                            width: 14, height: 14,
-                            borderTop:    h.includes("n") ? "2.5px solid #fff" : "none",
-                            borderBottom: h.includes("s") ? "2.5px solid #fff" : "none",
-                            borderLeft:   h.includes("w") ? "2.5px solid #fff" : "none",
-                            borderRight:  h.includes("e") ? "2.5px solid #fff" : "none",
-                          }} />
+                      {/* dimension readout — shown while dragging */}
+                      {isCropDragging && (
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                          <div className="rounded-full px-2.5 py-0.5" style={{ backgroundColor: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}>
+                            <span className="text-white text-[10px] font-mono font-semibold tracking-wide">
+                              {Math.round(cropRect.w)}% × {Math.round(cropRect.h)}%
+                            </span>
+                          </div>
                         </div>
-                      ))}
+                      )}
+
+                      {/* corner handles — 44×44px touch targets, 20×20px visual L-bracket */}
+                      {(["nw", "ne", "sw", "se"] as const).map(corner => {
+                        const isN = corner.startsWith("n"), isS = corner.startsWith("s");
+                        const isW = corner.endsWith("w"),   isE = corner.endsWith("e");
+                        return (
+                          <div
+                            key={corner}
+                            className="absolute"
+                            style={{
+                              width: 44, height: 44,
+                              top:    isN ? -22 : undefined,
+                              bottom: isS ? -22 : undefined,
+                              left:   isW ? -22 : undefined,
+                              right:  isE ? -22 : undefined,
+                              cursor: (corner === "nw" || corner === "se") ? "nwse-resize" : "nesw-resize",
+                              touchAction: "none",
+                              zIndex: 2,
+                            }}
+                            onPointerDown={e => { e.stopPropagation(); startCropDrag(e, corner); }}
+                          >
+                            {/* visual L-bracket, inset 12px from the crop-rect-facing corner */}
+                            <div
+                              className="absolute"
+                              style={{
+                                width: 20, height: 20,
+                                top:    isN ? 12 : undefined,
+                                bottom: isS ? 12 : undefined,
+                                left:   isW ? 12 : undefined,
+                                right:  isE ? 12 : undefined,
+                                borderTop:    isN ? "3px solid rgba(255,255,255,0.95)" : "none",
+                                borderBottom: isS ? "3px solid rgba(255,255,255,0.95)" : "none",
+                                borderLeft:   isW ? "3px solid rgba(255,255,255,0.95)" : "none",
+                                borderRight:  isE ? "3px solid rgba(255,255,255,0.95)" : "none",
+                                borderRadius:
+                                  corner === "nw" ? "3px 0 0 0" :
+                                  corner === "ne" ? "0 3px 0 0" :
+                                  corner === "sw" ? "0 0 0 3px" : "0 0 3px 0",
+                                filter: "drop-shadow(0 0 2px rgba(0,0,0,0.8))",
+                              }}
+                            />
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
               </div>
             </div>
+
+            {/* ── crop controls — real flex child so frame is never covered ── */}
+            <AnimatePresence>
+              {activeTool === "crop" && !isAddingText && (
+                <motion.div
+                  key="crop-bar"
+                  initial={{ y: 80, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  exit={{ y: 80, opacity: 0 }}
+                  transition={{ duration: 0.25, ease: E.drawer }}
+                  className="shrink-0 bg-[#111]/96 backdrop-blur-md rounded-t-2xl px-4 pt-4 pb-8 z-40 space-y-3"
+                  style={{ touchAction: "manipulation" }}
+                >
+                  {/* aspect ratio presets */}
+                  <div className="flex gap-2">
+                    {([
+                      { label: "Free", value: null },
+                      { label: "1:1",  value: 1 },
+                      { label: "4:5",  value: 0.8 },
+                      { label: "9:16", value: 9 / 16 },
+                    ] as { label: string; value: number | null }[]).map(({ label, value }) => (
+                      <button
+                        key={label}
+                        onClick={() => setAspectLock(value)}
+                        className="flex-1 py-1.5 rounded-xl text-xs font-semibold transition-all active:scale-95"
+                        style={{
+                          backgroundColor: aspectLock === value ? "#C4B0FF" : "rgba(255,255,255,0.10)",
+                          color: aspectLock === value ? "#0A0A0A" : "rgba(255,255,255,0.55)",
+                          transition: `all 0.15s ${E.out}`,
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <p className="text-white/35 text-[11px] text-center">
+                    Drag to move · Pull corners to resize
+                  </p>
+
+                  {/* cancel / apply */}
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setActiveTool("none")}
+                      className="flex-1 py-3 rounded-2xl border border-white/15 text-white/60 text-sm font-medium active:scale-95 transition-transform"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={confirmCrop}
+                      className="flex-1 py-3 rounded-2xl font-bold text-sm active:scale-95 transition-transform"
+                      style={{ backgroundColor: "#C4B0FF", color: "#0A0A0A", transition: `all 0.12s ${E.out}` }}
+                    >
+                      Apply Crop
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* ── tool panels & bottom bar ─────────────────────────────────── */}
             <AnimatePresence mode="wait">
@@ -1235,29 +1340,6 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                         Cancel
                       </button>
                     )}
-                  </div>
-                </motion.div>
-              )}
-
-              {/* crop controls */}
-              {activeTool === "crop" && !isAddingText && (
-                <motion.div key="crop" variants={panelVariants} initial="hidden" animate="show" exit="hidden"
-                  className="absolute bottom-0 left-0 right-0 bg-[#111]/96 backdrop-blur-md rounded-t-2xl px-4 pt-5 pb-8 z-40 space-y-3">
-                  <p className="text-white/40 text-xs text-center">Drag to move · Pull corners to resize</p>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => setActiveTool("none")}
-                      className="flex-1 py-3 rounded-2xl border border-white/15 text-white/60 text-sm font-medium"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={confirmCrop}
-                      className="flex-1 py-3 rounded-2xl font-bold text-sm"
-                      style={{ backgroundColor: "#C4B0FF", color: "#0A0A0A" }}
-                    >
-                      Apply Crop
-                    </button>
                   </div>
                 </motion.div>
               )}
