@@ -1,6 +1,7 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
+import { AnimatePresence } from "framer-motion";
 import StoryViewer from "@/components/StoryViewer";
 import { queryClient } from "@/lib/queryClient";
 
@@ -31,6 +32,7 @@ type StoryWithUser = {
 export default function StoryDetailPage() {
   const { storyId } = useParams<{ storyId: string }>();
   const [, navigate] = useLocation();
+  const [direction, setDirection] = useState<"next" | "prev">("next");
 
   // Seed from the all-stories cache (populated by FeedPage) — avoids a serial waterfall fetch
   const cachedStory = (queryClient.getQueryData<StoryWithUser[]>(["/api/stories"]) ?? [])
@@ -113,6 +115,7 @@ export default function StoryDetailPage() {
     if (currentGroupIndex === -1) { navigate("/feed"); return; }
     const nextGroup = groupedList[currentGroupIndex + 1];
     if (nextGroup) {
+      setDirection("next");
       navigate(`/stories/${nextGroup[0].id}`);
     } else {
       navigate("/feed");
@@ -122,21 +125,28 @@ export default function StoryDetailPage() {
   const handlePrevious = () => {
     if (currentGroupIndex === -1) return;
     const prevGroup = groupedList[currentGroupIndex - 1];
-    if (prevGroup) navigate(`/stories/${prevGroup[0].id}`);
+    if (prevGroup) {
+      setDirection("prev");
+      navigate(`/stories/${prevGroup[0].id}`);
+    }
   };
 
   return (
-    <StoryViewer
-      username={targetStory.user.username}
-      avatar={targetStory.user.avatarUrl ?? undefined}
-      slides={slides}
-      initialSlide={initialSlide}
-      onClose={() => navigate("/feed")}
-      onNext={handleNext}
-      onPrevious={currentGroupIndex > 0 ? handlePrevious : undefined}
-      storyOwnerId={targetStory.userId}
-      displayName={targetStory.user.displayName}
-      userType={targetStory.user.userType}
-    />
+    <AnimatePresence custom={direction} initial={false}>
+      <StoryViewer
+        key={targetStory.userId}
+        direction={direction}
+        username={targetStory.user.username}
+        avatar={targetStory.user.avatarUrl ?? undefined}
+        slides={slides}
+        initialSlide={initialSlide}
+        onClose={() => navigate("/feed")}
+        onNext={handleNext}
+        onPrevious={currentGroupIndex > 0 ? handlePrevious : undefined}
+        storyOwnerId={targetStory.userId}
+        displayName={targetStory.user.displayName}
+        userType={targetStory.user.userType}
+      />
+    </AnimatePresence>
   );
 }

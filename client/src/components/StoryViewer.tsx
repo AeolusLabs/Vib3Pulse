@@ -13,6 +13,22 @@ function formatStoryTime(timestamp: string): string {
   return diffDays === 1 ? "Yesterday" : `${diffDays}d ago`;
 }
 
+const slideVariants = {
+  enter: (dir: "next" | "prev") => ({
+    x: dir === "next" ? "100%" : "-100%",
+  }),
+  center: { x: 0 },
+  exit: (dir: "next" | "prev") => ({
+    x: dir === "next" ? "-25%" : "25%",
+    opacity: 0,
+  }),
+};
+
+const slideTransition = {
+  x: { type: "tween" as const, duration: 0.28, ease: "easeInOut" },
+  opacity: { duration: 0.2 },
+};
+
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,6 +63,7 @@ interface StoryViewerProps {
   avatar?: string;
   slides: StorySlide[];
   initialSlide?: number;
+  direction?: "next" | "prev";
   onClose: () => void;
   onNext?: () => void;
   onPrevious?: () => void;
@@ -60,6 +77,7 @@ export default function StoryViewer({
   avatar,
   slides,
   initialSlide = 0,
+  direction = "next",
   onClose,
   onNext,
   onPrevious,
@@ -80,6 +98,7 @@ export default function StoryViewer({
   const [showInteractionsPanel, setShowInteractionsPanel] = useState(false);
   const storyVideoRef = useRef<HTMLVideoElement>(null);
   const holdStartRef = useRef(0);
+  const navigatingRef = useRef(false);
 
   const SLIDE_DURATION = 5000;
   const currentStory = slides[currentSlide];
@@ -96,6 +115,14 @@ export default function StoryViewer({
     });
     setLocalLikeStates(initialStates);
   }, [slides]);
+
+  // Preload the next slide's image so the transition is instant
+  useEffect(() => {
+    const next = slides[currentSlide + 1];
+    if (next?.type === "image" && next.content) {
+      new Image().src = next.content;
+    }
+  }, [currentSlide, slides]);
 
   // Record a view whenever a new slide becomes active (non-owners only)
   useEffect(() => {
@@ -270,6 +297,8 @@ export default function StoryViewer({
   }, [currentStory, isOwnStory, localLikeStates, likeStoryMutation]);
 
   useEffect(() => {
+    navigatingRef.current = false;
+
     if (isVideoSlide) {
       const video = storyVideoRef.current;
       if (!video) return;
@@ -279,29 +308,21 @@ export default function StoryViewer({
           setProgress((video.currentTime / video.duration) * 100);
         }
       };
-      const onEnded = () => {
+      const advance = () => {
         if (currentSlide < slides.length - 1) {
           setCurrentSlide((curr) => curr + 1);
           setProgress(0);
-        } else {
-          onNext?.();
-        }
-      };
-
-      const onError = () => {
-        if (currentSlide < slides.length - 1) {
-          setCurrentSlide((curr) => curr + 1);
-          setProgress(0);
-        } else {
+        } else if (!navigatingRef.current) {
+          navigatingRef.current = true;
           onNext?.();
         }
       };
 
       video.addEventListener("timeupdate", onTimeUpdate);
-      video.addEventListener("ended", onEnded);
-      video.addEventListener("error", onError);
+      video.addEventListener("ended", advance);
+      video.addEventListener("error", advance);
       video.addEventListener("stalled", () => {
-        const fallback = setTimeout(onError, 5000);
+        const fallback = setTimeout(advance, 5000);
         video.addEventListener("playing", () => clearTimeout(fallback), { once: true });
       });
 
@@ -313,8 +334,8 @@ export default function StoryViewer({
 
       return () => {
         video.removeEventListener("timeupdate", onTimeUpdate);
-        video.removeEventListener("ended", onEnded);
-        video.removeEventListener("error", onError);
+        video.removeEventListener("ended", advance);
+        video.removeEventListener("error", advance);
       };
     }
 
@@ -327,10 +348,11 @@ export default function StoryViewer({
           if (currentSlide < slides.length - 1) {
             setCurrentSlide((curr) => curr + 1);
             return 0;
-          } else {
+          } else if (!navigatingRef.current) {
+            navigatingRef.current = true;
             onNext?.();
-            return 100;
           }
+          return 100;
         }
         return newProgress;
       });
@@ -378,7 +400,15 @@ export default function StoryViewer({
 
   return (
     <>
-    <div className="fixed inset-0 bg-black z-50 flex items-center justify-center">
+    <motion.div
+      className="fixed inset-0 bg-black z-50 flex items-center justify-center"
+      custom={direction}
+      variants={slideVariants}
+      initial="enter"
+      animate="center"
+      exit="exit"
+      transition={slideTransition}
+    >
       <div className="relative w-full h-full mx-auto" style={{ maxWidth: "calc(100dvh * 9 / 16)" }}>
         {/* Progress bars - Snapchat style */}
         <div className="absolute top-0 left-0 right-0 z-30 flex gap-1 p-2 pt-3">
@@ -687,7 +717,7 @@ export default function StoryViewer({
           </Button>
         </div>
       </div>
-    </div>
+    </motion.div>
 
     {isOwnStory && currentStory && (
       <StoryInteractionsPanel
