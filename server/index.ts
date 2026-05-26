@@ -273,7 +273,6 @@ setupAdminRoutes(app);
   server.listen({
     port,
     host: "0.0.0.0",
-    reusePort: true,
   }, () => {
     console.log(`[STARTUP] Server successfully bound to 0.0.0.0:${port}`);
     console.log(`[STARTUP] Application ready to accept requests`);

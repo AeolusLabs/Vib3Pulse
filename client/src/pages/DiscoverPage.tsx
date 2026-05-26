@@ -247,8 +247,11 @@ export default function DiscoverPage() {
     .filter(isEventUpcoming)
     .filter(event => {
       const matchesCategory = selectedCategory === "All Events" || event.category === selectedCategory;
-      const matchesSearch = event.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                           event.location.toLowerCase().includes(searchQuery.toLowerCase());
+      const q = searchQuery.toLowerCase();
+      const matchesSearch = event.title.toLowerCase().includes(q) ||
+                           event.location.toLowerCase().includes(q) ||
+                           (event.category ?? "").toLowerCase().includes(q) ||
+                           (event.description ?? "").toLowerCase().includes(q);
       const isNotPromoted = !promotedEvents.some(pe => pe.id === event.id);
       return matchesCategory && matchesSearch && isNotPromoted;
     });
@@ -257,8 +260,11 @@ export default function DiscoverPage() {
     .filter(isEventUpcoming)
     .filter(event => {
       const matchesCategory = selectedCategory === "All Events" || event.category === selectedCategory;
-      const matchesSearch = event.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                           event.location.toLowerCase().includes(searchQuery.toLowerCase());
+      const q = searchQuery.toLowerCase();
+      const matchesSearch = event.title.toLowerCase().includes(q) ||
+                           event.location.toLowerCase().includes(q) ||
+                           (event.category ?? "").toLowerCase().includes(q) ||
+                           (event.description ?? "").toLowerCase().includes(q);
       return matchesCategory && matchesSearch;
     });
 
