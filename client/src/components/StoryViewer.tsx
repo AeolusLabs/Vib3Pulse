@@ -377,7 +377,7 @@ export default function StoryViewer({
   return (
     <>
     <div className="fixed inset-0 bg-black z-50 flex items-center justify-center">
-      <div className="relative w-full h-full max-w-md mx-auto">
+      <div className="relative w-full h-full mx-auto" style={{ maxWidth: "calc(100dvh * 9 / 16)" }}>
         {/* Progress bars - Snapchat style */}
         <div className="absolute top-0 left-0 right-0 z-30 flex gap-1 p-2 pt-3">
           {slides.map((_, index) => (
@@ -504,7 +504,7 @@ export default function StoryViewer({
                 <video
                   ref={storyVideoRef}
                   src={currentStory.videoUrl || currentStory.content}
-                  className="relative w-full h-full object-contain"
+                  className="relative w-full h-full object-cover"
                   muted={isVideoMuted}
                   playsInline
                   autoPlay
@@ -525,7 +525,7 @@ export default function StoryViewer({
               <img
                 src={currentStory.content}
                 alt="Story"
-                className="relative w-full h-full object-contain"
+                className="relative w-full h-full object-cover"
               />
             </>
           ) : (
