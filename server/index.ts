@@ -53,13 +53,27 @@ app.use(securityHeaders);
 // Cookie parser for CSRF token validation
 app.use(cookieParser());
 
-app.use(express.json({
-  limit: '50mb',
-  verify: (req, _res, buf) => {
-    req.rawBody = buf;
-  }
-}));
-app.use(express.urlencoded({ extended: false, limit: '50mb' }));
+// 5 MB global limit covers all normal API calls including avatar uploads.
+// The 4 bulk-upload routes skip this and apply their own 50 MB parser AFTER
+// requireAuth, so unauthenticated requests never consume large bodies.
+const LARGE_UPLOAD_PATHS = new Set([
+  '/api/upload-images',
+  '/api/upload-video',
+  '/api/media/upload',
+  '/api/stories/upload',
+]);
+
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (LARGE_UPLOAD_PATHS.has(req.path)) return next();
+  express.json({
+    limit: '5mb',
+    verify: (req, _res, buf) => { req.rawBody = buf; },
+  })(req, res, next);
+});
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (LARGE_UPLOAD_PATHS.has(req.path)) return next();
+  express.urlencoded({ extended: false, limit: '5mb' })(req, res, next);
+});
 
 // SESSION_SECRET must be set in Railway env vars — see deployment docs
 const sessionSecret = process.env.SESSION_SECRET;

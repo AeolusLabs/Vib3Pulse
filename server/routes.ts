@@ -132,6 +132,9 @@ const signupSchema = insertUserSchema.omit({ passwordHash: true }).extend({
 });
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // 50 MB parser applied only to bulk upload routes, AFTER requireAuth
+  const largeJsonParser = express.json({ limit: '50mb' });
+
   // Unified helper: DB notification + WebSocket + push notification
   async function deliverNotification(params: {
     userId: string;
@@ -1652,7 +1655,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Generic image upload endpoint for posts/venues (supports multiple images)
-  app.post("/api/upload-images", requireAuth, async (req, res) => {
+  app.post("/api/upload-images", requireAuth, largeJsonParser, async (req, res) => {
     try {
       const { images } = req.body;
       if (!Array.isArray(images) || images.length === 0) {
@@ -1674,7 +1677,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/upload-video", requireAuth, async (req, res) => {
+  app.post("/api/upload-video", requireAuth, largeJsonParser, async (req, res) => {
     try {
       const { videoData } = req.body;
       if (!videoData || !videoData.startsWith('data:video')) {
@@ -1845,7 +1848,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Central upload: accepts base64 data URL, stores in DB, returns /api/media/{id} URL
-  app.post("/api/media/upload", requireAuth, async (req, res) => {
+  app.post("/api/media/upload", requireAuth, largeJsonParser, async (req, res) => {
     try {
       const { data } = req.body;
       if (!data || !data.startsWith('data:')) {
@@ -1876,7 +1879,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Server-side story image upload (bypasses CORS issues)
-  app.post("/api/stories/upload", requireAuth, async (req, res) => {
+  app.post("/api/stories/upload", requireAuth, largeJsonParser, async (req, res) => {
     try {
       const { imageData } = req.body;
       const isImage = imageData && imageData.startsWith('data:image');

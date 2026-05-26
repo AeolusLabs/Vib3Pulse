@@ -146,7 +146,13 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { eq, and, gte, gt, lt, or, ilike, desc, sql, count, inArray, notInArray, isNull, isNotNull } from "drizzle-orm";
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+  statement_timeout: 10000,
+});
 const db = drizzle(pool);
 
 // Idempotent schema migration — runs at server startup to add new columns safely
@@ -1027,49 +1033,52 @@ export class DbStorage implements IStorage {
 
   async getActiveStories(viewerId?: string): Promise<Array<Story & { user: User; likeCount: number; viewCount: number; isLiked?: boolean; isReshare?: boolean }>> {
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    
-    const result = await db
-      .select()
+
+    // Privacy collapsed into WHERE: no per-row canViewStory() calls.
+    // Public stories visible to all; private only to owner or explicit allowed viewers.
+    const privacyFilter = viewerId
+      ? or(
+          eq(stories.privacy, 'public'),
+          eq(stories.userId, viewerId),
+          sql`EXISTS (
+            SELECT 1 FROM ${storyAllowedViewers}
+            WHERE ${storyAllowedViewers.storyId} = ${stories.id}
+              AND ${storyAllowedViewers.viewerId} = ${viewerId}
+          )`
+        )
+      : eq(stories.privacy, 'public');
+
+    // Single query: counts + isLiked via aggregates, privacy via WHERE
+    const rows = await db
+      .select({
+        story: stories,
+        user: users,
+        likeCount: sql<number>`count(distinct ${storyLikes.id})::int`,
+        viewCount: sql<number>`count(distinct ${storyViews.id})::int`,
+        isLiked: viewerId
+          ? sql<boolean>`(coalesce(max(case when ${storyLikes.userId} = ${viewerId} then 1 else 0 end), 0) = 1)`
+          : sql<boolean>`false`,
+      })
       .from(stories)
       .innerJoin(users, eq(stories.userId, users.id))
-      .where(gte(stories.createdAt, twentyFourHoursAgo))
-      .orderBy(desc(stories.createdAt));
-    
-    const storiesWithData = await Promise.all(result.map(async (row) => {
-      const { passwordHash, ...userWithoutPassword } = row.users;
-      
-      // Check privacy - if private, only show to allowed viewers
-      if (row.stories.privacy === 'private' && viewerId) {
-        const canView = await this.canViewStory(viewerId, row.stories.id);
-        if (!canView && row.stories.userId !== viewerId) {
-          return null; // Skip this story
-        }
-      } else if (row.stories.privacy === 'private' && !viewerId) {
-        return null; // Skip private stories for unauthenticated users
-      }
-      
-      // Get like count and view count
-      const likeCount = await this.getStoryLikeCount(row.stories.id);
-      const viewCount = await this.getStoryViewCount(row.stories.id);
+      .leftJoin(storyLikes, eq(storyLikes.storyId, stories.id))
+      .leftJoin(storyViews, eq(storyViews.storyId, stories.id))
+      .where(and(gte(stories.createdAt, twentyFourHoursAgo), privacyFilter))
+      .groupBy(stories.id, users.id)
+      .orderBy(desc(stories.createdAt))
+      .limit(100);
 
-      // Check if viewer has liked
-      let isLiked = false;
-      if (viewerId) {
-        isLiked = await this.hasUserLikedStory(viewerId, row.stories.id);
-      }
-
+    return rows.map(row => {
+      const { passwordHash, ...userWithoutPassword } = row.user;
       return {
-        ...row.stories,
+        ...row.story,
         user: userWithoutPassword as User,
-        likeCount,
-        viewCount,
-        isLiked,
-        isReshare: !!row.stories.originalStoryId,
+        likeCount: row.likeCount,
+        viewCount: row.viewCount,
+        isLiked: row.isLiked,
+        isReshare: !!row.story.originalStoryId,
       };
-    }));
-    
-    // Filter out null values (private stories viewer can't see)
-    return (storiesWithData.filter(s => s !== null)) as any as Array<Story & { user: User; likeCount: number; viewCount: number; isLiked?: boolean; isReshare?: boolean }>;
+    });
   }
 
   async getStory(id: string): Promise<Story | undefined> {
@@ -1525,59 +1534,67 @@ export class DbStorage implements IStorage {
   }
 
   async getTrendingPosts(limit: number = 10): Promise<Array<Post & { user: User; likeCount: number; commentCount: number }>> {
-    const postsWithUser = await db
-      .select()
+    // 101 queries → 1: LEFT JOIN likes + comments with COUNT(DISTINCT) aggregates
+    const rows = await db
+      .select({
+        post: posts,
+        user: users,
+        likeCount: sql<number>`count(distinct ${likes.id})::int`,
+        commentCount: sql<number>`count(distinct ${comments.id})::int`,
+      })
       .from(posts)
       .innerJoin(users, eq(posts.userId, users.id))
+      .leftJoin(likes, eq(likes.postId, posts.id))
+      .leftJoin(comments, eq(comments.postId, posts.id))
+      .groupBy(posts.id, users.id)
       .orderBy(desc(posts.createdAt))
       .limit(50);
-    
-    const postsWithEngagement = await Promise.all(
-      postsWithUser.map(async (row) => {
-        const likeCount = await this.getPostLikes(row.posts.id);
-        const commentCount = await this.getCommentCount(row.posts.id);
-        const { passwordHash, ...userWithoutPassword } = row.users;
+
+    return rows
+      .map(row => {
+        const { passwordHash, ...userWithoutPassword } = row.user;
         return {
-          ...row.posts,
+          ...row.post,
           user: userWithoutPassword as User,
-          likeCount,
-          commentCount,
-          engagementScore: likeCount * 2 + commentCount * 3,
+          likeCount: row.likeCount,
+          commentCount: row.commentCount,
+          engagementScore: row.likeCount * 2 + row.commentCount * 3,
         };
       })
-    );
-    
-    return postsWithEngagement
       .sort((a, b) => b.engagementScore - a.engagementScore)
       .slice(0, limit)
       .map(({ engagementScore, ...rest }) => rest);
   }
 
   async getTrendingEvents(limit: number = 10): Promise<Array<Event & { organizer: User; rsvpCount: number; ticketCount: number }>> {
-    const allEvents = await db
-      .select()
+    // 101 queries + bulk row fetches → 1: LEFT JOIN rsvps + tickets with COUNT(DISTINCT) aggregates
+    const rows = await db
+      .select({
+        event: events,
+        user: users,
+        rsvpCount: sql<number>`count(distinct ${rsvps.id})::int`,
+        ticketCount: sql<number>`count(distinct ${tickets.id})::int`,
+      })
       .from(events)
       .innerJoin(users, eq(events.organizerId, users.id))
+      .leftJoin(rsvps, eq(rsvps.eventId, events.id))
+      .leftJoin(tickets, eq(tickets.eventId, events.id))
       .where(gte(events.eventDate, new Date()))
+      .groupBy(events.id, users.id)
       .orderBy(desc(events.eventDate))
       .limit(50);
-    
-    const eventsWithEngagement = await Promise.all(
-      allEvents.map(async (row) => {
-        const rsvpResult = await db.select().from(rsvps).where(eq(rsvps.eventId, row.events.id));
-        const ticketResult = await db.select().from(tickets).where(eq(tickets.eventId, row.events.id));
-        const { passwordHash, ...userWithoutPassword } = row.users;
+
+    return rows
+      .map(row => {
+        const { passwordHash, ...userWithoutPassword } = row.user;
         return {
-          ...row.events,
+          ...row.event,
           organizer: userWithoutPassword as User,
-          rsvpCount: rsvpResult.length,
-          ticketCount: ticketResult.length,
-          engagementScore: rsvpResult.length * 2 + ticketResult.length * 3 + (row.events.isPromoted ? 10 : 0),
+          rsvpCount: row.rsvpCount,
+          ticketCount: row.ticketCount,
+          engagementScore: row.rsvpCount * 2 + row.ticketCount * 3 + (row.event.isPromoted ? 10 : 0),
         };
       })
-    );
-    
-    return eventsWithEngagement
       .sort((a, b) => b.engagementScore - a.engagementScore)
       .slice(0, limit)
       .map(({ engagementScore, ...rest }) => rest);
