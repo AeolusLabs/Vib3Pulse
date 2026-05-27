@@ -145,6 +145,7 @@ import {
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { eq, and, gte, gt, lt, or, ilike, desc, sql, count, inArray, notInArray, isNull, isNotNull } from "drizzle-orm";
+import crypto from "crypto";
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -483,6 +484,7 @@ export interface IStorage {
   createVenueTicket(ticket: InsertVenueTicket): Promise<VenueTicket>;
   checkInVenueTicket(ticketId: string, organizerId: string): Promise<VenueTicket | null>;
   incrementVenueEntryNightTicketsSold(entryNightId: string): Promise<void>;
+  claimVenueTicketSlot(entryNightId: string): Promise<boolean>;
   getVenueEventCheckIns(venueEntryNightId: string): Promise<Array<VenueTicket & { user: User }>>;
 
   // Venue staff access codes
@@ -532,7 +534,7 @@ export interface IStorage {
 
   // Content reports
   createContentReport(report: InsertContentReport): Promise<ContentReport>;
-  getContentReports(status?: string): Promise<Array<ContentReport & { reporter: User }>>;
+  getContentReports(status?: string, limit?: number, offset?: number): Promise<Array<ContentReport & { reporter: User }>>;
   getContentReport(id: string): Promise<ContentReport | undefined>;
   updateContentReport(id: string, updates: { status: string; reviewedBy: string; resolution?: string }): Promise<ContentReport>;
 
@@ -661,6 +663,11 @@ export interface IStorage {
   ensureBannerColumns(): Promise<void>;
   ensureTicketTiersTable(): Promise<void>;
   ensureEventModerationsTable(): Promise<void>;
+  ensureLoginAttemptsTable(): Promise<void>;
+  getLoginAttempt(key: string): Promise<{ count: number; lastAttempt: Date; lockedUntil: Date | null } | null>;
+  upsertLoginAttempt(key: string, count: number, lastAttempt: Date, lockedUntil: Date | null): Promise<void>;
+  deleteLoginAttempt(key: string): Promise<void>;
+  cleanupExpiredLoginAttempts(): Promise<void>;
   saveMedia(data: string, contentType: string, ownerId?: string): Promise<string>;
   getMedia(id: string): Promise<{ data: string; contentType: string } | null>;
   deleteMedia(id: string): Promise<void>;
@@ -2716,6 +2723,21 @@ export class DbStorage implements IStorage {
       .where(eq(venueEntryNights.id, entryNightId));
   }
 
+  async claimVenueTicketSlot(entryNightId: string): Promise<boolean> {
+    const result = await db
+      .update(venueEntryNights)
+      .set({ ticketsSold: sql`${venueEntryNights.ticketsSold} + 1` })
+      .where(and(
+        eq(venueEntryNights.id, entryNightId),
+        or(
+          isNull(venueEntryNights.capacity),
+          gt(venueEntryNights.capacity, venueEntryNights.ticketsSold)
+        )
+      ))
+      .returning({ id: venueEntryNights.id });
+    return result.length > 0;
+  }
+
   async getVenueEventCheckIns(venueEntryNightId: string): Promise<Array<VenueTicket & { user: User }>> {
     const result = await db
       .select()
@@ -2727,20 +2749,10 @@ export class DbStorage implements IStorage {
   }
 
   async createVenueStaffCode(venueEntryNightId: string, organizerId: string, expiresAt: Date): Promise<VenueStaffAccessCode> {
-    let code: string;
-    let attempts = 0;
-    while (true) {
-      code = String(Math.floor(100000 + Math.random() * 900000));
-      const existing = await db
-        .select()
-        .from(venueStaffAccessCodes)
-        .where(and(eq(venueStaffAccessCodes.code, code), eq(venueStaffAccessCodes.status, "pending")));
-      if (existing.length === 0) break;
-      if (++attempts > 20) throw new Error("Could not generate unique staff code");
-    }
+    const code = crypto.randomBytes(32).toString("hex");
     const result = await db
       .insert(venueStaffAccessCodes)
-      .values({ venueEntryNightId, organizerId, code: code!, expiresAt })
+      .values({ venueEntryNightId, organizerId, code, expiresAt })
       .returning();
     return result[0];
   }
@@ -3214,20 +3226,22 @@ export class DbStorage implements IStorage {
     return result[0];
   }
 
-  async getContentReports(status?: string): Promise<Array<ContentReport & { reporter: User }>> {
+  async getContentReports(status?: string, limit = 50, offset = 0): Promise<Array<ContentReport & { reporter: User }>> {
+    const safeLimit = Math.min(Math.max(limit, 1), 100);
+    const safeOffset = Math.max(offset, 0);
+
     const query = db
       .select()
       .from(contentReports)
       .innerJoin(users, eq(contentReports.reporterId, users.id))
-      .orderBy(desc(contentReports.createdAt));
-    
-    let results;
-    if (status) {
-      results = await query.where(eq(contentReports.status, status));
-    } else {
-      results = await query;
-    }
-    
+      .orderBy(desc(contentReports.createdAt))
+      .limit(safeLimit)
+      .offset(safeOffset);
+
+    const results = status
+      ? await query.where(eq(contentReports.status, status))
+      : await query;
+
     return results.map(r => ({
       ...r.content_reports,
       reporter: r.users,
@@ -4496,21 +4510,10 @@ export class DbStorage implements IStorage {
   // ── Staff access codes ───────────────────────────────────────────────────
 
   async createStaffCode(eventId: string, organizerId: string, expiresAt: Date): Promise<EventStaffAccessCode> {
-    // Generate a unique 6-digit code not currently active for this event
-    let code: string;
-    let attempts = 0;
-    while (true) {
-      code = String(Math.floor(100000 + Math.random() * 900000));
-      const existing = await db
-        .select()
-        .from(eventStaffAccessCodes)
-        .where(and(eq(eventStaffAccessCodes.code, code), eq(eventStaffAccessCodes.status, "pending")));
-      if (existing.length === 0) break;
-      if (++attempts > 20) throw new Error("Could not generate unique staff code");
-    }
+    const code = crypto.randomBytes(32).toString("hex");
     const result = await db
       .insert(eventStaffAccessCodes)
-      .values({ eventId, organizerId, code: code!, expiresAt })
+      .values({ eventId, organizerId, code, expiresAt })
       .returning();
     return result[0];
   }
@@ -4655,6 +4658,51 @@ export class DbStorage implements IStorage {
       totalRatings: parseInt(row.total_ratings, 10),
       eventsRated: parseInt(row.events_rated, 10),
     };
+  }
+
+  // ── Login attempt tracking (brute-force protection, survives restarts) ─────
+
+  async ensureLoginAttemptsTable(): Promise<void> {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS login_attempts (
+        key TEXT PRIMARY KEY,
+        count INTEGER NOT NULL DEFAULT 0,
+        last_attempt TIMESTAMPTZ NOT NULL,
+        locked_until TIMESTAMPTZ
+      )
+    `);
+  }
+
+  async getLoginAttempt(key: string): Promise<{ count: number; lastAttempt: Date; lockedUntil: Date | null } | null> {
+    const result = await db.execute(sql`
+      SELECT count, last_attempt, locked_until FROM login_attempts WHERE key = ${key}
+    `);
+    if (result.rows.length === 0) return null;
+    const row = result.rows[0] as { count: number; last_attempt: Date; locked_until: Date | null };
+    return { count: row.count, lastAttempt: row.last_attempt, lockedUntil: row.locked_until };
+  }
+
+  async upsertLoginAttempt(key: string, count: number, lastAttempt: Date, lockedUntil: Date | null): Promise<void> {
+    await db.execute(sql`
+      INSERT INTO login_attempts (key, count, last_attempt, locked_until)
+      VALUES (${key}, ${count}, ${lastAttempt}, ${lockedUntil})
+      ON CONFLICT (key) DO UPDATE SET
+        count = EXCLUDED.count,
+        last_attempt = EXCLUDED.last_attempt,
+        locked_until = EXCLUDED.locked_until
+    `);
+  }
+
+  async deleteLoginAttempt(key: string): Promise<void> {
+    await db.execute(sql`DELETE FROM login_attempts WHERE key = ${key}`);
+  }
+
+  async cleanupExpiredLoginAttempts(): Promise<void> {
+    await db.execute(sql`
+      DELETE FROM login_attempts
+      WHERE last_attempt < NOW() - INTERVAL '30 minutes'
+      AND (locked_until IS NULL OR locked_until < NOW())
+    `);
   }
 }
 

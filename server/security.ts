@@ -2,11 +2,10 @@ import { Request, Response, NextFunction } from "express";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import crypto from "crypto";
 import sanitizeHtml from "sanitize-html";
+import { storage } from "./storage";
 
 const CSRF_TOKEN_HEADER = "x-csrf-token";
 const CSRF_TOKEN_COOKIE = "csrf-token";
-
-const loginAttempts = new Map<string, { count: number; lastAttempt: number; lockedUntil?: number }>();
 
 const LOGIN_THROTTLE_CONFIG = {
   maxAttempts: 5,
@@ -15,14 +14,11 @@ const LOGIN_THROTTLE_CONFIG = {
   cleanupIntervalMs: 60 * 60 * 1000,
 };
 
+// Purge expired rows once per hour so the table stays lean.
 setInterval(() => {
-  const now = Date.now();
-  const entries = Array.from(loginAttempts.entries());
-  for (const [key, data] of entries) {
-    if (now - data.lastAttempt > LOGIN_THROTTLE_CONFIG.windowMs * 2) {
-      loginAttempts.delete(key);
-    }
-  }
+  storage.cleanupExpiredLoginAttempts().catch((err) => {
+    console.error("[SECURITY] login_attempts cleanup failed:", err);
+  });
 }, LOGIN_THROTTLE_CONFIG.cleanupIntervalMs);
 
 export function generateCsrfToken(): string {
@@ -147,7 +143,7 @@ export const apiRateLimiter = rateLimit({
 
 export const sensitiveOperationLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 20,
+  max: 5,
   message: {
     message: "Too many sensitive operations. Please try again later.",
     code: "RATE_LIMITED"
@@ -173,29 +169,28 @@ function getLoginKey(identifier: string, ip: string): string {
   return `${identifier}:${ip}`;
 }
 
-export function checkLoginThrottle(identifier: string, ip: string): { allowed: boolean; remainingAttempts?: number; lockedUntil?: Date } {
+export async function checkLoginThrottle(
+  identifier: string,
+  ip: string,
+): Promise<{ allowed: boolean; remainingAttempts?: number; lockedUntil?: Date }> {
   const key = getLoginKey(identifier, ip);
-  const now = Date.now();
-  const data = loginAttempts.get(key);
+  const now = new Date();
+  const data = await storage.getLoginAttempt(key);
 
   if (!data) {
     return { allowed: true, remainingAttempts: LOGIN_THROTTLE_CONFIG.maxAttempts };
   }
 
   if (data.lockedUntil && now < data.lockedUntil) {
-    return { 
-      allowed: false, 
-      lockedUntil: new Date(data.lockedUntil)
-    };
+    return { allowed: false, lockedUntil: data.lockedUntil };
   }
 
-  if (data.lockedUntil && now >= data.lockedUntil) {
-    loginAttempts.delete(key);
-    return { allowed: true, remainingAttempts: LOGIN_THROTTLE_CONFIG.maxAttempts };
-  }
-
-  if (now - data.lastAttempt > LOGIN_THROTTLE_CONFIG.windowMs) {
-    loginAttempts.delete(key);
+  // Lock expired or window elapsed — clear the stale row
+  if (
+    (data.lockedUntil && now >= data.lockedUntil) ||
+    now.getTime() - data.lastAttempt.getTime() > LOGIN_THROTTLE_CONFIG.windowMs
+  ) {
+    await storage.deleteLoginAttempt(key);
     return { allowed: true, remainingAttempts: LOGIN_THROTTLE_CONFIG.maxAttempts };
   }
 
@@ -203,35 +198,35 @@ export function checkLoginThrottle(identifier: string, ip: string): { allowed: b
   return { allowed: remainingAttempts > 0, remainingAttempts: Math.max(0, remainingAttempts) };
 }
 
-export function recordLoginAttempt(identifier: string, ip: string, success: boolean): void {
+export async function recordLoginAttempt(identifier: string, ip: string, success: boolean): Promise<void> {
   const key = getLoginKey(identifier, ip);
-  const now = Date.now();
+  const now = new Date();
 
   if (success) {
-    loginAttempts.delete(key);
+    await storage.deleteLoginAttempt(key);
     return;
   }
 
-  const data = loginAttempts.get(key) || { count: 0, lastAttempt: now };
-  
-  if (now - data.lastAttempt > LOGIN_THROTTLE_CONFIG.windowMs) {
-    data.count = 1;
+  const existing = await storage.getLoginAttempt(key);
+  let count: number;
+
+  if (!existing || now.getTime() - existing.lastAttempt.getTime() > LOGIN_THROTTLE_CONFIG.windowMs) {
+    count = 1;
   } else {
-    data.count++;
-  }
-  
-  data.lastAttempt = now;
-
-  if (data.count >= LOGIN_THROTTLE_CONFIG.maxAttempts) {
-    data.lockedUntil = now + LOGIN_THROTTLE_CONFIG.lockoutDurationMs;
+    count = existing.count + 1;
   }
 
-  loginAttempts.set(key, data);
+  const lockedUntil =
+    count >= LOGIN_THROTTLE_CONFIG.maxAttempts
+      ? new Date(now.getTime() + LOGIN_THROTTLE_CONFIG.lockoutDurationMs)
+      : null;
+
+  await storage.upsertLoginAttempt(key, count, now, lockedUntil);
 }
 
-export function clearLoginAttempts(identifier: string, ip: string): void {
+export async function clearLoginAttempts(identifier: string, ip: string): Promise<void> {
   const key = getLoginKey(identifier, ip);
-  loginAttempts.delete(key);
+  await storage.deleteLoginAttempt(key);
 }
 
 const sanitizeOptions: sanitizeHtml.IOptions = {
@@ -290,14 +285,29 @@ export function validateAndSanitizeObject<T extends Record<string, any>>(
 }
 
 export const securityHeaders = (req: Request, res: Response, next: NextFunction) => {
+  const isProduction = process.env.NODE_ENV === "production";
+
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   res.setHeader("Permissions-Policy", "geolocation=(self), microphone=(), camera=()");
-  
+
+  // Per-request nonce — use res.locals.cspNonce to stamp any legitimate inline <script>
+  const nonce = crypto.randomBytes(16).toString("base64");
+  res.locals.cspNonce = nonce;
+
+  // In production the Vite bundle is all external files — no inline scripts needed.
+  // In development Vite HMR injects inline scripts, so unsafe-inline/unsafe-eval are
+  // kept only in that environment.
+  const scriptSrc = isProduction
+    ? `script-src 'self' 'nonce-${nonce}' https://js.stripe.com`
+    : `script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com`;
+
   const cspDirectives = [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com https://fonts.googleapis.com",
+    scriptSrc,
+    // unsafe-inline for style-src is required: React inline style={{}} props produce
+    // inline style attributes which browsers block without it.
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: blob: https: http:",
@@ -310,14 +320,14 @@ export const securityHeaders = (req: Request, res: Response, next: NextFunction)
     "frame-ancestors 'none'",
   ];
   res.setHeader("Content-Security-Policy", cspDirectives.join("; "));
-  
-  if (process.env.NODE_ENV === "production") {
+
+  if (isProduction) {
     res.setHeader(
       "Strict-Transport-Security",
       "max-age=31536000; includeSubDomains; preload"
     );
   }
-  
+
   next();
 };
 

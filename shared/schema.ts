@@ -865,7 +865,7 @@ export const eventStaffAccessCodes = pgTable("event_staff_access_codes", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   eventId: varchar("event_id").notNull().references(() => events.id, { onDelete: "cascade" }),
   organizerId: varchar("organizer_id").notNull().references(() => users.id),
-  code: varchar("code", { length: 6 }).notNull(),
+  code: varchar("code", { length: 64 }).notNull(),
   scannerToken: varchar("scanner_token").unique(),
   status: text("status").notNull().default("pending"), // 'pending' | 'active' | 'revoked'
   expiresAt: timestamp("expires_at").notNull(),
@@ -887,7 +887,7 @@ export const venueStaffAccessCodes = pgTable("venue_staff_access_codes", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   venueEntryNightId: varchar("venue_entry_night_id").notNull().references(() => venueEntryNights.id, { onDelete: "cascade" }),
   organizerId: varchar("organizer_id").notNull().references(() => users.id),
-  code: varchar("code", { length: 6 }).notNull(),
+  code: varchar("code", { length: 64 }).notNull(),
   scannerToken: varchar("scanner_token").unique(),
   status: text("status").notNull().default("pending"), // 'pending' | 'active' | 'revoked'
   expiresAt: timestamp("expires_at").notNull(),

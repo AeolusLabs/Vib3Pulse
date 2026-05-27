@@ -70,7 +70,10 @@ export function registerPaymentRoutes(app: Express): void {
       }
 
       const currency = resolveCurrency(event.city);
-      const origin = req.headers.origin || `https://${req.headers.host}`;
+      // Use APP_URL env var when set; fall back to the request host.
+      // Never use req.headers.origin — it is user-controlled and would allow
+      // an attacker to redirect victims to a phishing site after payment.
+      const baseUrl = process.env.APP_URL || `${req.protocol}://${req.headers.host}`;
 
       const session = await createCheckout({
         itemId: eventId,
@@ -80,8 +83,8 @@ export function registerPaymentRoutes(app: Express): void {
         description: event.description,
         amountSmallestUnit,
         currency,
-        successUrl: `${origin}/ticket-wallet?success=true&session_id={CHECKOUT_SESSION_ID}&provider=${providerForCurrency(currency)}`,
-        cancelUrl: `${origin}/event/${eventId}?cancelled=true`,
+        successUrl: `${baseUrl}/ticket-wallet?success=true&session_id={CHECKOUT_SESSION_ID}&provider=${providerForCurrency(currency)}`,
+        cancelUrl: `${baseUrl}/event/${eventId}?cancelled=true`,
       });
 
       res.json({
@@ -249,6 +252,12 @@ export function registerPaymentRoutes(app: Express): void {
         return res.status(403).json({ message: "Payment does not belong to this account" });
       }
 
+      const slotClaimed = await storage.claimVenueTicketSlot(venueEntryNightId);
+      if (!slotClaimed) {
+        console.error(`[Payment] Oversell: venue entry night ${venueEntryNightId} is at capacity. Payment ${paymentIntentId} by user ${userId} requires manual refund.`);
+        return res.status(409).json({ message: "This entry is now sold out. Your payment will be refunded." });
+      }
+
       const ticket = await storage.createVenueTicket({
         userId,
         venueEntryNightId,
@@ -258,8 +267,6 @@ export function registerPaymentRoutes(app: Express): void {
         amountPaid: verified.amountSmallestUnit,
         status: "confirmed",
       });
-
-      await storage.incrementVenueEntryNightTicketsSold(venueEntryNightId);
 
       res.json({ message: "Ticket issued", ticket });
     } catch (error) {
@@ -407,6 +414,10 @@ export function registerPaymentRoutes(app: Express): void {
           if (meta.type === "venue_entry") {
             const night = await storage.getVenueEntryNight(meta.venueEntryNightId);
             if (night) {
+              const slotClaimed = await storage.claimVenueTicketSlot(meta.venueEntryNightId);
+              if (!slotClaimed) {
+                console.error(`[Stripe Webhook] Oversell: venue entry night ${meta.venueEntryNightId} at capacity. Payment ${intent.id} for user ${meta.userId} requires manual refund.`);
+              }
               await storage.createVenueTicket({
                 userId: meta.userId,
                 venueEntryNightId: meta.venueEntryNightId,
@@ -416,7 +427,6 @@ export function registerPaymentRoutes(app: Express): void {
                 amountPaid: intent.amount,
                 status: "confirmed",
               });
-              await storage.incrementVenueEntryNightTicketsSold(meta.venueEntryNightId);
             }
           }
           break;
@@ -472,6 +482,10 @@ export function registerPaymentRoutes(app: Express): void {
                 }));
               }
             } else if (meta.venueEntryNightId) {
+              const slotClaimed = await storage.claimVenueTicketSlot(meta.venueEntryNightId);
+              if (!slotClaimed) {
+                console.error(`[Paystack Webhook] Oversell: venue entry night ${meta.venueEntryNightId} at capacity. Reference ${reference} for user ${meta.userId} requires manual refund.`);
+              }
               await storage.createVenueTicket({
                 userId: meta.userId!,
                 venueEntryNightId: meta.venueEntryNightId,
@@ -481,7 +495,6 @@ export function registerPaymentRoutes(app: Express): void {
                 amountPaid: verified.amountSmallestUnit,
                 status: "confirmed",
               });
-              await storage.incrementVenueEntryNightTicketsSold(meta.venueEntryNightId);
             }
           }
         }

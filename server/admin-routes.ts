@@ -1,5 +1,6 @@
 import { Express, Request, Response, NextFunction } from "express";
 import bcrypt from "bcrypt";
+import crypto from "crypto";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import { Pool } from "pg";
@@ -127,7 +128,7 @@ export function setupAdminRoutes(app: Express) {
     displayName: z.string().min(1, "Display name required"),
   });
 
-  app.post("/api/admin/setup", async (req: Request, res: Response) => {
+  app.post("/api/admin/setup", authRateLimiter, async (req: Request, res: Response) => {
     try {
       // Check if any admins already exist
       const existingAdmins = await storage.getAllAdminUsers();
@@ -155,7 +156,11 @@ export function setupAdminRoutes(app: Express) {
         });
       }
 
-      if (setupKey !== expectedKey) {
+      const suppliedBuf = Buffer.from(setupKey);
+      const expectedBuf = Buffer.from(expectedKey);
+      const keyValid = suppliedBuf.length === expectedBuf.length &&
+        crypto.timingSafeEqual(suppliedBuf, expectedBuf);
+      if (!keyValid) {
         return res.status(401).json({ message: "Invalid setup key" });
       }
 
@@ -234,10 +239,10 @@ export function setupAdminRoutes(app: Express) {
       }
 
       // Check login throttling
-      const throttleCheck = checkLoginThrottle(`admin:${username}`, ip);
+      const throttleCheck = await checkLoginThrottle(`admin:${username}`, ip);
       if (!throttleCheck.allowed) {
         logSecurityEvent("lockout", { identifier: `admin:${username}`, ip, lockedUntil: throttleCheck.lockedUntil });
-        return res.status(429).json({ 
+        return res.status(429).json({
           message: `Account temporarily locked. Try again after ${throttleCheck.lockedUntil?.toLocaleTimeString()}`,
           lockedUntil: throttleCheck.lockedUntil
         });
@@ -245,25 +250,25 @@ export function setupAdminRoutes(app: Express) {
 
       const admin = await storage.getAdminUserByUsername(username);
       if (!admin) {
-        recordLoginAttempt(`admin:${username}`, ip, false);
+        await recordLoginAttempt(`admin:${username}`, ip, false);
         logSecurityEvent("login_failed", { identifier: `admin:${username}`, ip, type: "admin" });
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
       if (!admin.isActive) {
-        recordLoginAttempt(`admin:${username}`, ip, false);
+        await recordLoginAttempt(`admin:${username}`, ip, false);
         return res.status(401).json({ message: "Account is deactivated" });
       }
 
       const isValidPassword = await bcrypt.compare(password, admin.passwordHash);
       if (!isValidPassword) {
-        recordLoginAttempt(`admin:${username}`, ip, false);
+        await recordLoginAttempt(`admin:${username}`, ip, false);
         logSecurityEvent("login_failed", { identifier: `admin:${username}`, ip, type: "admin" });
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
       // Clear login attempts on successful login
-      clearLoginAttempts(`admin:${username}`, ip);
+      await clearLoginAttempts(`admin:${username}`, ip);
       logSecurityEvent("login_success", { adminId: admin.id, ip, type: "admin" });
 
       // Set session
@@ -357,7 +362,7 @@ export function setupAdminRoutes(app: Express) {
         return res.status(400).json({ message: "Email already exists" });
       }
 
-      const passwordHash = await bcrypt.hash(data.password, 10);
+      const passwordHash = await bcrypt.hash(data.password, 12);
 
       const admin = await storage.createAdminUser({
         email: data.email,
@@ -757,7 +762,9 @@ export function setupAdminRoutes(app: Express) {
   app.get("/api/admin/reports", requireRole("super_admin", "content_moderator", "user_support"), async (req: Request, res: Response) => {
     try {
       const status = req.query.status as string | undefined;
-      const reports = await storage.getContentReports(status);
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+      const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
+      const reports = await storage.getContentReports(status, limit, offset);
       res.json(reports);
     } catch (error) {
       res.status(500).json({ message: "Failed to get reports" });

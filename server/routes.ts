@@ -30,6 +30,14 @@ import { registerPaymentRoutes } from "./payment-routes";
 import { buddyRouter } from "./buddyRoutes";
 import { registerRatingRoutes } from "./rating-routes";
 import { startBuddyScheduler } from "./buddyScheduler";
+import { fileTypeFromBuffer } from "file-type";
+
+class MediaValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MediaValidationError';
+  }
+}
 
 // Helper function to resolve identifier (UUID or username) to userId
 async function resolveUserId(identifier: string): Promise<string | null> {
@@ -169,8 +177,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   app.post("/api/auth/signup", authRateLimiter, async (req, res) => {
     try {
-      const { password, ...userData } = signupSchema.parse(req.body);
-      
+      const { password, ...rawUserData } = signupSchema.parse(req.body);
+      const userData = { ...rawUserData, email: rawUserData.email.toLowerCase() };
+
       const existingUsername = await storage.getUserByUsername(userData.username);
       if (existingUsername) {
         return res.status(400).json({ message: "Username already exists" });
@@ -204,56 +213,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/auth/login", authRateLimiter, (req, res, next) => {
+  app.post("/api/auth/login", authRateLimiter, async (req, res, next) => {
     const identifier = req.body.username || "";
     const ip = req.ip || req.headers["x-forwarded-for"] as string || "unknown";
-    
-    const throttleCheck = checkLoginThrottle(identifier, ip);
-    if (!throttleCheck.allowed) {
-      logSecurityEvent("lockout", { identifier, ip, lockedUntil: throttleCheck.lockedUntil });
-      return res.status(429).json({ 
-        message: `Account temporarily locked. Try again after ${throttleCheck.lockedUntil?.toLocaleTimeString()}`,
-        lockedUntil: throttleCheck.lockedUntil
-      });
+
+    try {
+      const throttleCheck = await checkLoginThrottle(identifier, ip);
+      if (!throttleCheck.allowed) {
+        logSecurityEvent("lockout", { identifier, ip, lockedUntil: throttleCheck.lockedUntil });
+        return res.status(429).json({
+          message: `Account temporarily locked. Try again after ${throttleCheck.lockedUntil?.toLocaleTimeString()}`,
+          lockedUntil: throttleCheck.lockedUntil,
+        });
+      }
+    } catch (err) {
+      console.error("[AUTH] throttle check failed:", err);
     }
-    
-    passport.authenticate("local", (err: any, user: Express.User | false, info: any) => {
+
+    passport.authenticate("local", async (err: any, user: Express.User | false, info: any) => {
       if (err) {
         return res.status(500).json({ message: "Login failed" });
       }
       if (!user) {
-        recordLoginAttempt(identifier, ip, false);
-        
-        // Check if this failed attempt triggered a lockout
-        const postAttemptCheck = checkLoginThrottle(identifier, ip);
-        if (!postAttemptCheck.allowed) {
-          logSecurityEvent("lockout", { identifier, ip, lockedUntil: postAttemptCheck.lockedUntil });
-          return res.status(429).json({ 
-            message: `Too many failed attempts. Account temporarily locked. Try again after ${postAttemptCheck.lockedUntil?.toLocaleTimeString()}`,
-            lockedUntil: postAttemptCheck.lockedUntil
-          });
+        try {
+          await recordLoginAttempt(identifier, ip, false);
+          const postAttemptCheck = await checkLoginThrottle(identifier, ip);
+          if (!postAttemptCheck.allowed) {
+            logSecurityEvent("lockout", { identifier, ip, lockedUntil: postAttemptCheck.lockedUntil });
+            return res.status(429).json({
+              message: `Too many failed attempts. Account temporarily locked. Try again after ${postAttemptCheck.lockedUntil?.toLocaleTimeString()}`,
+              lockedUntil: postAttemptCheck.lockedUntil,
+            });
+          }
+          logSecurityEvent("login_failed", { identifier, ip, remainingAttempts: postAttemptCheck.remainingAttempts || 0 });
+        } catch (throttleErr) {
+          console.error("[AUTH] throttle record failed:", throttleErr);
         }
-        
-        logSecurityEvent("login_failed", { identifier, ip, remainingAttempts: postAttemptCheck.remainingAttempts || 0 });
         return res.status(401).json({ message: info?.message || "Invalid credentials" });
       }
-      
+
       req.session.regenerate((regenerateErr) => {
         if (regenerateErr) {
           return res.status(500).json({ message: "Login failed" });
         }
-        
-        req.login(user, (loginErr) => {
+
+        req.login(user, async (loginErr) => {
           if (loginErr) {
             return res.status(500).json({ message: "Login failed" });
           }
-          
-          clearLoginAttempts(identifier, ip);
+
+          try {
+            await clearLoginAttempts(identifier, ip);
+          } catch (clearErr) {
+            console.error("[AUTH] clear login attempts failed:", clearErr);
+          }
           logSecurityEvent("login_success", { userId: user.id, ip });
-          
+
           // Rotate CSRF token on successful login for security
           const newCsrfToken = rotateCsrfToken(res);
-          
+
           res.json({ user, csrfToken: newCsrfToken });
         });
       });
@@ -324,11 +342,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Forgot password - request reset email
   app.post("/api/auth/forgot-password", authRateLimiter, async (req, res) => {
     try {
-      const { email } = req.body;
-      if (!email) {
+      const { email: rawEmail } = req.body;
+      if (!rawEmail) {
         return res.status(400).json({ message: "Email is required" });
       }
-      
+      const email = rawEmail.toLowerCase();
+
       const user = await storage.getUserByEmail(email);
       
       // Always return success to prevent email enumeration attacks
@@ -1424,11 +1443,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Bouncer redeems a 6-digit code → gets scanner token (no auth required)
-  app.post("/api/scanner/auth", async (req, res) => {
+  // Bouncer redeems a staff code → gets scanner token (no auth required)
+  app.post("/api/scanner/auth", authRateLimiter, async (req, res) => {
     try {
       const schema = z.object({
-        code: z.string().length(6),
+        code: z.string().length(64),
         staffName: z.string().min(1).max(80),
       });
       const parsed = schema.safeParse(req.body);
@@ -1521,10 +1540,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Event-scoped staff code redemption — bouncer submits code at a specific event URL
-  app.post("/api/events/:eventId/staff-access/validate", async (req, res) => {
+  app.post("/api/events/:eventId/staff-access/validate", authRateLimiter, async (req, res) => {
     try {
       const schema = z.object({
-        code: z.string().length(6),
+        code: z.string().length(64),
         staffName: z.string().min(1).max(80),
       });
       const parsed = schema.safeParse(req.body);
@@ -1672,6 +1691,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json({ urls });
     } catch (error) {
+      if (error instanceof MediaValidationError) {
+        return res.status(400).json({ message: error.message });
+      }
       console.error("Error uploading images:", error);
       res.status(500).json({ message: "Failed to upload images" });
     }
@@ -1686,6 +1708,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const videoUrl = await storeMedia(videoData, req.user!.id);
       res.json({ videoUrl });
     } catch (error) {
+      if (error instanceof MediaValidationError) {
+        return res.status(400).json({ message: error.message });
+      }
       console.error("Error uploading video:", error);
       res.status(500).json({ message: "Failed to upload video" });
     }
@@ -1824,22 +1849,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ──── Media Storage (Railway-compatible, DB-backed) ────────────────────────
 
   // Helper: store base64 data URL in DB, return /api/media/{id} URL
+  const ALLOWED_MEDIA_TYPES = new Set([
+    'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+    'video/mp4', 'video/webm', 'video/ogg',
+  ]);
+
   async function storeMedia(data: string, ownerId: string): Promise<string> {
-    const contentTypeMatch = data.match(/data:([^;]+);base64/);
-    const contentType = contentTypeMatch ? contentTypeMatch[1] : 'application/octet-stream';
-    const id = await storage.saveMedia(data, contentType, ownerId);
+    const base64Data = data.includes(',') ? data.split(',')[1] : data;
+    const buffer = Buffer.from(base64Data, 'base64');
+
+    const detected = await fileTypeFromBuffer(buffer);
+    if (!detected || !ALLOWED_MEDIA_TYPES.has(detected.mime)) {
+      throw new MediaValidationError(
+        `File type not allowed: ${detected?.mime ?? 'unknown'}`
+      );
+    }
+
+    const safeData = `data:${detected.mime};base64,${base64Data}`;
+    const id = await storage.saveMedia(safeData, detected.mime, ownerId);
     return `/api/media/${id}`;
   }
 
   // Serve any uploaded media from DB
-  app.get("/api/media/:id", async (req, res) => {
+  app.get("/api/media/:id", requireAuth, async (req, res) => {
     try {
       const media = await storage.getMedia(req.params.id);
       if (!media) return res.sendStatus(404);
       const base64 = media.data.includes(',') ? media.data.split(',')[1] : media.data;
       const buffer = Buffer.from(base64, 'base64');
       res.set('Content-Type', media.contentType);
-      res.set('Cache-Control', 'public, max-age=31536000, immutable');
+      res.set('Cache-Control', 'private, max-age=3600');
       res.set('Content-Length', String(buffer.length));
       res.send(buffer);
     } catch {
@@ -1856,7 +1895,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const url = await storeMedia(data, req.user!.id);
       res.json({ url });
-    } catch {
+    } catch (error) {
+      if (error instanceof MediaValidationError) {
+        return res.status(400).json({ message: error.message });
+      }
       res.status(500).json({ message: "Failed to save media" });
     }
   });
@@ -1890,6 +1932,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const stablePath = await storeMedia(imageData, req.user!.id);
       res.json({ stablePath, mediaType: isVideo ? 'video' : 'image' });
     } catch (error) {
+      if (error instanceof MediaValidationError) {
+        return res.status(400).json({ message: error.message });
+      }
       console.error("Error uploading story media:", error);
       res.status(500).json({ message: "Failed to upload media" });
     }
@@ -3058,6 +3103,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { passwordHash, ...userWithoutPassword } = updatedUser;
       return res.json(userWithoutPassword);
     } catch (error: any) {
+      if (error instanceof MediaValidationError) {
+        return res.status(400).json({ message: error.message });
+      }
       console.error("[Avatar Upload] Error:", error?.message || error);
       res.status(500).json({ message: "Failed to upload avatar. Please try again." });
     }
@@ -3110,6 +3158,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Return a dummy upload URL for backward compat with ObjectUploader
       res.json({ uploadURL: '/api/media/upload', stablePath: null });
     } catch (error) {
+      if (error instanceof MediaValidationError) {
+        return res.status(400).json({ message: error.message });
+      }
       console.error("Error with group avatar:", error);
       res.status(500).json({ message: "Failed to update avatar" });
     }
@@ -3709,10 +3760,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Venue event-scoped staff code redemption — bouncer submits code at a specific venue event URL
-  app.post("/api/venue-events/:id/staff-access/validate", async (req, res) => {
+  app.post("/api/venue-events/:id/staff-access/validate", authRateLimiter, async (req, res) => {
     try {
       const schema = z.object({
-        code: z.string().length(6),
+        code: z.string().length(64),
         staffName: z.string().min(1).max(80),
       });
       const parsed = schema.safeParse(req.body);
@@ -4023,6 +4074,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Already a real URL — just return it
       res.json({ objectPath: imageURL });
     } catch (error) {
+      if (error instanceof MediaValidationError) {
+        return res.status(400).json({ message: error.message });
+      }
       console.error("Error processing media:", error);
       res.status(500).json({ message: "Failed to process post media" });
     }
@@ -4046,6 +4100,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json({ objectPath: imageURL });
     } catch (error) {
+      if (error instanceof MediaValidationError) {
+        return res.status(400).json({ message: error.message });
+      }
       res.status(500).json({ message: "Failed to process venue image" });
     }
   });

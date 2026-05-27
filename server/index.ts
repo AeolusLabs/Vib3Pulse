@@ -110,8 +110,8 @@ passport.use(
   new LocalStrategy(async (username, password, done) => {
     try {
       const isEmail = username.includes('@');
-      const user = isEmail 
-        ? await storage.getUserByEmail(username)
+      const user = isEmail
+        ? await storage.getUserByEmail(username.toLowerCase())
         : await storage.getUserByUsername(username);
       
       if (!user) {
@@ -230,6 +230,13 @@ setupAdminRoutes(app);
     console.log('[STARTUP] event_moderations table ready');
   } catch (err) {
     console.error('[STARTUP] event_moderations table setup FAILED — admin moderation will not work:', err);
+  }
+
+  // Auto-create login_attempts table (brute-force protection, survives restarts)
+  try {
+    await storage.ensureLoginAttemptsTable();
+  } catch (err) {
+    console.error('[STARTUP] login_attempts table setup failed:', err);
   }
 
   // Auto-add currency column to events table (idempotent ADD COLUMN IF NOT EXISTS)
