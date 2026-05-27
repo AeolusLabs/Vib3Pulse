@@ -1,120 +1,28 @@
-import { useEffect, useState } from "react";
-
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { useRoute, Link } from "wouter";
-import { format } from "date-fns";
-import Navigation from "@/components/Navigation";
-import BottomNavigation from "@/components/BottomNavigation";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Card, CardContent } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import TicketSelector from "@/components/TicketSelector";
-import EventCard from "@/components/EventCard";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useRoute } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
-import { useEventRatings, useUserEventRating } from "@/hooks/use-ratings";
-import RatingDisplay from "@/components/RatingDisplay";
-import RatingInput from "@/components/RatingInput";
-import type { Event, User, Community } from "@shared/schema";
-import musicFestival from '@assets/generated_images/Outdoor_music_festival_event_179040d3.png';
-import { CalendarIcon, MapPinIcon, Share2Icon, ExternalLinkIcon, UsersIcon, FlagIcon } from "@/components/ui/icons";
-
-type EventWithOrganizer = Event & { organizer: User; community: (Community & { memberCount: number }) | null };
+import EventDetailsModal from "@/components/EventDetailsModal";
+import type { Event } from "@shared/schema";
 
 export default function EventDetailPage() {
-  const [match, params] = useRoute("/event/:id");
+  const [, params] = useRoute("/event/:id");
   const eventId = params?.id;
-  const { user } = useAuth();
-  const { data: sessionUser } = useAuth();
+  const { data: user } = useAuth();
 
-  const { data: event, isLoading, error } = useQuery<EventWithOrganizer>({
+  const { data: event, isLoading } = useQuery<Event>({
     queryKey: ["/api/events", eventId],
     enabled: !!eventId,
   });
 
-  const communityId = event?.community?.id;
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <p className="text-muted-foreground">Loading…</p>
+      </div>
+    );
+  }
 
-  const { data: membership, isLoading: membershipLoading } = useQuery<{ isMember: boolean }>({
-    queryKey: ["/api/communities", communityId, "membership"],
-    enabled: !!communityId && !!user,
-  });
-
-  const joinMutation = useMutation({
-    mutationFn: () => apiRequest("POST", `/api/communities/${communityId}/join`, {}),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/communities", communityId, "membership"] });
-    },
-  });
-
-  const leaveMutation = useMutation({
-    mutationFn: () => apiRequest("DELETE", `/api/communities/${communityId}/leave`, {}),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/communities", communityId, "membership"] });
-    },
-  });
-
-  const [reportOpen, setReportOpen] = useState(false);
-  const [reportReason, setReportReason] = useState("");
-
-  const reportMutation = useMutation({
-    mutationFn: () => apiRequest("POST", `/api/events/${eventId}/report`, { reason: reportReason }),
-    onSuccess: () => {
-      setReportOpen(false);
-      setReportReason("");
-    },
-  });
-
-  useEffect(() => {
-    if (eventId) {
-      apiRequest("POST", `/api/events/${eventId}/track-view`, {}).catch(() => {});
-    }
-  }, [eventId]);
-
-  const { data: rawTiers } = useQuery({
-    queryKey: ["/api/events", eventId, "ticket-tiers"],
-    queryFn: async () => {
-      const res = await fetch(`/api/events/${eventId}/ticket-tiers`, { credentials: "include" });
-      if (!res.ok) return [];
-      return res.json();
-    },
-    enabled: !!eventId,
-  });
-
-  // Adapt DB tier shape → TicketSelector's expected shape
-  const ticketTiers = (rawTiers ?? []).map((t: any) => ({
-    id: t.id,
-    name: t.name,
-    price: t.priceSmallestUnit / 100,
-    description: "",
-    available: t.quantity,
-  }));
-
-  const { data: similarEvents } = useQuery<Event[]>({
-    queryKey: ["/api/events"],
-    select: (events) => {
-      if (!event) return [];
-      return events
-        .filter(e => e.category === event.category && e.id !== event.id)
-        .slice(0, 3);
-    },
-    enabled: !!event,
-  });
-
-  const { data: ratingStats } = useEventRatings(eventId);
-  const { data: userRating } = useUserEventRating(sessionUser ? eventId : undefined);
-
-  if (!match || !eventId) {
+  if (!event) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <p className="text-muted-foreground">Event not found</p>
@@ -122,295 +30,19 @@ export default function EventDetailPage() {
     );
   }
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-background pb-20 md:pb-0">
-        <Navigation />
-        <div className="container mx-auto px-4 py-16 text-center">
-          <p className="text-muted-foreground">Loading event details...</p>
-        </div>
-        <BottomNavigation />
-      </div>
-    );
-  }
-
-  if (error || !event) {
-    return (
-      <div className="min-h-screen bg-background pb-20 md:pb-0">
-        <Navigation />
-        <div className="container mx-auto px-4 py-16 text-center">
-          <p className="text-destructive">Failed to load event details</p>
-        </div>
-        <BottomNavigation />
-      </div>
-    );
-  }
-
-  const isOrganizer = user?.id === event.organizerId;
   const modStatus = (event as any).moderationStatus;
-  if (!isOrganizer && modStatus && modStatus !== 'approved') {
+  if (user?.id !== event.organizerId && modStatus && modStatus !== "approved") {
     return (
-      <div className="min-h-screen bg-background pb-20 md:pb-0">
-        <Navigation />
-        <div className="container mx-auto px-4 py-16 text-center space-y-2">
-          <p className="text-lg font-semibold">Event not available</p>
-          <p className="text-muted-foreground">This event is currently under review and is not publicly accessible.</p>
-        </div>
-        <BottomNavigation />
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <p className="text-muted-foreground">This event is not publicly available</p>
       </div>
     );
   }
-
-  const eventDate = new Date(event.eventDate);
-  const formattedDate = format(eventDate, "EEEE, MMMM d, yyyy");
-  const formattedTime = format(eventDate, "h:mm a");
-  const organizerInitials = event.organizer.username.slice(0, 2).toUpperCase();
-  const eventEnded = new Date(event.eventEndDate ?? event.eventDate) < new Date();
 
   return (
-    <div className="min-h-screen bg-background pb-20 md:pb-0">
-      <Navigation />
-
-      <div className="relative h-[400px] md:h-[500px] overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-t from-background/95 via-background/40 to-transparent z-10" />
-        <img
-          src={event.imageUrl || musicFestival}
-          alt={event.title}
-          className="w-full h-full object-cover"
-        />
-      </div>
-
-      <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 -mt-32 relative z-20">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2 space-y-6">
-            <Card>
-              <CardContent className="p-6 md:p-8">
-                <div className="flex flex-wrap gap-2 mb-4">
-                  <Badge variant="default" data-testid="badge-category">{event.category}</Badge>
-                  {event.requiresRSVP && (
-                    <Badge variant="outline" data-testid="badge-rsvp">RSVP Required</Badge>
-                  )}
-                </div>
-
-                <h1 className="font-serif text-3xl md:text-4xl font-bold mb-4" data-testid="text-event-title">
-                  {event.title}
-                </h1>
-
-                <div className="flex items-center gap-4 mb-6 pb-6 border-b">
-                  <Avatar className="h-12 w-12">
-                    <AvatarImage src="" alt={event.organizer.username} />
-                    <AvatarFallback>{organizerInitials}</AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <p className="font-semibold" data-testid="text-organizer">{event.organizer.username}</p>
-                    <p className="text-sm text-muted-foreground">Event Organizer</p>
-                  </div>
-                  <Button variant="outline" size="sm" className="ml-auto" data-testid="button-follow-organizer">
-                    Follow
-                  </Button>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-                  <div className="flex items-start gap-3">
-                    <CalendarIcon className="h-5 w-5 text-primary mt-0.5" />
-                    <div>
-                      <p className="font-semibold">Date & Time</p>
-                      <p className="text-sm text-muted-foreground" data-testid="text-date">
-                        {formattedDate}<br />{formattedTime}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-3">
-                    <MapPinIcon className="h-5 w-5 text-primary mt-0.5" />
-                    <div>
-                      <p className="font-semibold">Location</p>
-                      <p className="text-sm text-muted-foreground" data-testid="text-location">
-                        {event.location}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="prose prose-sm max-w-none">
-                  <h3 className="font-serif text-xl font-semibold mb-3">About This Event</h3>
-                  <p className="text-foreground whitespace-pre-wrap" data-testid="text-description">
-                    {event.description}
-                  </p>
-                </div>
-
-                {/* Ratings section */}
-                <div className="mt-6 pt-6 border-t space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-serif text-lg font-semibold">Ratings</h3>
-                    <RatingDisplay
-                      averageRating={ratingStats?.averageRating ?? null}
-                      totalRatings={ratingStats?.totalRatings ?? 0}
-                    />
-                  </div>
-
-                  {ratingStats && ratingStats.totalRatings > 0 && (
-                    <div className="space-y-1.5">
-                      {[5, 4, 3, 2, 1].map((star) => {
-                        const cnt = ratingStats.distribution[star] ?? 0;
-                        const pct = (cnt / ratingStats.totalRatings) * 100;
-                        return (
-                          <div key={star} className="flex items-center gap-2 text-xs">
-                            <span className="w-4 text-right text-muted-foreground">{star}★</span>
-                            <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-yellow-400 rounded-full transition-all"
-                                style={{ width: `${pct}%` }}
-                              />
-                            </div>
-                            <span className="w-5 text-right text-muted-foreground">{cnt}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {sessionUser && eventEnded && userRating?.hasRated === false && (
-                    <RatingInput eventId={eventId!} organizerId={event.organizerId} />
-                  )}
-                </div>
-
-                <div className="flex flex-wrap gap-2 mt-6 pt-6 border-t">
-                  {event.externalTicketUrl && (
-                    <Button asChild data-testid="button-external-tickets">
-                      <a href={event.externalTicketUrl} target="_blank" rel="noopener noreferrer">
-                        <ExternalLinkIcon className="h-4 w-4 mr-2" />
-                        Get Tickets
-                      </a>
-                    </Button>
-                  )}
-                  <Button variant="outline" size="default" data-testid="button-share">
-                    <Share2Icon className="h-4 w-4 mr-2" />
-                    Share Event
-                  </Button>
-                  {user && user.id !== event.organizer.id && (
-                    <Button
-                      variant="ghost"
-                      size="default"
-                      className="text-muted-foreground hover:text-destructive"
-                      onClick={() => setReportOpen(true)}
-                      data-testid="button-report-event"
-                    >
-                      <FlagIcon className="h-4 w-4 mr-2" />
-                      Report
-                    </Button>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            {event.community && (
-              <Card>
-                <CardContent className="p-6">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <UsersIcon className="h-5 w-5 text-primary flex-shrink-0" />
-                      <div className="min-w-0">
-                        <p className="text-xs text-muted-foreground mb-0.5">Part of community</p>
-                        <Link
-                          href={`/community/${event.community.slug ?? event.community.id}`}
-                          className="font-semibold hover:underline truncate block"
-                        >
-                          {event.community.name}
-                        </Link>
-                        <p className="text-xs text-muted-foreground">
-                          {event.community.memberCount.toLocaleString()} {event.community.memberCount === 1 ? "member" : "members"}
-                        </p>
-                      </div>
-                    </div>
-                    {user && !membershipLoading && (
-                      membership?.isMember ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => leaveMutation.mutate()}
-                          disabled={leaveMutation.isPending}
-                        >
-                          {leaveMutation.isPending ? "Leaving…" : "Leave"}
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          onClick={() => joinMutation.mutate()}
-                          disabled={joinMutation.isPending}
-                        >
-                          {joinMutation.isPending ? "Joining…" : "Join Community"}
-                        </Button>
-                      )
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-
-          <div className="lg:col-span-1">
-            <TicketSelector
-              tiers={ticketTiers}
-              onPurchase={(selections) => console.log('Purchase:', selections)}
-            />
-          </div>
-        </div>
-
-        {similarEvents && similarEvents.length > 0 && (
-          <div className="mt-12 mb-8">
-            <h2 className="font-serif text-2xl font-semibold mb-6">Similar Events</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {similarEvents.map((similarEvent) => (
-                <EventCard
-                  key={similarEvent.id}
-                  id={similarEvent.id}
-                  title={similarEvent.title}
-                  image={similarEvent.imageUrl || musicFestival}
-                  date={format(new Date(similarEvent.eventDate), "MMM d")}
-                  location={similarEvent.location}
-                  organizer={{ name: similarEvent.organizerId, avatar: '' }}
-                  price={similarEvent.ticketPrice === 0 ? 'free' as const : similarEvent.ticketPrice}
-                  rsvpCount={0}
-                  onClick={() => window.location.href = `/event/${similarEvent.id}`}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-      </main>
-
-      <Dialog open={reportOpen} onOpenChange={setReportOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Report Event</DialogTitle>
-            <DialogDescription>
-              Tell us why you're reporting <span className="font-medium">{event.title}</span>.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2 py-2">
-            <Label>Reason</Label>
-            <Textarea
-              value={reportReason}
-              onChange={(e) => setReportReason(e.target.value)}
-              placeholder="Describe the issue (e.g. spam, misleading info, inappropriate content)..."
-              rows={3}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setReportOpen(false)}>Cancel</Button>
-            <Button
-              variant="destructive"
-              onClick={() => reportMutation.mutate()}
-              disabled={!reportReason.trim() || reportMutation.isPending}
-            >
-              {reportMutation.isPending ? "Submitting..." : "Submit Report"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <BottomNavigation />
-    </div>
+    <EventDetailsModal
+      event={event}
+      onClose={() => window.history.back()}
+    />
   );
 }

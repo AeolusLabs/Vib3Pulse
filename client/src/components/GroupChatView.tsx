@@ -40,9 +40,75 @@ import PollMessage from "./PollMessage";
 import CreatePollModal from "./CreatePollModal";
 import { ObjectUploader } from "./ObjectUploader";
 import { MentionInput, renderMessageWithMentions } from "./MentionInput";
-import type { User, Conversation, ConversationParticipant, ConversationMessage } from "@shared/schema";
+import type { User, Conversation, ConversationParticipant, ConversationMessage, Event, Venue } from "@shared/schema";
 import type { AuthUser } from "@/hooks/useAuth";
-import { SendIcon, ArrowLeftIcon, UsersIcon, SettingsIcon, ChartBarIcon, MoreVerticalIcon, UserPlusIcon, LogOutIcon, ShieldIcon, UserMinusIcon, Trash2Icon, Loader2Icon, Link2Icon, CopyIcon, CheckIcon, CameraIcon, CalendarIcon, Building2Icon, XIcon } from "@/components/ui/icons";
+import { SendIcon, ArrowLeftIcon, UsersIcon, SettingsIcon, ChartBarIcon, MoreVerticalIcon, UserPlusIcon, LogOutIcon, ShieldIcon, UserMinusIcon, Trash2Icon, Loader2Icon, Link2Icon, CopyIcon, CheckIcon, CameraIcon, CalendarIcon, Building2Icon, XIcon, MapPinIcon } from "@/components/ui/icons";
+
+function GCVAttachedEvent({ eventId, isOwn }: { eventId: string; isOwn: boolean }) {
+  const [, navigate] = useLocation();
+  const { data: event } = useQuery<Event>({
+    queryKey: ['/api/events', eventId],
+    enabled: !!eventId,
+  });
+  if (!event) return null;
+  return (
+    <div
+      className={`mt-2 p-2 rounded-lg cursor-pointer ${isOwn ? 'bg-primary-foreground/20 hover:bg-primary-foreground/30' : 'bg-background/50 hover:bg-background/70'}`}
+      onClick={(e) => { e.stopPropagation(); navigate(`/event/${event.id}`); }}
+    >
+      <div className="flex gap-2">
+        {event.imageUrl && (
+          <img src={event.imageUrl} alt={event.title} className="w-12 h-12 rounded object-cover flex-shrink-0" />
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1 mb-0.5">
+            <CalendarIcon className="h-3 w-3" />
+            <span className="text-xs font-medium">Event</span>
+          </div>
+          <p className="text-sm font-medium line-clamp-1">{event.title}</p>
+          <p className="text-xs opacity-70 flex items-center gap-1">
+            <MapPinIcon className="h-3 w-3" />
+            <span className="line-clamp-1">{event.location}</span>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GCVAttachedVenue({ venueId, isOwn }: { venueId: string; isOwn: boolean }) {
+  const [, navigate] = useLocation();
+  const { data: venue } = useQuery<Venue>({
+    queryKey: ['/api/venues', venueId],
+    enabled: !!venueId,
+  });
+  if (!venue) return null;
+  return (
+    <div
+      className={`mt-2 p-2 rounded-lg cursor-pointer ${isOwn ? 'bg-primary-foreground/20 hover:bg-primary-foreground/30' : 'bg-background/50 hover:bg-background/70'}`}
+      onClick={(e) => { e.stopPropagation(); navigate(`/venue/${venue.id}`); }}
+    >
+      <div className="flex gap-2">
+        {(venue.coverImageUrl || venue.imageUrl) && (
+          <img src={venue.coverImageUrl || venue.imageUrl || ''} alt={venue.name} className="w-12 h-12 rounded object-cover flex-shrink-0" />
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1 mb-0.5">
+            <Building2Icon className="h-3 w-3" />
+            <span className="text-xs font-medium">Venue</span>
+          </div>
+          <p className="text-sm font-medium line-clamp-1">{venue.name}</p>
+          {venue.city && (
+            <p className="text-xs opacity-70 flex items-center gap-1">
+              <MapPinIcon className="h-3 w-3" />
+              <span className="line-clamp-1">{venue.city}</span>
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 interface ConversationWithDetails extends Conversation {
   participants: Array<ConversationParticipant & { user: User }>;
@@ -448,11 +514,17 @@ export default function GroupChatView({ conversationId, currentUser, onBack, pen
                       >
                         <p className="text-sm whitespace-pre-wrap break-words">
                           {renderMessageWithMentions(
-                            message.content || '', 
+                            message.content || '',
                             currentUser.username,
                             (username) => navigate(`/profile/${username}`)
                           )}
                         </p>
+                        {message.eventId && (
+                          <GCVAttachedEvent eventId={message.eventId} isOwn={isOwn} />
+                        )}
+                        {message.venueId && (
+                          <GCVAttachedVenue venueId={message.venueId} isOwn={isOwn} />
+                        )}
                       </div>
                     )}
                     {showTime && (
