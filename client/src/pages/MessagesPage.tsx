@@ -204,6 +204,7 @@ export default function MessagesPage() {
   const [createGroupOpen, setCreateGroupOpen] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<ConversationWithDetails | null>(null);
   const [replyingTo, setReplyingTo] = useState<ConversationMessageWithSender | null>(null);
+  const [pendingShare, setPendingShare] = useState<{ type: 'event' | 'venue'; id: string; title?: string; name?: string } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -229,6 +230,28 @@ export default function MessagesPage() {
     }, 300);
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const shareParam = params.get('share');
+    let shareData: { type: 'event' | 'venue'; id: string; title?: string; name?: string } | null = null;
+    if (shareParam) {
+      try { shareData = JSON.parse(decodeURIComponent(shareParam)); } catch {}
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+    if (!shareData) {
+      try {
+        const stored = localStorage.getItem('shareToMessage');
+        if (stored) shareData = JSON.parse(stored);
+      } catch {}
+    }
+    localStorage.removeItem('shareToMessage');
+    if (shareData?.type && shareData?.id) setPendingShare(shareData);
+  }, []);
+
+  useEffect(() => {
+    if (pendingShare && !conversationId) setNewChatDialogOpen(true);
+  }, [pendingShare, conversationId]);
 
   const currentUserId = currentUser?.id;
   const { data: followingList = [], isLoading: followingLoading, refetch: refetchFollowing } = useQuery<User[]>({
@@ -283,11 +306,18 @@ export default function MessagesPage() {
   });
 
   const sendMessageMutation = useMutation({
-    mutationFn: async ({ content, replyToId }: { content: string; replyToId?: string }) => {
+    mutationFn: async ({ content, replyToId, eventId, venueId }: {
+      content: string;
+      replyToId?: string;
+      eventId?: string;
+      venueId?: string;
+    }) => {
       return await apiRequest('POST', `/api/conversations/${conversationId}/messages`, {
         content,
-        messageType: 'text',
+        messageType: eventId ? 'event' : venueId ? 'venue' : 'text',
         replyToId,
+        eventId,
+        venueId,
       });
     },
     onSuccess: () => {
@@ -295,6 +325,7 @@ export default function MessagesPage() {
       queryClient.invalidateQueries({ queryKey: ['/api/conversations'] });
       setMessageText("");
       setReplyingTo(null);
+      setPendingShare(null);
     },
   });
 
@@ -327,10 +358,14 @@ export default function MessagesPage() {
   }, [conversationId]);
 
   const handleSendMessage = () => {
-    if (messageText.trim() && conversationId) {
+    if ((messageText.trim() || pendingShare) && conversationId) {
       sendMessageMutation.mutate({
-        content: messageText,
+        content: messageText.trim() || (pendingShare?.type === 'event'
+          ? `Check out this event: ${pendingShare.title}`
+          : `Check out this venue: ${pendingShare?.name}`),
         replyToId: replyingTo?.id,
+        eventId: pendingShare?.type === 'event' ? pendingShare.id : undefined,
+        venueId: pendingShare?.type === 'venue' ? pendingShare.id : undefined,
       });
     }
   };
@@ -529,6 +564,12 @@ export default function MessagesPage() {
                               </div>
                             )}
                             {message.content}
+                            {message.eventId && (
+                              <MessageAttachedEvent eventId={message.eventId} isOwnMessage={isOwnMessage} />
+                            )}
+                            {message.venueId && (
+                              <MessageAttachedVenue venueId={message.venueId} isOwnMessage={isOwnMessage} />
+                            )}
                           </div>
                           <button
                             className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity p-1 text-muted-foreground hover:text-foreground rounded-full hover:bg-muted"
@@ -549,6 +590,31 @@ export default function MessagesPage() {
 
           {/* Reply banner + input bar */}
           <div className="flex-shrink-0 pb-4 md:pb-6">
+            {pendingShare && (
+              <div className="mb-2 px-3 py-2.5 bg-violet-600/10 border border-violet-500/20 rounded-xl flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  {pendingShare.type === 'event'
+                    ? <CalendarIcon className="h-4 w-4 text-violet-400 shrink-0" />
+                    : <Building2Icon className="h-4 w-4 text-violet-400 shrink-0" />
+                  }
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-medium text-violet-400 leading-none mb-0.5">
+                      {pendingShare.type === 'event' ? 'Attaching event' : 'Attaching venue'}
+                    </p>
+                    <p className="text-sm font-medium text-foreground truncate">
+                      {pendingShare.title || pendingShare.name}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  className="text-muted-foreground hover:text-foreground p-1.5 rounded-full hover:bg-muted transition-colors duration-150 flex-shrink-0"
+                  onClick={() => setPendingShare(null)}
+                  aria-label="Remove attachment"
+                >
+                  <XIcon className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
             {replyingTo && (
               <div className="mb-2 px-4 py-2.5 bg-muted/60 rounded-xl border border-border/40 flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
@@ -573,7 +639,7 @@ export default function MessagesPage() {
               <Input
                 ref={inputRef}
                 type="text"
-                placeholder="Type a message…"
+                placeholder={pendingShare ? "Add a message (optional)…" : "Type a message…"}
                 value={messageText}
                 onChange={(e) => setMessageText(e.target.value)}
                 className="flex-1 h-11 rounded-full bg-muted/50 border-border/40 focus-visible:ring-1 focus-visible:ring-primary px-5 text-sm"
@@ -581,7 +647,7 @@ export default function MessagesPage() {
               />
               <button
                 type="submit"
-                disabled={!messageText.trim() || sendMessageMutation.isPending}
+                disabled={(!messageText.trim() && !pendingShare) || sendMessageMutation.isPending}
                 className="h-11 w-11 rounded-full bg-violet-600 hover:bg-violet-500 disabled:opacity-40 flex items-center justify-center text-white transition-colors flex-shrink-0"
                 data-testid="button-send"
               >
@@ -752,6 +818,22 @@ export default function MessagesPage() {
           </DialogHeader>
           
           <div className="space-y-4">
+            {pendingShare && (
+              <div className="flex items-center gap-2.5 px-3 py-2.5 bg-violet-600/10 border border-violet-500/20 rounded-xl">
+                {pendingShare.type === 'event'
+                  ? <CalendarIcon className="h-4 w-4 text-violet-400 shrink-0" />
+                  : <Building2Icon className="h-4 w-4 text-violet-400 shrink-0" />
+                }
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] text-violet-400 font-medium leading-none mb-0.5">
+                    {pendingShare.type === 'event' ? 'Sharing event' : 'Sharing venue'}
+                  </p>
+                  <p className="text-sm font-medium text-foreground truncate">
+                    {pendingShare.title || pendingShare.name}
+                  </p>
+                </div>
+              </div>
+            )}
             <div className="relative">
               <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
