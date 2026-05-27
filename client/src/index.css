@@ -269,6 +269,21 @@
     inset: -1px;
   }
 
+  /* Share contact stagger entry — Emil: ease-out-quart, starts fast */
+  @keyframes shareContactIn {
+    from {
+      opacity: 0;
+      transform: translateY(5px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .animate-share-contact-in {
+    animation: shareContactIn 220ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  }
+
   /* Heart pop animation */
   @keyframes heartPop {
     0%   { transform: scale(1); }

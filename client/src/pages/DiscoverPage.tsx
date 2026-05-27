@@ -6,7 +6,7 @@ import HeroSection from "@/components/HeroSection";
 import FilterBar from "@/components/FilterBar";
 import EventDetailsModal from "@/components/EventDetailsModal";
 import CreateEventModal from "@/components/CreateEventModal";
-import ShareModal from "@/components/ShareModal";
+import UnifiedShareModal, { type ShareData } from "@/components/UnifiedShareModal";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,9 +32,7 @@ export default function DiscoverPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [createEventOpen, setCreateEventOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
-  const [shareModalOpen, setShareModalOpen] = useState(false);
-  const [shareEvent, setShareEvent] = useState<Event | null>(null);
-  const [shareVenue, setShareVenue] = useState<Venue | null>(null);
+  const [activeShareData, setActiveShareData] = useState<ShareData | null>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   
   // Parse query parameters for shared event/venue
@@ -45,23 +43,23 @@ export default function DiscoverPage() {
 
   const handleShareEvent = (event: Event, e: React.MouseEvent) => {
     e.stopPropagation();
-    setShareEvent(event);
-    setShareVenue(null);
-    setShareModalOpen(true);
+    setActiveShareData({
+      type: "event",
+      id: event.id,
+      title: event.title,
+      imageUrl: event.imageUrl,
+    });
   };
 
   const handleShareVenue = (venue: Venue, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setShareVenue(venue);
-    setShareEvent(null);
-    setShareModalOpen(true);
-  };
-
-  const handleCloseShareModal = () => {
-    setShareModalOpen(false);
-    setShareEvent(null);
-    setShareVenue(null);
+    setActiveShareData({
+      type: "venue",
+      id: venue.id,
+      name: venue.name,
+      imageUrl: (venue as any).coverImageUrl || venue.imageUrl,
+    });
   };
 
   const { 
@@ -980,12 +978,13 @@ export default function DiscoverPage() {
         />
       )}
 
-      <ShareModal
-        open={shareModalOpen}
-        onClose={handleCloseShareModal}
-        event={shareEvent}
-        venue={shareVenue}
-      />
+      {activeShareData && (
+        <UnifiedShareModal
+          open={!!activeShareData}
+          onClose={() => setActiveShareData(null)}
+          shareData={activeShareData}
+        />
+      )}
     </div>
   );
 }

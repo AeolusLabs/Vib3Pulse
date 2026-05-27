@@ -26,6 +26,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import CommentDialog from "@/components/CommentDialog";
+import UnifiedShareModal from "@/components/UnifiedShareModal";
 import LinkPreviewCard, { extractFirstUrl } from "@/components/LinkPreviewCard";
 import ImageGrid from "@/components/ImageGrid";
 import FeedVideoPlayer from "@/components/FeedVideoPlayer";
@@ -173,6 +174,7 @@ export default function FeedPost({
   const [commentDialogOpen, setCommentDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [eventModalEvent, setEventModalEvent] = useState<Event | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
   const [likeAnimating, setLikeAnimating] = useState(false);
   const [displayTime, setDisplayTime] = useState(() =>
     createdAt ? formatRelativeTime(createdAt) : timestamp || "Just now"
@@ -346,11 +348,7 @@ export default function FeedPost({
     onError: () => toast({ title: "Error", description: "Failed to delete post", variant: "destructive" }),
   });
 
-  const handleShare = () => {
-    navigator.clipboard.writeText(`${window.location.origin}/posts/${id}`).then(() =>
-      toast({ title: "Link copied!" })
-    );
-  };
+  const handleShare = () => setShareOpen(true);
 
   // ── Media ──────────────────────────────────────────────────────────────────
 
@@ -697,6 +695,12 @@ export default function FeedPost({
           onClose={() => setEventModalEvent(null)}
         />
       )}
+
+      <UnifiedShareModal
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        shareData={{ type: "post", id, title: content.slice(0, 80) || "Post" }}
+      />
 
       <CommentDialog
         open={commentDialogOpen}

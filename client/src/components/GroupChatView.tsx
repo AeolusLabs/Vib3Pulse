@@ -123,11 +123,9 @@ interface GroupChatViewProps {
   conversationId: string;
   currentUser: AuthUser;
   onBack: () => void;
-  pendingShare?: { type: 'event' | 'venue'; id: string; title?: string; name?: string } | null;
-  onShareSent?: () => void;
 }
 
-export default function GroupChatView({ conversationId, currentUser, onBack, pendingShare, onShareSent }: GroupChatViewProps) {
+export default function GroupChatView({ conversationId, currentUser, onBack }: GroupChatViewProps) {
   const [, navigate] = useLocation();
   const [messageText, setMessageText] = useState("");
   const [pollModalOpen, setPollModalOpen] = useState(false);
@@ -159,7 +157,6 @@ export default function GroupChatView({ conversationId, currentUser, onBack, pen
     onSuccess: () => {
       setMessageText("");
       queryClient.invalidateQueries({ queryKey: ['/api/conversations', conversationId, 'messages'] });
-      onShareSent?.();
     },
     onError: () => {
       toast({ title: "Failed to send message", variant: "destructive" });
@@ -241,14 +238,8 @@ export default function GroupChatView({ conversationId, currentUser, onBack, pen
   }, [messages]);
 
   const handleSend = () => {
-    if (!messageText.trim() && !pendingShare) return;
-    sendMessageMutation.mutate({
-      content: messageText.trim() || (pendingShare?.type === 'event'
-        ? `Check out this event: ${pendingShare.title}`
-        : `Check out this venue: ${pendingShare?.name}`),
-      eventId: pendingShare?.type === 'event' ? pendingShare.id : undefined,
-      venueId: pendingShare?.type === 'venue' ? pendingShare.id : undefined,
-    });
+    if (!messageText.trim()) return;
+    sendMessageMutation.mutate({ content: messageText.trim() });
   };
 
   if (loadingConversation) {
@@ -550,32 +541,6 @@ export default function GroupChatView({ conversationId, currentUser, onBack, pen
       </ScrollArea>
 
       <div className="p-4 border-t">
-        {pendingShare && (
-          <div className="mb-2 px-3 py-2.5 bg-violet-600/10 border border-violet-500/20 rounded-xl flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5 min-w-0">
-              {pendingShare.type === 'event'
-                ? <CalendarIcon className="h-4 w-4 text-violet-400 shrink-0" />
-                : <Building2Icon className="h-4 w-4 text-violet-400 shrink-0" />
-              }
-              <div className="min-w-0">
-                <p className="text-[11px] font-medium text-violet-400 leading-none mb-0.5">
-                  {pendingShare.type === 'event' ? 'Attaching event' : 'Attaching venue'}
-                </p>
-                <p className="text-sm font-medium text-foreground truncate">
-                  {pendingShare.title || pendingShare.name}
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              className="text-muted-foreground hover:text-foreground p-1.5 rounded-full hover:bg-muted transition-colors duration-150 flex-shrink-0"
-              onClick={() => onShareSent?.()}
-              aria-label="Remove attachment"
-            >
-              <XIcon className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        )}
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -593,7 +558,7 @@ export default function GroupChatView({ conversationId, currentUser, onBack, pen
             <ChartBarIcon className="h-5 w-5" />
           </Button>
           <MentionInput
-            placeholder={pendingShare ? "Add a message (optional)…" : "Type @ to mention someone..."}
+            placeholder="Type @ to mention someone..."
             value={messageText}
             onChange={setMessageText}
             participants={conversation?.participants || []}
@@ -603,7 +568,7 @@ export default function GroupChatView({ conversationId, currentUser, onBack, pen
           <Button
             type="submit"
             size="icon"
-            disabled={(!messageText.trim() && !pendingShare) || sendMessageMutation.isPending}
+            disabled={!messageText.trim() || sendMessageMutation.isPending}
             data-testid="button-send"
           >
             {sendMessageMutation.isPending ? (

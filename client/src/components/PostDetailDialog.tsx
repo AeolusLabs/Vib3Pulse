@@ -1,4 +1,5 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import UnifiedShareModal from "@/components/UnifiedShareModal";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -227,15 +228,8 @@ export default function PostDetailDialog({
     },
   });
 
-  const handleShare = () => {
-    const postUrl = `${window.location.origin}/posts/${postId}`;
-    navigator.clipboard.writeText(postUrl).then(() => {
-      toast({
-        title: "Link copied!",
-        description: "Post link copied to clipboard",
-      });
-    });
-  };
+  const [shareOpen, setShareOpen] = useState(false);
+  const handleShare = () => setShareOpen(true);
 
   const handleSubmitComment = (e: React.FormEvent) => {
     e.preventDefault();
@@ -245,6 +239,7 @@ export default function PostDetailDialog({
   };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col p-0 gap-0">
         <DialogHeader className="px-6 py-4 border-b">
@@ -449,5 +444,12 @@ export default function PostDetailDialog({
         </div>
       </DialogContent>
     </Dialog>
+
+    <UnifiedShareModal
+      open={shareOpen}
+      onClose={() => setShareOpen(false)}
+      shareData={{ type: "post", id: postId, title: content.slice(0, 80) || "Post" }}
+    />
+    </>
   );
 }

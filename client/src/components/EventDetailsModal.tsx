@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
+import UnifiedShareModal from "@/components/UnifiedShareModal";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -51,6 +52,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
   const [selectedTier, setSelectedTier] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const currency = (event as any).currency as string | undefined;
   const communityId = (event as any).communityId as string | undefined;
@@ -151,20 +153,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
     if (quantity > 1) setQuantity(quantity - 1);
   };
 
-  const handleShare = async () => {
-    const url = `${window.location.origin}/event/${event.id}`;
-    const shareData = { title: event.title, text: `Check out ${event.title} on Vib3Pulse`, url };
-    try {
-      if (navigator.share) {
-        await navigator.share(shareData);
-      } else {
-        await navigator.clipboard.writeText(url);
-        toast({ title: "Link copied!", description: "Event link copied to clipboard." });
-      }
-    } catch {
-      // User cancelled share — ignore
-    }
-  };
+  const handleShare = () => setShareOpen(true);
 
   const isFreeEvent = event.ticketPrice === 0;
   const requiresRSVP = event.requiresRSVP;
@@ -418,6 +407,12 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
           </div>
         </DialogContent>
       </Dialog>
+
+      <UnifiedShareModal
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        shareData={{ type: "event", id: event.id, title: event.title, imageUrl: event.imageUrl }}
+      />
 
       {/* Tier selection modal */}
       <Dialog open={showTierSelection} onOpenChange={setShowTierSelection}>
