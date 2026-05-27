@@ -56,7 +56,7 @@ function MessageAttachedEvent({ eventId, isOwnMessage }: { eventId: string; isOw
       }`}
       onClick={(e) => {
         e.stopPropagation();
-        navigate(`/events/${event.id}`);
+        navigate(`/event/${event.id}`);
       }}
     >
       <div className="flex gap-2">
@@ -101,7 +101,7 @@ function MessageAttachedVenue({ venueId, isOwnMessage }: { venueId: string; isOw
       }`}
       onClick={(e) => {
         e.stopPropagation();
-        navigate(`/venues/${venue.id}`);
+        navigate(`/venue/${venue.id}`);
       }}
     >
       <div className="flex gap-2">
@@ -276,6 +276,37 @@ export default function MessagesPage() {
       (user.organizationName?.toLowerCase().includes(searchLower))
     );
   });
+
+  // IDs of users the current user already has a direct conversation with
+  const existingDirectUserIds = new Set(
+    (conversations ?? [])
+      .filter(c => !c.isGroup)
+      .flatMap(c => c.participants.filter(p => p.userId !== currentUser?.id).map(p => p.userId))
+  );
+
+  // Conversations filtered by search query — used in share-mode dialog
+  const shareDialogConversations = (conversations ?? []).filter(conv => {
+    if (!debouncedSearchQuery) return true;
+    const q = debouncedSearchQuery.toLowerCase();
+    if (conv.isGroup) return conv.name?.toLowerCase().includes(q) ?? false;
+    const other = conv.participants.find(p => p.userId !== currentUser?.id)?.user;
+    return !!(
+      other?.username.toLowerCase().includes(q) ||
+      other?.displayName?.toLowerCase().includes(q) ||
+      other?.organizationName?.toLowerCase().includes(q)
+    );
+  });
+
+  // Followers without an existing DM — shown as "Start new chat" in share mode
+  const newChatContacts = pendingShare
+    ? filteredFollowing.filter(u => !existingDirectUserIds.has(u.id))
+    : filteredFollowing;
+
+  const handleSelectConversationForShare = (conv: ConversationWithDetails) => {
+    setNewChatDialogOpen(false);
+    setSearchQuery("");
+    navigate(`/messages/${conv.id}`);
+  };
 
   useEffect(() => {
     if (conversationId && conversations) {
@@ -452,6 +483,8 @@ export default function MessagesPage() {
             conversationId={conversationId}
             currentUser={currentUser}
             onBack={handleBack}
+            pendingShare={pendingShare}
+            onShareSent={() => setPendingShare(null)}
           />
         </div>
         <BottomNavigation />
@@ -811,12 +844,14 @@ export default function MessagesPage() {
       <Dialog open={newChatDialogOpen} onOpenChange={setNewChatDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>New Chat</DialogTitle>
+            <DialogTitle>{pendingShare ? 'Send to…' : 'New Chat'}</DialogTitle>
             <DialogDescription>
-              Choose someone you follow to start a conversation
+              {pendingShare
+                ? `Choose where to send "${pendingShare.title || pendingShare.name}"`
+                : 'Choose someone you follow to start a conversation'}
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-4">
             {pendingShare && (
               <div className="flex items-center gap-2.5 px-3 py-2.5 bg-violet-600/10 border border-violet-500/20 rounded-xl">
@@ -834,67 +869,179 @@ export default function MessagesPage() {
                 </div>
               </div>
             )}
+
             <div className="relative">
-              <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 type="text"
-                placeholder="Filter by name or username..."
+                placeholder={pendingShare ? "Search conversations…" : "Filter by name or username..."}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-10"
                 data-testid="input-filter-following"
               />
             </div>
-            
-            <ScrollArea className="h-[300px]">
-              {followingLoading ? (
-                <div className="space-y-3">
-                  {[1, 2, 3].map((i) => (
-                    <Skeleton key={i} className="h-16 w-full" />
-                  ))}
-                </div>
-              ) : followingList.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <UserPlusIcon className="h-12 w-12 mx-auto mb-2 opacity-20" />
-                  <p>You're not following anyone yet</p>
-                  <p className="text-sm mt-1">Follow people to message them</p>
-                </div>
-              ) : filteredFollowing.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <SearchIcon className="h-12 w-12 mx-auto mb-2 opacity-20" />
-                  <p>No matches found</p>
-                </div>
-              ) : (
-                <div className="rounded-xl border border-border/40 overflow-hidden divide-y divide-border/30">
-                  {filteredFollowing.map((user) => (
-                    <div
-                      key={user.id}
-                      className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-muted/40 transition-colors"
-                      onClick={() => createDirectConversationMutation.mutate(user.id)}
-                      data-testid={`following-user-${user.id}`}
-                    >
-                      <Avatar className="h-10 w-10 ring-2 ring-border/40">
-                        <AvatarImage src={user.avatarUrl || ""} alt={user.displayName || user.username} />
-                        <AvatarFallback className="bg-primary/10 text-primary font-semibold">
-                          {(user.displayName || user.organizationName || user.username).charAt(0).toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-sm text-foreground truncate">
-                          {user.displayName || user.organizationName || user.username}
+
+            {pendingShare ? (
+              /* ── Share mode: existing conversations first, then new contacts ── */
+              <ScrollArea className="h-[360px]">
+                {conversationsLoading ? (
+                  <div className="space-y-3">
+                    {[1, 2, 3].map((i) => (
+                      <Skeleton key={i} className="h-14 w-full" />
+                    ))}
+                  </div>
+                ) : (
+                  <>
+                    {shareDialogConversations.length > 0 && (
+                      <div className="mb-4">
+                        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-1 pb-2">
+                          Conversations
                         </p>
-                        <p className="text-xs text-muted-foreground truncate">@{user.username}</p>
+                        <div className="rounded-xl border border-border/40 overflow-hidden divide-y divide-border/30">
+                          {shareDialogConversations.map((conv) => {
+                            const other = conv.participants.find(p => p.userId !== currentUser.id)?.user;
+                            return (
+                              <div
+                                key={conv.id}
+                                className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-muted/40 transition-colors duration-150"
+                                onClick={() => handleSelectConversationForShare(conv)}
+                                data-testid={`share-conv-${conv.id}`}
+                              >
+                                <Avatar className="h-10 w-10 ring-2 ring-border/40">
+                                  {conv.isGroup ? (
+                                    <>
+                                      <AvatarImage src={conv.avatarUrl || ""} alt={conv.name || "Group"} />
+                                      <AvatarFallback className="bg-primary/10 text-primary">
+                                        <UsersIcon className="h-4 w-4" />
+                                      </AvatarFallback>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <AvatarImage src={other?.avatarUrl || ""} alt={other?.displayName || other?.username} />
+                                      <AvatarFallback className="bg-primary/10 text-primary font-semibold">
+                                        {(other?.displayName || other?.organizationName || other?.username || '?')[0].toUpperCase()}
+                                      </AvatarFallback>
+                                    </>
+                                  )}
+                                </Avatar>
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-semibold text-sm text-foreground truncate">
+                                    {conv.isGroup ? conv.name : (other?.displayName || other?.organizationName || other?.username)}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground truncate">
+                                    {conv.isGroup ? `${conv.participants.length} members` : `@${other?.username}`}
+                                  </p>
+                                </div>
+                                {conv.isGroup && (
+                                  <span className="text-[10px] font-semibold bg-violet-600/20 text-violet-400 px-2 py-0.5 rounded-full shrink-0">
+                                    Group
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
-                      {user.userType === "organizer" && (
-                        <span className="text-[10px] font-semibold bg-violet-600/20 text-violet-400 px-2 py-0.5 rounded-full shrink-0">
-                          Organizer
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </ScrollArea>
+                    )}
+
+                    {newChatContacts.length > 0 && (
+                      <div>
+                        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-1 pb-2">
+                          Start new chat
+                        </p>
+                        <div className="rounded-xl border border-border/40 overflow-hidden divide-y divide-border/30">
+                          {newChatContacts.map((user) => (
+                            <div
+                              key={user.id}
+                              className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-muted/40 transition-colors duration-150"
+                              onClick={() => createDirectConversationMutation.mutate(user.id)}
+                              data-testid={`following-user-${user.id}`}
+                            >
+                              <Avatar className="h-10 w-10 ring-2 ring-border/40">
+                                <AvatarImage src={user.avatarUrl || ""} alt={user.displayName || user.username} />
+                                <AvatarFallback className="bg-primary/10 text-primary font-semibold">
+                                  {(user.displayName || user.organizationName || user.username).charAt(0).toUpperCase()}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-semibold text-sm text-foreground truncate">
+                                  {user.displayName || user.organizationName || user.username}
+                                </p>
+                                <p className="text-xs text-muted-foreground truncate">@{user.username}</p>
+                              </div>
+                              {user.userType === "organizer" && (
+                                <span className="text-[10px] font-semibold bg-violet-600/20 text-violet-400 px-2 py-0.5 rounded-full shrink-0">
+                                  Organizer
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {shareDialogConversations.length === 0 && newChatContacts.length === 0 && (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <SearchIcon className="h-10 w-10 mx-auto mb-2 opacity-20" />
+                        <p className="text-sm">No matches found</p>
+                      </div>
+                    )}
+                  </>
+                )}
+              </ScrollArea>
+            ) : (
+              /* ── Normal new-chat mode: followers only ── */
+              <ScrollArea className="h-[300px]">
+                {followingLoading ? (
+                  <div className="space-y-3">
+                    {[1, 2, 3].map((i) => (
+                      <Skeleton key={i} className="h-16 w-full" />
+                    ))}
+                  </div>
+                ) : followingList.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <UserPlusIcon className="h-12 w-12 mx-auto mb-2 opacity-20" />
+                    <p>You're not following anyone yet</p>
+                    <p className="text-sm mt-1">Follow people to message them</p>
+                  </div>
+                ) : filteredFollowing.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <SearchIcon className="h-12 w-12 mx-auto mb-2 opacity-20" />
+                    <p>No matches found</p>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-border/40 overflow-hidden divide-y divide-border/30">
+                    {filteredFollowing.map((user) => (
+                      <div
+                        key={user.id}
+                        className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-muted/40 transition-colors duration-150"
+                        onClick={() => createDirectConversationMutation.mutate(user.id)}
+                        data-testid={`following-user-${user.id}`}
+                      >
+                        <Avatar className="h-10 w-10 ring-2 ring-border/40">
+                          <AvatarImage src={user.avatarUrl || ""} alt={user.displayName || user.username} />
+                          <AvatarFallback className="bg-primary/10 text-primary font-semibold">
+                            {(user.displayName || user.organizationName || user.username).charAt(0).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-sm text-foreground truncate">
+                            {user.displayName || user.organizationName || user.username}
+                          </p>
+                          <p className="text-xs text-muted-foreground truncate">@{user.username}</p>
+                        </div>
+                        {user.userType === "organizer" && (
+                          <span className="text-[10px] font-semibold bg-violet-600/20 text-violet-400 px-2 py-0.5 rounded-full shrink-0">
+                            Organizer
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </ScrollArea>
+            )}
           </div>
         </DialogContent>
       </Dialog>
