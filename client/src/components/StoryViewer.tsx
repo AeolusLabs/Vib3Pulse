@@ -172,21 +172,36 @@ export default function StoryViewer({
       const response = await apiRequest('POST', `/api/stories/${storyId}/like`, undefined);
       return response.json();
     },
+    onMutate: (storyId) => {
+      const previous = localLikeStates[storyId];
+      const currentCount = previous?.likeCount ?? slides.find(s => s.id === storyId)?.likeCount ?? 0;
+      setLocalLikeStates(prev => ({
+        ...prev,
+        [storyId]: { isLiked: true, likeCount: currentCount + 1 },
+      }));
+      setShowLikeAnimation(true);
+      setTimeout(() => setShowLikeAnimation(false), 1000);
+      return { previous };
+    },
     onSuccess: (data, storyId) => {
+      // Reconcile with server-confirmed count
       setLocalLikeStates(prev => ({
         ...prev,
         [storyId]: { isLiked: true, likeCount: data.likeCount },
       }));
-      setShowLikeAnimation(true);
-      setTimeout(() => setShowLikeAnimation(false), 1000);
       queryClient.invalidateQueries({ queryKey: ['/api/stories'] });
     },
-    onError: () => {
-      toast({
-        title: "Error",
-        description: "Failed to like story.",
-        variant: "destructive",
+    onError: (_err, storyId, context) => {
+      setLocalLikeStates(prev => {
+        const next = { ...prev };
+        if (context?.previous !== undefined) {
+          next[storyId] = context.previous;
+        } else {
+          delete next[storyId];
+        }
+        return next;
       });
+      toast({ title: "Error", description: "Failed to like story.", variant: "destructive" });
     },
   });
 
@@ -195,6 +210,15 @@ export default function StoryViewer({
       const response = await apiRequest('DELETE', `/api/stories/${storyId}/like`, undefined);
       return response.json();
     },
+    onMutate: (storyId) => {
+      const previous = localLikeStates[storyId];
+      const currentCount = previous?.likeCount ?? slides.find(s => s.id === storyId)?.likeCount ?? 0;
+      setLocalLikeStates(prev => ({
+        ...prev,
+        [storyId]: { isLiked: false, likeCount: Math.max(0, currentCount - 1) },
+      }));
+      return { previous };
+    },
     onSuccess: (data, storyId) => {
       setLocalLikeStates(prev => ({
         ...prev,
@@ -202,12 +226,17 @@ export default function StoryViewer({
       }));
       queryClient.invalidateQueries({ queryKey: ['/api/stories'] });
     },
-    onError: () => {
-      toast({
-        title: "Error",
-        description: "Failed to unlike story.",
-        variant: "destructive",
+    onError: (_err, storyId, context) => {
+      setLocalLikeStates(prev => {
+        const next = { ...prev };
+        if (context?.previous !== undefined) {
+          next[storyId] = context.previous;
+        } else {
+          delete next[storyId];
+        }
+        return next;
       });
+      toast({ title: "Error", description: "Failed to unlike story.", variant: "destructive" });
     },
   });
 

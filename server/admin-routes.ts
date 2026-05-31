@@ -5,6 +5,7 @@ import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import { Pool } from "pg";
 import { storage } from "./storage";
+import { invalidateCache, postsCache, eventsCache, storiesCache } from "./cache";
 import { insertAdminUserSchema, adminRoles, type AdminRole } from "@shared/schema";
 import { z } from "zod";
 import { 
@@ -886,6 +887,44 @@ export function setupAdminRoutes(app: Express) {
     } catch (error) {
       console.error("[Admin Utility] Error:", error);
       res.status(500).json({ message: "Failed to fix post ACLs" });
+    }
+  });
+
+  // Cache stats — any admin, read-only
+  app.get("/api/admin/cache-stats", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      res.json({
+        posts:     postsCache.stats(),
+        events:    eventsCache.stats(),
+        stories:   storiesCache.stats(),
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get cache stats" });
+    }
+  });
+
+  // Cache clear — super admin only; causes DB load spike, treat as infrastructure op
+  app.post("/api/admin/cache-clear", requireSuperAdmin, async (req: Request, res: Response) => {
+    try {
+      invalidateCache.all();
+
+      await logActivity(
+        req.session.adminId!,
+        "cache_clear",
+        "cache",
+        "all",
+        "Cleared all caches (posts, events, stories)",
+        req.ip
+      );
+
+      res.json({
+        message:   "All caches cleared",
+        cleared:   ["posts", "events", "stories"],
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to clear caches" });
     }
   });
 

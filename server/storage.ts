@@ -146,6 +146,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { eq, and, gte, gt, lt, or, ilike, desc, sql, count, inArray, notInArray, isNull, isNotNull } from "drizzle-orm";
 import crypto from "crypto";
+import { cached, postsCache, eventsCache, storiesCache, invalidateCache } from "./cache";
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -804,11 +805,13 @@ export class DbStorage implements IStorage {
 
   async createEvent(insertEvent: InsertEvent): Promise<Event> {
     const result = await db.insert(events).values(insertEvent).returning();
+    invalidateCache.events();
     return result[0];
   }
 
   async updateEvent(id: string, eventUpdate: Partial<InsertEvent>): Promise<Event> {
     const result = await db.update(events).set(eventUpdate).where(eq(events.id, id)).returning();
+    invalidateCache.events();
     return result[0];
   }
 
@@ -1019,73 +1022,81 @@ export class DbStorage implements IStorage {
 
   async createPost(insertPost: InsertPost): Promise<Post> {
     const result = await db.insert(posts).values(insertPost).returning();
+    invalidateCache.posts();
     return result[0];
   }
 
   async deletePost(id: string): Promise<void> {
     await db.delete(posts).where(eq(posts.id, id));
+    invalidateCache.posts();
   }
 
   async createStory(insertStory: InsertStory, allowedViewerIds?: string[]): Promise<Story> {
     const result = await db.insert(stories).values(insertStory).returning();
     const story = result[0];
-    
-    // If private story with allowed viewers, insert them
+
     if (insertStory.privacy === 'private' && allowedViewerIds && allowedViewerIds.length > 0) {
       await this.setStoryAllowedViewers(story.id, allowedViewerIds);
     }
-    
+
+    invalidateCache.stories();
     return story;
   }
 
   async getActiveStories(viewerId?: string): Promise<Array<Story & { user: User; likeCount: number; viewCount: number; isLiked?: boolean; isReshare?: boolean }>> {
-    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    return cached(
+      `active-stories:${viewerId ?? 'anon'}`,
+      async () => {
+        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-    // Privacy collapsed into WHERE: no per-row canViewStory() calls.
-    // Public stories visible to all; private only to owner or explicit allowed viewers.
-    const privacyFilter = viewerId
-      ? or(
-          eq(stories.privacy, 'public'),
-          eq(stories.userId, viewerId),
-          sql`EXISTS (
-            SELECT 1 FROM ${storyAllowedViewers}
-            WHERE ${storyAllowedViewers.storyId} = ${stories.id}
-              AND ${storyAllowedViewers.viewerId} = ${viewerId}
-          )`
-        )
-      : eq(stories.privacy, 'public');
+        // Privacy collapsed into WHERE: no per-row canViewStory() calls.
+        // Public stories visible to all; private only to owner or explicit allowed viewers.
+        const privacyFilter = viewerId
+          ? or(
+              eq(stories.privacy, 'public'),
+              eq(stories.userId, viewerId),
+              sql`EXISTS (
+                SELECT 1 FROM ${storyAllowedViewers}
+                WHERE ${storyAllowedViewers.storyId} = ${stories.id}
+                  AND ${storyAllowedViewers.viewerId} = ${viewerId}
+              )`
+            )
+          : eq(stories.privacy, 'public');
 
-    // Single query: counts + isLiked via aggregates, privacy via WHERE
-    const rows = await db
-      .select({
-        story: stories,
-        user: users,
-        likeCount: sql<number>`count(distinct ${storyLikes.id})::int`,
-        viewCount: sql<number>`count(distinct ${storyViews.id})::int`,
-        isLiked: viewerId
-          ? sql<boolean>`(coalesce(max(case when ${storyLikes.userId} = ${viewerId} then 1 else 0 end), 0) = 1)`
-          : sql<boolean>`false`,
-      })
-      .from(stories)
-      .innerJoin(users, eq(stories.userId, users.id))
-      .leftJoin(storyLikes, eq(storyLikes.storyId, stories.id))
-      .leftJoin(storyViews, eq(storyViews.storyId, stories.id))
-      .where(and(gte(stories.createdAt, twentyFourHoursAgo), privacyFilter))
-      .groupBy(stories.id, users.id)
-      .orderBy(desc(stories.createdAt))
-      .limit(100);
+        // Single query: counts + isLiked via aggregates, privacy via WHERE
+        const rows = await db
+          .select({
+            story: stories,
+            user: users,
+            likeCount: sql<number>`count(distinct ${storyLikes.id})::int`,
+            viewCount: sql<number>`count(distinct ${storyViews.id})::int`,
+            isLiked: viewerId
+              ? sql<boolean>`(coalesce(max(case when ${storyLikes.userId} = ${viewerId} then 1 else 0 end), 0) = 1)`
+              : sql<boolean>`false`,
+          })
+          .from(stories)
+          .innerJoin(users, eq(stories.userId, users.id))
+          .leftJoin(storyLikes, eq(storyLikes.storyId, stories.id))
+          .leftJoin(storyViews, eq(storyViews.storyId, stories.id))
+          .where(and(gte(stories.createdAt, twentyFourHoursAgo), privacyFilter))
+          .groupBy(stories.id, users.id)
+          .orderBy(desc(stories.createdAt))
+          .limit(100);
 
-    return rows.map(row => {
-      const { passwordHash, ...userWithoutPassword } = row.user;
-      return {
-        ...row.story,
-        user: userWithoutPassword as User,
-        likeCount: row.likeCount,
-        viewCount: row.viewCount,
-        isLiked: row.isLiked,
-        isReshare: !!row.story.originalStoryId,
-      };
-    });
+        return rows.map(row => {
+          const { passwordHash, ...userWithoutPassword } = row.user;
+          return {
+            ...row.story,
+            user: userWithoutPassword as User,
+            likeCount: row.likeCount,
+            viewCount: row.viewCount,
+            isLiked: row.isLiked,
+            isReshare: !!row.story.originalStoryId,
+          };
+        });
+      },
+      storiesCache,
+    );
   }
 
   async getStory(id: string): Promise<Story | undefined> {
@@ -1108,11 +1119,13 @@ export class DbStorage implements IStorage {
 
   async deleteStory(id: string): Promise<void> {
     await db.delete(stories).where(eq(stories.id, id));
+    invalidateCache.stories();
   }
 
   // Story likes
   async likeStory(userId: string, storyId: string): Promise<void> {
     await db.insert(storyLikes).values({ storyId, userId }).onConflictDoNothing();
+    storiesCache.delete(`active-stories:${userId}`);
   }
 
   async unlikeStory(userId: string, storyId: string): Promise<void> {
@@ -1122,6 +1135,7 @@ export class DbStorage implements IStorage {
         eq(storyLikes.userId, userId)
       )
     );
+    storiesCache.delete(`active-stories:${userId}`);
   }
 
   async hasUserLikedStory(userId: string, storyId: string): Promise<boolean> {
@@ -1541,70 +1555,82 @@ export class DbStorage implements IStorage {
   }
 
   async getTrendingPosts(limit: number = 10): Promise<Array<Post & { user: User; likeCount: number; commentCount: number }>> {
-    // 101 queries → 1: LEFT JOIN likes + comments with COUNT(DISTINCT) aggregates
-    const rows = await db
-      .select({
-        post: posts,
-        user: users,
-        likeCount: sql<number>`count(distinct ${likes.id})::int`,
-        commentCount: sql<number>`count(distinct ${comments.id})::int`,
-      })
-      .from(posts)
-      .innerJoin(users, eq(posts.userId, users.id))
-      .leftJoin(likes, eq(likes.postId, posts.id))
-      .leftJoin(comments, eq(comments.postId, posts.id))
-      .groupBy(posts.id, users.id)
-      .orderBy(desc(posts.createdAt))
-      .limit(50);
+    const all = await cached(
+      'trending-posts',
+      async () => {
+        // 101 queries → 1: LEFT JOIN likes + comments with COUNT(DISTINCT) aggregates
+        const rows = await db
+          .select({
+            post: posts,
+            user: users,
+            likeCount: sql<number>`count(distinct ${likes.id})::int`,
+            commentCount: sql<number>`count(distinct ${comments.id})::int`,
+          })
+          .from(posts)
+          .innerJoin(users, eq(posts.userId, users.id))
+          .leftJoin(likes, eq(likes.postId, posts.id))
+          .leftJoin(comments, eq(comments.postId, posts.id))
+          .groupBy(posts.id, users.id)
+          .orderBy(desc(posts.createdAt))
+          .limit(50);
 
-    return rows
-      .map(row => {
-        const { passwordHash, ...userWithoutPassword } = row.user;
-        return {
-          ...row.post,
-          user: userWithoutPassword as User,
-          likeCount: row.likeCount,
-          commentCount: row.commentCount,
-          engagementScore: row.likeCount * 2 + row.commentCount * 3,
-        };
-      })
-      .sort((a, b) => b.engagementScore - a.engagementScore)
-      .slice(0, limit)
-      .map(({ engagementScore, ...rest }) => rest);
+        return rows
+          .map(row => {
+            const { passwordHash, ...userWithoutPassword } = row.user;
+            return {
+              ...row.post,
+              user: userWithoutPassword as User,
+              likeCount: row.likeCount,
+              commentCount: row.commentCount,
+              engagementScore: row.likeCount * 2 + row.commentCount * 3,
+            };
+          })
+          .sort((a, b) => b.engagementScore - a.engagementScore)
+          .map(({ engagementScore, ...rest }) => rest);
+      },
+      postsCache,
+    );
+    return all.slice(0, limit);
   }
 
   async getTrendingEvents(limit: number = 10): Promise<Array<Event & { organizer: User; rsvpCount: number; ticketCount: number }>> {
-    // 101 queries + bulk row fetches → 1: LEFT JOIN rsvps + tickets with COUNT(DISTINCT) aggregates
-    const rows = await db
-      .select({
-        event: events,
-        user: users,
-        rsvpCount: sql<number>`count(distinct ${rsvps.id})::int`,
-        ticketCount: sql<number>`count(distinct ${tickets.id})::int`,
-      })
-      .from(events)
-      .innerJoin(users, eq(events.organizerId, users.id))
-      .leftJoin(rsvps, eq(rsvps.eventId, events.id))
-      .leftJoin(tickets, eq(tickets.eventId, events.id))
-      .where(gte(events.eventDate, new Date()))
-      .groupBy(events.id, users.id)
-      .orderBy(desc(events.eventDate))
-      .limit(50);
+    const all = await cached(
+      'trending-events',
+      async () => {
+        // 101 queries + bulk row fetches → 1: LEFT JOIN rsvps + tickets with COUNT(DISTINCT) aggregates
+        const rows = await db
+          .select({
+            event: events,
+            user: users,
+            rsvpCount: sql<number>`count(distinct ${rsvps.id})::int`,
+            ticketCount: sql<number>`count(distinct ${tickets.id})::int`,
+          })
+          .from(events)
+          .innerJoin(users, eq(events.organizerId, users.id))
+          .leftJoin(rsvps, eq(rsvps.eventId, events.id))
+          .leftJoin(tickets, eq(tickets.eventId, events.id))
+          .where(gte(events.eventDate, new Date()))
+          .groupBy(events.id, users.id)
+          .orderBy(desc(events.eventDate))
+          .limit(50);
 
-    return rows
-      .map(row => {
-        const { passwordHash, ...userWithoutPassword } = row.user;
-        return {
-          ...row.event,
-          organizer: userWithoutPassword as User,
-          rsvpCount: row.rsvpCount,
-          ticketCount: row.ticketCount,
-          engagementScore: row.rsvpCount * 2 + row.ticketCount * 3 + (row.event.isPromoted ? 10 : 0),
-        };
-      })
-      .sort((a, b) => b.engagementScore - a.engagementScore)
-      .slice(0, limit)
-      .map(({ engagementScore, ...rest }) => rest);
+        return rows
+          .map(row => {
+            const { passwordHash, ...userWithoutPassword } = row.user;
+            return {
+              ...row.event,
+              organizer: userWithoutPassword as User,
+              rsvpCount: row.rsvpCount,
+              ticketCount: row.ticketCount,
+              engagementScore: row.rsvpCount * 2 + row.ticketCount * 3 + (row.event.isPromoted ? 10 : 0),
+            };
+          })
+          .sort((a, b) => b.engagementScore - a.engagementScore)
+          .map(({ engagementScore, ...rest }) => rest);
+      },
+      eventsCache,
+    );
+    return all.slice(0, limit);
   }
 
   async getTrendingVenues(limit: number = 10): Promise<Array<Venue & { viewCount: number }>> {
@@ -2493,13 +2519,14 @@ export class DbStorage implements IStorage {
   async promoteEvent(eventId: string, durationDays: number): Promise<Event> {
     const promotedUntil = new Date();
     promotedUntil.setDate(promotedUntil.getDate() + durationDays);
-    
+
     const result = await db
       .update(events)
       .set({ isPromoted: true, promotedUntil })
       .where(eq(events.id, eventId))
       .returning();
-    
+
+    invalidateCache.events();
     return result[0];
   }
 
@@ -3506,6 +3533,7 @@ export class DbStorage implements IStorage {
     await db.delete(tickets).where(eq(tickets.eventId, id));
     // Delete the event — ticket_tiers cascade automatically
     await db.delete(events).where(eq(events.id, id));
+    invalidateCache.events();
   }
 
   async getAllStoriesAdmin(limit: number = 50): Promise<Array<Story & { user: User }>> {
@@ -3524,6 +3552,7 @@ export class DbStorage implements IStorage {
 
   async deleteStoryAdmin(id: string): Promise<void> {
     await db.delete(stories).where(eq(stories.id, id));
+    invalidateCache.stories();
   }
 
   // ============================================
