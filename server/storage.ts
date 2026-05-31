@@ -765,9 +765,13 @@ export class DbStorage implements IStorage {
   }
 
   async getEvents(): Promise<Event[]> {
-    return await db.select().from(events)
-      .where(and(eq(events.isPublished, true), eq(events.moderationStatus, 'approved')))
-      .orderBy(events.eventDate);
+    return cached(
+      'events',
+      () => db.select().from(events)
+        .where(and(eq(events.isPublished, true), eq(events.moderationStatus, 'approved')))
+        .orderBy(events.eventDate),
+      eventsCache,
+    );
   }
 
   async getEvent(id: string): Promise<(Event & { organizer: User; community: (Community & { memberCount: number }) | null }) | undefined> {
@@ -3829,22 +3833,28 @@ export class DbStorage implements IStorage {
   }
 
   async getPostsWithCommunity(): Promise<Array<Post & { user: User; community: Community | null }>> {
-    const result = await db
-      .select({
-        post: posts,
-        user: users,
-        community: communities,
-      })
-      .from(posts)
-      .innerJoin(users, eq(posts.userId, users.id))
-      .leftJoin(communities, eq(posts.communityId, communities.id))
-      .orderBy(desc(posts.createdAt));
-    
-    return result.map(r => ({
-      ...r.post,
-      user: r.user,
-      community: r.community,
-    }));
+    return cached(
+      'posts-with-community',
+      async () => {
+        const result = await db
+          .select({
+            post: posts,
+            user: users,
+            community: communities,
+          })
+          .from(posts)
+          .innerJoin(users, eq(posts.userId, users.id))
+          .leftJoin(communities, eq(posts.communityId, communities.id))
+          .orderBy(desc(posts.createdAt));
+
+        return result.map(r => ({
+          ...r.post,
+          user: r.user,
+          community: r.community,
+        }));
+      },
+      postsCache,
+    );
   }
 
   // ============================================
