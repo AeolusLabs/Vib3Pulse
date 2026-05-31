@@ -265,7 +265,8 @@ export interface IStorage {
   getUserByPasswordResetToken(token: string): Promise<User | undefined>;
   clearPasswordResetToken(userId: string): Promise<void>;
   
-  getEvents(): Promise<Event[]>;
+  getEvents(): Promise<(Event & { minPrice: number; maxPrice: number })[]>;
+  getBulkEventTicketTiers(eventIds: string[]): Promise<TicketTier[]>;
   getEvent(id: string): Promise<(Event & { organizer: User; community: (Community & { memberCount: number }) | null }) | undefined>;
   getUserEvents(userId: string): Promise<Event[]>;
   getEventsByOrganizer(organizerId: string): Promise<Event[]>;
@@ -764,14 +765,31 @@ export class DbStorage implements IStorage {
     }).where(eq(users.id, userId));
   }
 
-  async getEvents(): Promise<Event[]> {
+  async getEvents(): Promise<(Event & { minPrice: number; maxPrice: number })[]> {
     return cached(
       'events',
-      () => db.select().from(events)
-        .where(and(eq(events.isPublished, true), eq(events.moderationStatus, 'approved')))
-        .orderBy(events.eventDate),
+      async () => {
+        const rows = await db
+          .select({
+            event: events,
+            minPrice: sql<number>`COALESCE(MIN(${ticketTiers.priceSmallestUnit}), ${events.ticketPrice})::int`,
+            maxPrice: sql<number>`COALESCE(MAX(${ticketTiers.priceSmallestUnit}), ${events.ticketPrice})::int`,
+          })
+          .from(events)
+          .leftJoin(ticketTiers, eq(ticketTiers.eventId, events.id))
+          .where(and(eq(events.isPublished, true), eq(events.moderationStatus, 'approved')))
+          .groupBy(events.id)
+          .orderBy(events.eventDate);
+
+        return rows.map(r => ({ ...r.event, minPrice: r.minPrice, maxPrice: r.maxPrice }));
+      },
       eventsCache,
     );
+  }
+
+  async getBulkEventTicketTiers(eventIds: string[]): Promise<TicketTier[]> {
+    if (eventIds.length === 0) return [];
+    return db.select().from(ticketTiers).where(inArray(ticketTiers.eventId, eventIds));
   }
 
   async getEvent(id: string): Promise<(Event & { organizer: User; community: (Community & { memberCount: number }) | null }) | undefined> {

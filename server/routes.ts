@@ -543,41 +543,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Helper function to add price ranges to events
-  async function addPriceRangesToEvents<T extends { id: string; ticketPrice: number }>(events: T[]): Promise<(T & { minPrice: number; maxPrice: number })[]> {
-    return Promise.all(
-      events.map(async (event) => {
-        try {
-          const tiers = await storage.getEventTicketTiers(event.id);
-          if (tiers.length === 0) {
-            return {
-              ...event,
-              minPrice: event.ticketPrice,
-              maxPrice: event.ticketPrice,
-            };
-          }
-          const prices = tiers.map(t => t.priceSmallestUnit);
-          return {
-            ...event,
-            minPrice: Math.min(...prices),
-            maxPrice: Math.max(...prices),
-          };
-        } catch {
-          return {
-            ...event,
-            minPrice: event.ticketPrice,
-            maxPrice: event.ticketPrice,
-          };
-        }
-      })
-    );
+  async function addPriceRangesToEvents<T extends { id: string; ticketPrice: number }>(evts: T[]): Promise<(T & { minPrice: number; maxPrice: number })[]> {
+    if (evts.length === 0) return [];
+    const allTiers = await storage.getBulkEventTicketTiers(evts.map(e => e.id));
+    const tiersByEvent = new Map<string, number[]>();
+    for (const tier of allTiers) {
+      if (!tiersByEvent.has(tier.eventId)) tiersByEvent.set(tier.eventId, []);
+      tiersByEvent.get(tier.eventId)!.push(tier.priceSmallestUnit);
+    }
+    return evts.map(event => {
+      const prices = tiersByEvent.get(event.id) ?? [];
+      return {
+        ...event,
+        minPrice: prices.length > 0 ? Math.min(...prices) : event.ticketPrice,
+        maxPrice: prices.length > 0 ? Math.max(...prices) : event.ticketPrice,
+      };
+    });
   }
 
   // Events
-  app.get("/api/events", async (req, res) => {
+  app.get("/api/events", async (_req, res) => {
     try {
-      const events = await storage.getEvents();
-      const eventsWithPriceRanges = await addPriceRangesToEvents(events);
-      res.json(eventsWithPriceRanges);
+      res.json(await storage.getEvents());
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch events" });
     }
@@ -608,12 +595,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { category } = req.params;
       const allEvents = await storage.getEvents();
-      // Filter events by category (case-insensitive)
-      const filteredEvents = allEvents.filter(
-        (event) => event.category.toLowerCase() === category.toLowerCase()
-      );
-      const eventsWithPrices = await addPriceRangesToEvents(filteredEvents);
-      res.json(eventsWithPrices);
+      res.json(allEvents.filter(e => e.category.toLowerCase() === category.toLowerCase()));
     } catch (error) {
       console.error('Error fetching events by category:', error);
       res.status(500).json({ message: "Failed to fetch events by category" });
@@ -621,17 +603,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get featured events for landing page (public endpoint)
-  app.get("/api/events/featured", async (req, res) => {
+  app.get("/api/events/featured", async (_req, res) => {
     try {
-      const allEvents = await storage.getEvents();
-      // Return upcoming events sorted by date, limit to 8
       const now = new Date();
-      const featuredEvents = allEvents
-        .filter((event) => new Date(event.eventDate) >= now)
+      const featured = (await storage.getEvents())
+        .filter(e => new Date(e.eventDate) >= now)
         .sort((a, b) => new Date(a.eventDate).getTime() - new Date(b.eventDate).getTime())
         .slice(0, 8);
-      const eventsWithPrices = await addPriceRangesToEvents(featuredEvents);
-      res.json(eventsWithPrices);
+      res.json(featured);
     } catch (error) {
       console.error('Error fetching featured events:', error);
       res.status(500).json({ message: "Failed to fetch featured events" });
@@ -657,14 +636,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const allEvents = await storage.getEvents();
       const eventsWithDistance = sortByProximity(allEvents, userLat, userLon);
-      
-      // Filter by max distance if provided
-      const filteredEvents = maxDist 
+      const filteredEvents = maxDist
         ? eventsWithDistance.filter(e => e.distance === null || e.distance <= maxDist)
         : eventsWithDistance;
-      
-      const eventsWithPrices = await addPriceRangesToEvents(filteredEvents);
-      res.json(eventsWithPrices);
+      res.json(filteredEvents);
     } catch (error) {
       console.error('Error fetching nearby events:', error);
       res.status(500).json({ message: "Failed to fetch nearby events" });
@@ -698,12 +673,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return eventDate >= now && eventDate <= cutoffTime;
       });
       
-      // Sort by proximity and limit to nearby events (within 25 miles)
       const nearbyUpcoming = sortByProximity(upcomingEvents, userLat, userLon)
         .filter(e => e.distance === null || e.distance <= 25);
-      
-      const eventsWithPrices = await addPriceRangesToEvents(nearbyUpcoming);
-      res.json(eventsWithPrices);
+      res.json(nearbyUpcoming);
     } catch (error) {
       console.error('Error fetching happening now events:', error);
       res.status(500).json({ message: "Failed to fetch happening now events" });
@@ -729,15 +701,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return eventCity.includes(cityName) || eventLocation.includes(cityName);
       });
       
-      // Sort by upcoming date (soonest first)
-      const sortedEvents = cityEvents.sort((a, b) => {
-        const dateA = new Date(a.eventDate).getTime();
-        const dateB = new Date(b.eventDate).getTime();
-        return dateA - dateB;
-      });
-      
-      const eventsWithPrices = await addPriceRangesToEvents(sortedEvents);
-      res.json(eventsWithPrices);
+      const sortedEvents = cityEvents.sort((a, b) =>
+        new Date(a.eventDate).getTime() - new Date(b.eventDate).getTime()
+      );
+      res.json(sortedEvents);
     } catch (error) {
       console.error('Error fetching trending events:', error);
       res.status(500).json({ message: "Failed to fetch trending events" });
