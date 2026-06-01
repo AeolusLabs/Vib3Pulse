@@ -17,7 +17,8 @@ interface VideoUploaderProps {
   fileToUpload?: File | null;
 }
 
-const ALLOWED_VIDEO_TYPES = ["video/mp4", "video/quicktime", "video/webm"];
+const ALLOWED_VIDEO_TYPES = new Set(["video/mp4", "video/quicktime", "video/webm", "video/x-msvideo", "video/x-matroska"]);
+const ALLOWED_VIDEO_EXTS = new Set(["mp4", "mov", "webm", "m4v", "mkv", "avi"]);
 
 export function VideoUploader({
   onComplete,
@@ -38,10 +39,12 @@ export function VideoUploader({
   const maxFileSize = maxSizeMB * 1024 * 1024;
 
   const uploadVideo = useCallback(async (file: File) => {
-    if (!ALLOWED_VIDEO_TYPES.includes(file.type)) {
+    const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+    const isAllowed = ALLOWED_VIDEO_TYPES.has(file.type) || (!file.type && ALLOWED_VIDEO_EXTS.has(ext));
+    if (!isAllowed) {
       toast({
         title: "Unsupported format",
-        description: "Please select an MP4, MOV, or WebM video.",
+        description: "Please select an MP4, MOV, WebM, MKV, or AVI video.",
         variant: "destructive",
       });
       return;

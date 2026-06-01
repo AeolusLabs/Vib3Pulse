@@ -302,6 +302,8 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
       const tempUrl = URL.createObjectURL(file);
       const probe   = document.createElement("video");
       probe.preload = "metadata";
+      probe.setAttribute("playsinline", "");
+      probe.muted = true;
 
       probe.onloadedmetadata = () => {
         const dur = probe.duration;
