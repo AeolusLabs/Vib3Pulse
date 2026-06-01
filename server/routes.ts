@@ -1911,15 +1911,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { allowedViewerIds, ...storyInput } = req.body;
       const storyData = insertStorySchema.omit({ userId: true }).parse(storyInput);
-      
-      const story = await storage.createStory({
-        ...storyData,
-        userId: req.user!.id,
-      }, allowedViewerIds);
+      const story = await storage.createStory({ ...storyData, userId: req.user!.id }, allowedViewerIds);
       res.json(story);
     } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(422).json({ message: error.errors[0]?.message ?? "Invalid story data" });
+      }
       console.error("Create story error:", error);
-      res.status(400).json({ message: "Invalid story data" });
+      res.status(500).json({ message: "Story could not be saved. Please try again." });
     }
   });
 

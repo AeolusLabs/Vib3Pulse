@@ -260,8 +260,8 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
       });
       handleClose();
     },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to post story. Please try again.", variant: "destructive" });
+    onError: (err: Error) => {
+      toast({ title: "Failed to post story", description: err.message || "Please try again.", variant: "destructive" });
       setIsPosting(false);
     },
   });
@@ -566,7 +566,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
   // ─── compose final image ──────────────────────────────────────────────────
 
   const composeFinal = (): Promise<string> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (!capturedImage) { resolve(""); return; }
       const img = new Image();
       img.onload = () => {
@@ -621,7 +621,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
 
         resolve(canvas.toDataURL("image/jpeg", 0.88));
       };
-      img.onerror = () => resolve(capturedImage);
+      img.onerror = () => reject(new Error("Could not process your image. Try a different photo."));
       img.src = capturedImage;
     });
 
@@ -637,7 +637,13 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
       xhr.setRequestHeader("Content-Type", blob.type || "video/webm");
       xhr.setRequestHeader("x-csrf-token", csrf);
       xhr.upload.onprogress = e => { if (e.lengthComputable) setUploadProgress(Math.round((e.loaded / e.total) * 80)); };
-      xhr.onload  = () => xhr.status < 300 ? resolve() : reject(new Error(`${xhr.status}`));
+      xhr.onload = () => {
+        if (xhr.status < 300) return resolve();
+        const msg = xhr.status === 413 ? "File is too large to upload"
+          : xhr.status >= 500 ? "Server error during upload. Please try again."
+          : `Upload failed (${xhr.status})`;
+        reject(new Error(msg));
+      };
       xhr.onerror = () => reject(new Error("Network error"));
       xhr.send(blob);
     });
@@ -699,8 +705,8 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
           allowedViewerIds: privacy === "private" ? selectedViewers : undefined,
         });
       }
-    } catch {
-      toast({ title: "Upload failed", description: "Please try again.", variant: "destructive" });
+    } catch (err: any) {
+      toast({ title: "Upload failed", description: err.message || "Please try again.", variant: "destructive" });
       setIsPosting(false);
     }
   };
