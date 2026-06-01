@@ -17,8 +17,11 @@ interface VideoUploaderProps {
   fileToUpload?: File | null;
 }
 
-const ALLOWED_VIDEO_TYPES = new Set(["video/mp4", "video/quicktime", "video/webm", "video/x-msvideo", "video/x-matroska"]);
-const ALLOWED_VIDEO_EXTS = new Set(["mp4", "mov", "webm", "m4v", "mkv", "avi"]);
+const ALLOWED_VIDEO_EXTS = new Set(["mp4", "mov", "m4v", "webm", "mkv", "avi", "3gp"]);
+const MIME_FROM_EXT: Record<string, string> = {
+  mp4: "video/mp4", m4v: "video/mp4", mov: "video/quicktime",
+  webm: "video/webm", mkv: "video/x-matroska", avi: "video/x-msvideo", "3gp": "video/3gpp",
+};
 
 export function VideoUploader({
   onComplete,
@@ -40,11 +43,11 @@ export function VideoUploader({
 
   const uploadVideo = useCallback(async (file: File) => {
     const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
-    const isAllowed = ALLOWED_VIDEO_TYPES.has(file.type) || (!file.type && ALLOWED_VIDEO_EXTS.has(ext));
+    const isAllowed = file.type.startsWith("video/") || (!file.type && ALLOWED_VIDEO_EXTS.has(ext));
     if (!isAllowed) {
       toast({
         title: "Unsupported format",
-        description: "Please select an MP4, MOV, WebM, MKV, or AVI video.",
+        description: "Please select a video file (MP4, MOV, WebM, etc.).",
         variant: "destructive",
       });
       return;
@@ -74,7 +77,7 @@ export function VideoUploader({
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open("PUT", uploadURL);
-        xhr.setRequestHeader("Content-Type", file.type);
+        xhr.setRequestHeader("Content-Type", file.type.split(";")[0] || MIME_FROM_EXT[ext] || "video/mp4");
         xhr.setRequestHeader("x-csrf-token", csrfToken);
 
         xhr.upload.onprogress = (e) => {
@@ -216,7 +219,7 @@ export function VideoUploader({
         <input
           ref={fileInputRef}
           type="file"
-          accept="video/mp4,video/quicktime,video/webm"
+          accept="video/*"
           className="hidden"
           onChange={handleInputChange}
           data-testid="input-video-upload"
@@ -250,7 +253,7 @@ export function VideoUploader({
         <input
           ref={fileInputRef}
           type="file"
-          accept="video/mp4,video/quicktime,video/webm"
+          accept="video/*"
           className="hidden"
           onChange={handleInputChange}
           data-testid="input-video-upload"

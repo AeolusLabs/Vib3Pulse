@@ -300,22 +300,18 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
       reader.readAsDataURL(file);
     } else if (isVideo) {
       const tempUrl = URL.createObjectURL(file);
-      const probe   = document.createElement("video");
+      const probe = document.createElement("video");
       probe.preload = "metadata";
       probe.setAttribute("playsinline", "");
       probe.muted = true;
 
-      probe.onloadedmetadata = () => {
-        const dur = probe.duration;
+      let probeTimer: ReturnType<typeof setTimeout>;
+
+      const accept = (dur: number) => {
+        clearTimeout(probeTimer);
+        probe.onloadedmetadata = null;
+        probe.onerror = null;
         URL.revokeObjectURL(tempUrl);
-        if (!isFinite(dur) || dur <= 0) {
-          toast({ title: "Invalid video", description: "Could not read that video file.", variant: "destructive" });
-          return;
-        }
-        if (dur > 5 * 60) {
-          toast({ title: "Video too long", description: "Maximum video length is 5 minutes.", variant: "destructive" });
-          return;
-        }
         setVideoDuration(dur);
         setCapturedVideoUrl(URL.createObjectURL(file));
         setCapturedVideoBlob(file);
@@ -323,14 +319,24 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
         setPhase("editing");
       };
 
-      probe.onerror = () => {
-        URL.revokeObjectURL(tempUrl);
-        toast({ title: "Unsupported video", description: "This video format can't be played in your browser. Try an MP4 or MOV file.", variant: "destructive" });
+      // Fallback: if metadata never arrives (moov atom at end of file), proceed without duration
+      probeTimer = setTimeout(() => accept(0), 5000);
+
+      probe.onloadedmetadata = () => {
+        const dur = probe.duration;
+        if (dur > 5 * 60) {
+          clearTimeout(probeTimer);
+          URL.revokeObjectURL(tempUrl);
+          toast({ title: "Video too long", description: "Maximum video length is 5 minutes.", variant: "destructive" });
+          return;
+        }
+        accept(isFinite(dur) && dur > 0 ? dur : 0);
       };
 
+      // Browser can't decode this codec — proceed anyway, server validates the bytes
+      probe.onerror = () => accept(0);
+
       probe.src = tempUrl;
-      // Explicitly call load() — required on some Android browsers and
-      // mobile WebViews that don't trigger onloadedmetadata from src alone.
       probe.load();
     } else {
       toast({ title: "Unsupported file", description: "Please select a photo or video.", variant: "destructive" });
@@ -636,7 +642,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
     await new Promise<void>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open("PUT", uploadURL);
-      xhr.setRequestHeader("Content-Type", blob.type || "video/webm");
+      xhr.setRequestHeader("Content-Type", blob.type.split(";")[0] || "video/mp4");
       xhr.setRequestHeader("x-csrf-token", csrf);
       xhr.upload.onprogress = e => { if (e.lengthComputable) setUploadProgress(Math.round((e.loaded / e.total) * 80)); };
       xhr.onload = () => {
