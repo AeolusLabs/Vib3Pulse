@@ -278,7 +278,13 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
     // files don't silently vanish into the else-branch below.
     const mime = file.type;
     const ext  = file.name.split(".").pop()?.toLowerCase() ?? "";
-    const VIDEO_EXTS = ["mp4", "mov", "webm", "m4v", "mkv", "avi", "3gp"];
+    const VIDEO_EXTS = [
+      "mp4", "m4v", "mov", "avi", "mkv", "webm",   // universal
+      "3gp", "3gpp",                                 // mobile (Android/older iOS)
+      "flv", "f4v",                                  // Flash/desktop legacy
+      "wmv",                                         // Windows Media
+      "ogv", "ogg",                                  // Ogg video (unambiguous container)
+    ];
 
     const isImage = mime.startsWith("image/");
     const isVideo = mime.startsWith("video/") || (!isImage && VIDEO_EXTS.includes(ext));
@@ -657,7 +663,10 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
     });
     setUploadProgress(90);
     const aclRes = await apiRequest("PUT", "/api/post-media", { imageURL: uploadURL });
-    if (!aclRes.ok) throw new Error("Failed to set media permissions");
+    if (!aclRes.ok) {
+      const body = await aclRes.json().catch(() => ({})) as { message?: string };
+      throw new Error(body.message || `Upload failed: HTTP ${aclRes.status}`);
+    }
     const { objectPath } = await aclRes.json() as { objectPath: string };
     setUploadProgress(100);
     return objectPath;

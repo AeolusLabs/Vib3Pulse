@@ -1817,9 +1817,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Helper: store base64 data URL in DB, return /api/media/{id} URL
   const ALLOWED_MEDIA_TYPES = new Set([
+    // Images
     'image/jpeg', 'image/png', 'image/gif', 'image/webp',
-    'video/mp4', 'video/webm', 'video/ogg', 'video/quicktime',
-    'video/x-msvideo', 'video/x-matroska',
+    // Common video containers
+    'video/mp4', 'video/quicktime', 'video/webm', 'video/ogg',
+    'video/x-msvideo',    // AVI
+    'video/x-matroska',   // MKV
+    'video/x-m4v',        // M4V (iTunes)
+    // Mobile formats
+    'video/3gpp',         // 3GP  — matches .3gp / .3gpp in client VIDEO_EXTS
+    'video/3gpp2',        // 3G2
+    // Desktop legacy
+    'video/x-flv',        // FLV  — matches .flv / .f4v
+    'video/x-ms-wmv',     // WMV  — matches .wmv
   ]);
 
   async function storeMedia(data: string, ownerId: string): Promise<string> {
