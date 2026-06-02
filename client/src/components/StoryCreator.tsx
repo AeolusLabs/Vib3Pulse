@@ -313,11 +313,15 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
 
       let probeTimer: ReturnType<typeof setTimeout>;
 
-      const accept = (dur: number) => {
+      const cleanup = () => {
         clearTimeout(probeTimer);
         probe.onloadedmetadata = null;
         probe.onerror = null;
         URL.revokeObjectURL(tempUrl);
+      };
+
+      const accept = (dur: number) => {
+        cleanup();
         setVideoDuration(dur);
         setCapturedVideoUrl(URL.createObjectURL(file));
         setCapturedVideoBlob(file);
@@ -325,22 +329,34 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
         setPhase("editing");
       };
 
-      // Fallback: if metadata never arrives (moov atom at end of file), proceed without duration
-      probeTimer = setTimeout(() => accept(0), 5000);
+      // Fallback: if metadata never loads within 5 s the codec is likely unsupported
+      probeTimer = setTimeout(() => {
+        cleanup();
+        toast({
+          title: "Could not read video",
+          description: "Your browser may not support this codec. Try converting to MP4 (H.264) or use Chrome, Edge, or Firefox.",
+          variant: "destructive",
+        });
+      }, 5000);
 
       probe.onloadedmetadata = () => {
         const dur = probe.duration;
         if (dur > 5 * 60) {
-          clearTimeout(probeTimer);
-          URL.revokeObjectURL(tempUrl);
+          cleanup();
           toast({ title: "Video too long", description: "Maximum video length is 5 minutes.", variant: "destructive" });
           return;
         }
         accept(isFinite(dur) && dur > 0 ? dur : 0);
       };
 
-      // Browser can't decode this codec — proceed anyway, server validates the bytes
-      probe.onerror = () => accept(0);
+      probe.onerror = () => {
+        cleanup();
+        toast({
+          title: "Video format not supported",
+          description: "Your device may not support this video codec. Try converting to MP4 (H.264) or WebM.",
+          variant: "destructive",
+        });
+      };
 
       probe.src = tempUrl;
       probe.load();

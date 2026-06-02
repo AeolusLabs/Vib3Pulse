@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useVideoTrimmer } from "@/hooks/useVideoTrimmer";
+import { useToast } from "@/hooks/use-toast";
 import { VideoFilmstrip } from "@/components/VideoFilmstrip";
 import { ScissorsIcon } from "@/components/ui/icons";
 
@@ -52,6 +53,7 @@ export function VideoTrimPanel({ videoUrl, duration, onConfirm, onCancel }: Vide
   const syncOut = (v: number) => { outRef.current = v; setOutPoint(v); };
 
   const { trim, isTrimming, progress } = useVideoTrimmer();
+  const { toast } = useToast();
 
   // ── loop playback ─────────────────────────────────────────────────────────
 
@@ -164,11 +166,19 @@ export function VideoTrimPanel({ videoUrl, duration, onConfirm, onCancel }: Vide
       const blob = await trim(video, inRef.current, outRef.current);
       onConfirm(blob, outRef.current - inRef.current);
     } catch (err: any) {
-      // Restore loop so the user can adjust and retry
       startLoop();
-      throw err; // propagated to StoryCreator's catch → toast
+
+      const msg: string = err?.message ?? "";
+      const description =
+        msg.includes("not supported") || msg.includes("captureStream not available")
+          ? "Video trimming isn't supported in this browser. Try Chrome, Edge, or Firefox."
+          : msg.includes("MediaRecorder")
+          ? "Recording failed. Your browser may not support this video's codec."
+          : msg || "Something went wrong. Please try again.";
+
+      toast({ title: "Trim failed", description, variant: "destructive" });
     }
-  }, [isTrimming, trim, onConfirm, startLoop, stopLoop]);
+  }, [isTrimming, trim, onConfirm, startLoop, stopLoop, toast]);
 
   // ── derived UI values ─────────────────────────────────────────────────────
 
@@ -423,6 +433,13 @@ export function VideoTrimPanel({ videoUrl, duration, onConfirm, onCancel }: Vide
             ? "Minimum clip length is 1 second"
             : "Drag handles to set start and end · Video loops selection"}
         </p>
+
+        {/* format notice */}
+        {!isTrimming && (
+          <p className="text-center text-xs px-4" style={{ color: "rgba(255,255,255,0.15)" }}>
+            Trimmed clip is exported as WebM · Your original file is unchanged
+          </p>
+        )}
       </div>
     </motion.div>
   );

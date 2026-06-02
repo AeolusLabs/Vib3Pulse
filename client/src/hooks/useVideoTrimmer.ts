@@ -31,7 +31,7 @@ export function useVideoTrimmer() {
       if (!supported) {
         return Promise.reject(
           new Error(
-            "Video trim is not supported in this browser — please use Chrome or Edge.",
+            "Video trim is not supported in this browser — please use Chrome, Edge, or Firefox.",
           ),
         );
       }
