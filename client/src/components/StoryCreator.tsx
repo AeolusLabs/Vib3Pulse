@@ -273,21 +273,34 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
     if (!file) return;
     e.target.value = "";
 
-    // Some Android devices and the iOS Files app report file.type = "" for
-    // perfectly valid video files. Fall back to the file extension so those
-    // files don't silently vanish into the else-branch below.
+    // Server validates with magic bytes — client routing is best-effort only.
+    // mime="" is common on Android and iOS Files app for perfectly valid videos.
     const mime = file.type;
     const ext  = file.name.split(".").pop()?.toLowerCase() ?? "";
     const VIDEO_EXTS = [
-      "mp4", "m4v", "mov", "avi", "mkv", "webm",   // universal
-      "3gp", "3gpp",                                 // mobile (Android/older iOS)
-      "flv", "f4v",                                  // Flash/desktop legacy
-      "wmv",                                         // Windows Media
-      "ogv", "ogg",                                  // Ogg video (unambiguous container)
+      // Universal containers
+      "mp4", "m4v", "m4b", "mov",
+      "avi", "mkv", "webm",
+      // MPEG family
+      "mpeg", "mpg", "m2v",
+      // Transport streams (DVR / broadcast)
+      "ts", "mts", "m2ts", "trp",
+      // Mobile
+      "3gp", "3gpp", "3g2", "3gpp2",
+      // Legacy desktop
+      "flv", "f4v", "wmv", "asf",
+      // Ogg
+      "ogv", "ogg",
+      // Professional / misc
+      "mxf", "dv", "divx", "xvid", "amv", "rm", "rmvb",
     ];
 
     const isImage = mime.startsWith("image/");
-    const isVideo = mime.startsWith("video/") || (!isImage && VIDEO_EXTS.includes(ext));
+    // Accept any video/* MIME, any file whose extension is in the list, or any
+    // file whose MIME is blank (Android/iOS camera recordings often omit type).
+    const isVideo =
+      !isImage &&
+      (mime.startsWith("video/") || mime === "" || VIDEO_EXTS.includes(ext));
 
     if (isImage) {
       const reader = new FileReader();

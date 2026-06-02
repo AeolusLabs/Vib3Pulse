@@ -1816,28 +1816,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ──── Media Storage (Railway-compatible, DB-backed) ────────────────────────
 
   // Helper: store base64 data URL in DB, return /api/media/{id} URL
-  const ALLOWED_MEDIA_TYPES = new Set([
-    // Images
-    'image/jpeg', 'image/png', 'image/gif', 'image/webp',
-    // Common video containers
-    'video/mp4', 'video/quicktime', 'video/webm', 'video/ogg',
-    'video/x-msvideo',    // AVI
-    'video/x-matroska',   // MKV
-    'video/x-m4v',        // M4V (iTunes)
-    // Mobile formats
-    'video/3gpp',         // 3GP  — matches .3gp / .3gpp in client VIDEO_EXTS
-    'video/3gpp2',        // 3G2
-    // Desktop legacy
-    'video/x-flv',        // FLV  — matches .flv / .f4v
-    'video/x-ms-wmv',     // WMV  — matches .wmv
-  ]);
-
   async function storeMedia(data: string, ownerId: string): Promise<string> {
     const base64Data = data.includes(',') ? data.split(',')[1] : data;
     const buffer = Buffer.from(base64Data, 'base64');
 
+    // fileTypeFromBuffer reads magic bytes — the declared MIME in the data URL
+    // is ignored. Any file whose bytes don't parse as image/* or video/* is
+    // rejected here, including executables, archives, and spoofed extensions.
     const detected = await fileTypeFromBuffer(buffer);
-    if (!detected || !ALLOWED_MEDIA_TYPES.has(detected.mime)) {
+    if (!detected || (!detected.mime.startsWith('image/') && !detected.mime.startsWith('video/'))) {
       throw new MediaValidationError(
         `File type not allowed: ${detected?.mime ?? 'unknown'}`
       );
