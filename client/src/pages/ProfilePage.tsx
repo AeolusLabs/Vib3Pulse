@@ -21,7 +21,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { format } from "date-fns";
 import type { User, Event, Rsvp, Post } from "@shared/schema";
 import EditProfileDialog from "@/components/EditProfileDialog";
-import { OrganizerStatsModal } from "@/components/OrganizerStatsModal";
 import FollowersFollowingDialog from "@/components/FollowersFollowingDialog";
 import FeedPost from "@/components/FeedPost";
 import { useAuth } from "@/hooks/useAuth";
@@ -472,12 +471,6 @@ export default function ProfilePage() {
               {isOwnProfile ? (
                 <div className="flex gap-2">
                   <EditProfileDialog user={profile as User} />
-                  {isOrganizer && (
-                    <OrganizerStatsModal
-                      organizerId={profile.id}
-                      organizerName={profile.organizationName || profile.username}
-                    />
-                  )}
                 </div>
               ) : sessionUser ? (
                 isFollowing ? (
