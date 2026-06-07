@@ -250,6 +250,12 @@ export async function ensureSchema() {
   await pool.query(`
     ALTER TABLE conversation_messages ADD COLUMN IF NOT EXISTS story_id VARCHAR REFERENCES stories(id) ON DELETE SET NULL
   `);
+  await pool.query(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id TEXT UNIQUE
+  `);
+  await pool.query(`
+    ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL
+  `);
 }
 
 export interface IStorage {
@@ -257,7 +263,10 @@ export interface IStorage {
   getUsersByUsernames(usernames: string[]): Promise<User[]>;
   getUserByUsername(username: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
+  getUserByGoogleId(googleId: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  createUserFromGoogle(data: { email: string; googleId: string; displayName: string; avatarUrl?: string }): Promise<User>;
+  linkGoogleId(userId: string, googleId: string): Promise<void>;
   updateUser(id: string, updates: Partial<InsertUser>): Promise<User>;
   updateUserPassword(userId: string, hashedPassword: string): Promise<void>;
   updateUsername(userId: string, newUsername: string): Promise<User>;
@@ -717,6 +726,35 @@ export class DbStorage implements IStorage {
   async createUser(insertUser: InsertUser): Promise<User> {
     const result = await db.insert(users).values(insertUser).returning();
     return result[0];
+  }
+
+  async getUserByGoogleId(googleId: string): Promise<User | undefined> {
+    const result = await db.select().from(users).where(eq(users.googleId, googleId));
+    return result[0];
+  }
+
+  async createUserFromGoogle(data: { email: string; googleId: string; displayName: string; avatarUrl?: string }): Promise<User> {
+    const base = (data.displayName || data.email.split('@')[0])
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '_')
+      .slice(0, 20);
+    const suffix = crypto.randomBytes(3).toString('hex');
+    const username = `${base}_${suffix}`;
+
+    const result = await db.insert(users).values({
+      email: data.email,
+      googleId: data.googleId,
+      username,
+      passwordHash: null,
+      displayName: data.displayName,
+      avatarUrl: data.avatarUrl ?? null,
+      userType: 'social',
+    } as any).returning();
+    return result[0];
+  }
+
+  async linkGoogleId(userId: string, googleId: string): Promise<void> {
+    await db.update(users).set({ googleId } as any).where(eq(users.id, userId));
   }
 
   async updateUser(id: string, updates: Partial<InsertUser>): Promise<User> {

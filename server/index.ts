@@ -11,6 +11,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
 import passport from "passport";
 import { Strategy as LocalStrategy } from "passport-local";
+import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import connectPgSimple from "connect-pg-simple";
 import cookieParser from "cookie-parser";
 import { registerRoutes } from "./routes";
@@ -84,6 +85,10 @@ if (!process.env.RESEND_API_KEY) {
   console.warn("[STARTUP] WARNING: RESEND_API_KEY is not set — password reset emails will fail silently");
 }
 
+if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+  console.warn("[STARTUP] WARNING: GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not set — Google OAuth will be disabled");
+}
+
 // In production, APP_URL must be set so reset links point to the live domain
 if (process.env.NODE_ENV === "production" && !process.env.APP_URL && !process.env.REPLIT_DEV_DOMAIN) {
   console.warn("[STARTUP] WARNING: APP_URL is not set in production — password reset links will use localhost fallback and will not work");
@@ -118,6 +123,10 @@ passport.use(
         return done(null, false, { message: "Invalid username or password" });
       }
 
+      if (!user.passwordHash) {
+        return done(null, false, { message: "This account uses Google sign-in. Please continue with Google." });
+      }
+
       const isValid = await comparePassword(password, user.passwordHash);
       if (!isValid) {
         return done(null, false, { message: "Invalid username or password" });
@@ -134,6 +143,53 @@ passport.use(
     }
   })
 );
+
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  const appUrl = process.env.APP_URL || `http://localhost:${process.env.PORT || 5000}`;
+  passport.use(
+    new GoogleStrategy(
+      {
+        clientID: process.env.GOOGLE_CLIENT_ID,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        callbackURL: `${appUrl}/api/auth/google/callback`,
+        scope: ['profile', 'email'],
+      },
+      async (_accessToken, _refreshToken, profile, done) => {
+        try {
+          const email = profile.emails?.[0]?.value?.toLowerCase();
+          if (!email) {
+            return done(null, false);
+          }
+
+          let user = await storage.getUserByGoogleId(profile.id);
+
+          if (!user) {
+            user = await storage.getUserByEmail(email);
+            if (user) {
+              await storage.linkGoogleId(user.id, profile.id);
+            } else {
+              user = await storage.createUserFromGoogle({
+                email,
+                googleId: profile.id,
+                displayName: profile.displayName || email.split('@')[0],
+                avatarUrl: profile.photos?.[0]?.value,
+              });
+            }
+          }
+
+          const suspension = await storage.getActiveSuspension(user.id);
+          if (suspension) {
+            return done(null, false);
+          }
+
+          return done(null, userToSessionUser(user));
+        } catch (err) {
+          return done(err as Error);
+        }
+      }
+    )
+  );
+}
 
 passport.serializeUser((user, done) => {
   done(null, user.id);

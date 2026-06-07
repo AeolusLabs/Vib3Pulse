@@ -287,6 +287,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  // Google OAuth — only registered when credentials are present
+  if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+    app.get("/api/auth/google",
+      passport.authenticate("google", { scope: ["profile", "email"] })
+    );
+
+    app.get(
+      "/api/auth/google/callback",
+      passport.authenticate("google", { failureRedirect: "/login?error=google_auth_failed" }),
+      (req, res) => {
+        rotateCsrfToken(res);
+        res.redirect("/discover");
+      }
+    );
+  }
+
   app.get("/api/auth/session", async (req, res) => {
     if (req.isAuthenticated()) {
       return res.json({ user: req.user });
@@ -324,7 +340,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
-      
+      if (!user.passwordHash) {
+        return res.status(400).json({ message: "Password cannot be changed on accounts that use Google sign-in." });
+      }
+
       const isValid = await comparePassword(currentPassword, user.passwordHash);
       if (!isValid) {
         return res.status(400).json({ message: "Current password is incorrect" });
