@@ -1118,13 +1118,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/organizers/:id/demographics", requireAuth, async (req, res) => {
     try {
       const organizerId = req.params.id;
-      
-      // Only allow organizers to view their own demographics, or allow viewing their own
+
       if (organizerId !== req.user!.id) {
         return res.status(403).json({ message: "Not authorized to view demographics for this organizer" });
       }
-      
-      const demographics = await storage.getOrganizerDemographics(organizerId);
+
+      // Optional period filter: "30d" | "90d" — defaults to all-time
+      let startDate: Date | undefined;
+      const period = req.query.period as string | undefined;
+      if (period === '30d') {
+        startDate = new Date();
+        startDate.setDate(startDate.getDate() - 30);
+      } else if (period === '90d') {
+        startDate = new Date();
+        startDate.setDate(startDate.getDate() - 90);
+      }
+      // endDate is always "now" when a period is set
+      const endDate = startDate ? new Date() : undefined;
+
+      const demographics = await storage.getOrganizerDemographics(organizerId, { startDate, endDate });
       res.json(demographics);
     } catch (error) {
       console.error('Error fetching organizer demographics:', error);

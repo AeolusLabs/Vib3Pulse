@@ -28,6 +28,7 @@ import BuddyDashboardPage from "@/pages/BuddyDashboardPage";
 import DistressAlertsPage from "@/pages/DistressAlertsPage";
 import AccountSettingsPage from "@/pages/AccountSettingsPage";
 import ManageVenuesPage from "@/pages/ManageVenuesPage";
+import OrganizerAnalyticsPage from "@/pages/OrganizerAnalyticsPage";
 import VenueDetailPage from "@/pages/VenueDetailPage";
 import VenueEventsPage from "@/pages/VenueEventsPage";
 import VenueEventDetailPage from "@/pages/VenueEventDetailPage";
@@ -152,6 +153,12 @@ function Router() {
       <Route path="/manage-venues">
         <AuthenticatedLayout>
           <ManageVenuesPage />
+        </AuthenticatedLayout>
+      </Route>
+
+      <Route path="/organizer/analytics">
+        <AuthenticatedLayout>
+          <OrganizerAnalyticsPage />
         </AuthenticatedLayout>
       </Route>
       

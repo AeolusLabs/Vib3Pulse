@@ -16,7 +16,7 @@ import NotificationBell from "./NotificationBell";
 import { EmergencyFAB } from "@/components/safety/EmergencyFAB";
 import { Link, useLocation } from "wouter";
 import { useAuth, logout } from "@/hooks/useAuth";
-import { SearchIcon, UserIcon, CalendarIcon, LogOutIcon, TicketIcon, ShieldIcon, AlertTriangleIcon, Building2Icon, SettingsIcon } from "@/components/ui/icons";
+import { SearchIcon, UserIcon, CalendarIcon, LogOutIcon, TicketIcon, ShieldIcon, AlertTriangleIcon, Building2Icon, SettingsIcon, BarChart3Icon } from "@/components/ui/icons";
 
 interface NavigationProps {
   onSearch?: (query: string) => void;
@@ -96,6 +96,12 @@ export default function Navigation({ onSearch }: NavigationProps) {
                       <Link href="/manage-events">
                         <CalendarIcon className="mr-2 h-4 w-4" />
                         My Events
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild data-testid="menu-analytics">
+                      <Link href="/organizer/analytics">
+                        <BarChart3Icon className="mr-2 h-4 w-4" />
+                        Analytics
                       </Link>
                     </DropdownMenuItem>
                     {user.canManageVenues && (
