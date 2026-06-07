@@ -3226,8 +3226,9 @@ export class DbStorage implements IStorage {
       }));
 
     const calculatedRevenue = eventBreakdown.reduce((sum, e) => sum + e.revenue, 0);
-    const averageTicketPrice = totalTicketPurchases > 0
-      ? Math.round(calculatedRevenue / totalTicketPurchases)
+    const paidEvents = eventBreakdown.filter(e => !e.isFree);
+    const averageTicketPrice = paidEvents.length > 0
+      ? Math.round(paidEvents.reduce((sum, e) => sum + e.ticketPrice, 0) / paidEvents.length)
       : 0;
 
     const sortedByTickets = [...eventBreakdown].sort((a, b) => b.tickets - a.tickets);
