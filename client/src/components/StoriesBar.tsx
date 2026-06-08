@@ -1,5 +1,6 @@
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import StoryCircle from "./StoryCircle";
+import { StoryCircleSkeleton } from "@/components/ui/skeleton-layouts";
 
 interface Story {
   id: string;
@@ -13,11 +14,12 @@ interface Story {
 
 interface StoriesBarProps {
   stories: Story[];
+  isLoading?: boolean;
   onStoryClick?: (storyId: string) => void;
   onCreateStory?: () => void;
 }
 
-export default function StoriesBar({ stories, onStoryClick, onCreateStory }: StoriesBarProps) {
+export default function StoriesBar({ stories, isLoading, onStoryClick, onCreateStory }: StoriesBarProps) {
   return (
     <div className="bg-background border-b">
       <ScrollArea className="w-full">
@@ -27,7 +29,9 @@ export default function StoriesBar({ stories, onStoryClick, onCreateStory }: Sto
             isOwn={true}
             onClick={onCreateStory}
           />
-          {stories.map((story) => (
+          {isLoading
+            ? [0, 1, 2, 3].map((i) => <StoryCircleSkeleton key={i} index={i} />)
+            : stories.map((story) => (
             <StoryCircle
               key={story.id}
               username={story.username}

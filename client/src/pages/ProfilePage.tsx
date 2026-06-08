@@ -7,7 +7,7 @@ import BottomNavigation from "@/components/BottomNavigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { ProfileHeaderSkeleton, PostSkeleton } from "@/components/ui/skeleton-layouts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import {
@@ -48,26 +48,6 @@ type PostWithUser = Post & {
   };
 };
 
-function ProfileSkeleton() {
-  return (
-    <div className="animate-pulse">
-      <div className="h-40 md:h-52 bg-muted rounded-none" />
-      <div className="px-4 pb-4">
-        <div className="flex justify-between items-end -mt-14 mb-4">
-          <div className="h-28 w-28 rounded-full bg-muted border-4 border-background" />
-          <Skeleton className="h-9 w-28 rounded-full" />
-        </div>
-        <Skeleton className="h-6 w-40 mb-2" />
-        <Skeleton className="h-4 w-28 mb-4" />
-        <Skeleton className="h-16 w-full mb-4" />
-        <div className="flex gap-4">
-          <Skeleton className="h-4 w-20" />
-          <Skeleton className="h-4 w-20" />
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export default function ProfilePage() {
   const { username } = useParams<{ username: string }>();
@@ -265,7 +245,7 @@ export default function ProfilePage() {
       <div className="min-h-screen bg-background pb-20 md:pb-0">
         <Navigation onSearch={() => {}} />
         <main className="max-w-[680px] mx-auto">
-          <ProfileSkeleton />
+          <ProfileHeaderSkeleton />
         </main>
         <BottomNavigation />
       </div>
@@ -320,17 +300,7 @@ export default function ProfilePage() {
     if (loading) {
       return (
         <div className="divide-y divide-border">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="p-4 space-y-3">
-              <div className="flex gap-3">
-                <Skeleton className="h-10 w-10 rounded-full flex-shrink-0" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-4 w-32" />
-                  <Skeleton className="h-16 w-full" />
-                </div>
-              </div>
-            </div>
-          ))}
+          {[0, 1, 2].map((i) => <PostSkeleton key={i} index={i} />)}
         </div>
       );
     }

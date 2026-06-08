@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SearchResultSkeleton } from "@/components/ui/skeleton-layouts";
 import FeedPost from "@/components/FeedPost";
 import EventDetailsModal from "@/components/EventDetailsModal";
 
@@ -262,10 +263,8 @@ export default function SearchPage() {
         {isSearching ? (
           <div className="space-y-6">
             {searchLoading ? (
-              <div className="space-y-4">
-                {[1, 2, 3].map((i) => (
-                  <Skeleton key={i} className="h-24 w-full" />
-                ))}
+              <div className="space-y-1">
+                {[0, 1, 2, 3].map((i) => <SearchResultSkeleton key={i} index={i} />)}
               </div>
             ) : !hasSearchResults ? (
               <div className="text-center py-12">

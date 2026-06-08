@@ -19,6 +19,7 @@ import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 
 import CommunityModal from "@/components/CommunityModal";
 import { SparklesIcon, ImageIcon, PlusIcon, UsersIcon } from "@/components/ui/icons";
+import { PostSkeleton } from "@/components/ui/skeleton-layouts";
 
 type StoryWithUser = {
   id: string;
@@ -178,7 +179,7 @@ export default function FeedPage() {
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes
   });
 
-  const { data: storiesData = [] } = useQuery<StoryWithUser[]>({
+  const { data: storiesData = [], isLoading: storiesLoading } = useQuery<StoryWithUser[]>({
     queryKey: ['/api/stories'],
   });
 
@@ -285,6 +286,7 @@ export default function FeedPage() {
 
       <StoriesBar
         stories={stories}
+        isLoading={storiesLoading}
         onStoryClick={(storyId) => {
           const story = stories.find(s => s.id === storyId);
           const firstSlideId = story?.slides?.[0]?.id;
@@ -394,9 +396,7 @@ export default function FeedPage() {
         {/* Posts — borderless timeline (A1) */}
         <div className="divide-y divide-border">
           {isLoading ? (
-            <div className="text-center py-8">
-              <p className="text-muted-foreground">Loading posts...</p>
-            </div>
+            <>{[0, 1, 2].map((i) => <PostSkeleton key={i} index={i} />)}</>
           ) : isError ? (
             <div className="text-center py-12">
               <p className="text-muted-foreground text-sm">Failed to load posts. Try refreshing.</p>

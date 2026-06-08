@@ -9,7 +9,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Skeleton } from "@/components/ui/skeleton";
+import { ConversationItemSkeleton, MessageBubbleSkeleton } from "@/components/ui/skeleton-layouts";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -389,11 +389,8 @@ export default function MessagesPage() {
       <div className="min-h-screen flex flex-col bg-background">
         <Navigation onSearch={() => {}} />
         <main className="flex-1 container mx-auto px-4 py-6 pb-20 max-w-2xl">
-          <Skeleton className="h-10 w-48 mb-6" />
-          <div className="space-y-4">
-            {[1, 2, 3].map((i) => (
-              <Skeleton key={i} className="h-20 w-full" />
-            ))}
+          <div className="space-y-1">
+            {[0, 1, 2, 3].map((i) => <ConversationItemSkeleton key={i} index={i} />)}
           </div>
         </main>
         <BottomNavigation />
@@ -478,10 +475,8 @@ export default function MessagesPage() {
         <main className="flex-1 overflow-hidden flex flex-col max-w-[1200px] mx-auto w-full px-4 sm:px-6 lg:px-8">
           <ScrollArea className="flex-1 py-4">
             {messagesLoading ? (
-              <div className="space-y-4">
-                {[1, 2, 3].map((i) => (
-                  <Skeleton key={i} className={`h-12 w-2/3 rounded-2xl ${i % 2 === 0 ? "ml-auto" : ""}`} />
-                ))}
+              <div className="space-y-1 py-2">
+                {[0, 1, 2, 3].map((i) => <MessageBubbleSkeleton key={i} index={i} />)}
               </div>
             ) : conversationMessages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full py-16 text-center">

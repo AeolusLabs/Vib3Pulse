@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Skeleton } from "@/components/ui/skeleton";
+import { CommentSkeleton } from "@/components/ui/skeleton-layouts";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 import * as DialogPrimitive from "@radix-ui/react-dialog";
@@ -178,15 +178,7 @@ export default function CommentDialog({ open, onClose, postId, postSummary }: Co
           <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
             {isLoading ? (
               <div className="space-y-4">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="flex gap-3">
-                    <Skeleton className="h-10 w-10 rounded-full flex-shrink-0" />
-                    <div className="flex-1 space-y-2">
-                      <Skeleton className="h-4 w-24" />
-                      <Skeleton className="h-12 w-full" />
-                    </div>
-                  </div>
-                ))}
+                {[0, 1, 2].map((i) => <CommentSkeleton key={i} index={i} />)}
               </div>
             ) : comments.length === 0 ? (
               <div className="text-center py-10 text-muted-foreground">

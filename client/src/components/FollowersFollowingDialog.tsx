@@ -11,7 +11,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Skeleton } from "@/components/ui/skeleton";
+import { UserListItemSkeleton } from "@/components/ui/skeleton-layouts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import type { User } from "@shared/schema";
@@ -53,21 +53,6 @@ function UserListItem({ user, onNavigate }: { user: FollowUser; onNavigate: (use
   );
 }
 
-function UserListSkeleton() {
-  return (
-    <div className="space-y-2">
-      {[1, 2, 3, 4, 5].map((i) => (
-        <div key={i} className="flex items-center gap-3 p-3">
-          <Skeleton className="h-10 w-10 rounded-full" />
-          <div className="flex-1 space-y-2">
-            <Skeleton className="h-4 w-32" />
-            <Skeleton className="h-3 w-24" />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 function EmptyState({ type }: { type: "followers" | "following" }) {
   return (
@@ -154,7 +139,7 @@ export default function FollowersFollowingDialog({
             <ScrollArea className="h-[400px]">
               <div className="p-2">
                 {loadingFollowers ? (
-                  <UserListSkeleton />
+                  <div>{[0,1,2,3,4].map((i) => <UserListItemSkeleton key={i} index={i} />)}</div>
                 ) : followers.length === 0 ? (
                   <EmptyState type="followers" />
                 ) : (
@@ -176,7 +161,7 @@ export default function FollowersFollowingDialog({
             <ScrollArea className="h-[400px]">
               <div className="p-2">
                 {loadingFollowing ? (
-                  <UserListSkeleton />
+                  <div>{[0,1,2,3,4].map((i) => <UserListItemSkeleton key={i} index={i} />)}</div>
                 ) : following.length === 0 ? (
                   <EmptyState type="following" />
                 ) : (

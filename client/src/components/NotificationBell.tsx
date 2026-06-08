@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback } from "react";
+import { NotificationItemSkeleton } from "@/components/ui/skeleton-layouts";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -138,20 +139,6 @@ function buildGroupTitle(g: NotificationGroup): string {
   return `${nameStr} ${verb}`;
 }
 
-// --- Skeleton ---
-
-function SkeletonItem() {
-  return (
-    <div className="flex items-start gap-3 px-4 py-3.5 border-b border-border/40">
-      <div className="h-10 w-10 rounded-full bg-muted animate-pulse flex-shrink-0" />
-      <div className="flex-1 space-y-2 pt-1">
-        <div className="h-3.5 bg-muted animate-pulse rounded-full w-2/3" />
-        <div className="h-3 bg-muted animate-pulse rounded-full w-full" />
-        <div className="h-2.5 bg-muted animate-pulse rounded-full w-1/4" />
-      </div>
-    </div>
-  );
-}
 
 // --- Empty state ---
 
@@ -550,7 +537,7 @@ export default function NotificationBell() {
             <TabsContent key={tab} value={tab} className="m-0">
               <ScrollArea className="h-[360px]">
                 {isLoading ? (
-                  Array.from({ length: 5 }, (_, i) => <SkeletonItem key={i} />)
+                  Array.from({ length: 5 }, (_, i) => <NotificationItemSkeleton key={i} index={i} />)
                 ) : (
                   <NotificationList
                     groups={allGrouped[tab]}

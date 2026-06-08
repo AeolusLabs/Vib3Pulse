@@ -16,6 +16,7 @@ import { Link, useSearch } from "wouter";
 import { useGeolocation } from "@/hooks/useGeolocation";
 import type { Event, Venue } from "@shared/schema";
 import { CalendarIcon, MapPinIcon, UsersIcon, SparklesIcon, Building2Icon, MusicIcon, ClockIcon, TrendingUpIcon, Navigation2Icon, Loader2Icon, XCircleIcon, RefreshCwIcon, Share2Icon, TicketIcon } from "@/components/ui/icons";
+import { EventCardSkeleton } from "@/components/ui/skeleton-layouts";
 
 interface EventWithDistance extends Event {
   distance?: number | null;
@@ -374,8 +375,8 @@ export default function DiscoverPage() {
         </div>
 
         {isLoading ? (
-          <div className="text-center py-16">
-            <p className="text-muted-foreground">Loading events...</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {[0, 1, 2, 3, 4, 5].map((i) => <EventCardSkeleton key={i} index={i} />)}
           </div>
         ) : (
           <>
