@@ -505,11 +505,11 @@ export default function SignupPage() {
                   name="contactEmail"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className={labelCls}>Contact Email</FormLabel>
+                      <FormLabel className={labelCls}>Public Contact Email</FormLabel>
                       <FormControl>
                         <Input type="email" placeholder="contact@organization.com" className={inputCls} {...field} data-testid="input-contact-email" />
                       </FormControl>
-                      <FormDescription className="text-white/25 text-xs">Shown publicly for event enquiries.</FormDescription>
+                      <FormDescription className="text-white/25 text-xs">Shown publicly for event enquiries. To log in, use the account email you entered in step 1.</FormDescription>
                       <FormMessage className="text-xs text-red-400" />
                     </FormItem>
                   )}

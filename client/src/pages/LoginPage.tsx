@@ -13,7 +13,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { LogInIcon, EyeIcon, EyeOffIcon } from "@/components/ui/icons";
 
 const loginSchema = z.object({
-  username: z.string().min(1, "Username is required"),
+  username: z.string().min(1, "Username or email is required"),
   password: z.string().min(1, "Password is required"),
 });
 
@@ -95,11 +95,11 @@ export default function LoginPage() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel className="text-white/40 text-xs font-sans font-medium tracking-wide uppercase">
-                      Username
+                      Username or Email
                     </FormLabel>
                     <FormControl>
                       <Input
-                        placeholder="Enter your username"
+                        placeholder="Enter your username or email"
                         className="h-12 bg-white/[0.04] border-white/[0.09] text-white placeholder:text-white/20 focus-visible:ring-1 focus-visible:ring-violet-500 focus-visible:border-violet-500/50 rounded-xl font-sans text-sm transition-colors"
                         {...field}
                         data-testid="input-username"
