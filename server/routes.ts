@@ -264,6 +264,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           try {
             await clearLoginAttempts(identifier, ip);
+            // Clear the alternate identifier too so a prior email-lockout
+            // doesn't survive a successful username login (and vice-versa)
+            const altIdentifier = identifier.includes('@') ? user.username : user.email;
+            if (altIdentifier && altIdentifier !== identifier) {
+              await clearLoginAttempts(altIdentifier, ip);
+            }
           } catch (clearErr) {
             console.error("[AUTH] clear login attempts failed:", clearErr);
           }
