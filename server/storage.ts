@@ -256,6 +256,67 @@ export async function ensureSchema() {
   await pool.query(`
     ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL
   `);
+
+  // ── Zernio Social Media Integration ─────────────────────────────────────────
+
+  await pool.query(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS zernio_profile_id VARCHAR(255) UNIQUE
+  `);
+
+  // oauth_state / oauth_state_expires_at columns track the pending OAuth flow
+  // per-organizer per-platform so the callback can verify state and prevent CSRF.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS connected_socials (
+      id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      platform VARCHAR(50) NOT NULL,
+      zernio_account_id VARCHAR(255) NOT NULL,
+      handle VARCHAR(255),
+      connected_at TIMESTAMP NOT NULL DEFAULT now(),
+      disconnected_at TIMESTAMP,
+      oauth_state VARCHAR(128),
+      oauth_state_expires_at TIMESTAMP,
+      UNIQUE(user_id, platform)
+    )
+  `);
+
+  // zernio_post_id is UNIQUE but nullable — failed posts have no Zernio ID and
+  // NULLs do not collide in a UNIQUE constraint, so retries insert new rows cleanly.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS social_posts (
+      id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      event_id VARCHAR NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      user_id VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      platform VARCHAR(50) NOT NULL,
+      zernio_post_id VARCHAR(255) UNIQUE,
+      content TEXT,
+      status VARCHAR(50) NOT NULL DEFAULT 'posted',
+      error_message TEXT,
+      posted_at TIMESTAMP NOT NULL DEFAULT now(),
+      cost_usd DECIMAL(10,2) NOT NULL DEFAULT 0
+    )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_connected_socials_user
+      ON connected_socials(user_id)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_social_posts_user
+      ON social_posts(user_id)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_social_posts_event
+      ON social_posts(event_id)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_social_posts_platform
+      ON social_posts(platform)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_social_posts_posted_at
+      ON social_posts(posted_at)
+  `);
 }
 
 export interface IStorage {

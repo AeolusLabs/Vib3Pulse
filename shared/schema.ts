@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, integer, boolean, unique, doublePrecision, check, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, integer, boolean, unique, doublePrecision, check, jsonb, numeric } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -31,6 +31,7 @@ export const users = pgTable("users", {
   passwordResetExpires: timestamp("password_reset_expires"),
   isVerified: boolean("is_verified").notNull().default(false),
   isOfficial: boolean("is_official").notNull().default(false),
+  zernioProfileId: varchar("zernio_profile_id", { length: 255 }).unique(),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
@@ -1208,3 +1209,87 @@ export const insertEventRatingSchema = createInsertSchema(eventRatings).omit({
 
 export type InsertEventRating = z.infer<typeof insertEventRatingSchema>;
 export type EventRating = typeof eventRatings.$inferSelect;
+
+// ============================================
+// ZERNIO SOCIAL MEDIA INTEGRATION
+// ============================================
+
+// Canonical platform whitelist — shared between server validation and client UI.
+// Both socialRoutes.ts and SocialPromotionPage.tsx import from here so the list
+// can never drift between layers.
+export const SOCIAL_PLATFORMS = [
+  "instagram",
+  "twitter",
+  "tiktok",
+  "facebook",
+  "linkedin",
+  "youtube",
+  "threads",
+  "reddit",
+  "pinterest",
+  "bluesky",
+  "telegram",
+  "snapchat",
+  "whatsapp",
+  "discord",
+] as const;
+export type SocialPlatform = typeof SOCIAL_PLATFORMS[number];
+
+export const socialPostStatuses = ["posted", "failed", "scheduled"] as const;
+export type SocialPostStatus = typeof socialPostStatuses[number];
+
+// connected_socials — one row per organizer per platform.
+// UNIQUE(user_id, platform) means reconnecting the same platform uses an upsert
+// (sets disconnected_at = NULL) rather than inserting a duplicate row.
+export const connectedSocials = pgTable("connected_socials", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  platform: varchar("platform", { length: 50 }).notNull(),
+  zernioAccountId: varchar("zernio_account_id", { length: 255 }).notNull(),
+  handle: varchar("handle", { length: 255 }),
+  connectedAt: timestamp("connected_at").notNull().default(sql`now()`),
+  disconnectedAt: timestamp("disconnected_at"),
+  // OAuth state token stored here during the pending OAuth flow and cleared on
+  // callback. Prevents OAuth CSRF — the callback must present a matching value.
+  oauthState: varchar("oauth_state", { length: 128 }),
+  oauthStateExpiresAt: timestamp("oauth_state_expires_at"),
+}, (table) => ({
+  uniqueUserPlatform: unique().on(table.userId, table.platform),
+}));
+
+export const insertConnectedSocialSchema = createInsertSchema(connectedSocials)
+  .omit({ id: true, connectedAt: true })
+  .extend({
+    platform: z.enum(SOCIAL_PLATFORMS),
+  });
+
+export type InsertConnectedSocial = z.infer<typeof insertConnectedSocialSchema>;
+export type ConnectedSocial = typeof connectedSocials.$inferSelect;
+
+// social_posts — one row per platform per promote call.
+// zernio_post_id is UNIQUE but nullable: failed posts have no Zernio ID and
+// NULL values do not trigger the unique constraint, so retries insert cleanly.
+export const socialPosts = pgTable("social_posts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventId: varchar("event_id").notNull().references(() => events.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  platform: varchar("platform", { length: 50 }).notNull(),
+  zernioPostId: varchar("zernio_post_id", { length: 255 }).unique(),
+  content: text("content"),
+  status: varchar("status", { length: 50 }).notNull().default("posted"),
+  errorMessage: text("error_message"),
+  postedAt: timestamp("posted_at").notNull().default(sql`now()`),
+  // DECIMAL(10,2) — Drizzle maps numeric() to string in TypeScript to preserve
+  // precision. Use parseFloat() when summing in application code.
+  costUsd: numeric("cost_usd", { precision: 10, scale: 2 }).notNull().default("0"),
+});
+
+export const insertSocialPostSchema = createInsertSchema(socialPosts)
+  .omit({ id: true, postedAt: true })
+  .extend({
+    platform: z.enum(SOCIAL_PLATFORMS),
+    status: z.enum(socialPostStatuses).optional().default("posted"),
+  });
+
+export type InsertSocialPost = z.infer<typeof insertSocialPostSchema>;
+export type SocialPost = typeof socialPosts.$inferSelect;
