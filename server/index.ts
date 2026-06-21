@@ -146,7 +146,7 @@ passport.use(
 );
 
 if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
-  const appUrl = process.env.APP_URL || `http://localhost:${process.env.PORT || 5000}`;
+  const appUrl = (process.env.APP_URL || `http://localhost:${process.env.PORT || 5000}`).replace(/\/+$/, "");
   passport.use(
     new GoogleStrategy(
       {
