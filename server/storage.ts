@@ -4346,7 +4346,8 @@ export class DbStorage implements IStorage {
       .innerJoin(users, eq(conversationMessages.senderId, users.id))
       .where(and(
         eq(conversationMessages.conversationId, conversationId),
-        eq(conversationMessages.isDeleted, false)
+        eq(conversationMessages.isDeleted, false),
+        before ? lt(conversationMessages.createdAt, new Date(before)) : undefined
       ))
       .orderBy(desc(conversationMessages.createdAt))
       .limit(limit);

@@ -181,6 +181,27 @@ class WebSocketManager {
     }
   }
 
+  // Broadcast a new conversation message to all participants
+  broadcastToConversation(conversationId: string, participantIds: string[], message: any) {
+    const payload = JSON.stringify({
+      type: "new_conversation_message",
+      conversationId,
+      message,
+      timestamp: new Date().toISOString(),
+    });
+
+    participantIds.forEach((userId) => {
+      const userSockets = this.clients.get(userId);
+      if (userSockets) {
+        userSockets.forEach((socket) => {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(payload);
+          }
+        });
+      }
+    });
+  }
+
   // Broadcast typing indicator
   broadcastTyping(senderId: string, receiverId: string, isTyping: boolean) {
     const recipientSockets = this.clients.get(receiverId);

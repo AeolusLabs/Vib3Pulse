@@ -9,6 +9,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ConversationItemSkeleton, MessageBubbleSkeleton } from "@/components/ui/skeleton-layouts";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -138,7 +139,7 @@ type ConversationMessageWithSender = ConversationMessage & {
 
 function StoryReplyCard({ story, isOwnMessage }: { story?: Story & { user: User }; isOwnMessage: boolean }) {
   const [, navigate] = useLocation();
-  const isExpired = story ? new Date(story.expiresAt) < new Date() : true;
+  const isExpired = story ? (story.expiresAt ? new Date(story.expiresAt) < new Date() : false) : true;
   const isAvailable = !!story && !isExpired;
 
   return (
@@ -220,7 +221,7 @@ export default function MessagesPage() {
 
   const { data: conversationMessages = [], isLoading: messagesLoading } = useQuery<ConversationMessageWithSender[]>({
     queryKey: ['/api/conversations', conversationId, 'messages'],
-    enabled: !!conversationId && !!selectedConversation,
+    enabled: !!conversationId && !!currentUser,
   });
 
   useEffect(() => {
@@ -318,7 +319,12 @@ export default function MessagesPage() {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.type === 'new_message' || data.type === 'message_sent' || data.type === 'message_read') {
+        if (
+          data.type === 'new_message' ||
+          data.type === 'message_sent' ||
+          data.type === 'message_read' ||
+          data.type === 'new_conversation_message'
+        ) {
           queryClient.invalidateQueries({ queryKey: ['/api/conversations'] });
           if (conversationId) {
             queryClient.invalidateQueries({ queryKey: ['/api/conversations', conversationId, 'messages'] });

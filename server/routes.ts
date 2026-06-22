@@ -2776,11 +2776,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
+  app.get("/api/messages/unread-count", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const count = await storage.getUnreadMessageCount(userId);
+      res.json({ count });
+    } catch (error) {
+      console.error("Get unread message count error:", error);
+      res.status(500).json({ message: "Failed to get unread message count" });
+    }
+  });
+
   app.get("/api/messages/:userId", requireAuth, async (req, res) => {
     try {
       const userId1 = req.user!.id;
       const userId2 = req.params.userId;
-      
+
       const conversation = await storage.getConversation(userId1, userId2);
       res.json(conversation);
     } catch (error) {
@@ -3214,18 +3225,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Get unread count error:", error);
       res.status(500).json({ message: "Failed to get unread count" });
-    }
-  });
-
-  // Get unread message count
-  app.get("/api/messages/unread-count", requireAuth, async (req, res) => {
-    try {
-      const userId = req.user!.id;
-      const count = await storage.getUnreadMessageCount(userId);
-      res.json({ count });
-    } catch (error) {
-      console.error("Get unread message count error:", error);
-      res.status(500).json({ message: "Failed to get unread message count" });
     }
   });
 
@@ -4842,7 +4841,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         imageUrls,
         replyToId,
       });
-      
+
+      // Broadcast to all conversation participants in real-time
+      const participants = await storage.getConversationParticipants(req.params.id);
+      const participantIds = participants.map((p) => p.userId);
+      wsManager.broadcastToConversation(req.params.id, participantIds, message);
+
       res.status(201).json(message);
     } catch (error) {
       console.error("Error sending message:", error);

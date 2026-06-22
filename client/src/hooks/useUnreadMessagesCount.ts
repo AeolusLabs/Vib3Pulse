@@ -30,7 +30,11 @@ export function useMessageCountWebSocket() {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.type === "new_message" || data.type === "message_read") {
+        if (
+          data.type === "new_message" ||
+          data.type === "message_read" ||
+          data.type === "new_conversation_message"
+        ) {
           queryClient.invalidateQueries({ queryKey: ["/api/messages/unread-count"] });
         }
       } catch {
