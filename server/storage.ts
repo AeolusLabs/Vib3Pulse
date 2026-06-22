@@ -141,6 +141,10 @@ import {
   venueStaffAccessCodes,
   type EventRating,
   eventRatings,
+  connectedSocials,
+  socialPosts,
+  type ConnectedSocial,
+  type SocialPost,
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
@@ -773,6 +777,79 @@ export interface IStorage {
   getUserEventRating(eventId: string, userId: string): Promise<EventRating | null>;
   getEventRatingStats(eventId: string): Promise<{ averageRating: number | null; totalRatings: number; distribution: Record<number, number> }>;
   getOrganizerRating(organizerId: string): Promise<{ averageRating: number | null; totalRatings: number; eventsRated: number }>;
+
+  // ============================================
+  // ZERNIO SOCIAL MEDIA
+  // ============================================
+
+  // Persist the Zernio profile ID on first connect; never exposed to the user
+  setZernioProfileId(userId: string, profileId: string): Promise<void>;
+
+  // Active connected accounts for a given organizer (disconnected_at IS NULL)
+  getConnectedSocials(userId: string): Promise<ConnectedSocial[]>;
+
+  // Single active account for one platform — used by the promote route
+  getConnectedSocial(userId: string, platform: string): Promise<ConnectedSocial | undefined>;
+
+  // Insert or reactivate: ON CONFLICT (user_id, platform) DO UPDATE resets
+  // disconnected_at = NULL so reconnecting the same platform works cleanly
+  upsertConnectedSocial(data: {
+    userId: string;
+    platform: string;
+    zernioAccountId: string;
+    handle: string | null;
+  }): Promise<ConnectedSocial>;
+
+  // Soft-delete: sets disconnected_at, keeps the row for audit history
+  disconnectSocial(userId: string, platform: string): Promise<void>;
+
+  // Record one platform's post attempt (status = 'posted' | 'failed')
+  insertSocialPost(data: {
+    eventId: string;
+    userId: string;
+    platform: string;
+    zernioPostId?: string | null;
+    content: string;
+    status: string;
+    errorMessage?: string | null;
+    costUsd: string;
+  }): Promise<SocialPost>;
+
+  // Idempotency guard — returns the most recent successful post for this
+  // event+platform within the given window so double-clicks are rejected
+  getRecentSocialPost(
+    eventId: string,
+    platform: string,
+    windowMinutes: number,
+  ): Promise<SocialPost | undefined>;
+
+  // ── Admin analytics (aggregate only, no PII) ──────────────────────────────
+
+  getSocialDashboardStats(dateFrom: Date): Promise<{
+    totalPosts: number;
+    totalCostUsd: string;
+    failedPosts: number;
+    platformsUsed: number;
+  }>;
+
+  getSocialDailyBreakdown(
+    dateFrom: Date,
+  ): Promise<Array<{ date: string; count: number; costUsd: string }>>;
+
+  getSocialPlatformBreakdown(
+    dateFrom: Date,
+  ): Promise<Array<{ platform: string; posts: number; costUsd: string }>>;
+
+  getSocialOrganizerStats(
+    limit: number,
+    offset: number,
+  ): Promise<Array<{
+    userId: string;
+    orgName: string | null;
+    connectedAccounts: number;
+    postsThisMonth: number;
+    costThisMonth: string;
+  }>>;
 }
 
 export class DbStorage implements IStorage {
@@ -4881,6 +4958,214 @@ export class DbStorage implements IStorage {
       WHERE last_attempt < NOW() - INTERVAL '30 minutes'
       AND (locked_until IS NULL OR locked_until < NOW())
     `);
+  }
+
+  // ============================================
+  // ZERNIO SOCIAL MEDIA
+  // ============================================
+
+  async setZernioProfileId(userId: string, profileId: string): Promise<void> {
+    await db.update(users)
+      .set({ zernioProfileId: profileId } as any)
+      .where(eq(users.id, userId));
+  }
+
+  async getConnectedSocials(userId: string): Promise<ConnectedSocial[]> {
+    return db.select()
+      .from(connectedSocials)
+      .where(and(
+        eq(connectedSocials.userId, userId),
+        isNull(connectedSocials.disconnectedAt),
+      ));
+  }
+
+  async getConnectedSocial(
+    userId: string,
+    platform: string,
+  ): Promise<ConnectedSocial | undefined> {
+    const result = await db.select()
+      .from(connectedSocials)
+      .where(and(
+        eq(connectedSocials.userId, userId),
+        eq(connectedSocials.platform, platform),
+        isNull(connectedSocials.disconnectedAt),
+      ))
+      .limit(1);
+    return result[0];
+  }
+
+  async upsertConnectedSocial(data: {
+    userId: string;
+    platform: string;
+    zernioAccountId: string;
+    handle: string | null;
+  }): Promise<ConnectedSocial> {
+    // ON CONFLICT resets disconnected_at so reconnecting the same platform
+    // reactivates the existing row rather than violating the unique constraint
+    const result = await db.execute(sql`
+      INSERT INTO connected_socials (user_id, platform, zernio_account_id, handle)
+      VALUES (${data.userId}, ${data.platform}, ${data.zernioAccountId}, ${data.handle})
+      ON CONFLICT (user_id, platform) DO UPDATE SET
+        zernio_account_id   = EXCLUDED.zernio_account_id,
+        handle              = EXCLUDED.handle,
+        connected_at        = now(),
+        disconnected_at     = NULL
+      RETURNING *
+    `);
+    return result.rows[0] as ConnectedSocial;
+  }
+
+  async disconnectSocial(userId: string, platform: string): Promise<void> {
+    await db.update(connectedSocials)
+      .set({ disconnectedAt: new Date() })
+      .where(and(
+        eq(connectedSocials.userId, userId),
+        eq(connectedSocials.platform, platform),
+        isNull(connectedSocials.disconnectedAt),
+      ));
+  }
+
+  async insertSocialPost(data: {
+    eventId: string;
+    userId: string;
+    platform: string;
+    zernioPostId?: string | null;
+    content: string;
+    status: string;
+    errorMessage?: string | null;
+    costUsd: string;
+  }): Promise<SocialPost> {
+    const result = await db.insert(socialPosts).values({
+      eventId: data.eventId,
+      userId: data.userId,
+      platform: data.platform,
+      zernioPostId: data.zernioPostId ?? null,
+      content: data.content,
+      status: data.status,
+      errorMessage: data.errorMessage ?? null,
+      costUsd: data.costUsd,
+    } as any).returning();
+    return result[0];
+  }
+
+  async getRecentSocialPost(
+    eventId: string,
+    platform: string,
+    windowMinutes: number,
+  ): Promise<SocialPost | undefined> {
+    const cutoff = new Date(Date.now() - windowMinutes * 60 * 1000);
+    const result = await db.select()
+      .from(socialPosts)
+      .where(and(
+        eq(socialPosts.eventId, eventId),
+        eq(socialPosts.platform, platform),
+        eq(socialPosts.status, "posted"),
+        gte(socialPosts.postedAt, cutoff),
+      ))
+      .limit(1);
+    return result[0];
+  }
+
+  async getSocialDashboardStats(dateFrom: Date): Promise<{
+    totalPosts: number;
+    totalCostUsd: string;
+    failedPosts: number;
+    platformsUsed: number;
+  }> {
+    const result = await db.execute(sql`
+      SELECT
+        COUNT(*)::int                                           AS total_posts,
+        COALESCE(SUM(cost_usd), 0)::text                       AS total_cost_usd,
+        COUNT(*) FILTER (WHERE status = 'failed')::int         AS failed_posts,
+        COUNT(DISTINCT platform)::int                          AS platforms_used
+      FROM social_posts
+      WHERE posted_at >= ${dateFrom}
+    `);
+    const row = result.rows[0] as any;
+    return {
+      totalPosts:    Number(row?.total_posts   ?? 0),
+      totalCostUsd:  String(row?.total_cost_usd ?? "0"),
+      failedPosts:   Number(row?.failed_posts  ?? 0),
+      platformsUsed: Number(row?.platforms_used ?? 0),
+    };
+  }
+
+  async getSocialDailyBreakdown(
+    dateFrom: Date,
+  ): Promise<Array<{ date: string; count: number; costUsd: string }>> {
+    const result = await db.execute(sql`
+      SELECT
+        DATE(posted_at)::text                          AS date,
+        COUNT(*)::int                                  AS count,
+        COALESCE(SUM(cost_usd), 0)::text               AS cost_usd
+      FROM social_posts
+      WHERE posted_at >= ${dateFrom}
+      GROUP BY DATE(posted_at)
+      ORDER BY DATE(posted_at)
+    `);
+    return (result.rows as any[]).map((r) => ({
+      date:    r.date,
+      count:   Number(r.count),
+      costUsd: String(r.cost_usd),
+    }));
+  }
+
+  async getSocialPlatformBreakdown(
+    dateFrom: Date,
+  ): Promise<Array<{ platform: string; posts: number; costUsd: string }>> {
+    const result = await db.execute(sql`
+      SELECT
+        platform,
+        COUNT(*)::int                                  AS posts,
+        COALESCE(SUM(cost_usd), 0)::text               AS cost_usd
+      FROM social_posts
+      WHERE posted_at >= ${dateFrom}
+      GROUP BY platform
+      ORDER BY posts DESC
+    `);
+    return (result.rows as any[]).map((r) => ({
+      platform: r.platform,
+      posts:    Number(r.posts),
+      costUsd:  String(r.cost_usd),
+    }));
+  }
+
+  async getSocialOrganizerStats(
+    limit: number,
+    offset: number,
+  ): Promise<Array<{
+    userId: string;
+    orgName: string | null;
+    connectedAccounts: number;
+    postsThisMonth: number;
+    costThisMonth: string;
+  }>> {
+    // month_start is computed in SQL to avoid timezone skew between app and DB
+    const result = await db.execute(sql`
+      SELECT
+        u.id                                                                    AS user_id,
+        u.organization_name                                                     AS org_name,
+        COUNT(DISTINCT cs.id) FILTER (WHERE cs.disconnected_at IS NULL)::int   AS connected_accounts,
+        COUNT(sp.id) FILTER (WHERE sp.posted_at >= date_trunc('month', now()))::int AS posts_this_month,
+        COALESCE(
+          SUM(sp.cost_usd) FILTER (WHERE sp.posted_at >= date_trunc('month', now())),
+          0
+        )::text                                                                 AS cost_this_month
+      FROM users u
+      LEFT JOIN connected_socials cs ON cs.user_id = u.id
+      LEFT JOIN social_posts      sp ON sp.user_id = u.id
+      WHERE u.user_type = 'organizer'
+      GROUP BY u.id, u.organization_name
+      ORDER BY posts_this_month DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `);
+    return (result.rows as any[]).map((r) => ({
+      userId:           r.user_id,
+      orgName:          r.org_name ?? null,
+      connectedAccounts: Number(r.connected_accounts ?? 0),
+      postsThisMonth:   Number(r.posts_this_month ?? 0),
+      costThisMonth:    String(r.cost_this_month ?? "0"),
+    }));
   }
 }
 

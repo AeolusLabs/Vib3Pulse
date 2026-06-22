@@ -969,4 +969,143 @@ export function setupAdminRoutes(app: Express) {
       res.status(500).json({ message: "Failed to fetch safety alerts" });
     }
   });
+
+  // ── Zernio Social Media Analytics (aggregate only, no PII) ───────────────
+
+  // Shared helper: compute a 30-day window from today
+  function thirtyDaysAgo(): Date {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+
+  // GET /api/admin/social/dashboard
+  // Overview stats + daily posts/cost series + platform breakdown for last 30 days.
+  app.get("/api/admin/social/dashboard", requireAdmin, async (req, res) => {
+    try {
+      const dateFrom = thirtyDaysAgo();
+      const [stats, daily, byPlatform] = await Promise.all([
+        storage.getSocialDashboardStats(dateFrom),
+        storage.getSocialDailyBreakdown(dateFrom),
+        storage.getSocialPlatformBreakdown(dateFrom),
+      ]);
+
+      res.json({
+        stats: {
+          total_posts:    stats.totalPosts,
+          total_cost_usd: stats.totalCostUsd,
+          platforms_used: stats.platformsUsed,
+          posts_failed:   stats.failedPosts,
+        },
+        daily_posts: daily.map((d) => ({
+          date:  d.date,
+          count: d.count,
+          cost:  d.costUsd,
+        })),
+        by_platform: byPlatform.map((p) => ({
+          platform: p.platform,
+          posts:    p.posts,
+          cost:     p.costUsd,
+        })),
+      });
+    } catch (error) {
+      console.error("[Admin] Social dashboard error:", error);
+      res.status(500).json({ message: "Failed to fetch social dashboard" });
+    }
+  });
+
+  // GET /api/admin/social/organizers?limit=50&offset=0
+  // Organizer list with aggregate post + cost stats. No individual email or PII.
+  app.get("/api/admin/social/organizers", requireAdmin, async (req, res) => {
+    try {
+      const limit  = Math.min(parseInt((req.query.limit  as string) || "50", 10), 200);
+      const offset = Math.max(parseInt((req.query.offset as string) || "0",  10), 0);
+
+      const organizers = await storage.getSocialOrganizerStats(limit, offset);
+      res.json(organizers.map((o) => ({
+        user_id:            o.userId,
+        org_name:           o.orgName ?? "—",
+        connected_accounts: o.connectedAccounts,
+        posts_this_month:   o.postsThisMonth,
+        cost_this_month:    o.costThisMonth,
+      })));
+    } catch (error) {
+      console.error("[Admin] Social organizers error:", error);
+      res.status(500).json({ message: "Failed to fetch organizer stats" });
+    }
+  });
+
+  // GET /api/admin/social/costs
+  // Daily cost series, platform split, month-to-date total, and linear projection.
+  app.get("/api/admin/social/costs", requireAdmin, async (req, res) => {
+    try {
+      const dateFrom    = thirtyDaysAgo();
+      const [stats, daily, byPlatform] = await Promise.all([
+        storage.getSocialDashboardStats(dateFrom),
+        storage.getSocialDailyBreakdown(dateFrom),
+        storage.getSocialPlatformBreakdown(dateFrom),
+      ]);
+
+      // Month-to-date cost (from the 1st of current month)
+      const monthStart = new Date();
+      monthStart.setDate(1);
+      monthStart.setHours(0, 0, 0, 0);
+      const [monthStats] = await Promise.all([
+        storage.getSocialDashboardStats(monthStart),
+      ]);
+      const monthActual = parseFloat(monthStats.totalCostUsd) || 0;
+
+      // Linear projection: average daily cost × days in month
+      const daysElapsed  = Math.max(new Date().getDate(), 1);
+      const daysInMonth  = new Date(
+        new Date().getFullYear(),
+        new Date().getMonth() + 1,
+        0,
+      ).getDate();
+      const monthlyProjection = parseFloat(
+        ((monthActual / daysElapsed) * daysInMonth).toFixed(2),
+      );
+
+      // Trend: compare average daily cost of last 7 days vs preceding 7 days
+      const sorted = [...daily].sort((a, b) => a.date.localeCompare(b.date));
+      const last7  = sorted.slice(-7).reduce((s, d) => s + parseFloat(d.costUsd), 0);
+      const prev7  = sorted.slice(-14, -7).reduce((s, d) => s + parseFloat(d.costUsd), 0);
+      const trendDirection =
+        last7 > prev7 * 1.1 ? "up" : last7 < prev7 * 0.9 ? "down" : "stable";
+
+      // Build platform breakdown object { instagram: "12.50", twitter: "8.20" }
+      const platformMap: Record<string, string> = {};
+      byPlatform.forEach((p) => { platformMap[p.platform] = p.costUsd; });
+
+      res.json({
+        this_month_actual:  monthActual.toFixed(2),
+        monthly_projection: monthlyProjection.toFixed(2),
+        by_platform:        platformMap,
+        daily:              daily.map((d) => ({ date: d.date, cost: d.costUsd })),
+        trend_direction:    trendDirection,
+      });
+    } catch (error) {
+      console.error("[Admin] Social costs error:", error);
+      res.status(500).json({ message: "Failed to fetch cost data" });
+    }
+  });
+
+  // GET /api/admin/social/platforms
+  // Per-platform connection counts and post/cost stats for the last 30 days.
+  app.get("/api/admin/social/platforms", requireAdmin, async (req, res) => {
+    try {
+      const dateFrom   = thirtyDaysAgo();
+      const breakdown  = await storage.getSocialPlatformBreakdown(dateFrom);
+
+      res.json(breakdown.map((p) => ({
+        platform:        p.platform,
+        posts_this_month: p.posts,
+        cost_this_month:  p.costUsd,
+      })));
+    } catch (error) {
+      console.error("[Admin] Social platforms error:", error);
+      res.status(500).json({ message: "Failed to fetch platform stats" });
+    }
+  });
 }

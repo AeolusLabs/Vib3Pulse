@@ -43,7 +43,9 @@ import AdminStaff from "@/pages/admin/AdminStaff";
 import AdminActivity from "@/pages/admin/AdminActivity";
 import AdminSetup from "@/pages/admin/AdminSetup";
 import AdminSOS from "@/pages/admin/AdminSOS";
+import AdminSocialDashboard from "@/pages/admin/AdminSocialDashboard";
 import ForgotPasswordPage from "@/pages/ForgotPasswordPage";
+import SocialPromotionPage from "@/pages/SocialPromotionPage";
 import ResetPasswordPage from "@/pages/ResetPasswordPage";
 import JoinGroupPage from "@/pages/JoinGroupPage";
 import ScannerPage from "@/pages/ScannerPage";
@@ -161,6 +163,12 @@ function Router() {
           <OrganizerAnalyticsPage />
         </AuthenticatedLayout>
       </Route>
+
+      <Route path="/organizer/social">
+        <AuthenticatedLayout>
+          <SocialPromotionPage />
+        </AuthenticatedLayout>
+      </Route>
       
       <Route path="/venues/:venueId/venue-events">
         <AuthenticatedLayout>
@@ -202,7 +210,8 @@ function Router() {
       <Route path="/admin/staff" component={AdminStaff} />
       <Route path="/admin/activity" component={AdminActivity} />
       <Route path="/admin/sos" component={AdminSOS} />
-      
+      <Route path="/admin/social" component={AdminSocialDashboard} />
+
       <Route component={NotFound} />
     </Switch>
   );

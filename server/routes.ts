@@ -29,6 +29,7 @@ import { registerSafetyRoutes, startSafetyTimerJob } from "./safety-routes";
 import { registerPaymentRoutes } from "./payment-routes";
 import { buddyRouter } from "./buddyRoutes";
 import { registerRatingRoutes } from "./rating-routes";
+import { registerSocialRoutes } from "./socialRoutes";
 import { startBuddyScheduler } from "./buddyScheduler";
 import { fileTypeFromBuffer } from "file-type";
 
@@ -5044,6 +5045,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerPaymentRoutes(app);
   app.use("/api/safety", buddyRouter);
   registerRatingRoutes(app);
+  registerSocialRoutes(app);
 
   // Start background jobs
   startSafetyTimerJob();
