@@ -409,11 +409,6 @@ export interface IStorage {
   getFollowers(userId: string): Promise<Array<Follow & { follower: User }>>;
   getFollowing(userId: string): Promise<Array<Follow & { following: User }>>;
   
-  sendMessage(message: InsertMessage): Promise<Message>;
-  getConversation(userId1: string, userId2: string): Promise<Array<Message & { sender: User; receiver: User; replyTo?: Message & { sender: User } }>>;
-  getConversations(userId: string): Promise<Array<{ otherUser: User; lastMessage: Message; unreadCount: number }>>;
-  markAsRead(messageId: string): Promise<void>;
-  
   getUserProfile(userId: string): Promise<{ user: User; posts: Post[]; events: Array<Rsvp & { event: Event }> } | undefined>;
   searchUsers(query: string): Promise<User[]>;
   
@@ -714,9 +709,8 @@ export interface IStorage {
   // Conversations
   createConversation(data: InsertConversation, participantIds: string[]): Promise<Conversation>;
   getConversationById(id: string): Promise<(Conversation & { participants: Array<ConversationParticipant & { user: User }> }) | undefined>;
-  getUserConversations(userId: string): Promise<Array<Conversation & { 
+  getUserConversations(userId: string): Promise<Array<Conversation & {
     participants: Array<ConversationParticipant & { user: User }>;
-    lastMessage: ConversationMessage | null;
     unreadCount: number;
   }>>;
   updateConversation(id: string, updates: Partial<InsertConversation>): Promise<Conversation>;
@@ -1515,127 +1509,6 @@ export class DbStorage implements IStorage {
         following: userWithoutPassword as User,
       };
     });
-  }
-
-  async sendMessage(insertMessage: InsertMessage): Promise<Message> {
-    const result = await db.insert(messages).values(insertMessage).returning();
-    return result[0];
-  }
-
-  async getConversation(userId1: string, userId2: string): Promise<Array<Message & { sender: User; receiver: User; replyTo?: Message & { sender: User } }>> {
-    const result = await db
-      .select()
-      .from(messages)
-      .innerJoin(users, eq(messages.senderId, users.id))
-      .where(
-        or(
-          and(eq(messages.senderId, userId1), eq(messages.receiverId, userId2)),
-          and(eq(messages.senderId, userId2), eq(messages.receiverId, userId1))
-        )
-      )
-      .orderBy(messages.createdAt);
-    
-    const messagesWithSender = await Promise.all(result.map(async row => {
-      const receiver = await this.getUser(row.messages.receiverId);
-      const { passwordHash: senderHash, ...senderWithoutPassword } = row.users;
-      const { passwordHash: receiverHash, ...receiverWithoutPassword } = receiver!;
-      
-      let replyTo: (Message & { sender: User }) | undefined;
-      if (row.messages.replyToId) {
-        const replyMessage = await db.select().from(messages).where(eq(messages.id, row.messages.replyToId));
-        if (replyMessage.length > 0) {
-          const replySender = await this.getUser(replyMessage[0].senderId);
-          if (replySender) {
-            const { passwordHash: replySenderHash, ...replySenderWithoutPassword } = replySender;
-            replyTo = {
-              ...replyMessage[0],
-              sender: replySenderWithoutPassword as User,
-            };
-          }
-        }
-      }
-      
-      return {
-        ...row.messages,
-        sender: senderWithoutPassword as User,
-        receiver: receiverWithoutPassword as User,
-        replyTo,
-      };
-    }));
-    
-    return messagesWithSender;
-  }
-
-  async getConversations(userId: string): Promise<Array<{ otherUser: User; lastMessage: Message; unreadCount: number }>> {
-    const allMessages = await db
-      .select()
-      .from(messages)
-      .where(
-        or(
-          eq(messages.senderId, userId),
-          eq(messages.receiverId, userId)
-        )
-      )
-      .orderBy(desc(messages.createdAt));
-    
-    const conversationMap = new Map<string, Message>();
-    const unreadCountMap = new Map<string, number>();
-    
-    for (const msg of allMessages) {
-      const otherUserId = msg.senderId === userId ? msg.receiverId : msg.senderId;
-      
-      // Track last message for each conversation
-      if (!conversationMap.has(otherUserId)) {
-        conversationMap.set(otherUserId, msg);
-      }
-      
-      // Count unread messages from the other user
-      if (msg.senderId === otherUserId && !msg.isRead && msg.receiverId === userId) {
-        unreadCountMap.set(otherUserId, (unreadCountMap.get(otherUserId) || 0) + 1);
-      }
-    }
-    
-    const conversations = await Promise.all(
-      Array.from(conversationMap.entries()).map(async ([otherUserId, lastMessage]) => {
-        const otherUser = await this.getUser(otherUserId);
-        const { passwordHash, ...userWithoutPassword } = otherUser!;
-        return {
-          otherUser: userWithoutPassword as User,
-          lastMessage,
-          unreadCount: unreadCountMap.get(otherUserId) || 0,
-        };
-      })
-    );
-    
-    return conversations;
-  }
-
-  async markAsRead(messageId: string): Promise<void> {
-    // Get the message to find the conversation participants
-    const message = await db.select().from(messages).where(eq(messages.id, messageId));
-    if (message.length === 0) return;
-    
-    const msg = message[0];
-    
-    // Determine the current user (receiver of this message) and the other user
-    const currentUserId = msg.receiverId;
-    const otherUserId = msg.senderId;
-    
-    // Mark ALL unread messages in this conversation where current user is the receiver
-    // This includes messages sent by the other user that haven't been read yet
-    await db.update(messages)
-      .set({ isRead: true })
-      .where(
-        and(
-          eq(messages.receiverId, currentUserId),
-          eq(messages.senderId, otherUserId),
-          eq(messages.isRead, false),
-          or(
-            lt(messages.createdAt, msg.createdAt),
-            eq(messages.id, messageId)
-          )
-        )
-      );
   }
 
   async getUserProfile(userId: string): Promise<{ user: User; posts: Post[]; events: Array<Rsvp & { event: Event }> } | undefined> {
@@ -4108,87 +3981,50 @@ export class DbStorage implements IStorage {
     };
   }
 
-  async getUserConversations(userId: string): Promise<Array<Conversation & { 
+  async getUserConversations(userId: string): Promise<Array<Conversation & {
     participants: Array<ConversationParticipant & { user: User }>;
-    lastMessage: ConversationMessage | null;
     unreadCount: number;
   }>> {
-    // Get all conversation IDs where user is a participant
-    const userConversations = await db
-      .select({ conversationId: conversationParticipants.conversationId, lastReadAt: conversationParticipants.lastReadAt })
+    // Query 1: get the user's conversation memberships (includes their unreadCount)
+    const userMemberships = await db
+      .select({
+        conversationId: conversationParticipants.conversationId,
+        unreadCount: conversationParticipants.unreadCount,
+      })
       .from(conversationParticipants)
       .where(eq(conversationParticipants.userId, userId));
-    
-    if (userConversations.length === 0) return [];
-    
-    const conversationIds = userConversations.map(c => c.conversationId);
-    
-    // Get all conversations
+
+    if (userMemberships.length === 0) return [];
+
+    const conversationIds = userMemberships.map(m => m.conversationId);
+    const unreadByConvId = new Map(userMemberships.map(m => [m.conversationId, m.unreadCount]));
+
+    // Query 2: fetch all conversations ordered by most recent activity
     const convs = await db
       .select()
       .from(conversations)
       .where(inArray(conversations.id, conversationIds))
       .orderBy(desc(conversations.lastMessageAt));
-    
-    const result: Array<Conversation & { 
-      participants: Array<ConversationParticipant & { user: User }>;
-      lastMessage: ConversationMessage | null;
-      unreadCount: number;
-    }> = [];
-    
-    for (const conv of convs) {
-      const participants = await this.getConversationParticipants(conv.id);
-      
-      // Get last message
-      const lastMsgResult = await db
-        .select()
-        .from(conversationMessages)
-        .where(and(
-          eq(conversationMessages.conversationId, conv.id),
-          eq(conversationMessages.isDeleted, false)
-        ))
-        .orderBy(desc(conversationMessages.createdAt))
-        .limit(1);
-      
-      const lastMessage = lastMsgResult[0] || null;
-      
-      // Get unread count (excluding user's own messages)
-      const userConv = userConversations.find(c => c.conversationId === conv.id);
-      let unreadCount = 0;
-      
-      if (userConv?.lastReadAt) {
-        const [unreadResult] = await db
-          .select({ count: count() })
-          .from(conversationMessages)
-          .where(and(
-            eq(conversationMessages.conversationId, conv.id),
-            eq(conversationMessages.isDeleted, false),
-            gt(conversationMessages.createdAt, userConv.lastReadAt),
-            sql`${conversationMessages.senderId} != ${userId}`
-          ));
-        unreadCount = unreadResult?.count || 0;
-      } else {
-        // If never read, count all messages not from self
-        const [unreadResult] = await db
-          .select({ count: count() })
-          .from(conversationMessages)
-          .where(and(
-            eq(conversationMessages.conversationId, conv.id),
-            eq(conversationMessages.isDeleted, false),
-            sql`${conversationMessages.senderId} != ${userId}`
-          ));
-        unreadCount = unreadResult?.count || 0;
-      }
-      
-      result.push({
-        ...conv,
-        participants,
-        lastMessage,
-        unreadCount,
-      });
+
+    // Query 3: fetch all participants for all conversations in one shot
+    const allParticipantRows = await db
+      .select({ participant: conversationParticipants, user: users })
+      .from(conversationParticipants)
+      .innerJoin(users, eq(conversationParticipants.userId, users.id))
+      .where(inArray(conversationParticipants.conversationId, conversationIds));
+
+    const participantsByConvId = new Map<string, Array<ConversationParticipant & { user: User }>>();
+    for (const row of allParticipantRows) {
+      const list = participantsByConvId.get(row.participant.conversationId) ?? [];
+      list.push({ ...row.participant, user: row.user });
+      participantsByConvId.set(row.participant.conversationId, list);
     }
-    
-    return result;
+
+    return convs.map(conv => ({
+      ...conv,
+      participants: participantsByConvId.get(conv.id) ?? [],
+      unreadCount: unreadByConvId.get(conv.id) ?? 0,
+    }));
   }
 
   async updateConversation(id: string, updates: Partial<InsertConversation>): Promise<Conversation> {
@@ -4305,7 +4141,7 @@ export class DbStorage implements IStorage {
   async updateLastReadAt(conversationId: string, userId: string): Promise<void> {
     await db
       .update(conversationParticipants)
-      .set({ lastReadAt: new Date() })
+      .set({ lastReadAt: new Date(), unreadCount: 0 })
       .where(and(
         eq(conversationParticipants.conversationId, conversationId),
         eq(conversationParticipants.userId, userId)
@@ -4329,13 +4165,30 @@ export class DbStorage implements IStorage {
   // Conversation messages
   async sendConversationMessage(message: InsertConversationMessage): Promise<ConversationMessage> {
     const [result] = await db.insert(conversationMessages).values(message).returning();
-    
-    // Update conversation lastMessageAt
-    await db
-      .update(conversations)
-      .set({ lastMessageAt: new Date() })
-      .where(eq(conversations.id, message.conversationId));
-    
+
+    const preview = message.content?.trim()
+      ? message.content.length > 60 ? message.content.substring(0, 60) + '…' : message.content
+      : message.messageType === 'poll' ? 'Created a poll'
+      : message.messageType === 'image' ? 'Sent an image'
+      : message.messageType === 'event' ? 'Shared an event'
+      : message.messageType === 'venue' ? 'Shared a venue'
+      : message.messageType === 'post' ? 'Shared a post'
+      : message.messageType === 'story_reply' ? 'Replied to your story'
+      : 'Sent a message';
+
+    // Update conversation metadata and increment unread for all other participants in parallel
+    await Promise.all([
+      db.update(conversations)
+        .set({ lastMessageAt: new Date(), lastMessagePreview: preview })
+        .where(eq(conversations.id, message.conversationId)),
+      db.update(conversationParticipants)
+        .set({ unreadCount: sql`${conversationParticipants.unreadCount} + 1` })
+        .where(and(
+          eq(conversationParticipants.conversationId, message.conversationId),
+          sql`${conversationParticipants.userId} != ${message.senderId}`
+        )),
+    ]);
+
     return result;
   }
 

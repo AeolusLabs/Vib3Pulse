@@ -16,7 +16,6 @@ import {
   useMarkNotificationAsRead,
   useMarkAllNotificationsAsRead,
   useDeleteNotification,
-  useNotificationWebSocket,
   type NotificationWithUser,
 } from "@/hooks/useNotifications";
 import { formatDistanceToNow } from "date-fns";
@@ -393,8 +392,6 @@ export default function NotificationBell() {
   const markAsRead = useMarkNotificationAsRead();
   const markAllAsRead = useMarkAllNotificationsAsRead();
   const deleteNotification = useDeleteNotification();
-
-  useNotificationWebSocket();
 
   // Partition by tab
   const tabItems = useMemo(() => {

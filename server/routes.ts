@@ -2718,64 +2718,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Messages
-  app.post("/api/messages", requireAuth, async (req, res) => {
-    try {
-      const { receiverId, content, replyToId, eventId, venueId } = req.body;
-      const senderId = req.user!.id;
-      
-      if (senderId === receiverId) {
-        return res.status(400).json({ message: "Cannot message yourself" });
-      }
-      
-      const sanitizedContent = sanitizeTextOnly(content || "");
-      if (!sanitizedContent.trim()) {
-        return res.status(400).json({ message: "Message cannot be empty" });
-      }
-      
-      const message = await storage.sendMessage({
-        senderId,
-        receiverId,
-        content: sanitizedContent,
-        replyToId: replyToId || null,
-        eventId: eventId || null,
-        venueId: venueId || null,
-        isRead: false,
-      });
-      
-      // Broadcast message via WebSocket to recipient
-      const sender = await storage.getUser(senderId);
-      const receiver = await storage.getUser(receiverId);
-      
-      if (sender && receiver) {
-        const { passwordHash: senderHash, ...senderData } = sender;
-        const { passwordHash: receiverHash, ...receiverData } = receiver;
-        
-        wsManager.broadcastMessage(senderId, receiverId, {
-          ...message,
-          sender: senderData,
-          receiver: receiverData,
-        });
-
-        // Create notification for message recipient - use sanitized content
-        const messageSnippet = sanitizedContent.length > 50 ? sanitizedContent.substring(0, 50) + "..." : sanitizedContent;
-        await deliverNotification({
-          userId: receiverId,
-          type: "new_message",
-          title: "New Message",
-          message: `${sender.displayName || sender.username}: "${messageSnippet}"`,
-          link: `/messages/${senderId}`,
-          relatedUserId: senderId,
-          relatedEntityId: message.id,
-        });
-      }
-      
-      res.json(message);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to send message" });
-    }
-  });
-  
+  // Messages — unread count only; direct-message CRUD lives in /api/conversations
   app.get("/api/messages/unread-count", requireAuth, async (req, res) => {
     try {
       const userId = req.user!.id;
@@ -2784,41 +2727,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Get unread message count error:", error);
       res.status(500).json({ message: "Failed to get unread message count" });
-    }
-  });
-
-  app.get("/api/messages/:userId", requireAuth, async (req, res) => {
-    try {
-      const userId1 = req.user!.id;
-      const userId2 = req.params.userId;
-
-      const conversation = await storage.getConversation(userId1, userId2);
-      res.json(conversation);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch conversation" });
-    }
-  });
-  
-  app.get("/api/messages", requireAuth, async (req, res) => {
-    try {
-      const userId = req.user!.id;
-      const conversations = await storage.getConversations(userId);
-      res.json(conversations);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch conversations" });
-    }
-  });
-  
-  app.patch("/api/messages/:id/read", requireAuth, async (req, res) => {
-    try {
-      await storage.markAsRead(req.params.id);
-      
-      // Broadcast read status via WebSocket
-      wsManager.broadcastMessageRead(req.params.id, req.user!.id);
-      
-      res.json({ message: "Message marked as read" });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to mark message as read" });
     }
   });
 

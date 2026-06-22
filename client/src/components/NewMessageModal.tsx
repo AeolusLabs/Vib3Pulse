@@ -19,7 +19,6 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { format } from "date-fns";
 import type { Event, Venue, User } from "@shared/schema";
 import { SearchIcon, SendIcon, CalendarIcon, MapPinIcon, Building2Icon, XIcon } from "@/components/ui/icons";
 
@@ -67,29 +66,30 @@ export default function NewMessageModal({
   }, [open, attachedEvent, attachedVenue]);
 
   const sendMessageMutation = useMutation({
-    mutationFn: async ({ content, receiverId, eventId, venueId }: { 
-      content: string; 
+    mutationFn: async ({ content, receiverId, eventId, venueId }: {
+      content: string;
       receiverId: string;
       eventId?: string;
       venueId?: string;
     }) => {
-      return await apiRequest('POST', '/api/messages', {
-        receiverId,
+      const convRes = await apiRequest('POST', '/api/conversations/direct', { userId: receiverId });
+      const conversation = await convRes.json();
+      await apiRequest('POST', `/api/conversations/${conversation.id}/messages`, {
         content,
+        messageType: eventId ? 'event' : venueId ? 'venue' : 'text',
         eventId,
         venueId,
       });
+      return conversation;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/messages'] });
+    onSuccess: (conversation) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/conversations'] });
       toast({
         title: "Message sent",
         description: `Message sent to ${selectedUser?.displayName || selectedUser?.organizationName || selectedUser?.username}`,
       });
       handleClose();
-      if (selectedUser) {
-        navigate(`/messages/${selectedUser.id}`);
-      }
+      navigate(`/messages/${conversation.id}`);
     },
     onError: () => {
       toast({

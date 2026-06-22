@@ -65,6 +65,32 @@ const steps = [
       ALTER TABLE safety_buddies ALTER COLUMN phone_number DROP NOT NULL
     `,
   },
+  // 6. Add unread_count to conversation_participants (denorm — avoids COUNT at read time)
+  {
+    label: "Add unread_count column to conversation_participants",
+    check: `
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'conversation_participants'
+        AND column_name = 'unread_count'
+    `,
+    sql: `
+      ALTER TABLE conversation_participants
+        ADD COLUMN unread_count integer NOT NULL DEFAULT 0
+    `,
+  },
+  // 7. Add last_message_preview to conversations (denorm — avoids join on inbox list)
+  {
+    label: "Add last_message_preview column to conversations",
+    check: `
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'conversations'
+        AND column_name = 'last_message_preview'
+    `,
+    sql: `
+      ALTER TABLE conversations
+        ADD COLUMN last_message_preview text
+    `,
+  },
   // 4. Pre-existing: add unique constraint on post_mentions(post_id, mentioned_user_id)
   {
     label: "Add unique constraint on post_mentions(post_id, mentioned_user_id)",

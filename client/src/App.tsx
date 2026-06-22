@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Switch, Route } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { WebSocketProvider } from "@/providers/WebSocketProvider";
 import { Toaster } from "@/components/ui/toaster";
 import { ToastAction } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
@@ -250,11 +251,13 @@ function SWUpdatePrompt() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <Toaster />
-        <SWUpdatePrompt />
-        <Router />
-      </TooltipProvider>
+      <WebSocketProvider>
+        <TooltipProvider>
+          <Toaster />
+          <SWUpdatePrompt />
+          <Router />
+        </TooltipProvider>
+      </WebSocketProvider>
     </QueryClientProvider>
   );
 }

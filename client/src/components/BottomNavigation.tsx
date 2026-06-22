@@ -1,6 +1,6 @@
 
 import { Link, useLocation } from "wouter";
-import { useUnreadMessagesCount, useMessageCountWebSocket } from "@/hooks/useUnreadMessagesCount";
+import { useUnreadMessagesCount } from "@/hooks/useUnreadMessagesCount";
 import { CompassIcon, LayoutGridIcon, SearchIcon, MessageCircleIcon, TicketIcon } from "@/components/ui/icons";
 
 interface BottomNavigationProps {
@@ -10,7 +10,6 @@ interface BottomNavigationProps {
 export default function BottomNavigation({ onCreateClick }: BottomNavigationProps) {
   const [location] = useLocation();
   const { data: unreadMessageCount = 0 } = useUnreadMessagesCount();
-  useMessageCountWebSocket();
 
   const navItems = [
     { icon: LayoutGridIcon, label: "Feed", path: "/feed", testId: "nav-feed" },

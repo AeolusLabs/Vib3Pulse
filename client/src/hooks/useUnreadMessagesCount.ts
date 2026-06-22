@@ -1,6 +1,4 @@
 import { useQuery } from "@tanstack/react-query";
-import { queryClient } from "@/lib/queryClient";
-import { useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth";
 
 export function useUnreadMessagesCount() {
@@ -21,27 +19,3 @@ export function useUnreadMessagesCount() {
   });
 }
 
-export function useMessageCountWebSocket() {
-  useEffect(() => {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-    const ws = new WebSocket(wsUrl);
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (
-          data.type === "new_message" ||
-          data.type === "message_read" ||
-          data.type === "new_conversation_message"
-        ) {
-          queryClient.invalidateQueries({ queryKey: ["/api/messages/unread-count"] });
-        }
-      } catch {
-        // ignore malformed messages
-      }
-    };
-
-    return () => ws.close();
-  }, []);
-}

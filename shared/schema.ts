@@ -417,6 +417,7 @@ export const conversations = pgTable("conversations", {
   directKey: varchar("direct_key").unique(), // Sorted "userA:userB" key for race-safe direct conversation lookup
   createdById: varchar("created_by_id").references(() => users.id),
   lastMessageAt: timestamp("last_message_at"),
+  lastMessagePreview: text("last_message_preview"), // Denormalized snippet — updated on every send to avoid a join at read time
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
@@ -437,6 +438,7 @@ export const conversationParticipants = pgTable("conversation_participants", {
   role: text("role").notNull().default("member"), // 'admin' or 'member'
   joinedAt: timestamp("joined_at").notNull().default(sql`now()`),
   lastReadAt: timestamp("last_read_at"),
+  unreadCount: integer("unread_count").notNull().default(0), // Incremented on send, reset to 0 on read — avoids COUNT(*) at read time
 }, (table) => ({
   uniqueParticipant: unique().on(table.conversationId, table.userId),
 }));

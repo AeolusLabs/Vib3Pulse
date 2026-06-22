@@ -1,7 +1,6 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Notification, User } from "@shared/schema";
-import { useEffect } from "react";
 
 export type NotificationWithUser = Notification & { relatedUser: User | null };
 
@@ -80,25 +79,3 @@ export function useDeleteNotification() {
   });
 }
 
-export function useNotificationWebSocket() {
-  useEffect(() => {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-    const ws = new WebSocket(wsUrl);
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === "notification") {
-          queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
-          queryClient.invalidateQueries({ queryKey: ["/api/notifications/unread-count"] });
-        }
-      } catch {
-      }
-    };
-
-    return () => {
-      ws.close();
-    };
-  }, []);
-}

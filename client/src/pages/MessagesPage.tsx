@@ -35,7 +35,6 @@ import { SendIcon, ArrowLeftIcon, SearchIcon, UserPlusIcon, ReplyIcon, XIcon, Ca
 
 type ConversationWithDetails = Conversation & {
   participants: Array<ConversationParticipant & { user: User }>;
-  lastMessage: ConversationMessage | null;
   unreadCount: number;
 };
 
@@ -207,7 +206,6 @@ export default function MessagesPage() {
   const [replyingTo, setReplyingTo] = useState<ConversationMessageWithSender | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
   const { toast } = useToast();
 
   const { data: currentUser, isLoading: loadingUser } = useAuth();
@@ -309,38 +307,6 @@ export default function MessagesPage() {
     },
   });
 
-  useEffect(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-    
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (
-          data.type === 'new_message' ||
-          data.type === 'message_sent' ||
-          data.type === 'message_read' ||
-          data.type === 'new_conversation_message'
-        ) {
-          queryClient.invalidateQueries({ queryKey: ['/api/conversations'] });
-          if (conversationId) {
-            queryClient.invalidateQueries({ queryKey: ['/api/conversations', conversationId, 'messages'] });
-          }
-        }
-      } catch (error) {
-        console.error('Error parsing WebSocket message:', error);
-      }
-    };
-
-    return () => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.close();
-      }
-    };
-  }, [conversationId]);
 
   const handleSendMessage = () => {
     if (messageText.trim() && conversationId) {
@@ -730,24 +696,14 @@ export default function MessagesPage() {
                           </span>
                         )}
                       </div>
-                      {conv.lastMessage && (
+                      {conv.lastMessageAt && (
                         <span className={`text-xs shrink-0 ${hasUnread ? 'text-violet-400 font-medium' : 'text-muted-foreground'}`}>
-                          {formatDistanceToNow(new Date(conv.lastMessage.createdAt), { addSuffix: true })}
+                          {formatDistanceToNow(new Date(conv.lastMessageAt), { addSuffix: true })}
                         </span>
                       )}
                     </div>
                     <p className={`text-sm truncate ${hasUnread ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
-                      {conv.lastMessage ? (
-                        conv.lastMessage.content ||
-                        (conv.lastMessage.messageType === "poll" ? "Poll created" :
-                         conv.lastMessage.messageType === "image" ? "Sent an image" :
-                         conv.lastMessage.messageType === "event" ? "Shared an event" :
-                         conv.lastMessage.messageType === "venue" ? "Shared a venue" :
-                         conv.lastMessage.messageType === "post" ? "Shared a post" :
-                         "Sent a message")
-                      ) : (
-                        "Start the conversation"
-                      )}
+                      {conv.lastMessagePreview ?? "Start the conversation"}
                     </p>
                   </div>
                 </div>
