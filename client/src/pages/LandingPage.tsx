@@ -31,7 +31,7 @@ const heroHeadline = {
 };
 
 const stagger = {
-  visible: { transition: { staggerChildren: 0.13 } },
+  visible: { transition: { staggerChildren: 0.09 } },
 };
 
 export default function LandingPage() {
@@ -93,6 +93,14 @@ export default function LandingPage() {
     return format(d, "h:mm a");
   };
 
+  const formatPrice = (event: Event) => {
+    if (event.ticketPrice === undefined || event.ticketPrice === null) return null;
+    if (event.ticketPrice === 0) return "Free";
+    const currency = (event as any).currency;
+    const symbol = currency === "NGN" ? "₦" : "£";
+    return `From ${symbol}${(event.ticketPrice / 100).toFixed(0)}`;
+  };
+
   return (
     <div className="min-h-screen bg-[#090909] text-white font-sans">
 
@@ -108,7 +116,7 @@ export default function LandingPage() {
             <Link href="/login">
               <Button
                 variant="ghost"
-                className="text-white/50 hover:text-white hover:bg-white/[0.06] rounded-full px-5 h-9 text-sm transition-colors duration-200"
+                className="text-white/60 hover:text-white hover:bg-white/[0.06] rounded-full px-5 h-9 text-sm transition-colors duration-200"
                 data-testid="button-header-login"
               >
                 Sign In
@@ -116,7 +124,7 @@ export default function LandingPage() {
             </Link>
             <Link href="/signup">
               <Button
-                className="bg-violet-600 hover:bg-violet-500 text-white rounded-full px-5 h-9 text-sm border-0 shadow-lg shadow-violet-600/20 transition-all duration-200"
+                className="bg-violet-600 hover:bg-violet-500 active:scale-[0.97] text-white rounded-full px-5 h-9 text-sm border-0 shadow-lg shadow-violet-600/20 transition-all duration-200"
                 data-testid="button-header-signup"
               >
                 Join Free
@@ -137,9 +145,9 @@ export default function LandingPage() {
             backgroundSize: "180px",
           }}
         />
-        {/* Violet glow — barely visible, atmospheric */}
-        <div className="absolute top-1/4 -left-1/4 w-[800px] h-[800px] bg-violet-600/6 rounded-full blur-[140px] pointer-events-none" />
-        <div className="absolute bottom-0 right-0 w-[500px] h-[500px] bg-violet-900/8 rounded-full blur-[120px] pointer-events-none" />
+        {/* Violet glows — more visible, atmospheric */}
+        <div className="absolute top-1/4 -left-1/4 w-[800px] h-[800px] bg-violet-600/[0.14] rounded-full blur-[140px] pointer-events-none" />
+        <div className="absolute bottom-0 right-0 w-[500px] h-[500px] bg-violet-900/[0.16] rounded-full blur-[120px] pointer-events-none" />
 
         <div className="max-w-7xl mx-auto px-6 py-28 lg:py-32">
           <motion.div
@@ -151,9 +159,9 @@ export default function LandingPage() {
             {/* Eyebrow */}
             <motion.p
               variants={heroEyebrow}
-              className="text-white/30 text-[0.7rem] tracking-[0.3em] uppercase mb-12 font-sans"
+              className="text-white/50 text-[0.7rem] tracking-[0.3em] uppercase mb-12 font-sans"
             >
-              London's Nightlife Platform
+              Every City Has a Pulse. Find Yours.
             </motion.p>
 
             {/* Giant editorial headline */}
@@ -172,7 +180,7 @@ export default function LandingPage() {
             {/* Subline */}
             <motion.p
               variants={inView}
-              className="text-base md:text-lg text-white/45 max-w-xs leading-relaxed mb-12 font-sans"
+              className="text-base md:text-lg text-white/60 max-w-sm leading-relaxed mb-12 font-sans"
             >
               Events. Tickets. Community. Safety.
               <br />
@@ -187,7 +195,7 @@ export default function LandingPage() {
               <Link href="/signup">
                 <Button
                   size="lg"
-                  className="h-12 px-8 bg-violet-600 hover:bg-violet-500 text-white rounded-full border-0 font-sans font-medium text-base shadow-xl shadow-violet-600/25 transition-all duration-200 active:scale-[0.98]"
+                  className="h-12 px-8 bg-violet-600 hover:bg-violet-500 active:scale-[0.97] text-white rounded-full border-0 font-sans font-medium text-base shadow-xl shadow-violet-600/25 transition-all duration-200"
                   data-testid="button-hero-signup"
                 >
                   Get Started
@@ -198,7 +206,7 @@ export default function LandingPage() {
                 <Button
                   size="lg"
                   variant="ghost"
-                  className="h-12 px-7 text-white/50 hover:text-white hover:bg-white/[0.06] rounded-full font-sans text-base transition-all duration-200"
+                  className="h-12 px-7 text-white/60 hover:text-white hover:bg-white/[0.06] active:scale-[0.97] rounded-full font-sans text-base transition-all duration-200"
                   data-testid="button-hero-login"
                 >
                   Sign In
@@ -215,7 +223,11 @@ export default function LandingPage() {
                   whileHover={{ y: -3 }}
                   whileTap={{ scale: 0.93 }}
                   transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-                  className="flex items-center gap-2 px-4 py-2 rounded-full border border-white/[0.1] bg-white/[0.04] hover:bg-white/[0.08] hover:border-white/20 text-white/50 hover:text-white text-sm font-sans transition-colors duration-200 cursor-pointer"
+                  className={`flex items-center gap-2 px-4 py-2 rounded-full border text-sm font-sans transition-colors duration-200 cursor-pointer ${
+                    selectedCategory === cat.value
+                      ? "bg-violet-600/20 border-violet-500/40 text-violet-300"
+                      : "border-white/[0.1] bg-white/[0.04] hover:bg-white/[0.08] hover:border-white/20 text-white/60 hover:text-white"
+                  }`}
                   data-testid={`button-category-${cat.value}`}
                 >
                   <cat.icon className="w-3.5 h-3.5" />
@@ -226,11 +238,30 @@ export default function LandingPage() {
           </motion.div>
         </div>
 
-        {/* Scroll line */}
-        <div className="absolute bottom-10 left-1/2 -translate-x-1/2">
-          <div className="w-px h-14 bg-gradient-to-b from-transparent to-white/15" />
+        {/* Scroll indicator */}
+        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1.5">
+          <div className="w-1 h-1 rounded-full bg-white/20 animate-bounce" />
+          <div className="w-px h-12 bg-gradient-to-b from-white/15 to-transparent" />
         </div>
       </section>
+
+      {/* ─── Social Proof Belt ───────────────────────────────────────── */}
+      <div className="border-y border-white/[0.06]">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="flex flex-col sm:flex-row items-center justify-center divide-y sm:divide-y-0 sm:divide-x divide-white/[0.08]">
+            {[
+              { value: "6", label: "Event Categories" },
+              { value: "2", label: "Cities Live" },
+              { value: "Free", label: "Always Free to Join" },
+            ].map((stat) => (
+              <div key={stat.label} className="flex flex-col items-center py-7 px-10 sm:px-14 gap-1">
+                <span className="font-serif text-2xl font-bold text-white/80">{stat.value}</span>
+                <span className="text-white/40 text-xs font-sans tracking-wide">{stat.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
 
       {/* ─── Featured Events ─────────────────────────────────────────── */}
       {(isFeaturedLoading || featuredEvents.length > 0) && (
@@ -238,7 +269,7 @@ export default function LandingPage() {
           <div className="max-w-7xl mx-auto px-6">
             <div className="flex items-end justify-between mb-14">
               <div>
-                <p className="text-white/25 text-[0.65rem] tracking-[0.28em] uppercase font-sans mb-3">
+                <p className="text-white/45 text-[0.65rem] tracking-[0.28em] uppercase font-sans mb-3">
                   Upcoming
                 </p>
                 <h2 className="font-serif text-4xl md:text-5xl font-bold text-white tracking-tight">
@@ -247,7 +278,7 @@ export default function LandingPage() {
               </div>
               <Link href="/signup">
                 <button
-                  className="flex items-center gap-1 text-sm text-white/35 hover:text-white/70 transition-colors font-sans cursor-pointer"
+                  className="flex items-center gap-1 text-sm text-white/40 hover:text-white/70 transition-colors font-sans cursor-pointer"
                   data-testid="button-view-all"
                 >
                   View all
@@ -256,8 +287,6 @@ export default function LandingPage() {
               </Link>
             </div>
 
-            {/* Row 1: hero card full-width on sm+, then side-by-side on lg */}
-            {/* Row 2: remaining cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               {isFeaturedLoading
                 ? Array.from({ length: 4 }).map((_, i) => (
@@ -267,7 +296,7 @@ export default function LandingPage() {
                     <motion.button
                       key={event.id}
                       onClick={() => setSelectedEvent(event)}
-                      className={`group relative overflow-hidden rounded-2xl bg-[#111111] border border-white/[0.07] hover:border-violet-500/30 transition-all duration-300 text-left cursor-pointer ${
+                      className={`group relative overflow-hidden rounded-2xl bg-[#111111] border border-white/[0.1] hover:border-violet-500/30 transition-all duration-300 text-left cursor-pointer ${
                         idx === 0 ? "sm:col-span-2" : ""
                       }`}
                       whileHover={{ y: -3, transition: { duration: 0.2 } }}
@@ -322,15 +351,23 @@ export default function LandingPage() {
                         >
                           {event.title}
                         </h3>
-                        <div className="flex items-center gap-3 text-white/35 text-xs font-sans">
-                          <span className="flex items-center gap-1.5">
-                            <ClockIcon className="w-3 h-3" />
-                            {formatEventDate(event.eventDate)}
-                          </span>
-                          {event.location && (
-                            <span className="flex items-center gap-1.5 min-w-0">
-                              <MapPinIcon className="w-3 h-3 flex-shrink-0" />
-                              <span className="truncate">{event.location}</span>
+                        <div className="flex items-center justify-between gap-3 text-white/40 text-xs font-sans">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <span className="flex items-center gap-1.5 flex-shrink-0">
+                              <ClockIcon className="w-3 h-3" />
+                              {formatEventDate(event.eventDate)}
+                            </span>
+                            {event.location && (
+                              <span className="flex items-center gap-1.5 min-w-0">
+                                <MapPinIcon className="w-3 h-3 flex-shrink-0" />
+                                <span className="truncate">{event.location}</span>
+                              </span>
+                            )}
+                          </div>
+                          {!event.externalTicketUrl && formatPrice(event) && (
+                            <span className="text-violet-400/80 flex-shrink-0 flex items-center gap-1">
+                              <TicketIcon className="w-3 h-3" />
+                              {formatPrice(event)}
                             </span>
                           )}
                         </div>
@@ -350,11 +387,12 @@ export default function LandingPage() {
       {/* ─── Pillars ─────────────────────────────────────────────────── */}
       <section className="py-28">
         <div className="max-w-7xl mx-auto px-6">
-          <p className="text-white/25 text-[0.65rem] tracking-[0.28em] uppercase font-sans mb-20">
+          <p className="text-white/45 text-[0.65rem] tracking-[0.28em] uppercase font-sans mb-14">
             Why Vib3Pulse
           </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+          {/* Card grid — gap-px on a white/[0.06] background creates hairline dividers */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-px bg-white/[0.06]">
             {pillars.map((pillar, idx) => (
               <motion.div
                 key={pillar.number}
@@ -362,18 +400,26 @@ export default function LandingPage() {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
                 transition={{ duration: 0.55, delay: idx * 0.09, ease: [0.22, 1, 0.36, 1] }}
-                className="border-l border-white/[0.07] pl-8 py-8 first:border-l-0 first:pl-0 sm:first:border-l sm:first:pl-8"
+                className="relative bg-[#090909] p-8 flex flex-col gap-5"
               >
-                <span className="block text-white/20 font-sans text-[0.65rem] tracking-[0.22em] mb-6">
+                {/* Icon chip */}
+                <div className="w-9 h-9 rounded-xl bg-violet-600/[0.12] flex items-center justify-center flex-shrink-0">
+                  <pillar.icon className="w-4 h-4 text-violet-400" />
+                </div>
+
+                <div>
+                  <h3 className="font-sans font-semibold text-white text-base mb-2.5 tracking-tight">
+                    {pillar.title}
+                  </h3>
+                  <p className="font-sans text-white/55 text-sm leading-relaxed">
+                    {pillar.desc}
+                  </p>
+                </div>
+
+                {/* Number — editorial detail, bottom-right */}
+                <span className="absolute bottom-6 right-6 text-white/[0.18] font-sans text-[0.6rem] tracking-[0.22em]">
                   {pillar.number}
                 </span>
-                <pillar.icon className="w-5 h-5 text-violet-400 mb-5" />
-                <h3 className="font-sans font-semibold text-white text-base mb-3 tracking-tight">
-                  {pillar.title}
-                </h3>
-                <p className="font-sans text-white/35 text-sm leading-relaxed">
-                  {pillar.desc}
-                </p>
               </motion.div>
             ))}
           </div>
@@ -393,24 +439,24 @@ export default function LandingPage() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-            className="rounded-3xl bg-[#0e0e0e] border border-white/[0.06] p-10 md:p-16 relative overflow-hidden"
+            className="rounded-3xl bg-[#0e0e0e] border border-white/[0.08] p-10 md:p-16 relative overflow-hidden"
           >
             {/* Subtle glow */}
-            <div className="absolute top-0 right-0 w-72 h-72 bg-violet-600/5 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute top-0 right-0 w-72 h-72 bg-violet-600/[0.1] rounded-full blur-3xl pointer-events-none" />
 
             <div className="relative max-w-2xl">
               <div className="flex items-center gap-2.5 mb-10">
                 <ShieldIcon className="w-4 h-4 text-violet-400" />
-                <span className="text-white/35 text-[0.65rem] font-sans tracking-[0.28em] uppercase">
+                <span className="text-white/45 text-[0.65rem] font-sans tracking-[0.28em] uppercase">
                   Safety First
                 </span>
               </div>
               <h2 className="font-serif text-3xl md:text-5xl lg:text-6xl font-bold text-white mb-7 leading-[1.05] tracking-tight">
                 Go Out.
                 <br />
-                <span className="text-white/30">Come Home Safe.</span>
+                <span className="text-white/50">Come Home Safe.</span>
               </h2>
-              <p className="font-sans text-white/45 text-base md:text-lg leading-relaxed mb-10 max-w-lg">
+              <p className="font-sans text-white/60 text-base md:text-lg leading-relaxed mb-10 max-w-lg">
                 Our Safety Buddy system lets you assign a trusted contact, set
                 check-in timers before you head out, and send instant SOS alerts
                 with your location. All in one tap.
@@ -419,7 +465,7 @@ export default function LandingPage() {
                 <Button
                   size="lg"
                   variant="outline"
-                  className="h-11 px-7 rounded-full border-white/[0.15] text-white/70 bg-transparent hover:bg-white/[0.05] hover:text-white hover:border-white/25 font-sans text-sm transition-all duration-200"
+                  className="h-11 px-7 rounded-full border-white/[0.18] text-white/70 bg-transparent hover:bg-white/[0.05] hover:text-white hover:border-white/30 active:scale-[0.97] font-sans text-sm transition-all duration-200"
                 >
                   Learn More
                   <ArrowRightIcon className="ml-2 w-4 h-4" />
@@ -439,16 +485,16 @@ export default function LandingPage() {
             viewport={{ once: true }}
             transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
           >
-            <p className="text-white/25 text-[0.65rem] tracking-[0.28em] uppercase font-sans mb-10">
+            <p className="text-white/45 text-[0.65rem] tracking-[0.28em] uppercase font-sans mb-10">
               Ready?
             </p>
             <h2
               className="font-serif font-bold text-white uppercase tracking-tight leading-[0.9] mb-14"
               style={{ fontSize: "clamp(2.8rem, 9vw, 8.5rem)" }}
             >
-              Your Night
+              Your Vib3
               <br />
-              <span className="text-white/20">Starts Here.</span>
+              <span className="text-white/35">Starts Here.</span>
             </h2>
             <motion.div
               whileHover={{ scale: 1.03 }}
@@ -467,11 +513,19 @@ export default function LandingPage() {
                 </Button>
               </Link>
             </motion.div>
-            <p className="mt-5 text-white/20 text-sm font-sans">
+            <p className="mt-5 text-white/30 text-sm font-sans">
               Already a member?{" "}
               <Link href="/login">
                 <span className="text-violet-400/70 hover:text-violet-300 transition-colors cursor-pointer" data-testid="button-cta-login">
                   Sign in
+                </span>
+              </Link>
+            </p>
+            <p className="mt-3 text-white/25 text-sm font-sans">
+              Organising events?{" "}
+              <Link href="/signup">
+                <span className="text-white/40 hover:text-white/70 transition-colors cursor-pointer">
+                  List yours →
                 </span>
               </Link>
             </p>
@@ -481,12 +535,32 @@ export default function LandingPage() {
 
       {/* ─── Footer ──────────────────────────────────────────────────── */}
       <footer className="border-t border-white/[0.06] py-10">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <span className="font-serif text-xl font-bold text-white/40 tracking-tight">
-            Vib3Pulse
-          </span>
-          <p className="font-sans text-white/20 text-xs">
-            © 2025 Vib3Pulse. All rights reserved.
+        <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-6">
+          {/* Left: logo + city callout */}
+          <div className="flex flex-col items-center sm:items-start gap-1">
+            <span className="font-serif text-xl font-bold text-white/55 tracking-tight">
+              Vib3Pulse
+            </span>
+            <span className="font-sans text-white/30 text-[0.65rem] tracking-[0.12em]">
+              Lagos · London · More cities coming
+            </span>
+          </div>
+
+          {/* Centre: nav links */}
+          <nav className="flex items-center gap-5">
+            {["Privacy", "Terms", "Contact"].map((link) => (
+              <span
+                key={link}
+                className="font-sans text-white/25 hover:text-white/50 transition-colors text-xs cursor-pointer"
+              >
+                {link}
+              </span>
+            ))}
+          </nav>
+
+          {/* Right: copyright */}
+          <p className="font-sans text-white/35 text-xs">
+            © 2026 Vib3Pulse. All rights reserved.
           </p>
         </div>
       </footer>
@@ -560,20 +634,20 @@ export default function LandingPage() {
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-1.5 text-white/35 text-xs font-sans mb-1">
+                      <div className="flex items-center gap-1.5 text-white/40 text-xs font-sans mb-1">
                         <ClockIcon className="w-3 h-3 flex-shrink-0" />
                         {formatEventDate(event.eventDate)} · {formatEventTime(event.eventDate)}
                       </div>
                       {event.location && (
-                        <div className="flex items-center gap-1.5 text-white/25 text-xs font-sans">
+                        <div className="flex items-center gap-1.5 text-white/30 text-xs font-sans">
                           <MapPinIcon className="w-3 h-3 flex-shrink-0" />
                           <span className="truncate">{event.location}</span>
                         </div>
                       )}
-                      {event.ticketPrice !== undefined && event.ticketPrice > 0 && !event.externalTicketUrl && (
+                      {!event.externalTicketUrl && formatPrice(event) && (
                         <div className="flex items-center gap-1.5 text-violet-400/70 text-xs font-sans mt-1">
                           <TicketIcon className="w-3 h-3 flex-shrink-0" />
-                          From £{(event.ticketPrice / 100).toFixed(2)}
+                          {formatPrice(event)}
                         </div>
                       )}
                     </div>
@@ -636,14 +710,14 @@ export default function LandingPage() {
               </DialogHeader>
 
               <div className="mt-4 space-y-3 font-sans text-sm">
-                <div className="flex items-center gap-3 text-white/50">
+                <div className="flex items-center gap-3 text-white/55">
                   <ClockIcon className="w-4 h-4 text-violet-400 flex-shrink-0" />
                   <span>
                     {format(new Date(selectedEvent.eventDate), "EEEE, MMMM d, yyyy 'at' h:mm a")}
                   </span>
                 </div>
                 {selectedEvent.location && (
-                  <div className="flex items-center gap-3 text-white/50">
+                  <div className="flex items-center gap-3 text-white/55">
                     <MapPinIcon className="w-4 h-4 text-violet-400 flex-shrink-0" />
                     <span>
                       {selectedEvent.location}
@@ -652,19 +726,15 @@ export default function LandingPage() {
                   </div>
                 )}
                 {selectedEvent.ticketPrice !== undefined && !selectedEvent.externalTicketUrl && (
-                  <div className="flex items-center gap-3 text-white/50">
+                  <div className="flex items-center gap-3 text-white/55">
                     <TicketIcon className="w-4 h-4 text-violet-400 flex-shrink-0" />
-                    <span>
-                      {selectedEvent.ticketPrice === 0
-                        ? "Free"
-                        : `From £${(selectedEvent.ticketPrice / 100).toFixed(2)}`}
-                    </span>
+                    <span>{formatPrice(selectedEvent) ?? "Free"}</span>
                   </div>
                 )}
 
                 {selectedEvent.description && (
                   <div className="pt-4 border-t border-white/[0.06]">
-                    <p className="text-white/45 leading-relaxed">{selectedEvent.description}</p>
+                    <p className="text-white/50 leading-relaxed">{selectedEvent.description}</p>
                   </div>
                 )}
 
@@ -689,7 +759,7 @@ export default function LandingPage() {
                       </Button>
                     </Link>
                   )}
-                  <p className="text-center text-white/20 text-xs font-sans">
+                  <p className="text-center text-white/25 text-xs font-sans">
                     Create an account to purchase tickets and RSVP
                   </p>
                 </div>
