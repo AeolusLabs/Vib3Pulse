@@ -173,15 +173,15 @@ export function registerSocialRoutes(app: Express): void {
     return `/api/media/${id}`;
   }
 
-  // Serve any uploaded media from DB
-  app.get("/api/media/:id", requireAuth, async (req, res) => {
+  // Serve any uploaded media from DB — no auth required (UUIDs are capability URLs)
+  app.get("/api/media/:id", async (req, res) => {
     try {
       const media = await storage.getMedia(req.params.id);
       if (!media) return res.sendStatus(404);
       const base64 = media.data.includes(',') ? media.data.split(',')[1] : media.data;
       const buffer = Buffer.from(base64, 'base64');
       res.set('Content-Type', media.contentType);
-      res.set('Cache-Control', 'private, max-age=3600');
+      res.set('Cache-Control', 'public, max-age=3600');
       res.set('Content-Length', String(buffer.length));
       res.send(buffer);
     } catch {
