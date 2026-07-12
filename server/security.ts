@@ -129,16 +129,17 @@ export const authRateLimiter = rateLimit({
 
 export const apiRateLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 100,
-  message: { 
+  max: 300,
+  message: {
     message: "Too many requests. Please slow down.",
     code: "RATE_LIMITED"
   },
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => {
-    return req.path.startsWith("/auth/session");
-  },
+  keyGenerator: (req) => (req.user as any)?.id ?? req.ip ?? "",
+  skip: (req) =>
+    req.path.startsWith("/auth/session") ||
+    req.path.startsWith("/media"),
 });
 
 export const sensitiveOperationLimiter = rateLimit({

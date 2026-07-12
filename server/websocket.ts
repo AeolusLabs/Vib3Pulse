@@ -25,7 +25,8 @@ class WebSocketManager {
       try {
         // Parse cookies and get session
         const cookies = cookie.parse(req.headers.cookie || "");
-        const sessionId = cookies["connect.sid"]?.split("s:")[1]?.split(".")[0];
+        const rawSid = cookies["connect.sid"];
+        const sessionId = rawSid ? decodeURIComponent(rawSid).split("s:")[1]?.split(".")[0] : undefined;
 
         if (!sessionId) {
           ws.close(4001, "Unauthorized");

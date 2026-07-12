@@ -54,8 +54,12 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         if (unmountedRef.current) return;
+        if (event.code === 4001) {
+          // Server rejected the session — back off 5 min before retrying
+          retryDelayRef.current = 5 * 60 * 1000;
+        }
         // Exponential backoff capped at 30 s
         const delay = retryDelayRef.current;
         retryDelayRef.current = Math.min(delay * 2, 30_000);
