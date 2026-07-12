@@ -22,10 +22,16 @@ const EVENT_CATEGORIES = [
   "Video Games", "Esports", "Streaming",
 ];
 
+const passwordRulesSchema = z.string()
+  .min(8, "Password must be at least 8 characters")
+  .regex(/[A-Z]/, "Must contain at least one uppercase letter")
+  .regex(/[0-9]/, "Must contain at least one number")
+  .regex(/[^A-Za-z0-9]/, "Must contain at least one special character");
+
 const step1Schema = z.object({
   email: z.string().email("Please enter a valid email address"),
   username: z.string().min(3, "Username must be at least 3 characters"),
-  password: z.string().min(8, "Password must be at least 8 characters"),
+  password: passwordRulesSchema,
   confirmPassword: z.string(),
 }).refine((d) => d.password === d.confirmPassword, {
   message: "Passwords don't match",
@@ -64,6 +70,13 @@ const inputCls =
 
 const labelCls = "text-white/55 text-xs font-sans font-medium tracking-wide uppercase";
 
+const PASSWORD_RULES = [
+  { label: "8+ characters",         test: (v: string) => v.length >= 8 },
+  { label: "Uppercase letter",      test: (v: string) => /[A-Z]/.test(v) },
+  { label: "Number",                test: (v: string) => /[0-9]/.test(v) },
+  { label: "Special character",     test: (v: string) => /[^A-Za-z0-9]/.test(v) },
+];
+
 export default function SignupPage() {
   const [, setLocation] = useLocation();
   const [currentStep, setCurrentStep] = useState(1);
@@ -95,6 +108,8 @@ export default function SignupPage() {
     resolver: zodResolver(organizerSchema),
     defaultValues: step3DataOrganizer || { organizationName: "", bio: "", contactEmail: "", socialMediaLinks: [], canManageVenues: false },
   });
+
+  const livePassword = step1Form.watch("password") ?? "";
 
   const onStep1Submit = (data: Step1Data) => { setStep1Data(data); setCurrentStep(2); };
   const onStep2Submit = (data: Step2Data) => { setStep2Data(data); setCurrentStep(3); };
@@ -287,6 +302,19 @@ export default function SignupPage() {
                           </button>
                         </div>
                       </FormControl>
+                      {livePassword.length > 0 && (
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-2">
+                          {PASSWORD_RULES.map((rule) => {
+                            const met = rule.test(livePassword);
+                            return (
+                              <div key={rule.label} className={`flex items-center gap-1.5 text-xs transition-colors ${met ? "text-emerald-400" : "text-white/30"}`}>
+                                <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 transition-colors ${met ? "bg-emerald-400" : "bg-white/20"}`} />
+                                {rule.label}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                       <FormMessage className="text-xs text-red-400" />
                     </FormItem>
                   )}

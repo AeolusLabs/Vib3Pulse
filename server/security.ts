@@ -152,6 +152,18 @@ export const sensitiveOperationLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+export const verificationEmailLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 3,
+  keyGenerator: (req) => (req.user as any)?.id ?? ipKeyGenerator(req.ip ?? ""),
+  message: {
+    message: "Too many verification email requests. Please try again in an hour.",
+    code: "RATE_LIMITED",
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 export const ratingSubmitLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 5,

@@ -5,6 +5,7 @@ import { requireAuth } from "../middleware";
 import {
   authRateLimiter,
   sensitiveOperationLimiter,
+  verificationEmailLimiter,
   checkLoginThrottle,
   recordLoginAttempt,
   clearLoginAttempts,
@@ -26,8 +27,14 @@ class MediaValidationError extends Error {
   }
 }
 
+const passwordSchema = z.string()
+  .min(8, "Password must be at least 8 characters")
+  .regex(/[A-Z]/, "Password must contain at least one uppercase letter")
+  .regex(/[0-9]/, "Password must contain at least one number")
+  .regex(/[^A-Za-z0-9]/, "Password must contain at least one special character");
+
 const signupSchema = insertUserSchema.omit({ passwordHash: true }).extend({
-  password: z.string().min(8, "Password must be at least 8 characters"),
+  password: passwordSchema,
 });
 
 export function registerUsersRoutes(app: Express): void {
@@ -87,6 +94,23 @@ export function registerUsersRoutes(app: Express): void {
         ...userDataWithGenderTimestamp,
         passwordHash,
       } as any);
+
+      // Send verification email — fire-and-forget so signup never blocks on email delivery
+      (async () => {
+        try {
+          const crypto = await import("crypto");
+          const rawToken = crypto.randomBytes(32).toString("hex");
+          const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+          const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+          await storage.setEmailVerificationToken(user.id, tokenHash, expires);
+          const baseUrl = (process.env.APP_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
+          const verifyLink = `${baseUrl}/verify-email?token=${rawToken}`;
+          const { sendVerificationEmail } = await import("../emailService");
+          await sendVerificationEmail({ to: user.email, verifyLink, userName: user.displayName || user.username });
+        } catch (err) {
+          console.error("[AUTH] Failed to send verification email:", err);
+        }
+      })();
 
       req.login(userToSessionUser(user), (err) => {
         if (err) {
@@ -217,6 +241,71 @@ export function registerUsersRoutes(app: Express): void {
     res.status(401).json({ message: "Not authenticated" });
   });
 
+  // Verify email with token from the emailed link
+  app.get("/api/auth/verify-email", async (req, res) => {
+    try {
+      const { token } = req.query;
+      if (!token || typeof token !== "string") {
+        return res.status(400).json({ message: "Verification token is required.", code: "INVALID_TOKEN" });
+      }
+
+      const crypto = await import("crypto");
+      const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+
+      const user = await storage.getUserByEmailVerificationToken(tokenHash);
+      if (!user) {
+        return res.status(400).json({ message: "This verification link is invalid or has expired.", code: "INVALID_TOKEN" });
+      }
+
+      await storage.setUserVerified(user.id);
+      await storage.clearEmailVerificationToken(user.id);
+
+      // Refresh the session so the client sees isVerified: true without re-logging in
+      if (req.isAuthenticated() && req.user!.id === user.id) {
+        (req.user as any).isVerified = true;
+        await new Promise<void>((resolve, reject) => req.session.save((err) => err ? reject(err) : resolve()));
+      }
+
+      res.json({ message: "Email verified successfully." });
+    } catch (error) {
+      console.error("[AUTH] verify-email error:", error);
+      res.status(500).json({ message: "Failed to verify email. Please try again." });
+    }
+  });
+
+  // Resend verification email (authenticated users only)
+  app.post("/api/auth/resend-verification", requireAuth, verificationEmailLimiter, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.user!.id);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      if (user.isVerified) {
+        return res.status(400).json({ message: "Your email is already verified.", code: "ALREADY_VERIFIED" });
+      }
+
+      const crypto = await import("crypto");
+      const rawToken = crypto.randomBytes(32).toString("hex");
+      const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+      const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      await storage.setEmailVerificationToken(user.id, tokenHash, expires);
+
+      const baseUrl = (process.env.APP_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
+      const verifyLink = `${baseUrl}/verify-email?token=${rawToken}`;
+      const { sendVerificationEmail } = await import("../emailService");
+      const sent = await sendVerificationEmail({ to: user.email, verifyLink, userName: user.displayName || user.username });
+
+      if (!sent) {
+        return res.status(500).json({ message: "Failed to send verification email. Please try again later." });
+      }
+
+      res.json({ message: "Verification email sent. Please check your inbox." });
+    } catch (error) {
+      console.error("[AUTH] resend-verification error:", error);
+      res.status(500).json({ message: "Failed to send verification email." });
+    }
+  });
+
   // Change password
   app.patch("/api/auth/change-password", requireAuth, sensitiveOperationLimiter, async (req, res) => {
     try {
@@ -224,8 +313,9 @@ export function registerUsersRoutes(app: Express): void {
       if (!currentPassword || !newPassword) {
         return res.status(400).json({ message: "Current password and new password are required" });
       }
-      if (newPassword.length < 8) {
-        return res.status(400).json({ message: "New password must be at least 8 characters" });
+      const passwordValidation = passwordSchema.safeParse(newPassword);
+      if (!passwordValidation.success) {
+        return res.status(400).json({ message: passwordValidation.error.errors[0].message });
       }
 
       const user = await storage.getUser(req.user!.id);
@@ -304,8 +394,9 @@ export function registerUsersRoutes(app: Express): void {
       if (!token || !newPassword) {
         return res.status(400).json({ message: "Token and new password are required" });
       }
-      if (newPassword.length < 8) {
-        return res.status(400).json({ message: "Password must be at least 8 characters" });
+      const passwordValidation = passwordSchema.safeParse(newPassword);
+      if (!passwordValidation.success) {
+        return res.status(400).json({ message: passwordValidation.error.errors[0].message });
       }
 
       const user = await storage.getUserByPasswordResetToken(token);

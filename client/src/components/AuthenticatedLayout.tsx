@@ -1,6 +1,10 @@
+import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { Redirect } from "wouter";
 import { Button } from "@/components/ui/button";
+import { useMutation } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 interface AuthenticatedLayoutProps {
   children: React.ReactNode;
@@ -8,6 +12,18 @@ interface AuthenticatedLayoutProps {
 
 export default function AuthenticatedLayout({ children }: AuthenticatedLayoutProps) {
   const { data: user, isLoading, error } = useAuth();
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+  const { toast } = useToast();
+
+  const resendMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/auth/resend-verification"),
+    onSuccess: () => toast({ title: "Verification email sent", description: "Check your inbox for the link." }),
+    onError: (err: any) => toast({
+      title: "Couldn't send email",
+      description: err?.message || "Please try again later.",
+      variant: "destructive",
+    }),
+  });
 
   if (isLoading) {
     return (
@@ -43,6 +59,29 @@ export default function AuthenticatedLayout({ children }: AuthenticatedLayoutPro
 
   return (
     <>
+      {user && !user.isVerified && !bannerDismissed && (
+        <div className="sticky top-0 z-50 bg-amber-500/10 border-b border-amber-500/20 px-4 py-2.5 flex items-center justify-between gap-4 text-sm">
+          <span className="text-amber-300/90 leading-snug">
+            Please verify your email address to unlock all features.
+          </span>
+          <div className="flex items-center gap-4 flex-shrink-0">
+            <button
+              onClick={() => resendMutation.mutate()}
+              disabled={resendMutation.isPending || resendMutation.isSuccess}
+              className="text-amber-300 underline hover:no-underline disabled:opacity-50 disabled:cursor-not-allowed transition-opacity text-sm"
+            >
+              {resendMutation.isPending ? "Sending…" : resendMutation.isSuccess ? "Sent!" : "Resend email"}
+            </button>
+            <button
+              onClick={() => setBannerDismissed(true)}
+              aria-label="Dismiss"
+              className="text-amber-300/50 hover:text-amber-300 transition-colors text-lg leading-none"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
       {children}
     </>
   );

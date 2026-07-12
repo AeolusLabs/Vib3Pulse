@@ -48,6 +48,7 @@ import AdminSocialDashboard from "@/pages/admin/AdminSocialDashboard";
 import ForgotPasswordPage from "@/pages/ForgotPasswordPage";
 import SocialPromotionPage from "@/pages/SocialPromotionPage";
 import ResetPasswordPage from "@/pages/ResetPasswordPage";
+import VerifyEmailPage from "@/pages/VerifyEmailPage";
 import JoinGroupPage from "@/pages/JoinGroupPage";
 import ScannerPage from "@/pages/ScannerPage";
 import VenueEventCheckInPage from "@/pages/VenueEventCheckInPage";
@@ -62,6 +63,7 @@ function Router() {
       <Route path="/signup" component={SignupPage} />
       <Route path="/forgot-password" component={ForgotPasswordPage} />
       <Route path="/reset-password" component={ResetPasswordPage} />
+      <Route path="/verify-email" component={VerifyEmailPage} />
       <Route path="/discover" component={DiscoverPage} />
       <Route path="/event/:id" component={EventDetailPage} />
       <Route path="/profile/:username" component={ProfilePage} />

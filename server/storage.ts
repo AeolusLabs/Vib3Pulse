@@ -338,6 +338,10 @@ export interface IStorage {
   setPasswordResetToken(userId: string, token: string, expires: Date): Promise<void>;
   getUserByPasswordResetToken(token: string): Promise<User | undefined>;
   clearPasswordResetToken(userId: string): Promise<void>;
+  setEmailVerificationToken(userId: string, tokenHash: string, expires: Date): Promise<void>;
+  getUserByEmailVerificationToken(tokenHash: string): Promise<User | undefined>;
+  clearEmailVerificationToken(userId: string): Promise<void>;
+  setUserVerified(userId: string): Promise<void>;
   
   getEvents(): Promise<(Event & { minPrice: number; maxPrice: number })[]>;
   getBulkEventTicketTiers(eventIds: string[]): Promise<TicketTier[]>;
@@ -899,6 +903,7 @@ export class DbStorage implements IStorage {
       displayName: data.displayName,
       avatarUrl: data.avatarUrl ?? null,
       userType: 'social',
+      isVerified: true, // Google has already verified the email address
     } as any).returning();
     return result[0];
   }
@@ -947,10 +952,38 @@ export class DbStorage implements IStorage {
   }
 
   async clearPasswordResetToken(userId: string): Promise<void> {
-    await db.update(users).set({ 
+    await db.update(users).set({
       passwordResetToken: null,
       passwordResetExpires: null
     }).where(eq(users.id, userId));
+  }
+
+  async setEmailVerificationToken(userId: string, tokenHash: string, expires: Date): Promise<void> {
+    await db.update(users).set({
+      emailVerificationToken: tokenHash,
+      emailVerificationExpires: expires,
+    }).where(eq(users.id, userId));
+  }
+
+  async getUserByEmailVerificationToken(tokenHash: string): Promise<User | undefined> {
+    const result = await db.select().from(users).where(
+      and(
+        eq(users.emailVerificationToken, tokenHash),
+        gte(users.emailVerificationExpires, new Date()),
+      )
+    );
+    return result[0];
+  }
+
+  async clearEmailVerificationToken(userId: string): Promise<void> {
+    await db.update(users).set({
+      emailVerificationToken: null,
+      emailVerificationExpires: null,
+    }).where(eq(users.id, userId));
+  }
+
+  async setUserVerified(userId: string): Promise<void> {
+    await db.update(users).set({ isVerified: true }).where(eq(users.id, userId));
   }
 
   async getEvents(): Promise<(Event & { minPrice: number; maxPrice: number })[]> {
