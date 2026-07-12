@@ -2067,7 +2067,10 @@ export class DbStorage implements IStorage {
   // ============================================
 
   async repostPost(userId: string, postId: string): Promise<Repost> {
-    const result = await db.insert(reposts).values({ userId, postId }).returning();
+    const result = await db.transaction(async (tx) => {
+      return tx.insert(reposts).values({ userId, postId }).returning();
+    });
+    invalidateCache.posts();
     return result[0];
   }
 
@@ -2075,6 +2078,7 @@ export class DbStorage implements IStorage {
     await db.delete(reposts).where(
       and(eq(reposts.userId, userId), eq(reposts.postId, postId))
     );
+    invalidateCache.posts();
   }
 
   async hasUserRepostedPost(userId: string, postId: string): Promise<boolean> {
@@ -3954,26 +3958,52 @@ export class DbStorage implements IStorage {
       ));
   }
 
-  async getPostsWithCommunity(): Promise<Array<Post & { user: User; community: Community | null }>> {
+  async getPostsWithCommunity(): Promise<Array<any>> {
     return cached(
       'posts-with-community',
       async () => {
-        const result = await db
-          .select({
-            post: posts,
-            user: users,
-            community: communities,
-          })
+        // 1. Original posts with author + community (DB-level join)
+        const postsResult = await db
+          .select({ post: posts, user: users, community: communities })
           .from(posts)
           .innerJoin(users, eq(posts.userId, users.id))
           .leftJoin(communities, eq(posts.communityId, communities.id))
           .orderBy(desc(posts.createdAt));
 
-        return result.map(r => ({
-          ...r.post,
-          user: r.user,
-          community: r.community,
-        }));
+        // O(1) lookup so reposts can find their original post without a nested scan
+        const postMap = new Map<string, any>();
+        const feed: any[] = [];
+
+        for (const r of postsResult) {
+          const item = { ...r.post, user: r.user, community: r.community, isRepost: false };
+          postMap.set(r.post.id, item);
+          feed.push(item);
+        }
+
+        // 2. Reposts with reposting-user info (DB-level join — no in-memory search)
+        const repostsResult = await db
+          .select({ repost: reposts, repostingUser: users })
+          .from(reposts)
+          .innerJoin(users, eq(reposts.userId, users.id));
+
+        for (const r of repostsResult) {
+          const originalPost = postMap.get(r.repost.postId);
+          if (!originalPost) continue; // original was deleted
+          feed.push({
+            id: `repost-${r.repost.id}`,
+            isRepost: true,
+            repostedBy: r.repostingUser,
+            originalPost,
+            createdAt: r.repost.createdAt,
+            user: r.repostingUser,
+            postId: r.repost.postId,
+          });
+        }
+
+        // 3. Sort combined feed chronologically
+        feed.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+        return feed;
       },
       postsCache,
     );

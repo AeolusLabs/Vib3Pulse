@@ -155,10 +155,12 @@ export default function FeedPage() {
   }, [notificationPostId]);
 
   // Extract unique @usernames from all posts for avatar lookup
+  // Repost items carry the content inside .originalPost, not at the top level
   const mentionedUsernames = useMemo(() => {
     const usernames = new Set<string>();
     posts.forEach((post: any) => {
-      const matches = post.content?.match(/@(\w+)/g);
+      const content = post.isRepost ? post.originalPost?.content : post.content;
+      const matches = content?.match(/@(\w+)/g);
       if (matches) {
         matches.forEach((match: string) => usernames.add(match.slice(1).toLowerCase()));
       }
@@ -402,35 +404,46 @@ export default function FeedPage() {
               <p className="text-muted-foreground text-sm">Failed to load posts. Try refreshing.</p>
             </div>
           ) : posts.length > 0 ? (
-            posts.map((post: any) => (
-              <FeedPost
-                key={post.id}
-                id={post.id}
-                author={{
-                  name: post.user.displayName || post.user.organizationName || post.user.username,
-                  username: post.user.username,
-                  isOrganizer: post.user.userType === "organizer",
-                  isVerified: post.user.isVerified,
-                  userId: post.user.id,
-                  avatar: post.user.avatarUrl,
-                }}
-                content={post.content}
-                createdAt={post.createdAt}
-                likes={0}
-                comments={0}
-                isLiked={false}
-                image={post.imageUrl}
-                imageUrls={post.imageUrls || []}
-                videoUrl={post.videoUrl}
-                eventId={post.eventId}
-                venueId={post.venueId}
-                community={post.community}
-                mentionedUsers={mentionedUsersData}
-                hasActiveStory={userIdsWithStories.has(post.user.id)}
-                feedMode={true}
-                onPostClick={() => setSelectedPost(post)}
-              />
-            ))
+            posts.map((post: any) => {
+              // Repost items wrap the original post — resolve which data to display
+              const displayPost = post.isRepost ? post.originalPost : post;
+              const displayUser = displayPost.user;
+              return (
+                <FeedPost
+                  key={post.id}
+                  id={displayPost.id}
+                  author={{
+                    name: displayUser.displayName || displayUser.organizationName || displayUser.username,
+                    username: displayUser.username,
+                    isOrganizer: displayUser.userType === "organizer",
+                    isVerified: displayUser.isVerified,
+                    userId: displayUser.id,
+                    avatar: displayUser.avatarUrl,
+                  }}
+                  content={displayPost.content}
+                  createdAt={post.createdAt}
+                  likes={0}
+                  comments={0}
+                  isLiked={false}
+                  image={displayPost.imageUrl}
+                  imageUrls={displayPost.imageUrls || []}
+                  videoUrl={displayPost.videoUrl}
+                  eventId={displayPost.eventId}
+                  venueId={displayPost.venueId}
+                  community={displayPost.community}
+                  isRepost={!!post.isRepost}
+                  repostedBy={post.isRepost ? {
+                    name: post.repostedBy.displayName || post.repostedBy.organizationName || post.repostedBy.username,
+                    username: post.repostedBy.username,
+                    userId: post.repostedBy.id,
+                  } : undefined}
+                  mentionedUsers={mentionedUsersData}
+                  hasActiveStory={userIdsWithStories.has(displayUser.id)}
+                  feedMode={true}
+                  onPostClick={() => setSelectedPost(displayPost)}
+                />
+              );
+            })
           ) : (
             <div className="text-center py-12">
               <p className="text-muted-foreground text-sm">
