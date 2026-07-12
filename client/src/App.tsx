@@ -54,6 +54,7 @@ import ScannerPage from "@/pages/ScannerPage";
 import VenueEventCheckInPage from "@/pages/VenueEventCheckInPage";
 import StoryDetailPage from "@/pages/StoryDetailPage";
 import CommunityPage from "@/pages/CommunityPage";
+import PostDetailPage from "@/pages/PostDetailPage";
 
 function Router() {
   return (
@@ -195,6 +196,8 @@ function Router() {
           <CommunityPage />
         </AuthenticatedLayout>
       </Route>
+
+      <Route path="/posts/:id" component={PostDetailPage} />
 
       <Route path="/join/:code" component={JoinGroupPage} />
 
