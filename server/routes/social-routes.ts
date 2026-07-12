@@ -24,6 +24,12 @@ export function registerSocialRoutes(app: Express): void {
   // Posts
   app.get("/api/posts", async (req, res) => {
     try {
+      if (req.query.limit !== undefined) {
+        const limit = Math.min(Number(req.query.limit) || 20, 50);
+        const cursor = req.query.cursor as string | undefined;
+        const result = await storage.getFeedPosts(cursor, limit);
+        return res.json(result);
+      }
       const posts = await storage.getPostsWithCommunity();
       res.json(posts);
     } catch (error) {

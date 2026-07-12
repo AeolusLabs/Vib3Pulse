@@ -31,6 +31,7 @@ interface VenueWithDistance extends Venue {
 export default function DiscoverPage() {
   const [selectedCategory, setSelectedCategory] = useState("All Events");
   const [searchQuery, setSearchQuery] = useState("");
+  const [eventsShownLimit, setEventsShownLimit] = useState(20);
   const [createEventOpen, setCreateEventOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [activeShareData, setActiveShareData] = useState<ShareData | null>(null);
@@ -267,8 +268,11 @@ export default function DiscoverPage() {
       return matchesCategory && matchesSearch;
     });
 
+  // Reset shown limit when filters change so users always start at the top
+  useEffect(() => { setEventsShownLimit(20); }, [selectedCategory, searchQuery, hasLocation]);
+
   // Filter promoted venues - prefer nearby if available
-  const displayVenues = hasLocation && nearbyVenues.length > 0 
+  const displayVenues = hasLocation && nearbyVenues.length > 0
     ? nearbyVenues.filter(v => promotedVenues.some(pv => pv.id === v.id))
     : promotedVenues;
 
@@ -792,7 +796,7 @@ export default function DiscoverPage() {
               </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" data-testid="events-grid">
-              {filteredEvents.map((event) => {
+              {filteredEvents.slice(0, eventsShownLimit).map((event) => {
                 const isEventHighlighted = sharedEventId === String(event.id) || highlightedId === String(event.id);
                 return (
                 <Card
@@ -890,6 +894,18 @@ export default function DiscoverPage() {
                 );
               })}
             </div>
+
+            {filteredEvents.length > eventsShownLimit && (
+              <div className="text-center py-6">
+                <Button
+                  variant="outline"
+                  onClick={() => setEventsShownLimit(n => n + 20)}
+                  data-testid="button-load-more-events"
+                >
+                  Load more ({filteredEvents.length - eventsShownLimit} remaining)
+                </Button>
+              </div>
+            )}
 
             {filteredEvents.length === 0 && (
               <div className="text-center py-16">

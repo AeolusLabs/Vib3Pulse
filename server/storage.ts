@@ -344,6 +344,7 @@ export interface IStorage {
   setUserVerified(userId: string): Promise<void>;
   
   getEvents(): Promise<(Event & { minPrice: number; maxPrice: number })[]>;
+  getEventsByCategory(category: string): Promise<(Event & { minPrice: number; maxPrice: number })[]>;
   getBulkEventTicketTiers(eventIds: string[]): Promise<TicketTier[]>;
   getEvent(id: string): Promise<(Event & { organizer: User; community: (Community & { memberCount: number }) | null }) | undefined>;
   getUserEvents(userId: string): Promise<Event[]>;
@@ -705,6 +706,7 @@ export interface IStorage {
   // Community posts
   getCommunityPosts(communityId: string, limit?: number, offset?: number): Promise<Array<Post & { user: User; community: Community }>>;
   getPostsWithCommunity(): Promise<Array<Post & { user: User; community: Community | null }>>;
+  getFeedPosts(cursor?: string, limit?: number): Promise<{ posts: any[]; nextCursor: string | null }>;
 
   // ============================================
   // GROUP CHATS / CONVERSATIONS
@@ -1006,6 +1008,25 @@ export class DbStorage implements IStorage {
       },
       eventsCache,
     );
+  }
+
+  async getEventsByCategory(category: string): Promise<(Event & { minPrice: number; maxPrice: number })[]> {
+    const rows = await db
+      .select({
+        event: events,
+        minPrice: sql<number>`COALESCE(MIN(${ticketTiers.priceSmallestUnit}), ${events.ticketPrice})::int`,
+        maxPrice: sql<number>`COALESCE(MAX(${ticketTiers.priceSmallestUnit}), ${events.ticketPrice})::int`,
+      })
+      .from(events)
+      .leftJoin(ticketTiers, eq(ticketTiers.eventId, events.id))
+      .where(and(
+        eq(events.isPublished, true),
+        eq(events.moderationStatus, 'approved'),
+        ilike(events.category, category),
+      ))
+      .groupBy(events.id)
+      .orderBy(events.eventDate);
+    return rows.map(r => ({ ...r.event, minPrice: r.minPrice, maxPrice: r.maxPrice }));
   }
 
   async getBulkEventTicketTiers(eventIds: string[]): Promise<TicketTier[]> {
@@ -4007,6 +4028,77 @@ export class DbStorage implements IStorage {
       },
       postsCache,
     );
+  }
+
+  async getFeedPosts(cursor?: string, limit = 20): Promise<{ posts: any[]; nextCursor: string | null }> {
+    const cursorDate = cursor ? new Date(cursor) : undefined;
+
+    const [postsResult, repostsResult] = await Promise.all([
+      db.select({ post: posts, user: users, community: communities })
+        .from(posts)
+        .innerJoin(users, eq(posts.userId, users.id))
+        .leftJoin(communities, eq(posts.communityId, communities.id))
+        .where(cursorDate ? lt(posts.createdAt, cursorDate) : undefined)
+        .orderBy(desc(posts.createdAt))
+        .limit(limit * 2),
+      db.select({ repost: reposts, repostingUser: users })
+        .from(reposts)
+        .innerJoin(users, eq(reposts.userId, users.id))
+        .where(cursorDate ? lt(reposts.createdAt, cursorDate) : undefined)
+        .orderBy(desc(reposts.createdAt))
+        .limit(limit),
+    ]);
+
+    const postMap = new Map<string, any>();
+    for (const r of postsResult) {
+      postMap.set(r.post.id, { ...r.post, user: r.user, community: r.community });
+    }
+
+    // Fetch original posts for reposts not covered by the posts window
+    const missingIds = [...new Set(
+      repostsResult.map(r => r.repost.postId).filter(id => !postMap.has(id))
+    )];
+    if (missingIds.length > 0) {
+      const missing = await db
+        .select({ post: posts, user: users, community: communities })
+        .from(posts)
+        .innerJoin(users, eq(posts.userId, users.id))
+        .leftJoin(communities, eq(posts.communityId, communities.id))
+        .where(inArray(posts.id, missingIds));
+      for (const r of missing) {
+        postMap.set(r.post.id, { ...r.post, user: r.user, community: r.community });
+      }
+    }
+
+    const feed: any[] = [];
+    for (const r of postsResult) {
+      feed.push({ ...r.post, user: r.user, community: r.community, isRepost: false });
+    }
+    for (const r of repostsResult) {
+      const originalPost = postMap.get(r.repost.postId);
+      if (!originalPost) continue;
+      feed.push({
+        id: `repost-${r.repost.id}`,
+        isRepost: true,
+        repostedBy: r.repostingUser,
+        originalPost,
+        createdAt: r.repost.createdAt,
+        user: r.repostingUser,
+        postId: r.repost.postId,
+      });
+    }
+
+    feed.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    const page = feed.slice(0, limit);
+    const overflow = feed[limit];
+    const nextCursor = overflow
+      ? (overflow.createdAt instanceof Date
+          ? overflow.createdAt.toISOString()
+          : String(overflow.createdAt))
+      : null;
+
+    return { posts: page, nextCursor };
   }
 
   // ============================================

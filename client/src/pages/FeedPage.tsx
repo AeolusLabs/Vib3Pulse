@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useLocation, useSearch } from "wouter";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useInfiniteQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -113,11 +113,51 @@ export default function FeedPage() {
     ? myCommunities.find(c => c.id === feedFilter) 
     : null;
 
-  // Use separate queries for main feed vs community feed to ensure proper reactivity
-  const { data: mainPosts = [], isLoading: isLoadingMain, isError: isErrorMain } = useQuery<any[]>({
+  // Infinite scroll sentinel ref
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  // Paginated main feed using cursor-based infinite query
+  const {
+    data: mainPostsData,
+    isLoading: isLoadingMain,
+    isError: isErrorMain,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
     queryKey: ['/api/posts'],
+    queryFn: async ({ pageParam }: { pageParam: string | undefined }) => {
+      const url = pageParam
+        ? `/api/posts?limit=20&cursor=${encodeURIComponent(pageParam)}`
+        : '/api/posts?limit=20';
+      const res = await fetch(url, { credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to fetch posts');
+      return res.json() as Promise<{ posts: any[]; nextCursor: string | null }>;
+    },
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    initialPageParam: undefined as string | undefined,
     enabled: !isViewingCommunity,
   });
+
+  const mainPosts = useMemo(
+    () => mainPostsData?.pages.flatMap(p => p.posts) ?? [],
+    [mainPostsData]
+  );
+
+  // Wire up IntersectionObserver to auto-fetch next page
+  const handleSentinel = useCallback((entries: IntersectionObserverEntry[]) => {
+    if (entries[0]?.isIntersecting && hasNextPage && !isFetchingNextPage) {
+      fetchNextPage();
+    }
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
+
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(handleSentinel, { rootMargin: '200px' });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [handleSentinel]);
 
   const { data: communityPosts = [], isLoading: isLoadingCommunity, isError: isErrorCommunity } = useQuery<any[]>({
     queryKey: ['/api/communities', feedFilter, 'posts'],
@@ -457,9 +497,18 @@ export default function FeedPage() {
           )}
         </div>
 
-        <div className="text-center py-8">
-          <p className="text-muted-foreground text-sm">You're all caught up! 🎉</p>
-        </div>
+        {/* Infinite scroll sentinel — triggers next page fetch when visible */}
+        {!isViewingCommunity && (
+          <div ref={sentinelRef} className="py-2">
+            {isFetchingNextPage && <>{[0, 1].map(i => <PostSkeleton key={i} index={i} />)}</>}
+          </div>
+        )}
+
+        {!isViewingCommunity && !hasNextPage && mainPosts.length > 0 && (
+          <div className="text-center py-8">
+            <p className="text-muted-foreground text-sm">You're all caught up!</p>
+          </div>
+        )}
       </main>
 
       <CreateStoryModal

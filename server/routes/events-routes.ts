@@ -32,9 +32,15 @@ export function registerEventsRoutes(app: Express): void {
   }
 
   // Events
-  app.get("/api/events", async (_req, res) => {
+  app.get("/api/events", async (req, res) => {
     try {
-      res.json(await storage.getEvents());
+      const allEvents = await storage.getEvents();
+      if (req.query.limit !== undefined) {
+        const limit = Math.min(Number(req.query.limit) || 20, 100);
+        const offset = Number(req.query.offset) || 0;
+        return res.json({ events: allEvents.slice(offset, offset + limit), total: allEvents.length });
+      }
+      res.json(allEvents);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch events" });
     }
@@ -63,9 +69,8 @@ export function registerEventsRoutes(app: Express): void {
   // Get events by category (public endpoint for landing page)
   app.get("/api/events/by-category/:category", async (req, res) => {
     try {
-      const { category } = req.params;
-      const allEvents = await storage.getEvents();
-      res.json(allEvents.filter(e => e.category.toLowerCase() === category.toLowerCase()));
+      const events = await storage.getEventsByCategory(req.params.category);
+      res.json(events);
     } catch (error) {
       console.error('Error fetching events by category:', error);
       res.status(500).json({ message: "Failed to fetch events by category" });
