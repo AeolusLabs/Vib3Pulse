@@ -4088,10 +4088,22 @@ export class DbStorage implements IStorage {
       });
     }
 
-    feed.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    // Deduplicate: if the same post appears as both an original and a repost,
+    // keep only the most recent entry (the repost wins, bumping it up the timeline).
+    const deduped = new Map<string, any>();
+    for (const item of feed) {
+      const originalId = item.isRepost ? item.postId : item.id;
+      const existing = deduped.get(originalId);
+      if (!existing || new Date(item.createdAt) > new Date(existing.createdAt)) {
+        deduped.set(originalId, item);
+      }
+    }
+    const dedupedFeed = [...deduped.values()];
 
-    const page = feed.slice(0, limit);
-    const overflow = feed[limit];
+    dedupedFeed.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    const page = dedupedFeed.slice(0, limit);
+    const overflow = dedupedFeed[limit];
     const nextCursor = overflow
       ? (overflow.createdAt instanceof Date
           ? overflow.createdAt.toISOString()
