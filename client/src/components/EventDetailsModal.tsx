@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import UnifiedShareModal from "@/components/UnifiedShareModal";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -14,7 +14,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
 import type { Event, Community } from "@shared/schema";
 import { Card } from "@/components/ui/card";
-import { CalendarIcon, MapPinIcon, UsersIcon, TicketIcon, CheckCircleIcon, MinusIcon, PlusIcon, ExternalLinkIcon, Share2Icon, XIcon } from "@/components/ui/icons";
+import { CalendarIcon, MapPinIcon, UsersIcon, TicketIcon, CheckCircleIcon, ExternalLinkIcon, Share2Icon, XIcon } from "@/components/ui/icons";
 
 interface EventDetailsModalProps {
   event: Event;
@@ -50,9 +50,19 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
   const [isProcessing, setIsProcessing] = useState(false);
   const [showTierSelection, setShowTierSelection] = useState(false);
   const [selectedTier, setSelectedTier] = useState<string | null>(null);
-  const [quantity, setQuantity] = useState(1);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+
+  // The checkout success/cancel redirect returns here (or reloads this page for
+  // full-page /event/:id views) — surface a toast for the cancelled case and
+  // strip the query param so a refresh doesn't re-trigger it.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("cancelled") === "true") {
+      toast({ title: "Purchase cancelled", description: "Your ticket purchase was cancelled." });
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [toast]);
 
   const currency = (event as any).currency as string | undefined;
   const communityId = (event as any).communityId as string | undefined;
@@ -102,19 +112,18 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
   const hasRSVPed = rsvps?.some((rsvp: any) => rsvp.eventId === event.id);
 
   const purchaseTicketMutation = useMutation({
-    mutationFn: async ({ tierId, qty }: { tierId: string; qty: number }) => {
-      const response = await apiRequest("POST", "/api/tickets/purchase", {
+    mutationFn: async (tierId: string | undefined) => {
+      const response = await apiRequest("POST", "/api/payments/event/checkout", {
         eventId: event.id,
-        tierId,
-        quantity: qty,
+        ticketTierId: tierId,
       });
       return response.json();
     },
     onSuccess: (data: { url: string }) => {
       if (data.url) window.location.href = data.url;
     },
-    onError: () => {
-      toast({ title: "Purchase Failed", description: "Unable to process ticket purchase. Please try again.", variant: "destructive" });
+    onError: (error: any) => {
+      toast({ title: "Purchase Failed", description: error?.message || "Unable to process ticket purchase. Please try again.", variant: "destructive" });
       setIsProcessing(false);
     },
   });
@@ -135,22 +144,20 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
   });
 
   const handlePurchaseTicket = () => {
-    setShowTierSelection(true);
+    if (ticketTiers && ticketTiers.length > 0) {
+      setShowTierSelection(true);
+    } else {
+      // No configured tiers — this event just has a flat ticketPrice, so
+      // checkout can proceed directly without a tier selection step.
+      setIsProcessing(true);
+      purchaseTicketMutation.mutate(undefined);
+    }
   };
 
   const handleConfirmPurchase = () => {
     if (!selectedTier) return;
     setIsProcessing(true);
-    purchaseTicketMutation.mutate({ tierId: selectedTier, qty: quantity });
-  };
-
-  const incrementQuantity = () => {
-    const max = ticketTiers?.find((t: any) => t.id === selectedTier)?.quantity || 0;
-    if (quantity < max) setQuantity(quantity + 1);
-  };
-
-  const decrementQuantity = () => {
-    if (quantity > 1) setQuantity(quantity - 1);
+    purchaseTicketMutation.mutate(selectedTier);
   };
 
   const handleShare = () => setShareOpen(true);
@@ -420,7 +427,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
           <DialogHeader>
             <DialogTitle>Select Ticket Tier</DialogTitle>
             <DialogDescription>
-              Choose your ticket type and quantity for {event.title}
+              Choose your ticket type for {event.title}
             </DialogDescription>
           </DialogHeader>
 
@@ -435,7 +442,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
                     className={`p-4 cursor-pointer transition-all hover-elevate ${
                       selectedTier === tier.id ? "border-primary bg-primary/5" : "border-border"
                     }`}
-                    onClick={() => { setSelectedTier(tier.id); setQuantity(1); }}
+                    onClick={() => setSelectedTier(tier.id)}
                     data-testid={`tier-option-${tier.id}`}
                   >
                     <div className="flex items-center justify-between">
@@ -452,39 +459,6 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">No ticket tiers available.</p>
-            )}
-
-            {selectedTier && (
-              <div className="pt-4 border-t space-y-4">
-                <div>
-                  <label className="text-sm font-medium mb-2 block">Quantity</label>
-                  <div className="flex items-center gap-3">
-                    <Button variant="outline" size="icon" onClick={decrementQuantity} disabled={quantity <= 1} data-testid="button-decrease-quantity">
-                      <MinusIcon className="h-4 w-4" />
-                    </Button>
-                    <span className="text-lg font-semibold w-10 text-center" data-testid="text-quantity">{quantity}</span>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={incrementQuantity}
-                      disabled={quantity >= (ticketTiers?.find((t: any) => t.id === selectedTier)?.quantity || 0)}
-                      data-testid="button-increase-quantity"
-                    >
-                      <PlusIcon className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between text-base font-semibold border-t pt-3">
-                  <span>Total:</span>
-                  <span data-testid="text-total-price">
-                    {formatPrice(
-                      (ticketTiers?.find((t: any) => t.id === selectedTier)?.priceSmallestUnit || 0) * quantity,
-                      ticketTiers?.find((t: any) => t.id === selectedTier)?.currency ?? currency
-                    )}
-                  </span>
-                </div>
-              </div>
             )}
           </div>
 

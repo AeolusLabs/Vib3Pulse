@@ -71,15 +71,17 @@ export default function TicketWalletPage() {
   const { toast } = useToast();
   const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
 
-  // Handle success/cancel redirects from payment
+  // Handle the success redirect from event ticket checkout (see
+  // /api/payments/event/checkout's successUrl in server/payment-routes.ts,
+  // which appends session_id and provider — both are required by verify).
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const sessionId = params.get('session_id');
-    
-    if (params.get('success') === 'true' && sessionId && !isVerifyingPayment) {
-      // Verify the payment and create the ticket
+    const provider = params.get('provider');
+
+    if (params.get('success') === 'true' && sessionId && provider && !isVerifyingPayment) {
       setIsVerifyingPayment(true);
-      apiRequest('POST', '/api/tickets/verify-payment', { sessionId })
+      apiRequest('POST', '/api/payments/event/verify', { sessionId, provider })
         .then(async (response) => {
           await response.json();
           // Refetch tickets to show the newly purchased ticket
@@ -101,14 +103,6 @@ export default function TicketWalletPage() {
           // Clean up URL
           window.history.replaceState({}, '', '/ticket-wallet');
         });
-    } else if (params.get('canceled') === 'true') {
-      toast({
-        title: "Purchase canceled",
-        description: "Your ticket purchase was canceled.",
-        variant: "destructive",
-      });
-      // Clean up URL
-      window.history.replaceState({}, '', '/ticket-wallet');
     }
   }, [toast, isVerifyingPayment]);
 
