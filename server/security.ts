@@ -136,7 +136,7 @@ export const apiRateLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => (req.user as any)?.id ?? req.ip ?? "",
+  keyGenerator: (req) => (req.user as any)?.id ?? ipKeyGenerator(req.ip ?? ""),
   skip: (req) =>
     req.path.startsWith("/auth/session") ||
     req.path.startsWith("/media"),
@@ -313,8 +313,8 @@ export const securityHeaders = (req: Request, res: Response, next: NextFunction)
   // In development Vite HMR injects inline scripts, so unsafe-inline/unsafe-eval are
   // kept only in that environment.
   const scriptSrc = isProduction
-    ? `script-src 'self' 'nonce-${nonce}' https://js.stripe.com`
-    : `script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com`;
+    ? `script-src 'self' 'nonce-${nonce}' https://js.stripe.com https://js.paystack.co`
+    : `script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com https://js.paystack.co`;
 
   const cspDirectives = [
     "default-src 'self'",
@@ -325,8 +325,8 @@ export const securityHeaders = (req: Request, res: Response, next: NextFunction)
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: blob: https: http:",
     "worker-src 'self'",
-    "connect-src 'self' https://api.stripe.com https://fonts.googleapis.com https://fonts.gstatic.com wss: ws:",
-    "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
+    "connect-src 'self' https://api.stripe.com https://api.paystack.co https://fonts.googleapis.com https://fonts.gstatic.com wss: ws:",
+    "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://js.paystack.co https://checkout.paystack.com",
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",

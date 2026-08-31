@@ -14,73 +14,56 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import type { VenueEntryNight, Venue } from "@shared/schema";
-import { ArrowLeftIcon, CalendarIcon, MapPinIcon, UsersIcon, TicketIcon, ClockIcon, LogOutIcon, Building2Icon, CheckCircleIcon, AlertCircleIcon, SparklesIcon, GlobeIcon, PhoneIcon } from "@/components/ui/icons";
+import { ArrowLeftIcon, CalendarIcon, MapPinIcon, UsersIcon, TicketIcon, ClockIcon, LogOutIcon, Building2Icon, CheckCircleIcon, SparklesIcon, GlobeIcon, PhoneIcon } from "@/components/ui/icons";
 import { DoorOpen, UtensilsCrossed, Wine } from "lucide-react";
+import { CardPaymentForm } from "@/components/payments/CardPaymentForm";
 
 type VenueEventWithVenue = VenueEntryNight & { venue: Venue };
 
-function SimulatedPaymentForm({
+function VenueTicketPaymentStep({
   event,
+  clientSecret,
   paymentIntentId,
   provider,
   onSuccess,
   onCancel,
 }: {
   event: VenueEntryNight;
+  clientSecret: string;
   paymentIntentId: string;
   provider: string;
   onSuccess: () => void;
   onCancel: () => void;
 }) {
   const { toast } = useToast();
-  const [processing, setProcessing] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setProcessing(true);
-    try {
+  const confirmMutation = useMutation({
+    mutationFn: async () => {
       await apiRequest("POST", "/api/payments/venue/confirm", {
         venueEntryNightId: event.id,
         paymentIntentId,
         provider,
       });
+    },
+    onSuccess: () => {
       toast({ title: "Ticket purchased successfully!" });
       queryClient.invalidateQueries({ queryKey: ["/api/my-venue-tickets"] });
       onSuccess();
-    } catch {
+    },
+    onError: () => {
       toast({ title: "Failed to confirm ticket", variant: "destructive" });
-    }
-    setProcessing(false);
-  };
+    },
+  });
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="rounded-lg border border-dashed border-amber-500/50 bg-amber-50 dark:bg-amber-950/20 p-4">
-        <div className="flex items-start gap-3">
-          <AlertCircleIcon className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
-          <div>
-            <p className="font-medium text-amber-800 dark:text-amber-200">Demo Mode</p>
-            <p className="text-sm text-amber-700 dark:text-amber-300">Payments are simulated. No real charges will be made.</p>
-          </div>
-        </div>
-      </div>
-      <div className="rounded-lg border p-4 space-y-3">
-        <div className="flex justify-between text-sm">
-          <span className="text-muted-foreground">Entry ticket</span>
-          <span>£{(event.coverPriceCents / 100).toFixed(2)}</span>
-        </div>
-        <div className="border-t pt-3 flex justify-between font-medium">
-          <span>Total</span>
-          <span>£{(event.coverPriceCents / 100).toFixed(2)}</span>
-        </div>
-      </div>
-      <div className="flex gap-3 justify-end">
-        <Button type="button" variant="outline" onClick={onCancel} disabled={processing}>Cancel</Button>
-        <Button type="submit" disabled={processing} data-testid="button-confirm-payment">
-          {processing ? "Processing..." : "Confirm Purchase"}
-        </Button>
-      </div>
-    </form>
+    <CardPaymentForm
+      clientSecret={clientSecret}
+      provider={provider}
+      amountLabel={`£${(event.coverPriceCents / 100).toFixed(2)}`}
+      itemLabel="Entry ticket"
+      onSuccess={() => confirmMutation.mutate()}
+      onCancel={onCancel}
+    />
   );
 }
 
@@ -455,8 +438,9 @@ export default function VenueEventDetailPage() {
             </DialogDescription>
           </DialogHeader>
           {clientSecret && (
-            <SimulatedPaymentForm
+            <VenueTicketPaymentStep
               event={event}
+              clientSecret={clientSecret}
               paymentIntentId={paymentIntentId || ""}
               provider={paymentProvider}
               onSuccess={handlePaymentSuccess}

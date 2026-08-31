@@ -6,7 +6,8 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { SparklesIcon, CheckIcon, ZapIcon, CrownIcon, RocketIcon, AlertCircleIcon } from "@/components/ui/icons";
+import { SparklesIcon, CheckIcon, ZapIcon, CrownIcon, RocketIcon } from "@/components/ui/icons";
+import { CardPaymentForm } from "@/components/payments/CardPaymentForm";
 
 interface PromoteVenueDialogProps {
   open: boolean;
@@ -53,9 +54,9 @@ const promotionPackages = [
 export function PromoteVenueDialog({ open, onOpenChange, venueId, venueName }: PromoteVenueDialogProps) {
   const [selectedPackage, setSelectedPackage] = useState(7);
   const [paymentStep, setPaymentStep] = useState<"select" | "pay">("select");
+  const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
   const [provider, setProvider] = useState<string>("stripe");
-  const [processing, setProcessing] = useState(false);
   const { toast } = useToast();
 
   const intentMutation = useMutation({
@@ -64,6 +65,7 @@ export function PromoteVenueDialog({ open, onOpenChange, venueId, venueName }: P
       return res.json();
     },
     onSuccess: (data) => {
+      setClientSecret(data.clientSecret);
       setPaymentIntentId(data.paymentIntentId);
       setProvider(data.provider ?? "stripe");
       setPaymentStep("pay");
@@ -73,31 +75,32 @@ export function PromoteVenueDialog({ open, onOpenChange, venueId, venueName }: P
     },
   });
 
-  const handleClose = () => {
-    setPaymentStep("select");
-    setPaymentIntentId(null);
-    setProvider("stripe");
-    onOpenChange(false);
-  };
-
-  const handleConfirmPayment = async () => {
-    if (!paymentIntentId) return;
-    setProcessing(true);
-    try {
+  const confirmMutation = useMutation({
+    mutationFn: async () => {
       await apiRequest("POST", "/api/payments/venue/promote/confirm", {
         venueId,
         durationDays: selectedPackage,
         paymentIntentId,
         provider,
       });
+    },
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/my-venues"] });
       queryClient.invalidateQueries({ queryKey: ["/api/venues/promoted"] });
       toast({ title: "Venue promoted successfully!", description: "Your venue is now featured." });
       handleClose();
-    } catch {
+    },
+    onError: () => {
       toast({ title: "Failed to confirm promotion payment", variant: "destructive" });
-    }
-    setProcessing(false);
+    },
+  });
+
+  const handleClose = () => {
+    setPaymentStep("select");
+    setClientSecret(null);
+    setPaymentIntentId(null);
+    setProvider("stripe");
+    onOpenChange(false);
   };
 
   const selectedPkg = promotionPackages.find(p => p.duration === selectedPackage)!;
@@ -186,43 +189,17 @@ export function PromoteVenueDialog({ open, onOpenChange, venueId, venueName }: P
             </DialogFooter>
           </>
         ) : (
-          <div className="space-y-4 py-4">
-            <div className="rounded-lg border border-dashed border-amber-500/50 bg-amber-50 dark:bg-amber-950/20 p-4">
-              <div className="flex items-start gap-3">
-                <AlertCircleIcon className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="font-medium text-amber-800 dark:text-amber-200">Demo Mode</p>
-                  <p className="text-sm text-amber-700 dark:text-amber-300">
-                    Payments are simulated. No real charges will be made.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-lg border p-4 space-y-3">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Promotion — {selectedPkg.label}</span>
-                <span>£{selectedPkg.price}</span>
-              </div>
-              <div className="border-t pt-3 flex justify-between font-medium">
-                <span>Total</span>
-                <span>£{selectedPkg.price}</span>
-              </div>
-            </div>
-
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setPaymentStep("select")} disabled={processing}>
-                Back
-              </Button>
-              <Button
-                onClick={handleConfirmPayment}
-                disabled={processing}
-                className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600"
-                data-testid="button-confirm-promote-payment"
-              >
-                {processing ? "Processing..." : `Pay £${selectedPkg.price}`}
-              </Button>
-            </DialogFooter>
+          <div className="py-4">
+            {clientSecret && (
+              <CardPaymentForm
+                clientSecret={clientSecret}
+                provider={provider}
+                amountLabel={`£${selectedPkg.price}`}
+                itemLabel={`Promotion — ${selectedPkg.label}`}
+                onSuccess={() => confirmMutation.mutate()}
+                onCancel={() => setPaymentStep("select")}
+              />
+            )}
           </div>
         )}
       </DialogContent>
