@@ -4,17 +4,38 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 
 import AdminLayout from "./AdminLayout";
 import { Badge } from "@/components/ui/badge";
-import { PoundSterlingIcon, TicketIcon, TrendingUpIcon, CreditCardIcon, InfoIcon, AlertTriangleIcon } from "@/components/ui/icons";
+import { PoundSterlingIcon, TicketIcon, TrendingUpIcon, CreditCardIcon, InfoIcon, AlertTriangleIcon, CheckCircleIcon } from "@/components/ui/icons";
 
 interface FinanceOverview {
   totalRevenue: number;
   totalTicketsSold: number;
 }
 
+interface PaymentConfig {
+  stripeConfigured: boolean;
+  paystackConfigured: boolean;
+}
+
 export default function AdminFinance() {
   const { data: finance, isLoading } = useQuery<FinanceOverview>({
     queryKey: ["/api/admin/finance/overview"],
   });
+
+  const { data: paymentConfig } = useQuery<PaymentConfig>({
+    queryKey: ["/api/payments/config"],
+  });
+
+  const stripeLive = !!paymentConfig?.stripeConfigured;
+  const paystackLive = !!paymentConfig?.paystackConfigured;
+  const anyProviderLive = stripeLive || paystackLive;
+
+  const paymentModeLabel = stripeLive && paystackLive
+    ? "Stripe + Paystack"
+    : stripeLive
+    ? "Stripe"
+    : paystackLive
+    ? "Paystack"
+    : "Not configured";
 
   const stats = [
     {
@@ -33,7 +54,7 @@ export default function AdminFinance() {
     },
     {
       title: "Avg. Ticket Price",
-      value: finance && finance.totalTicketsSold > 0 
+      value: finance && finance.totalTicketsSold > 0
         ? `£${((finance.totalRevenue / finance.totalTicketsSold) / 100).toFixed(2)}`
         : "£0.00",
       icon: <TrendingUpIcon className="w-5 h-5" />,
@@ -42,7 +63,7 @@ export default function AdminFinance() {
     },
     {
       title: "Payment Mode",
-      value: "Demo",
+      value: paymentModeLabel,
       icon: <CreditCardIcon className="w-5 h-5" />,
       color: "bg-indigo-500/10 text-indigo-400",
       iconBg: "bg-indigo-500/20",
@@ -52,12 +73,15 @@ export default function AdminFinance() {
   return (
     <AdminLayout>
       <div className="space-y-6">
-        <Alert className="border-red-500/50 bg-red-500/10">
-          <AlertTriangleIcon className="w-4 h-4 text-red-400" />
-          <AlertDescription className="text-red-300 font-medium">
-            DEMO DATA ONLY — Real revenue tracking coming after Paystack setup
-          </AlertDescription>
-        </Alert>
+        {!anyProviderLive && (
+          <Alert className="border-amber-500/50 bg-amber-500/10">
+            <AlertTriangleIcon className="w-4 h-4 text-amber-400" />
+            <AlertDescription className="text-amber-300 font-medium">
+              No payment provider is configured yet — Stripe and Paystack keys are both unset.
+              The figures below only reflect free/RSVP activity until keys are added.
+            </AlertDescription>
+          </Alert>
+        )}
 
         <div>
           <h1 className="text-2xl font-bold text-white">Finance Overview</h1>
@@ -79,8 +103,8 @@ export default function AdminFinance() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {stats.map((stat, index) => (
-              <Card 
-                key={index} 
+              <Card
+                key={index}
                 className="bg-slate-800/50 border-slate-700"
                 data-testid={`stat-card-${stat.title.toLowerCase().replace(/\s+/g, '-')}`}
               >
@@ -112,22 +136,26 @@ export default function AdminFinance() {
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between p-4 bg-slate-700/30 rounded-lg">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-amber-500/20 rounded-lg flex items-center justify-center">
-                    <InfoIcon className="w-5 h-5 text-amber-400" />
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${anyProviderLive ? "bg-emerald-500/20" : "bg-amber-500/20"}`}>
+                    {anyProviderLive ? (
+                      <CheckCircleIcon className="w-5 h-5 text-emerald-400" />
+                    ) : (
+                      <InfoIcon className="w-5 h-5 text-amber-400" />
+                    )}
                   </div>
                   <div>
-                    <p className="text-white font-medium">Simulated Payments</p>
-                    <p className="text-sm text-slate-400">Demo Mode Active</p>
+                    <p className="text-white font-medium">{anyProviderLive ? "Live Payments" : "No Provider Configured"}</p>
+                    <p className="text-sm text-slate-400">{paymentModeLabel}</p>
                   </div>
                 </div>
-                <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30">
-                  Demo
+                <Badge className={anyProviderLive ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-amber-500/20 text-amber-400 border-amber-500/30"}>
+                  {anyProviderLive ? "Live" : "Not Configured"}
                 </Badge>
               </div>
               <p className="text-sm text-slate-400">
-                All payments are currently simulated for demonstration purposes. 
-                No real transactions are processed. Connect a payment provider 
-                for production use.
+                {anyProviderLive
+                  ? "Real card payments are processed through the provider(s) above. Ticket and promotion purchases charge a real card."
+                  : "Set STRIPE_SECRET_KEY and/or PAYSTACK_SECRET_KEY to start accepting real payments. Until then, only free RSVPs and admin-granted promotion credits go through."}
               </p>
             </CardContent>
           </Card>
@@ -145,40 +173,18 @@ export default function AdminFinance() {
                   </span>
                 </div>
                 <div className="w-full bg-slate-700 rounded-full h-2">
-                  <div 
-                    className="bg-purple-500 h-2 rounded-full" 
+                  <div
+                    className="bg-purple-500 h-2 rounded-full"
                     style={{ width: '100%' }}
                   />
                 </div>
               </div>
               <p className="text-sm text-slate-400 pt-2">
                 Revenue is calculated from all confirmed ticket purchases.
-                All amounts shown are simulated for demonstration.
               </p>
             </CardContent>
           </Card>
         </div>
-
-        <Card className="bg-slate-800/50 border-slate-700">
-          <CardHeader>
-            <CardTitle className="text-white">Demo Mode Information</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-lg">
-              <div className="flex items-start gap-3">
-                <InfoIcon className="w-5 h-5 text-amber-400 mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="text-white font-medium mb-1">Simulated Payment Environment</p>
-                  <p className="text-slate-400 text-sm">
-                    This platform is running in demo mode. All payments are simulated 
-                    and no real money is transferred. Ticket purchases are instantly 
-                    confirmed for testing purposes.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
       </div>
     </AdminLayout>
   );

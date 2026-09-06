@@ -51,7 +51,7 @@ export async function createPaystackCheckout(params: CreateCheckoutParams): Prom
   const data = await paystackRequest<PaystackInitData>("/transaction/initialize", {
     method: "POST",
     body: JSON.stringify({
-      email: `payment+${params.userId}@vib3pulse.com`, // placeholder — replace with real email lookup
+      email: params.email,
       amount: params.amountSmallestUnit,
       currency: params.currency,
       reference,
@@ -100,13 +100,13 @@ export async function verifyPaystackTransaction(reference: string): Promise<Veri
 // Paystack does not have a separate "payment intent" concept for inline payments;
 // for inline (Paystack Popup), we initialize a transaction and return the access_code
 // which the frontend uses with the Paystack JS SDK.
-export async function createPaystackInlineSession(params: CreatePaymentIntentParams & { userId: string }): Promise<PaymentIntentResult> {
+export async function createPaystackInlineSession(params: CreatePaymentIntentParams & { userId: string; email: string }): Promise<PaymentIntentResult> {
   const reference = `vib3_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
   const data = await paystackRequest<PaystackInitData>("/transaction/initialize", {
     method: "POST",
     body: JSON.stringify({
-      email: `payment+${params.userId}@vib3pulse.com`,
+      email: params.email,
       amount: params.amountSmallestUnit,
       currency: params.currency,
       reference,
@@ -120,6 +120,14 @@ export async function createPaystackInlineSession(params: CreatePaymentIntentPar
     paymentIntentId: data.reference,
     clientSecret: data.access_code,
   };
+}
+
+export async function refundPaystackPayment(reference: string): Promise<void> {
+  // Omitting `amount` triggers a full refund of the original transaction amount.
+  await paystackRequest<unknown>("/refund", {
+    method: "POST",
+    body: JSON.stringify({ transaction: reference }),
+  });
 }
 
 export function verifyPaystackWebhookSignature(rawBody: string, signature: string): boolean {

@@ -1,6 +1,6 @@
 import type { SupportedCurrency, PaymentProvider, CreateCheckoutParams, CheckoutResult, VerifiedSession, CreatePaymentIntentParams, PaymentIntentResult, VerifiedPaymentIntent } from "./types.js";
-import { createStripeCheckout, verifyStripeSession, createStripePaymentIntent, verifyStripePaymentIntent } from "./stripe.js";
-import { createPaystackCheckout, verifyPaystackTransaction, createPaystackInlineSession } from "./paystack.js";
+import { createStripeCheckout, verifyStripeSession, createStripePaymentIntent, verifyStripePaymentIntent, refundStripePayment } from "./stripe.js";
+import { createPaystackCheckout, verifyPaystackTransaction, createPaystackInlineSession, refundPaystackPayment } from "./paystack.js";
 
 export type { SupportedCurrency, PaymentProvider, CheckoutResult, VerifiedSession, VerifiedPaymentIntent };
 
@@ -51,7 +51,7 @@ export async function verifyCheckoutSession(
 }
 
 export async function createPaymentIntent(
-  params: CreatePaymentIntentParams & { userId: string }
+  params: CreatePaymentIntentParams & { userId: string; email: string }
 ): Promise<PaymentIntentResult> {
   if (params.currency === "NGN") {
     return createPaystackInlineSession(params);
@@ -65,4 +65,10 @@ export async function verifyPaymentIntent(
 ): Promise<VerifiedPaymentIntent | null> {
   if (provider === "paystack") return verifyPaystackTransaction(paymentIntentId) as any;
   return verifyStripePaymentIntent(paymentIntentId);
+}
+
+export async function refundPayment(providerPaymentId: string, provider: PaymentProvider): Promise<void> {
+  if (provider === "paystack") return refundPaystackPayment(providerPaymentId);
+  if (provider === "stripe") return refundStripePayment(providerPaymentId);
+  // "free" provider (promotion credits, free RSVPs) never charged anything to refund.
 }

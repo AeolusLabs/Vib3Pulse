@@ -7,6 +7,7 @@ import {
   verifyCheckoutSession,
   createPaymentIntent,
   verifyPaymentIntent,
+  refundPayment,
   resolveCurrency,
   providerForCurrency,
   formatAmount,
@@ -79,6 +80,7 @@ export function registerPaymentRoutes(app: Express): void {
         itemId: eventId,
         itemType: "event",
         userId,
+        email: req.user!.email,
         title: tierName,
         description: event.description,
         amountSmallestUnit,
@@ -203,6 +205,7 @@ export function registerPaymentRoutes(app: Express): void {
         amountSmallestUnit: night.coverPriceCents,
         currency,
         userId,
+        email: req.user!.email,
         metadata: {
           type: "venue_entry",
           venueEntryNightId,
@@ -254,7 +257,12 @@ export function registerPaymentRoutes(app: Express): void {
 
       const slotClaimed = await storage.claimVenueTicketSlot(venueEntryNightId);
       if (!slotClaimed) {
-        console.error(`[Payment] Oversell: venue entry night ${venueEntryNightId} is at capacity. Payment ${paymentIntentId} by user ${userId} requires manual refund.`);
+        try {
+          await refundPayment(verified.providerPaymentId, provider);
+          console.error(`[Payment] Oversell: venue entry night ${venueEntryNightId} is at capacity. Payment ${paymentIntentId} by user ${userId} auto-refunded.`);
+        } catch (refundError) {
+          console.error(`[Payment] Oversell: venue entry night ${venueEntryNightId} is at capacity. Payment ${paymentIntentId} by user ${userId} — REFUND FAILED, requires manual refund:`, refundError);
+        }
         return res.status(409).json({ message: "This entry is now sold out. Your payment will be refunded." });
       }
 
@@ -315,6 +323,7 @@ export function registerPaymentRoutes(app: Express): void {
         amountSmallestUnit: amountPence,
         currency,
         userId: req.user!.id,
+        email: req.user!.email,
         metadata: {
           type: "venue_promotion",
           venueId,
@@ -402,6 +411,7 @@ export function registerPaymentRoutes(app: Express): void {
         amountSmallestUnit: amountPence,
         currency,
         userId: req.user!.id,
+        email: req.user!.email,
         metadata: {
           type: "event_promotion",
           eventId,
@@ -509,17 +519,23 @@ export function registerPaymentRoutes(app: Express): void {
             if (night) {
               const slotClaimed = await storage.claimVenueTicketSlot(meta.venueEntryNightId);
               if (!slotClaimed) {
-                console.error(`[Stripe Webhook] Oversell: venue entry night ${meta.venueEntryNightId} at capacity. Payment ${intent.id} for user ${meta.userId} requires manual refund.`);
+                try {
+                  await refundPayment(intent.id, "stripe");
+                  console.error(`[Stripe Webhook] Oversell: venue entry night ${meta.venueEntryNightId} at capacity. Payment ${intent.id} for user ${meta.userId} auto-refunded.`);
+                } catch (refundError) {
+                  console.error(`[Stripe Webhook] Oversell: venue entry night ${meta.venueEntryNightId} at capacity. Payment ${intent.id} for user ${meta.userId} — REFUND FAILED, requires manual refund:`, refundError);
+                }
+              } else {
+                await storage.createVenueTicket({
+                  userId: meta.userId,
+                  venueEntryNightId: meta.venueEntryNightId,
+                  providerPaymentId: intent.id,
+                  paymentProvider: "stripe",
+                  currency: (intent.currency?.toUpperCase() ?? "GBP"),
+                  amountPaid: intent.amount,
+                  status: "confirmed",
+                });
               }
-              await storage.createVenueTicket({
-                userId: meta.userId,
-                venueEntryNightId: meta.venueEntryNightId,
-                providerPaymentId: intent.id,
-                paymentProvider: "stripe",
-                currency: (intent.currency?.toUpperCase() ?? "GBP"),
-                amountPaid: intent.amount,
-                status: "confirmed",
-              });
             }
           }
           break;
@@ -577,17 +593,23 @@ export function registerPaymentRoutes(app: Express): void {
             } else if (meta.venueEntryNightId) {
               const slotClaimed = await storage.claimVenueTicketSlot(meta.venueEntryNightId);
               if (!slotClaimed) {
-                console.error(`[Paystack Webhook] Oversell: venue entry night ${meta.venueEntryNightId} at capacity. Reference ${reference} for user ${meta.userId} requires manual refund.`);
+                try {
+                  await refundPayment(reference, "paystack");
+                  console.error(`[Paystack Webhook] Oversell: venue entry night ${meta.venueEntryNightId} at capacity. Reference ${reference} for user ${meta.userId} auto-refunded.`);
+                } catch (refundError) {
+                  console.error(`[Paystack Webhook] Oversell: venue entry night ${meta.venueEntryNightId} at capacity. Reference ${reference} for user ${meta.userId} — REFUND FAILED, requires manual refund:`, refundError);
+                }
+              } else {
+                await storage.createVenueTicket({
+                  userId: meta.userId!,
+                  venueEntryNightId: meta.venueEntryNightId,
+                  providerPaymentId: reference,
+                  paymentProvider: "paystack",
+                  currency: verified.currency,
+                  amountPaid: verified.amountSmallestUnit,
+                  status: "confirmed",
+                });
               }
-              await storage.createVenueTicket({
-                userId: meta.userId!,
-                venueEntryNightId: meta.venueEntryNightId,
-                providerPaymentId: reference,
-                paymentProvider: "paystack",
-                currency: verified.currency,
-                amountPaid: verified.amountSmallestUnit,
-                status: "confirmed",
-              });
             }
           }
         }

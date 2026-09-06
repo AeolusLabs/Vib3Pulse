@@ -5,6 +5,7 @@ export interface CreateCheckoutParams {
   itemId: string;        // eventId or venueEntryNightId
   itemType: "event" | "venue_entry";
   userId: string;
+  email: string;
   title: string;
   description: string;
   amountSmallestUnit: number; // pence for GBP, kobo for NGN

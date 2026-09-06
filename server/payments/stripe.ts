@@ -114,6 +114,11 @@ export async function verifyStripePaymentIntent(paymentIntentId: string): Promis
   }
 }
 
+export async function refundStripePayment(paymentIntentId: string): Promise<void> {
+  const stripe = getStripeClient();
+  await stripe.refunds.create({ payment_intent: paymentIntentId });
+}
+
 export function constructStripeWebhookEvent(rawBody: Buffer, signature: string): Stripe.Event {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!secret) throw new Error("STRIPE_WEBHOOK_SECRET is not set");
