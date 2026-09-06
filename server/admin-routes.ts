@@ -510,6 +510,38 @@ export function setupAdminRoutes(app: Express) {
     }
   });
 
+  // Grant/adjust a user's free promotion credits (each credit waives payment
+  // on one event or venue promotion — see /api/payments/*/promote/intent)
+  app.patch("/api/admin/users/:id/promotion-credits", requireRole("super_admin"), async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const { credits } = z.object({
+        credits: z.number().int().min(0).max(1000),
+      }).parse(req.body);
+
+      const user = await storage.setUserPromotionCredits(id, credits);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      await logActivity(
+        req.session.adminId!,
+        "set_promotion_credits",
+        "user",
+        id,
+        `Set free promotion credits to ${credits}`,
+        req.ip
+      );
+
+      res.json({ id: user.id, freePromotionCredits: user.freePromotionCredits });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "credits must be an integer between 0 and 1000" });
+      }
+      res.status(500).json({ message: "Failed to update promotion credits" });
+    }
+  });
+
   // Suspend user
   app.post("/api/admin/users/:id/suspend", requireRole("super_admin", "user_support"), async (req: Request, res: Response) => {
     try {

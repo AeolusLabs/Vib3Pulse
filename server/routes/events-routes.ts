@@ -526,30 +526,10 @@ export function registerEventsRoutes(app: Express): void {
     }
   });
 
-  // Event Promotion & Analytics
-  app.post("/api/events/:id/promote", requireOrganizer, async (req, res) => {
-    try {
-      const event = await storage.getEvent(req.params.id);
-      if (!event) {
-        return res.status(404).json({ message: "Event not found" });
-      }
-
-      if (event.organizerId !== req.user!.id) {
-        return res.status(403).json({ message: "Not authorized to promote this event" });
-      }
-
-      const { durationDays } = req.body;
-      if (!durationDays || typeof durationDays !== 'number' || durationDays < 1 || durationDays > 30) {
-        return res.status(400).json({ message: "Invalid duration. Must be between 1 and 30 days" });
-      }
-
-      const promotedEvent = await storage.promoteEvent(req.params.id, durationDays);
-      res.json(promotedEvent);
-    } catch (error) {
-      console.error('Error promoting event:', error);
-      res.status(500).json({ message: "Failed to promote event" });
-    }
-  });
+  // Event promotion (paid — see /api/payments/event/promote/intent + /confirm in
+  // payment-routes.ts) previously lived at this same path as a free bypass, which
+  // also silently shadowed the social cross-posting handler registered later at
+  // this exact route in socialRoutes.ts. Removing it here un-shadows that handler.
 
   app.get("/api/events/:id/analytics", requireOrganizer, async (req, res) => {
     try {

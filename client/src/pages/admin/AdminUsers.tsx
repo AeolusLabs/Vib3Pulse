@@ -28,7 +28,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import AdminLayout from "./AdminLayout";
 import { format } from "date-fns";
-import { SearchIcon, BanIcon, EyeIcon, Trash2Icon, CheckCircleIcon } from "@/components/ui/icons";
+import { SearchIcon, BanIcon, EyeIcon, Trash2Icon, CheckCircleIcon, SparklesIcon } from "@/components/ui/icons";
 
 interface ActiveSuspension {
   id: string;
@@ -44,6 +44,7 @@ interface User {
   userType: string;
   createdAt: string;
   activeSuspension: ActiveSuspension | null;
+  freePromotionCredits: number;
 }
 
 export default function AdminUsers() {
@@ -54,6 +55,8 @@ export default function AdminUsers() {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [suspendReason, setSuspendReason] = useState("");
   const [isPermanent, setIsPermanent] = useState(false);
+  const [creditsDialogOpen, setCreditsDialogOpen] = useState(false);
+  const [creditsInput, setCreditsInput] = useState("0");
 
   const { data, isLoading } = useQuery<{ users: User[]; total: number }>({
     queryKey: ["/api/admin/users"],
@@ -94,6 +97,22 @@ export default function AdminUsers() {
     },
   });
 
+  const creditsMutation = useMutation({
+    mutationFn: async ({ userId, credits }: { userId: string; credits: number }) => {
+      const response = await apiRequest("PATCH", `/api/admin/users/${userId}/promotion-credits`, { credits });
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Promotion credits updated" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      setCreditsDialogOpen(false);
+      setSelectedUser(null);
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to update promotion credits", description: error.message, variant: "destructive" });
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: async (userId: string) => {
       const response = await apiRequest("DELETE", `/api/admin/users/${userId}`);
@@ -119,6 +138,13 @@ export default function AdminUsers() {
   const handleSuspend = () => {
     if (selectedUser && suspendReason.trim()) {
       suspendMutation.mutate({ userId: selectedUser.id, reason: suspendReason, isPermanent });
+    }
+  };
+
+  const handleSaveCredits = () => {
+    const parsed = parseInt(creditsInput, 10);
+    if (selectedUser && Number.isInteger(parsed) && parsed >= 0) {
+      creditsMutation.mutate({ userId: selectedUser.id, credits: parsed });
     }
   };
 
@@ -158,6 +184,7 @@ export default function AdminUsers() {
                     <TableHead className="text-slate-400">Email</TableHead>
                     <TableHead className="text-slate-400">Type</TableHead>
                     <TableHead className="text-slate-400">Status</TableHead>
+                    <TableHead className="text-slate-400">Promo Credits</TableHead>
                     <TableHead className="text-slate-400">Joined</TableHead>
                     <TableHead className="text-slate-400 text-right">Actions</TableHead>
                   </TableRow>
@@ -187,6 +214,15 @@ export default function AdminUsers() {
                           <Badge variant="outline" className="border-green-500 text-green-400">Active</Badge>
                         )}
                       </TableCell>
+                      <TableCell className="text-slate-300">
+                        {user.freePromotionCredits > 0 ? (
+                          <Badge variant="outline" className="border-purple-500 text-purple-400">
+                            {user.freePromotionCredits}
+                          </Badge>
+                        ) : (
+                          <span className="text-slate-500">0</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-slate-400">
                         {format(new Date(user.createdAt), 'MMM d, yyyy')}
                       </TableCell>
@@ -199,6 +235,19 @@ export default function AdminUsers() {
                             data-testid={`button-view-user-${user.id}`}
                           >
                             <EyeIcon className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-purple-400 hover:text-purple-300"
+                            onClick={() => {
+                              setSelectedUser(user);
+                              setCreditsInput(String(user.freePromotionCredits));
+                              setCreditsDialogOpen(true);
+                            }}
+                            data-testid={`button-edit-credits-${user.id}`}
+                          >
+                            <SparklesIcon className="w-4 h-4" />
                           </Button>
                           {user.activeSuspension ? (
                             <Button
@@ -284,6 +333,43 @@ export default function AdminUsers() {
                 data-testid="button-confirm-suspend"
               >
                 {suspendMutation.isPending ? "Suspending..." : "Suspend User"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Promotion Credits Dialog */}
+        <Dialog open={creditsDialogOpen} onOpenChange={setCreditsDialogOpen}>
+          <DialogContent className="bg-slate-800 border-slate-700">
+            <DialogHeader>
+              <DialogTitle className="text-white">Free Promotion Credits</DialogTitle>
+              <DialogDescription className="text-slate-400">
+                Set how many free promotions {selectedUser?.username} can use. Each credit waives payment on
+                one event or venue promotion. Currently: {selectedUser?.freePromotionCredits ?? 0}.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2 py-4">
+              <Label className="text-slate-300">Credits</Label>
+              <Input
+                type="number"
+                min={0}
+                max={1000}
+                value={creditsInput}
+                onChange={(e) => setCreditsInput(e.target.value)}
+                className="bg-slate-700/50 border-slate-600 text-white"
+                data-testid="input-promotion-credits"
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setCreditsDialogOpen(false)} className="border-slate-600">
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSaveCredits}
+                disabled={creditsMutation.isPending}
+                data-testid="button-save-promotion-credits"
+              >
+                {creditsMutation.isPending ? "Saving..." : "Save"}
               </Button>
             </DialogFooter>
           </DialogContent>

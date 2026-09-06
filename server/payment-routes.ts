@@ -302,6 +302,12 @@ export function registerPaymentRoutes(app: Express): void {
       if (!venue) return res.status(404).json({ message: "Venue not found" });
       if (venue.ownerId !== req.user!.id) return res.status(403).json({ message: "You can only promote your own venues" });
 
+      const usedFreeCredit = await storage.claimFreePromotionCredit(req.user!.id);
+      if (usedFreeCredit) {
+        const promotedVenue = await storage.promoteVenue(venueId, durationDays);
+        return res.json({ free: true, venue: promotedVenue });
+      }
+
       const amountPence = PROMOTION_PRICES_PENCE[durationDays];
       const currency = resolveCurrency(venue.city ?? null);
 
@@ -363,6 +369,93 @@ export function registerPaymentRoutes(app: Express): void {
       }
       console.error("[Payment] Venue promote confirm error:", error);
       res.status(500).json({ message: "Failed to confirm venue promotion" });
+    }
+  });
+
+  // ============================================================
+  // EVENT PROMOTION PAYMENT
+  // ============================================================
+
+  app.post("/api/payments/event/promote/intent", requireAuth, sensitiveOperationLimiter, async (req, res) => {
+    try {
+      const { eventId, durationDays } = z.object({
+        eventId: z.string().min(1),
+        durationDays: z.number().int().refine(d => d in PROMOTION_PRICES_PENCE, {
+          message: "Invalid promotion duration",
+        }),
+      }).parse(req.body);
+
+      const event = await storage.getEvent(eventId);
+      if (!event) return res.status(404).json({ message: "Event not found" });
+      if (event.organizerId !== req.user!.id) return res.status(403).json({ message: "You can only promote your own events" });
+
+      const usedFreeCredit = await storage.claimFreePromotionCredit(req.user!.id);
+      if (usedFreeCredit) {
+        const promotedEvent = await storage.promoteEvent(eventId, durationDays);
+        return res.json({ free: true, event: promotedEvent });
+      }
+
+      const amountPence = PROMOTION_PRICES_PENCE[durationDays];
+      const currency = resolveCurrency(event.city ?? null);
+
+      const intent = await createPaymentIntent({
+        amountSmallestUnit: amountPence,
+        currency,
+        userId: req.user!.id,
+        metadata: {
+          type: "event_promotion",
+          eventId,
+          durationDays: String(durationDays),
+          userId: req.user!.id,
+        },
+      });
+
+      res.json({
+        clientSecret: intent.clientSecret,
+        paymentIntentId: intent.paymentIntentId,
+        provider: intent.provider,
+        currency: intent.currency,
+        amount: formatAmount(amountPence, currency),
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: error.errors[0]?.message ?? "Invalid request" });
+      }
+      console.error("[Payment] Event promote intent error:", error);
+      res.status(500).json({ message: "Failed to create promotion payment" });
+    }
+  });
+
+  app.post("/api/payments/event/promote/confirm", requireAuth, async (req, res) => {
+    try {
+      const { eventId, durationDays, paymentIntentId, provider } = z.object({
+        eventId: z.string().min(1),
+        durationDays: z.number().int().refine(d => d in PROMOTION_PRICES_PENCE),
+        paymentIntentId: z.string().min(1),
+        provider: z.enum(["stripe", "paystack"]),
+      }).parse(req.body);
+
+      const event = await storage.getEvent(eventId);
+      if (!event) return res.status(404).json({ message: "Event not found" });
+      if (event.organizerId !== req.user!.id) return res.status(403).json({ message: "You can only promote your own events" });
+
+      const verified = await verifyPaymentIntent(paymentIntentId, provider);
+      if (!verified || !verified.paid) {
+        return res.status(402).json({ message: "Payment not confirmed" });
+      }
+
+      if (verified.metadata?.userId !== req.user!.id) {
+        return res.status(403).json({ message: "Payment does not belong to this account" });
+      }
+
+      const promotedEvent = await storage.promoteEvent(eventId, durationDays);
+      res.json({ message: "Event promoted successfully", event: promotedEvent });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "eventId, durationDays, paymentIntentId, and provider are required" });
+      }
+      console.error("[Payment] Event promote confirm error:", error);
+      res.status(500).json({ message: "Failed to confirm event promotion" });
     }
   });
 

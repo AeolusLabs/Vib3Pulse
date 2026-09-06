@@ -65,6 +65,13 @@ export function PromoteVenueDialog({ open, onOpenChange, venueId, venueName }: P
       return res.json();
     },
     onSuccess: (data) => {
+      if (data.free) {
+        queryClient.invalidateQueries({ queryKey: ["/api/my-venues"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/venues/promoted"] });
+        toast({ title: "Venue promoted successfully!", description: "Used a free promotion credit." });
+        handleClose();
+        return;
+      }
       setClientSecret(data.clientSecret);
       setPaymentIntentId(data.paymentIntentId);
       setProvider(data.provider ?? "stripe");

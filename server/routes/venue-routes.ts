@@ -198,30 +198,9 @@ export function registerVenueRoutes(app: Express): void {
     }
   });
 
-  // Promote venue
-  app.post("/api/venues/:id/promote", requireOrganizer, async (req, res) => {
-    try {
-      const venue = await storage.getVenue(req.params.id);
-      if (!venue) {
-        return res.status(404).json({ message: "Venue not found" });
-      }
-
-      if (venue.ownerId !== req.user!.id) {
-        return res.status(403).json({ message: "You can only promote your own venues" });
-      }
-
-      const { durationDays } = req.body;
-      if (!durationDays || ![3, 7, 14, 30].includes(durationDays)) {
-        return res.status(400).json({ message: "Invalid promotion duration" });
-      }
-
-      const promotedVenue = await storage.promoteVenue(req.params.id, durationDays);
-      res.json(promotedVenue);
-    } catch (error) {
-      console.error("Promote venue error:", error);
-      res.status(500).json({ message: "Failed to promote venue" });
-    }
-  });
+  // Venue promotion is paid — see /api/payments/venue/promote/intent + /confirm
+  // in payment-routes.ts. This used to also exist here as an unguarded free
+  // bypass sitting right next to the paid flow; removed.
 
   // Get venue analytics
   app.get("/api/venues/:id/analytics", requireOrganizer, async (req, res) => {

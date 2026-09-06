@@ -34,6 +34,9 @@ export const users = pgTable("users", {
   isVerified: boolean("is_verified").notNull().default(false),
   isOfficial: boolean("is_official").notNull().default(false),
   zernioProfileId: varchar("zernio_profile_id", { length: 255 }).unique(),
+  // Admin-granted credits letting an account promote an event/venue without
+  // paying — each successful promotion (event or venue) consumes exactly one.
+  freePromotionCredits: integer("free_promotion_credits").notNull().default(0),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 

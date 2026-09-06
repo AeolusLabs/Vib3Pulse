@@ -543,6 +543,10 @@ export interface IStorage {
   getPromotedVenues(): Promise<Venue[]>;
   promoteVenue(venueId: string, durationDays: number): Promise<Venue>;
 
+  // Free promotion credits (admin-granted) — event and venue promotion share the pool
+  claimFreePromotionCredit(userId: string): Promise<boolean>;
+  setUserPromotionCredits(userId: string, credits: number): Promise<User>;
+
   // Venue events methods (formerly "entry nights")
   getVenueEntryNights(venueId: string): Promise<VenueEntryNight[]>;
   getUpcomingVenueEntryNights(venueId: string): Promise<VenueEntryNight[]>;
@@ -2774,7 +2778,25 @@ export class DbStorage implements IStorage {
       .set({ isPromoted: true, promotedUntil })
       .where(eq(venues.id, venueId))
       .returning();
-    
+
+    return result[0];
+  }
+
+  async claimFreePromotionCredit(userId: string): Promise<boolean> {
+    const result = await db
+      .update(users)
+      .set({ freePromotionCredits: sql`${users.freePromotionCredits} - 1` })
+      .where(and(eq(users.id, userId), gt(users.freePromotionCredits, 0)))
+      .returning({ id: users.id });
+    return result.length > 0;
+  }
+
+  async setUserPromotionCredits(userId: string, credits: number): Promise<User> {
+    const result = await db
+      .update(users)
+      .set({ freePromotionCredits: credits })
+      .where(eq(users.id, userId))
+      .returning();
     return result[0];
   }
 
