@@ -145,6 +145,9 @@ import {
   socialPosts,
   type ConnectedSocial,
   type SocialPost,
+  paymentIssues,
+  type PaymentIssue,
+  type InsertPaymentIssue,
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
@@ -321,6 +324,33 @@ export async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_social_posts_posted_at
       ON social_posts(posted_at)
   `);
+
+  // Event ticket oversell guard + soft-cancellation (payment system Phase 1 fixes)
+  await pool.query(`
+    ALTER TABLE events ADD COLUMN IF NOT EXISTS tickets_sold INTEGER NOT NULL DEFAULT 0
+  `);
+  await pool.query(`
+    ALTER TABLE events ADD COLUMN IF NOT EXISTS is_cancelled BOOLEAN NOT NULL DEFAULT false
+  `);
+  await pool.query(`
+    ALTER TABLE events ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP
+  `);
+  await pool.query(`
+    ALTER TABLE ticket_tiers ADD COLUMN IF NOT EXISTS sold INTEGER NOT NULL DEFAULT 0
+  `);
+  // Refund failures that previously only went to console.error — now queryable.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS payment_issues (
+      id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      ticket_id VARCHAR,
+      provider_payment_id TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      reason TEXT NOT NULL DEFAULT 'refund_failed',
+      error_message TEXT,
+      resolved_at TIMESTAMP,
+      created_at TIMESTAMP NOT NULL DEFAULT now()
+    )
+  `);
 }
 
 export interface IStorage {
@@ -360,6 +390,15 @@ export interface IStorage {
   createTicket(ticket: InsertTicket): Promise<Ticket>;
   checkInTicket(ticketId: string, organizerId: string): Promise<Ticket>;
   getEventCheckIns(eventId: string): Promise<Array<Ticket & { user: User }>>;
+  // Atomic oversell guard for event tickets — mirrors claimVenueTicketSlot.
+  // Pass ticketTierId when the purchase was for a specific tier, null for a plain event ticket.
+  claimEventTicketSlot(eventId: string, ticketTierId: string | null): Promise<boolean>;
+  // Event cancellation with refunds — orchestration (calling the payment provider) lives
+  // in the route handler; storage only provides the DB primitives it needs.
+  getConfirmedTicketsForEvent(eventId: string): Promise<Ticket[]>;
+  markEventCancelled(eventId: string): Promise<Event>;
+  markTicketRefunded(ticketId: string): Promise<void>;
+  createPaymentIssue(issue: InsertPaymentIssue): Promise<PaymentIssue>;
 
   getEventTicketTiers(eventId: string): Promise<TicketTier[]>;
   getTicketTier(id: string): Promise<TicketTier | undefined>;
@@ -652,7 +691,16 @@ export interface IStorage {
     totalUsers: number;
     totalEvents: number;
     totalTicketsSold: number;
-    totalRevenue: number;
+    totalVenueTicketsSold: number;
+    // Revenue split by currency — GBP pence and NGN kobo must never be summed together.
+    revenueByCurrency: Array<{
+      currency: string;
+      ticketsSold: number;
+      ticketRevenue: number;
+      venueTicketsSold: number;
+      venueRevenue: number;
+      totalRevenue: number;
+    }>;
     activeUsers: number;
     newUsersToday: number;
     pendingReports: number;
@@ -2934,6 +2982,35 @@ export class DbStorage implements IStorage {
     return result.length > 0;
   }
 
+  // Atomic oversell guard for event tickets. Mirrors claimVenueTicketSlot exactly:
+  // a single conditional UPDATE means two concurrent buyers racing for the last slot
+  // can't both succeed. Tiered events track capacity on ticket_tiers.sold; events with
+  // no tiers track it on events.tickets_sold.
+  async claimEventTicketSlot(eventId: string, ticketTierId: string | null): Promise<boolean> {
+    if (ticketTierId) {
+      const result = await db
+        .update(ticketTiers)
+        .set({ sold: sql`${ticketTiers.sold} + 1` })
+        .where(and(
+          eq(ticketTiers.id, ticketTierId),
+          eq(ticketTiers.eventId, eventId),
+          gt(ticketTiers.quantity, ticketTiers.sold)
+        ))
+        .returning({ id: ticketTiers.id });
+      return result.length > 0;
+    }
+
+    const result = await db
+      .update(events)
+      .set({ ticketsSold: sql`${events.ticketsSold} + 1` })
+      .where(and(
+        eq(events.id, eventId),
+        gt(events.ticketsAvailable, events.ticketsSold)
+      ))
+      .returning({ id: events.id });
+    return result.length > 0;
+  }
+
   async getVenueEventCheckIns(venueEntryNightId: string): Promise<Array<VenueTicket & { user: User }>> {
     const result = await db
       .select()
@@ -3580,7 +3657,15 @@ export class DbStorage implements IStorage {
     totalUsers: number;
     totalEvents: number;
     totalTicketsSold: number;
-    totalRevenue: number;
+    totalVenueTicketsSold: number;
+    revenueByCurrency: Array<{
+      currency: string;
+      ticketsSold: number;
+      ticketRevenue: number;
+      venueTicketsSold: number;
+      venueRevenue: number;
+      totalRevenue: number;
+    }>;
     activeUsers: number;
     newUsersToday: number;
     pendingReports: number;
@@ -3588,26 +3673,66 @@ export class DbStorage implements IStorage {
   }> {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
+
     const [userCount] = await db.select({ count: count() }).from(users);
     const [eventCount] = await db.select({ count: count() }).from(events);
-    const [ticketCount] = await db.select({ count: count() }).from(tickets);
+    // "Sold" means actually paid and not refunded — count only confirmed tickets.
+    const [ticketCount] = await db.select({ count: count() }).from(tickets).where(eq(tickets.status, 'confirmed'));
+    const [venueTicketCount] = await db.select({ count: count() }).from(venueTickets).where(eq(venueTickets.status, 'confirmed'));
     const [pendingReportCount] = await db.select({ count: count() }).from(contentReports).where(eq(contentReports.status, 'pending'));
     const [newUserCount] = await db.select({ count: count() }).from(users).where(gte(users.createdAt, today));
     const [organizerCount] = await db.select({ count: count() }).from(users).where(eq(users.userType, 'organizer'));
     const [verifiedCount] = await db.select({ count: count() }).from(users).where(eq(users.isVerified, true));
-    
-    const [revenueResult] = await db
-      .select({ total: sql<number>`COALESCE(SUM(${events.ticketPrice}), 0)` })
+
+    // Revenue must use what was actually charged (tickets.amountPaid), never the
+    // event's current listed price — and GBP pence / NGN kobo can never be summed
+    // together, so this is grouped by currency instead of collapsed to one number.
+    const ticketRevenueByCurrency = await db
+      .select({
+        currency: tickets.currency,
+        ticketsSold: sql<number>`count(*)::int`,
+        ticketRevenue: sql<number>`coalesce(sum(${tickets.amountPaid}), 0)::int`,
+      })
       .from(tickets)
-      .innerJoin(events, eq(tickets.eventId, events.id));
-    const totalRevenue = Number(revenueResult?.total || 0);
+      .where(eq(tickets.status, 'confirmed'))
+      .groupBy(tickets.currency);
+
+    const venueRevenueByCurrency = await db
+      .select({
+        currency: venueTickets.currency,
+        venueTicketsSold: sql<number>`count(*)::int`,
+        venueRevenue: sql<number>`coalesce(sum(${venueTickets.amountPaid}), 0)::int`,
+      })
+      .from(venueTickets)
+      .where(eq(venueTickets.status, 'confirmed'))
+      .groupBy(venueTickets.currency);
+
+    const currencies = Array.from(new Set([
+      ...ticketRevenueByCurrency.map(r => r.currency),
+      ...venueRevenueByCurrency.map(r => r.currency),
+    ]));
+
+    const revenueByCurrency = currencies.map(currency => {
+      const t = ticketRevenueByCurrency.find(r => r.currency === currency);
+      const v = venueRevenueByCurrency.find(r => r.currency === currency);
+      const ticketRevenue = Number(t?.ticketRevenue || 0);
+      const venueRevenue = Number(v?.venueRevenue || 0);
+      return {
+        currency,
+        ticketsSold: Number(t?.ticketsSold || 0),
+        ticketRevenue,
+        venueTicketsSold: Number(v?.venueTicketsSold || 0),
+        venueRevenue,
+        totalRevenue: ticketRevenue + venueRevenue,
+      };
+    });
 
     return {
       totalUsers: Number(userCount?.count || 0),
       totalEvents: Number(eventCount?.count || 0),
       totalTicketsSold: Number(ticketCount?.count || 0),
-      totalRevenue,
+      totalVenueTicketsSold: Number(venueTicketCount?.count || 0),
+      revenueByCurrency,
       activeUsers: Number(verifiedCount?.count || 0),
       newUsersToday: Number(newUserCount?.count || 0),
       pendingReports: Number(pendingReportCount?.count || 0),
@@ -3678,12 +3803,15 @@ export class DbStorage implements IStorage {
       currency: 'GBP',
       requiresRSVP: false,
       ticketsAvailable: r.venueEntry.capacity ?? 0,
+      ticketsSold: r.venueEntry.ticketsSold,
       imageUrl: r.venueEntry.imageUrl ?? null,
       externalTicketUrl: null,
       isPromoted: false,
       promotedUntil: null,
       isPublished: r.venueEntry.isActive,
       moderationStatus: r.venueEntry.moderationStatus,
+      isCancelled: false,
+      cancelledAt: null,
       communityId: null,
       organizer: r.organizer,
       sourceType: 'venue_entry' as const,
@@ -3707,6 +3835,36 @@ export class DbStorage implements IStorage {
     // Delete the event — ticket_tiers cascade automatically
     await db.delete(events).where(eq(events.id, id));
     invalidateCache.events();
+  }
+
+  // Confirmed (i.e. paid-and-not-yet-refunded) tickets for an event — used by the
+  // cancel-event flow to know who needs a refund and a notification.
+  async getConfirmedTicketsForEvent(eventId: string): Promise<Ticket[]> {
+    return await db
+      .select()
+      .from(tickets)
+      .where(and(eq(tickets.eventId, eventId), eq(tickets.status, 'confirmed')));
+  }
+
+  // Soft-cancel: keeps the event row (and its tickets) so refunds and history survive.
+  // Use instead of deleteEvent() whenever the event has confirmed tickets.
+  async markEventCancelled(eventId: string): Promise<Event> {
+    const result = await db
+      .update(events)
+      .set({ isCancelled: true, isPublished: false, cancelledAt: new Date() })
+      .where(eq(events.id, eventId))
+      .returning();
+    invalidateCache.events();
+    return result[0];
+  }
+
+  async markTicketRefunded(ticketId: string): Promise<void> {
+    await db.update(tickets).set({ status: 'refunded' }).where(eq(tickets.id, ticketId));
+  }
+
+  async createPaymentIssue(issue: InsertPaymentIssue): Promise<PaymentIssue> {
+    const result = await db.insert(paymentIssues).values(issue).returning();
+    return result[0];
   }
 
   async getAllStoriesAdmin(limit: number = 50): Promise<Array<Story & { user: User }>> {

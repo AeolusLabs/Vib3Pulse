@@ -37,6 +37,7 @@ export async function createStripeCheckout(params: CreateCheckoutParams): Promis
       itemId: params.itemId,
       itemType: params.itemType,
       userId: params.userId,
+      ...(params.ticketTierId ? { ticketTierId: params.ticketTierId } : {}),
     },
     success_url: params.successUrl.includes("{CHECKOUT_SESSION_ID}")
       ? params.successUrl.replace("{CHECKOUT_SESSION_ID}", "{CHECKOUT_SESSION_ID}")
@@ -71,6 +72,7 @@ export async function verifyStripeSession(sessionId: string): Promise<VerifiedSe
       metadata: {
         eventId: meta.itemType === "event" ? meta.itemId : undefined,
         venueEntryNightId: meta.itemType === "venue_entry" ? meta.itemId : undefined,
+        ticketTierId: meta.ticketTierId || undefined,
         userId: meta.userId,
       },
     };

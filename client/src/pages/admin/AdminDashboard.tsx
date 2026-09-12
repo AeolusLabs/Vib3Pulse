@@ -8,15 +8,30 @@ import { apiRequest } from "@/lib/queryClient";
 import { UsersIcon, CalendarIcon, TicketIcon, PoundSterlingIcon, UserPlusIcon, FlagIcon, TrendingUpIcon, ImageIcon, Loader2Icon } from "@/components/ui/icons";
 import { Building, Wrench } from "lucide-react";
 
+interface CurrencyRevenue {
+  currency: string;
+  totalRevenue: number;
+}
+
 interface PlatformStats {
   totalUsers: number;
   totalEvents: number;
   totalTicketsSold: number;
-  totalRevenue: number;
+  totalVenueTicketsSold: number;
+  revenueByCurrency: CurrencyRevenue[];
   activeUsers: number;
   newUsersToday: number;
   pendingReports: number;
   activeOrganizers: number;
+}
+
+// Mirrors server/payments/index.ts formatAmount() — GBP pence and NGN kobo
+// are never combined into one figure.
+function formatMoney(amountSmallestUnit: number, currency: string): string {
+  if (currency === "NGN") {
+    return `₦${(amountSmallestUnit / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })}`;
+  }
+  return `£${(amountSmallestUnit / 100).toFixed(2)}`;
 }
 
 export default function AdminDashboard() {
@@ -71,13 +86,13 @@ export default function AdminDashboard() {
       color: "bg-green-500/10 text-green-400",
       iconBg: "bg-green-500/20",
     },
-    {
-      title: "Total Revenue",
-      value: `£${((stats?.totalRevenue || 0) / 100).toFixed(2)}`,
+    ...((stats?.revenueByCurrency?.length ? stats.revenueByCurrency : [{ currency: "GBP", totalRevenue: 0 }]).map((r) => ({
+      title: `Revenue (${r.currency})`,
+      value: formatMoney(r.totalRevenue, r.currency),
       icon: <PoundSterlingIcon className="w-5 h-5" />,
       color: "bg-emerald-500/10 text-emerald-400",
       iconBg: "bg-emerald-500/20",
-    },
+    }))),
     {
       title: "New Users Today",
       value: stats?.newUsersToday || 0,

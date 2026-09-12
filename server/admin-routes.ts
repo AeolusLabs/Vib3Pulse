@@ -843,13 +843,14 @@ export function setupAdminRoutes(app: Express) {
   // FINANCE (Finance Manager + Super Admin)
   // ============================================
 
-  // Get payment/ticket overview (placeholder for Stripe integration)
+  // Get payment/ticket overview
   app.get("/api/admin/finance/overview", requireRole("super_admin", "finance_manager"), async (req: Request, res: Response) => {
     try {
       const stats = await storage.getPlatformStats();
       res.json({
-        totalRevenue: stats.totalRevenue,
+        revenueByCurrency: stats.revenueByCurrency,
         totalTicketsSold: stats.totalTicketsSold,
+        totalVenueTicketsSold: stats.totalVenueTicketsSold,
       });
     } catch (error) {
       res.status(500).json({ message: "Failed to get finance overview" });

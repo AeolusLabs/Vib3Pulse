@@ -95,17 +95,27 @@ export const events = pgTable("events", {
   currency: text("currency").notNull().default("GBP"),
   requiresRSVP: boolean("requires_rsvp").notNull().default(false),
   ticketsAvailable: integer("tickets_available").notNull(),
+  // Atomic oversell guard for events with no ticket tiers — see claimEventTicketSlot()
+  // in storage.ts. Tiered events track sold count on ticket_tiers.sold instead.
+  ticketsSold: integer("tickets_sold").notNull().default(0),
   imageUrl: text("image_url"),
   externalTicketUrl: text("external_ticket_url"),
   isPromoted: boolean("is_promoted").notNull().default(false),
   promotedUntil: timestamp("promoted_until"),
   isPublished: boolean("is_published").notNull().default(true),
   moderationStatus: text("moderation_status").notNull().default("pending"),
+  // Soft-cancellation — set by cancelEventWithRefunds() instead of hard-deleting
+  // an event that already has paid tickets, so refunds have something to point at.
+  isCancelled: boolean("is_cancelled").notNull().default(false),
+  cancelledAt: timestamp("cancelled_at"),
   communityId: varchar("community_id").references(() => communities.id, { onDelete: "set null" }),
 });
 
 export const insertEventSchema = createInsertSchema(events).omit({
   id: true,
+  ticketsSold: true,
+  isCancelled: true,
+  cancelledAt: true,
 }).extend({
   eventDate: z.coerce.date(),
   eventEndDate: z.coerce.date().optional().nullable(),
@@ -135,6 +145,8 @@ export const ticketTiers = pgTable("ticket_tiers", {
   priceSmallestUnit: integer("price_smallest_unit").notNull(), // pence for GBP, kobo for NGN
   currency: text("currency").notNull().default("GBP"), // 'GBP' | 'NGN'
   quantity: integer("quantity").notNull(),
+  // Atomic oversell guard — see claimEventTicketSlot() in storage.ts.
+  sold: integer("sold").notNull().default(0),
   salesEndDate: timestamp("sales_end_date"),
   dayDate: timestamp("day_date"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
@@ -142,6 +154,7 @@ export const ticketTiers = pgTable("ticket_tiers", {
 
 export const insertTicketTierSchema = createInsertSchema(ticketTiers).omit({
   id: true,
+  sold: true,
   createdAt: true,
 });
 
@@ -867,6 +880,35 @@ export type InsertVenueTicket = z.infer<typeof insertVenueTicketSchema>;
 export type VenueTicket = typeof venueTickets.$inferSelect;
 
 // ============================================
+// PAYMENT ISSUES — refund failures that need manual follow-up
+// ============================================
+// Previously these were only ever console.error'd (oversell auto-refunds,
+// event cancellations). This table makes them queryable so finance/admin
+// can find and resolve them instead of relying on someone reading server logs.
+export const paymentIssueReasons = ["refund_failed"] as const;
+export type PaymentIssueReason = typeof paymentIssueReasons[number];
+
+export const paymentIssues = pgTable("payment_issues", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  ticketId: varchar("ticket_id"), // tickets.id or venue_tickets.id — no FK, either table may own it
+  providerPaymentId: text("provider_payment_id").notNull(),
+  provider: text("provider").notNull(), // 'stripe' | 'paystack'
+  reason: text("reason").notNull().default("refund_failed"),
+  errorMessage: text("error_message"),
+  resolvedAt: timestamp("resolved_at"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const insertPaymentIssueSchema = createInsertSchema(paymentIssues).omit({
+  id: true,
+  resolvedAt: true,
+  createdAt: true,
+});
+
+export type InsertPaymentIssue = z.infer<typeof insertPaymentIssueSchema>;
+export type PaymentIssue = typeof paymentIssues.$inferSelect;
+
+// ============================================
 // STAFF ACCESS CODES - for event check-in delegation
 // ============================================
 
@@ -1081,6 +1123,7 @@ export const notificationTypes = [
   "buddy_timer_expiry",
   "event_rsvp",
   "ticket_purchase",
+  "ticket_refund",
   "new_follower",
   "community_post",
 ] as const;

@@ -6,14 +6,33 @@ import AdminLayout from "./AdminLayout";
 import { Badge } from "@/components/ui/badge";
 import { PoundSterlingIcon, TicketIcon, TrendingUpIcon, CreditCardIcon, InfoIcon, AlertTriangleIcon, CheckCircleIcon } from "@/components/ui/icons";
 
-interface FinanceOverview {
+interface CurrencyRevenue {
+  currency: string;
+  ticketsSold: number;
+  ticketRevenue: number;
+  venueTicketsSold: number;
+  venueRevenue: number;
   totalRevenue: number;
+}
+
+interface FinanceOverview {
+  revenueByCurrency: CurrencyRevenue[];
   totalTicketsSold: number;
+  totalVenueTicketsSold: number;
 }
 
 interface PaymentConfig {
   stripeConfigured: boolean;
   paystackConfigured: boolean;
+}
+
+// Mirrors server/payments/index.ts formatAmount() — smallest-unit ints only,
+// GBP pence and NGN kobo are never combined into one figure.
+function formatMoney(amountSmallestUnit: number, currency: string): string {
+  if (currency === "NGN") {
+    return `₦${(amountSmallestUnit / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })}`;
+  }
+  return `£${(amountSmallestUnit / 100).toFixed(2)}`;
 }
 
 export default function AdminFinance() {
@@ -37,14 +56,9 @@ export default function AdminFinance() {
     ? "Paystack"
     : "Not configured";
 
-  const stats = [
-    {
-      title: "Total Revenue",
-      value: finance ? `£${(finance.totalRevenue / 100).toFixed(2)}` : "£0.00",
-      icon: <PoundSterlingIcon className="w-5 h-5" />,
-      color: "bg-emerald-500/10 text-emerald-400",
-      iconBg: "bg-emerald-500/20",
-    },
+  const revenueByCurrency = finance?.revenueByCurrency ?? [];
+
+  const statCards = [
     {
       title: "Tickets Sold",
       value: finance?.totalTicketsSold || 0,
@@ -53,14 +67,27 @@ export default function AdminFinance() {
       iconBg: "bg-blue-500/20",
     },
     {
-      title: "Avg. Ticket Price",
-      value: finance && finance.totalTicketsSold > 0
-        ? `£${((finance.totalRevenue / finance.totalTicketsSold) / 100).toFixed(2)}`
-        : "£0.00",
-      icon: <TrendingUpIcon className="w-5 h-5" />,
-      color: "bg-purple-500/10 text-purple-400",
-      iconBg: "bg-purple-500/20",
+      title: "Venue Tickets Sold",
+      value: finance?.totalVenueTicketsSold || 0,
+      icon: <TicketIcon className="w-5 h-5" />,
+      color: "bg-cyan-500/10 text-cyan-400",
+      iconBg: "bg-cyan-500/20",
     },
+    ...(revenueByCurrency.length > 0
+      ? revenueByCurrency.map((r) => ({
+          title: `Revenue (${r.currency})`,
+          value: formatMoney(r.totalRevenue, r.currency),
+          icon: <PoundSterlingIcon className="w-5 h-5" />,
+          color: "bg-emerald-500/10 text-emerald-400",
+          iconBg: "bg-emerald-500/20",
+        }))
+      : [{
+          title: "Revenue",
+          value: "£0.00",
+          icon: <PoundSterlingIcon className="w-5 h-5" />,
+          color: "bg-emerald-500/10 text-emerald-400",
+          iconBg: "bg-emerald-500/20",
+        }]),
     {
       title: "Payment Mode",
       value: paymentModeLabel,
@@ -102,7 +129,7 @@ export default function AdminFinance() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {stats.map((stat, index) => (
+            {statCards.map((stat, index) => (
               <Card
                 key={index}
                 className="bg-slate-800/50 border-slate-700"
@@ -164,23 +191,47 @@ export default function AdminFinance() {
             <CardHeader>
               <CardTitle className="text-white">Revenue Breakdown</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Event Tickets</span>
-                  <span className="text-white font-medium">
-                    £{finance ? (finance.totalRevenue / 100).toFixed(2) : '0.00'}
-                  </span>
-                </div>
-                <div className="w-full bg-slate-700 rounded-full h-2">
-                  <div
-                    className="bg-purple-500 h-2 rounded-full"
-                    style={{ width: '100%' }}
-                  />
-                </div>
-              </div>
-              <p className="text-sm text-slate-400 pt-2">
-                Revenue is calculated from all confirmed ticket purchases.
+            <CardContent className="space-y-5">
+              {revenueByCurrency.length === 0 ? (
+                <p className="text-sm text-slate-400">No confirmed sales yet.</p>
+              ) : (
+                revenueByCurrency.map((r) => {
+                  const eventShare = r.totalRevenue > 0 ? Math.round((r.ticketRevenue / r.totalRevenue) * 100) : 0;
+                  const avgTicketPrice = r.ticketsSold > 0 ? formatMoney(Math.round(r.ticketRevenue / r.ticketsSold), r.currency) : formatMoney(0, r.currency);
+                  return (
+                    <div key={r.currency} className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-white font-medium">{r.currency}</span>
+                        <span className="text-white font-medium">{formatMoney(r.totalRevenue, r.currency)}</span>
+                      </div>
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-slate-400">Event Tickets ({r.ticketsSold})</span>
+                          <span className="text-slate-300">{formatMoney(r.ticketRevenue, r.currency)}</span>
+                        </div>
+                        <div className="w-full bg-slate-700 rounded-full h-2">
+                          <div className="bg-purple-500 h-2 rounded-full" style={{ width: `${eventShare}%` }} />
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-slate-400">Venue Tickets ({r.venueTicketsSold})</span>
+                          <span className="text-slate-300">{formatMoney(r.venueRevenue, r.currency)}</span>
+                        </div>
+                        <div className="w-full bg-slate-700 rounded-full h-2">
+                          <div className="bg-cyan-500 h-2 rounded-full" style={{ width: `${100 - eventShare}%` }} />
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between text-sm pt-1">
+                        <span className="text-slate-400 flex items-center gap-1">
+                          <TrendingUpIcon className="w-3.5 h-3.5" /> Avg. ticket price
+                        </span>
+                        <span className="text-slate-300">{avgTicketPrice}</span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+              <p className="text-sm text-slate-400 pt-2 border-t border-slate-700">
+                Revenue is calculated from confirmed ticket purchases only (refunded and failed payments are excluded).
               </p>
             </CardContent>
           </Card>

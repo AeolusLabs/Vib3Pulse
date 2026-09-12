@@ -12,6 +12,7 @@ export interface CreateCheckoutParams {
   currency: SupportedCurrency;
   successUrl: string;
   cancelUrl: string;
+  ticketTierId?: string; // set when itemType === "event" and a specific tier was purchased
 }
 
 export interface CheckoutResult {
@@ -44,6 +45,7 @@ export interface VerifiedSession {
   metadata: {
     eventId?: string;
     venueEntryNightId?: string;
+    ticketTierId?: string;
     userId: string;
   };
 }

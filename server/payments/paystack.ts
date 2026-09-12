@@ -61,6 +61,7 @@ export async function createPaystackCheckout(params: CreateCheckoutParams): Prom
         itemType: params.itemType,
         userId: params.userId,
         cancel_action: params.cancelUrl,
+        ...(params.ticketTierId ? { ticketTierId: params.ticketTierId } : {}),
       },
     }),
   });
@@ -89,6 +90,7 @@ export async function verifyPaystackTransaction(reference: string): Promise<Veri
       metadata: {
         eventId: meta.itemType === "event" ? meta.itemId : undefined,
         venueEntryNightId: meta.itemType === "venue_entry" ? meta.itemId : undefined,
+        ticketTierId: meta.ticketTierId || undefined,
         userId: meta.userId,
       },
     };

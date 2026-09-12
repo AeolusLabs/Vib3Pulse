@@ -8,6 +8,7 @@ import {
   sanitizeTextOnly,
 } from "../security";
 import { deliverNotification } from "../notifications";
+import { refundPayment } from "../payments/index.js";
 import { geocodeAddress, sortByProximity } from "../utils/geo";
 import QRCode from "qrcode";
 import { eventCreateDto, eventUpdateDto, insertTicketSchema, insertRsvpSchema } from "@shared/schema";
@@ -508,7 +509,9 @@ export function registerEventsRoutes(app: Express): void {
     }
   });
 
-  // Delete organizer's own event
+  // Delete organizer's own event — only allowed once no confirmed (paid) tickets
+  // exist, so this can never silently discard money someone already paid. An
+  // event with confirmed tickets must go through POST /api/events/:id/cancel instead.
   app.delete("/api/events/:id", requireOrganizer, async (req, res) => {
     try {
       const event = await storage.getEvent(req.params.id);
@@ -518,11 +521,89 @@ export function registerEventsRoutes(app: Express): void {
       if (event.organizerId !== req.user!.id) {
         return res.status(403).json({ message: "Not authorized to delete this event" });
       }
+      const confirmedTickets = await storage.getConfirmedTicketsForEvent(req.params.id);
+      if (confirmedTickets.length > 0) {
+        return res.status(409).json({
+          message: "This event has paid ticket holders and can't be deleted directly. Cancel it instead to refund attendees.",
+          confirmedTicketCount: confirmedTickets.length,
+        });
+      }
       await storage.deleteEvent(req.params.id);
       res.json({ message: "Event deleted" });
     } catch (error) {
       console.error('Error deleting event:', error);
       res.status(500).json({ message: "Failed to delete event" });
+    }
+  });
+
+  // Cancel an event that has paid ticket holders: refunds every confirmed ticket,
+  // notifies each buyer, and soft-cancels the event (kept, not deleted, so the
+  // refund trail has something to point at). Failed refunds are recorded in
+  // payment_issues instead of only being logged, so finance can find and resolve them.
+  app.post("/api/events/:id/cancel", requireOrganizer, async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.id);
+      if (!event) {
+        return res.status(404).json({ message: "Event not found" });
+      }
+      if (event.organizerId !== req.user!.id) {
+        return res.status(403).json({ message: "Not authorized to cancel this event" });
+      }
+      if (event.isCancelled) {
+        return res.status(409).json({ message: "This event is already cancelled" });
+      }
+
+      const confirmedTickets = await storage.getConfirmedTicketsForEvent(req.params.id);
+
+      let refunded = 0;
+      let refundFailed = 0;
+      for (const ticket of confirmedTickets) {
+        const providerPaymentId = ticket.providerPaymentId;
+        let refundOk = true;
+
+        if (ticket.paymentProvider === "free" || !providerPaymentId) {
+          await storage.markTicketRefunded(ticket.id);
+        } else {
+          try {
+            await refundPayment(providerPaymentId, ticket.paymentProvider as "stripe" | "paystack");
+            await storage.markTicketRefunded(ticket.id);
+            refunded++;
+          } catch (refundError) {
+            refundOk = false;
+            refundFailed++;
+            console.error(`[Event Cancel] Refund failed for ticket ${ticket.id} (event ${event.id}):`, refundError);
+            await storage.createPaymentIssue({
+              ticketId: ticket.id,
+              providerPaymentId,
+              provider: ticket.paymentProvider,
+              reason: "refund_failed",
+              errorMessage: refundError instanceof Error ? refundError.message : String(refundError),
+            });
+          }
+        }
+
+        await deliverNotification({
+          userId: ticket.userId,
+          type: "ticket_refund",
+          title: "Event Cancelled",
+          message: refundOk
+            ? `${event.title} was cancelled by the organiser. Your ticket has been refunded.`
+            : `${event.title} was cancelled by the organiser. Your refund is being processed manually and may take longer than usual — contact support if you don't see it soon.`,
+          link: `/event/${event.id}`,
+          relatedEntityId: ticket.id,
+        });
+      }
+
+      const cancelledEvent = await storage.markEventCancelled(req.params.id);
+      res.json({
+        message: "Event cancelled",
+        event: cancelledEvent,
+        ticketsRefunded: refunded,
+        refundFailures: refundFailed,
+      });
+    } catch (error) {
+      console.error('Error cancelling event:', error);
+      res.status(500).json({ message: "Failed to cancel event" });
     }
   });
 
