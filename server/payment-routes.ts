@@ -21,6 +21,7 @@ import {
 } from "./payments/paystack.js";
 import { insertTicketSchema } from "@shared/schema";
 import { sensitiveOperationLimiter } from "./security.js";
+import { recordTransaction } from "./payments/ledger.js";
 
 function requireAuth(req: Request, res: Response, next: Function) {
   if (!req.isAuthenticated() || !req.user) {
@@ -396,6 +397,21 @@ export function registerPaymentRoutes(app: Express): void {
       }
 
       const promotedVenue = await storage.promoteVenue(venueId, durationDays);
+
+      // Promotion revenue is 100% platform's — no organizer split applies.
+      await recordTransaction({
+        type: "venue_promotion",
+        provider: verified.provider,
+        providerPaymentId: verified.providerPaymentId,
+        currency: verified.currency,
+        buyerUserId: req.user!.id,
+        venueId,
+        grossAmount: verified.amountSmallestUnit,
+        platformFeeAmount: verified.amountSmallestUnit,
+        netToOrganizerAmount: 0,
+        status: "succeeded",
+      });
+
       res.json({ message: "Venue promoted successfully", venue: promotedVenue });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -484,6 +500,21 @@ export function registerPaymentRoutes(app: Express): void {
       }
 
       const promotedEvent = await storage.promoteEvent(eventId, durationDays);
+
+      // Promotion revenue is 100% platform's — no organizer split applies.
+      await recordTransaction({
+        type: "event_promotion",
+        provider: verified.provider,
+        providerPaymentId: verified.providerPaymentId,
+        currency: verified.currency,
+        buyerUserId: req.user!.id,
+        eventId,
+        grossAmount: verified.amountSmallestUnit,
+        platformFeeAmount: verified.amountSmallestUnit,
+        netToOrganizerAmount: 0,
+        status: "succeeded",
+      });
+
       res.json({ message: "Event promoted successfully", event: promotedEvent });
     } catch (error) {
       if (error instanceof z.ZodError) {

@@ -148,6 +148,14 @@ import {
   paymentIssues,
   type PaymentIssue,
   type InsertPaymentIssue,
+  platformSettings,
+  type PlatformSettings,
+  organizerPaymentAccounts,
+  type OrganizerPaymentAccount,
+  type InsertOrganizerPaymentAccount,
+  paymentTransactions,
+  type PaymentTransaction,
+  type InsertPaymentTransaction,
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
@@ -351,6 +359,65 @@ export async function ensureSchema() {
       created_at TIMESTAMP NOT NULL DEFAULT now()
     )
   `);
+
+  // Payout architecture foundation (Phase 2): commission rate, organizer payout
+  // accounts, and the money-movement ledger.
+  await pool.query(`
+    ALTER TABLE events ADD COLUMN IF NOT EXISTS fee_passthrough_to_buyer BOOLEAN NOT NULL DEFAULT false
+  `);
+  await pool.query(`
+    ALTER TABLE venue_entry_nights ADD COLUMN IF NOT EXISTS fee_passthrough_to_buyer BOOLEAN NOT NULL DEFAULT false
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS platform_settings (
+      id VARCHAR PRIMARY KEY DEFAULT 'default',
+      commission_bps INTEGER NOT NULL DEFAULT 1000,
+      updated_by VARCHAR,
+      updated_at TIMESTAMP NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS organizer_payment_accounts (
+      id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      provider TEXT NOT NULL,
+      stripe_account_id VARCHAR(255),
+      paystack_subaccount_code VARCHAR(255),
+      details_submitted BOOLEAN NOT NULL DEFAULT false,
+      payouts_enabled BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMP NOT NULL DEFAULT now(),
+      updated_at TIMESTAMP NOT NULL DEFAULT now(),
+      UNIQUE(user_id, provider)
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS payment_transactions (
+      id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      type TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      provider_payment_id TEXT,
+      currency TEXT NOT NULL,
+      buyer_user_id VARCHAR REFERENCES users(id) ON DELETE SET NULL,
+      organizer_id VARCHAR REFERENCES users(id) ON DELETE SET NULL,
+      event_id VARCHAR REFERENCES events(id) ON DELETE SET NULL,
+      venue_id VARCHAR REFERENCES venues(id) ON DELETE SET NULL,
+      venue_entry_night_id VARCHAR REFERENCES venue_entry_nights(id) ON DELETE SET NULL,
+      ticket_id VARCHAR,
+      gross_amount INTEGER NOT NULL,
+      platform_fee_amount INTEGER NOT NULL DEFAULT 0,
+      net_to_organizer_amount INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'succeeded',
+      created_at TIMESTAMP NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_payment_transactions_organizer
+      ON payment_transactions(organizer_id)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_payment_transactions_created_at
+      ON payment_transactions(created_at)
+  `);
 }
 
 export interface IStorage {
@@ -399,6 +466,19 @@ export interface IStorage {
   markEventCancelled(eventId: string): Promise<Event>;
   markTicketRefunded(ticketId: string): Promise<void>;
   createPaymentIssue(issue: InsertPaymentIssue): Promise<PaymentIssue>;
+
+  // Platform commission rate — admin-adjustable, defaults to 10% (1000 bps) if
+  // no row exists yet. See PATCH /api/admin/finance/commission-rate.
+  getPlatformCommissionBps(): Promise<number>;
+  setPlatformCommissionBps(commissionBps: number, updatedBy: string): Promise<PlatformSettings>;
+
+  // Organizer payout accounts (Stripe Connect Express / Paystack Subaccounts).
+  getOrganizerPaymentAccount(userId: string, provider: "stripe" | "paystack"): Promise<OrganizerPaymentAccount | undefined>;
+  upsertOrganizerPaymentAccount(account: InsertOrganizerPaymentAccount): Promise<OrganizerPaymentAccount>;
+
+  // The money-movement ledger — see server/payments/ledger.ts recordTransaction(),
+  // which is the only code that should call this.
+  createPaymentTransaction(tx: InsertPaymentTransaction): Promise<PaymentTransaction>;
 
   getEventTicketTiers(eventId: string): Promise<TicketTier[]>;
   getTicketTier(id: string): Promise<TicketTier | undefined>;
@@ -3812,6 +3892,7 @@ export class DbStorage implements IStorage {
       moderationStatus: r.venueEntry.moderationStatus,
       isCancelled: false,
       cancelledAt: null,
+      feePassthroughToBuyer: r.venueEntry.feePassthroughToBuyer,
       communityId: null,
       organizer: r.organizer,
       sourceType: 'venue_entry' as const,
@@ -3864,6 +3945,48 @@ export class DbStorage implements IStorage {
 
   async createPaymentIssue(issue: InsertPaymentIssue): Promise<PaymentIssue> {
     const result = await db.insert(paymentIssues).values(issue).returning();
+    return result[0];
+  }
+
+  async getPlatformCommissionBps(): Promise<number> {
+    const result = await db.select().from(platformSettings).where(eq(platformSettings.id, "default"));
+    return result[0]?.commissionBps ?? 1000;
+  }
+
+  async setPlatformCommissionBps(commissionBps: number, updatedBy: string): Promise<PlatformSettings> {
+    const result = await db
+      .insert(platformSettings)
+      .values({ id: "default", commissionBps, updatedBy, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: platformSettings.id,
+        set: { commissionBps, updatedBy, updatedAt: new Date() },
+      })
+      .returning();
+    return result[0];
+  }
+
+  async getOrganizerPaymentAccount(userId: string, provider: "stripe" | "paystack"): Promise<OrganizerPaymentAccount | undefined> {
+    const result = await db
+      .select()
+      .from(organizerPaymentAccounts)
+      .where(and(eq(organizerPaymentAccounts.userId, userId), eq(organizerPaymentAccounts.provider, provider)));
+    return result[0];
+  }
+
+  async upsertOrganizerPaymentAccount(account: InsertOrganizerPaymentAccount): Promise<OrganizerPaymentAccount> {
+    const result = await db
+      .insert(organizerPaymentAccounts)
+      .values(account)
+      .onConflictDoUpdate({
+        target: [organizerPaymentAccounts.userId, organizerPaymentAccounts.provider],
+        set: { ...account, updatedAt: new Date() },
+      })
+      .returning();
+    return result[0];
+  }
+
+  async createPaymentTransaction(tx: InsertPaymentTransaction): Promise<PaymentTransaction> {
+    const result = await db.insert(paymentTransactions).values(tx).returning();
     return result[0];
   }
 

@@ -846,14 +846,45 @@ export function setupAdminRoutes(app: Express) {
   // Get payment/ticket overview
   app.get("/api/admin/finance/overview", requireRole("super_admin", "finance_manager"), async (req: Request, res: Response) => {
     try {
-      const stats = await storage.getPlatformStats();
+      const [stats, commissionBps] = await Promise.all([
+        storage.getPlatformStats(),
+        storage.getPlatformCommissionBps(),
+      ]);
       res.json({
         revenueByCurrency: stats.revenueByCurrency,
         totalTicketsSold: stats.totalTicketsSold,
         totalVenueTicketsSold: stats.totalVenueTicketsSold,
+        commissionBps,
       });
     } catch (error) {
       res.status(500).json({ message: "Failed to get finance overview" });
+    }
+  });
+
+  // Update the platform commission rate — takes effect on the next checkout,
+  // no deploy required. bps: 1000 = 10%. Bounded to a sane range to prevent a
+  // fat-fingered rate (e.g. 100000 = 1000%) from being accepted.
+  app.patch("/api/admin/finance/commission-rate", requireRole("super_admin", "finance_manager"), async (req: Request, res: Response) => {
+    try {
+      const { commissionBps } = z.object({
+        commissionBps: z.number().int().min(0).max(5000), // 0%–50%
+      }).parse(req.body);
+
+      const updated = await storage.setPlatformCommissionBps(commissionBps, req.session.adminId!);
+      await logActivity(
+        req.session.adminId!,
+        "update_commission_rate",
+        "platform_settings",
+        "default",
+        `Commission rate set to ${commissionBps} bps (${(commissionBps / 100).toFixed(2)}%)`,
+        req.ip
+      );
+      res.json({ commissionBps: updated.commissionBps });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: error.errors[0]?.message ?? "Invalid commission rate" });
+      }
+      res.status(500).json({ message: "Failed to update commission rate" });
     }
   });
 

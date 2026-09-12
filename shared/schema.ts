@@ -108,6 +108,10 @@ export const events = pgTable("events", {
   // an event that already has paid tickets, so refunds have something to point at.
   isCancelled: boolean("is_cancelled").notNull().default(false),
   cancelledAt: timestamp("cancelled_at"),
+  // Who bears the platform commission — false (default): deducted from the organizer's
+  // payout, buyer pays the listed ticketPrice. true: added on top at checkout, buyer
+  // pays ticketPrice + fee, organizer nets the full ticketPrice. See computeFeeSplit().
+  feePassthroughToBuyer: boolean("fee_passthrough_to_buyer").notNull().default(false),
   communityId: varchar("community_id").references(() => communities.id, { onDelete: "set null" }),
 });
 
@@ -834,6 +838,8 @@ export const venueEntryNights = pgTable("venue_entry_nights", {
   description: text("description"),
   isActive: boolean("is_active").notNull().default(true),
   moderationStatus: text("moderation_status").notNull().default("pending"),
+  // See events.feePassthroughToBuyer — same meaning, applied to entry-night cover charges.
+  feePassthroughToBuyer: boolean("fee_passthrough_to_buyer").notNull().default(false),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
@@ -1343,3 +1349,95 @@ export const insertSocialPostSchema = createInsertSchema(socialPosts)
 
 export type InsertSocialPost = z.infer<typeof insertSocialPostSchema>;
 export type SocialPost = typeof socialPosts.$inferSelect;
+
+// ============================================
+// PAYOUTS & PLATFORM FEE (Phase 2)
+// ============================================
+// Aggregator model today: every charge lands in VibePulse's own Stripe/Paystack
+// balance with no split and no fee taken. This section is the foundation for
+// Stripe Connect (Express) + Paystack Subaccounts — organizer payout accounts,
+// a single source of truth for money movement, and an admin-adjustable
+// commission rate instead of a hardcoded percentage.
+
+// Single-row config table — see getPlatformCommissionBps()/setPlatformCommissionBps()
+// in storage.ts. Using a real row (not an env var) lets finance/super_admin change
+// the rate without a deploy.
+export const platformSettings = pgTable("platform_settings", {
+  id: varchar("id").primaryKey().default("default"),
+  commissionBps: integer("commission_bps").notNull().default(1000), // 1000 = 10%
+  updatedBy: varchar("updated_by"),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
+export type PlatformSettings = typeof platformSettings.$inferSelect;
+
+// One row per organizer per provider — created once they complete Stripe Connect
+// Express onboarding or Paystack Subaccount setup. payoutsEnabled gates whether
+// checkout is allowed to create a paid charge for that organizer's events/venues
+// (see the payout guardrail in payment-routes.ts) — money is never accepted for
+// an organizer the platform has no way to pay out.
+export const organizerPaymentAccounts = pgTable("organizer_payment_accounts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull(), // 'stripe' | 'paystack'
+  stripeAccountId: varchar("stripe_account_id", { length: 255 }),
+  paystackSubaccountCode: varchar("paystack_subaccount_code", { length: 255 }),
+  detailsSubmitted: boolean("details_submitted").notNull().default(false),
+  payoutsEnabled: boolean("payouts_enabled").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+}, (table) => ({
+  uniqueUserProvider: unique().on(table.userId, table.provider),
+}));
+
+export const insertOrganizerPaymentAccountSchema = createInsertSchema(organizerPaymentAccounts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertOrganizerPaymentAccount = z.infer<typeof insertOrganizerPaymentAccountSchema>;
+export type OrganizerPaymentAccount = typeof organizerPaymentAccounts.$inferSelect;
+
+// The ledger — every charge, fee, and refund goes through recordTransaction() in
+// server/payments/ledger.ts. Before this, "how much has the platform taken" had
+// no real answer (admin revenue was an ad-hoc SUM over tickets, and promotion
+// payments were never recorded anywhere at all). This is the source of truth.
+export const paymentTransactionTypes = [
+  "ticket_sale",
+  "venue_ticket_sale",
+  "event_promotion",
+  "venue_promotion",
+  "refund",
+] as const;
+export type PaymentTransactionType = typeof paymentTransactionTypes[number];
+
+export const paymentTransactionStatuses = ["succeeded", "refunded", "refund_failed"] as const;
+export type PaymentTransactionStatus = typeof paymentTransactionStatuses[number];
+
+export const paymentTransactions = pgTable("payment_transactions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  type: text("type").notNull(),
+  provider: text("provider").notNull(), // 'stripe' | 'paystack' | 'free'
+  providerPaymentId: text("provider_payment_id"),
+  currency: text("currency").notNull(),
+  buyerUserId: varchar("buyer_user_id").references(() => users.id, { onDelete: "set null" }),
+  organizerId: varchar("organizer_id").references(() => users.id, { onDelete: "set null" }),
+  eventId: varchar("event_id").references(() => events.id, { onDelete: "set null" }),
+  venueId: varchar("venue_id").references(() => venues.id, { onDelete: "set null" }),
+  venueEntryNightId: varchar("venue_entry_night_id").references(() => venueEntryNights.id, { onDelete: "set null" }),
+  ticketId: varchar("ticket_id"), // tickets.id or venue_tickets.id — no FK, either table may own it
+  grossAmount: integer("gross_amount").notNull(), // what the buyer paid, smallest currency unit
+  platformFeeAmount: integer("platform_fee_amount").notNull().default(0),
+  netToOrganizerAmount: integer("net_to_organizer_amount").notNull().default(0),
+  status: text("status").notNull().default("succeeded"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const insertPaymentTransactionSchema = createInsertSchema(paymentTransactions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertPaymentTransaction = z.infer<typeof insertPaymentTransactionSchema>;
+export type PaymentTransaction = typeof paymentTransactions.$inferSelect;
