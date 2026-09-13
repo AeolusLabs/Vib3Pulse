@@ -8,7 +8,7 @@ import {
   createPaymentIntent,
   verifyPaymentIntent,
   refundPayment,
-  resolveCurrency,
+  asSupportedCurrency,
   providerForCurrency,
   formatAmount,
 } from "./payments/index.js";
@@ -22,12 +22,61 @@ import {
 import { insertTicketSchema } from "@shared/schema";
 import { sensitiveOperationLimiter } from "./security.js";
 import { recordTransaction } from "./payments/ledger.js";
+import { computeFeeSplit } from "./payments/fees.js";
+import type { OrganizerSplit } from "./payments/types.js";
 
 function requireAuth(req: Request, res: Response, next: Function) {
   if (!req.isAuthenticated() || !req.user) {
     return res.status(401).json({ message: "Unauthorized" });
   }
   next();
+}
+
+class PayoutNotConnectedError extends Error {
+  constructor() {
+    super("The organiser hasn't finished payout setup yet, so this event can't accept payments right now.");
+  }
+}
+
+// Resolves how a paid charge should split between the platform and the
+// organizer. Returns { buyerCharge } unchanged with no split for any
+// provider/currency that doesn't have a payout mechanism wired in yet (GBP/
+// Stripe today — Connect isn't built, so those charges behave exactly as
+// before). For NGN/Paystack, throws PayoutNotConnectedError if the organizer
+// has no connected payout account — money is never accepted for an organizer
+// the platform has no way to pay out.
+async function resolveOrganizerSplit(params: {
+  organizerId: string;
+  currency: "GBP" | "NGN";
+  baseAmount: number;
+  passthroughToBuyer: boolean;
+}): Promise<{ buyerCharge: number; organizerSplit?: OrganizerSplit }> {
+  if (params.currency !== "NGN") {
+    return { buyerCharge: params.baseAmount };
+  }
+
+  const payoutAccount = await storage.getOrganizerPaymentAccount(params.organizerId, "paystack");
+  if (!payoutAccount?.payoutsEnabled || !payoutAccount.paystackSubaccountCode) {
+    throw new PayoutNotConnectedError();
+  }
+
+  const commissionBps = await storage.getPlatformCommissionBps();
+  const feeSplit = computeFeeSplit({
+    baseAmount: params.baseAmount,
+    commissionBps,
+    passthroughToBuyer: params.passthroughToBuyer,
+  });
+
+  return {
+    buyerCharge: feeSplit.buyerCharge,
+    organizerSplit: {
+      paystackSubaccountCode: payoutAccount.paystackSubaccountCode,
+      platformFeeAmount: feeSplit.platformFee,
+      // Platform absorbs Paystack's own processing fee so the organizer's
+      // payout is exactly base-minus-platformFee, not a variable amount.
+      bearer: "account",
+    },
+  };
 }
 
 // ============================================================
@@ -71,7 +120,15 @@ export function registerPaymentRoutes(app: Express): void {
         return res.status(400).json({ message: "Free events use RSVP, not payment" });
       }
 
-      const currency = resolveCurrency(event.city);
+      const currency = asSupportedCurrency(event.currency);
+
+      const { buyerCharge, organizerSplit } = await resolveOrganizerSplit({
+        organizerId: event.organizerId,
+        currency,
+        baseAmount: amountSmallestUnit,
+        passthroughToBuyer: event.feePassthroughToBuyer,
+      });
+
       // Use APP_URL env var when set; fall back to the request host.
       // Never use req.headers.origin — it is user-controlled and would allow
       // an attacker to redirect victims to a phishing site after payment.
@@ -84,11 +141,12 @@ export function registerPaymentRoutes(app: Express): void {
         email: req.user!.email,
         title: tierName,
         description: event.description,
-        amountSmallestUnit,
+        amountSmallestUnit: buyerCharge,
         currency,
         successUrl: `${baseUrl}/ticket-wallet?success=true&session_id={CHECKOUT_SESSION_ID}&provider=${providerForCurrency(currency)}`,
         cancelUrl: `${baseUrl}/event/${eventId}?cancelled=true`,
         ticketTierId,
+        organizerSplit,
       });
 
       res.json({
@@ -96,11 +154,14 @@ export function registerPaymentRoutes(app: Express): void {
         url: session.url,
         provider: session.provider,
         currency: session.currency,
-        amount: formatAmount(amountSmallestUnit, currency),
+        amount: formatAmount(buyerCharge, currency),
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "eventId is required" });
+      }
+      if (error instanceof PayoutNotConnectedError) {
+        return res.status(409).json({ message: error.message });
       }
       console.error("[Payment] Event checkout error:", error);
       res.status(500).json({ message: "Failed to create checkout session" });
@@ -169,6 +230,22 @@ export function registerPaymentRoutes(app: Express): void {
 
       const event = await storage.getEvent(meta.eventId);
       if (event) {
+        const platformFeeAmount = Number(meta.platformFeeAmount ?? 0);
+        await recordTransaction({
+          type: "ticket_sale",
+          provider: verified.provider,
+          providerPaymentId: verified.providerPaymentId,
+          currency: verified.currency,
+          buyerUserId: meta.userId,
+          organizerId: event.organizerId,
+          eventId: event.id,
+          ticketId: ticket.id,
+          grossAmount: verified.amountSmallestUnit,
+          platformFeeAmount,
+          netToOrganizerAmount: verified.amountSmallestUnit - platformFeeAmount,
+          status: "succeeded",
+        });
+
         const buyer = await storage.getUser(meta.userId);
         await storage.createNotification({
           userId: event.organizerId,
@@ -219,10 +296,20 @@ export function registerPaymentRoutes(app: Express): void {
       }
 
       const venue = await storage.getVenue(night.venueId);
-      const currency = resolveCurrency(venue?.city ?? null);
+      if (!venue) {
+        return res.status(404).json({ message: "Venue not found" });
+      }
+      const currency = asSupportedCurrency(venue.currency);
+
+      const { buyerCharge, organizerSplit } = await resolveOrganizerSplit({
+        organizerId: venue.ownerId,
+        currency,
+        baseAmount: night.coverPriceCents,
+        passthroughToBuyer: night.feePassthroughToBuyer,
+      });
 
       const intent = await createPaymentIntent({
-        amountSmallestUnit: night.coverPriceCents,
+        amountSmallestUnit: buyerCharge,
         currency,
         userId,
         email: req.user!.email,
@@ -232,6 +319,7 @@ export function registerPaymentRoutes(app: Express): void {
           venueId: night.venueId,
           userId,
         },
+        organizerSplit,
       });
 
       res.json({
@@ -239,11 +327,14 @@ export function registerPaymentRoutes(app: Express): void {
         paymentIntentId: intent.paymentIntentId,
         provider: intent.provider,
         currency: intent.currency,
-        amount: formatAmount(night.coverPriceCents, currency),
+        amount: formatAmount(buyerCharge, currency),
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "venueEntryNightId is required" });
+      }
+      if (error instanceof PayoutNotConnectedError) {
+        return res.status(409).json({ message: error.message });
       }
       console.error("[Payment] Venue intent error:", error);
       res.status(500).json({ message: "Failed to create payment" });
@@ -302,6 +393,27 @@ export function registerPaymentRoutes(app: Express): void {
         status: "confirmed",
       });
 
+      const night = await storage.getVenueEntryNight(venueEntryNightId);
+      const venue = night ? await storage.getVenue(night.venueId) : undefined;
+      if (venue) {
+        const platformFeeAmount = Number(meta.platformFeeAmount ?? 0);
+        await recordTransaction({
+          type: "venue_ticket_sale",
+          provider: verified.provider,
+          providerPaymentId: verified.providerPaymentId,
+          currency: verified.currency,
+          buyerUserId: userId,
+          organizerId: venue.ownerId,
+          venueId: venue.id,
+          venueEntryNightId,
+          ticketId: ticket.id,
+          grossAmount: verified.amountSmallestUnit,
+          platformFeeAmount,
+          netToOrganizerAmount: verified.amountSmallestUnit - platformFeeAmount,
+          status: "succeeded",
+        });
+      }
+
       res.json({ message: "Ticket issued", ticket });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -322,6 +434,21 @@ export function registerPaymentRoutes(app: Express): void {
     14: 3499,
     30: 5999,
   };
+  // Naira pricing — round, sensible starting price points (not an FX conversion
+  // of the GBP table, which would drift with exchange rates anyway). The old
+  // heuristic reused the GBP pence numbers verbatim as kobo, charging ~₦9.99
+  // for a "3-day promotion" — a placeholder bug, not a real price. Adjust
+  // these to actual pricing strategy whenever that's decided.
+  const PROMOTION_PRICES_KOBO: Record<number, number> = {
+    3: 250000,   // ₦2,500
+    7: 499900,   // ₦4,999
+    14: 899900,  // ₦8,999
+    30: 1499900, // ₦14,999
+  };
+
+  function getPromotionPrice(durationDays: number, currency: "GBP" | "NGN"): number {
+    return currency === "NGN" ? PROMOTION_PRICES_KOBO[durationDays] : PROMOTION_PRICES_PENCE[durationDays];
+  }
 
   app.post("/api/payments/venue/promote/intent", requireAuth, sensitiveOperationLimiter, async (req, res) => {
     try {
@@ -342,11 +469,11 @@ export function registerPaymentRoutes(app: Express): void {
         return res.json({ free: true, venue: promotedVenue });
       }
 
-      const amountPence = PROMOTION_PRICES_PENCE[durationDays];
-      const currency = resolveCurrency(venue.city ?? null);
+      const currency = asSupportedCurrency(venue.currency);
+      const amount = getPromotionPrice(durationDays, currency);
 
       const intent = await createPaymentIntent({
-        amountSmallestUnit: amountPence,
+        amountSmallestUnit: amount,
         currency,
         userId: req.user!.id,
         email: req.user!.email,
@@ -363,7 +490,7 @@ export function registerPaymentRoutes(app: Express): void {
         paymentIntentId: intent.paymentIntentId,
         provider: intent.provider,
         currency: intent.currency,
-        amount: formatAmount(amountPence, currency),
+        amount: formatAmount(amount, currency),
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -445,11 +572,11 @@ export function registerPaymentRoutes(app: Express): void {
         return res.json({ free: true, event: promotedEvent });
       }
 
-      const amountPence = PROMOTION_PRICES_PENCE[durationDays];
-      const currency = resolveCurrency(event.city ?? null);
+      const currency = asSupportedCurrency(event.currency);
+      const amount = getPromotionPrice(durationDays, currency);
 
       const intent = await createPaymentIntent({
-        amountSmallestUnit: amountPence,
+        amountSmallestUnit: amount,
         currency,
         userId: req.user!.id,
         email: req.user!.email,
@@ -466,7 +593,7 @@ export function registerPaymentRoutes(app: Express): void {
         paymentIntentId: intent.paymentIntentId,
         provider: intent.provider,
         currency: intent.currency,
-        amount: formatAmount(amountPence, currency),
+        amount: formatAmount(amount, currency),
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -568,7 +695,7 @@ export function registerPaymentRoutes(app: Express): void {
                   });
                 }
               } else {
-                await storage.createTicket(insertTicketSchema.parse({
+                const ticket = await storage.createTicket(insertTicketSchema.parse({
                   userId: meta.userId,
                   eventId: meta.itemId,
                   ticketTierId: meta.ticketTierId ?? null,
@@ -578,6 +705,24 @@ export function registerPaymentRoutes(app: Express): void {
                   amountPaid: session.amount_total ?? 0,
                   status: "confirmed",
                 }));
+                const event = await storage.getEvent(meta.itemId);
+                if (event) {
+                  const platformFeeAmount = Number(meta.platformFeeAmount ?? 0);
+                  await recordTransaction({
+                    type: "ticket_sale",
+                    provider: "stripe",
+                    providerPaymentId: session.payment_intent,
+                    currency: (session.currency?.toUpperCase() ?? "GBP"),
+                    buyerUserId: meta.userId,
+                    organizerId: event.organizerId,
+                    eventId: event.id,
+                    ticketId: ticket.id,
+                    grossAmount: session.amount_total ?? 0,
+                    platformFeeAmount,
+                    netToOrganizerAmount: (session.amount_total ?? 0) - platformFeeAmount,
+                    status: "succeeded",
+                  });
+                }
               }
             }
           }
@@ -605,7 +750,7 @@ export function registerPaymentRoutes(app: Express): void {
                   });
                 }
               } else {
-                await storage.createVenueTicket({
+                const ticket = await storage.createVenueTicket({
                   userId: meta.userId,
                   venueEntryNightId: meta.venueEntryNightId,
                   providerPaymentId: intent.id,
@@ -614,6 +759,25 @@ export function registerPaymentRoutes(app: Express): void {
                   amountPaid: intent.amount,
                   status: "confirmed",
                 });
+                const venue = await storage.getVenue(night.venueId);
+                if (venue) {
+                  const platformFeeAmount = Number(meta.platformFeeAmount ?? 0);
+                  await recordTransaction({
+                    type: "venue_ticket_sale",
+                    provider: "stripe",
+                    providerPaymentId: intent.id,
+                    currency: (intent.currency?.toUpperCase() ?? "GBP"),
+                    buyerUserId: meta.userId,
+                    organizerId: venue.ownerId,
+                    venueId: venue.id,
+                    venueEntryNightId: meta.venueEntryNightId,
+                    ticketId: ticket.id,
+                    grossAmount: intent.amount,
+                    platformFeeAmount,
+                    netToOrganizerAmount: intent.amount - platformFeeAmount,
+                    status: "succeeded",
+                  });
+                }
               }
             }
           }
@@ -674,7 +838,7 @@ export function registerPaymentRoutes(app: Express): void {
                     });
                   }
                 } else {
-                  await storage.createTicket(insertTicketSchema.parse({
+                  const ticket = await storage.createTicket(insertTicketSchema.parse({
                     userId: meta.userId,
                     eventId: meta.eventId,
                     ticketTierId: meta.ticketTierId ?? null,
@@ -684,6 +848,24 @@ export function registerPaymentRoutes(app: Express): void {
                     amountPaid: verified.amountSmallestUnit,
                     status: "confirmed",
                   }));
+                  const event = await storage.getEvent(meta.eventId);
+                  if (event) {
+                    const platformFeeAmount = Number(meta.platformFeeAmount ?? 0);
+                    await recordTransaction({
+                      type: "ticket_sale",
+                      provider: "paystack",
+                      providerPaymentId: reference,
+                      currency: verified.currency,
+                      buyerUserId: meta.userId,
+                      organizerId: event.organizerId,
+                      eventId: event.id,
+                      ticketId: ticket.id,
+                      grossAmount: verified.amountSmallestUnit,
+                      platformFeeAmount,
+                      netToOrganizerAmount: verified.amountSmallestUnit - platformFeeAmount,
+                      status: "succeeded",
+                    });
+                  }
                 }
               }
             } else if (meta.venueEntryNightId) {
@@ -702,7 +884,7 @@ export function registerPaymentRoutes(app: Express): void {
                   });
                 }
               } else {
-                await storage.createVenueTicket({
+                const ticket = await storage.createVenueTicket({
                   userId: meta.userId!,
                   venueEntryNightId: meta.venueEntryNightId,
                   providerPaymentId: reference,
@@ -711,6 +893,26 @@ export function registerPaymentRoutes(app: Express): void {
                   amountPaid: verified.amountSmallestUnit,
                   status: "confirmed",
                 });
+                const night = await storage.getVenueEntryNight(meta.venueEntryNightId);
+                const venue = night ? await storage.getVenue(night.venueId) : undefined;
+                if (venue) {
+                  const platformFeeAmount = Number(meta.platformFeeAmount ?? 0);
+                  await recordTransaction({
+                    type: "venue_ticket_sale",
+                    provider: "paystack",
+                    providerPaymentId: reference,
+                    currency: verified.currency,
+                    buyerUserId: meta.userId!,
+                    organizerId: venue.ownerId,
+                    venueId: venue.id,
+                    venueEntryNightId: meta.venueEntryNightId,
+                    ticketId: ticket.id,
+                    grossAmount: verified.amountSmallestUnit,
+                    platformFeeAmount,
+                    netToOrganizerAmount: verified.amountSmallestUnit - platformFeeAmount,
+                    status: "succeeded",
+                  });
+                }
               }
             }
           }
@@ -731,6 +933,19 @@ export function registerPaymentRoutes(app: Express): void {
       paystackPublicKey: process.env.PAYSTACK_PUBLIC_KEY ?? null,
       stripeConfigured: !!process.env.STRIPE_SECRET_KEY,
       paystackConfigured: !!process.env.PAYSTACK_SECRET_KEY,
+    });
+  });
+
+  // Single source of truth for promotion pricing, by currency — the promote
+  // dialogs fetch this instead of hardcoding a price table client-side, so
+  // the price shown before checkout can never drift from what's actually
+  // charged (which is exactly what happened before: the dialogs hardcoded a
+  // GBP-only table and would show "£59.99" even for an NGN event/venue that
+  // was actually about to be charged ₦14,999).
+  app.get("/api/payments/promotion-prices", (req, res) => {
+    res.json({
+      GBP: PROMOTION_PRICES_PENCE,
+      NGN: PROMOTION_PRICES_KOBO,
     });
   });
 }

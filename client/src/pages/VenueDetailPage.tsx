@@ -12,6 +12,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import ImageLightbox from "@/components/ImageLightbox";
 import { VenueGalleryManager } from "@/components/VenueGalleryManager";
 import { useAuth } from "@/hooks/useAuth";
+import { CardPaymentForm } from "@/components/payments/CardPaymentForm";
+import { formatMoney } from "@/lib/currency";
 
 import { format } from "date-fns";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -40,73 +42,59 @@ const categoryLabels: Record<string, string> = {
   comedy_club: "Comedy Club",
 };
 
-// ─── Simulated payment form ───────────────────────────────────────────────────
-function SimulatedPaymentForm({
+// ─── Venue ticket payment step ─────────────────────────────────────────────────
+// Was a "SimulatedPaymentForm" that never actually collected payment at all —
+// it posted straight to /api/payments/venue/confirm with no card/Paystack
+// popup step in between, so it could only ever fail ("Payment not confirmed")
+// once real Stripe/Paystack keys were configured. Replaced with the same real
+// CardPaymentForm used by VenueEventDetailPage.tsx, so venue ticket purchases
+// from a venue's own page actually work.
+function VenueTicketPaymentForm({
+  venue,
   entryNight,
+  clientSecret,
   paymentIntentId,
   provider,
   onSuccess,
   onCancel,
 }: {
+  venue: Venue;
   entryNight: VenueEntryNight;
+  clientSecret: string;
   paymentIntentId: string;
   provider: string;
   onSuccess: () => void;
   onCancel: () => void;
 }) {
   const { toast } = useToast();
-  const [processing, setProcessing] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setProcessing(true);
-    try {
+  const confirmMutation = useMutation({
+    mutationFn: async () => {
       await apiRequest("POST", "/api/payments/venue/confirm", {
         venueEntryNightId: entryNight.id,
         paymentIntentId,
         provider,
       });
+    },
+    onSuccess: () => {
       toast({ title: "Ticket purchased successfully!" });
       queryClient.invalidateQueries({ queryKey: ["/api/my-venue-tickets"] });
       onSuccess();
-    } catch {
+    },
+    onError: () => {
       toast({ title: "Failed to confirm ticket", variant: "destructive" });
-    }
-    setProcessing(false);
-  };
+    },
+  });
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="rounded-lg border border-dashed border-amber-500/50 bg-amber-50 dark:bg-amber-950/20 p-4">
-        <div className="flex items-start gap-3">
-          <AlertCircleIcon className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
-          <div>
-            <p className="font-medium text-amber-800 dark:text-amber-200">Demo Mode</p>
-            <p className="text-sm text-amber-700 dark:text-amber-300">
-              Payments are simulated. No real charges will be made.
-            </p>
-          </div>
-        </div>
-      </div>
-      <div className="rounded-lg border p-4 space-y-3">
-        <div className="flex justify-between text-sm">
-          <span className="text-muted-foreground">Entry ticket</span>
-          <span>£{(entryNight.coverPriceCents / 100).toFixed(2)}</span>
-        </div>
-        <div className="border-t pt-3 flex justify-between font-medium">
-          <span>Total</span>
-          <span>£{(entryNight.coverPriceCents / 100).toFixed(2)}</span>
-        </div>
-      </div>
-      <div className="flex gap-3 justify-end">
-        <Button type="button" variant="outline" onClick={onCancel} disabled={processing}>
-          Cancel
-        </Button>
-        <Button type="submit" disabled={processing} data-testid="button-confirm-simulated-payment">
-          {processing ? "Processing..." : "Confirm Purchase"}
-        </Button>
-      </div>
-    </form>
+    <CardPaymentForm
+      clientSecret={clientSecret}
+      provider={provider}
+      amountLabel={formatMoney(entryNight.coverPriceCents, venue.currency)}
+      itemLabel="Entry ticket"
+      onSuccess={() => confirmMutation.mutate()}
+      onCancel={onCancel}
+    />
   );
 }
 
@@ -596,8 +584,10 @@ export default function VenueDetailPage() {
             </DialogDescription>
           </DialogHeader>
           {clientSecret && selectedEntryNight && (
-            <SimulatedPaymentForm
+            <VenueTicketPaymentForm
+              venue={venue}
               entryNight={selectedEntryNight}
+              clientSecret={clientSecret}
               paymentIntentId={paymentIntentId || ""}
               provider={paymentProvider}
               onSuccess={handlePaymentSuccess}

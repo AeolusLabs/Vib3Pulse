@@ -23,6 +23,7 @@ export default function ManageVenuesPage() {
   const [editingVenue, setEditingVenue] = useState<Venue | undefined>(undefined);
   const [promoteVenueId, setPromoteVenueId] = useState<string | null>(null);
   const [promoteVenueName, setPromoteVenueName] = useState<string>("");
+  const [promoteVenueCurrency, setPromoteVenueCurrency] = useState<string>("GBP");
   const [showAnalyticsFor, setShowAnalyticsFor] = useState<string | null>(null);
   const { toast } = useToast();
   
@@ -66,9 +67,10 @@ export default function ManageVenuesPage() {
     }
   };
 
-  const handlePromoteVenue = (venueId: string, venueName: string) => {
+  const handlePromoteVenue = (venueId: string, venueName: string, currency: string) => {
     setPromoteVenueId(venueId);
     setPromoteVenueName(venueName);
+    setPromoteVenueCurrency(currency);
   };
 
   const categoryLabels: Record<string, string> = {
@@ -207,7 +209,7 @@ export default function ManageVenuesPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => handlePromoteVenue(venue.id, venue.name)}
+              onClick={() => handlePromoteVenue(venue.id, venue.name, (venue as any).currency || "GBP")}
               className="text-purple-600 border-purple-300 hover:bg-purple-50"
               data-testid={`button-promote-${venue.id}`}
             >
@@ -419,6 +421,7 @@ export default function ManageVenuesPage() {
         onOpenChange={(open: boolean) => !open && setPromoteVenueId(null)}
         venueId={promoteVenueId || ""}
         venueName={promoteVenueName}
+        currency={promoteVenueCurrency}
       />
     </div>
   );

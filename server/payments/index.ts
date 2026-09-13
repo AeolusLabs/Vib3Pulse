@@ -4,12 +4,18 @@ import { createPaystackCheckout, verifyPaystackTransaction, createPaystackInline
 
 export type { SupportedCurrency, PaymentProvider, CheckoutResult, VerifiedSession, VerifiedPaymentIntent };
 
-// Determine currency from city/country context
-export function resolveCurrency(city?: string | null): SupportedCurrency {
-  if (!city) return "GBP";
-  const lower = city.toLowerCase();
-  const ngCities = ["lagos", "abuja", "port harcourt", "ibadan", "kano", "kaduna", "benin", "enugu", "calabar", "owerri"];
-  return ngCities.some(c => lower.includes(c)) ? "NGN" : "GBP";
+// Currency is an explicit field the organizer chooses at event/venue creation
+// (events.currency / venues.currency) — it is never guessed from city text at
+// charge time. This just guards against a stored value outside the two
+// currencies we actually have a payment rail for (e.g. legacy data from
+// before the creation-form picker was restricted to GBP/NGN), so a charge
+// never silently mis-routes to the wrong provider.
+export function asSupportedCurrency(currency: string | null | undefined): SupportedCurrency {
+  if (currency === "NGN") return "NGN";
+  if (currency !== "GBP") {
+    console.warn(`[Payments] Unsupported currency "${currency}" on a chargeable item — falling back to GBP.`);
+  }
+  return "GBP";
 }
 
 export function providerForCurrency(currency: SupportedCurrency): PaymentProvider {

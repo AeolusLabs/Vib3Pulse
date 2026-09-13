@@ -9,9 +9,10 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useState, useEffect, useRef } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { SUPPORTED_CURRENCIES as CURRENCIES, deriveDefaultCurrency, type PayoutStatusForDefault } from "@/lib/currency";
 
 import { ObjectUploader } from "@/components/ObjectUploader";
 import ImageLightbox from "@/components/ImageLightbox";
@@ -91,6 +92,7 @@ const emptyForm = {
   imageUrls: [] as string[],
   address: "",
   city: "",
+  currency: "GBP",
   phone: "",
   website: "",
   hours: "",
@@ -108,6 +110,16 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
   const [formData, setFormData] = useState(emptyForm);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
+
+  // Smarter currency default: prefer whichever payout account the organizer
+  // has actually connected over a browser-locale guess — see
+  // client/src/lib/currency.ts. Only relevant for a new venue; never
+  // overrides an existing venue's already-set currency.
+  const { data: payoutStatus } = useQuery<PayoutStatusForDefault>({
+    queryKey: ["/api/organizer/payments/status"],
+    enabled: open && !editingVenue,
+  });
+  const appliedPayoutDefault = useRef(false);
 
   const maxGalleryImages = 6;
   const [replacingImageIndex, setReplacingImageIndex] = useState<number | null>(null);
@@ -157,6 +169,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
         imageUrls: editingVenue.imageUrls || [],
         address: editingVenue.address || "",
         city: editingVenue.city || "",
+        currency: (editingVenue as any).currency || "GBP",
         phone: editingVenue.phone || "",
         website: editingVenue.website || "",
         hours: editingVenue.hours || "",
@@ -167,9 +180,20 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
         accessibilityFeatures: (editingVenue as any).accessibilityFeatures || [],
       });
     } else {
-      setFormData(emptyForm);
+      setFormData({ ...emptyForm, currency: deriveDefaultCurrency() });
+      appliedPayoutDefault.current = false;
     }
   }, [editingVenue, open]);
+
+  // Upgrade the currency default once payout status has loaded (see the
+  // useQuery above) — guarded so it never clobbers a value the organizer has
+  // since picked themselves.
+  useEffect(() => {
+    if (!editingVenue && payoutStatus && !appliedPayoutDefault.current) {
+      appliedPayoutDefault.current = true;
+      setFormData(prev => ({ ...prev, currency: deriveDefaultCurrency(payoutStatus) }));
+    }
+  }, [payoutStatus, editingVenue]);
 
   const createMutation = useMutation({
     mutationFn: async (data: Partial<InsertVenue>) => {
@@ -202,6 +226,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
       imageUrls: formData.imageUrls.length > 0 ? formData.imageUrls : [],
       address: formData.address || null,
       city: formData.city || null,
+      currency: formData.currency,
       phone: formData.phone || null,
       website: formData.website || null,
       hours: formData.hours || null,
@@ -363,6 +388,26 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
                         data-testid="input-venue-website"
                       />
                     </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="venue-currency">Payout Currency <span className="text-destructive">*</span></Label>
+                    <Select
+                      value={formData.currency}
+                      onValueChange={(value) => setFormData(prev => ({ ...prev, currency: value }))}
+                    >
+                      <SelectTrigger id="venue-currency" data-testid="select-venue-currency">
+                        <SelectValue placeholder="Select currency" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CURRENCIES.map((c) => (
+                          <SelectItem key={c.code} value={c.code}>{c.symbol} {c.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      What entry tickets and promotions for this venue are charged in — choose the currency that matches your connected payout account.
+                    </p>
                   </div>
 
                   <div className="space-y-2">

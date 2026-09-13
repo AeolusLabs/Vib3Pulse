@@ -7,6 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { UsersIcon, CalendarIcon, TicketIcon, PoundSterlingIcon, UserPlusIcon, FlagIcon, TrendingUpIcon, ImageIcon, Loader2Icon } from "@/components/ui/icons";
 import { Building, Wrench } from "lucide-react";
+import { formatMoney } from "@/lib/currency";
 
 interface CurrencyRevenue {
   currency: string;
@@ -23,15 +24,6 @@ interface PlatformStats {
   newUsersToday: number;
   pendingReports: number;
   activeOrganizers: number;
-}
-
-// Mirrors server/payments/index.ts formatAmount() — GBP pence and NGN kobo
-// are never combined into one figure.
-function formatMoney(amountSmallestUnit: number, currency: string): string {
-  if (currency === "NGN") {
-    return `₦${(amountSmallestUnit / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })}`;
-  }
-  return `£${(amountSmallestUnit / 100).toFixed(2)}`;
 }
 
 export default function AdminDashboard() {

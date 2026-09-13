@@ -18,6 +18,7 @@ import { format, isPast, isFuture } from "date-fns";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Venue, VenueEntryNight, InsertVenueEntryNight } from "@shared/schema";
+import { formatMoney, getCurrencySymbol } from "@/lib/currency";
 import { ArrowLeftIcon, CalendarIcon, PoundSterlingIcon, UsersIcon, PlusIcon, EditIcon, Trash2Icon, TicketIcon, ClockIcon, CheckCircleIcon, XCircleIcon, TrendingUpIcon } from "@/components/ui/icons";
 
 interface EntryNightFormData {
@@ -185,7 +186,6 @@ export default function VenueEntryNightsPage() {
   const EntryNightCard = ({ night }: { night: VenueEntryNight }) => {
     const isUpcoming = isFuture(new Date(night.date));
     const capacityUsed = night.capacity ? (night.ticketsSold / night.capacity) * 100 : 0;
-    const revenue = (night.ticketsSold * night.coverPriceCents) / 100;
 
     return (
       <Card className="overflow-hidden" data-testid={`card-entry-night-${night.id}`}>
@@ -229,8 +229,7 @@ export default function VenueEntryNightsPage() {
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">Cover Price</p>
               <p className="text-lg font-semibold flex items-center" data-testid={`text-night-price-${night.id}`}>
-                <PoundSterlingIcon className="h-4 w-4" />
-                {(night.coverPriceCents / 100).toFixed(2)}
+                {formatMoney(night.coverPriceCents, venue?.currency)}
               </p>
             </div>
             
@@ -256,7 +255,7 @@ export default function VenueEntryNightsPage() {
               <p className="text-xs text-muted-foreground">Revenue</p>
               <p className="text-lg font-semibold flex items-center text-green-600 dark:text-green-400" data-testid={`text-night-revenue-${night.id}`}>
                 <TrendingUpIcon className="h-4 w-4 mr-1" />
-                £{revenue.toFixed(2)}
+                {formatMoney(night.ticketsSold * night.coverPriceCents, venue?.currency)}
               </p>
             </div>
           </div>
@@ -431,7 +430,7 @@ export default function VenueEntryNightsPage() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="coverPrice">Cover Price ($) *</Label>
+                <Label htmlFor="coverPrice">Cover Price ({getCurrencySymbol(venue?.currency)}) *</Label>
                 <Input
                   id="coverPrice"
                   type="number"

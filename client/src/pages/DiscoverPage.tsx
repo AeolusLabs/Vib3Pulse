@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { formatMoney } from "@/lib/currency";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import HeroSection from "@/components/HeroSection";
@@ -561,9 +562,9 @@ export default function DiscoverPage() {
                               const minPrice = eventWithPrices.minPrice ?? event.ticketPrice;
                               const maxPrice = eventWithPrices.maxPrice ?? event.ticketPrice;
                               if (minPrice === maxPrice) {
-                                return `£${(minPrice / 100).toFixed(2)}`;
+                                return formatMoney(minPrice, event.currency);
                               }
-                              return `£${(minPrice / 100).toFixed(2)} - £${(maxPrice / 100).toFixed(2)}`;
+                              return `${formatMoney(minPrice, event.currency)} - ${formatMoney(maxPrice, event.currency)}`;
                             })()}
                           </span>
                         )}
@@ -722,7 +723,7 @@ export default function DiscoverPage() {
                                   <Badge variant="default" className="text-sm">Free</Badge>
                                 ) : (
                                   <span className="font-semibold text-sm">
-                                    £{(event.ticketPrice / 100).toFixed(2)}
+                                    {formatMoney(event.ticketPrice, event.currency)}
                                   </span>
                                 )}
                                 <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); handleShareEvent(event, e); }}>
@@ -768,7 +769,7 @@ export default function DiscoverPage() {
                                   </div>
                                 )}
                                 <div className="flex items-center justify-between pt-1">
-                                  <span className="font-semibold text-sm">£{(event.coverPriceCents / 100).toFixed(2)}</span>
+                                  <span className="font-semibold text-sm">{formatMoney(event.coverPriceCents, event.venue?.currency)}</span>
                                   {event.capacity && (
                                     <span className="text-xs text-muted-foreground">{event.capacity - event.ticketsSold} left</span>
                                   )}
@@ -863,9 +864,9 @@ export default function DiscoverPage() {
                           const minPrice = eventWithPrices.minPrice ?? event.ticketPrice;
                           const maxPrice = eventWithPrices.maxPrice ?? event.ticketPrice;
                           if (minPrice === maxPrice) {
-                            return `£${(minPrice / 100).toFixed(2)}`;
+                            return formatMoney(minPrice, event.currency);
                           }
-                          return `£${(minPrice / 100).toFixed(2)} - £${(maxPrice / 100).toFixed(2)}`;
+                          return `${formatMoney(minPrice, event.currency)} - ${formatMoney(maxPrice, event.currency)}`;
                         })()}
                       </span>
                     )}

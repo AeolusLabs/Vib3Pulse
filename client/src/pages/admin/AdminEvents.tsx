@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { formatMoney } from "@/lib/currency";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -218,7 +219,7 @@ export default function AdminEvents() {
                         {format(new Date(event.eventDate), 'MMM d, yyyy')}
                       </TableCell>
                       <TableCell className="text-slate-300">
-                        {event.ticketPrice === 0 ? 'Free' : `£${(event.ticketPrice / 100).toFixed(2)}`}
+                        {event.ticketPrice === 0 ? 'Free' : formatMoney(event.ticketPrice, (event as any).currency)}
                       </TableCell>
                       <TableCell>{statusBadge(event.moderationStatus)}</TableCell>
                       <TableCell className="text-right">

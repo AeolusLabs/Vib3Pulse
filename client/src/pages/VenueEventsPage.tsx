@@ -20,6 +20,7 @@ import { format, isPast, isFuture } from "date-fns";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Venue, VenueEntryNight, InsertVenueEntryNight } from "@shared/schema";
+import { formatMoney, getCurrencySymbol } from "@/lib/currency";
 import { ArrowLeftIcon, CalendarIcon, PoundSterlingIcon, UsersIcon, PlusIcon, EditIcon, Trash2Icon, TicketIcon, ClockIcon, CheckCircleIcon, XCircleIcon, TrendingUpIcon, UploadIcon, ImageIcon, XIcon, LogOutIcon, ScanLineIcon } from "@/components/ui/icons";
 import { DoorOpen, UtensilsCrossed, Wine } from "lucide-react";
 
@@ -213,7 +214,6 @@ export default function VenueEventsPage() {
   const VenueEventCard = ({ event }: { event: VenueEntryNight }) => {
     const isUpcoming = isFuture(new Date(event.date));
     const capacityUsed = event.capacity ? (event.ticketsSold / event.capacity) * 100 : 0;
-    const revenue = (event.ticketsSold * event.coverPriceCents) / 100;
     const ev = event as any;
 
     return (
@@ -287,7 +287,7 @@ export default function VenueEventsPage() {
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">Cover Price</p>
               <p className="text-lg font-semibold flex items-center" data-testid={`text-event-price-${event.id}`}>
-                <PoundSterlingIcon className="h-4 w-4" />{(event.coverPriceCents / 100).toFixed(2)}
+                {formatMoney(event.coverPriceCents, venue?.currency)}
               </p>
             </div>
             <div className="space-y-1">
@@ -307,7 +307,7 @@ export default function VenueEventsPage() {
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">Revenue</p>
               <p className="text-lg font-semibold flex items-center text-green-600 dark:text-green-400" data-testid={`text-event-revenue-${event.id}`}>
-                <TrendingUpIcon className="h-4 w-4 mr-1" />£{revenue.toFixed(2)}
+                <TrendingUpIcon className="h-4 w-4 mr-1" />{formatMoney(event.ticketsSold * event.coverPriceCents, venue?.currency)}
               </p>
             </div>
           </div>
@@ -579,7 +579,7 @@ export default function VenueEventsPage() {
               {/* Cover Price + Capacity */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="coverPrice">Cover Price (£) <span className="text-destructive">*</span></Label>
+                  <Label htmlFor="coverPrice">Cover Price ({getCurrencySymbol(venue?.currency)}) <span className="text-destructive">*</span></Label>
                   <Input
                     id="coverPrice"
                     type="number"

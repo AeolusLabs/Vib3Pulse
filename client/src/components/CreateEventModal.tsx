@@ -1,30 +1,5 @@
-import { useState, useEffect } from "react";
-
-// ── Currency helpers ──────────────────────────────────────────────────────────
-const CURRENCIES = [
-  { code: "GBP", symbol: "£", name: "British Pound" },
-  { code: "USD", symbol: "$", name: "US Dollar" },
-  { code: "EUR", symbol: "€", name: "Euro" },
-  { code: "NGN", symbol: "₦", name: "Nigerian Naira" },
-  { code: "CAD", symbol: "C$", name: "Canadian Dollar" },
-  { code: "AUD", symbol: "A$", name: "Australian Dollar" },
-  { code: "ZAR", symbol: "R", name: "South African Rand" },
-  { code: "GHS", symbol: "₵", name: "Ghanaian Cedi" },
-];
-
-function detectCurrency(): string {
-  const locale = (typeof navigator !== "undefined" && navigator.language) || "en-GB";
-  const map: Record<string, string> = {
-    "en-GB": "GBP", "en-NG": "NGN", "en-US": "USD", "en-CA": "CAD",
-    "en-AU": "AUD", "en-ZA": "ZAR", "en-GH": "GHS",
-    "fr": "EUR", "de": "EUR", "es": "EUR", "it": "EUR", "pt": "EUR", "nl": "EUR",
-  };
-  return map[locale] || map[locale.split("-")[0]] || "GBP";
-}
-
-function getCurrencySymbol(code: string): string {
-  return CURRENCIES.find(c => c.code === code)?.symbol ?? "£";
-}
+import { useState, useEffect, useRef } from "react";
+import { SUPPORTED_CURRENCIES as CURRENCIES, getCurrencySymbol, deriveDefaultCurrency, type PayoutStatusForDefault } from "@/lib/currency";
 
 const ACCEPTED_IMAGE_TYPES = "image/jpeg,image/png,image/webp,image/gif";
 const BLOCKED_IMAGE_TYPES = ["image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence"];
@@ -50,7 +25,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Event, EventCreateDto, EventUpdateDto } from "@shared/schema";
@@ -132,6 +107,17 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
   // Only verified/official users can add external ticket links
   const canAddExternalTicketUrl = currentUser?.isVerified || currentUser?.isOfficial;
 
+  // Smarter currency default: prefer whichever payout account the organizer
+  // has actually connected (that's the strongest signal — no point defaulting
+  // to a currency they can't be paid out in) over a browser-locale guess.
+  // Applied once the status loads, in a new event only — never overrides an
+  // in-progress edit. The dropdown remains fully overridable either way.
+  const { data: payoutStatus } = useQuery<PayoutStatusForDefault>({
+    queryKey: ["/api/organizer/payments/status"],
+    enabled: open && !event,
+  });
+  const appliedPayoutDefault = useRef(false);
+
   const [formData, setFormData] = useState<EventFormData>({
     name: "",
     type: "",
@@ -146,7 +132,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
     ageRestriction: "all",
     parentalGuidance: "none",
     entryType: "free",
-    currency: detectCurrency(),
+    currency: deriveDefaultCurrency(),
     thumbnailUrl: "",
     thumbnailPreview: "",
     externalTicketUrl: "",
@@ -159,6 +145,19 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
   });
   
   const [externalLinksModalOpen, setExternalLinksModalOpen] = useState(false);
+
+  // Upgrade the currency default once payout status has loaded — see the
+  // useQuery above. Guarded to fire once per modal open so it never clobbers
+  // a value the organizer has since picked themselves.
+  useEffect(() => {
+    if (!event && payoutStatus && !appliedPayoutDefault.current) {
+      appliedPayoutDefault.current = true;
+      setFormData(prev => ({ ...prev, currency: deriveDefaultCurrency(payoutStatus) }));
+    }
+    if (!open) {
+      appliedPayoutDefault.current = false;
+    }
+  }, [payoutStatus, event, open]);
 
   // Pre-fill form when editing
   useEffect(() => {
@@ -195,7 +194,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
         ageRestriction: "all" as const,
         parentalGuidance: "none" as const,
         entryType: event.externalTicketUrl ? "external" as const : (event.ticketPrice > 0 ? "ticketed" as const : "free" as const),
-        currency: (event as any).currency || detectCurrency(),
+        currency: (event as any).currency || deriveDefaultCurrency(),
         thumbnailUrl: event.imageUrl || "",
         thumbnailPreview: event.imageUrl || "",
         externalTicketUrl: event.externalTicketUrl || "",
@@ -252,7 +251,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
         ageRestriction: "all",
         parentalGuidance: "none",
         entryType: "free",
-        currency: detectCurrency(),
+        currency: deriveDefaultCurrency(),
         thumbnailUrl: "",
         thumbnailPreview: "",
         externalTicketUrl: "",

@@ -418,6 +418,35 @@ export async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_payment_transactions_created_at
       ON payment_transactions(created_at)
   `);
+
+  // Currency correctness (Phase 3): `currency` is now the sole, explicit,
+  // organizer-chosen source of truth for what a charge is made in — it is no
+  // longer re-derived from free-text city at checkout time. `venues` never had
+  // a currency column at all; add it, then run a ONE-TIME backfill using the
+  // exact same 10-city heuristic the old resolveCurrency(city) used, so an
+  // already-live Nigerian event/venue doesn't silently revert to GBP the
+  // moment the code stops re-deriving currency from its city on every request.
+  // This UPDATE is safe to run on every boot — it only ever touches rows still
+  // sitting on the column's untouched 'GBP' default, so it can never overwrite
+  // a currency an organizer (or a prior run of this same backfill) already set.
+  await pool.query(`
+    ALTER TABLE venues ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'GBP'
+  `);
+  const NG_CITY_PATTERN = "(lagos|abuja|port harcourt|ibadan|kano|kaduna|benin|enugu|calabar|owerri)";
+  await pool.query(`
+    UPDATE events SET currency = 'NGN'
+    WHERE currency = 'GBP' AND city ~* $1
+  `, [NG_CITY_PATTERN]);
+  await pool.query(`
+    UPDATE venues SET currency = 'NGN'
+    WHERE currency = 'GBP' AND city ~* $1
+  `, [NG_CITY_PATTERN]);
+  await pool.query(`
+    UPDATE ticket_tiers SET currency = 'NGN'
+    FROM events
+    WHERE ticket_tiers.event_id = events.id
+      AND ticket_tiers.currency = 'GBP' AND events.currency = 'NGN'
+  `);
 }
 
 export interface IStorage {
@@ -716,6 +745,7 @@ export interface IStorage {
       tickets: number;
       views: number;
       revenue: number;
+      currency: string;
       ticketPrice: number;
       capacity: number;
       eventDate: string;
@@ -724,7 +754,7 @@ export interface IStorage {
     ticketSalesByAge: { ageGroup: string; tickets: number; revenue: number; percentage: number }[];
     ticketSalesByGender: { gender: string; tickets: number; revenue: number; percentage: number }[];
     averageTicketPrice: number;
-    bestSellingEvent: { title: string; tickets: number; revenue: number } | null;
+    bestSellingEvent: { title: string; tickets: number; revenue: number; currency: string } | null;
     conversionRate: number;
   }>;
 
@@ -3224,6 +3254,7 @@ export class DbStorage implements IStorage {
       tickets: number;
       views: number;
       revenue: number;
+      currency: string;
       ticketPrice: number;
       capacity: number;
       eventDate: string;
@@ -3232,7 +3263,7 @@ export class DbStorage implements IStorage {
     ticketSalesByAge: { ageGroup: string; tickets: number; revenue: number; percentage: number }[];
     ticketSalesByGender: { gender: string; tickets: number; revenue: number; percentage: number }[];
     averageTicketPrice: number;
-    bestSellingEvent: { title: string; tickets: number; revenue: number } | null;
+    bestSellingEvent: { title: string; tickets: number; revenue: number; currency: string } | null;
     conversionRate: number;
   }> {
     const { startDate, endDate } = options ?? {};
@@ -3393,6 +3424,7 @@ export class DbStorage implements IStorage {
           tickets: evtTickets[0]?.count || 0,
           views: evtViews[0]?.count || 0,
           revenue: Number(evtRevenue[0]?.total) || 0,
+          currency: event.currency,
           ticketPrice: event.ticketPrice || 0,
           capacity: event.ticketsAvailable || 0,
           eventDate: event.eventDate.toISOString(),
@@ -3483,7 +3515,7 @@ export class DbStorage implements IStorage {
 
     const sortedByTickets = [...eventBreakdown].sort((a, b) => b.tickets - a.tickets);
     const bestSellingEvent = sortedByTickets.length > 0 && sortedByTickets[0].tickets > 0
-      ? { title: sortedByTickets[0].title, tickets: sortedByTickets[0].tickets, revenue: sortedByTickets[0].revenue }
+      ? { title: sortedByTickets[0].title, tickets: sortedByTickets[0].tickets, revenue: sortedByTickets[0].revenue, currency: sortedByTickets[0].currency }
       : null;
 
     // Conversion = (RSVPs + tickets) / views — ticket purchases already unique per user

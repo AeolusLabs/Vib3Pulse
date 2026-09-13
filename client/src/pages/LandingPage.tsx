@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { getCurrencySymbol } from "@/lib/currency";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -96,8 +97,7 @@ export default function LandingPage() {
   const formatPrice = (event: Event) => {
     if (event.ticketPrice === undefined || event.ticketPrice === null) return null;
     if (event.ticketPrice === 0) return "Free";
-    const currency = (event as any).currency;
-    const symbol = currency === "NGN" ? "₦" : "£";
+    const symbol = getCurrencySymbol((event as any).currency);
     return `From ${symbol}${(event.ticketPrice / 100).toFixed(0)}`;
   };
 

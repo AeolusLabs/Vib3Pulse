@@ -17,6 +17,7 @@ import type { VenueEntryNight, Venue } from "@shared/schema";
 import { ArrowLeftIcon, CalendarIcon, MapPinIcon, UsersIcon, TicketIcon, ClockIcon, LogOutIcon, Building2Icon, CheckCircleIcon, SparklesIcon, GlobeIcon, PhoneIcon } from "@/components/ui/icons";
 import { DoorOpen, UtensilsCrossed, Wine } from "lucide-react";
 import { CardPaymentForm } from "@/components/payments/CardPaymentForm";
+import { formatMoney } from "@/lib/currency";
 
 type VenueEventWithVenue = VenueEntryNight & { venue: Venue };
 
@@ -28,7 +29,7 @@ function VenueTicketPaymentStep({
   onSuccess,
   onCancel,
 }: {
-  event: VenueEntryNight;
+  event: VenueEventWithVenue;
   clientSecret: string;
   paymentIntentId: string;
   provider: string;
@@ -59,7 +60,7 @@ function VenueTicketPaymentStep({
     <CardPaymentForm
       clientSecret={clientSecret}
       provider={provider}
-      amountLabel={`£${(event.coverPriceCents / 100).toFixed(2)}`}
+      amountLabel={formatMoney(event.coverPriceCents, event.venue?.currency)}
       itemLabel="Entry ticket"
       onSuccess={() => confirmMutation.mutate()}
       onCancel={onCancel}

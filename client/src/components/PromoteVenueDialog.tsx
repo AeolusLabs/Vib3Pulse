@@ -3,55 +3,37 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { SparklesIcon, CheckIcon, ZapIcon, CrownIcon, RocketIcon } from "@/components/ui/icons";
 import { CardPaymentForm } from "@/components/payments/CardPaymentForm";
+import { formatMoney } from "@/lib/currency";
 
 interface PromoteVenueDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   venueId: string;
   venueName: string;
+  currency: string;
 }
 
-const promotionPackages = [
-  {
-    duration: 3,
-    price: 9.99,
-    label: "3 Days",
-    icon: ZapIcon,
-    popular: false,
-    description: "Quick visibility boost"
-  },
-  {
-    duration: 7,
-    price: 19.99,
-    label: "1 Week",
-    icon: SparklesIcon,
-    popular: true,
-    description: "Best for weekend events"
-  },
-  {
-    duration: 14,
-    price: 34.99,
-    label: "2 Weeks",
-    icon: CrownIcon,
-    popular: false,
-    description: "Extended exposure"
-  },
-  {
-    duration: 30,
-    price: 59.99,
-    label: "1 Month",
-    icon: RocketIcon,
-    popular: false,
-    description: "Maximum impact"
-  },
+const promotionPackageMeta = [
+  { duration: 3, label: "3 Days", icon: ZapIcon, popular: false, description: "Quick visibility boost" },
+  { duration: 7, label: "1 Week", icon: SparklesIcon, popular: true, description: "Best for weekend events" },
+  { duration: 14, label: "2 Weeks", icon: CrownIcon, popular: false, description: "Extended exposure" },
+  { duration: 30, label: "1 Month", icon: RocketIcon, popular: false, description: "Maximum impact" },
 ];
 
-export function PromoteVenueDialog({ open, onOpenChange, venueId, venueName }: PromoteVenueDialogProps) {
+export function PromoteVenueDialog({ open, onOpenChange, venueId, venueName, currency }: PromoteVenueDialogProps) {
+  // Fetched, not hardcoded — see PromoteEventDialog.tsx for why (a client-side
+  // GBP-only price table would silently mismatch what NGN venues are charged).
+  const { data: promotionPrices } = useQuery<Record<string, Record<number, number>>>({
+    queryKey: ["/api/payments/promotion-prices"],
+  });
+  const pricesForCurrency = promotionPrices?.[currency] ?? {};
+  const promotionPackages = promotionPackageMeta.map(m => ({ ...m, amount: pricesForCurrency[m.duration] ?? 0 }));
+
   const [selectedPackage, setSelectedPackage] = useState(7);
   const [paymentStep, setPaymentStep] = useState<"select" | "pay">("select");
   const [clientSecret, setClientSecret] = useState<string | null>(null);
@@ -152,7 +134,7 @@ export function PromoteVenueDialog({ open, onOpenChange, venueId, venueName }: P
                       )}
                     </div>
                     <div className="font-semibold">{pkg.label}</div>
-                    <div className="text-2xl font-bold text-purple-600">£{pkg.price}</div>
+                    <div className="text-2xl font-bold text-purple-600">{formatMoney(pkg.amount, currency)}</div>
                     <div className="text-xs text-muted-foreground mt-1">{pkg.description}</div>
                   </Card>
                 ))}
@@ -191,7 +173,7 @@ export function PromoteVenueDialog({ open, onOpenChange, venueId, venueName }: P
                 className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600"
                 data-testid="button-confirm-promote"
               >
-                {intentMutation.isPending ? "Processing..." : `Promote for £${selectedPkg.price}`}
+                {intentMutation.isPending ? "Processing..." : `Promote for ${formatMoney(selectedPkg.amount, currency)}`}
               </Button>
             </DialogFooter>
           </>
@@ -201,7 +183,7 @@ export function PromoteVenueDialog({ open, onOpenChange, venueId, venueName }: P
               <CardPaymentForm
                 clientSecret={clientSecret}
                 provider={provider}
-                amountLabel={`£${selectedPkg.price}`}
+                amountLabel={formatMoney(selectedPkg.amount, currency)}
                 itemLabel={`Promotion — ${selectedPkg.label}`}
                 onSuccess={() => confirmMutation.mutate()}
                 onCancel={() => setPaymentStep("select")}

@@ -11,16 +11,19 @@ export function calculateDistanceMiles(lat1: number, lon1: number, lat2: number,
   return R * c;
 }
 
-// Forward geocode an address to coordinates using OpenStreetMap Nominatim
-export async function geocodeAddress(address: string): Promise<{ latitude: number; longitude: number; city: string | null } | null> {
+// Forward geocode an address to coordinates using OpenStreetMap Nominatim.
+// Previously this forced ", UK" onto every address that didn't already say
+// UK/United Kingdom — harmless for UK addresses, but it actively mangled
+// non-UK ones (a Lagos address became "..., Nigeria, UK", which Nominatim
+// often can't resolve at all). VibePulse operates in both the UK and Nigeria
+// now, so global, unbiased geocoding is correct; countryCode is also now
+// returned since Nominatim already provides it and callers may want it
+// (e.g. deciding what to suggest, though currency itself is never inferred
+// from this — see asSupportedCurrency() in server/payments/index.ts).
+export async function geocodeAddress(address: string): Promise<{ latitude: number; longitude: number; city: string | null; countryCode: string | null } | null> {
   try {
-    // Add UK bias for better results
-    const searchAddress = address.includes("UK") || address.includes("United Kingdom")
-      ? address
-      : `${address}, UK`;
-
     const response = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchAddress)}&format=json&addressdetails=1&limit=1`,
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&addressdetails=1&limit=1`,
       {
         headers: {
           "User-Agent": "VibePulse/1.0 (social-events-platform)",
@@ -47,12 +50,13 @@ export async function geocodeAddress(address: string): Promise<{ latitude: numbe
       return null;
     }
 
-    // Extract city from address details
+    // Extract city/country from address details
     const addr = result.address || {};
     const city = addr.city || addr.town || addr.village || addr.county || null;
+    const countryCode = addr.country_code ? String(addr.country_code).toUpperCase() : null;
 
-    console.log(`Geocoded "${address}" to lat=${lat}, lon=${lon}, city=${city}`);
-    return { latitude: lat, longitude: lon, city };
+    console.log(`Geocoded "${address}" to lat=${lat}, lon=${lon}, city=${city}, country=${countryCode}`);
+    return { latitude: lat, longitude: lon, city, countryCode };
   } catch (error) {
     console.error("Geocoding error for address:", address, error);
     return null;

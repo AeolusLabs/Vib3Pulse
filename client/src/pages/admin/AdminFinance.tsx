@@ -5,6 +5,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import AdminLayout from "./AdminLayout";
 import { Badge } from "@/components/ui/badge";
 import { PoundSterlingIcon, TicketIcon, TrendingUpIcon, CreditCardIcon, InfoIcon, AlertTriangleIcon, CheckCircleIcon } from "@/components/ui/icons";
+import { formatMoney } from "@/lib/currency";
 
 interface CurrencyRevenue {
   currency: string;
@@ -24,15 +25,6 @@ interface FinanceOverview {
 interface PaymentConfig {
   stripeConfigured: boolean;
   paystackConfigured: boolean;
-}
-
-// Mirrors server/payments/index.ts formatAmount() — smallest-unit ints only,
-// GBP pence and NGN kobo are never combined into one figure.
-function formatMoney(amountSmallestUnit: number, currency: string): string {
-  if (currency === "NGN") {
-    return `₦${(amountSmallestUnit / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })}`;
-  }
-  return `£${(amountSmallestUnit / 100).toFixed(2)}`;
 }
 
 export default function AdminFinance() {

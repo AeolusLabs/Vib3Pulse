@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { formatMoney } from "@/lib/currency";
 import { useLocation } from "wouter";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
@@ -638,7 +639,7 @@ function EventResultCard({ event, navigate }: { event: Event & { organizer?: Use
           {event.ticketPrice === 0 ? (
             <span className="absolute top-2 right-2 text-xs font-semibold text-green-400 bg-black/50 px-2 py-0.5 rounded-full backdrop-blur-sm">Free</span>
           ) : (
-            <span className="absolute top-2 right-2 text-xs font-semibold text-white bg-black/50 px-2 py-0.5 rounded-full backdrop-blur-sm">£{(event.ticketPrice / 100).toFixed(2)}</span>
+            <span className="absolute top-2 right-2 text-xs font-semibold text-white bg-black/50 px-2 py-0.5 rounded-full backdrop-blur-sm">{formatMoney(event.ticketPrice, event.currency)}</span>
           )}
         </div>
       )}
@@ -669,7 +670,7 @@ function VenueEventResultCard({ venueEvent, navigate }: { venueEvent: VenueEntry
             {format(new Date(venueEvent.date), "EEE, MMM d")}
           </span>
           <span className="absolute top-2 right-2 text-xs font-semibold text-white bg-black/50 px-2 py-0.5 rounded-full backdrop-blur-sm">
-            £{(venueEvent.coverPriceCents / 100).toFixed(2)}
+            {formatMoney(venueEvent.coverPriceCents, venueEvent.venue?.currency)}
           </span>
         </div>
       )}
@@ -800,7 +801,7 @@ function TrendingEventCard({ event, onSelect }: { event: TrendingEvent; onSelect
         {event.ticketPrice === 0 ? (
           <span className="absolute top-2 right-2 text-xs font-semibold text-green-400 bg-black/50 px-2 py-0.5 rounded-full backdrop-blur-sm">Free</span>
         ) : (
-          <span className="absolute top-2 right-2 text-xs font-semibold text-white bg-black/50 px-2 py-0.5 rounded-full backdrop-blur-sm">£{(event.ticketPrice / 100).toFixed(2)}</span>
+          <span className="absolute top-2 right-2 text-xs font-semibold text-white bg-black/50 px-2 py-0.5 rounded-full backdrop-blur-sm">{formatMoney(event.ticketPrice, event.currency)}</span>
         )}
       </div>
       <div className="p-3">

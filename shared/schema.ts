@@ -792,6 +792,11 @@ export const venues = pgTable("venues", {
   imageUrls: text("image_urls").array().default(sql`'{}'`), // Up to 6 venue images
   address: varchar("address", { length: 500 }),
   city: varchar("city", { length: 100 }),
+  // Explicit, organizer-chosen currency for everything sold under this venue
+  // (entry-night tickets, venue promotions) — a venue is one fixed location,
+  // so currency lives here rather than per entry-night. Never inferred from
+  // `city` at charge time — see asSupportedCurrency() in server/payments/index.ts.
+  currency: text("currency").notNull().default("GBP"),
   phone: varchar("phone", { length: 50 }),
   website: varchar("website", { length: 255 }),
   hours: text("hours"),

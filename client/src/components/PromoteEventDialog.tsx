@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Dialog,
   DialogContent,
@@ -15,42 +15,32 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { MegaphoneIcon, SparklesIcon, CheckIcon } from "@/components/ui/icons";
 import { CardPaymentForm } from "@/components/payments/CardPaymentForm";
+import { formatMoney } from "@/lib/currency";
 
 interface PromoteEventDialogProps {
   eventId: string;
   eventTitle: string;
+  currency: string;
   isOpen: boolean;
   onClose: () => void;
 }
 
-const promotionOptions = [
-  {
-    days: 3,
-    price: 9.99,
-    label: "3 Days",
-    description: "Quick boost for upcoming events",
-  },
-  {
-    days: 7,
-    price: 19.99,
-    label: "1 Week",
-    description: "Standard promotion period",
-  },
-  {
-    days: 14,
-    price: 34.99,
-    label: "2 Weeks",
-    description: "Extended visibility",
-  },
-  {
-    days: 30,
-    price: 59.99,
-    label: "1 Month",
-    description: "Maximum exposure",
-  },
+const promotionMeta = [
+  { days: 3, label: "3 Days", description: "Quick boost for upcoming events" },
+  { days: 7, label: "1 Week", description: "Standard promotion period" },
+  { days: 14, label: "2 Weeks", description: "Extended visibility" },
+  { days: 30, label: "1 Month", description: "Maximum exposure" },
 ];
 
-export function PromoteEventDialog({ eventId, eventTitle, isOpen, onClose }: PromoteEventDialogProps) {
+export function PromoteEventDialog({ eventId, eventTitle, currency, isOpen, onClose }: PromoteEventDialogProps) {
+  // Fetched, not hardcoded — a client-side price table previously drifted
+  // from what the server actually charged once NGN got its own real pricing
+  // (it always showed "£X.XX" regardless of the event's currency).
+  const { data: promotionPrices } = useQuery<Record<string, Record<number, number>>>({
+    queryKey: ["/api/payments/promotion-prices"],
+  });
+  const pricesForCurrency = promotionPrices?.[currency] ?? {};
+  const promotionOptions = promotionMeta.map(m => ({ ...m, amount: pricesForCurrency[m.days] ?? 0 }));
   const [selectedDuration, setSelectedDuration] = useState<number>(7);
   const [paymentStep, setPaymentStep] = useState<"select" | "pay">("select");
   const [clientSecret, setClientSecret] = useState<string | null>(null);
@@ -164,7 +154,7 @@ export function PromoteEventDialog({ eventId, eventTitle, isOpen, onClose }: Pro
                           <p className="text-sm text-muted-foreground">{option.description}</p>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="font-semibold">£{option.price}</span>
+                          <span className="font-semibold">{formatMoney(option.amount, currency)}</span>
                           {selectedDuration === option.days && (
                             <CheckIcon className="h-5 w-5 text-primary" />
                           )}
@@ -200,7 +190,7 @@ export function PromoteEventDialog({ eventId, eventTitle, isOpen, onClose }: Pro
                 disabled={intentMutation.isPending}
                 data-testid="button-confirm-promote"
               >
-                {intentMutation.isPending ? "Processing..." : `Promote for £${selectedOption.price}`}
+                {intentMutation.isPending ? "Processing..." : `Promote for ${formatMoney(selectedOption.amount, currency)}`}
               </Button>
             </DialogFooter>
           </>
@@ -210,7 +200,7 @@ export function PromoteEventDialog({ eventId, eventTitle, isOpen, onClose }: Pro
               <CardPaymentForm
                 clientSecret={clientSecret}
                 provider={provider}
-                amountLabel={`£${selectedOption.price}`}
+                amountLabel={formatMoney(selectedOption.amount, currency)}
                 itemLabel={`Promotion — ${selectedOption.label}`}
                 onSuccess={() => confirmMutation.mutate()}
                 onCancel={() => setPaymentStep("select")}

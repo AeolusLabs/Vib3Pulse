@@ -18,6 +18,7 @@ import {
   Users, Award, ArrowRight, ChevronUp, ChevronDown,
   Minus, ExternalLink, AlertCircle, TrendingUp,
 } from "lucide-react";
+import { formatMoneyCompact } from "@/lib/currency";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -30,6 +31,7 @@ interface EventBreakdownItem {
   tickets: number;
   views: number;
   revenue: number;
+  currency: string;
   ticketPrice: number;
   capacity: number;
   eventDate: string;
@@ -48,7 +50,7 @@ interface DemographicsData {
   ticketSalesByAge: { ageGroup: string; tickets: number; revenue: number; percentage: number }[];
   ticketSalesByGender: { gender: string; tickets: number; revenue: number; percentage: number }[];
   averageTicketPrice: number;
-  bestSellingEvent: { title: string; tickets: number; revenue: number } | null;
+  bestSellingEvent: { title: string; tickets: number; revenue: number; currency: string } | null;
   conversionRate: number;
 }
 
@@ -72,16 +74,6 @@ const CHART_TOOLTIP_STYLE = {
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatGBP(pence: number): string {
-  if (pence === 0) return "£0";
-  const pounds = pence / 100;
-  return new Intl.NumberFormat("en-GB", {
-    style: "currency",
-    currency: "GBP",
-    maximumFractionDigits: pounds >= 100 ? 0 : 2,
-  }).format(pounds);
-}
 
 function formatCompact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -362,6 +354,14 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
     eventBreakdown,
   } = data;
 
+  // Aggregates (totalRevenue, averageTicketPrice, age/gender breakdowns) sum
+  // across every event without splitting by currency — correct for the
+  // overwhelmingly common case of an organizer running events in one
+  // currency, an approximation for one running events in both GBP and NGN.
+  // Per-event figures (event.revenue, bestSellingEvent) always use that
+  // event's own currency and are exact regardless.
+  const primaryCurrency = eventBreakdown[0]?.currency ?? "GBP";
+
   return (
     <div className="space-y-7">
 
@@ -385,7 +385,7 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
         <KpiCard
           accent
           label="Revenue"
-          value={formatGBP(totalRevenue)}
+          value={formatMoneyCompact(totalRevenue, primaryCurrency)}
           sub="from ticket sales"
           icon={<DollarSignIcon className="h-4 w-4" />}
         />
@@ -403,7 +403,7 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
         />
         <KpiCard
           label="Avg ticket"
-          value={averageTicketPrice > 0 ? formatGBP(averageTicketPrice) : "Free"}
+          value={averageTicketPrice > 0 ? formatMoneyCompact(averageTicketPrice, primaryCurrency) : "Free"}
           sub="per ticket sold"
           icon={<TrendingUp className="h-4 w-4" />}
         />
@@ -485,7 +485,7 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
                     {bestSellingEvent.tickets}
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    tickets · {formatGBP(bestSellingEvent.revenue)}
+                    tickets · {formatMoneyCompact(bestSellingEvent.revenue, bestSellingEvent.currency)}
                   </p>
                 </div>
               </div>
@@ -535,7 +535,7 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
                           </div>
                         </div>
                         <span className="text-sm font-semibold tabular-nums text-emerald-700 dark:text-emerald-400 w-20 text-right">
-                          {formatGBP(event.revenue)}
+                          {formatMoneyCompact(event.revenue, event.currency)}
                         </span>
                       </div>
                     );
@@ -568,7 +568,7 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
                       <CartesianGrid strokeDasharray="3 3" opacity={0.25} horizontal={false} />
                       <XAxis
                         type="number"
-                        tickFormatter={v => formatGBP(v)}
+                        tickFormatter={v => formatMoneyCompact(v, primaryCurrency)}
                         tick={{ fontSize: 11 }}
                         axisLine={false}
                         tickLine={false}
@@ -584,7 +584,7 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
                       />
                       <Tooltip
                         contentStyle={CHART_TOOLTIP_STYLE}
-                        formatter={(v: number) => [formatGBP(v), "Revenue"]}
+                        formatter={(v: number) => [formatMoneyCompact(v, primaryCurrency), "Revenue"]}
                         cursor={{ fill: "hsl(var(--muted))" }}
                       />
                       <Bar dataKey="revenue" fill="#7C3AED" radius={[0, 4, 4, 0]} name="revenue" />
@@ -670,7 +670,7 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
                           </td>
                           <td className="py-3 px-3 text-right">
                             <span className="tabular-nums font-medium text-emerald-700 dark:text-emerald-400">
-                              {event.revenue > 0 ? formatGBP(event.revenue) : "—"}
+                              {event.revenue > 0 ? formatMoneyCompact(event.revenue, event.currency) : "—"}
                             </span>
                           </td>
                           <td className="py-3 px-3 text-right">
@@ -708,7 +708,7 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
                         {aggregateSellThrough !== null ? `${aggregateSellThrough}% avg` : "—"}
                       </td>
                       <td className="py-3 px-3 text-right tabular-nums text-emerald-700 dark:text-emerald-400">
-                        {formatGBP(totalRevenue)}
+                        {formatMoneyCompact(totalRevenue, primaryCurrency)}
                       </td>
                       <td className="py-3 px-3 text-right text-xs text-muted-foreground tabular-nums">
                         {conversionRate}%
@@ -858,7 +858,7 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
                       <YAxis
                         yAxisId="right"
                         orientation="right"
-                        tickFormatter={v => formatGBP(v)}
+                        tickFormatter={v => formatMoneyCompact(v, primaryCurrency)}
                         tick={{ fontSize: 11 }}
                         axisLine={false}
                         tickLine={false}
@@ -867,7 +867,7 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
                         contentStyle={CHART_TOOLTIP_STYLE}
                         formatter={(v: number, name: string, props: any) => {
                           if (name === "Tickets") return [`${v} tickets (${props.payload.percentage}%)`, "Tickets"];
-                          return [formatGBP(v), "Revenue"];
+                          return [formatMoneyCompact(v, primaryCurrency), "Revenue"];
                         }}
                         cursor={{ fill: "hsl(var(--muted))" }}
                       />
@@ -921,7 +921,7 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
                       <p className="text-xl font-bold tabular-nums mt-0.5">{g.tickets}</p>
                       <p className="text-xs text-muted-foreground">tickets</p>
                       <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400 mt-1 tabular-nums">
-                        {formatGBP(g.revenue)}
+                        {formatMoneyCompact(g.revenue, primaryCurrency)}
                       </p>
                       <p className="text-[10px] text-muted-foreground">{g.percentage}% of sales</p>
                     </div>
@@ -969,7 +969,7 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
                           Top buying gender:{" "}
                           <strong>{ticketSalesByGender[0].gender}</strong>{" "}
                           ({ticketSalesByGender[0].percentage}% of ticket sales,{" "}
-                          {formatGBP(ticketSalesByGender[0].revenue)} revenue)
+                          {formatMoneyCompact(ticketSalesByGender[0].revenue, primaryCurrency)} revenue)
                         </span>
                       </li>
                     )}
@@ -980,7 +980,7 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
                           Best event:{" "}
                           <strong>{bestSellingEvent.title}</strong> —{" "}
                           {bestSellingEvent.tickets} tickets,{" "}
-                          {formatGBP(bestSellingEvent.revenue)}
+                          {formatMoneyCompact(bestSellingEvent.revenue, bestSellingEvent.currency)}
                         </span>
                       </li>
                     )}
