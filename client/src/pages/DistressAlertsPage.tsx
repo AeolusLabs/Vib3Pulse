@@ -15,6 +15,7 @@ import {
   TimerIcon,
   CheckCircleIcon,
   XCircleIcon,
+  PhoneIcon,
 } from "@/components/ui/icons";
 
 interface SafetyAlert {
@@ -268,29 +269,38 @@ function ActiveAlertCard({
         </a>
       )}
 
-      {/* Actions — only for sent alerts the user can resolve */}
-      {alert.type === "sent" && (
-        <div className="flex flex-col gap-2 pt-1">
-          <Button
-            size="lg"
-            className="w-full rounded-full gap-2 bg-green-600 hover:bg-green-700 text-white"
-            onClick={onResolve}
-            disabled={resolving || falseAlarming}
-            data-testid="button-im-safe"
+      {/* Actions — the sender can mark themselves safe; a buddy who received
+          the alert can confirm they've reached them. Both resolve the same
+          alert, just from different sides. */}
+      <div className="flex flex-col gap-2 pt-1">
+        {alert.type === "received" && other?.phoneNumber && (
+          <a
+            href={`tel:${other.phoneNumber}`}
+            className="flex items-center justify-center gap-2 w-full rounded-full border h-11 text-sm font-medium hover:bg-muted"
           >
-            <CheckCircleIcon className="h-4 w-4" />
-            {resolving ? "Sending…" : "I'm Safe"}
-          </Button>
-          <Button
-            variant="outline"
-            className="w-full rounded-full"
-            onClick={onFalseAlarm}
-            disabled={resolving || falseAlarming}
-          >
-            False Alarm
-          </Button>
-        </div>
-      )}
+            <PhoneIcon className="h-4 w-4" />
+            Call {other.displayName || other.username}
+          </a>
+        )}
+        <Button
+          size="lg"
+          className="w-full rounded-full gap-2 bg-green-600 hover:bg-green-700 text-white"
+          onClick={onResolve}
+          disabled={resolving || falseAlarming}
+          data-testid="button-im-safe"
+        >
+          <CheckCircleIcon className="h-4 w-4" />
+          {resolving ? "Sending…" : alert.type === "sent" ? "I'm Safe" : "I Have Reached Them"}
+        </Button>
+        <Button
+          variant="outline"
+          className="w-full rounded-full"
+          onClick={onFalseAlarm}
+          disabled={resolving || falseAlarming}
+        >
+          False Alarm
+        </Button>
+      </div>
     </div>
   );
 }

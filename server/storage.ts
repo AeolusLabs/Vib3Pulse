@@ -649,7 +649,7 @@ export interface IStorage {
   createSafetyAlert(params: { userId: string; buddyId: string; alertType: string; message: string; latitude?: number; longitude?: number; locationText?: string; timerId?: string }): Promise<SafetyAlert>;
   getSafetyAlerts(userId: string): Promise<any[]>;
   getAllSafetyAlerts(limit: number): Promise<any[]>;
-  resolveSafetyAlert(alertId: string, userId: string, status: string): Promise<SafetyAlert>;
+  resolveSafetyAlert(alertId: string, userId: string, status: string): Promise<SafetyAlert | undefined>;
   createSafetyTimer(params: { userId: string; durationMinutes: number; gracePeriodMinutes?: number; eventId?: string }): Promise<SafetyTimer>;
   getActiveSafetyTimer(userId: string): Promise<SafetyTimer | null>;
   checkInSafetyTimer(userId: string): Promise<void>;
@@ -2573,10 +2573,14 @@ export class DbStorage implements IStorage {
     );
   }
 
-  async resolveSafetyAlert(alertId: string, userId: string, status: string): Promise<SafetyAlert> {
+  // Either the alert's own sender OR their confirmed buddy (the recipient) may
+  // resolve it — a buddy who reaches the person, or the person themself, can
+  // both mark it safe/false-alarm. The caller (safety-routes.ts) figures out
+  // which side acted and notifies the other one accordingly.
+  async resolveSafetyAlert(alertId: string, userId: string, status: string): Promise<SafetyAlert | undefined> {
     const [result] = await db.update(safetyAlerts)
       .set({ status, resolvedAt: new Date() })
-      .where(and(eq(safetyAlerts.id, alertId), eq(safetyAlerts.userId, userId)))
+      .where(and(eq(safetyAlerts.id, alertId), or(eq(safetyAlerts.userId, userId), eq(safetyAlerts.buddyId, userId))))
       .returning();
     return result;
   }

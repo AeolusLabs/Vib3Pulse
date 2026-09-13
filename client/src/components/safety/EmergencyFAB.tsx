@@ -43,7 +43,7 @@ interface EmergencyFABProps {
 export function EmergencyFAB({ variant = "fab" }: EmergencyFABProps) {
   const { toast } = useToast();
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [location, setLocation] = useState<{ latitude: number; longitude: number; accuracy: number | null } | null>(null);
   const [locating, setLocating] = useState(false);
   const [holdProgress, setHoldProgress] = useState(0);
   const holdStart = useRef<number | null>(null);
@@ -77,6 +77,7 @@ export function EmergencyFAB({ variant = "fab" }: EmergencyFABProps) {
         latitude: location?.latitude ?? null,
         longitude: location?.longitude ?? null,
         locationText: null,
+        accuracy: location?.accuracy ?? null,
       });
       return res.json() as Promise<SosResponse>;
     },
@@ -106,7 +107,7 @@ export function EmergencyFAB({ variant = "fab" }: EmergencyFABProps) {
     setLocating(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+        setLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy ?? null });
         setLocating(false);
       },
       () => setLocating(false),

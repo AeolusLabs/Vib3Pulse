@@ -3,6 +3,7 @@ import { z } from "zod";
 import rateLimit from "express-rate-limit";
 import { storage } from "./storage.js";
 import { wsManager } from "./websocket.js";
+import { deliverNotification } from "./notifications.js";
 import { sendAlertSMS } from "./buddyService.js";
 import { requireAuth } from "./middleware.js";
 
@@ -55,11 +56,12 @@ export function registerSafetyRoutes(app: Express): void {
     latitude: z.number().optional().nullable(),
     longitude: z.number().optional().nullable(),
     locationText: z.string().optional().nullable(),
+    accuracy: z.number().optional().nullable(),
   });
 
   app.post("/api/safety/sos", requireAuth, sosRateLimit, async (req, res) => {
     try {
-      const { latitude, longitude, locationText } = sosSchema.parse(req.body);
+      const { latitude, longitude, locationText, accuracy } = sosSchema.parse(req.body);
       const userId = req.user!.id;
 
       const confirmedBuddies = await storage.getConfirmedBuddies(userId);
@@ -109,26 +111,23 @@ export function registerSafetyRoutes(app: Express): void {
             senderName,
             message: alertMessage,
             alertType: "manual_sos",
+            triggerMethod: "manual_sos",
             latitude: latitude ?? null,
             longitude: longitude ?? null,
+            accuracy: accuracy ?? null,
             locationText: locationText ?? null,
             timestamp: alert.createdAt.toISOString(),
           },
         });
 
-        await storage.createNotification({
+        await deliverNotification({
           userId: buddy.buddyUserId,
           type: "buddy_alert",
           title: "SOS Alert",
           message: `${senderName} needs help!${locationPart}`,
-          link: "/safety/alerts",
+          link: "/buddy/alerts",
           relatedUserId: userId,
           relatedEntityId: alert.id,
-        });
-
-        wsManager.sendToUser(buddy.buddyUserId, {
-          type: "notification",
-          data: { type: "buddy_alert" },
         });
       }
 
@@ -161,29 +160,44 @@ export function registerSafetyRoutes(app: Express): void {
     }
   });
 
+  // Either the alert's sender (resolving their own alert) or their confirmed
+  // buddy (confirming they reached the sender) may call these two routes.
+  // `storage.resolveSafetyAlert` matches on userId OR buddyId; we branch the
+  // notification here based on which side actually acted.
   app.post("/api/safety/alerts/:id/resolve", requireAuth, async (req, res) => {
     try {
       const { id } = req.params;
       const userId = req.user!.id;
       const alert = await storage.resolveSafetyAlert(id, userId, "safe");
+      if (!alert) {
+        return res.status(404).json({ message: "Alert not found" });
+      }
 
-      const sender = await storage.getUser(userId);
-      const senderName = sender?.displayName || sender?.username || "Your buddy";
+      const actor = await storage.getUser(userId);
+      const actorName = actor?.displayName || actor?.username || "Your buddy";
+      const isSender = alert.userId === userId;
 
-      wsManager.sendToUser(alert.buddyId, {
-        type: "notification",
-        data: { type: "buddy_alert_resolved" },
-      });
-
-      await storage.createNotification({
-        userId: alert.buddyId,
-        type: "buddy_alert_resolved",
-        title: "Buddy is Safe",
-        message: `${senderName} has marked themselves as safe`,
-        link: "/safety/alerts",
-        relatedUserId: userId,
-        relatedEntityId: id,
-      });
+      if (isSender) {
+        await deliverNotification({
+          userId: alert.buddyId,
+          type: "buddy_alert_resolved",
+          title: "Buddy is Safe",
+          message: `${actorName} has marked themselves as safe`,
+          link: "/buddy/alerts",
+          relatedUserId: userId,
+          relatedEntityId: id,
+        });
+      } else {
+        await deliverNotification({
+          userId: alert.userId,
+          type: "buddy_alert_resolved",
+          title: "Buddy Reached You",
+          message: `${actorName} confirmed they reached you and you're safe`,
+          link: "/buddy/alerts",
+          relatedUserId: userId,
+          relatedEntityId: id,
+        });
+      }
 
       res.json({ message: "Marked as safe" });
     } catch (error) {
@@ -197,24 +211,35 @@ export function registerSafetyRoutes(app: Express): void {
       const { id } = req.params;
       const userId = req.user!.id;
       const alert = await storage.resolveSafetyAlert(id, userId, "false_alarm");
+      if (!alert) {
+        return res.status(404).json({ message: "Alert not found" });
+      }
 
-      const sender = await storage.getUser(userId);
-      const senderName = sender?.displayName || sender?.username || "Your buddy";
+      const actor = await storage.getUser(userId);
+      const actorName = actor?.displayName || actor?.username || "Your buddy";
+      const isSender = alert.userId === userId;
 
-      wsManager.sendToUser(alert.buddyId, {
-        type: "notification",
-        data: { type: "buddy_alert_resolved" },
-      });
-
-      await storage.createNotification({
-        userId: alert.buddyId,
-        type: "buddy_alert_resolved",
-        title: "Alert: False Alarm",
-        message: `${senderName} marked their alert as a false alarm`,
-        link: "/safety/alerts",
-        relatedUserId: userId,
-        relatedEntityId: id,
-      });
+      if (isSender) {
+        await deliverNotification({
+          userId: alert.buddyId,
+          type: "buddy_alert_resolved",
+          title: "Alert: False Alarm",
+          message: `${actorName} marked their alert as a false alarm`,
+          link: "/buddy/alerts",
+          relatedUserId: userId,
+          relatedEntityId: id,
+        });
+      } else {
+        await deliverNotification({
+          userId: alert.userId,
+          type: "buddy_alert_resolved",
+          title: "Alert Marked False Alarm",
+          message: `${actorName} marked your alert as a false alarm`,
+          link: "/buddy/alerts",
+          relatedUserId: userId,
+          relatedEntityId: id,
+        });
+      }
 
       res.json({ message: "Marked as false alarm" });
     } catch (error) {
@@ -347,26 +372,23 @@ export function startSafetyTimerJob(): void {
                 senderName,
                 message: alertMessage,
                 alertType: "timer_expiry",
+                triggerMethod: "timer_expiry",
                 latitude: null,
                 longitude: null,
+                accuracy: null,
                 locationText: null,
                 timestamp: alert.createdAt.toISOString(),
               },
             });
 
-            await storage.createNotification({
+            await deliverNotification({
               userId: buddy.buddyUserId,
               type: "buddy_timer_expiry",
               title: "Check-In Timer Expired",
               message: `${senderName} didn't check in on time — they may need help`,
-              link: "/safety/alerts",
+              link: "/buddy/alerts",
               relatedUserId: timer.userId,
               relatedEntityId: alert.id,
-            });
-
-            wsManager.sendToUser(buddy.buddyUserId, {
-              type: "notification",
-              data: { type: "buddy_timer_expiry" },
             });
           }
 

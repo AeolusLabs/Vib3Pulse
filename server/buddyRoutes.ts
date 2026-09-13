@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { storage } from "./storage.js";
-import { wsManager } from "./websocket.js";
+import { deliverNotification } from "./notifications.js";
 import { assignBuddy, assignAppBuddy, acceptBuddyRequest, declineBuddyRequest, processBuddySMSReply, removeBuddy } from "./buddyService.js";
 import { validateTwilioWebhook, parseTwilioInboundSMS } from "./twilioService.js";
 import { requireAuth } from "./middleware.js";
@@ -65,28 +65,20 @@ router.post("/buddy-sms-reply", async (req, res) => {
       const name = updatedBuddy?.name ?? "Your buddy";
 
       if (status === "confirmed") {
-        await storage.createNotification({
+        await deliverNotification({
           userId: result.userId,
           type: "buddy_request_response",
           title: "Buddy Confirmed!",
           message: `${name} has confirmed they will be your safety buddy.`,
-          link: "/safety/settings",
-        });
-        wsManager.sendToUser(result.userId, {
-          type: "notification",
-          data: { type: "buddy_confirmed" },
+          link: "/buddy/settings",
         });
       } else if (status === "declined") {
-        await storage.createNotification({
+        await deliverNotification({
           userId: result.userId,
           type: "buddy_request_response",
           title: "Buddy Declined",
           message: `${name} declined your safety buddy request.`,
-          link: "/safety/settings",
-        });
-        wsManager.sendToUser(result.userId, {
-          type: "notification",
-          data: { type: "buddy_declined" },
+          link: "/buddy/settings",
         });
       }
     }

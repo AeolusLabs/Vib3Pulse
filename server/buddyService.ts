@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { storage } from "./storage.js";
-import { wsManager } from "./websocket.js";
+import { deliverNotification } from "./notifications.js";
 import { sendUKSMS } from "./twilioService.js";
 import { sendNigeriaSMS } from "./termiiService.js";
 import type { SafetyBuddy } from "@shared/schema";
@@ -47,6 +47,32 @@ function isNigerianNumber(phone: string): boolean {
   return phone.startsWith("+234");
 }
 
+// Finds the user's nearest upcoming confirmed ticket or RSVP, for use in the
+// buddy-invite SMS ("X is going to [eventName]..."). Falls back to a generic
+// phrase if they have nothing booked yet.
+async function getNextUpcomingEventLabel(userId: string): Promise<string> {
+  const [ticketRows, rsvpRows] = await Promise.all([
+    storage.getUserTickets(userId),
+    storage.getUserRsvps(userId),
+  ]);
+  const now = new Date();
+  const upcoming = [
+    ...ticketRows.filter((t) => t.status === "confirmed"),
+    ...rsvpRows.filter((r) => r.status === "confirmed"),
+  ]
+    .filter((x) => !x.event.isCancelled && new Date(x.event.eventDate) >= now)
+    .sort((a, b) => new Date(a.event.eventDate).getTime() - new Date(b.event.eventDate).getTime());
+
+  if (upcoming.length === 0) return "their next event";
+
+  const ev = upcoming[0].event;
+  const dateStr = new Date(ev.eventDate).toLocaleDateString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+  return `${ev.title} at ${ev.location} on ${dateStr}`;
+}
 
 async function sendBuddySMS(
   phone: string,
@@ -119,7 +145,7 @@ export async function assignBuddy(
   const displayName = user?.displayName || user?.username || "Someone";
 
   // Get current event name if they have an upcoming ticket — fall back to a generic placeholder
-  const eventName = "their next event";
+  const eventName = await getNextUpcomingEventLabel(userId);
 
   sendBuddySMS(phone, displayName, eventName).catch((err: any) => {
     console.error(`[BuddyService] SMS send failed to ${phone}:`, err.message);
@@ -179,13 +205,13 @@ export async function expirePendingBuddies(): Promise<number> {
         tokenExpiresAt: null,
       });
 
-      // Notify the user in-app that their invitation expired
-      await storage.createNotification({
+      // Notify the user (in-app + push) that their invitation expired
+      await deliverNotification({
         userId: buddy.userId,
         type: "buddy_request",
         title: "Buddy Invitation Expired",
         message: `Your invitation to ${buddy.name} (${buddy.phoneNumber}) has expired after 48 hours. Add them again to send a new invitation.`,
-        link: "/safety/settings",
+        link: "/buddy/settings",
       });
 
       console.log(`[BuddyService] Expired invitation for buddy ${buddy.id} (${buddy.phoneNumber})`);
@@ -240,18 +266,15 @@ export async function assignAppBuddy(
   const requester = await storage.getUser(userId);
   const requesterName = requester?.displayName || requester?.username || "Someone";
 
-  // Notify the target user in-app
-  await storage.createNotification({
+  // Notify the target user (in-app + push)
+  await deliverNotification({
     userId: targetUserId,
     type: "buddy_request",
     title: "Safety Buddy Request",
     message: `${requesterName} wants you to be their safety buddy on Vib3Pulse.`,
     link: "/buddy/settings",
-  });
-
-  wsManager.sendToUser(targetUserId, {
-    type: "notification",
-    data: { type: "buddy_request", fromUserId: userId, fromName: requesterName },
+    relatedUserId: userId,
+    relatedEntityId: buddy.id,
   });
 
   console.log(`[BuddyService] App buddy request sent from ${userId} to ${targetUserId}`);
@@ -272,17 +295,14 @@ export async function acceptBuddyRequest(
   const accepter = await storage.getUser(acceptingUserId);
   const accepterName = accepter?.displayName || accepter?.username || "Your buddy";
 
-  await storage.createNotification({
+  await deliverNotification({
     userId: buddy.userId,
     type: "buddy_request_response",
     title: "Buddy Request Accepted!",
     message: `${accepterName} accepted your safety buddy request.`,
     link: "/buddy/settings",
-  });
-
-  wsManager.sendToUser(buddy.userId, {
-    type: "notification",
-    data: { type: "buddy_confirmed", buddyId },
+    relatedUserId: acceptingUserId,
+    relatedEntityId: buddyId,
   });
 
   console.log(`[BuddyService] App buddy ${buddyId} accepted by ${acceptingUserId}`);
@@ -302,17 +322,14 @@ export async function declineBuddyRequest(
   const decliner = await storage.getUser(decliningUserId);
   const declinerName = decliner?.displayName || decliner?.username || "Your buddy";
 
-  await storage.createNotification({
+  await deliverNotification({
     userId: buddy.userId,
     type: "buddy_request_response",
     title: "Buddy Request Declined",
     message: `${declinerName} declined your safety buddy request.`,
     link: "/buddy/settings",
-  });
-
-  wsManager.sendToUser(buddy.userId, {
-    type: "notification",
-    data: { type: "buddy_declined", buddyId },
+    relatedUserId: decliningUserId,
+    relatedEntityId: buddyId,
   });
 
   console.log(`[BuddyService] App buddy ${buddyId} declined by ${decliningUserId}`);
