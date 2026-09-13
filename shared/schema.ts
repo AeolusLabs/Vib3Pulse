@@ -744,6 +744,14 @@ export const safetyTimers = pgTable("safety_timers", {
   gracePeriodMinutes: integer("grace_period_minutes").notNull().default(5),
   gracePeriodEndsAt: timestamp("grace_period_ends_at").notNull(),
   status: text("status").notNull().default("active"), // SafetyTimerStatus
+  // Graduated check-in escalation (PRD stages T+0/T+10/T+20/T+25): 0=none notified yet,
+  // 1=T+0, 2=T+10, 3=T+20, 4=alerted(T+25, handled by existing status="alerted" flow).
+  // Guards the 30s poll job from re-notifying the same stage every tick.
+  lastStageNotified: integer("last_stage_notified").notNull().default(0),
+  // Max 3 per timer. Snoozing extends expiresAt by 30min; on the 3rd snooze,
+  // lastStageNotified is pre-seeded to 1 so the final cycle skips stage 1's
+  // gentle copy and goes straight to stage 2, per PRD.
+  snoozeCount: integer("snooze_count").notNull().default(0),
   checkedInAt: timestamp("checked_in_at"),
   alertedAt: timestamp("alerted_at"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
@@ -758,6 +766,26 @@ export const insertSafetyTimerSchema = createInsertSchema(safetyTimers).omit({
 
 export type InsertSafetyTimer = z.infer<typeof insertSafetyTimerSchema>;
 export type SafetyTimer = typeof safetyTimers.$inferSelect;
+
+// Public, no-auth share link for a phone-only buddy (no app account) to view an
+// alert's location/status without logging in. One row per triggering event,
+// reused across every phone-only buddy notified by that same event — it is a
+// snapshot taken at alert time, not a live-synced view of safetyAlerts (a
+// later resolve/false-alarm on the real alert does not update this row).
+export const safetyAlertShares = pgTable("safety_alert_shares", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  shareToken: varchar("share_token").notNull().unique(),
+  alertType: text("alert_type").notNull(), // SafetyAlertType
+  message: text("message").notNull(),
+  latitude: doublePrecision("latitude"),
+  longitude: doublePrecision("longitude"),
+  locationText: text("location_text"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  expiresAt: timestamp("expires_at").notNull(),
+});
+
+export type SafetyAlertShare = typeof safetyAlertShares.$inferSelect;
 
 export const eventAnalytics = pgTable("event_analytics", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1132,6 +1160,7 @@ export const notificationTypes = [
   "buddy_request_response",
   "buddy_alert_resolved",
   "buddy_timer_expiry",
+  "checkin_stage_reminder",
   "event_rsvp",
   "ticket_purchase",
   "ticket_refund",

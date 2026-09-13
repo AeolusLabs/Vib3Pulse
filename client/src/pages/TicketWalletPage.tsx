@@ -13,8 +13,20 @@ import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import type { Ticket as TicketType, Event } from "@shared/schema";
 import { CalendarIcon, MapPinIcon, TicketIcon, QrCodeIcon, Loader2Icon } from "@/components/ui/icons";
+import { AutoSetupTimerDialog } from "@/components/safety/AutoSetupTimerDialog";
 
 type TicketWithEvent = TicketType & { event: Event };
+
+interface Buddy { confirmationStatus: string }
+
+// Mirrors the "+3h if no end date" fallback used elsewhere (EventDetailsModal.tsx,
+// rating-routes.ts) — events aren't guaranteed to have eventEndDate set.
+function computeDefaultCheckinExpiry(event: Event): Date {
+  const end = event.eventEndDate
+    ? new Date(event.eventEndDate)
+    : new Date(new Date(event.eventDate).getTime() + 3 * 60 * 60_000);
+  return new Date(end.getTime() + 60 * 60_000); // +1h per PRD
+}
 
 function TicketQRCode({ ticketId }: { ticketId: string }) {
   const [showQR, setShowQR] = useState(false);
@@ -70,6 +82,12 @@ export default function TicketWalletPage() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
+  const [autoSetupTarget, setAutoSetupTarget] = useState<{ eventId: string; eventName: string; defaultExpiry: Date } | null>(null);
+
+  const { data: buddiesData } = useQuery<{ buddies: Buddy[] }>({
+    queryKey: ["/api/safety/buddies"],
+  });
+  const hasConfirmedBuddy = (buddiesData?.buddies ?? []).some((b) => b.confirmationStatus === "confirmed");
 
   // Handle the success redirect from event ticket checkout (see
   // /api/payments/event/checkout's successUrl in server/payment-routes.ts,
@@ -83,13 +101,20 @@ export default function TicketWalletPage() {
       setIsVerifyingPayment(true);
       apiRequest('POST', '/api/payments/event/verify', { sessionId, provider })
         .then(async (response) => {
-          await response.json();
+          const body: { ticket: TicketType; event?: Event } = await response.json();
           // Refetch tickets to show the newly purchased ticket
           queryClient.invalidateQueries({ queryKey: ["/api/tickets"] });
           toast({
             title: "Ticket purchased!",
             description: "Your ticket has been added to your wallet.",
           });
+          if (body.event && hasConfirmedBuddy) {
+            setAutoSetupTarget({
+              eventId: body.event.id,
+              eventName: body.event.title,
+              defaultExpiry: computeDefaultCheckinExpiry(body.event),
+            });
+          }
         })
         .catch(() => {
           toast({
@@ -104,7 +129,7 @@ export default function TicketWalletPage() {
           window.history.replaceState({}, '', '/ticket-wallet');
         });
     }
-  }, [toast, isVerifyingPayment]);
+  }, [toast, isVerifyingPayment, hasConfirmedBuddy]);
 
   const { data: tickets, isLoading } = useQuery<TicketWithEvent[]>({
     queryKey: ["/api/tickets"],
@@ -235,6 +260,16 @@ export default function TicketWalletPage() {
       </main>
 
       <BottomNavigation />
+
+      {autoSetupTarget && (
+        <AutoSetupTimerDialog
+          open={!!autoSetupTarget}
+          onOpenChange={(open) => { if (!open) setAutoSetupTarget(null); }}
+          eventId={autoSetupTarget.eventId}
+          eventName={autoSetupTarget.eventName}
+          defaultExpiry={autoSetupTarget.defaultExpiry}
+        />
+      )}
     </div>
   );
 }

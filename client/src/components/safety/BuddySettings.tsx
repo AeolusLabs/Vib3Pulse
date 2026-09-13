@@ -9,8 +9,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { CheckInTimer } from "./CheckInTimer";
+import { useShakeOptIn } from "@/hooks/useShakeDetector";
+import { usePowerButtonOptIn } from "@/hooks/usePowerButtonDetector";
 import {
   ShieldIcon,
   XIcon,
@@ -21,6 +24,67 @@ import {
   ClockIcon,
   SearchIcon,
 } from "@/components/ui/icons";
+
+function SilentTriggersCard() {
+  const { toast } = useToast();
+  const shake = useShakeOptIn();
+  const powerButton = usePowerButtonOptIn();
+
+  return (
+    <Card data-testid="card-silent-triggers">
+      <CardHeader>
+        <CardTitle className="text-base">Silent SOS Triggers</CardTitle>
+        <CardDescription>
+          Trigger an alert without anyone noticing. Only arm while night mode is active.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <Label htmlFor="switch-shake-sos" className="text-sm font-medium">Shake to SOS</Label>
+            <p className="text-xs text-muted-foreground">Shake your phone hard 3 times to trigger silently.</p>
+          </div>
+          <Switch
+            id="switch-shake-sos"
+            checked={shake.optedIn}
+            disabled={!shake.isSupported}
+            onCheckedChange={async (checked) => {
+              if (checked) {
+                const granted = await shake.requestPermission();
+                if (!granted) {
+                  toast({ title: "Permission denied", description: "Shake-to-SOS needs motion access to work.", variant: "destructive" });
+                }
+              } else {
+                shake.disable();
+              }
+            }}
+            data-testid="switch-shake-sos"
+          />
+        </div>
+        {!shake.isSupported && (
+          <p className="text-xs text-muted-foreground">Not supported on this device/browser.</p>
+        )}
+
+        <Separator />
+
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <Label htmlFor="switch-power-button-sos" className="text-sm font-medium">Power-Button SOS</Label>
+            <p className="text-xs text-muted-foreground">
+              Press the power button 5 times quickly. Off by default — higher risk of accidental triggers.
+            </p>
+          </div>
+          <Switch
+            id="switch-power-button-sos"
+            checked={powerButton.optedIn}
+            onCheckedChange={powerButton.setOptedIn}
+            data-testid="switch-power-button-sos"
+          />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 interface Buddy {
   id: string;
@@ -646,6 +710,9 @@ export function BuddySettings() {
 
       {/* Check-in timer — only when at least one buddy is confirmed */}
       {hasConfirmedBuddy && <CheckInTimer />}
+
+      {/* Silent SOS triggers — only useful once there's a confirmed buddy to alert */}
+      {hasConfirmedBuddy && <SilentTriggersCard />}
 
       {/* Distress message */}
       <Card data-testid="card-distress-message">

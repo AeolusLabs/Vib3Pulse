@@ -197,7 +197,7 @@ export function registerPaymentRoutes(app: Express): void {
 
       const existing = await storage.getTicketByPaymentIntent(verified.providerPaymentId);
       if (existing) {
-        return res.json({ message: "Ticket already issued", ticket: existing });
+        return res.json({ message: "Ticket already issued", ticket: existing, event: await storage.getEvent(existing.eventId) });
       }
 
       const slotClaimed = await storage.claimEventTicketSlot(meta.eventId, meta.ticketTierId ?? null);
@@ -262,7 +262,7 @@ export function registerPaymentRoutes(app: Express): void {
         });
       }
 
-      res.json({ message: "Ticket issued", ticket });
+      res.json({ message: "Ticket issued", ticket, event });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "sessionId and provider are required" });

@@ -18,10 +18,21 @@ interface SafetyTimer {
   gracePeriodMinutes: number;
   gracePeriodEndsAt: string;
   status: "active" | "grace_period" | "alerted" | "checked_in" | "cancelled";
+  lastStageNotified: number; // 0=none, 1=T+0, 2=T+10, 3=T+20, 4=alerted(T+25)
+  snoozeCount: number;
   checkedInAt: string | null;
   alertedAt: string | null;
   createdAt: string;
 }
+
+// Graduated escalation stages (fixed per PRD — not user-configurable).
+// Stage boundaries are offsets from expiresAt; stage 0 is "not expired yet".
+const STAGE_INFO: Record<number, { label: string; border: string; badgeClass: string } | null> = {
+  0: null,
+  1: { label: "Quick check-in", border: "border-blue-500/40 bg-blue-500/5", badgeClass: "bg-blue-600 text-white" },
+  2: { label: "Still there?", border: "border-amber-500/40 bg-amber-500/5", badgeClass: "bg-amber-600 text-white" },
+  3: { label: "Last chance", border: "border-destructive/40 bg-destructive/5", badgeClass: "bg-destructive text-white" },
+};
 
 function useCountdown(targetIso: string | null) {
   const [label, setLabel] = useState("");
@@ -47,13 +58,15 @@ function formatExpiry(iso: string) {
   return new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
-const GRACE_OPTIONS = [1, 5, 10, 15, 30] as const;
+function addMinutes(iso: string, minutes: number): string {
+  return new Date(new Date(iso).getTime() + minutes * 60_000).toISOString();
+}
+
 const DURATION_PRESETS = [30, 60, 120, 240] as const;
 
 export function CheckInTimer() {
   const { toast } = useToast();
   const [customMinutes, setCustomMinutes] = useState("");
-  const [gracePeriod, setGracePeriod] = useState<number>(5);
 
   const { data, isLoading } = useQuery<{ timer: SafetyTimer | null }>({
     queryKey: ["/api/safety/timer"],
@@ -61,13 +74,21 @@ export function CheckInTimer() {
   });
 
   const timer = data?.timer ?? null;
-  const isInGrace = timer?.status === "grace_period";
-  const countdownTarget = isInGrace ? timer?.gracePeriodEndsAt : timer?.expiresAt;
-  const countdown = useCountdown(timer ? countdownTarget ?? null : null);
+  const stage = timer?.status === "grace_period" ? Math.max(timer.lastStageNotified, 1) : 0;
+  const stageInfo = STAGE_INFO[stage];
+
+  // Stage 1 counts down to the T+10 boundary, stage 2 to T+20, stage 3 to the
+  // final T+25 alert deadline (gracePeriodEndsAt). Stage 0 counts down to expiry.
+  const countdownTarget = !timer ? null
+    : stage === 0 ? timer.expiresAt
+    : stage === 1 ? addMinutes(timer.expiresAt, 10)
+    : stage === 2 ? addMinutes(timer.expiresAt, 20)
+    : timer.gracePeriodEndsAt;
+  const countdown = useCountdown(countdownTarget);
 
   const startMutation = useMutation({
     mutationFn: (durationMinutes: number) =>
-      apiRequest("POST", "/api/safety/timer", { durationMinutes, gracePeriodMinutes: gracePeriod }),
+      apiRequest("POST", "/api/safety/timer", { durationMinutes }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/safety/timer"] });
       toast({ title: "Timer started", description: "Check in before it expires or your buddy will be alerted." });
@@ -93,6 +114,15 @@ export function CheckInTimer() {
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
+  const snoozeMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/safety/timer/snooze"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/safety/timer"] });
+      toast({ title: "Snoozed", description: "Extended by 30 minutes." });
+    },
+    onError: (e: any) => toast({ title: "Couldn't snooze", description: e.message, variant: "destructive" }),
+  });
+
   const handleCustomStart = () => {
     const mins = parseInt(customMinutes, 10);
     if (isNaN(mins) || mins < 1 || mins > 1440) {
@@ -111,7 +141,7 @@ export function CheckInTimer() {
           Check-In Timer
         </CardTitle>
         <CardDescription>
-          Set a timer. If you don't check in before the grace period ends, your buddy is alerted automatically.
+          Set a timer. If you don't check in, we'll nudge you a few times before your buddy is alerted automatically.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -123,22 +153,20 @@ export function CheckInTimer() {
             <div
               className={[
                 "text-center p-6 rounded-xl space-y-1 border-2 transition-colors duration-500",
-                isInGrace
-                  ? "border-destructive/40 bg-destructive/5"
-                  : "border-primary/20 bg-primary/5",
+                stageInfo ? stageInfo.border : "border-primary/20 bg-primary/5",
               ].join(" ")}
             >
-              {isInGrace && (
-                <Badge variant="destructive" className="mb-2 gap-1">
+              {stageInfo && (
+                <Badge className={`mb-2 gap-1 ${stageInfo.badgeClass}`}>
                   <span className="relative flex h-2 w-2">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
                     <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
                   </span>
-                  Grace period — check in now!
+                  {stageInfo.label}
                 </Badge>
               )}
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest">
-                {isInGrace ? "Grace ends in" : "Time remaining"}
+                {stage === 0 ? "Time remaining" : stage === 3 ? "Buddy alerted in" : "Next check-in in"}
               </p>
               {/* Large mono countdown — tabular-nums prevents layout shift */}
               <p
@@ -149,9 +177,9 @@ export function CheckInTimer() {
                 {countdown || "—"}
               </p>
               <p className="text-xs text-muted-foreground pt-1">
-                {isInGrace
-                  ? `Buddy alerted at ${formatExpiry(timer.gracePeriodEndsAt)}`
-                  : `Expires ${formatExpiry(timer.expiresAt)} · +${timer.gracePeriodMinutes}m grace`
+                {stage === 0
+                  ? `Expires ${formatExpiry(timer.expiresAt)}`
+                  : `Buddy alerted at ${formatExpiry(timer.gracePeriodEndsAt)}`
                 }
               </p>
             </div>
@@ -179,6 +207,22 @@ export function CheckInTimer() {
                 {cancelMutation.isPending ? "…" : "Cancel"}
               </Button>
             </div>
+
+            {timer.snoozeCount < 3 ? (
+              <Button
+                variant="ghost"
+                className="w-full rounded-full gap-2 text-muted-foreground"
+                onClick={() => snoozeMutation.mutate()}
+                disabled={snoozeMutation.isPending}
+                data-testid="button-snooze-timer"
+                style={{ touchAction: "manipulation" }}
+              >
+                <ClockIcon className="h-4 w-4" />
+                {snoozeMutation.isPending ? "Snoozing…" : `I'm fine, extend by 30 min (${3 - timer.snoozeCount} left)`}
+              </Button>
+            ) : (
+              <p className="text-center text-xs text-muted-foreground">No more snoozes for this timer</p>
+            )}
           </div>
         ) : (
           /* Timer setup state */
@@ -210,39 +254,6 @@ export function CheckInTimer() {
                       {mins < 60 ? "min" : "hr"}
                     </span>
                   </Button>
-                ))}
-              </div>
-            </div>
-
-            <Separator />
-
-            {/* Grace period selector */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest">
-                  Grace period
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Alert fires {gracePeriod}m after expiry
-                </p>
-              </div>
-              <div className="flex gap-1.5 flex-wrap">
-                {GRACE_OPTIONS.map((g) => (
-                  <button
-                    key={g}
-                    onClick={() => setGracePeriod(g)}
-                    data-testid={`button-grace-${g}`}
-                    style={{ touchAction: "manipulation" }}
-                    className={[
-                      "h-8 min-w-[48px] rounded-full px-3 text-xs font-medium",
-                      "transition-all duration-150",
-                      gracePeriod === g
-                        ? "bg-primary text-primary-foreground shadow-sm"
-                        : "bg-muted text-muted-foreground hover:bg-muted/80",
-                    ].join(" ")}
-                  >
-                    {g}m
-                  </button>
                 ))}
               </div>
             </div>

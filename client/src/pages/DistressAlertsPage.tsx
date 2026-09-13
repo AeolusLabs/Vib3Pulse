@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import type { User } from "@shared/schema";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
+import { AlertLocationMap } from "@/components/safety/AlertLocationMap";
 import {
   AlertTriangleIcon,
   ClockIcon,
@@ -253,20 +254,23 @@ function ActiveAlertCard({
       {/* Message */}
       <p className="text-sm leading-relaxed">{alert.message}</p>
 
-      {/* Location */}
+      {/* Location — embedded map for at-a-glance location, external link kept for turn-by-turn nav */}
       {alert.latitude !== null && alert.longitude !== null && (
-        <a
-          href={openMapsLink(alert.latitude, alert.longitude)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-1.5 text-xs text-primary hover:underline w-fit"
-        >
-          <MapPinIcon className="h-3.5 w-3.5" />
-          {alert.locationText
-            ? alert.locationText
-            : `${alert.latitude.toFixed(5)}, ${alert.longitude.toFixed(5)}`}
-          <span className="text-muted-foreground">— open in maps</span>
-        </a>
+        <div className="space-y-1.5">
+          <AlertLocationMap latitude={alert.latitude} longitude={alert.longitude} />
+          <a
+            href={openMapsLink(alert.latitude, alert.longitude)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 text-xs text-primary hover:underline w-fit"
+          >
+            <MapPinIcon className="h-3.5 w-3.5" />
+            {alert.locationText
+              ? alert.locationText
+              : `${alert.latitude.toFixed(5)}, ${alert.longitude.toFixed(5)}`}
+            <span className="text-muted-foreground">— open in maps</span>
+          </a>
+        </div>
       )}
 
       {/* Actions — the sender can mark themselves safe; a buddy who received

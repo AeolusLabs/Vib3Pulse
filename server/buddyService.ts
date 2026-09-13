@@ -93,10 +93,12 @@ export async function sendAlertSMS(
   phone: string,
   senderName: string,
   alertMessage: string,
-  locationText?: string | null
+  locationText?: string | null,
+  alertUrl?: string | null
 ): Promise<void> {
   const locationPart = locationText ? ` Location: ${locationText}` : "";
-  const body = `URGENT: ${senderName} needs help! "${alertMessage}"${locationPart} — Vib3Pulse Safety Alert`;
+  const linkPart = alertUrl ? ` Open their location: ${alertUrl}` : "";
+  const body = `URGENT: ${senderName} needs help! "${alertMessage}"${locationPart}${linkPart} — Vib3Pulse Safety Alert`;
   try {
     if (isNigerianNumber(phone)) {
       await sendNigeriaSMS(phone, body);

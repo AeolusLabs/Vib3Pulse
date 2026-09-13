@@ -7,6 +7,11 @@ import { deliverNotification } from "./notifications.js";
 import { sendAlertSMS } from "./buddyService.js";
 import { requireAuth } from "./middleware.js";
 
+// The background timer job has no request object to derive a host from (unlike
+// the SOS route, which uses req.protocol/req.headers.host) — APP_URL must be
+// set in production for timer-expiry share links to resolve correctly.
+const PUBLIC_BASE_URL = process.env.APP_URL || "http://localhost:5000";
+
 const sosRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   limit: 5,
@@ -78,13 +83,29 @@ export function registerSafetyRoutes(app: Express): void {
         ? ` Coordinates: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`
         : "";
 
+      const baseUrl = process.env.APP_URL || `${req.protocol}://${req.headers.host}`;
+      let phoneBuddyAlertUrl: string | null = null;
+
       const alertIds: string[] = [];
       let actualNotified = 0;
 
       for (const buddy of confirmedBuddies) {
         if (!buddy.buddyUserId) {
-          // Phone-only buddy — send SMS directly
-          await sendAlertSMS(buddy.phoneNumber, senderName, alertMessage, locationText ?? null);
+          // Phone-only buddy — send SMS directly, with a no-auth link to the
+          // live alert page. One share row per SOS trigger, reused across
+          // every phone-only buddy notified by this same alert.
+          if (!phoneBuddyAlertUrl) {
+            const share = await storage.createSafetyAlertShare({
+              userId,
+              alertType: "manual_sos",
+              message: alertMessage,
+              latitude,
+              longitude,
+              locationText,
+            });
+            phoneBuddyAlertUrl = `${baseUrl}/safety/alert/${share.shareToken}`;
+          }
+          await sendAlertSMS(buddy.phoneNumber, senderName, alertMessage, locationText ?? null, phoneBuddyAlertUrl);
           console.log(`[Safety] SOS SMS sent to phone-only buddy ${buddy.phoneNumber} for user ${userId}`);
           actualNotified++;
           continue;
@@ -254,13 +275,12 @@ export function registerSafetyRoutes(app: Express): void {
 
   const createTimerSchema = z.object({
     durationMinutes: z.number().int().min(1).max(1440),
-    gracePeriodMinutes: z.number().int().min(1).max(60).optional(),
     eventId: z.string().optional(),
   });
 
   app.post("/api/safety/timer", requireAuth, async (req, res) => {
     try {
-      const { durationMinutes, gracePeriodMinutes, eventId } = createTimerSchema.parse(req.body);
+      const { durationMinutes, eventId } = createTimerSchema.parse(req.body);
       const userId = req.user!.id;
 
       const confirmedBuddies = await storage.getConfirmedBuddies(userId);
@@ -271,7 +291,6 @@ export function registerSafetyRoutes(app: Express): void {
       const timer = await storage.createSafetyTimer({
         userId,
         durationMinutes,
-        gracePeriodMinutes: gracePeriodMinutes ?? 5,
         eventId,
       });
 
@@ -282,6 +301,23 @@ export function registerSafetyRoutes(app: Express): void {
       }
       console.error("[Safety] Create timer error:", error);
       res.status(500).json({ message: "Failed to create timer" });
+    }
+  });
+
+  app.post("/api/safety/timer/snooze", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const timer = await storage.snoozeSafetyTimer(userId);
+      if (!timer) {
+        return res.status(404).json({ message: "No active check-in timer to snooze" });
+      }
+      res.json({ timer });
+    } catch (error: any) {
+      if (error.message === "No more snoozes available for this timer") {
+        return res.status(409).json({ message: "You've used all 3 snoozes for this timer" });
+      }
+      console.error("[Safety] Snooze timer error:", error);
+      res.status(500).json({ message: "Failed to snooze timer" });
     }
   });
 
@@ -317,6 +353,36 @@ export function registerSafetyRoutes(app: Express): void {
       res.status(500).json({ message: "Failed to cancel timer" });
     }
   });
+
+  // ============================================================
+  // PUBLIC ALERT SHARE (no auth — for phone-only buddies without the app)
+  // ============================================================
+
+  app.get("/api/safety/public-alert/:token", async (req, res) => {
+    try {
+      const share = await storage.getSafetyAlertShareByToken(req.params.token);
+      if (!share || share.expiresAt.getTime() < Date.now()) {
+        return res.status(404).json({ message: "This alert link has expired or doesn't exist." });
+      }
+
+      const sender = await storage.getUser(share.userId);
+
+      res.json({
+        status: "active",
+        senderDisplayName: sender?.displayName || sender?.username || "Someone",
+        senderAvatarUrl: sender?.avatarUrl ?? null,
+        message: share.message,
+        alertType: share.alertType,
+        latitude: share.latitude,
+        longitude: share.longitude,
+        locationText: share.locationText,
+        createdAt: share.createdAt.toISOString(),
+      });
+    } catch (error) {
+      console.error("[Safety] Public alert lookup error:", error);
+      res.status(500).json({ message: "Failed to load alert" });
+    }
+  });
 }
 
 // ============================================================
@@ -324,10 +390,57 @@ export function registerSafetyRoutes(app: Express): void {
 // Called from server/routes.ts on startup
 // ============================================================
 
+// Graduated self check-in reminders (PRD stages T+0/T+10/T+20/T+25 — stage 4 is
+// the existing "alerted" flow below, unchanged). These notify the TIMER'S OWN
+// USER, not a buddy — stage 4 is the only stage that alerts a buddy.
+const STAGE_COPY: Record<number, { title: string; message: string }> = {
+  1: { title: "Quick check-in", message: "Tap to let us know you're okay." },
+  2: { title: "Still there?", message: "We haven't heard from you — check in now." },
+  3: { title: "Last chance", message: "Your buddy will be alerted in 5 minutes unless you check in." },
+};
+
+function computeStage(timer: { expiresAt: Date }): number {
+  const elapsedMs = Date.now() - timer.expiresAt.getTime();
+  if (elapsedMs < 0) return 0;
+  if (elapsedMs < 10 * 60_000) return 1;
+  if (elapsedMs < 20 * 60_000) return 2;
+  if (elapsedMs < 25 * 60_000) return 3;
+  return 4;
+}
+
+async function runStageNotificationPass(): Promise<void> {
+  const timers = await storage.getTimersForStageCheck();
+  for (const timer of timers) {
+    const stage = computeStage(timer);
+    if (stage > timer.lastStageNotified && stage >= 1 && stage <= 3) {
+      const copy = STAGE_COPY[stage];
+      try {
+        await deliverNotification({
+          userId: timer.userId,
+          type: "checkin_stage_reminder",
+          title: copy.title,
+          message: copy.message,
+          link: "/buddy/settings",
+          relatedEntityId: timer.id,
+        });
+        await storage.updateTimerStageNotified(timer.id, stage);
+      } catch (err) {
+        console.error(`[Safety] Stage-${stage} notification failed for timer ${timer.id}:`, err);
+      }
+    }
+  }
+}
+
 export function startSafetyTimerJob(): void {
   const POLL_INTERVAL_MS = 30_000; // 30 seconds
 
   setInterval(async () => {
+    try {
+      await runStageNotificationPass();
+    } catch (err) {
+      console.error("[Safety] Stage notification pass error:", err);
+    }
+
     try {
       const timers = await storage.getTimersNeedingAlert();
 
@@ -345,11 +458,20 @@ export function startSafetyTimerJob(): void {
           const senderName = sender?.displayName || sender?.username || "Your buddy";
 
           let timerNotified = 0;
+          let phoneBuddyAlertUrl: string | null = null;
 
           for (const buddy of confirmedBuddies) {
             if (!buddy.buddyUserId) {
-              // Phone-only buddy — send SMS
-              await sendAlertSMS(buddy.phoneNumber, senderName, alertMessage, null);
+              // Phone-only buddy — send SMS, with a no-auth link to the live alert page
+              if (!phoneBuddyAlertUrl) {
+                const share = await storage.createSafetyAlertShare({
+                  userId: timer.userId,
+                  alertType: "timer_expiry",
+                  message: alertMessage,
+                });
+                phoneBuddyAlertUrl = `${PUBLIC_BASE_URL}/safety/alert/${share.shareToken}`;
+              }
+              await sendAlertSMS(buddy.phoneNumber, senderName, alertMessage, null, phoneBuddyAlertUrl);
               console.log(`[Safety] Timer ${timer.id} expired — SMS sent to phone-only buddy ${buddy.phoneNumber}`);
               timerNotified++;
               continue;

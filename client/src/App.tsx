@@ -56,6 +56,8 @@ import VenueEventCheckInPage from "@/pages/VenueEventCheckInPage";
 import StoryDetailPage from "@/pages/StoryDetailPage";
 import CommunityPage from "@/pages/CommunityPage";
 import PostDetailPage from "@/pages/PostDetailPage";
+import PublicAlertPage from "@/pages/PublicAlertPage";
+import { SafetyTriggersProvider } from "@/components/safety/SafetyTriggersProvider";
 
 function Router() {
   return (
@@ -206,6 +208,9 @@ function Router() {
 
       <Route path="/posts/:id" component={PostDetailPage} />
 
+      {/* Public — token read and verified server-side, page has no auth of its own */}
+      <Route path="/safety/alert/:token" component={PublicAlertPage} />
+
       <Route path="/join/:code" component={JoinGroupPage} />
 
       {/* Staff scanner — no AuthenticatedLayout, bouncers don't have accounts */}
@@ -267,6 +272,7 @@ function App() {
         <TooltipProvider>
           <Toaster />
           <SWUpdatePrompt />
+          <SafetyTriggersProvider />
           <Router />
         </TooltipProvider>
       </WebSocketProvider>

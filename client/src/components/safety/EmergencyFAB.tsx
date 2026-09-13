@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { apiRequest } from "@/lib/queryClient";
+import { postOrQueueSOS } from "@/hooks/useTriggerSOS";
 import {
   Dialog,
   DialogContent,
@@ -22,12 +22,6 @@ interface Buddy {
 
 interface SafetyTimer {
   status: "active" | "grace_period" | "alerted" | "checked_in" | "cancelled";
-}
-
-interface SosResponse {
-  message: string;
-  alertIds: string[];
-  buddiesNotified: number;
 }
 
 const HOLD_MS = 3000;
@@ -72,21 +66,27 @@ export function EmergencyFAB({ variant = "fab" }: EmergencyFABProps) {
   const timerInGrace = timerData?.timer?.status === "grace_period";
 
   const sosMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/safety/sos", {
+    mutationFn: () =>
+      postOrQueueSOS({
         latitude: location?.latitude ?? null,
         longitude: location?.longitude ?? null,
         locationText: null,
         accuracy: location?.accuracy ?? null,
-      });
-      return res.json() as Promise<SosResponse>;
-    },
-    onSuccess: (data) => {
-      // Haptic confirmation pulse
-      if ("vibrate" in navigator) navigator.vibrate([40, 30, 40]);
+      }),
+    onSuccess: (result) => {
       setDialogOpen(false);
       setLocation(null);
-      const count = data.buddiesNotified;
+      if (result.queued) {
+        if ("vibrate" in navigator) navigator.vibrate(80);
+        toast({
+          title: "SOS Queued",
+          description: "No connection right now — it'll send the moment you're back online.",
+        });
+        return;
+      }
+      // Haptic confirmation pulse
+      if ("vibrate" in navigator) navigator.vibrate([40, 30, 40]);
+      const count = result.data?.buddiesNotified ?? 0;
       toast({
         title: "SOS Alert Sent",
         description: `Alert sent to ${count} ${count === 1 ? "buddy" : "buddies"}.`,

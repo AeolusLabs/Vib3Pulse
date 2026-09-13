@@ -303,6 +303,20 @@ setupAdminRoutes(app);
     console.error('[STARTUP] events schema update failed:', err);
   }
 
+  // Auto-add graduated check-in timer columns (idempotent ADD COLUMN IF NOT EXISTS)
+  try {
+    await storage.ensureSafetyTimerStageColumns();
+  } catch (err) {
+    console.error('[STARTUP] safety_timers stage columns setup failed:', err);
+  }
+
+  // Auto-create safety_alert_shares table if it doesn't exist (idempotent)
+  try {
+    await storage.ensureSafetyAlertSharesTable();
+  } catch (err) {
+    console.error('[STARTUP] safety_alert_shares table setup failed:', err);
+  }
+
   const server = await registerRoutes(app);
 
   // Initialize WebSocket server

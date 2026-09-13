@@ -168,6 +168,101 @@ self.addEventListener("message", (event) => {
   }
 });
 
+// ============================================================
+// OFFLINE SOS QUEUE — Background Sync progressive enhancement.
+// The real safety net is the page's own online-event flush
+// (client/src/lib/sosQueue.ts + SafetyTriggersProvider), which works
+// everywhere including iOS/Safari (neither of which supports Background
+// Sync at all). This handler is a bonus for browsers that DO support it
+// (mainly Android Chrome): it can flush a queued SOS even if the page
+// itself isn't open. Plain JS, no ES module import — a service worker
+// can't easily import client/src/lib/sosQueue.ts, so the minimal
+// IndexedDB open/getAll/delete logic is duplicated here against the
+// exact same DB/store name.
+const SOS_DB_NAME = "vibepulse-sos";
+const SOS_STORE_NAME = "pending";
+
+function openSosDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(SOS_DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(SOS_STORE_NAME)) {
+        req.result.createObjectStore(SOS_STORE_NAME, { keyPath: "id", autoIncrement: true });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function getAllSosEntries(db) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(SOS_STORE_NAME, "readonly");
+    const req = tx.objectStore(SOS_STORE_NAME).getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function deleteSosEntry(db, id) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(SOS_STORE_NAME, "readwrite");
+    tx.objectStore(SOS_STORE_NAME).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function getCsrfTokenForSw() {
+  // Double-submit cookie CSRF (server/security.ts) — the cookie is
+  // httpOnly:false specifically so it can be read here. cookieStore is
+  // only available in the same Chromium browsers that support Background
+  // Sync in the first place, so this pairing is consistent.
+  if (!("cookieStore" in self)) return null;
+  const cookie = await self.cookieStore.get("csrf-token");
+  return cookie ? cookie.value : null;
+}
+
+async function flushSOSQueueFromSW() {
+  const db = await openSosDb();
+  const entries = await getAllSosEntries(db);
+  let flushed = 0;
+  const csrfToken = await getCsrfTokenForSw();
+
+  for (const entry of entries) {
+    try {
+      const res = await fetch("/api/safety/sos", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...(csrfToken ? { "x-csrf-token": csrfToken } : {}),
+        },
+        body: JSON.stringify(entry.payload),
+      });
+      if (res.ok) {
+        await deleteSosEntry(db, entry.id);
+        flushed++;
+      }
+    } catch {
+      // stays queued, page's online-listener tier will retry too
+    }
+  }
+
+  if (flushed > 0) {
+    const allClients = await clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const client of allClients) {
+      client.postMessage({ type: "sos-flushed", count: flushed });
+    }
+  }
+}
+
+self.addEventListener("sync", (event) => {
+  if (event.tag === "sos-queue") {
+    event.waitUntil(flushSOSQueueFromSW());
+  }
+});
+
 self.addEventListener("push", (event) => {
   if (!event.data) return;
 

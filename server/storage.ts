@@ -47,6 +47,7 @@ import {
   type InsertSafetyBuddy,
   type SafetyAlert,
   type SafetyTimer,
+  type SafetyAlertShare,
   type DistressMessage,
   type InsertDistressMessage,
   type EventAnalytics,
@@ -117,6 +118,7 @@ import {
   distressMessages,
   safetyAlerts,
   safetyTimers,
+  safetyAlertShares,
   eventAnalytics,
   venues,
   venueEntryNights,
@@ -650,12 +652,17 @@ export interface IStorage {
   getSafetyAlerts(userId: string): Promise<any[]>;
   getAllSafetyAlerts(limit: number): Promise<any[]>;
   resolveSafetyAlert(alertId: string, userId: string, status: string): Promise<SafetyAlert | undefined>;
-  createSafetyTimer(params: { userId: string; durationMinutes: number; gracePeriodMinutes?: number; eventId?: string }): Promise<SafetyTimer>;
+  createSafetyTimer(params: { userId: string; durationMinutes: number; eventId?: string }): Promise<SafetyTimer>;
+  snoozeSafetyTimer(userId: string): Promise<SafetyTimer | undefined>;
   getActiveSafetyTimer(userId: string): Promise<SafetyTimer | null>;
   checkInSafetyTimer(userId: string): Promise<void>;
   cancelSafetyTimer(userId: string): Promise<void>;
   getTimersNeedingAlert(): Promise<SafetyTimer[]>;
+  getTimersForStageCheck(): Promise<SafetyTimer[]>;
+  updateTimerStageNotified(timerId: string, stage: number): Promise<void>;
   markTimerAlerted(timerId: string): Promise<void>;
+  createSafetyAlertShare(params: { userId: string; alertType: string; message: string; latitude?: number | null; longitude?: number | null; locationText?: string | null }): Promise<SafetyAlertShare>;
+  getSafetyAlertShareByToken(token: string): Promise<SafetyAlertShare | undefined>;
   getWatchingOver(userId: string): Promise<Array<{
     buddyRecord: SafetyBuddy;
     protectedUser: Omit<User, "passwordHash">;
@@ -918,6 +925,8 @@ export interface IStorage {
   ensureTicketTiersTable(): Promise<void>;
   ensureEventModerationsTable(): Promise<void>;
   ensureLoginAttemptsTable(): Promise<void>;
+  ensureSafetyTimerStageColumns(): Promise<void>;
+  ensureSafetyAlertSharesTable(): Promise<void>;
   getLoginAttempt(key: string): Promise<{ count: number; lastAttempt: Date; lockedUntil: Date | null } | null>;
   upsertLoginAttempt(key: string, count: number, lastAttempt: Date, lockedUntil: Date | null): Promise<void>;
   deleteLoginAttempt(key: string): Promise<void>;
@@ -2585,13 +2594,14 @@ export class DbStorage implements IStorage {
     return result;
   }
 
+  // Grace period is fixed at 25 minutes — it's the T+25 "alerted" boundary of the
+  // PRD's graduated escalation (T+0/T+10/T+20/T+25), not user-configurable.
   async createSafetyTimer(params: {
     userId: string;
     durationMinutes: number;
-    gracePeriodMinutes?: number;
     eventId?: string;
   }): Promise<SafetyTimer> {
-    const grace = params.gracePeriodMinutes ?? 5;
+    const grace = 25;
     const now = new Date();
     const expiresAt = new Date(now.getTime() + params.durationMinutes * 60_000);
     const gracePeriodEndsAt = new Date(expiresAt.getTime() + grace * 60_000);
@@ -2611,6 +2621,48 @@ export class DbStorage implements IStorage {
       status: "active",
     }).returning();
     return result;
+  }
+
+  // Extends expiresAt by 30min (max 3 times per timer). On the 3rd snooze, the
+  // final cycle skips stage 1's gentle copy and starts at stage 2 — see the
+  // lastStageNotified comment on the safetyTimers table definition.
+  async snoozeSafetyTimer(userId: string): Promise<SafetyTimer | undefined> {
+    const timer = await this.getActiveSafetyTimer(userId);
+    if (!timer) return undefined;
+    if (timer.snoozeCount >= 3) {
+      throw new Error("No more snoozes available for this timer");
+    }
+
+    const newSnoozeCount = timer.snoozeCount + 1;
+    const newExpiresAt = new Date(timer.expiresAt.getTime() + 30 * 60_000);
+    const newGracePeriodEndsAt = new Date(newExpiresAt.getTime() + 25 * 60_000);
+
+    const [result] = await db.update(safetyTimers)
+      .set({
+        status: "active",
+        expiresAt: newExpiresAt,
+        gracePeriodEndsAt: newGracePeriodEndsAt,
+        snoozeCount: newSnoozeCount,
+        lastStageNotified: newSnoozeCount === 3 ? 1 : 0,
+      })
+      .where(eq(safetyTimers.id, timer.id))
+      .returning();
+    return result;
+  }
+
+  // All timers not yet in a terminal state — used by the 30s poll job's stage-1/2/3
+  // self-notification pass. Terminal states (alerted/checked_in/cancelled) are excluded.
+  async getTimersForStageCheck(): Promise<SafetyTimer[]> {
+    return db
+      .select()
+      .from(safetyTimers)
+      .where(or(eq(safetyTimers.status, "active"), eq(safetyTimers.status, "grace_period")));
+  }
+
+  async updateTimerStageNotified(timerId: string, stage: number): Promise<void> {
+    await db.update(safetyTimers)
+      .set({ lastStageNotified: stage })
+      .where(eq(safetyTimers.id, timerId));
   }
 
   async getActiveSafetyTimer(userId: string): Promise<SafetyTimer | null> {
@@ -2668,6 +2720,40 @@ export class DbStorage implements IStorage {
     await db.update(safetyTimers)
       .set({ status: "alerted", alertedAt: new Date() })
       .where(eq(safetyTimers.id, timerId));
+  }
+
+  // One share row per triggering event (SOS fire or timer expiry), reused across
+  // every phone-only buddy notified by that same event — see the table comment
+  // in shared/schema.ts for why this is a standalone snapshot, not a safetyAlerts row.
+  async createSafetyAlertShare(params: {
+    userId: string;
+    alertType: string;
+    message: string;
+    latitude?: number | null;
+    longitude?: number | null;
+    locationText?: string | null;
+  }): Promise<SafetyAlertShare> {
+    const shareToken = crypto.randomBytes(24).toString("base64url");
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const [result] = await db.insert(safetyAlertShares).values({
+      userId: params.userId,
+      shareToken,
+      alertType: params.alertType,
+      message: params.message,
+      latitude: params.latitude ?? null,
+      longitude: params.longitude ?? null,
+      locationText: params.locationText ?? null,
+      expiresAt,
+    }).returning();
+    return result;
+  }
+
+  async getSafetyAlertShareByToken(token: string): Promise<SafetyAlertShare | undefined> {
+    const [result] = await db
+      .select()
+      .from(safetyAlertShares)
+      .where(eq(safetyAlertShares.shareToken, token));
+    return result;
   }
 
   async getWatchingOver(userId: string): Promise<Array<{
@@ -5284,6 +5370,31 @@ export class DbStorage implements IStorage {
         count INTEGER NOT NULL DEFAULT 0,
         last_attempt TIMESTAMPTZ NOT NULL,
         locked_until TIMESTAMPTZ
+      )
+    `);
+  }
+
+  async ensureSafetyTimerStageColumns(): Promise<void> {
+    await db.execute(sql`
+      ALTER TABLE safety_timers
+        ADD COLUMN IF NOT EXISTS last_stage_notified INTEGER NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS snooze_count INTEGER NOT NULL DEFAULT 0
+    `);
+  }
+
+  async ensureSafetyAlertSharesTable(): Promise<void> {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS safety_alert_shares (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        share_token VARCHAR NOT NULL UNIQUE,
+        alert_type TEXT NOT NULL,
+        message TEXT NOT NULL,
+        latitude DOUBLE PRECISION,
+        longitude DOUBLE PRECISION,
+        location_text TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT now(),
+        expires_at TIMESTAMP NOT NULL
       )
     `);
   }

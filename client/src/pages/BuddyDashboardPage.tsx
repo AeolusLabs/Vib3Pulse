@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
+import { AlertLocationMap } from "@/components/safety/AlertLocationMap";
 import {
   ShieldIcon,
   TimerIcon,
@@ -35,6 +36,8 @@ interface SafetyAlert {
   alertType: "manual_sos" | "timer_expiry";
   status: "active" | "safe" | "false_alarm";
   message: string;
+  latitude: number | null;
+  longitude: number | null;
   createdAt: string;
 }
 
@@ -86,6 +89,9 @@ function WatchingCard({ entry, index }: { entry: WatchingEntry; index: number })
   const countdownTarget = isInGrace ? activeTimer?.gracePeriodEndsAt : activeTimer?.expiresAt;
   const countdown = useCountdown(activeTimer ? (countdownTarget ?? null) : null);
   const hasActiveAlert = recentAlerts.some((a) => a.status === "active");
+  const activeAlertWithLocation = recentAlerts.find(
+    (a) => a.status === "active" && a.latitude !== null && a.longitude !== null
+  );
 
   return (
     <div
@@ -184,6 +190,14 @@ function WatchingCard({ entry, index }: { entry: WatchingEntry; index: number })
               <TimerIcon className="h-4 w-4 opacity-40" />
               <span>No active timer</span>
             </div>
+          )}
+
+          {/* Live location for an active alert, if one was shared */}
+          {activeAlertWithLocation && (
+            <AlertLocationMap
+              latitude={activeAlertWithLocation.latitude!}
+              longitude={activeAlertWithLocation.longitude!}
+            />
           )}
 
           {/* Recent alerts */}

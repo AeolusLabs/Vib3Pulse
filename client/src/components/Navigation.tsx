@@ -14,22 +14,48 @@ import ThemeToggle from "./ThemeToggle";
 import MenuTray from "./MenuTray";
 import NotificationBell from "./NotificationBell";
 import { EmergencyFAB } from "@/components/safety/EmergencyFAB";
+import { NightModeShield } from "@/components/safety/NightModeShield";
 import { Link, useLocation } from "wouter";
+import { useEffect, useRef } from "react";
 import { useAuth, logout } from "@/hooks/useAuth";
+import { useNightMode } from "@/hooks/useNightMode";
+import { useToast } from "@/hooks/use-toast";
 import { SearchIcon, UserIcon, CalendarIcon, LogOutIcon, TicketIcon, ShieldIcon, AlertTriangleIcon, Building2Icon, SettingsIcon, BarChart3Icon } from "@/components/ui/icons";
 
 interface NavigationProps {
   onSearch?: (query: string) => void;
 }
 
+const SOFT_PROMPT_DISMISS_PREFIX = "vibepulse_nightmode_softprompt_dismissed_";
+
 export default function Navigation({ onSearch }: NavigationProps) {
   const [, setLocation] = useLocation();
   const { data: user, isLoading } = useAuth();
+  const { toast } = useToast();
+  const night = useNightMode();
+  const softPromptShown = useRef(false);
 
   const handleLogout = async () => {
     await logout();
     setLocation("/login");
   };
+
+  // Fri/Sat 22:00+, no ticket/RSVP, no buddy yet — a one-shot nudge per day.
+  useEffect(() => {
+    if (softPromptShown.current || night.isLoading || !night.shouldShowSoftPrompt || user?.userType !== "social") return;
+    const key = SOFT_PROMPT_DISMISS_PREFIX + new Date().toISOString().slice(0, 10);
+    try {
+      if (localStorage.getItem(key) === "true") return;
+      localStorage.setItem(key, "true");
+    } catch {
+      // localStorage unavailable — still show the toast this session, just won't persist the dismiss
+    }
+    softPromptShown.current = true;
+    toast({
+      title: "Going out tonight?",
+      description: "Set up a safety buddy before you head out — tap Safety Settings in the menu.",
+    });
+  }, [night.isLoading, night.shouldShowSoftPrompt, user?.userType, toast]);
 
   return (
     <header className="sticky top-0 z-50 border-b bg-card">
@@ -62,6 +88,8 @@ export default function Navigation({ onSearch }: NavigationProps) {
             {!isLoading && user && <NotificationBell />}
 
             {!isLoading && user?.userType === "social" && <EmergencyFAB variant="nav" />}
+
+            {!isLoading && user?.userType === "social" && <NightModeShield />}
 
             <ThemeToggle />
 
