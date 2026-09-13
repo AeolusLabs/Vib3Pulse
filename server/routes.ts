@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { registerSafetyRoutes, startSafetyTimerJob } from "./safety-routes";
 import { registerPaymentRoutes } from "./payment-routes";
+import { registerOrganizerPaymentsRoutes } from "./organizer-payments-routes";
 import { buddyRouter } from "./buddyRoutes";
 import { registerRatingRoutes } from "./rating-routes";
 import { registerSocialRoutes } from "./socialRoutes";
@@ -28,6 +29,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerCommunityRoutes(app);
   registerSafetyRoutes(app);
   registerPaymentRoutes(app);
+  registerOrganizerPaymentsRoutes(app);
   app.use("/api/safety", buddyRouter);
   registerRatingRoutes(app);
   registerSocialRoutes(app);

@@ -73,6 +73,11 @@ export async function verifyStripeSession(sessionId: string): Promise<VerifiedSe
         eventId: meta.itemType === "event" ? meta.itemId : undefined,
         venueEntryNightId: meta.itemType === "venue_entry" ? meta.itemId : undefined,
         ticketTierId: meta.ticketTierId || undefined,
+        // Never set today — Stripe Connect isn't wired in yet, so GBP charges
+        // never carry an organizerSplit. Kept here for type symmetry with the
+        // Paystack path so downstream ledger code can read this field
+        // uniformly regardless of provider.
+        platformFeeAmount: meta.platformFeeAmount || undefined,
         userId: meta.userId,
       },
     };

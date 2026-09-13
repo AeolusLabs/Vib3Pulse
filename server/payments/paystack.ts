@@ -47,6 +47,7 @@ interface PaystackVerifyData {
 
 export async function createPaystackCheckout(params: CreateCheckoutParams): Promise<CheckoutResult> {
   const reference = `vib3_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  const split = params.organizerSplit;
 
   const data = await paystackRequest<PaystackInitData>("/transaction/initialize", {
     method: "POST",
@@ -62,7 +63,15 @@ export async function createPaystackCheckout(params: CreateCheckoutParams): Prom
         userId: params.userId,
         cancel_action: params.cancelUrl,
         ...(params.ticketTierId ? { ticketTierId: params.ticketTierId } : {}),
+        ...(split ? { platformFeeAmount: String(split.platformFeeAmount) } : {}),
       },
+      // Organizer payout split — subaccount gets amount minus transaction_charge,
+      // bearer decides who eats Paystack's own processing fee on top of that.
+      ...(split?.paystackSubaccountCode ? {
+        subaccount: split.paystackSubaccountCode,
+        transaction_charge: split.platformFeeAmount,
+        bearer: split.bearer,
+      } : {}),
     }),
   });
 
@@ -88,9 +97,18 @@ export async function verifyPaystackTransaction(reference: string): Promise<Veri
       currency: (data.currency?.toUpperCase() ?? "NGN") as "GBP" | "NGN",
       amountSmallestUnit: data.amount,
       metadata: {
-        eventId: meta.itemType === "event" ? meta.itemId : undefined,
-        venueEntryNightId: meta.itemType === "venue_entry" ? meta.itemId : undefined,
+        // Two metadata shapes reach this function: checkout sessions (event
+        // tickets) use {itemId, itemType}; inline sessions (venue entry,
+        // promotions) set {venueEntryNightId} etc. directly. Recognize both —
+        // previously only the itemId/itemType shape was read, which meant
+        // verified.metadata.venueEntryNightId was always undefined for a
+        // Paystack venue-entry payment and silently broke the webhook's
+        // venue-entry branch (the client-driven /confirm call still worked
+        // since it doesn't rely on this field, which is why it went unnoticed).
+        eventId: meta.itemType === "event" ? meta.itemId : (meta.eventId as string | undefined),
+        venueEntryNightId: meta.itemType === "venue_entry" ? meta.itemId : (meta.venueEntryNightId as string | undefined),
         ticketTierId: meta.ticketTierId || undefined,
+        platformFeeAmount: meta.platformFeeAmount || undefined,
         userId: meta.userId,
       },
     };
@@ -104,6 +122,7 @@ export async function verifyPaystackTransaction(reference: string): Promise<Veri
 // which the frontend uses with the Paystack JS SDK.
 export async function createPaystackInlineSession(params: CreatePaymentIntentParams & { userId: string; email: string }): Promise<PaymentIntentResult> {
   const reference = `vib3_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  const split = params.organizerSplit;
 
   const data = await paystackRequest<PaystackInitData>("/transaction/initialize", {
     method: "POST",
@@ -112,7 +131,15 @@ export async function createPaystackInlineSession(params: CreatePaymentIntentPar
       amount: params.amountSmallestUnit,
       currency: params.currency,
       reference,
-      metadata: params.metadata,
+      metadata: {
+        ...params.metadata,
+        ...(split ? { platformFeeAmount: String(split.platformFeeAmount) } : {}),
+      },
+      ...(split?.paystackSubaccountCode ? {
+        subaccount: split.paystackSubaccountCode,
+        transaction_charge: split.platformFeeAmount,
+        bearer: split.bearer,
+      } : {}),
     }),
   });
 
@@ -139,4 +166,52 @@ export function verifyPaystackWebhookSignature(rawBody: string, signature: strin
   const crypto = require("crypto") as typeof import("crypto");
   const hash = crypto.createHmac("sha512", secret).update(rawBody).digest("hex");
   return hash === signature;
+}
+
+// ============================================================
+// SUBACCOUNTS (organizer payouts — Phase 2)
+// ============================================================
+
+export interface PaystackBank {
+  name: string;
+  code: string;
+}
+
+export async function listPaystackBanks(): Promise<PaystackBank[]> {
+  const data = await paystackRequest<Array<{ name: string; code: string }>>(
+    "/bank?country=nigeria&currency=NGN"
+  );
+  return data.map((b) => ({ name: b.name, code: b.code }));
+}
+
+export interface ResolvedBankAccount {
+  accountNumber: string;
+  accountName: string;
+}
+
+export async function resolvePaystackBankAccount(accountNumber: string, bankCode: string): Promise<ResolvedBankAccount> {
+  const data = await paystackRequest<{ account_number: string; account_name: string }>(
+    `/bank/resolve?account_number=${encodeURIComponent(accountNumber)}&bank_code=${encodeURIComponent(bankCode)}`
+  );
+  return { accountNumber: data.account_number, accountName: data.account_name };
+}
+
+export interface CreateSubaccountParams {
+  businessName: string;
+  bankCode: string;
+  accountNumber: string;
+  percentageCharge: number; // e.g. 10 for 10% — set to the platform commission rate at creation time; actual per-charge split is overridden with transaction_charge at checkout
+}
+
+export async function createPaystackSubaccount(params: CreateSubaccountParams): Promise<{ subaccountCode: string }> {
+  const data = await paystackRequest<{ subaccount_code: string }>("/subaccount", {
+    method: "POST",
+    body: JSON.stringify({
+      business_name: params.businessName,
+      settlement_bank: params.bankCode,
+      account_number: params.accountNumber,
+      percentage_charge: params.percentageCharge,
+    }),
+  });
+  return { subaccountCode: data.subaccount_code };
 }

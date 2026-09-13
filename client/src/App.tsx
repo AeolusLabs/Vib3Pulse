@@ -17,6 +17,7 @@ import UserProfilePage from "@/pages/UserProfilePage";
 import FeedPage from "@/pages/FeedPage";
 import MyEventsPage from "@/pages/MyEventsPage";
 import ManageEventsPage from "@/pages/ManageEventsPage";
+import OrganizerPayoutsPage from "@/pages/OrganizerPayoutsPage";
 import TicketWalletPage from "@/pages/TicketWalletPage";
 import EventCheckInPage from "@/pages/EventCheckInPage";
 import MyRsvpsPage from "@/pages/MyRsvpsPage";
@@ -84,6 +85,12 @@ function Router() {
       <Route path="/manage-events">
         <AuthenticatedLayout>
           <ManageEventsPage />
+        </AuthenticatedLayout>
+      </Route>
+
+      <Route path="/organizer/payouts">
+        <AuthenticatedLayout>
+          <OrganizerPayoutsPage />
         </AuthenticatedLayout>
       </Route>
       
