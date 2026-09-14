@@ -20,7 +20,10 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Venue, VenueEntryNight } from "@shared/schema";
 import { MapPinIcon, PhoneIcon, GlobeIcon, ClockIcon, MusicIcon, UsersIcon, CalendarIcon, ShieldIcon, SparklesIcon, ArrowLeftIcon, TicketIcon, CheckCircleIcon, AlertCircleIcon } from "@/components/ui/icons";
-import { Accessibility } from "lucide-react";
+import { Accessibility, Star } from "lucide-react";
+import { useVenueRatings, useUserVenueRating, useSubmitVenueRating } from "@/hooks/use-ratings";
+import RatingInput from "@/components/RatingInput";
+import RatingDisplay from "@/components/RatingDisplay";
 
 const categoryLabels: Record<string, string> = {
   Club: "Club",
@@ -111,11 +114,16 @@ export default function VenueDetailPage() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [galleryLightboxOpen, setGalleryLightboxOpen] = useState(false);
   const [galleryLightboxIndex, setGalleryLightboxIndex] = useState(0);
+  const [isEditingRating, setIsEditingRating] = useState(false);
 
   const { data: venue, isLoading: venueLoading } = useQuery<Venue & { owner: any }>({
     queryKey: ["/api/venues", id],
     enabled: !!id,
   });
+
+  const { data: venueRatingStats } = useVenueRatings(id);
+  const { data: userVenueRating } = useUserVenueRating(currentUser ? id : undefined);
+  const submitVenueRating = useSubmitVenueRating(id ?? "");
 
   const { data: entryNights = [], isLoading: nightsLoading } = useQuery<VenueEntryNight[]>({
     queryKey: ["/api/venues", id, "venue-events", "upcoming"],
@@ -454,6 +462,54 @@ export default function VenueDetailPage() {
                 </CardContent>
               </Card>
             )}
+
+            {/* Ratings & Reviews */}
+            <Card className="shadow-lg">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Star className="h-5 w-5 text-primary" />
+                    Ratings &amp; Reviews
+                  </CardTitle>
+                  <RatingDisplay
+                    averageRating={venueRatingStats?.averageRating}
+                    totalRatings={venueRatingStats?.totalRatings ?? 0}
+                  />
+                </div>
+              </CardHeader>
+              <CardContent>
+                {!currentUser ? (
+                  <p className="text-sm text-muted-foreground">Sign in to rate this venue.</p>
+                ) : userVenueRating?.hasRated && !isEditingRating ? (
+                  <div className="flex items-center justify-between gap-3 p-3 rounded-md border bg-muted/30">
+                    <div>
+                      <p className="text-sm font-medium">Your rating: {userVenueRating.rating} ★</p>
+                      {userVenueRating.reviewText && (
+                        <p className="text-xs text-muted-foreground mt-1">{userVenueRating.reviewText}</p>
+                      )}
+                    </div>
+                    <Button size="sm" variant="outline" onClick={() => setIsEditingRating(true)} data-testid="button-edit-venue-rating">
+                      Edit
+                    </Button>
+                  </div>
+                ) : (
+                  <RatingInput
+                    label={userVenueRating?.hasRated ? "Update your rating" : "Rate this venue"}
+                    initialRating={userVenueRating?.rating ?? 0}
+                    initialReviewText={userVenueRating?.reviewText}
+                    submitLabel={userVenueRating?.hasRated ? "Update rating" : "Submit rating"}
+                    isPending={submitVenueRating.isPending}
+                    errorMessage={submitVenueRating.isError ? (submitVenueRating.error as any)?.message ?? "Failed to submit rating" : null}
+                    onCancel={userVenueRating?.hasRated ? () => setIsEditingRating(false) : undefined}
+                    onSubmit={(rating, reviewText) => {
+                      submitVenueRating.mutate({ rating, reviewText }, {
+                        onSuccess: () => setIsEditingRating(false),
+                      });
+                    }}
+                  />
+                )}
+              </CardContent>
+            </Card>
 
             {/* Owner-only gallery management */}
             {isVenueOwner && (

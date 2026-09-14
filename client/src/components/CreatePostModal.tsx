@@ -13,8 +13,30 @@ import { format } from "date-fns";
 import type { Event, Venue, Community } from "@shared/schema";
 import { VideoUploader } from "./VideoUploader";
 import { ImagesIcon, CalendarIcon, Building2Icon, UsersIcon, GlobeIcon, XIcon, MapPinIcon, PlusIcon } from "@/components/ui/icons";
+import { useToast } from "@/hooks/use-toast";
 
 type CommunityWithRole = Community & { memberCount: number; role: string };
+
+// PRD: post videos are capped at 30s, checked client-side only (no server
+// probing infra) — mirrors the same convention as the 15s Stories cap.
+const MAX_POST_VIDEO_SECONDS = 30;
+
+function getVideoDuration(file: File): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.onloadedmetadata = () => {
+      URL.revokeObjectURL(url);
+      resolve(video.duration);
+    };
+    video.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Failed to read video metadata"));
+    };
+    video.src = url;
+  });
+}
 
 interface CreatePostModalProps {
   open: boolean;
@@ -78,6 +100,7 @@ export default function CreatePostModal({
   onCreatePost,
 }: CreatePostModalProps) {
   const { data: currentUser } = useAuth();
+  const { toast } = useToast();
   const [content, setContent] = useState("");
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [uploadedVideoUrl, setUploadedVideoUrl] = useState<string | null>(null);
@@ -134,7 +157,7 @@ export default function CreatePostModal({
     }
   };
 
-  const handleMediaSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleMediaSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
 
@@ -145,9 +168,25 @@ export default function CreatePostModal({
 
     if (videoFiles.length > 0 && imageFiles.length === 0) {
       // Pure video selection — clear images, start video upload
+      const candidate = videoFiles[0];
+      try {
+        const duration = await getVideoDuration(candidate);
+        if (duration > MAX_POST_VIDEO_SECONDS) {
+          toast({
+            title: "Video too long",
+            description: `Posts support videos up to ${MAX_POST_VIDEO_SECONDS}s. This one is ${Math.round(duration)}s.`,
+            variant: "destructive",
+          });
+          e.target.value = "";
+          return;
+        }
+      } catch {
+        // Metadata read failed (unusual codec, etc.) — let the upload proceed
+        // rather than blocking a post over a client-side probing failure.
+      }
       setSelectedImages([]);
       setUploadedVideoUrl(null);
-      setVideoFileToUpload(videoFiles[0]);
+      setVideoFileToUpload(candidate);
     } else if (imageFiles.length > 0) {
       // Images selected — clear video, add images up to MAX_IMAGES
       setVideoFileToUpload(null);

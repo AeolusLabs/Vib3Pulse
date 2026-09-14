@@ -95,7 +95,7 @@ export function useVideoSplitter() {
 
   const split = useCallback(async (
     blob: Blob,
-    segDurationSecs = 60,
+    segDurationSecs = 15, // PRD: stories are max 15s each
   ): Promise<Blob[]> => {
     const supported =
       typeof MediaRecorder !== "undefined" &&

@@ -144,7 +144,9 @@ import {
   eventStaffAccessCodes,
   venueStaffAccessCodes,
   type EventRating,
+  type VenueRating,
   eventRatings,
+  venueRatings,
   connectedSocials,
   socialPosts,
   type ConnectedSocial,
@@ -533,12 +535,13 @@ export interface IStorage {
   getUserLikedPosts(userId: string): Promise<Array<Post & { user: User }>>;
   getUserRepostedPosts(userId: string): Promise<Array<Post & { user: User }>>;
   createPost(post: InsertPost): Promise<Post>;
+  updatePost(id: string, userId: string, content: string): Promise<{ post?: Post; error?: "NOT_FOUND" | "FORBIDDEN" | "EDIT_WINDOW_PASSED" }>;
   deletePost(id: string): Promise<void>;
   
   createStory(story: InsertStory, allowedViewerIds?: string[]): Promise<Story>;
   getActiveStories(viewerId?: string): Promise<Array<Story & { user: User; likeCount: number; viewCount: number; isLiked?: boolean; isReshare?: boolean }>>;
   getStory(id: string): Promise<Story | undefined>;
-  getUserStories(userId: string): Promise<Story[]>;
+  getUserStories(userId: string, viewerId?: string): Promise<Story[]>;
   deleteStory(id: string): Promise<void>;
 
   // Story likes
@@ -595,18 +598,21 @@ export interface IStorage {
   getPostLikes(postId: string): Promise<number>;
   hasUserLikedPost(userId: string, postId: string): Promise<boolean>;
   
+  getComment(id: string): Promise<Comment | undefined>;
   addComment(comment: InsertComment): Promise<Comment>;
-  getPostComments(postId: string): Promise<Array<Comment & { user: User }>>;
+  deleteComment(id: string, userId: string): Promise<Comment | undefined>;
+  getPostComments(postId: string, limit?: number): Promise<Array<Comment & { user: User }>>;
+  getCommentThread(topLevelCommentId: string, viewerId?: string): Promise<Array<Comment & { user: User; likeCount: number; isLiked: boolean }>>;
   getCommentCount(postId: string): Promise<number>;
-  
+
   // Comment interactions
   likeComment(userId: string, commentId: string): Promise<CommentLike>;
   unlikeComment(userId: string, commentId: string): Promise<void>;
   hasUserLikedComment(userId: string, commentId: string): Promise<boolean>;
   getCommentLikeCount(commentId: string): Promise<number>;
-  
-  addCommentReply(userId: string, commentId: string, content: string): Promise<CommentReply>;
-  getCommentReplies(commentId: string): Promise<Array<CommentReply & { user: User }>>;
+
+  addCommentReply(userId: string, commentId: string, content: string): Promise<Comment>;
+  getCommentReplies(commentId: string): Promise<Array<Comment & { user: User }>>;
   getCommentReplyCount(commentId: string): Promise<number>;
   
   repostComment(userId: string, commentId: string): Promise<CommentRepost>;
@@ -789,6 +795,8 @@ export interface IStorage {
 
   // Content reports
   createContentReport(report: InsertContentReport): Promise<ContentReport>;
+  createPostReport(postId: string, reporterId: string, reason: string, description: string | null): Promise<ContentReport>;
+  createCommentReport(commentId: string, reporterId: string, reason: string, description: string | null): Promise<ContentReport>;
   getContentReports(status?: string, limit?: number, offset?: number): Promise<Array<ContentReport & { reporter: User }>>;
   getContentReport(id: string): Promise<ContentReport | undefined>;
   updateContentReport(id: string, updates: { status: string; reviewedBy: string; resolution?: string }): Promise<ContentReport>;
@@ -950,10 +958,17 @@ export interface IStorage {
   deletePushSubscription(endpoint: string): Promise<void>;
 
   // Event ratings
-  createEventRating(eventId: string, userId: string, rating: number): Promise<EventRating>;
+  createEventRating(eventId: string, userId: string, rating: number, reviewText?: string | null): Promise<EventRating>;
   getUserEventRating(eventId: string, userId: string): Promise<EventRating | null>;
   getEventRatingStats(eventId: string): Promise<{ averageRating: number | null; totalRatings: number; distribution: Record<number, number> }>;
   getOrganizerRating(organizerId: string): Promise<{ averageRating: number | null; totalRatings: number; eventsRated: number }>;
+
+  // Venue ratings — same shape as event ratings, eligibility checked one join
+  // deeper (venueTickets -> venueEntryNights.venueId) in the routes layer.
+  createVenueRating(venueId: string, userId: string, rating: number, reviewText?: string | null): Promise<VenueRating>;
+  getUserVenueRating(venueId: string, userId: string): Promise<VenueRating | null>;
+  getVenueRatingStats(venueId: string): Promise<{ averageRating: number | null; totalRatings: number; distribution: Record<number, number> }>;
+  hasAttendedVenue(userId: string, venueId: string): Promise<boolean>;
 
   // ============================================
   // ZERNIO SOCIAL MEDIA
@@ -1467,6 +1482,20 @@ export class DbStorage implements IStorage {
     return result[0];
   }
 
+  async updatePost(id: string, userId: string, content: string): Promise<{ post?: Post; error?: "NOT_FOUND" | "FORBIDDEN" | "EDIT_WINDOW_PASSED" }> {
+    const [existing] = await db.select().from(posts).where(eq(posts.id, id));
+    if (!existing) return { error: "NOT_FOUND" };
+    if (existing.userId !== userId) return { error: "FORBIDDEN" };
+    if (Date.now() - existing.createdAt.getTime() > 5 * 60_000) return { error: "EDIT_WINDOW_PASSED" };
+
+    const [post] = await db.update(posts)
+      .set({ content, updatedAt: new Date() })
+      .where(eq(posts.id, id))
+      .returning();
+    invalidateCache.posts();
+    return { post };
+  }
+
   async deletePost(id: string): Promise<void> {
     await db.delete(posts).where(eq(posts.id, id));
     invalidateCache.posts();
@@ -1545,16 +1574,20 @@ export class DbStorage implements IStorage {
     return result[0];
   }
 
-  async getUserStories(userId: string): Promise<Story[]> {
+  // Snapchat-style: a story disappears from PUBLIC view after 24h (the
+  // gte(createdAt, ...) filter below), but the poster can still see their own
+  // full history — pass viewerId === userId (e.g. from the /api/stories/archive
+  // route) to skip that filter entirely. Nothing is ever deleted.
+  async getUserStories(userId: string, viewerId?: string): Promise<Story[]> {
+    const isOwnerViewing = viewerId === userId;
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    
+
     return await db
       .select()
       .from(stories)
-      .where(and(
-        eq(stories.userId, userId),
-        gte(stories.createdAt, twentyFourHoursAgo)
-      ))
+      .where(isOwnerViewing
+        ? eq(stories.userId, userId)
+        : and(eq(stories.userId, userId), gte(stories.createdAt, twentyFourHoursAgo)))
       .orderBy(desc(stories.createdAt));
   }
 
@@ -1874,11 +1907,21 @@ export class DbStorage implements IStorage {
     };
   }
 
+  // Hacker-News-style gravity decay instead of a flat score over a fixed
+  // recency window — a genuinely high-engagement post from 2 days ago can now
+  // outrank a mediocre 1-hour-old one, which a "newest 50, then sort" query
+  // structurally can never do (the older post never even makes the candidate
+  // pool). Candidate pool widened to 14 days so decay has real room to work
+  // with. Flagged posts (3+ distinct reports, see createPostReport) are
+  // excluded — a flagged post shouldn't be able to trend its way back into
+  // visibility while under review. The existing postsCache 5-minute TTL
+  // already re-runs this periodically, so the decay term visibly moves over
+  // time even with zero new engagement, not just on cache invalidation.
   async getTrendingPosts(limit: number = 10): Promise<Array<Post & { user: User; likeCount: number; commentCount: number }>> {
     const all = await cached(
       'trending-posts',
       async () => {
-        // 101 queries → 1: LEFT JOIN likes + comments with COUNT(DISTINCT) aggregates
+        const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
         const rows = await db
           .select({
             post: posts,
@@ -1890,23 +1933,27 @@ export class DbStorage implements IStorage {
           .innerJoin(users, eq(posts.userId, users.id))
           .leftJoin(likes, eq(likes.postId, posts.id))
           .leftJoin(comments, eq(comments.postId, posts.id))
+          .where(and(gte(posts.createdAt, fourteenDaysAgo), eq(posts.moderationStatus, "approved")))
           .groupBy(posts.id, users.id)
           .orderBy(desc(posts.createdAt))
-          .limit(50);
+          .limit(200);
 
+        const now = Date.now();
         return rows
           .map(row => {
             const { passwordHash, ...userWithoutPassword } = row.user;
+            const ageHours = (now - row.post.createdAt.getTime()) / 3_600_000;
+            const rawEngagement = row.likeCount * 2 + row.commentCount * 3;
             return {
               ...row.post,
               user: userWithoutPassword as User,
               likeCount: row.likeCount,
               commentCount: row.commentCount,
-              engagementScore: row.likeCount * 2 + row.commentCount * 3,
+              decayScore: rawEngagement / Math.pow(ageHours + 2, 1.8),
             };
           })
-          .sort((a, b) => b.engagementScore - a.engagementScore)
-          .map(({ engagementScore, ...rest }) => rest);
+          .sort((a, b) => b.decayScore - a.decayScore)
+          .map(({ decayScore, ...rest }) => rest);
       },
       postsCache,
     );
@@ -2107,24 +2154,117 @@ export class DbStorage implements IStorage {
     return result.length > 0;
   }
 
-  async addComment(insertComment: InsertComment): Promise<Comment> {
-    const result = await db.insert(comments).values(insertComment).returning();
-    return result[0];
+  async getComment(id: string): Promise<Comment | undefined> {
+    const [result] = await db.select().from(comments).where(eq(comments.id, id));
+    return result;
   }
 
-  async getPostComments(postId: string): Promise<Array<Comment & { user: User }>> {
+  // Generic insert — works for a top-level comment (parentCommentId: null) or
+  // a reply at any depth (parentCommentId: the parent's id), since replies are
+  // now just comments rows. Keeps posts.commentCount in sync so feed/trending
+  // never need a live COUNT(*).
+  async addComment(insertComment: InsertComment): Promise<Comment> {
+    const [result] = await db.insert(comments).values(insertComment).returning();
+    await db.update(posts)
+      .set({ commentCount: sql`${posts.commentCount} + 1` })
+      .where(eq(posts.id, insertComment.postId));
+    invalidateCache.posts();
+    return result;
+  }
+
+  // Soft delete — replies underneath stay attached and visible under a
+  // "[comment deleted]" placeholder, matching X/Reddit/HN instead of cascading
+  // the delete through the whole subtree.
+  async deleteComment(id: string, userId: string): Promise<Comment | undefined> {
+    const [existing] = await db.select().from(comments).where(eq(comments.id, id));
+    if (!existing || existing.userId !== userId || existing.isDeleted) return undefined;
+
+    const [result] = await db.update(comments)
+      .set({ isDeleted: true, deletedAt: new Date(), content: "" })
+      .where(eq(comments.id, id))
+      .returning();
+
+    await db.update(posts)
+      .set({ commentCount: sql`GREATEST(${posts.commentCount} - 1, 0)` })
+      .where(eq(posts.id, existing.postId));
+    invalidateCache.posts();
+    return result;
+  }
+
+  // Top-level comments only (parentCommentId IS NULL) — soft-deleted rows are
+  // still included so their replies stay legible under a placeholder. Nested
+  // replies are fetched lazily per-thread via getCommentThread, not here.
+  async getPostComments(postId: string, limit: number = 100): Promise<Array<Comment & { user: User }>> {
     const result = await db
       .select()
       .from(comments)
       .innerJoin(users, eq(comments.userId, users.id))
-      .where(eq(comments.postId, postId))
-      .orderBy(comments.createdAt);
-    
+      .where(and(eq(comments.postId, postId), isNull(comments.parentCommentId)))
+      .orderBy(comments.createdAt)
+      .limit(limit);
+
     return result.map(row => {
       const { passwordHash, ...userWithoutPassword } = row.users;
       return {
         ...row.comments,
         user: userWithoutPassword as User,
+      };
+    });
+  }
+
+  // Everything nested under one top-level comment, in a single recursive
+  // query — fetched lazily when a user taps "view replies" on that specific
+  // comment, not for the whole post at once. This is what makes unlimited
+  // depth scale instead of shipping the entire thread graph in one payload.
+  // Two-step (recursive CTE for ids, then a normal Drizzle join for row
+  // hydration) rather than selecting c.*, u.* in one raw query — the latter
+  // silently lets users.id clobber comments.id when the driver flattens both
+  // tables' columns into one object.
+  async getCommentThread(topLevelCommentId: string, viewerId?: string): Promise<Array<Comment & { user: User; likeCount: number; isLiked: boolean }>> {
+    const idRows = await db.execute(sql`
+      WITH RECURSIVE thread AS (
+        SELECT id FROM comments WHERE parent_comment_id = ${topLevelCommentId}
+        UNION ALL
+        SELECT c.id FROM comments c
+        INNER JOIN thread t ON c.parent_comment_id = t.id
+      )
+      SELECT id FROM thread
+    `);
+    const threadIds = (idRows.rows as any[]).map((r) => r.id as string);
+    if (threadIds.length === 0) return [];
+
+    const result = await db
+      .select()
+      .from(comments)
+      .innerJoin(users, eq(comments.userId, users.id))
+      .where(inArray(comments.id, threadIds))
+      .orderBy(comments.createdAt);
+
+    // Bounded to a handful of extra queries regardless of subtree size — keeps
+    // per-node like state out of an N-query fan-out when a deep thread renders.
+    const likeCountRows = await db
+      .select({ commentId: commentLikes.commentId, count: sql<number>`count(*)::int` })
+      .from(commentLikes)
+      .where(inArray(commentLikes.commentId, threadIds))
+      .groupBy(commentLikes.commentId);
+    const likeCountMap = new Map(likeCountRows.map(r => [r.commentId, r.count]));
+
+    let viewerLikedSet = new Set<string>();
+    if (viewerId) {
+      const viewerLikes = await db
+        .select({ commentId: commentLikes.commentId })
+        .from(commentLikes)
+        .where(and(inArray(commentLikes.commentId, threadIds), eq(commentLikes.userId, viewerId)));
+      viewerLikedSet = new Set(viewerLikes.map(r => r.commentId));
+    }
+
+    return result.map(row => {
+      const { passwordHash, ...userWithoutPassword } = row.users;
+      return {
+        ...row.comments,
+        user: userWithoutPassword as User,
+        likeCount: likeCountMap.get(row.comments.id) ?? 0,
+        isLiked: viewerLikedSet.has(row.comments.id),
       };
     });
   }
@@ -2170,34 +2310,37 @@ export class DbStorage implements IStorage {
     return result.length;
   }
 
-  async addCommentReply(userId: string, commentId: string, content: string): Promise<CommentReply> {
-    const result = await db.insert(commentReplies).values({
-      userId,
-      commentId,
-      content,
-    }).returning();
-    return result[0];
+  // A "reply" is now just a comment with parentCommentId set — works at any
+  // depth, since :commentId can itself be a top-level comment OR an existing
+  // reply. This is what gives unlimited-depth threading.
+  async addCommentReply(userId: string, commentId: string, content: string): Promise<Comment> {
+    const [parent] = await db.select().from(comments).where(eq(comments.id, commentId));
+    if (!parent) throw new Error("Parent comment not found");
+    return this.addComment({ userId, postId: parent.postId, parentCommentId: commentId, content } as InsertComment);
   }
 
-  async getCommentReplies(commentId: string): Promise<Array<CommentReply & { user: User }>> {
+  // Direct children only (one level) — kept for any caller that still wants a
+  // shallow reply list. getCommentThread (above) returns the full recursive
+  // subtree and is what the client actually uses for rendering.
+  async getCommentReplies(commentId: string): Promise<Array<Comment & { user: User }>> {
     const result = await db
       .select()
-      .from(commentReplies)
-      .innerJoin(users, eq(commentReplies.userId, users.id))
-      .where(eq(commentReplies.commentId, commentId))
-      .orderBy(commentReplies.createdAt);
-    
+      .from(comments)
+      .innerJoin(users, eq(comments.userId, users.id))
+      .where(eq(comments.parentCommentId, commentId))
+      .orderBy(comments.createdAt);
+
     return result.map(row => {
       const { passwordHash, ...userWithoutPassword } = row.users;
       return {
-        ...row.comment_replies,
+        ...row.comments,
         user: userWithoutPassword as User,
       };
     });
   }
 
   async getCommentReplyCount(commentId: string): Promise<number> {
-    const result = await db.select().from(commentReplies).where(eq(commentReplies.commentId, commentId));
+    const result = await db.select().from(comments).where(eq(comments.parentCommentId, commentId));
     return result.length;
   }
 
@@ -3732,6 +3875,43 @@ export class DbStorage implements IStorage {
     return result[0];
   }
 
+  // Thin wrapper over createContentReport that also enforces the auto-flag
+  // threshold — 3 DISTINCT reporters (the unique constraint on
+  // (reporterId, contentType, contentId) already stops one account from
+  // submitting more than one report on the same item, so a raw count here is
+  // already a distinct-reporter count).
+  async createPostReport(postId: string, reporterId: string, reason: string, description: string | null): Promise<ContentReport> {
+    const report = await this.createContentReport({
+      reporterId,
+      contentType: "post",
+      contentId: postId,
+      reason,
+      description: description ?? undefined,
+    });
+
+    const [{ count: reportCount }] = await db
+      .select({ count: count() })
+      .from(contentReports)
+      .where(and(eq(contentReports.contentType, "post"), eq(contentReports.contentId, postId)));
+
+    if (reportCount >= 3) {
+      await db.update(posts).set({ moderationStatus: "flagged" }).where(eq(posts.id, postId));
+      invalidateCache.posts();
+    }
+
+    return report;
+  }
+
+  async createCommentReport(commentId: string, reporterId: string, reason: string, description: string | null): Promise<ContentReport> {
+    return this.createContentReport({
+      reporterId,
+      contentType: "comment",
+      contentId: commentId,
+      reason,
+      description: description ?? undefined,
+    });
+  }
+
   async getContentReports(status?: string, limit = 50, offset = 0): Promise<Array<ContentReport & { reporter: User }>> {
     const safeLimit = Math.min(Math.max(limit, 1), 100);
     const safeOffset = Math.max(offset, 0);
@@ -4490,7 +4670,9 @@ export class DbStorage implements IStorage {
         .from(posts)
         .innerJoin(users, eq(posts.userId, users.id))
         .leftJoin(communities, eq(posts.communityId, communities.id))
-        .where(cursorDate ? lt(posts.createdAt, cursorDate) : undefined)
+        .where(cursorDate
+          ? and(lt(posts.createdAt, cursorDate), eq(posts.moderationStatus, "approved"))
+          : eq(posts.moderationStatus, "approved"))
         .orderBy(desc(posts.createdAt))
         .limit(limit * 2),
       db.select({ repost: reposts, repostingUser: users })
@@ -5093,6 +5275,89 @@ export class DbStorage implements IStorage {
     return { migratedConversations, migratedMessages };
   }
 
+  // Idempotent boot migration for the unified comment-threading model:
+  // 1. Add the new columns/table if they don't exist yet (safe on repeat runs).
+  // 2. Copy every commentReplies row into comments, REUSING its original id —
+  //    this makes the idempotency check a trivial "does this id already
+  //    exist" (no fuzzy content-matching needed) and means any existing
+  //    notification whose relatedEntityId points at an old reply id keeps
+  //    resolving correctly after the migration.
+  // 3. Backfill posts.commentCount from actual (non-deleted) comment rows —
+  //    cheap at this app's current scale and self-healing if counts ever drift.
+  async ensureUnifiedCommentSchema(): Promise<void> {
+    await db.execute(sql`
+      ALTER TABLE comments
+        ADD COLUMN IF NOT EXISTS parent_comment_id VARCHAR REFERENCES comments(id),
+        ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT false,
+        ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP
+    `);
+    await db.execute(sql`
+      ALTER TABLE posts
+        ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP,
+        ADD COLUMN IF NOT EXISTS moderation_status TEXT NOT NULL DEFAULT 'approved',
+        ADD COLUMN IF NOT EXISTS comment_count INTEGER NOT NULL DEFAULT 0
+    `);
+  }
+
+  // Report abuse-hardening + venue ratings — idempotent, same ADD-COLUMN-IF-
+  // NOT-EXISTS / CREATE-TABLE-IF-NOT-EXISTS convention as everything else
+  // that self-heals on boot in this project rather than relying on db:push.
+  async ensureSocialLayerSchema(): Promise<void> {
+    await db.execute(sql`
+      ALTER TABLE event_ratings ADD COLUMN IF NOT EXISTS review_text TEXT
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS venue_ratings (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        venue_id VARCHAR NOT NULL REFERENCES venues(id) ON DELETE CASCADE,
+        user_id VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        rating INTEGER NOT NULL,
+        review_text TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT now(),
+        updated_at TIMESTAMP,
+        CONSTRAINT venue_rating_check CHECK (rating >= 1 AND rating <= 5),
+        CONSTRAINT unique_venue_user_rating UNIQUE (venue_id, user_id)
+      )
+    `);
+    // One report per user per item — a DO block since Postgres has no
+    // "ADD CONSTRAINT IF NOT EXISTS".
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint WHERE conname = 'unique_reporter_content'
+        ) THEN
+          ALTER TABLE content_reports
+            ADD CONSTRAINT unique_reporter_content UNIQUE (reporter_id, content_type, content_id);
+        END IF;
+      END $$;
+    `);
+  }
+
+  async migrateLegacyCommentReplies(): Promise<{ migratedReplies: number; backfilledPosts: number }> {
+    const insertResult = await db.execute(sql`
+      INSERT INTO comments (id, user_id, post_id, parent_comment_id, content, created_at)
+      SELECT cr.id, cr.user_id, c.post_id, cr.comment_id, cr.content, cr.created_at
+      FROM comment_replies cr
+      JOIN comments c ON c.id = cr.comment_id
+      WHERE cr.id NOT IN (SELECT id FROM comments)
+      RETURNING comments.id
+    `);
+    const migratedReplies = insertResult.rows?.length ?? 0;
+
+    const backfillResult = await db.execute(sql`
+      UPDATE posts SET comment_count = sub.cnt
+      FROM (
+        SELECT post_id, count(*) AS cnt FROM comments WHERE NOT is_deleted GROUP BY post_id
+      ) sub
+      WHERE posts.id = sub.post_id AND posts.comment_count != sub.cnt
+      RETURNING posts.id
+    `);
+    const backfilledPosts = backfillResult.rows?.length ?? 0;
+
+    return { migratedReplies, backfilledPosts };
+  }
+
   async ensureMediaUploadsTable(): Promise<void> {
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS media_uploads (
@@ -5326,10 +5591,18 @@ export class DbStorage implements IStorage {
 
   // ── Event ratings ────────────────────────────────────────────────────────
 
-  async createEventRating(eventId: string, userId: string, rating: number): Promise<EventRating> {
+  // Upsert — re-rating an event you already rated updates it instead of being
+  // rejected forever. Every mainstream rating product (Google, Yelp, Airbnb)
+  // lets you edit your own review; hard-rejecting resubmission is worse than
+  // the industry baseline, not "done."
+  async createEventRating(eventId: string, userId: string, rating: number, reviewText?: string | null): Promise<EventRating> {
     const [result] = await db
       .insert(eventRatings)
-      .values({ eventId, userId, rating })
+      .values({ eventId, userId, rating, reviewText: reviewText ?? null })
+      .onConflictDoUpdate({
+        target: [eventRatings.eventId, eventRatings.userId],
+        set: { rating, reviewText: reviewText ?? null, updatedAt: new Date() },
+      })
       .returning();
     return result;
   }
@@ -5386,6 +5659,70 @@ export class DbStorage implements IStorage {
       totalRatings: parseInt(row.total_ratings, 10),
       eventsRated: parseInt(row.events_rated, 10),
     };
+  }
+
+  // Mirrors createEventRating's upsert semantics exactly.
+  async createVenueRating(venueId: string, userId: string, rating: number, reviewText?: string | null): Promise<VenueRating> {
+    const [result] = await db
+      .insert(venueRatings)
+      .values({ venueId, userId, rating, reviewText: reviewText ?? null })
+      .onConflictDoUpdate({
+        target: [venueRatings.venueId, venueRatings.userId],
+        set: { rating, reviewText: reviewText ?? null, updatedAt: new Date() },
+      })
+      .returning();
+    return result;
+  }
+
+  async getUserVenueRating(venueId: string, userId: string): Promise<VenueRating | null> {
+    const result = await db
+      .select()
+      .from(venueRatings)
+      .where(and(eq(venueRatings.venueId, venueId), eq(venueRatings.userId, userId)))
+      .limit(1);
+    return result[0] ?? null;
+  }
+
+  async getVenueRatingStats(venueId: string): Promise<{ averageRating: number | null; totalRatings: number; distribution: Record<number, number> }> {
+    const result = await db.execute(sql`
+      SELECT
+        AVG(rating)::NUMERIC(3,2)          AS average_rating,
+        COUNT(*)                            AS total_ratings,
+        COUNT(*) FILTER (WHERE rating = 1) AS one_star,
+        COUNT(*) FILTER (WHERE rating = 2) AS two_star,
+        COUNT(*) FILTER (WHERE rating = 3) AS three_star,
+        COUNT(*) FILTER (WHERE rating = 4) AS four_star,
+        COUNT(*) FILTER (WHERE rating = 5) AS five_star
+      FROM venue_ratings
+      WHERE venue_id = ${venueId}
+    `);
+    const row = result.rows[0] as any;
+    return {
+      averageRating: row.average_rating ? parseFloat(row.average_rating) : null,
+      totalRatings: parseInt(row.total_ratings, 10),
+      distribution: {
+        1: parseInt(row.one_star, 10),
+        2: parseInt(row.two_star, 10),
+        3: parseInt(row.three_star, 10),
+        4: parseInt(row.four_star, 10),
+        5: parseInt(row.five_star, 10),
+      },
+    };
+  }
+
+  // "Attended" for a venue means a checked-in, confirmed venueTicket for an
+  // entry night that belongs to this venue and has already happened — one
+  // join deeper than the event check since a venue isn't a single dated event.
+  // Reuses the existing getUserVenueTickets join rather than a new raw query.
+  async hasAttendedVenue(userId: string, venueId: string): Promise<boolean> {
+    const ticketsWithVenue = await this.getUserVenueTickets(userId);
+    const now = new Date();
+    return ticketsWithVenue.some(t =>
+      t.venue.id === venueId &&
+      t.checkedInAt !== null &&
+      t.status === "confirmed" &&
+      new Date(t.entryNight.date) < now
+    );
   }
 
   // ── Login attempt tracking (brute-force protection, survives restarts) ─────

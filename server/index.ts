@@ -368,7 +368,28 @@ setupAdminRoutes(app);
   } catch (err) {
     console.error('[STARTUP] Legacy message migration failed:', err);
   }
-  
+
+  // Unified comment-threading model: add the new columns, then fold legacy
+  // comment_replies rows into comments (reusing their original ids) and
+  // backfill posts.comment_count.
+  try {
+    await storage.ensureUnifiedCommentSchema();
+    const commentMigration = await storage.migrateLegacyCommentReplies();
+    if (commentMigration.migratedReplies > 0 || commentMigration.backfilledPosts > 0) {
+      console.log(`[STARTUP] Migrated ${commentMigration.migratedReplies} comment replies, backfilled comment_count on ${commentMigration.backfilledPosts} posts`);
+    }
+  } catch (err) {
+    console.error('[STARTUP] Comment threading migration failed:', err);
+  }
+
+  // Venue ratings table, event_ratings review text, content_reports abuse
+  // hardening (one report per user per item).
+  try {
+    await storage.ensureSocialLayerSchema();
+  } catch (err) {
+    console.error('[STARTUP] Social layer schema setup failed:', err);
+  }
+
   server.listen({
     port,
     host: "0.0.0.0",

@@ -730,6 +730,7 @@ function PostResultCard({ post }: { post: Post & { user: User }; navigate: (path
         image={post.imageUrl || undefined}
         videoUrl={post.videoUrl}
         createdAt={post.createdAt}
+        updatedAt={post.updatedAt}
         likes={0}
         comments={0}
         feedMode={true}
@@ -869,6 +870,7 @@ function TrendingPostCard({ post, navigate }: { post: TrendingPost; navigate: (p
         image={post.imageUrl || undefined}
         videoUrl={post.videoUrl}
         createdAt={post.createdAt}
+        updatedAt={post.updatedAt}
         likes={post.likeCount}
         comments={post.commentCount}
         feedMode={true}

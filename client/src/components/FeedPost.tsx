@@ -34,7 +34,9 @@ import EventDetailsModal from "@/components/EventDetailsModal";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import type { Event, Venue } from "@shared/schema";
-import { HeartIcon, MessageCircleIcon, Share2Icon, BookmarkIcon, Repeat2Icon, CalendarIcon, MapPinIcon, Building2Icon, MoreHorizontalIcon, Trash2Icon } from "@/components/ui/icons";
+import { HeartIcon, MessageCircleIcon, Share2Icon, BookmarkIcon, Repeat2Icon, CalendarIcon, MapPinIcon, Building2Icon, MoreHorizontalIcon, Trash2Icon, PencilIcon, FlagIcon } from "@/components/ui/icons";
+import { Textarea } from "@/components/ui/textarea";
+import ReportDialog from "@/components/ReportDialog";
 import { BadgeCheck } from "lucide-react";
 
 function formatRelativeTime(date: Date | string): string {
@@ -76,6 +78,7 @@ interface FeedPostProps {
   videoUrl?: string | null;
   timestamp?: string;
   createdAt?: string | Date;
+  updatedAt?: string | Date | null;
   likes: number;
   comments: number;
   isLiked?: boolean;
@@ -153,6 +156,7 @@ export default function FeedPost({
   videoUrl,
   timestamp,
   createdAt,
+  updatedAt,
   likes: initialLikes,
   comments: initialComments,
   isLiked: initialIsLiked = false,
@@ -173,6 +177,11 @@ export default function FeedPost({
   const { data: currentUser } = useAuth();
   const [commentDialogOpen, setCommentDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState(content);
+  const [localContent, setLocalContent] = useState(content);
+  const [localUpdatedAt, setLocalUpdatedAt] = useState(updatedAt);
   const [eventModalEvent, setEventModalEvent] = useState<Event | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [likeAnimating, setLikeAnimating] = useState(false);
@@ -188,6 +197,39 @@ export default function FeedPost({
     const interval = setInterval(() => setDisplayTime(formatRelativeTime(createdAt)), 30000);
     return () => clearInterval(interval);
   }, [createdAt]);
+
+  useEffect(() => {
+    setLocalContent(content);
+    setEditContent(content);
+  }, [content]);
+
+  useEffect(() => {
+    setLocalUpdatedAt(updatedAt);
+  }, [updatedAt]);
+
+  // 5-minute edit window, mirrors the server-side check — hide the option
+  // client-side once it'll be rejected rather than offering a dead action.
+  const canEdit = isOwnPost && !!createdAt &&
+    (Date.now() - new Date(createdAt).getTime()) < 5 * 60_000;
+
+  const editMutation = useMutation({
+    mutationFn: async (newContent: string) =>
+      await apiRequest("PATCH", `/api/posts/${id}`, { content: newContent }),
+    onSuccess: (updated: any) => {
+      setLocalContent(updated?.content ?? editContent);
+      setLocalUpdatedAt(updated?.updatedAt ?? new Date().toISOString());
+      setIsEditing(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/posts"] });
+      toast({ title: "Post updated" });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error?.message || "Failed to update post",
+        variant: "destructive",
+      });
+    },
+  });
 
   const { data: likeData } = useQuery<{ count: number; isLiked: boolean }>({
     queryKey: ["/api/posts", id, "likes"],
@@ -446,17 +488,55 @@ export default function FeedPost({
             )}
             <span className="text-xs text-muted-foreground flex-shrink-0">
               @{author.username} · {displayTime}
+              {localUpdatedAt && (
+                <span title={new Date(localUpdatedAt).toLocaleString()}> · Edited</span>
+              )}
             </span>
           </div>
 
           {/* Post content (A3) */}
-          <p className="text-[15px] leading-relaxed whitespace-pre-wrap break-words" data-testid={`text-content-${id}`}>
-            {renderContent(content, navigate, mentionedUsers)}
-          </p>
+          {isEditing ? (
+            <div className="mb-2" onClick={(e) => e.stopPropagation()}>
+              <Textarea
+                value={editContent}
+                onChange={(e) => setEditContent(e.target.value)}
+                maxLength={280}
+                rows={3}
+                className="text-[15px] resize-none"
+                data-testid={`input-edit-${id}`}
+                autoFocus
+              />
+              <div className="flex items-center justify-between mt-1.5">
+                <span className="text-xs text-muted-foreground">{editContent.length}/280</span>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => { setIsEditing(false); setEditContent(localContent); }}
+                    data-testid={`button-cancel-edit-${id}`}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => editMutation.mutate(editContent)}
+                    disabled={!editContent.trim() || editContent === localContent || editMutation.isPending}
+                    data-testid={`button-save-edit-${id}`}
+                  >
+                    Save
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="text-[15px] leading-relaxed whitespace-pre-wrap break-words" data-testid={`text-content-${id}`}>
+              {renderContent(localContent, navigate, mentionedUsers)}
+            </p>
+          )}
 
           {/* Link preview */}
           {(() => {
-            const firstUrl = extractFirstUrl(content);
+            const firstUrl = extractFirstUrl(localContent);
             return firstUrl && !displayEvent && !displayVenue ? (
               <LinkPreviewCard url={firstUrl} />
             ) : null;
@@ -662,29 +742,48 @@ export default function FeedPost({
               />
             </button>
 
-            {/* More (own posts) */}
-            {isOwnPost && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    className="group p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all duration-150"
-                    data-testid={`button-more-${id}`}
-                  >
-                    <MoreHorizontalIcon className="h-[18px] w-[18px]" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
+            {/* More */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className="group p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all duration-150"
+                  data-testid={`button-more-${id}`}
+                >
+                  <MoreHorizontalIcon className="h-[18px] w-[18px]" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {isOwnPost ? (
+                  <>
+                    {canEdit && (
+                      <DropdownMenuItem
+                        onClick={() => setIsEditing(true)}
+                        data-testid={`menu-edit-${id}`}
+                      >
+                        <PencilIcon className="h-4 w-4 mr-2" />
+                        Edit post
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem
+                      onClick={() => setDeleteDialogOpen(true)}
+                      className="text-destructive focus:text-destructive"
+                      data-testid={`menu-delete-${id}`}
+                    >
+                      <Trash2Icon className="h-4 w-4 mr-2" />
+                      Delete post
+                    </DropdownMenuItem>
+                  </>
+                ) : (
                   <DropdownMenuItem
-                    onClick={() => setDeleteDialogOpen(true)}
-                    className="text-destructive focus:text-destructive"
-                    data-testid={`menu-delete-${id}`}
+                    onClick={() => setReportDialogOpen(true)}
+                    data-testid={`menu-report-${id}`}
                   >
-                    <Trash2Icon className="h-4 w-4 mr-2" />
-                    Delete post
+                    <FlagIcon className="h-4 w-4 mr-2" />
+                    Report post
                   </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </div>
@@ -699,7 +798,7 @@ export default function FeedPost({
       <UnifiedShareModal
         open={shareOpen}
         onClose={() => setShareOpen(false)}
-        shareData={{ type: "post", id, title: content.slice(0, 80) || "Post" }}
+        shareData={{ type: "post", id, title: localContent.slice(0, 80) || "Post" }}
       />
 
       <CommentDialog
@@ -710,8 +809,15 @@ export default function FeedPost({
           authorName: author.name,
           authorUsername: author.username,
           authorAvatar: author.avatar,
-          content,
+          content: localContent,
         }}
+      />
+
+      <ReportDialog
+        open={reportDialogOpen}
+        onClose={() => setReportDialogOpen(false)}
+        endpoint={`/api/posts/${id}/report`}
+        itemLabel="post"
       />
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>

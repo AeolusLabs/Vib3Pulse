@@ -462,6 +462,7 @@ export default function FeedPage() {
                   }}
                   content={displayPost.content}
                   createdAt={post.createdAt}
+                  updatedAt={displayPost.updatedAt}
                   likes={0}
                   comments={0}
                   isLiked={false}

@@ -32,6 +32,7 @@ type Comment = {
   postId: string;
   content: string;
   createdAt: string;
+  isDeleted?: boolean;
   user: {
     id: string;
     username: string;

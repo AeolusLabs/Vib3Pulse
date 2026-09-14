@@ -218,14 +218,23 @@ export const posts = pgTable("posts", {
   eventId: varchar("event_id").references(() => events.id),
   venueId: varchar("venue_id").references(() => venues.id),
   communityId: varchar("community_id").references(() => communities.id),
+  updatedAt: timestamp("updated_at"), // set only when edited — drives the "Edited" label
+  moderationStatus: text("moderation_status").notNull().default("approved"), // approved | flagged | removed
+  // Denormalized so feed/trending never need a COUNT(*) join — kept in sync by
+  // storage.addComment/deleteComment in the same statement as the write.
+  commentCount: integer("comment_count").notNull().default(0),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
 export const insertPostSchema = createInsertSchema(posts).omit({
   id: true,
   createdAt: true,
+  updatedAt: true,
+  moderationStatus: true,
+  commentCount: true,
   imageUrl: true, // Use imageUrls instead
 }).extend({
+  content: z.string().min(1).max(280, "Caption must be 280 characters or less"),
   imageUrls: z.array(z.string()).max(4, "Maximum 4 images allowed").optional(),
   videoUrl: z.string().optional().nullable(),
 });
@@ -580,14 +589,25 @@ export type Like = typeof likes.$inferSelect;
 export const comments = pgTable("comments", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
-  postId: varchar("post_id").notNull().references(() => posts.id),
+  postId: varchar("post_id").notNull().references(() => posts.id, { onDelete: 'cascade' }),
+  // Self-reference for unlimited-depth threading (X/Reddit-style). Top-level
+  // comments have parentCommentId: null; any reply — to a top-level comment OR
+  // to another reply — points at its immediate parent. Deliberately NOT
+  // onDelete:cascade: comments are soft-deleted (see isDeleted below) so a
+  // removed comment's replies stay attached and visible, matching how every
+  // major platform handles mid-thread deletion instead of wiping descendants.
+  parentCommentId: varchar("parent_comment_id").references((): any => comments.id),
   content: text("content").notNull(),
+  isDeleted: boolean("is_deleted").notNull().default(false),
+  deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
 export const insertCommentSchema = createInsertSchema(comments).omit({
   id: true,
   createdAt: true,
+  isDeleted: true,
+  deletedAt: true,
 });
 
 export type InsertComment = z.infer<typeof insertCommentSchema>;
@@ -1102,7 +1122,11 @@ export const contentReports = pgTable("content_reports", {
   reviewedAt: timestamp("reviewed_at"),
   resolution: text("resolution"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
-});
+}, (table) => ({
+  // One report per user per item — closes the trivial "3 reports from 1
+  // account" hole in any report-count-based auto-flag mechanism.
+  uniqueReporterContent: unique().on(table.reporterId, table.contentType, table.contentId),
+}));
 
 export const insertContentReportSchema = createInsertSchema(contentReports).omit({
   id: true,
@@ -1300,6 +1324,7 @@ export const eventRatings = pgTable("event_ratings", {
   eventId: varchar("event_id").notNull().references(() => events.id, { onDelete: "cascade" }),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   rating: integer("rating").notNull(),
+  reviewText: text("review_text"), // optional — a bare star with no text is thinner than the industry baseline
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
   updatedAt: timestamp("updated_at"),
 }, (table) => ({
@@ -1315,6 +1340,31 @@ export const insertEventRatingSchema = createInsertSchema(eventRatings).omit({
 
 export type InsertEventRating = z.infer<typeof insertEventRatingSchema>;
 export type EventRating = typeof eventRatings.$inferSelect;
+
+// Mirrors eventRatings — a venue isn't a single dated event, so eligibility is
+// checked one join deeper (via venueTickets -> venueEntryNights.venueId) at
+// submission time in the routes layer, not encoded in this table.
+export const venueRatings = pgTable("venue_ratings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  venueId: varchar("venue_id").notNull().references(() => venues.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  rating: integer("rating").notNull(),
+  reviewText: text("review_text"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at"),
+}, (table) => ({
+  uniqueVenueUserRating: unique().on(table.venueId, table.userId),
+  ratingCheck: check("venue_rating_check", sql`${table.rating} >= 1 AND ${table.rating} <= 5`),
+}));
+
+export const insertVenueRatingSchema = createInsertSchema(venueRatings).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertVenueRating = z.infer<typeof insertVenueRatingSchema>;
+export type VenueRating = typeof venueRatings.$inferSelect;
 
 // ============================================
 // ZERNIO SOCIAL MEDIA INTEGRATION

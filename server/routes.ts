@@ -15,9 +15,15 @@ import { registerUsersRoutes } from "./routes/users-routes";
 import { registerNotificationRoutes } from "./routes/notification-routes";
 import { registerMediaRoutes } from "./routes/media-routes";
 import { registerCommunityRoutes } from "./routes/community-routes";
+import { registerOgRoutes } from "./og-routes";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
+
+  // Crawler-only server-rendered OG tags for /posts/:id — must be registered
+  // before the SPA catch-all (wired up later in server/index.ts) so it can
+  // intercept known link-unfurling user-agents; real browsers fall through.
+  registerOgRoutes(app);
 
   registerUsersRoutes(app);
   registerMessagesRoutes(app);

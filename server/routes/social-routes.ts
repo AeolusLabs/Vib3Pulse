@@ -157,6 +157,49 @@ export function registerSocialRoutes(app: Express): void {
     }
   });
 
+  app.patch("/api/posts/:id", requireAuth, async (req, res) => {
+    try {
+      const { content } = z.object({
+        content: z.string().min(1).max(280, "Caption must be 280 characters or less"),
+      }).parse(req.body);
+
+      const result = await storage.updatePost(req.params.id, req.user!.id, sanitizeTextOnly(content.trim()));
+      if (result.error === "NOT_FOUND") return res.status(404).json({ message: "Post not found" });
+      if (result.error === "FORBIDDEN") return res.status(403).json({ message: "Not authorized to edit this post" });
+      if (result.error === "EDIT_WINDOW_PASSED") return res.status(410).json({ message: "The 5-minute edit window has passed" });
+
+      res.json(result.post);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid content" });
+      }
+      res.status(500).json({ message: "Failed to edit post" });
+    }
+  });
+
+  app.post("/api/posts/:id/report", requireAuth, sensitiveOperationLimiter, async (req, res) => {
+    try {
+      const { reason, description } = z.object({
+        reason: z.string().min(1),
+        description: z.string().optional(),
+      }).parse(req.body);
+
+      const post = await storage.getPost(req.params.id);
+      if (!post) return res.status(404).json({ message: "Post not found" });
+
+      await storage.createPostReport(req.params.id, req.user!.id, reason, description ?? null);
+      res.json({ message: "Report submitted" });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Reason is required" });
+      }
+      if (error?.code === "23505") { // unique_reporter_content violation
+        return res.status(409).json({ message: "You've already reported this post" });
+      }
+      res.status(500).json({ message: "Failed to submit report" });
+    }
+  });
+
   // ──── Media Storage (Railway-compatible, DB-backed) ────────────────────────
 
   // Helper: store base64 data URL in DB, return /api/media/{id} URL
@@ -220,6 +263,21 @@ export function registerSocialRoutes(app: Express): void {
       res.json(stories);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch stories" });
+    }
+  });
+
+  // Snapchat-style personal archive — your own full story history, including
+  // ones that expired from everyone else's view 24h ago. Nothing is deleted;
+  // getUserStories(userId, viewerId) skips the 24h filter only when the
+  // viewer IS the owner (always true here, since this route uses req.user!.id
+  // for both).
+  app.get("/api/stories/archive", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const archive = await storage.getUserStories(userId, userId);
+      res.json(archive);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch story archive" });
     }
   });
 
@@ -662,7 +720,11 @@ export function registerSocialRoutes(app: Express): void {
     try {
       const postId = req.params.postId;
       const comments = await storage.getPostComments(postId);
-      res.json({ comments, count: comments.length });
+      // Denormalized total (top-level + every nested reply) — comments.length
+      // here would only be the top-level page, since replies now live at any
+      // depth and are fetched lazily per-thread, not in this response.
+      const post = await storage.getPost(postId);
+      res.json({ comments, count: post?.commentCount ?? comments.length });
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch comments" });
     }
@@ -709,7 +771,9 @@ export function registerSocialRoutes(app: Express): void {
     }
   });
 
-  // Comment Interactions - Replies
+  // Comment Interactions - Replies. :commentId may be a top-level comment OR
+  // an existing reply — either way this just inserts another comments row
+  // with parentCommentId = commentId, which is what gives unlimited depth.
   app.post("/api/comments/:commentId/replies", requireAuth, async (req, res) => {
     try {
       const userId = req.user!.id;
@@ -722,6 +786,25 @@ export function registerSocialRoutes(app: Express): void {
 
       const sanitizedContent = sanitizeTextOnly(content.trim());
       const reply = await storage.addCommentReply(userId, commentId, sanitizedContent);
+
+      // Notify the immediate parent's author (not just the post owner) — a
+      // reply several levels deep should still reach the person it's actually
+      // replying to, or a threaded conversation has no notification loop at all.
+      const parent = await storage.getComment(commentId);
+      if (parent && parent.userId !== userId) {
+        const replier = await storage.getUser(userId);
+        const snippet = sanitizedContent.length > 60 ? sanitizedContent.substring(0, 60) + "..." : sanitizedContent;
+        await deliverNotification({
+          userId: parent.userId,
+          type: "post_comment",
+          title: "New Reply",
+          message: `${replier?.displayName || replier?.username || "Someone"} replied: "${snippet}"`,
+          link: `/feed?post=${reply.postId}&comment=${reply.id}`,
+          relatedUserId: userId,
+          relatedEntityId: reply.id,
+        });
+      }
+
       res.json(reply);
     } catch (error) {
       res.status(500).json({ message: "Failed to add reply" });
@@ -736,6 +819,52 @@ export function registerSocialRoutes(app: Express): void {
       res.json({ replies, count });
     } catch (error) {
       res.status(500).json({ message: "Failed to get replies" });
+    }
+  });
+
+  // Full recursive subtree under one top-level comment — fetched lazily on
+  // "view replies", one query via a recursive CTE, instead of shipping the
+  // whole post's comment graph in one payload.
+  app.get("/api/comments/:commentId/thread", async (req, res) => {
+    try {
+      const thread = await storage.getCommentThread(req.params.commentId, req.user?.id);
+      res.json({ thread, count: thread.length });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get thread" });
+    }
+  });
+
+  // Soft delete — replies underneath stay visible under a "[comment deleted]"
+  // placeholder rather than being wiped along with the parent.
+  app.delete("/api/comments/:id", requireAuth, async (req, res) => {
+    try {
+      const result = await storage.deleteComment(req.params.id, req.user!.id);
+      if (!result) {
+        return res.status(403).json({ message: "Not authorized to delete this comment" });
+      }
+      res.json({ message: "Comment deleted" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete comment" });
+    }
+  });
+
+  app.post("/api/comments/:id/report", requireAuth, sensitiveOperationLimiter, async (req, res) => {
+    try {
+      const { reason, description } = z.object({
+        reason: z.string().min(1),
+        description: z.string().optional(),
+      }).parse(req.body);
+
+      await storage.createCommentReport(req.params.id, req.user!.id, reason, description ?? null);
+      res.json({ message: "Report submitted" });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Reason is required" });
+      }
+      if (error?.code === "23505") {
+        return res.status(409).json({ message: "You've already reported this comment" });
+      }
+      res.status(500).json({ message: "Failed to submit report" });
     }
   });
 

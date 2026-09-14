@@ -29,6 +29,7 @@ import {
   Loader2Icon,
   UploadIcon,
 } from "@/components/ui/icons";
+import { FaWhatsapp } from "react-icons/fa";
 
 export interface ShareData {
   type: "event" | "venue" | "post" | "story";
@@ -178,6 +179,13 @@ export default function UnifiedShareModal({
     toast({ title: "Link copied!", description: "Share link copied to clipboard." });
   };
 
+  const handleShareToWhatsApp = () => {
+    const url = getShareUrl(shareData);
+    const name = getDisplayName(shareData);
+    const text = `Check out "${name}" on Vib3Pulse\n${url}`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
+  };
+
   const handleShareVia = async () => {
     const url = getShareUrl(shareData);
     const name = getDisplayName(shareData);
@@ -296,8 +304,8 @@ export default function UnifiedShareModal({
         {/* ── Quick actions ────────────────────────────────────── */}
         <div
           className={cn(
-            "flex items-start justify-center gap-8 px-5 py-4",
-            !showPostToFeed && "gap-12"
+            "flex items-start justify-center gap-6 px-5 py-4",
+            !showPostToFeed && "gap-8"
           )}
         >
           {showPostToFeed && (
@@ -315,6 +323,20 @@ export default function UnifiedShareModal({
               </span>
             </button>
           )}
+
+          <button
+            className="flex flex-col items-center gap-1.5 group cursor-pointer"
+            onClick={handleShareToWhatsApp}
+            aria-label="Share to WhatsApp"
+            data-testid="button-share-whatsapp"
+          >
+            <div className="h-12 w-12 rounded-full bg-[#25D366]/10 flex items-center justify-center transition-colors duration-150 group-hover:bg-[#25D366]/20 active:scale-[0.96]">
+              <FaWhatsapp className="h-5 w-5 text-[#25D366]" />
+            </div>
+            <span className="text-[11px] font-medium text-muted-foreground group-hover:text-foreground transition-colors duration-150 whitespace-nowrap">
+              WhatsApp
+            </span>
+          </button>
 
           <button
             className="flex flex-col items-center gap-1.5 group cursor-pointer"

@@ -37,6 +37,11 @@ const E = {
 
 // ─── constants ────────────────────────────────────────────────────────────────
 
+// PRD: stories are max 15s each — longer videos get split into 15s segments,
+// each posted as its own story. Single source of truth for both the splitting
+// threshold and the segment length (they're the same number by design).
+const STORY_SEGMENT_SECONDS = 15;
+
 const FILTERS = [
   { name: "None",  css: "" },
   { name: "Vivid", css: "saturate(1.9) contrast(1.1) brightness(1.05)" },
@@ -705,19 +710,19 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
     if (isPosting || createStoryMutation.isPending || isSplitting) return;
 
     // Long video → split flow
-    if (mediaKind === "video" && capturedVideoBlob && videoDuration > 60) {
+    if (mediaKind === "video" && capturedVideoBlob && videoDuration > STORY_SEGMENT_SECONDS) {
       setIsPosting(true);
       try {
         // Generate thumbnails from original blob (fast, doesn't need real-time)
         const thumbUrl = capturedVideoUrl!;
-        const segCount = Math.ceil(videoDuration / 60);
+        const segCount = Math.ceil(videoDuration / STORY_SEGMENT_SECONDS);
         const thumbPromises = Array.from({ length: segCount }, (_, i) =>
-          captureVideoThumbnail(thumbUrl, i * 60 + Math.min(1, (videoDuration - i * 60) / 2))
+          captureVideoThumbnail(thumbUrl, i * STORY_SEGMENT_SECONDS + Math.min(1, (videoDuration - i * STORY_SEGMENT_SECONDS) / 2))
         );
 
         // Split video (real-time, shows progress modal via isSplitting)
         const [segments, thumbs] = await Promise.all([
-          splitVideo(capturedVideoBlob),
+          splitVideo(capturedVideoBlob, STORY_SEGMENT_SECONDS),
           Promise.all(thumbPromises),
         ]);
 
@@ -908,7 +913,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
 
                   {/* supported formats hint */}
                   <p className="text-white/20 text-xs text-center tracking-wide">
-                    Photos · Videos up to 5 minutes (auto-split into 60s clips)
+                    Photos · Videos up to 5 minutes (auto-split into {STORY_SEGMENT_SECONDS}s clips)
                   </p>
                 </motion.div>
 
@@ -1484,8 +1489,8 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                         <><div className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin" />{uploadProgress > 0 ? `${uploadProgress}%` : "Uploading…"}</>
                       ) : createStoryMutation.isPending ? (
                         <><div className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin" />Posting…</>
-                      ) : videoDuration > 60 ? (
-                        <><SendIcon className="h-4 w-4" />{Math.ceil(videoDuration / 60)} Stories</>
+                      ) : videoDuration > STORY_SEGMENT_SECONDS ? (
+                        <><SendIcon className="h-4 w-4" />{Math.ceil(videoDuration / STORY_SEGMENT_SECONDS)} Stories</>
                       ) : (
                         <><SendIcon className="h-4 w-4" />Your Story</>
                       )}
@@ -1550,7 +1555,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                     <div className="flex gap-3 px-5 overflow-x-auto py-6" style={{ scrollbarWidth: "none" } as React.CSSProperties}>
                       {splitSegments.map((_, i) => {
                         const active = activeSegments[i];
-                        const dur = Math.min(60, videoDuration - i * 60);
+                        const dur = Math.min(STORY_SEGMENT_SECONDS, videoDuration - i * STORY_SEGMENT_SECONDS);
                         return (
                           <div
                             key={i}

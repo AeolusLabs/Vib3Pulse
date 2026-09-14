@@ -32,6 +32,21 @@ import { CalendarIcon, MapPinIcon, PoundSterlingIcon, Building2Icon, MailIcon, U
 import { FileText, BadgeCheck, Cake } from "lucide-react";
 import { useOrganizerRating } from "@/hooks/use-ratings";
 import RatingDisplay from "@/components/RatingDisplay";
+import StoryViewer from "@/components/StoryViewer";
+import { ImageIcon } from "@/components/ui/icons";
+
+type ArchivedStory = {
+  id: string;
+  userId: string;
+  imageUrl: string;
+  videoUrl?: string | null;
+  caption?: string | null;
+  type: string;
+  privacy: string;
+  originalStoryId: string | null;
+  createdAt: string;
+  cropParams?: { x: number; y: number; w: number; h: number } | null;
+};
 
 type ProfileResponse = Omit<User, "password"> & {
   events?: Event[];
@@ -126,6 +141,15 @@ export default function ProfilePage() {
     },
     enabled: !!profile?.id && activeTab === "reposts",
   });
+
+  // Snapchat-style archive — your own full story history, own-profile only.
+  // (isOwnProfile isn't declared until after the not-found/loading guards
+  // below, so this inlines the same check against the raw query data.)
+  const { data: storyArchive, isLoading: archiveLoading } = useQuery<ArchivedStory[]>({
+    queryKey: ["/api/stories/archive"],
+    enabled: !!sessionUser?.id && sessionUser.id === profile?.id && activeTab === "archive",
+  });
+  const [archiveViewerIndex, setArchiveViewerIndex] = useState<number | null>(null);
 
   useEffect(() => {
     if (profile?.userType === "organizer") {
@@ -329,6 +353,7 @@ export default function ProfilePage() {
             image={post.imageUrl || undefined}
             videoUrl={post.videoUrl || undefined}
             createdAt={post.createdAt}
+            updatedAt={post.updatedAt}
             likes={0}
             comments={0}
             feedMode
@@ -602,13 +627,17 @@ export default function ProfilePage() {
         {isSocialUser ? (
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full mt-2">
             <TabsList
-              className="w-full grid grid-cols-3 rounded-none border-b border-border bg-transparent h-auto p-0"
+              className={cn(
+                "w-full grid rounded-none border-b border-border bg-transparent h-auto p-0",
+                isOwnProfile ? "grid-cols-4" : "grid-cols-3"
+              )}
               data-testid="profile-tabs"
             >
               {[
                 { value: "posts", label: "Posts", icon: FileText },
                 { value: "likes", label: "Likes", icon: HeartIcon },
                 { value: "reposts", label: "Reposts", icon: Repeat2Icon },
+                ...(isOwnProfile ? [{ value: "archive", label: "Archive", icon: ImageIcon }] : []),
               ].map(({ value, label, icon: Icon }) => (
                 <TabsTrigger
                   key={value}
@@ -652,6 +681,44 @@ export default function ProfilePage() {
                 emptyText="No reposts yet"
               />
             </TabsContent>
+
+            {isOwnProfile && (
+              <TabsContent value="archive" className="mt-0" data-testid="content-archive">
+                {archiveLoading ? (
+                  <div className="grid grid-cols-3 gap-1 p-1">
+                    {[0, 1, 2].map((i) => <div key={i} className="aspect-[9/16] bg-muted animate-pulse rounded-sm" />)}
+                  </div>
+                ) : !storyArchive || storyArchive.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                    <ImageIcon className="h-10 w-10 mb-2 opacity-40" />
+                    <p className="text-sm">No stories yet</p>
+                    <p className="text-xs mt-1 max-w-[220px] text-center">
+                      Your stories stay here after they disappear from everyone else's view — only you can see this.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 gap-1 p-1" data-testid="grid-story-archive">
+                    {storyArchive.map((story, i) => (
+                      <button
+                        key={story.id}
+                        onClick={() => setArchiveViewerIndex(i)}
+                        className="aspect-[9/16] bg-muted rounded-sm overflow-hidden relative group"
+                        data-testid={`button-archive-story-${story.id}`}
+                      >
+                        {story.type === "video" ? (
+                          <video src={story.videoUrl ?? story.imageUrl} className="h-full w-full object-cover" muted />
+                        ) : (
+                          <img src={story.imageUrl} alt="" className="h-full w-full object-cover" />
+                        )}
+                        <span className="absolute bottom-1 left-1 text-[10px] text-white/90 bg-black/40 rounded px-1">
+                          {format(new Date(story.createdAt), "MMM d")}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+            )}
           </Tabs>
         ) : (
           /* Organizer profile tabs — same visual treatment as social user */
@@ -762,6 +829,32 @@ export default function ProfilePage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {archiveViewerIndex !== null && storyArchive && storyArchive.length > 0 && (
+        <StoryViewer
+          username={profile.username}
+          avatar={avatarUrl ?? undefined}
+          displayName={displayName}
+          storyOwnerId={sessionUser!.id}
+          initialSlide={archiveViewerIndex}
+          onClose={() => setArchiveViewerIndex(null)}
+          slides={storyArchive.map((story) => ({
+            id: story.id,
+            type: (story.type === "video" ? "video" : "image") as "image" | "text" | "video",
+            content: story.imageUrl,
+            videoUrl: story.videoUrl || null,
+            caption: story.caption || null,
+            timestamp: story.createdAt,
+            likeCount: 0,
+            viewCount: 0,
+            isLiked: false,
+            isReshare: false,
+            privacy: story.privacy || "public",
+            originalStoryId: story.originalStoryId,
+            cropParams: story.cropParams || null,
+          }))}
+        />
+      )}
 
       <BottomNavigation />
     </div>

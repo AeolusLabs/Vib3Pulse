@@ -369,6 +369,7 @@ export default function CommunityPage() {
                     }}
                     content={post.content}
                     createdAt={post.createdAt}
+                    updatedAt={post.updatedAt}
                     likes={0}
                     comments={0}
                     isLiked={false}

@@ -6,6 +6,7 @@ import { ratingSubmitLimiter } from "./security.js";
 
 const ratingSchema = z.object({
   rating: z.number().int().min(1).max(5),
+  reviewText: z.string().max(500).optional(),
 });
 
 export function registerRatingRoutes(app: Express): void {
@@ -60,7 +61,9 @@ export function registerRatingRoutes(app: Express): void {
     }
   });
 
-  // POST /api/events/:eventId/ratings — auth required, full validation chain
+  // POST /api/events/:eventId/ratings — auth required, full validation chain.
+  // Upsert: submitting again updates your existing rating instead of being
+  // rejected forever (every mainstream rating product lets you edit a review).
   app.post("/api/events/:eventId/ratings", requireAuth, ratingSubmitLimiter, async (req, res) => {
     try {
       const { eventId } = req.params;
@@ -71,7 +74,7 @@ export function registerRatingRoutes(app: Express): void {
       if (!parseResult.success) {
         return res.status(400).json({ error: "INVALID_RATING", message: "Rating must be 1-5", statusCode: 400 });
       }
-      const { rating } = parseResult.data;
+      const { rating, reviewText } = parseResult.data;
 
       // 2. Event must exist
       const event = await storage.getEvent(eventId);
@@ -94,27 +97,82 @@ export function registerRatingRoutes(app: Express): void {
         return res.status(403).json({ error: "NOT_ATTENDED", message: "You didn't attend this event", statusCode: 403 });
       }
 
-      // 5. Duplicate prevention — check before hitting the DB constraint
-      const existing = await storage.getUserEventRating(eventId, userId);
-      if (existing) {
-        return res.status(409).json({ error: "ALREADY_RATED", message: "You already rated this event", statusCode: 409 });
-      }
-
-      // 6. Create rating
-      const created = await storage.createEventRating(eventId, userId, rating);
+      // 5. Create or update rating
+      const created = await storage.createEventRating(eventId, userId, rating, reviewText ?? null);
       return res.status(201).json({
         id: created.id,
         eventId: created.eventId,
         userId: created.userId,
         rating: created.rating,
+        reviewText: created.reviewText,
         createdAt: created.createdAt,
+        updatedAt: created.updatedAt,
       });
     } catch (error: any) {
-      // DB UNIQUE constraint violation — race condition fallback
-      if (error?.code === "23505") {
-        return res.status(409).json({ error: "ALREADY_RATED", message: "You already rated this event", statusCode: 409 });
-      }
       console.error("[Ratings] Post rating error:", error);
+      res.status(500).json({ error: "SERVER_ERROR", message: "Failed to submit rating", statusCode: 500 });
+    }
+  });
+
+  // ── Venue ratings — same shape, eligibility is "attended a past, checked-in
+  // entry night at this venue" instead of "attended this specific event" ──
+
+  app.get("/api/venues/:venueId/ratings", async (req, res) => {
+    try {
+      const { venueId } = req.params;
+      const stats = await storage.getVenueRatingStats(venueId);
+      res.json({ venueId, averageRating: stats.averageRating, totalRatings: stats.totalRatings, distribution: stats.distribution });
+    } catch (error) {
+      console.error("[Ratings] Get venue ratings error:", error);
+      res.status(500).json({ error: "SERVER_ERROR", message: "Failed to get ratings", statusCode: 500 });
+    }
+  });
+
+  app.get("/api/venues/:venueId/user-rating", requireAuth, async (req, res) => {
+    try {
+      const { venueId } = req.params;
+      const existing = await storage.getUserVenueRating(venueId, req.user!.id);
+      if (!existing) return res.json({ hasRated: false });
+      return res.json({ hasRated: true, rating: existing.rating, reviewText: existing.reviewText, ratedAt: existing.createdAt });
+    } catch (error) {
+      console.error("[Ratings] Get user venue rating error:", error);
+      res.status(500).json({ error: "SERVER_ERROR", message: "Failed to get rating", statusCode: 500 });
+    }
+  });
+
+  app.post("/api/venues/:venueId/ratings", requireAuth, ratingSubmitLimiter, async (req, res) => {
+    try {
+      const { venueId } = req.params;
+      const userId = req.user!.id;
+
+      const parseResult = ratingSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.status(400).json({ error: "INVALID_RATING", message: "Rating must be 1-5", statusCode: 400 });
+      }
+      const { rating, reviewText } = parseResult.data;
+
+      const venue = await storage.getVenue(venueId);
+      if (!venue) {
+        return res.status(404).json({ error: "VENUE_NOT_FOUND", message: "Venue not found", statusCode: 404 });
+      }
+
+      const attended = await storage.hasAttendedVenue(userId, venueId);
+      if (!attended) {
+        return res.status(403).json({ error: "NOT_ATTENDED", message: "You haven't attended a past checked-in night at this venue", statusCode: 403 });
+      }
+
+      const created = await storage.createVenueRating(venueId, userId, rating, reviewText ?? null);
+      return res.status(201).json({
+        id: created.id,
+        venueId: created.venueId,
+        userId: created.userId,
+        rating: created.rating,
+        reviewText: created.reviewText,
+        createdAt: created.createdAt,
+        updatedAt: created.updatedAt,
+      });
+    } catch (error: any) {
+      console.error("[Ratings] Post venue rating error:", error);
       res.status(500).json({ error: "SERVER_ERROR", message: "Failed to submit rating", statusCode: 500 });
     }
   });

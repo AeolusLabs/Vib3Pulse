@@ -15,6 +15,9 @@ import { useAuth } from "@/hooks/useAuth";
 import type { Event, Community } from "@shared/schema";
 import { Card } from "@/components/ui/card";
 import { CalendarIcon, MapPinIcon, UsersIcon, TicketIcon, CheckCircleIcon, ExternalLinkIcon, Share2Icon, XIcon } from "@/components/ui/icons";
+import { useEventRatings, useUserEventRating, useSubmitRating } from "@/hooks/use-ratings";
+import RatingInput from "@/components/RatingInput";
+import RatingDisplay from "@/components/RatingDisplay";
 
 interface EventDetailsModalProps {
   event: Event;
@@ -45,13 +48,22 @@ function EventStatusBadge({ eventDate, eventEndDate }: { eventDate: string | Dat
 
 export default function EventDetailsModal({ event, onClose }: EventDetailsModalProps) {
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { data: currentUser } = useAuth();
   const [, navigate] = useLocation();
   const [isProcessing, setIsProcessing] = useState(false);
   const [showTierSelection, setShowTierSelection] = useState(false);
   const [selectedTier, setSelectedTier] = useState<string | null>(null);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [isEditingRating, setIsEditingRating] = useState(false);
+
+  const isEventEnded =
+    (event.eventEndDate ? new Date(event.eventEndDate).getTime() : new Date(event.eventDate).getTime() + 3 * 60 * 60 * 1000)
+    < Date.now();
+
+  const { data: eventRatingStats } = useEventRatings(isEventEnded ? event.id : undefined);
+  const { data: userEventRating } = useUserEventRating(isEventEnded && currentUser ? event.id : undefined);
+  const submitEventRating = useSubmitRating(event.id, event.organizerId);
 
   // The checkout success/cancel redirect returns here (or reloads this page for
   // full-page /event/:id views) — surface a toast for the cancelled case and
@@ -74,7 +86,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
 
   const { data: communityMembership } = useQuery<{ isMember: boolean }>({
     queryKey: ["/api/communities", communityId, "membership"],
-    enabled: !!communityId && !!user,
+    enabled: !!communityId && !!currentUser,
   });
 
   const joinCommunityMutation = useMutation({
@@ -269,7 +281,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
                       </p>
                     </div>
                   </div>
-                  {user && (
+                  {currentUser && (
                     communityMembership?.isMember ? (
                       <Button
                         variant="outline"
@@ -356,6 +368,55 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
                 {event.description}
               </DialogDescription>
             </div>
+
+            {isEventEnded && (
+              <>
+                <Separator />
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-sm font-semibold">Ratings</h3>
+                    <RatingDisplay
+                      averageRating={eventRatingStats?.averageRating}
+                      totalRatings={eventRatingStats?.totalRatings ?? 0}
+                      size="sm"
+                    />
+                  </div>
+
+                  {!currentUser ? (
+                    <p className="text-xs text-muted-foreground">Sign in to rate this event.</p>
+                  ) : userEventRating?.hasRated && !isEditingRating ? (
+                    <div className="flex items-center justify-between gap-3 p-3 rounded-md border bg-muted/30">
+                      <div>
+                        <p className="text-sm font-medium flex items-center gap-1">
+                          Your rating: {userEventRating.rating} ★
+                        </p>
+                        {userEventRating.reviewText && (
+                          <p className="text-xs text-muted-foreground mt-1">{userEventRating.reviewText}</p>
+                        )}
+                      </div>
+                      <Button size="sm" variant="outline" onClick={() => setIsEditingRating(true)} data-testid="button-edit-rating">
+                        Edit
+                      </Button>
+                    </div>
+                  ) : (
+                    <RatingInput
+                      label={userEventRating?.hasRated ? "Update your rating" : "Rate this event"}
+                      initialRating={userEventRating?.rating ?? 0}
+                      initialReviewText={userEventRating?.reviewText}
+                      submitLabel={userEventRating?.hasRated ? "Update rating" : "Submit rating"}
+                      isPending={submitEventRating.isPending}
+                      errorMessage={submitEventRating.isError ? (submitEventRating.error as any)?.message ?? "Failed to submit rating" : null}
+                      onCancel={userEventRating?.hasRated ? () => setIsEditingRating(false) : undefined}
+                      onSubmit={(rating, reviewText) => {
+                        submitEventRating.mutate({ rating, reviewText }, {
+                          onSuccess: () => setIsEditingRating(false),
+                        });
+                      }}
+                    />
+                  )}
+                </div>
+              </>
+            )}
 
             <Separator />
 
