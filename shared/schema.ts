@@ -787,6 +787,22 @@ export const safetyAlertShares = pgTable("safety_alert_shares", {
 
 export type SafetyAlertShare = typeof safetyAlertShares.$inferSelect;
 
+// Tracks outbound SMS delivery status across both providers so a webhook
+// callback (Twilio's statusCallback, Termii's dashboard-configured webhook)
+// has something to update by provider message ID.
+export const deliveryLogs = pgTable("delivery_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  provider: text("provider").notNull(), // "twilio" | "termii"
+  providerMessageId: varchar("provider_message_id").notNull(),
+  phoneNumber: varchar("phone_number", { length: 20 }).notNull(),
+  context: text("context").notNull(), // "safety_alert" | "buddy_invite"
+  status: text("status").notNull().default("sent"), // sent -> delivered | failed | undelivered
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
+export type DeliveryLog = typeof deliveryLogs.$inferSelect;
+
 export const eventAnalytics = pgTable("event_analytics", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   eventId: varchar("event_id").notNull().references(() => events.id, { onDelete: "cascade" }),

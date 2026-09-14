@@ -9,14 +9,23 @@ function getClient(): twilio.Twilio {
   return twilio(accountSid, authToken);
 }
 
-export async function sendUKSMS(to: string, body: string): Promise<void> {
+// Returns the Twilio message SID so the caller can log it for later
+// delivery-status correlation (see /api/safety/sms-delivery-status/twilio).
+export async function sendUKSMS(to: string, body: string): Promise<string> {
   const fromNumber = process.env.TWILIO_PHONE_NUMBER;
   if (!fromNumber) {
     throw new Error("TWILIO_PHONE_NUMBER must be set");
   }
   const client = getClient();
-  const message = await client.messages.create({ from: fromNumber, to, body });
+  const baseUrl = process.env.APP_URL;
+  const message = await client.messages.create({
+    from: fromNumber,
+    to,
+    body,
+    ...(baseUrl ? { statusCallback: `${baseUrl}/api/safety/sms-delivery-status/twilio` } : {}),
+  });
   console.log(`[Twilio] SMS sent to ${to}, SID: ${message.sid}`);
+  return message.sid;
 }
 
 // Validate that an inbound webhook came from Twilio

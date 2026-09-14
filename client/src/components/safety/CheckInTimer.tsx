@@ -123,6 +123,15 @@ export function CheckInTimer() {
     onError: (e: any) => toast({ title: "Couldn't snooze", description: e.message, variant: "destructive" }),
   });
 
+  const extendMutation = useMutation({
+    mutationFn: (hours: 1 | 2 | 4) => apiRequest("POST", "/api/safety/timer/extend", { hours }),
+    onSuccess: (_data, hours) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/safety/timer"] });
+      toast({ title: "Timer extended", description: `Added ${hours} hour${hours === 1 ? "" : "s"}.` });
+    },
+    onError: (e: any) => toast({ title: "Couldn't extend", description: e.message, variant: "destructive" }),
+  });
+
   const handleCustomStart = () => {
     const mins = parseInt(customMinutes, 10);
     if (isNaN(mins) || mins < 1 || mins > 1440) {
@@ -223,6 +232,24 @@ export function CheckInTimer() {
             ) : (
               <p className="text-center text-xs text-muted-foreground">No more snoozes for this timer</p>
             )}
+
+            <div className="flex items-center justify-center gap-2 pt-1">
+              <span className="text-xs text-muted-foreground">Extend by</span>
+              {([1, 2, 4] as const).map((h) => (
+                <Button
+                  key={h}
+                  variant="outline"
+                  size="sm"
+                  className="rounded-full h-8 px-3"
+                  onClick={() => extendMutation.mutate(h)}
+                  disabled={extendMutation.isPending}
+                  data-testid={`button-extend-${h}h`}
+                  style={{ touchAction: "manipulation" }}
+                >
+                  +{h}h
+                </Button>
+              ))}
+            </div>
           </div>
         ) : (
           /* Timer setup state */

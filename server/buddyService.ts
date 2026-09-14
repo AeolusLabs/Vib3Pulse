@@ -47,6 +47,38 @@ function isNigerianNumber(phone: string): boolean {
   return phone.startsWith("+234");
 }
 
+// Sends via the number's home provider; on failure, retries once via the
+// *other* provider before giving up (cross-provider fallback). Logs a
+// delivery_logs row for whichever provider actually succeeded, so a later
+// webhook (Twilio's statusCallback, or Termii's dashboard-configured one)
+// has something to update by provider message ID.
+async function sendSmsWithFallback(phone: string, body: string, context: "safety_alert" | "buddy_invite"): Promise<void> {
+  const primaryIsNigeria = isNigerianNumber(phone);
+  try {
+    const providerMessageId = primaryIsNigeria ? await sendNigeriaSMS(phone, body) : await sendUKSMS(phone, body);
+    await storage.createDeliveryLog({
+      provider: primaryIsNigeria ? "termii" : "twilio",
+      providerMessageId,
+      phoneNumber: phone,
+      context,
+    });
+  } catch (primaryErr: any) {
+    console.error(`[BuddyService] Primary SMS provider failed for ${phone}, trying fallback:`, primaryErr.message);
+    try {
+      const providerMessageId = primaryIsNigeria ? await sendUKSMS(phone, body) : await sendNigeriaSMS(phone, body);
+      await storage.createDeliveryLog({
+        provider: primaryIsNigeria ? "twilio" : "termii",
+        providerMessageId,
+        phoneNumber: phone,
+        context,
+      });
+    } catch (fallbackErr: any) {
+      console.error(`[BuddyService] Fallback SMS provider also failed for ${phone}:`, fallbackErr.message);
+      throw fallbackErr;
+    }
+  }
+}
+
 // Finds the user's nearest upcoming confirmed ticket or RSVP, for use in the
 // buddy-invite SMS ("X is going to [eventName]..."). Falls back to a generic
 // phrase if they have nothing booked yet.
@@ -81,12 +113,8 @@ async function sendBuddySMS(
 ): Promise<void> {
   const ukTemplate = `${userName} is going to ${eventName} and has added you as their safety buddy on Vib3Pulse. If they need help, we will text you their location — no app needed. Reply YES to confirm or NO to decline. Vib3Pulse`;
   const ngTemplate = `${userName} is going to ${eventName} and has added you as their safety buddy on Vib3Pulse. If they need help, we go text you their location — no app needed. Reply YES to confirm or NO to decline. Vib3Pulse`;
-
-  if (isNigerianNumber(phone)) {
-    await sendNigeriaSMS(phone, ngTemplate);
-  } else {
-    await sendUKSMS(phone, ukTemplate);
-  }
+  const body = isNigerianNumber(phone) ? ngTemplate : ukTemplate;
+  await sendSmsWithFallback(phone, body, "buddy_invite");
 }
 
 export async function sendAlertSMS(
@@ -100,13 +128,11 @@ export async function sendAlertSMS(
   const linkPart = alertUrl ? ` Open their location: ${alertUrl}` : "";
   const body = `URGENT: ${senderName} needs help! "${alertMessage}"${locationPart}${linkPart} — Vib3Pulse Safety Alert`;
   try {
-    if (isNigerianNumber(phone)) {
-      await sendNigeriaSMS(phone, body);
-    } else {
-      await sendUKSMS(phone, body);
-    }
+    await sendSmsWithFallback(phone, body, "safety_alert");
   } catch (err: any) {
-    console.error(`[BuddyService] Alert SMS failed to ${phone}:`, err.message);
+    // Both providers failed — log and move on so other buddies in the same
+    // loop (SOS route / timer job) still get notified.
+    console.error(`[BuddyService] Alert SMS failed to ${phone} on both providers:`, err.message);
   }
 }
 

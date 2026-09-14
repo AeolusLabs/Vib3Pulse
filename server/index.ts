@@ -317,6 +317,13 @@ setupAdminRoutes(app);
     console.error('[STARTUP] safety_alert_shares table setup failed:', err);
   }
 
+  // Auto-create delivery_logs table if it doesn't exist (idempotent)
+  try {
+    await storage.ensureDeliveryLogsTable();
+  } catch (err) {
+    console.error('[STARTUP] delivery_logs table setup failed:', err);
+  }
+
   const server = await registerRoutes(app);
 
   // Initialize WebSocket server

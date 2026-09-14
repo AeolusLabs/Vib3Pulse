@@ -21,7 +21,11 @@ export function normalizeNigerianPhone(phone: string): string {
   return `+${digits}`;
 }
 
-export async function sendNigeriaSMS(to: string, body: string): Promise<void> {
+// Returns Termii's message_id for later delivery-status correlation. Unlike
+// Twilio, Termii's delivery webhook is configured in Termii's own dashboard
+// (Settings -> Webhooks), not passed per-request — see
+// /api/safety/sms-delivery-status/termii in server/safety-routes.ts.
+export async function sendNigeriaSMS(to: string, body: string): Promise<string> {
   if (!TERMII_API_KEY) {
     throw new Error("TERMII_API_KEY must be set");
   }
@@ -37,7 +41,7 @@ export async function sendNigeriaSMS(to: string, body: string): Promise<void> {
     api_key: TERMII_API_KEY,
   });
 
-  return new Promise((resolve, reject) => {
+  return new Promise<string>((resolve, reject) => {
     const url = new URL(`${TERMII_BASE_URL}/api/sms/send`);
     const options = {
       hostname: url.hostname,
@@ -57,7 +61,7 @@ export async function sendNigeriaSMS(to: string, body: string): Promise<void> {
           const parsed = JSON.parse(data);
           if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
             console.log(`[Termii] SMS sent to ${normalizedTo}, message_id: ${parsed.message_id}`);
-            resolve();
+            resolve(parsed.message_id);
           } else {
             const err = new Error(`Termii error ${res.statusCode}: ${data}`);
             console.error(`[Termii] Failed to send SMS to ${normalizedTo}:`, err.message);

@@ -5,12 +5,37 @@ import { storage } from "./storage.js";
 import { wsManager } from "./websocket.js";
 import { deliverNotification } from "./notifications.js";
 import { sendAlertSMS } from "./buddyService.js";
+import { calculateDistanceMiles } from "./utils/geo.js";
+import { validateTwilioWebhook } from "./twilioService.js";
 import { requireAuth } from "./middleware.js";
 
 // The background timer job has no request object to derive a host from (unlike
 // the SOS route, which uses req.protocol/req.headers.host) — APP_URL must be
 // set in production for timer-expiry share links to resolve correctly.
 const PUBLIC_BASE_URL = process.env.APP_URL || "http://localhost:5000";
+
+// Minimal proximity tag for the live alert payload only — NOT the full Layer 7
+// venue-safety-network (no incident counting, no thresholds, nothing
+// persisted). ~200m radius, matching the PRD's venue-proximity figure.
+const VENUE_PROXIMITY_MILES = 0.124;
+
+async function findNearestVenue(lat: number, lng: number): Promise<{ id: string; name: string } | null> {
+  try {
+    const venues = await storage.getVenues();
+    let nearest: { id: string; name: string; distance: number } | null = null;
+    for (const venue of venues) {
+      if (venue.latitude == null || venue.longitude == null) continue;
+      const distance = calculateDistanceMiles(lat, lng, venue.latitude, venue.longitude);
+      if (distance <= VENUE_PROXIMITY_MILES && (!nearest || distance < nearest.distance)) {
+        nearest = { id: venue.id, name: venue.name, distance };
+      }
+    }
+    return nearest ? { id: nearest.id, name: nearest.name } : null;
+  } catch (err) {
+    console.error("[Safety] findNearestVenue error:", err);
+    return null;
+  }
+}
 
 const sosRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -85,6 +110,7 @@ export function registerSafetyRoutes(app: Express): void {
 
       const baseUrl = process.env.APP_URL || `${req.protocol}://${req.headers.host}`;
       let phoneBuddyAlertUrl: string | null = null;
+      const nearbyVenue = latitude && longitude ? await findNearestVenue(latitude, longitude) : null;
 
       const alertIds: string[] = [];
       let actualNotified = 0;
@@ -137,6 +163,8 @@ export function registerSafetyRoutes(app: Express): void {
             longitude: longitude ?? null,
             accuracy: accuracy ?? null,
             locationText: locationText ?? null,
+            venueId: nearbyVenue?.id ?? null,
+            venueName: nearbyVenue?.name ?? null,
             timestamp: alert.createdAt.toISOString(),
           },
         });
@@ -321,6 +349,28 @@ export function registerSafetyRoutes(app: Express): void {
     }
   });
 
+  const extendTimerSchema = z.object({
+    hours: z.union([z.literal(1), z.literal(2), z.literal(4)]),
+  });
+
+  app.post("/api/safety/timer/extend", requireAuth, async (req, res) => {
+    try {
+      const { hours } = extendTimerSchema.parse(req.body);
+      const userId = req.user!.id;
+      const timer = await storage.extendSafetyTimer(userId, hours);
+      if (!timer) {
+        return res.status(404).json({ message: "No active check-in timer to extend" });
+      }
+      res.json({ timer });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "hours must be 1, 2, or 4" });
+      }
+      console.error("[Safety] Extend timer error:", error);
+      res.status(500).json({ message: "Failed to extend timer" });
+    }
+  });
+
   app.get("/api/safety/timer", requireAuth, async (req, res) => {
     try {
       const userId = req.user!.id;
@@ -381,6 +431,60 @@ export function registerSafetyRoutes(app: Express): void {
     } catch (error) {
       console.error("[Safety] Public alert lookup error:", error);
       res.status(500).json({ message: "Failed to load alert" });
+    }
+  });
+
+  // ============================================================
+  // SMS DELIVERY STATUS WEBHOOKS (no requireAuth — providers call these)
+  // ============================================================
+
+  app.post("/api/safety/sms-delivery-status/twilio", async (req, res) => {
+    try {
+      if (process.env.NODE_ENV === "production" && process.env.TWILIO_AUTH_TOKEN) {
+        const signature = (req.headers["x-twilio-signature"] as string) ?? "";
+        const url = `${req.protocol}://${req.get("host")}${req.originalUrl}`;
+        const valid = validateTwilioWebhook(signature, url, req.body as Record<string, string>);
+        if (!valid) {
+          console.warn("[Safety] Invalid Twilio delivery-status signature from", req.ip);
+          return res.status(403).send("Forbidden");
+        }
+      }
+
+      const { MessageSid, MessageStatus } = req.body as Record<string, string>;
+      if (MessageSid && MessageStatus) {
+        await storage.updateDeliveryLogStatus("twilio", MessageSid, MessageStatus);
+      }
+      res.status(200).send("OK");
+    } catch (error) {
+      console.error("[Safety] Twilio delivery-status webhook error:", error);
+      res.status(500).send("Internal server error");
+    }
+  });
+
+  // Termii's delivery webhook has no documented signature scheme (their
+  // inbound SMS-reply webhook has none either — confirmed this session), and
+  // the callback URL is configured in Termii's own dashboard rather than
+  // passed per-request like Twilio's statusCallback. A shared-secret query
+  // param is the best available protection until Termii offers something
+  // stronger.
+  app.post("/api/safety/sms-delivery-status/termii", async (req, res) => {
+    try {
+      const secret = process.env.TERMII_WEBHOOK_SECRET;
+      if (secret && req.query.key !== secret) {
+        console.warn("[Safety] Invalid Termii delivery-status secret from", req.ip);
+        return res.status(403).send("Forbidden");
+      }
+
+      const body = req.body as Record<string, any>;
+      const messageId = body.message_id ?? body.messageId;
+      const status = body.status;
+      if (messageId && status) {
+        await storage.updateDeliveryLogStatus("termii", String(messageId), String(status));
+      }
+      res.status(200).send("OK");
+    } catch (error) {
+      console.error("[Safety] Termii delivery-status webhook error:", error);
+      res.status(500).send("Internal server error");
     }
   });
 }
@@ -499,6 +603,8 @@ export function startSafetyTimerJob(): void {
                 longitude: null,
                 accuracy: null,
                 locationText: null,
+                venueId: null,
+                venueName: null,
                 timestamp: alert.createdAt.toISOString(),
               },
             });

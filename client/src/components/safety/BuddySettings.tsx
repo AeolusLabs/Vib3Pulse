@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { CheckInTimer } from "./CheckInTimer";
 import { useShakeOptIn } from "@/hooks/useShakeDetector";
 import { usePowerButtonOptIn } from "@/hooks/usePowerButtonDetector";
+import { queueInvite } from "@/lib/buddyInviteQueue";
 import {
   ShieldIcon,
   XIcon,
@@ -386,16 +387,31 @@ export function BuddySettings() {
   }, [distressMsgData]);
 
   const addPhoneBuddyMutation = useMutation({
-    mutationFn: () =>
-      apiRequest("POST", "/api/safety/buddy-assignment", {
-        name: phoneName.trim(),
-        phone_number: phone.trim(),
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/safety/buddies"] });
+    mutationFn: async () => {
+      const payload = { name: phoneName.trim(), phone_number: phone.trim() };
+      try {
+        await apiRequest("POST", "/api/safety/buddy-assignment", payload);
+        return { queued: false };
+      } catch (err) {
+        // Only queue a genuine network-level failure (fetch couldn't even
+        // complete) — a real server rejection (e.g. duplicate invite) should
+        // still surface as an error, not silently queue.
+        if (err instanceof TypeError) {
+          await queueInvite(payload);
+          return { queued: true };
+        }
+        throw err;
+      }
+    },
+    onSuccess: (result) => {
       setPhoneName("");
       setPhone("");
       setShowPhoneForm(false);
+      if (result.queued) {
+        toast({ title: "Invitation queued", description: "No connection right now — we'll send it the moment you're back online." });
+        return;
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/safety/buddies"] });
       toast({ title: "Invitation sent", description: "They'll get a text to confirm." });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),

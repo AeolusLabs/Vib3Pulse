@@ -6,7 +6,9 @@ import { useShakeOptIn, useShakeDetector } from "@/hooks/useShakeDetector";
 import { usePowerButtonOptIn, usePowerButtonDetector } from "@/hooks/usePowerButtonDetector";
 import { useSilentSOSTrigger, postOrQueueSOS } from "@/hooks/useTriggerSOS";
 import { flushQueue, type QueuedSOSPayload } from "@/lib/sosQueue";
+import { flushInviteQueue, type QueuedInvitePayload } from "@/lib/buddyInviteQueue";
 import { useToast } from "@/hooks/use-toast";
+import { queryClient, apiRequest } from "@/lib/queryClient";
 
 interface Buddy { confirmationStatus: string }
 
@@ -52,6 +54,19 @@ export function SafetyTriggersProvider() {
         });
         if (count > 0) {
           toast({ title: "SOS sent", description: `${count} queued alert${count === 1 ? "" : "s"} just went through.` });
+        }
+
+        const inviteCount = await flushInviteQueue(async (payload: QueuedInvitePayload) => {
+          try {
+            await apiRequest("POST", "/api/safety/buddy-assignment", payload);
+            return true;
+          } catch {
+            return false;
+          }
+        });
+        if (inviteCount > 0) {
+          queryClient.invalidateQueries({ queryKey: ["/api/safety/buddies"] });
+          toast({ title: "Buddy invite sent", description: `${inviteCount} queued invite${inviteCount === 1 ? "" : "s"} just went out.` });
         }
       } finally {
         flushing.current = false;

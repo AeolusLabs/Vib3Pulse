@@ -48,6 +48,7 @@ import {
   type SafetyAlert,
   type SafetyTimer,
   type SafetyAlertShare,
+  type DeliveryLog,
   type DistressMessage,
   type InsertDistressMessage,
   type EventAnalytics,
@@ -119,6 +120,7 @@ import {
   safetyAlerts,
   safetyTimers,
   safetyAlertShares,
+  deliveryLogs,
   eventAnalytics,
   venues,
   venueEntryNights,
@@ -654,6 +656,7 @@ export interface IStorage {
   resolveSafetyAlert(alertId: string, userId: string, status: string): Promise<SafetyAlert | undefined>;
   createSafetyTimer(params: { userId: string; durationMinutes: number; eventId?: string }): Promise<SafetyTimer>;
   snoozeSafetyTimer(userId: string): Promise<SafetyTimer | undefined>;
+  extendSafetyTimer(userId: string, hours: number): Promise<SafetyTimer | undefined>;
   getActiveSafetyTimer(userId: string): Promise<SafetyTimer | null>;
   checkInSafetyTimer(userId: string): Promise<void>;
   cancelSafetyTimer(userId: string): Promise<void>;
@@ -927,6 +930,9 @@ export interface IStorage {
   ensureLoginAttemptsTable(): Promise<void>;
   ensureSafetyTimerStageColumns(): Promise<void>;
   ensureSafetyAlertSharesTable(): Promise<void>;
+  ensureDeliveryLogsTable(): Promise<void>;
+  createDeliveryLog(params: { provider: string; providerMessageId: string; phoneNumber: string; context: string; status?: string }): Promise<DeliveryLog>;
+  updateDeliveryLogStatus(provider: string, providerMessageId: string, status: string): Promise<void>;
   getLoginAttempt(key: string): Promise<{ count: number; lastAttempt: Date; lockedUntil: Date | null } | null>;
   upsertLoginAttempt(key: string, count: number, lastAttempt: Date, lockedUntil: Date | null): Promise<void>;
   deleteLoginAttempt(key: string): Promise<void>;
@@ -2644,6 +2650,27 @@ export class DbStorage implements IStorage {
         gracePeriodEndsAt: newGracePeriodEndsAt,
         snoozeCount: newSnoozeCount,
         lastStageNotified: newSnoozeCount === 3 ? 1 : 0,
+      })
+      .where(eq(safetyTimers.id, timer.id))
+      .returning();
+    return result;
+  }
+
+  // Direct, uncapped edit — distinct from snoozeSafetyTimer's fixed 30min/max-3
+  // mechanism. Resets the escalation cycle from the new expiry point.
+  async extendSafetyTimer(userId: string, hours: number): Promise<SafetyTimer | undefined> {
+    const timer = await this.getActiveSafetyTimer(userId);
+    if (!timer) return undefined;
+
+    const newExpiresAt = new Date(timer.expiresAt.getTime() + hours * 3_600_000);
+    const newGracePeriodEndsAt = new Date(newExpiresAt.getTime() + 25 * 60_000);
+
+    const [result] = await db.update(safetyTimers)
+      .set({
+        status: "active",
+        expiresAt: newExpiresAt,
+        gracePeriodEndsAt: newGracePeriodEndsAt,
+        lastStageNotified: 0,
       })
       .where(eq(safetyTimers.id, timer.id))
       .returning();
@@ -5397,6 +5424,38 @@ export class DbStorage implements IStorage {
         expires_at TIMESTAMP NOT NULL
       )
     `);
+  }
+
+  async ensureDeliveryLogsTable(): Promise<void> {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS delivery_logs (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        provider TEXT NOT NULL,
+        provider_message_id VARCHAR NOT NULL,
+        phone_number VARCHAR(20) NOT NULL,
+        context TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'sent',
+        created_at TIMESTAMP NOT NULL DEFAULT now(),
+        updated_at TIMESTAMP NOT NULL DEFAULT now()
+      )
+    `);
+  }
+
+  async createDeliveryLog(params: { provider: string; providerMessageId: string; phoneNumber: string; context: string; status?: string }): Promise<DeliveryLog> {
+    const [result] = await db.insert(deliveryLogs).values({
+      provider: params.provider,
+      providerMessageId: params.providerMessageId,
+      phoneNumber: params.phoneNumber,
+      context: params.context,
+      status: params.status ?? "sent",
+    }).returning();
+    return result;
+  }
+
+  async updateDeliveryLogStatus(provider: string, providerMessageId: string, status: string): Promise<void> {
+    await db.update(deliveryLogs)
+      .set({ status, updatedAt: new Date() })
+      .where(and(eq(deliveryLogs.provider, provider), eq(deliveryLogs.providerMessageId, providerMessageId)));
   }
 
   async getLoginAttempt(key: string): Promise<{ count: number; lastAttempt: Date; lockedUntil: Date | null } | null> {

@@ -43,6 +43,8 @@ const CSRF_EXEMPT_PATHS = [
   "/stripe/webhook",
   "/webhook",
   "/safety/buddy-sms-reply", // Twilio/Termii inbound SMS webhook
+  "/safety/sms-delivery-status/twilio", // Twilio delivery-status webhook
+  "/safety/sms-delivery-status/termii", // Termii delivery-status webhook
 ];
 
 function isExemptFromCsrf(path: string): boolean {
