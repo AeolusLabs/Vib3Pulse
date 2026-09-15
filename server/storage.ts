@@ -453,6 +453,15 @@ export async function ensureSchema() {
     WHERE ticket_tiers.event_id = events.id
       AND ticket_tiers.currency = 'GBP' AND events.currency = 'NGN'
   `);
+
+  // Recurring venue events — see the recurrence/recurrenceParentId comment
+  // on venueEntryNights in shared/schema.ts.
+  await pool.query(`
+    ALTER TABLE venue_entry_nights ADD COLUMN IF NOT EXISTS recurrence TEXT NOT NULL DEFAULT 'none'
+  `);
+  await pool.query(`
+    ALTER TABLE venue_entry_nights ADD COLUMN IF NOT EXISTS recurrence_parent_id VARCHAR
+  `);
 }
 
 export interface IStorage {
@@ -497,6 +506,10 @@ export interface IStorage {
   createTicket(ticket: InsertTicket): Promise<Ticket>;
   checkInTicket(ticketId: string, organizerId: string): Promise<Ticket>;
   getEventCheckIns(eventId: string): Promise<Array<Ticket & { user: User }>>;
+  // Public "who's going" sample for the Event Detail page — union of RSVP'd
+  // and confirmed-ticket-holding users, deduped, capped at `limit` rows
+  // returned but totalCount reflects the full distinct attendee count.
+  getEventAttendeesSample(eventId: string, limit?: number): Promise<{ users: Array<Pick<User, "id" | "username" | "displayName" | "avatarUrl">>; totalCount: number }>;
   // Single grouped query (not N+1) — real revenue per event for an event-list
   // view like Manage Events, as opposed to getOrganizerDemographics's heavier
   // per-event breakdown used by the full analytics dashboard.
@@ -1374,6 +1387,27 @@ export class DbStorage implements IStorage {
       .where(eq(tickets.eventId, eventId));
     
     return result.map(row => ({ ...row.tickets, user: row.users }));
+  }
+
+  async getEventAttendeesSample(eventId: string, limit: number = 12): Promise<{ users: Array<Pick<User, "id" | "username" | "displayName" | "avatarUrl">>; totalCount: number }> {
+    const [rsvpRows, ticketRows] = await Promise.all([
+      db.select({ userId: rsvps.userId }).from(rsvps).where(eq(rsvps.eventId, eventId)),
+      db.select({ userId: tickets.userId }).from(tickets).where(and(eq(tickets.eventId, eventId), eq(tickets.status, "confirmed"))),
+    ]);
+
+    const attendeeIds = new Set<string>();
+    rsvpRows.forEach(r => attendeeIds.add(r.userId));
+    ticketRows.forEach(t => attendeeIds.add(t.userId));
+    const totalCount = attendeeIds.size;
+    if (totalCount === 0) return { users: [], totalCount: 0 };
+
+    const sampleIds = Array.from(attendeeIds).slice(0, limit);
+    const attendeeRows = await db
+      .select({ id: users.id, username: users.username, displayName: users.displayName, avatarUrl: users.avatarUrl })
+      .from(users)
+      .where(inArray(users.id, sampleIds));
+
+    return { users: attendeeRows, totalCount };
   }
 
   async getEventRevenueByIds(eventIds: string[]): Promise<Map<string, number>> {

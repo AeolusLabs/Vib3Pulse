@@ -14,6 +14,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
 import type { Event, Community } from "@shared/schema";
 import { Card } from "@/components/ui/card";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { CalendarIcon, MapPinIcon, UsersIcon, TicketIcon, CheckCircleIcon, ExternalLinkIcon, Share2Icon, XIcon, MinusIcon, PlusIcon } from "@/components/ui/icons";
 import { useEventRatings, useUserEventRating, useSubmitRating } from "@/hooks/use-ratings";
 import RatingInput from "@/components/RatingInput";
@@ -120,6 +121,36 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
       if (!response.ok) throw new Error("Failed to fetch ticket tiers");
       return response.json();
     },
+    // Live tier remaining-capacity — was static on load, so a tier could
+    // show "3 available" long after it actually sold out to someone else.
+    refetchInterval: 15000,
+  });
+
+  // Live top-level ticket availability (flat-price events with no tiers).
+  // The `event` prop is a point-in-time snapshot handed down by whichever
+  // list opened this modal and never refreshes on its own for as long as the
+  // modal stays open — same staleness problem as ticketTiers above.
+  const { data: liveEvent } = useQuery<Event>({
+    queryKey: ["/api/events", event.id],
+    queryFn: async () => {
+      const response = await fetch(`/api/events/${event.id}`);
+      if (!response.ok) throw new Error("Failed to fetch event");
+      return response.json();
+    },
+    initialData: event,
+    refetchInterval: 15000,
+  });
+  const liveTicketsAvailable = liveEvent?.ticketsAvailable ?? event.ticketsAvailable;
+  const liveTicketsSold = liveEvent?.ticketsSold ?? event.ticketsSold;
+  const liveTicketsRemaining = liveTicketsAvailable - liveTicketsSold;
+
+  const { data: attendeesData } = useQuery<{ users: Array<{ id: string; username: string; displayName: string | null; avatarUrl: string | null }>; totalCount: number }>({
+    queryKey: ["/api/events", event.id, "attendees"],
+    queryFn: async () => {
+      const response = await fetch(`/api/events/${event.id}/attendees`);
+      if (!response.ok) throw new Error("Failed to fetch attendees");
+      return response.json();
+    },
   });
 
   const hasRSVPed = rsvps?.some((rsvp: any) => rsvp.eventId === event.id);
@@ -176,9 +207,16 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
   const selectedTierData = hasTiers ? ticketTiers.find((t: any) => t.id === selectedTier) : undefined;
   const remainingForSelection = hasTiers
     ? (selectedTierData ? selectedTierData.quantity - selectedTierData.sold : undefined)
-    : (event.ticketsAvailable != null ? event.ticketsAvailable - event.ticketsSold : undefined);
+    : liveTicketsRemaining;
   const maxQuantity = Math.max(1, Math.min(10, remainingForSelection ?? 10));
   const unitPrice = hasTiers ? (selectedTierData?.priceSmallestUnit ?? 0) : event.ticketPrice;
+
+  // Tiered events track capacity per-tier (ticketTiers.quantity/sold), not on
+  // the event row — event.ticketsAvailable/ticketsSold only applies when
+  // there are no tiers, so "sold out" has to be computed differently for each.
+  const isSoldOut = hasTiers
+    ? ticketTiers.every((t: any) => t.quantity - t.sold <= 0)
+    : liveTicketsRemaining <= 0;
 
   const handleShare = () => setShareOpen(true);
 
@@ -314,10 +352,32 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
                 </div>
               )}
 
+              {!!attendeesData?.totalCount && (
+                <div className="flex items-center gap-3">
+                  <div className="flex -space-x-2 flex-shrink-0">
+                    {attendeesData.users.slice(0, 6).map((u) => (
+                      <Avatar key={u.id} className="h-7 w-7 border-2 border-background" data-testid={`avatar-attendee-${u.id}`}>
+                        <AvatarImage src={u.avatarUrl || ""} alt={u.displayName || u.username} />
+                        <AvatarFallback className="text-[10px]">
+                          {(u.displayName || u.username)[0]?.toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                    ))}
+                  </div>
+                  <p className="text-sm text-muted-foreground" data-testid="modal-event-attendees">
+                    {attendeesData.totalCount} {attendeesData.totalCount === 1 ? "person" : "people"} going
+                  </p>
+                </div>
+              )}
+
               <div className="flex items-center gap-3">
                 <UsersIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                 <p className="text-sm" data-testid="modal-event-tickets-available">
-                  {event.ticketsAvailable} tickets available
+                  {isFreeEvent
+                    ? `${liveTicketsAvailable} spots available`
+                    : liveTicketsRemaining <= 0
+                      ? "Sold out"
+                      : `${liveTicketsRemaining} of ${liveTicketsAvailable} tickets available`}
                 </p>
               </div>
 
@@ -454,10 +514,10 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
                 <Button
                   className="flex-1"
                   onClick={handlePurchaseTicket}
-                  disabled={isProcessing || event.ticketsAvailable === 0}
+                  disabled={isProcessing || isSoldOut}
                   data-testid="button-purchase-ticket"
                 >
-                  {isProcessing ? "Redirecting…" : event.ticketsAvailable === 0 ? "Sold Out" : (
+                  {isProcessing ? "Redirecting…" : isSoldOut ? "Sold Out" : (
                     <><TicketIcon className="h-4 w-4 mr-2" />Purchase Ticket</>
                   )}
                 </Button>

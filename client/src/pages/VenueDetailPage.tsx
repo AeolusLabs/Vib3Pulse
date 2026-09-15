@@ -574,7 +574,14 @@ export default function VenueDetailPage() {
                             </span>
                           </div>
                           {night.name && (
-                            <p className="font-semibold text-sm">{night.name}</p>
+                            <p className="font-semibold text-sm flex items-center gap-1.5">
+                              {night.name}
+                              {(ev.recurrence && ev.recurrence !== "none") && (
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 text-purple-600 border-purple-300">
+                                  {ev.recurrence === "weekly" ? "Weekly" : ev.recurrence === "biweekly" ? "Bi-weekly" : "Monthly"}
+                                </Badge>
+                              )}
+                            </p>
                           )}
                           {night.description && (
                             <p className="text-xs text-muted-foreground line-clamp-2">{night.description}</p>

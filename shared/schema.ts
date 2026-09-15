@@ -909,6 +909,15 @@ export const venueEntryNights = pgTable("venue_entry_nights", {
   moderationStatus: text("moderation_status").notNull().default("pending"),
   // See events.feePassthroughToBuyer — same meaning, applied to entry-night cover charges.
   feePassthroughToBuyer: boolean("fee_passthrough_to_buyer").notNull().default(false),
+  // Recurring venue events (e.g. "every Friday") — 'none' | 'weekly' | 'biweekly' | 'monthly'.
+  // Creating one with a recurrence generates real, independent rows for each
+  // occurrence (see generateRecurrenceDates() in server/utils/recurrence.ts),
+  // all sharing recurrenceParentId so the UI can badge them as part of a
+  // series. Deliberately scoped to "generate the occurrences" — editing or
+  // deleting a whole series at once isn't built; each occurrence is edited
+  // independently, same as any other venue event.
+  recurrence: text("recurrence").notNull().default("none"),
+  recurrenceParentId: varchar("recurrence_parent_id"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 

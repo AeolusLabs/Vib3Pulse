@@ -5,6 +5,7 @@ import { storage } from "../storage";
 import { requireAuth, requireOrganizer } from "../middleware";
 import { authRateLimiter } from "../security";
 import { geocodeAddress, sortByProximity } from "../utils/geo";
+import { generateRecurrenceDates, shiftByDelta, type RecurrenceInterval } from "../utils/recurrence.js";
 import { insertVenueSchema, insertVenueEntryNightSchema, venueCategories } from "@shared/schema";
 
 export function registerVenueRoutes(app: Express): void {
@@ -269,7 +270,9 @@ export function registerVenueRoutes(app: Express): void {
     }
   });
 
-  // Create venue event
+  // Create venue event — optionally recurring. recurrenceEndDate is a
+  // request-only field (not a column on venueEntryNights); it just bounds
+  // how many generated occurrences get created.
   app.post("/api/venues/:venueId/venue-events", requireOrganizer, async (req, res) => {
     try {
       const venue = await storage.getVenue(req.params.venueId);
@@ -279,11 +282,32 @@ export function registerVenueRoutes(app: Express): void {
       if (venue.ownerId !== req.user!.id) {
         return res.status(403).json({ message: "You can only create events for your own venues" });
       }
+      const { recurrenceEndDate, ...body } = req.body;
       const eventData = insertVenueEntryNightSchema.parse({
-        ...req.body,
+        ...body,
         venueId: req.params.venueId,
       });
       const event = await storage.createVenueEntryNight(eventData);
+
+      if (eventData.recurrence && eventData.recurrence !== "none") {
+        const interval = eventData.recurrence as RecurrenceInterval;
+        const endDate = recurrenceEndDate ? new Date(recurrenceEndDate) : undefined;
+        const occurrenceDates = generateRecurrenceDates(eventData.date, interval, endDate);
+
+        for (const date of occurrenceDates) {
+          const deltaMs = date.getTime() - eventData.date.getTime();
+          await storage.createVenueEntryNight({
+            ...eventData,
+            date,
+            endTime: shiftByDelta(eventData.endTime, deltaMs),
+            doorsCloseTime: shiftByDelta(eventData.doorsCloseTime, deltaMs),
+            lastCallTime: shiftByDelta(eventData.lastCallTime, deltaMs),
+            kitchenCloseTime: shiftByDelta(eventData.kitchenCloseTime, deltaMs),
+            recurrenceParentId: event.id,
+          });
+        }
+      }
+
       res.status(201).json(event);
     } catch (error) {
       console.error("Create venue event error:", error);

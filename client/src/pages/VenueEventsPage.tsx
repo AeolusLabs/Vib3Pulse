@@ -21,7 +21,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Venue, VenueEntryNight, InsertVenueEntryNight } from "@shared/schema";
 import { formatMoney, getCurrencySymbol } from "@/lib/currency";
-import { ArrowLeftIcon, CalendarIcon, PoundSterlingIcon, UsersIcon, PlusIcon, EditIcon, Trash2Icon, TicketIcon, ClockIcon, CheckCircleIcon, XCircleIcon, TrendingUpIcon, UploadIcon, ImageIcon, XIcon, LogOutIcon, ScanLineIcon } from "@/components/ui/icons";
+import { ArrowLeftIcon, CalendarIcon, PoundSterlingIcon, UsersIcon, PlusIcon, EditIcon, Trash2Icon, TicketIcon, ClockIcon, CheckCircleIcon, XCircleIcon, TrendingUpIcon, UploadIcon, ImageIcon, XIcon, LogOutIcon, ScanLineIcon, Repeat2Icon } from "@/components/ui/icons";
 import { DoorOpen, UtensilsCrossed, Wine } from "lucide-react";
 
 interface VenueEventFormData {
@@ -36,6 +36,8 @@ interface VenueEventFormData {
   description: string;
   imageUrl: string;
   isActive: boolean;
+  recurrence: "none" | "weekly" | "biweekly" | "monthly";
+  recurrenceEndDate: string;
 }
 
 const emptyForm: VenueEventFormData = {
@@ -50,6 +52,15 @@ const emptyForm: VenueEventFormData = {
   description: "",
   imageUrl: "",
   isActive: true,
+  recurrence: "none",
+  recurrenceEndDate: "",
+};
+
+const RECURRENCE_LABELS: Record<VenueEventFormData["recurrence"], string> = {
+  none: "Doesn't repeat",
+  weekly: "Every week",
+  biweekly: "Every 2 weeks",
+  monthly: "Every month",
 };
 
 function toDatetimeLocal(val: string | Date | null | undefined): string {
@@ -86,9 +97,13 @@ export default function VenueEventsPage() {
   const createMutation = useMutation({
     mutationFn: async (data: Partial<InsertVenueEntryNight>) =>
       await apiRequest("POST", `/api/venues/${venueId}/venue-events`, data),
-    onSuccess: () => {
+    onSuccess: (_result, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/venues", venueId, "venue-events"] });
-      toast({ title: "Venue event created successfully" });
+      const isRecurring = (variables as any).recurrence && (variables as any).recurrence !== "none";
+      toast({
+        title: "Venue event created successfully",
+        description: isRecurring ? "Future occurrences were created too — each one can be edited or cancelled individually." : undefined,
+      });
       handleCloseModal();
     },
     onError: (error: any) => {
@@ -140,6 +155,10 @@ export default function VenueEventsPage() {
       description: event.description || "",
       imageUrl: (event as any).imageUrl || "",
       isActive: event.isActive,
+      // Repeats isn't editable after creation (see the field's note in the
+      // form) — these stay at their defaults for the edit form.
+      recurrence: "none",
+      recurrenceEndDate: "",
     });
     setModalOpen(true);
   };
@@ -169,7 +188,14 @@ export default function VenueEventsPage() {
     if (editingEvent) {
       updateMutation.mutate({ id: editingEvent.id, data: data as Partial<InsertVenueEntryNight> });
     } else {
-      createMutation.mutate(data as Partial<InsertVenueEntryNight>);
+      const createData = {
+        ...data,
+        recurrence: formData.recurrence,
+        ...(formData.recurrence !== "none" && formData.recurrenceEndDate
+          ? { recurrenceEndDate: new Date(formData.recurrenceEndDate) }
+          : {}),
+      };
+      createMutation.mutate(createData as Partial<InsertVenueEntryNight>);
     }
   };
 
@@ -249,6 +275,12 @@ export default function VenueEventsPage() {
               )}
               {isUpcoming && (
                 <Badge variant="outline"><ClockIcon className="h-3 w-3 mr-1" />Upcoming</Badge>
+              )}
+              {(ev.recurrence !== "none" || ev.recurrenceParentId) && (
+                <Badge variant="outline" className="text-purple-600 border-purple-300">
+                  <Repeat2Icon className="h-3 w-3 mr-1" />
+                  {ev.recurrence === "weekly" ? "Weekly" : ev.recurrence === "biweekly" ? "Every 2 weeks" : ev.recurrence === "monthly" ? "Monthly" : "Recurring"}
+                </Badge>
               )}
             </div>
           </div>
@@ -605,6 +637,39 @@ export default function VenueEventsPage() {
                   />
                 </div>
               </div>
+
+              {/* Repeats — creation only; editing an occurrence never
+                  regenerates or retroactively changes the series */}
+              {!editingEvent && (
+                <div className="space-y-2">
+                  <Label htmlFor="recurrence">Repeats</Label>
+                  <select
+                    id="recurrence"
+                    className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+                    value={formData.recurrence}
+                    onChange={e => setFormData(prev => ({ ...prev, recurrence: e.target.value as VenueEventFormData["recurrence"] }))}
+                    data-testid="select-event-recurrence"
+                  >
+                    {Object.entries(RECURRENCE_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                  {formData.recurrence !== "none" && (
+                    <>
+                      <Label htmlFor="recurrenceEndDate" className="text-xs text-muted-foreground pt-1">
+                        Repeat until <span className="text-muted-foreground">(optional — otherwise stops after 12 occurrences)</span>
+                      </Label>
+                      <Input
+                        id="recurrenceEndDate"
+                        type="date"
+                        value={formData.recurrenceEndDate}
+                        onChange={e => setFormData(prev => ({ ...prev, recurrenceEndDate: e.target.value }))}
+                        data-testid="input-event-recurrence-end"
+                      />
+                    </>
+                  )}
+                </div>
+              )}
 
               {/* Description */}
               <div className="space-y-2">

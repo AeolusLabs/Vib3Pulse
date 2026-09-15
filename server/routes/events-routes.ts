@@ -228,6 +228,18 @@ export function registerEventsRoutes(app: Express): void {
     }
   });
 
+  // Public "who's going" sample — RSVP'd + ticket-holding users, deduped.
+  // Same public fields (avatar/displayName/username) already shown on any
+  // profile elsewhere in the app, nothing more sensitive.
+  app.get("/api/events/:id/attendees", async (req, res) => {
+    try {
+      const sample = await storage.getEventAttendeesSample(req.params.id);
+      res.json(sample);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch attendees" });
+    }
+  });
+
   app.post("/api/events", requireOrganizer, async (req, res) => {
     try {
       const parsedData = eventCreateDto.omit({ organizerId: true }).parse(req.body);
