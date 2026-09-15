@@ -26,6 +26,7 @@ export interface CreateCheckoutParams {
   cancelUrl: string;
   ticketTierId?: string; // set when itemType === "event" and a specific tier was purchased
   organizerSplit?: OrganizerSplit;
+  quantity?: number; // number of tickets this single charge covers — defaults to 1
 }
 
 export interface CheckoutResult {
@@ -61,6 +62,7 @@ export interface VerifiedSession {
     venueEntryNightId?: string;
     ticketTierId?: string;
     platformFeeAmount?: string;
+    quantity?: string;
     userId: string;
   };
 }

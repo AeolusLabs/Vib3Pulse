@@ -12,8 +12,9 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import type { Ticket as TicketType, Event } from "@shared/schema";
-import { CalendarIcon, MapPinIcon, TicketIcon, QrCodeIcon, Loader2Icon } from "@/components/ui/icons";
+import { CalendarIcon, MapPinIcon, TicketIcon, QrCodeIcon, Loader2Icon, Share2Icon } from "@/components/ui/icons";
 import { AutoSetupTimerDialog } from "@/components/safety/AutoSetupTimerDialog";
+import UnifiedShareModal, { type ShareData } from "@/components/UnifiedShareModal";
 
 type TicketWithEvent = TicketType & { event: Event };
 
@@ -83,6 +84,7 @@ export default function TicketWalletPage() {
   const { toast } = useToast();
   const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
   const [autoSetupTarget, setAutoSetupTarget] = useState<{ eventId: string; eventName: string; defaultExpiry: Date } | null>(null);
+  const [shareTarget, setShareTarget] = useState<ShareData | null>(null);
 
   const { data: buddiesData } = useQuery<{ buddies: Buddy[] }>({
     queryKey: ["/api/safety/buddies"],
@@ -203,6 +205,21 @@ export default function TicketWalletPage() {
                   </CardHeader>
                   <CardContent>
                     <TicketQRCode ticketId={ticket.id} />
+                    <Button
+                      variant="ghost"
+                      size="default"
+                      className="w-full mt-2"
+                      onClick={() => setShareTarget({
+                        type: "event",
+                        id: ticket.event.id,
+                        title: ticket.event.title,
+                        imageUrl: ticket.event.imageUrl,
+                      })}
+                      data-testid={`button-share-ticket-${ticket.id}`}
+                    >
+                      <Share2Icon className="h-4 w-4 mr-2" />
+                      Share
+                    </Button>
                   </CardContent>
                   <CardFooter className="text-sm text-muted-foreground">
                     Purchased on {format(new Date(ticket.purchaseDate), "MMM d, yyyy")}
@@ -268,6 +285,14 @@ export default function TicketWalletPage() {
           eventId={autoSetupTarget.eventId}
           eventName={autoSetupTarget.eventName}
           defaultExpiry={autoSetupTarget.defaultExpiry}
+        />
+      )}
+
+      {shareTarget && (
+        <UnifiedShareModal
+          open={!!shareTarget}
+          onClose={() => setShareTarget(null)}
+          shareData={shareTarget}
         />
       )}
     </div>

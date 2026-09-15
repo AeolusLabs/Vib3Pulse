@@ -14,7 +14,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
 import type { Event, Community } from "@shared/schema";
 import { Card } from "@/components/ui/card";
-import { CalendarIcon, MapPinIcon, UsersIcon, TicketIcon, CheckCircleIcon, ExternalLinkIcon, Share2Icon, XIcon } from "@/components/ui/icons";
+import { CalendarIcon, MapPinIcon, UsersIcon, TicketIcon, CheckCircleIcon, ExternalLinkIcon, Share2Icon, XIcon, MinusIcon, PlusIcon } from "@/components/ui/icons";
 import { useEventRatings, useUserEventRating, useSubmitRating } from "@/hooks/use-ratings";
 import RatingInput from "@/components/RatingInput";
 import RatingDisplay from "@/components/RatingDisplay";
@@ -53,6 +53,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
   const [isProcessing, setIsProcessing] = useState(false);
   const [showTierSelection, setShowTierSelection] = useState(false);
   const [selectedTier, setSelectedTier] = useState<string | null>(null);
+  const [quantity, setQuantity] = useState(1);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [isEditingRating, setIsEditingRating] = useState(false);
@@ -124,10 +125,11 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
   const hasRSVPed = rsvps?.some((rsvp: any) => rsvp.eventId === event.id);
 
   const purchaseTicketMutation = useMutation({
-    mutationFn: async (tierId: string | undefined) => {
+    mutationFn: async ({ tierId, quantity }: { tierId: string | undefined; quantity: number }) => {
       const response = await apiRequest("POST", "/api/payments/event/checkout", {
         eventId: event.id,
         ticketTierId: tierId,
+        quantity,
       });
       return response.json();
     },
@@ -155,22 +157,28 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
     },
   });
 
+  const hasTiers = !!ticketTiers && ticketTiers.length > 0;
+
   const handlePurchaseTicket = () => {
-    if (ticketTiers && ticketTiers.length > 0) {
-      setShowTierSelection(true);
-    } else {
-      // No configured tiers — this event just has a flat ticketPrice, so
-      // checkout can proceed directly without a tier selection step.
-      setIsProcessing(true);
-      purchaseTicketMutation.mutate(undefined);
-    }
+    // Always route through the purchase dialog — even flat-priced events (no
+    // configured tiers) need a place to pick quantity before checkout.
+    setSelectedTier(null);
+    setQuantity(1);
+    setShowTierSelection(true);
   };
 
   const handleConfirmPurchase = () => {
-    if (!selectedTier) return;
+    if (hasTiers && !selectedTier) return;
     setIsProcessing(true);
-    purchaseTicketMutation.mutate(selectedTier);
+    purchaseTicketMutation.mutate({ tierId: selectedTier ?? undefined, quantity });
   };
+
+  const selectedTierData = hasTiers ? ticketTiers.find((t: any) => t.id === selectedTier) : undefined;
+  const remainingForSelection = hasTiers
+    ? (selectedTierData ? selectedTierData.quantity - selectedTierData.sold : undefined)
+    : (event.ticketsAvailable != null ? event.ticketsAvailable - event.ticketsSold : undefined);
+  const maxQuantity = Math.max(1, Math.min(10, remainingForSelection ?? 10));
+  const unitPrice = hasTiers ? (selectedTierData?.priceSmallestUnit ?? 0) : event.ticketPrice;
 
   const handleShare = () => setShareOpen(true);
 
@@ -482,20 +490,20 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
         shareData={{ type: "event", id: event.id, title: event.title, imageUrl: event.imageUrl }}
       />
 
-      {/* Tier selection modal */}
+      {/* Purchase modal — tier selection (if configured) + quantity */}
       <Dialog open={showTierSelection} onOpenChange={setShowTierSelection}>
         <DialogContent className="sm:max-w-md" data-testid="dialog-tier-selection">
           <DialogHeader>
-            <DialogTitle>Select Ticket Tier</DialogTitle>
+            <DialogTitle>{hasTiers ? "Select Ticket Tier" : "Purchase Ticket"}</DialogTitle>
             <DialogDescription>
-              Choose your ticket type for {event.title}
+              {hasTiers ? `Choose your ticket type for ${event.title}` : `Choose how many tickets for ${event.title}`}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-4">
             {isLoadingTiers ? (
               <p className="text-sm text-muted-foreground">Loading ticket options…</p>
-            ) : ticketTiers && ticketTiers.length > 0 ? (
+            ) : hasTiers ? (
               <div className="space-y-3">
                 {ticketTiers.map((tier: any) => (
                   <Card
@@ -503,13 +511,13 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
                     className={`p-4 cursor-pointer transition-all hover-elevate ${
                       selectedTier === tier.id ? "border-primary bg-primary/5" : "border-border"
                     }`}
-                    onClick={() => setSelectedTier(tier.id)}
+                    onClick={() => { setSelectedTier(tier.id); setQuantity(1); }}
                     data-testid={`tier-option-${tier.id}`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex-1">
                         <h4 className="font-semibold text-sm" data-testid={`tier-option-name-${tier.id}`}>{tier.name}</h4>
-                        <p className="text-xs text-muted-foreground">{tier.quantity} available</p>
+                        <p className="text-xs text-muted-foreground">{tier.quantity - tier.sold} available</p>
                       </div>
                       <p className="text-base font-bold" data-testid={`tier-option-price-${tier.id}`}>
                         {formatPrice(tier.priceSmallestUnit, tier.currency ?? currency)}
@@ -521,13 +529,53 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
             ) : (
               <p className="text-sm text-muted-foreground">No ticket tiers available.</p>
             )}
+
+            {(!hasTiers || selectedTier) && (
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <span className="text-sm font-medium">Quantity</span>
+                <div className="flex items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                    disabled={quantity <= 1}
+                    data-testid="button-quantity-decrease"
+                  >
+                    <MinusIcon className="h-3.5 w-3.5" />
+                  </Button>
+                  <span className="w-6 text-center font-semibold" data-testid="text-quantity">{quantity}</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => setQuantity((q) => Math.min(maxQuantity, q + 1))}
+                    disabled={quantity >= maxQuantity}
+                    data-testid="button-quantity-increase"
+                  >
+                    <PlusIcon className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {(!hasTiers || selectedTier) && (
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Total</span>
+                <span className="font-bold text-base" data-testid="text-purchase-total">
+                  {formatPrice(unitPrice * quantity, currency)}
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="flex gap-3">
             <Button variant="outline" onClick={() => setShowTierSelection(false)} className="flex-1" data-testid="button-cancel-tier-selection">
               Cancel
             </Button>
-            <Button onClick={handleConfirmPurchase} disabled={!selectedTier} className="flex-1" data-testid="button-confirm-purchase">
+            <Button onClick={handleConfirmPurchase} disabled={hasTiers && !selectedTier} className="flex-1" data-testid="button-confirm-purchase">
               Continue to Checkout
             </Button>
           </div>

@@ -38,6 +38,7 @@ export async function createStripeCheckout(params: CreateCheckoutParams): Promis
       itemType: params.itemType,
       userId: params.userId,
       ...(params.ticketTierId ? { ticketTierId: params.ticketTierId } : {}),
+      ...(params.quantity && params.quantity > 1 ? { quantity: String(params.quantity) } : {}),
     },
     success_url: params.successUrl.includes("{CHECKOUT_SESSION_ID}")
       ? params.successUrl.replace("{CHECKOUT_SESSION_ID}", "{CHECKOUT_SESSION_ID}")
@@ -78,6 +79,7 @@ export async function verifyStripeSession(sessionId: string): Promise<VerifiedSe
         // Paystack path so downstream ledger code can read this field
         // uniformly regardless of provider.
         platformFeeAmount: meta.platformFeeAmount || undefined,
+        quantity: meta.quantity || undefined,
         userId: meta.userId,
       },
     };

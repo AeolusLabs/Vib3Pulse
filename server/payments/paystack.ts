@@ -63,6 +63,7 @@ export async function createPaystackCheckout(params: CreateCheckoutParams): Prom
         userId: params.userId,
         cancel_action: params.cancelUrl,
         ...(params.ticketTierId ? { ticketTierId: params.ticketTierId } : {}),
+        ...(params.quantity && params.quantity > 1 ? { quantity: String(params.quantity) } : {}),
         ...(split ? { platformFeeAmount: String(split.platformFeeAmount) } : {}),
       },
       // Organizer payout split — subaccount gets amount minus transaction_charge,
@@ -109,6 +110,7 @@ export async function verifyPaystackTransaction(reference: string): Promise<Veri
         venueEntryNightId: meta.itemType === "venue_entry" ? meta.itemId : (meta.venueEntryNightId as string | undefined),
         ticketTierId: meta.ticketTierId || undefined,
         platformFeeAmount: meta.platformFeeAmount || undefined,
+        quantity: meta.quantity || undefined,
         userId: meta.userId,
       },
     };

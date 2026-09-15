@@ -24,6 +24,7 @@ import { sensitiveOperationLimiter } from "./security.js";
 import { recordTransaction } from "./payments/ledger.js";
 import { computeFeeSplit } from "./payments/fees.js";
 import type { OrganizerSplit } from "./payments/types.js";
+import { sendTicketPurchaseEmail } from "./emailService.js";
 
 function requireAuth(req: Request, res: Response, next: Function) {
   if (!req.isAuthenticated() || !req.user) {
@@ -79,6 +80,126 @@ async function resolveOrganizerSplit(params: {
   };
 }
 
+// Issues however many event tickets a single (possibly multi-quantity) charge
+// covers. Shared by the client-driven /verify endpoint and both webhook
+// handlers so the oversell guard, idempotency check, and per-ticket ledger
+// split behave identically no matter which path actually completes the
+// purchase first — those three previously reimplemented this logic separately
+// (single-ticket only), which risked the same fix landing in one path but not
+// the others.
+interface IssueEventTicketsParams {
+  eventId: string;
+  ticketTierId: string | null;
+  userId: string;
+  providerPaymentId: string;
+  provider: "stripe" | "paystack";
+  currency: "GBP" | "NGN";
+  totalAmountPaid: number; // smallest currency unit, across all `quantity` tickets
+  totalPlatformFee: number;
+  quantity: number;
+  logPrefix: string;
+}
+
+interface IssueEventTicketsResult {
+  tickets: Awaited<ReturnType<typeof storage.createTicket>>[];
+  alreadyIssued: boolean;
+  oversold: boolean;
+}
+
+async function issueEventTickets(params: IssueEventTicketsParams): Promise<IssueEventTicketsResult> {
+  const existing = await storage.getTicketsByPaymentIntent(params.providerPaymentId);
+  if (existing.length > 0) {
+    // Idempotent replay — the verify call and a webhook retry can both reach
+    // here for the same payment; only the first should issue tickets.
+    return { tickets: existing, alreadyIssued: true, oversold: false };
+  }
+
+  const slotsClaimed = await storage.claimEventTicketSlot(params.eventId, params.ticketTierId, params.quantity);
+  if (!slotsClaimed) {
+    try {
+      await refundPayment(params.providerPaymentId, params.provider);
+      console.error(`${params.logPrefix} Oversell: event ${params.eventId}${params.ticketTierId ? ` tier ${params.ticketTierId}` : ""} can't fit ${params.quantity} ticket(s). Payment ${params.providerPaymentId} for user ${params.userId} auto-refunded.`);
+    } catch (refundError) {
+      console.error(`${params.logPrefix} Oversell: event ${params.eventId}${params.ticketTierId ? ` tier ${params.ticketTierId}` : ""} can't fit ${params.quantity} ticket(s). Payment ${params.providerPaymentId} for user ${params.userId} — REFUND FAILED, requires manual refund:`, refundError);
+      await storage.createPaymentIssue({
+        providerPaymentId: params.providerPaymentId,
+        provider: params.provider,
+        reason: "refund_failed",
+        errorMessage: refundError instanceof Error ? refundError.message : String(refundError),
+      });
+    }
+    return { tickets: [], alreadyIssued: false, oversold: true };
+  }
+
+  const event = await storage.getEvent(params.eventId);
+
+  // Split the total evenly across tickets; any rounding remainder lands on
+  // the last ticket so per-ticket amounts always sum back to the exact total.
+  const baseShare = Math.floor(params.totalAmountPaid / params.quantity);
+  const baseFeeShare = Math.floor(params.totalPlatformFee / params.quantity);
+
+  const tickets = [];
+  for (let i = 0; i < params.quantity; i++) {
+    const isLast = i === params.quantity - 1;
+    const amountPaid = isLast ? params.totalAmountPaid - baseShare * (params.quantity - 1) : baseShare;
+    const platformFeeAmount = isLast ? params.totalPlatformFee - baseFeeShare * (params.quantity - 1) : baseFeeShare;
+
+    const ticket = await storage.createTicket(insertTicketSchema.parse({
+      userId: params.userId,
+      eventId: params.eventId,
+      ticketTierId: params.ticketTierId,
+      providerPaymentId: params.providerPaymentId,
+      paymentProvider: params.provider,
+      currency: params.currency,
+      amountPaid,
+      status: "confirmed",
+    }));
+    tickets.push(ticket);
+
+    if (event) {
+      await recordTransaction({
+        type: "ticket_sale",
+        provider: params.provider,
+        providerPaymentId: params.providerPaymentId,
+        currency: params.currency,
+        buyerUserId: params.userId,
+        organizerId: event.organizerId,
+        eventId: event.id,
+        ticketId: ticket.id,
+        grossAmount: amountPaid,
+        platformFeeAmount,
+        netToOrganizerAmount: amountPaid - platformFeeAmount,
+        status: "succeeded",
+      });
+    }
+  }
+
+  // Fires exactly once per order — this branch only runs the first time a
+  // payment's tickets are issued, regardless of whether /verify or one of the
+  // two webhooks got here first (see the idempotency check above).
+  if (event) {
+    const buyer = await storage.getUser(params.userId);
+    if (buyer?.email) {
+      const tier = params.ticketTierId ? await storage.getTicketTier(params.ticketTierId) : undefined;
+      const baseUrl = process.env.APP_URL || "";
+      await sendTicketPurchaseEmail({
+        to: buyer.email,
+        userName: buyer.displayName || buyer.username,
+        eventTitle: event.title,
+        eventDate: new Date(event.eventDate),
+        eventLocation: event.location,
+        tierName: tier?.name,
+        quantity: params.quantity,
+        amountPaid: params.totalAmountPaid,
+        currency: params.currency,
+        walletLink: `${baseUrl}/ticket-wallet`,
+      });
+    }
+  }
+
+  return { tickets, alreadyIssued: false, oversold: false };
+}
+
 // ============================================================
 // EVENT TICKET PAYMENTS (Stripe Checkout / Paystack redirect)
 // ============================================================
@@ -88,9 +209,10 @@ export function registerPaymentRoutes(app: Express): void {
   // Start a checkout session for an event ticket
   app.post("/api/payments/event/checkout", requireAuth, sensitiveOperationLimiter, async (req, res) => {
     try {
-      const { eventId, ticketTierId } = z.object({
+      const { eventId, ticketTierId, quantity } = z.object({
         eventId: z.string().min(1),
         ticketTierId: z.string().optional(),
+        quantity: z.number().int().min(1).max(10).optional().default(1),
       }).parse(req.body);
 
       const userId = req.user!.id;
@@ -104,7 +226,7 @@ export function registerPaymentRoutes(app: Express): void {
         return res.status(403).json({ message: "This event is not yet available for ticket purchase" });
       }
 
-      let amountSmallestUnit = event.ticketPrice;
+      let perTicketAmount = event.ticketPrice;
       let tierName = event.title;
 
       if (ticketTierId) {
@@ -112,12 +234,16 @@ export function registerPaymentRoutes(app: Express): void {
         if (!tier || tier.eventId !== eventId) {
           return res.status(400).json({ message: "Invalid ticket tier" });
         }
-        amountSmallestUnit = tier.priceSmallestUnit;
+        perTicketAmount = tier.priceSmallestUnit;
         tierName = `${event.title} — ${tier.name}`;
       }
 
-      if (amountSmallestUnit === 0) {
+      if (perTicketAmount === 0) {
         return res.status(400).json({ message: "Free events use RSVP, not payment" });
+      }
+
+      if (quantity > 1) {
+        tierName = `${tierName} × ${quantity}`;
       }
 
       const currency = asSupportedCurrency(event.currency);
@@ -125,7 +251,7 @@ export function registerPaymentRoutes(app: Express): void {
       const { buyerCharge, organizerSplit } = await resolveOrganizerSplit({
         organizerId: event.organizerId,
         currency,
-        baseAmount: amountSmallestUnit,
+        baseAmount: perTicketAmount * quantity,
         passthroughToBuyer: event.feePassthroughToBuyer,
       });
 
@@ -147,6 +273,7 @@ export function registerPaymentRoutes(app: Express): void {
         cancelUrl: `${baseUrl}/event/${eventId}?cancelled=true`,
         ticketTierId,
         organizerSplit,
+        quantity,
       });
 
       res.json({
@@ -195,66 +322,42 @@ export function registerPaymentRoutes(app: Express): void {
         return res.status(403).json({ message: "Session does not belong to this account" });
       }
 
-      const existing = await storage.getTicketByPaymentIntent(verified.providerPaymentId);
-      if (existing) {
-        return res.json({ message: "Ticket already issued", ticket: existing, event: await storage.getEvent(existing.eventId) });
-      }
+      const quantity = meta.quantity ? parseInt(meta.quantity, 10) : 1;
 
-      const slotClaimed = await storage.claimEventTicketSlot(meta.eventId, meta.ticketTierId ?? null);
-      if (!slotClaimed) {
-        try {
-          await refundPayment(verified.providerPaymentId, verified.provider);
-          console.error(`[Payment] Oversell: event ${meta.eventId}${meta.ticketTierId ? ` tier ${meta.ticketTierId}` : ""} is at capacity. Payment ${verified.providerPaymentId} by user ${userId} auto-refunded.`);
-        } catch (refundError) {
-          console.error(`[Payment] Oversell: event ${meta.eventId}${meta.ticketTierId ? ` tier ${meta.ticketTierId}` : ""} is at capacity. Payment ${verified.providerPaymentId} by user ${userId} — REFUND FAILED, requires manual refund:`, refundError);
-          await storage.createPaymentIssue({
-            providerPaymentId: verified.providerPaymentId,
-            provider: verified.provider,
-            reason: "refund_failed",
-            errorMessage: refundError instanceof Error ? refundError.message : String(refundError),
-          });
-        }
+      const { tickets, alreadyIssued, oversold } = await issueEventTickets({
+        eventId: meta.eventId,
+        ticketTierId: meta.ticketTierId ?? null,
+        userId: meta.userId,
+        providerPaymentId: verified.providerPaymentId,
+        provider: verified.provider as "stripe" | "paystack",
+        currency: verified.currency,
+        totalAmountPaid: verified.amountSmallestUnit,
+        totalPlatformFee: Number(meta.platformFeeAmount ?? 0),
+        quantity,
+        logPrefix: "[Payment]",
+      });
+
+      if (oversold) {
         return res.status(409).json({ message: "This event is now sold out. Your payment will be refunded." });
       }
 
-      const ticket = await storage.createTicket(insertTicketSchema.parse({
-        userId: meta.userId,
-        eventId: meta.eventId,
-        ticketTierId: meta.ticketTierId ?? null,
-        providerPaymentId: verified.providerPaymentId,
-        paymentProvider: verified.provider,
-        currency: verified.currency,
-        amountPaid: verified.amountSmallestUnit,
-        status: "confirmed",
-      }));
+      if (alreadyIssued) {
+        return res.json({ message: "Ticket already issued", ticket: tickets[0], tickets, event: await storage.getEvent(meta.eventId) });
+      }
 
       const event = await storage.getEvent(meta.eventId);
       if (event) {
-        const platformFeeAmount = Number(meta.platformFeeAmount ?? 0);
-        await recordTransaction({
-          type: "ticket_sale",
-          provider: verified.provider,
-          providerPaymentId: verified.providerPaymentId,
-          currency: verified.currency,
-          buyerUserId: meta.userId,
-          organizerId: event.organizerId,
-          eventId: event.id,
-          ticketId: ticket.id,
-          grossAmount: verified.amountSmallestUnit,
-          platformFeeAmount,
-          netToOrganizerAmount: verified.amountSmallestUnit - platformFeeAmount,
-          status: "succeeded",
-        });
-
         const buyer = await storage.getUser(meta.userId);
         await storage.createNotification({
           userId: event.organizerId,
           type: "ticket_purchase",
           title: "Ticket Sold",
-          message: `${buyer?.displayName || buyer?.username || "Someone"} purchased a ticket for ${event.title}`,
+          message: quantity > 1
+            ? `${buyer?.displayName || buyer?.username || "Someone"} purchased ${quantity} tickets for ${event.title}`
+            : `${buyer?.displayName || buyer?.username || "Someone"} purchased a ticket for ${event.title}`,
           link: `/event/${event.id}`,
           relatedUserId: meta.userId,
-          relatedEntityId: ticket.id,
+          relatedEntityId: tickets[0].id,
         });
         wsManager.sendToUser(event.organizerId, {
           type: "notification",
@@ -262,7 +365,7 @@ export function registerPaymentRoutes(app: Express): void {
         });
       }
 
-      res.json({ message: "Ticket issued", ticket, event });
+      res.json({ message: "Ticket issued", ticket: tickets[0], tickets, event });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "sessionId and provider are required" });
@@ -678,53 +781,18 @@ export function registerPaymentRoutes(app: Express): void {
 
           const meta = session.metadata ?? {};
           if (meta.itemType === "event") {
-            const existing = await storage.getTicketByPaymentIntent(session.payment_intent);
-            if (!existing) {
-              const slotClaimed = await storage.claimEventTicketSlot(meta.itemId, meta.ticketTierId ?? null);
-              if (!slotClaimed) {
-                try {
-                  await refundPayment(session.payment_intent, "stripe");
-                  console.error(`[Stripe Webhook] Oversell: event ${meta.itemId}${meta.ticketTierId ? ` tier ${meta.ticketTierId}` : ""} at capacity. Payment ${session.payment_intent} for user ${meta.userId} auto-refunded.`);
-                } catch (refundError) {
-                  console.error(`[Stripe Webhook] Oversell: event ${meta.itemId}${meta.ticketTierId ? ` tier ${meta.ticketTierId}` : ""} at capacity. Payment ${session.payment_intent} for user ${meta.userId} — REFUND FAILED, requires manual refund:`, refundError);
-                  await storage.createPaymentIssue({
-                    providerPaymentId: session.payment_intent,
-                    provider: "stripe",
-                    reason: "refund_failed",
-                    errorMessage: refundError instanceof Error ? refundError.message : String(refundError),
-                  });
-                }
-              } else {
-                const ticket = await storage.createTicket(insertTicketSchema.parse({
-                  userId: meta.userId,
-                  eventId: meta.itemId,
-                  ticketTierId: meta.ticketTierId ?? null,
-                  providerPaymentId: session.payment_intent,
-                  paymentProvider: "stripe",
-                  currency: (session.currency?.toUpperCase() ?? "GBP"),
-                  amountPaid: session.amount_total ?? 0,
-                  status: "confirmed",
-                }));
-                const event = await storage.getEvent(meta.itemId);
-                if (event) {
-                  const platformFeeAmount = Number(meta.platformFeeAmount ?? 0);
-                  await recordTransaction({
-                    type: "ticket_sale",
-                    provider: "stripe",
-                    providerPaymentId: session.payment_intent,
-                    currency: (session.currency?.toUpperCase() ?? "GBP"),
-                    buyerUserId: meta.userId,
-                    organizerId: event.organizerId,
-                    eventId: event.id,
-                    ticketId: ticket.id,
-                    grossAmount: session.amount_total ?? 0,
-                    platformFeeAmount,
-                    netToOrganizerAmount: (session.amount_total ?? 0) - platformFeeAmount,
-                    status: "succeeded",
-                  });
-                }
-              }
-            }
+            await issueEventTickets({
+              eventId: meta.itemId,
+              ticketTierId: meta.ticketTierId ?? null,
+              userId: meta.userId,
+              providerPaymentId: session.payment_intent,
+              provider: "stripe",
+              currency: (session.currency?.toUpperCase() ?? "GBP") as "GBP" | "NGN",
+              totalAmountPaid: session.amount_total ?? 0,
+              totalPlatformFee: Number(meta.platformFeeAmount ?? 0),
+              quantity: meta.quantity ? parseInt(meta.quantity, 10) : 1,
+              logPrefix: "[Stripe Webhook]",
+            });
           }
           break;
         }
@@ -821,53 +889,18 @@ export function registerPaymentRoutes(app: Express): void {
             const meta = verified.metadata;
 
             if (meta.eventId) {
-              const existing = await storage.getTicketByPaymentIntent(reference);
-              if (!existing) {
-                const slotClaimed = await storage.claimEventTicketSlot(meta.eventId, meta.ticketTierId ?? null);
-                if (!slotClaimed) {
-                  try {
-                    await refundPayment(reference, "paystack");
-                    console.error(`[Paystack Webhook] Oversell: event ${meta.eventId}${meta.ticketTierId ? ` tier ${meta.ticketTierId}` : ""} at capacity. Reference ${reference} for user ${meta.userId} auto-refunded.`);
-                  } catch (refundError) {
-                    console.error(`[Paystack Webhook] Oversell: event ${meta.eventId}${meta.ticketTierId ? ` tier ${meta.ticketTierId}` : ""} at capacity. Reference ${reference} for user ${meta.userId} — REFUND FAILED, requires manual refund:`, refundError);
-                    await storage.createPaymentIssue({
-                      providerPaymentId: reference,
-                      provider: "paystack",
-                      reason: "refund_failed",
-                      errorMessage: refundError instanceof Error ? refundError.message : String(refundError),
-                    });
-                  }
-                } else {
-                  const ticket = await storage.createTicket(insertTicketSchema.parse({
-                    userId: meta.userId,
-                    eventId: meta.eventId,
-                    ticketTierId: meta.ticketTierId ?? null,
-                    providerPaymentId: reference,
-                    paymentProvider: "paystack",
-                    currency: verified.currency,
-                    amountPaid: verified.amountSmallestUnit,
-                    status: "confirmed",
-                  }));
-                  const event = await storage.getEvent(meta.eventId);
-                  if (event) {
-                    const platformFeeAmount = Number(meta.platformFeeAmount ?? 0);
-                    await recordTransaction({
-                      type: "ticket_sale",
-                      provider: "paystack",
-                      providerPaymentId: reference,
-                      currency: verified.currency,
-                      buyerUserId: meta.userId,
-                      organizerId: event.organizerId,
-                      eventId: event.id,
-                      ticketId: ticket.id,
-                      grossAmount: verified.amountSmallestUnit,
-                      platformFeeAmount,
-                      netToOrganizerAmount: verified.amountSmallestUnit - platformFeeAmount,
-                      status: "succeeded",
-                    });
-                  }
-                }
-              }
+              await issueEventTickets({
+                eventId: meta.eventId,
+                ticketTierId: meta.ticketTierId ?? null,
+                userId: meta.userId,
+                providerPaymentId: reference,
+                provider: "paystack",
+                currency: verified.currency,
+                totalAmountPaid: verified.amountSmallestUnit,
+                totalPlatformFee: Number(meta.platformFeeAmount ?? 0),
+                quantity: meta.quantity ? parseInt(meta.quantity, 10) : 1,
+                logPrefix: "[Paystack Webhook]",
+              });
             } else if (meta.venueEntryNightId) {
               const slotClaimed = await storage.claimVenueTicketSlot(meta.venueEntryNightId);
               if (!slotClaimed) {

@@ -17,6 +17,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Event as DBEvent } from "@shared/schema";
 import { EditIcon, Trash2Icon, BarChart3Icon, EyeIcon, EyeOffIcon, CalendarIcon, MapPinIcon, QrCodeIcon, MegaphoneIcon, SparklesIcon, DownloadIcon } from "@/components/ui/icons";
+import { formatMoney } from "@/lib/currency";
 
 interface Event {
   id: string;
@@ -29,7 +30,8 @@ interface Event {
   status: 'published' | 'draft' | 'completed';
   ticketsSold: number;
   totalTickets: number;
-  revenue: number;
+  revenue: number; // smallest currency unit (pence/kobo)
+  currency: string;
   isPublished: boolean;
   isPromoted: boolean;
   promotedUntil: Date | null;
@@ -99,10 +101,16 @@ export default function ManageEventsPage() {
       time: eventDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
       location: event.location,
       type: event.category,
-      status: isPast ? 'completed' : 'published',
-      ticketsSold: 0,
+      // "Draft" reuses the existing isPublished flag rather than a separate
+      // column — an event an organizer has never published, or has
+      // unpublished, reads identically from their side: not visible to
+      // attendees, needs (re)publishing. The Publish/Unpublish toggle below
+      // already only exposed this one lever, so no new schema concept needed.
+      status: isPast ? 'completed' : (event.isPublished ? 'published' : 'draft'),
+      ticketsSold: event.ticketsSold,
       totalTickets: event.ticketsAvailable,
-      revenue: 0,
+      revenue: (event as any).revenue ?? 0,
+      currency: (event as any).currency || "GBP",
       isPublished: event.isPublished ?? true,
       isPromoted: isCurrentlyPromoted || false,
       promotedUntil: promotedUntil,
@@ -118,7 +126,7 @@ export default function ManageEventsPage() {
 
   const allEvents = dbEvents.map(transformEvent);
   const publishedEvents = allEvents.filter(e => e.status === 'published');
-  const draftEvents: Event[] = []; // TODO: Add draft status to schema
+  const draftEvents = allEvents.filter(e => e.status === 'draft');
   const pastEvents = allEvents.filter(e => e.status === 'completed');
 
   const handleEditEvent = (eventId: string) => {
@@ -232,7 +240,7 @@ export default function ManageEventsPage() {
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Revenue</span>
                 <span className="font-semibold text-green-600" data-testid={`text-revenue-${event.id}`}>
-                  ${event.revenue.toLocaleString()}
+                  {formatMoney(event.revenue, event.currency)}
                 </span>
               </div>
             )}

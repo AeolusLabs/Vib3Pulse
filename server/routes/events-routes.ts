@@ -50,7 +50,9 @@ export function registerEventsRoutes(app: Express): void {
   app.get("/api/events/my-events", requireAuth, async (req, res) => {
     try {
       const events = await storage.getEventsByOrganizer(req.user!.id);
-      res.json(events);
+      const revenueByEvent = await storage.getEventRevenueByIds(events.map(e => e.id));
+      const eventsWithRevenue = events.map(e => ({ ...e, revenue: revenueByEvent.get(e.id) ?? 0 }));
+      res.json(eventsWithRevenue);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch your events" });
     }

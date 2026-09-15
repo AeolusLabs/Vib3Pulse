@@ -488,13 +488,21 @@ export interface IStorage {
   getUserTickets(userId: string): Promise<Array<Ticket & { event: Event }>>;
   getTicket(id: string): Promise<Ticket | undefined>;
   getTicketByPaymentIntent(paymentIntentId: string): Promise<Ticket | undefined>;
+  // Plural counterpart for multi-ticket (quantity > 1) purchases, which all share
+  // one providerPaymentId — used to detect a fully-issued order for idempotency.
+  getTicketsByPaymentIntent(paymentIntentId: string): Promise<Ticket[]>;
   getTicketByValidationCode(validationCode: string): Promise<Ticket | undefined>;
   createTicket(ticket: InsertTicket): Promise<Ticket>;
   checkInTicket(ticketId: string, organizerId: string): Promise<Ticket>;
   getEventCheckIns(eventId: string): Promise<Array<Ticket & { user: User }>>;
+  // Single grouped query (not N+1) — real revenue per event for an event-list
+  // view like Manage Events, as opposed to getOrganizerDemographics's heavier
+  // per-event breakdown used by the full analytics dashboard.
+  getEventRevenueByIds(eventIds: string[]): Promise<Map<string, number>>;
   // Atomic oversell guard for event tickets — mirrors claimVenueTicketSlot.
   // Pass ticketTierId when the purchase was for a specific tier, null for a plain event ticket.
-  claimEventTicketSlot(eventId: string, ticketTierId: string | null): Promise<boolean>;
+  // quantity claims multiple slots in a single atomic check (all-or-nothing).
+  claimEventTicketSlot(eventId: string, ticketTierId: string | null, quantity?: number): Promise<boolean>;
   // Event cancellation with refunds — orchestration (calling the payment provider) lives
   // in the route handler; storage only provides the DB primitives it needs.
   getConfirmedTicketsForEvent(eventId: string): Promise<Ticket[]>;
@@ -1299,6 +1307,10 @@ export class DbStorage implements IStorage {
     return result[0];
   }
 
+  async getTicketsByPaymentIntent(paymentIntentId: string): Promise<Ticket[]> {
+    return await db.select().from(tickets).where(eq(tickets.providerPaymentId, paymentIntentId));
+  }
+
   async createTicket(insertTicket: InsertTicket): Promise<Ticket> {
     const result = await db.insert(tickets).values(insertTicket).returning();
     return result[0];
@@ -1329,6 +1341,19 @@ export class DbStorage implements IStorage {
       .where(eq(tickets.eventId, eventId));
     
     return result.map(row => ({ ...row.tickets, user: row.users }));
+  }
+
+  async getEventRevenueByIds(eventIds: string[]): Promise<Map<string, number>> {
+    if (eventIds.length === 0) return new Map();
+    const rows = await db
+      .select({
+        eventId: tickets.eventId,
+        total: sql<number>`coalesce(sum(${tickets.amountPaid}), 0)::int`,
+      })
+      .from(tickets)
+      .where(and(inArray(tickets.eventId, eventIds), eq(tickets.status, "confirmed")))
+      .groupBy(tickets.eventId);
+    return new Map(rows.map(r => [r.eventId, Number(r.total)]));
   }
 
   async getEventTicketTiers(eventId: string): Promise<TicketTier[]> {
@@ -3356,15 +3381,15 @@ export class DbStorage implements IStorage {
   // a single conditional UPDATE means two concurrent buyers racing for the last slot
   // can't both succeed. Tiered events track capacity on ticket_tiers.sold; events with
   // no tiers track it on events.tickets_sold.
-  async claimEventTicketSlot(eventId: string, ticketTierId: string | null): Promise<boolean> {
+  async claimEventTicketSlot(eventId: string, ticketTierId: string | null, quantity: number = 1): Promise<boolean> {
     if (ticketTierId) {
       const result = await db
         .update(ticketTiers)
-        .set({ sold: sql`${ticketTiers.sold} + 1` })
+        .set({ sold: sql`${ticketTiers.sold} + ${quantity}` })
         .where(and(
           eq(ticketTiers.id, ticketTierId),
           eq(ticketTiers.eventId, eventId),
-          gt(ticketTiers.quantity, ticketTiers.sold)
+          gte(ticketTiers.quantity, sql`${ticketTiers.sold} + ${quantity}`)
         ))
         .returning({ id: ticketTiers.id });
       return result.length > 0;
@@ -3372,10 +3397,10 @@ export class DbStorage implements IStorage {
 
     const result = await db
       .update(events)
-      .set({ ticketsSold: sql`${events.ticketsSold} + 1` })
+      .set({ ticketsSold: sql`${events.ticketsSold} + ${quantity}` })
       .where(and(
         eq(events.id, eventId),
-        gt(events.ticketsAvailable, events.ticketsSold)
+        gte(events.ticketsAvailable, sql`${events.ticketsSold} + ${quantity}`)
       ))
       .returning({ id: events.id });
     return result.length > 0;
