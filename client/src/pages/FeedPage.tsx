@@ -396,7 +396,7 @@ export default function FeedPage() {
                 <button
                   type="button"
                   onClick={() => setCommunityModalOpen(true)}
-                  className="flex flex-col items-center gap-1 w-16 flex-shrink-0 group"
+                  className="flex flex-col items-center gap-1 w-20 flex-shrink-0 group"
                   data-testid="button-see-all-communities"
                 >
                   <div className="h-14 w-14 rounded-full border-2 border-dashed border-muted-foreground/30 flex items-center justify-center text-muted-foreground group-hover:border-primary/50 group-hover:text-primary transition-colors">

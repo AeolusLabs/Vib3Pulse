@@ -25,7 +25,7 @@ export default function CommunityChip({
     <button
       type="button"
       onClick={onClick}
-      className="flex flex-col items-center gap-1 w-16 flex-shrink-0 group"
+      className="flex flex-col items-center gap-1 w-20 flex-shrink-0 group"
       data-testid={testId}
     >
       <div className="relative">
@@ -51,7 +51,7 @@ export default function CommunityChip({
       </div>
       <span
         className={cn(
-          "text-xs w-full truncate text-center",
+          "text-xs w-full line-clamp-2 text-center leading-tight break-words",
           active ? "font-semibold text-foreground" : "text-muted-foreground"
         )}
       >
