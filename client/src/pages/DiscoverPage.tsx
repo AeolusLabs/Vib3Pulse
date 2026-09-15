@@ -148,24 +148,21 @@ export default function DiscoverPage() {
     };
   }, [sharedEventId, sharedVenueId]);
 
-  // Standard events query
-  const { data: events = [], isLoading } = useQuery<Event[]>({
-    queryKey: ["/api/events"],
-    refetchInterval: 60000,
-    refetchIntervalInBackground: true,
-  });
-
-  // Nearby events (when location available)
-  const { data: nearbyEvents = [] } = useQuery<EventWithDistance[]>({
-    queryKey: ["/api/events/nearby", latitude, longitude],
+  // Main discovery feed — ranked server-side (40% recency / 30% follow-graph
+  // / 20% proximity / 10% engagement, see rankEvents()). lat/lon are passed
+  // through so the proximity term activates and each event comes back with
+  // a `distance` for the card badge — this replaced a separate
+  // /api/events/nearby fetch that only ever sorted by distance alone.
+  const { data: events = [], isLoading } = useQuery<EventWithDistance[]>({
+    queryKey: ["/api/events", latitude, longitude],
     queryFn: async () => {
-      if (!latitude || !longitude) return [];
-      const response = await fetch(`/api/events/nearby?lat=${latitude}&lon=${longitude}`);
-      if (!response.ok) return [];
+      const params = hasLocation ? `?lat=${latitude}&lon=${longitude}` : "";
+      const response = await fetch(`/api/events${params}`);
+      if (!response.ok) throw new Error("Failed to fetch events");
       return response.json();
     },
-    enabled: hasLocation,
     refetchInterval: 60000,
+    refetchIntervalInBackground: true,
   });
 
   // Happening now events (when location available)
@@ -241,10 +238,7 @@ export default function DiscoverPage() {
     return !isPast(eventDate);
   };
 
-  // Use nearby events if location available, otherwise regular events
-  const baseEvents = hasLocation && nearbyEvents.length > 0 ? nearbyEvents : events;
-
-  const filteredEvents = baseEvents
+  const filteredEvents = events
     .filter(isEventUpcoming)
     .filter(event => {
       const matchesCategory = selectedCategory === "All Events" || event.category === selectedCategory;

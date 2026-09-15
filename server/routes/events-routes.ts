@@ -10,6 +10,7 @@ import {
 import { deliverNotification } from "../notifications";
 import { refundPayment } from "../payments/index.js";
 import { geocodeAddress, sortByProximity } from "../utils/geo";
+import { rankEvents } from "../utils/eventRanking.js";
 import QRCode from "qrcode";
 import { eventCreateDto, eventUpdateDto, insertTicketSchema, insertRsvpSchema } from "@shared/schema";
 
@@ -32,16 +33,36 @@ export function registerEventsRoutes(app: Express): void {
     });
   }
 
-  // Events
+  // Events — ranked per the PRD's discovery weighting (40% recency / 30%
+  // follow-graph / 20% proximity / 10% engagement) rather than a plain date
+  // sort. lat/lon are optional query params; the follow-graph term only
+  // applies for an authenticated request.
   app.get("/api/events", async (req, res) => {
     try {
       const allEvents = await storage.getEvents();
+
+      const lat = req.query.lat !== undefined ? parseFloat(req.query.lat as string) : undefined;
+      const lon = req.query.lon !== undefined ? parseFloat(req.query.lon as string) : undefined;
+      const userId = req.isAuthenticated() ? req.user!.id : undefined;
+
+      const [engagementByEvent, followedOrganizerIds] = await Promise.all([
+        storage.getEventEngagementCounts(),
+        userId ? storage.getFollowingIds(userId) : Promise.resolve([]),
+      ]);
+
+      const rankedEvents = rankEvents(allEvents, {
+        engagementByEvent,
+        followedOrganizerIds: new Set(followedOrganizerIds),
+        userLat: lat !== undefined && !isNaN(lat) ? lat : undefined,
+        userLon: lon !== undefined && !isNaN(lon) ? lon : undefined,
+      });
+
       if (req.query.limit !== undefined) {
         const limit = Math.min(Number(req.query.limit) || 20, 100);
         const offset = Number(req.query.offset) || 0;
-        return res.json({ events: allEvents.slice(offset, offset + limit), total: allEvents.length });
+        return res.json({ events: rankedEvents.slice(offset, offset + limit), total: rankedEvents.length });
       }
-      res.json(allEvents);
+      res.json(rankedEvents);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch events" });
     }
@@ -179,9 +200,15 @@ export function registerEventsRoutes(app: Express): void {
         return eventCity.includes(cityName) || eventLocation.includes(cityName);
       });
 
-      const sortedEvents = cityEvents.sort((a, b) =>
-        new Date(a.eventDate).getTime() - new Date(b.eventDate).getTime()
-      );
+      // Real trending signal — weighted RSVP+ticket engagement, same formula
+      // as getTrendingEvents() — instead of a plain date sort (a date sort
+      // isn't "trending" by any definition, it's just "soonest").
+      const engagementByEvent = await storage.getEventEngagementCounts();
+      const sortedEvents = cityEvents.sort((a, b) => {
+        const engagementDiff = (engagementByEvent.get(b.id) ?? 0) - (engagementByEvent.get(a.id) ?? 0);
+        if (engagementDiff !== 0) return engagementDiff;
+        return new Date(a.eventDate).getTime() - new Date(b.eventDate).getTime();
+      });
       res.json(sortedEvents);
     } catch (error) {
       console.error('Error fetching trending events:', error);

@@ -477,6 +477,8 @@ export interface IStorage {
   
   getEvents(): Promise<(Event & { minPrice: number; maxPrice: number })[]>;
   getEventsByCategory(category: string): Promise<(Event & { minPrice: number; maxPrice: number })[]>;
+  // eventId -> weighted rsvpCount*2 + ticketCount*3, for feed ranking and trending-in-city.
+  getEventEngagementCounts(): Promise<Map<string, number>>;
   getBulkEventTicketTiers(eventIds: string[]): Promise<TicketTier[]>;
   getEvent(id: string): Promise<(Event & { organizer: User; community: (Community & { memberCount: number }) | null }) | undefined>;
   getUserEvents(userId: string): Promise<Event[]>;
@@ -576,6 +578,8 @@ export interface IStorage {
   isFollowing(followerId: string, followingId: string): Promise<boolean>;
   getFollowers(userId: string): Promise<Array<Follow & { follower: User }>>;
   getFollowing(userId: string): Promise<Array<Follow & { following: User }>>;
+  // Lightweight counterpart — ids only, no user join — for set-membership checks like event ranking.
+  getFollowingIds(userId: string): Promise<string[]>;
   
   getUserProfile(userId: string): Promise<{ user: User; posts: Post[]; events: Array<Rsvp & { event: Event }> } | undefined>;
   searchUsers(query: string): Promise<User[]>;
@@ -1210,6 +1214,34 @@ export class DbStorage implements IStorage {
     );
   }
 
+  // Weighted RSVP+ticket engagement count per event, for the discovery feed's
+  // ranking algorithm (rankEvents() in server/utils/eventRanking.ts) and for
+  // /api/events/trending-in-city. Same rsvpCount*2 + ticketCount*3 formula as
+  // getTrendingEvents(), kept as its own cached query (rather than folded
+  // into getEvents()'s join) so getEvents()'s existing shape/consumers stay
+  // untouched — this is deliberately allowed to run up to eventsCache's TTL
+  // stale, same tradeoff getTrendingEvents() already makes.
+  async getEventEngagementCounts(): Promise<Map<string, number>> {
+    return cached(
+      'event-engagement',
+      async () => {
+        const rows = await db
+          .select({
+            eventId: events.id,
+            rsvpCount: sql<number>`count(distinct ${rsvps.id})::int`,
+            ticketCount: sql<number>`count(distinct ${tickets.id})::int`,
+          })
+          .from(events)
+          .leftJoin(rsvps, eq(rsvps.eventId, events.id))
+          .leftJoin(tickets, and(eq(tickets.eventId, events.id), eq(tickets.status, 'confirmed')))
+          .groupBy(events.id);
+
+        return new Map(rows.map(r => [r.eventId, r.rsvpCount * 2 + r.ticketCount * 3]));
+      },
+      eventsCache,
+    );
+  }
+
   async getEventsByCategory(category: string): Promise<(Event & { minPrice: number; maxPrice: number })[]> {
     const rows = await db
       .select({
@@ -1782,6 +1814,16 @@ export class DbStorage implements IStorage {
         follower: userWithoutPassword as User,
       };
     });
+  }
+
+  // Lightweight counterpart to getFollowing() — just the ids, no user join,
+  // for callers (like event ranking) that only need set-membership checks.
+  async getFollowingIds(userId: string): Promise<string[]> {
+    const result = await db
+      .select({ followingId: follows.followingId })
+      .from(follows)
+      .where(eq(follows.followerId, userId));
+    return result.map(r => r.followingId);
   }
 
   async getFollowing(userId: string): Promise<Array<Follow & { following: User }>> {
