@@ -40,7 +40,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { Community, CommunityMembership, User, Event } from "@shared/schema";
+import type { Community, CommunityMembership, User, Event, CommunityType } from "@shared/schema";
+import { communityTypes } from "@shared/schema";
+import { CommunityTypeBadge } from "@/components/CommunityModal";
 import {
   UsersIcon,
   CalendarIcon,
@@ -54,8 +56,12 @@ import {
   MapPinIcon,
   BellIcon,
   BellOffIcon,
+  ShieldIcon,
 } from "@/components/ui/icons";
+import { Pin, PinOff, FlagOff } from "lucide-react";
 import { format } from "date-fns";
+
+const POST_TYPE_FILTERS = ["all", "text", "photo", "video", "event", "venue"] as const;
 
 type CommunityWithDetails = Community & {
   memberCount: number;
@@ -73,8 +79,12 @@ export default function CommunityPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
+  const [editType, setEditType] = useState<CommunityType>("general");
+  const [editRules, setEditRules] = useState("");
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [kickConfirmMember, setKickConfirmMember] = useState<MemberWithUser | null>(null);
+  const [postTypeFilter, setPostTypeFilter] = useState<typeof POST_TYPE_FILTERS[number]>("all");
+  const [removeConfirmPost, setRemoveConfirmPost] = useState<any | null>(null);
 
   const {
     data: community,
@@ -91,7 +101,12 @@ export default function CommunityPage() {
   });
 
   const { data: posts = [], isLoading: postsLoading } = useQuery<any[]>({
-    queryKey: [`/api/communities/${community?.id}/posts`],
+    queryKey: [`/api/communities/${community?.id}/posts`, postTypeFilter],
+    queryFn: async () => {
+      const res = await fetch(`/api/communities/${community!.id}/posts?type=${postTypeFilter}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load posts");
+      return res.json();
+    },
     enabled: !!community?.id,
   });
 
@@ -137,7 +152,7 @@ export default function CommunityPage() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (data: { name: string; description: string }) =>
+    mutationFn: (data: { name: string; description: string; type: string; rules: string }) =>
       apiRequest("PUT", `/api/communities/${community!.id}`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/communities/slug/${slug}`] });
@@ -178,6 +193,25 @@ export default function CommunityPage() {
     onError: () => toast({ title: "Failed to update role", variant: "destructive" }),
   });
 
+  const pinPostMutation = useMutation({
+    mutationFn: ({ postId, pin }: { postId: string; pin: boolean }) =>
+      apiRequest(pin ? "POST" : "DELETE", `/api/communities/${community!.id}/posts/${postId}/pin`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/communities/${community!.id}/posts`] });
+    },
+    onError: () => toast({ title: "Failed to update pin", variant: "destructive" }),
+  });
+
+  const removePostMutation = useMutation({
+    mutationFn: (postId: string) => apiRequest("DELETE", `/api/communities/${community!.id}/posts/${postId}`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/communities/${community!.id}/posts`] });
+      setRemoveConfirmPost(null);
+      toast({ title: "Post removed" });
+    },
+    onError: () => toast({ title: "Failed to remove post", variant: "destructive" }),
+  });
+
   const toggleNotificationsMutation = useMutation({
     mutationFn: (enabled: boolean) =>
       apiRequest("PATCH", `/api/communities/${community!.id}/notifications`, { enabled }),
@@ -190,6 +224,8 @@ export default function CommunityPage() {
   function openEdit() {
     setEditName(community!.name);
     setEditDescription(community!.description ?? "");
+    setEditType((community!.type as CommunityType) ?? "general");
+    setEditRules(community!.rules ?? "");
     setEditOpen(true);
   }
 
@@ -242,98 +278,130 @@ export default function CommunityPage() {
           Feed
         </button>
 
-        {/* Cover image */}
-        {community.coverImageUrl ? (
-          <div className="h-36 md:h-48 rounded-xl overflow-hidden mb-4">
-            <img
-              src={community.coverImageUrl}
-              alt={community.name}
-              className="w-full h-full object-cover"
-            />
-          </div>
-        ) : (
-          <div className="h-36 md:h-48 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 mb-4 flex items-center justify-center">
-            <UsersIcon className="h-12 w-12 text-primary/30" />
-          </div>
-        )}
-
-        {/* Header row */}
-        <div className="flex items-start justify-between gap-3 mb-2">
-          <div className="flex-1 min-w-0">
-            <h1 className="text-2xl font-bold truncate">{community.name}</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">
-              {community.memberCount} {community.memberCount === 1 ? "member" : "members"} · by @{community.creator.username}
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2 flex-shrink-0 mt-1">
-            {currentUser && isMember && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                title={notificationsEnabled ? "Mute community notifications" : "Unmute community notifications"}
-                onClick={() => toggleNotificationsMutation.mutate(!notificationsEnabled)}
-                disabled={toggleNotificationsMutation.isPending}
-              >
-                {notificationsEnabled
-                  ? <BellIcon className="h-4 w-4" />
-                  : <BellOffIcon className="h-4 w-4 text-muted-foreground" />
-                }
-              </Button>
-            )}
-            {currentUser && (
-              isMember ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => leaveMutation.mutate()}
-                  disabled={leaveMutation.isPending || isOwner}
-                  title={isOwner ? "Transfer ownership before leaving" : undefined}
-                >
-                  {leaveMutation.isPending ? "Leaving..." : "Leave"}
-                </Button>
-              ) : (
-                <Button
-                  size="sm"
-                  onClick={() => joinMutation.mutate()}
-                  disabled={joinMutation.isPending}
-                >
-                  {joinMutation.isPending ? "Joining..." : "Join"}
-                </Button>
-              )
-            )}
-
-            {isOwner && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-8 w-8">
-                    <SettingsIcon className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={openEdit}>
-                    <EditIcon className="h-4 w-4 mr-2" />
-                    Edit community
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    className="text-destructive"
-                    onClick={() => setDeleteConfirmOpen(true)}
-                  >
-                    <Trash2Icon className="h-4 w-4 mr-2" />
-                    Delete community
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-          </div>
+        {/* Hero — full-bleed within the page's own padding, gradient overlay,
+            overlapping content card. Same structure as VenueDetailPage's hero. */}
+        <div className="-mx-4 relative h-44 md:h-56 overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-t from-background via-background/10 to-transparent z-10" />
+          {community.coverImageUrl ? (
+            <img src={community.coverImageUrl} alt={community.name} className="w-full h-full object-cover" />
+          ) : (
+            <div className="w-full h-full bg-gradient-to-br from-primary/25 via-primary/10 to-transparent flex items-center justify-center">
+              <UsersIcon className="h-14 w-14 text-primary/30" />
+            </div>
+          )}
         </div>
 
-        {/* Description */}
-        {community.description && (
-          <p className="text-sm text-muted-foreground mb-4">{community.description}</p>
-        )}
+        <div className="relative z-20 -mt-10 mb-4">
+          {/* Type badge */}
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
+            <CommunityTypeBadge type={community.type} />
+          </div>
+
+          {/* Header row */}
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1 min-w-0">
+              <h1 className="text-2xl font-bold truncate">{community.name}</h1>
+              <div className="flex items-center gap-2 mt-1.5">
+                {members.length > 0 && (
+                  <div className="flex -space-x-2">
+                    {members.slice(0, 5).map((m) => (
+                      <Avatar key={m.id} className="h-6 w-6 border-2 border-background">
+                        <AvatarImage src={m.user.avatarUrl ?? undefined} />
+                        <AvatarFallback className="text-[9px]">
+                          {(m.user.displayName || m.user.username).charAt(0).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                    ))}
+                  </div>
+                )}
+                <p className="text-sm text-muted-foreground">
+                  {community.memberCount.toLocaleString()} {community.memberCount === 1 ? "member" : "members"} · {posts.length} posts · by @{community.creator.username}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-shrink-0 mt-1">
+              {currentUser && isMember && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  title={notificationsEnabled ? "Mute community notifications" : "Unmute community notifications"}
+                  onClick={() => toggleNotificationsMutation.mutate(!notificationsEnabled)}
+                  disabled={toggleNotificationsMutation.isPending}
+                >
+                  {notificationsEnabled
+                    ? <BellIcon className="h-4 w-4" />
+                    : <BellOffIcon className="h-4 w-4 text-muted-foreground" />
+                  }
+                </Button>
+              )}
+              {currentUser && (
+                isMember ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => leaveMutation.mutate()}
+                    disabled={leaveMutation.isPending || isOwner}
+                    title={isOwner ? "Transfer ownership before leaving" : undefined}
+                  >
+                    {leaveMutation.isPending ? "Leaving..." : "Leave"}
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    onClick={() => joinMutation.mutate()}
+                    disabled={joinMutation.isPending}
+                  >
+                    {joinMutation.isPending ? "Joining..." : "Join"}
+                  </Button>
+                )
+              )}
+
+              {isOwner && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                      <SettingsIcon className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={openEdit}>
+                      <EditIcon className="h-4 w-4 mr-2" />
+                      Edit community
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className="text-destructive"
+                      onClick={() => setDeleteConfirmOpen(true)}
+                    >
+                      <Trash2Icon className="h-4 w-4 mr-2" />
+                      Delete community
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
+          </div>
+
+          {/* Description */}
+          {community.description && (
+            <p className="text-sm text-muted-foreground mt-2">{community.description}</p>
+          )}
+
+          {/* Rules */}
+          {community.rules && (
+            <Card className="mt-3 bg-muted/30">
+              <CardContent className="p-3">
+                <p className="text-xs font-semibold flex items-center gap-1.5 mb-1">
+                  <ShieldIcon className="h-3.5 w-3.5" />
+                  Community Rules
+                </p>
+                <p className="text-sm text-muted-foreground whitespace-pre-line">{community.rules}</p>
+              </CardContent>
+            </Card>
+          )}
+        </div>
 
         {/* Tabs */}
         <Tabs defaultValue="posts">
@@ -345,43 +413,97 @@ export default function CommunityPage() {
 
           {/* Posts tab */}
           <TabsContent value="posts">
+            {/* Post-type filter */}
+            <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1">
+              {POST_TYPE_FILTERS.map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setPostTypeFilter(t)}
+                  className={`px-3 h-8 rounded-full text-xs font-medium capitalize whitespace-nowrap flex-shrink-0 transition-colors ${
+                    postTypeFilter === t
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground hover:bg-muted/70"
+                  }`}
+                  data-testid={`button-filter-${t}`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+
             {postsLoading ? (
               <div className="space-y-3">
                 {[1, 2, 3].map(i => <Skeleton key={i} className="h-24 w-full rounded-xl" />)}
               </div>
             ) : posts.length === 0 ? (
               <div className="text-center py-12">
-                <p className="text-muted-foreground text-sm">No posts yet. Be the first to post in this community!</p>
+                <p className="text-muted-foreground text-sm">
+                  {postTypeFilter === "all" ? "No posts yet. Be the first to post in this community!" : `No ${postTypeFilter} posts yet.`}
+                </p>
               </div>
             ) : (
-              <div className="divide-y divide-border">
-                {posts.map((post: any) => (
-                  <FeedPost
-                    key={post.id}
-                    id={post.id}
-                    author={{
-                      name: post.user.displayName || post.user.organizationName || post.user.username,
-                      username: post.user.username,
-                      isOrganizer: post.user.userType === "organizer",
-                      isVerified: post.user.isVerified,
-                      userId: post.user.id,
-                      avatar: post.user.avatarUrl,
-                    }}
-                    content={post.content}
-                    createdAt={post.createdAt}
-                    updatedAt={post.updatedAt}
-                    likes={0}
-                    comments={0}
-                    isLiked={false}
-                    image={post.imageUrl}
-                    imageUrls={post.imageUrls || []}
-                    videoUrl={post.videoUrl}
-                    eventId={post.eventId}
-                    venueId={post.venueId}
-                    community={post.community}
-                    feedMode={true}
-                  />
-                ))}
+              <div className="space-y-1">
+                {posts.map((post: any) => {
+                  const canModerate = isOwner || isMod;
+                  return (
+                    <div
+                      key={post.id}
+                      className={post.isPinned ? "rounded-xl bg-primary/5 border border-primary/20 overflow-hidden" : "border-b border-border last:border-b-0"}
+                    >
+                      {post.isPinned && (
+                        <div className="flex items-center gap-1.5 px-4 pt-2.5 text-[11px] font-medium text-primary">
+                          <Pin className="h-3 w-3" />Pinned
+                        </div>
+                      )}
+                      <div className="relative">
+                        <FeedPost
+                          id={post.id}
+                          author={{
+                            name: post.user.displayName || post.user.organizationName || post.user.username,
+                            username: post.user.username,
+                            isOrganizer: post.user.userType === "organizer",
+                            isVerified: post.user.isVerified,
+                            userId: post.user.id,
+                            avatar: post.user.avatarUrl,
+                          }}
+                          content={post.content}
+                          createdAt={post.createdAt}
+                          updatedAt={post.updatedAt}
+                          likes={0}
+                          comments={0}
+                          isLiked={false}
+                          image={post.imageUrl}
+                          imageUrls={post.imageUrls || []}
+                          videoUrl={post.videoUrl}
+                          eventId={post.eventId}
+                          venueId={post.venueId}
+                          community={post.community}
+                          feedMode={true}
+                        />
+                        {canModerate && (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-7 w-7 absolute top-2 right-2 bg-background/80 backdrop-blur-sm" data-testid={`button-mod-post-${post.id}`}>
+                                <MoreHorizontalIcon className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => pinPostMutation.mutate({ postId: post.id, pin: !post.isPinned })}>
+                                {post.isPinned ? <PinOff className="h-4 w-4 mr-2" /> : <Pin className="h-4 w-4 mr-2" />}
+                                {post.isPinned ? "Unpin post" : "Pin post"}
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem className="text-destructive" onClick={() => setRemoveConfirmPost(post)}>
+                                <Trash2Icon className="h-4 w-4 mr-2" />
+                                Remove post
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </TabsContent>
@@ -525,6 +647,19 @@ export default function CommunityPage() {
               <Input value={editName} onChange={(e) => setEditName(e.target.value)} maxLength={100} />
             </div>
             <div className="space-y-1.5">
+              <Label>Type</Label>
+              <select
+                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm capitalize"
+                value={editType}
+                onChange={(e) => setEditType(e.target.value as CommunityType)}
+                data-testid="select-edit-community-type"
+              >
+                {communityTypes.map((t) => (
+                  <option key={t} value={t} className="capitalize">{t}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
               <Label>Description</Label>
               <Textarea
                 value={editDescription}
@@ -532,11 +667,21 @@ export default function CommunityPage() {
                 rows={3}
               />
             </div>
+            <div className="space-y-1.5">
+              <Label>Rules</Label>
+              <Textarea
+                value={editRules}
+                onChange={(e) => setEditRules(e.target.value)}
+                rows={3}
+                placeholder="Set expectations for members..."
+                data-testid="input-edit-community-rules"
+              />
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
             <Button
-              onClick={() => updateMutation.mutate({ name: editName, description: editDescription })}
+              onClick={() => updateMutation.mutate({ name: editName, description: editDescription, type: editType, rules: editRules })}
               disabled={updateMutation.isPending || !editName.trim()}
             >
               {updateMutation.isPending ? "Saving..." : "Save"}
@@ -582,6 +727,27 @@ export default function CommunityPage() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Remove post confirmation */}
+      <AlertDialog open={!!removeConfirmPost} onOpenChange={(open) => { if (!open) setRemoveConfirmPost(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this post?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the post from {community.name}. The author keeps it on their own profile.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => removeConfirmPost && removePostMutation.mutate(removeConfirmPost.id)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {removePostMutation.isPending ? "Removing..." : "Remove"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

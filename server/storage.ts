@@ -462,6 +462,44 @@ export async function ensureSchema() {
   await pool.query(`
     ALTER TABLE venue_entry_nights ADD COLUMN IF NOT EXISTS recurrence_parent_id VARCHAR
   `);
+
+  // Messaging/Communities pass — read receipts, event-linked group chats,
+  // community types/rules, pinned posts, and generalizing `comments` to
+  // cover story comments too (see the commentTargetCheck comment on
+  // comments in shared/schema.ts).
+  await pool.query(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS read_receipts_enabled BOOLEAN NOT NULL DEFAULT true
+  `);
+  await pool.query(`
+    ALTER TABLE conversations ADD COLUMN IF NOT EXISTS event_id VARCHAR REFERENCES events(id) ON DELETE SET NULL
+  `);
+  await pool.query(`
+    ALTER TABLE communities ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'general'
+  `);
+  await pool.query(`
+    ALTER TABLE communities ADD COLUMN IF NOT EXISTS rules TEXT
+  `);
+  await pool.query(`
+    ALTER TABLE posts ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN NOT NULL DEFAULT false
+  `);
+  await pool.query(`
+    ALTER TABLE comments ALTER COLUMN post_id DROP NOT NULL
+  `);
+  await pool.query(`
+    ALTER TABLE comments ADD COLUMN IF NOT EXISTS story_id VARCHAR REFERENCES stories(id) ON DELETE CASCADE
+  `);
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_name = 'comment_target_check' AND table_name = 'comments'
+      ) THEN
+        ALTER TABLE comments ADD CONSTRAINT comment_target_check
+          CHECK ((post_id IS NOT NULL AND story_id IS NULL) OR (post_id IS NULL AND story_id IS NOT NULL));
+      END IF;
+    END $$;
+  `);
 }
 
 export interface IStorage {
@@ -510,6 +548,7 @@ export interface IStorage {
   // and confirmed-ticket-holding users, deduped, capped at `limit` rows
   // returned but totalCount reflects the full distinct attendee count.
   getEventAttendeesSample(eventId: string, limit?: number): Promise<{ users: Array<Pick<User, "id" | "username" | "displayName" | "avatarUrl">>; totalCount: number }>;
+  getAllEventAttendeeIds(eventId: string): Promise<string[]>;
   // Single grouped query (not N+1) — real revenue per event for an event-list
   // view like Manage Events, as opposed to getOrganizerDemographics's heavier
   // per-event breakdown used by the full analytics dashboard.
@@ -586,6 +625,7 @@ export interface IStorage {
   setStoryAllowedViewers(storyId: string, viewerIds: string[]): Promise<void>;
   getStoryAllowedViewers(storyId: string): Promise<string[]>;
   canViewStory(viewerId: string, storyId: string): Promise<boolean>;
+  canViewStoryNow(viewerId: string, storyId: string): Promise<boolean>;
 
   followUser(followerId: string, followingId: string): Promise<Follow>;
   unfollowUser(followerId: string, followingId: string): Promise<void>;
@@ -628,6 +668,7 @@ export interface IStorage {
   addComment(comment: InsertComment): Promise<Comment>;
   deleteComment(id: string, userId: string): Promise<Comment | undefined>;
   getPostComments(postId: string, limit?: number): Promise<Array<Comment & { user: User }>>;
+  getStoryComments(storyId: string, viewerId?: string): Promise<Array<Comment & { user: User; likeCount: number; isLiked: boolean }>>;
   getCommentThread(topLevelCommentId: string, viewerId?: string): Promise<Array<Comment & { user: User; likeCount: number; isLiked: boolean }>>;
   getCommentCount(postId: string): Promise<number>;
 
@@ -910,7 +951,11 @@ export interface IStorage {
   setCommunityNotifications(userId: string, communityId: string, enabled: boolean): Promise<void>;
 
   // Community posts
-  getCommunityPosts(communityId: string, limit?: number, offset?: number): Promise<Array<Post & { user: User; community: Community }>>;
+  getCommunityPosts(communityId: string, limit?: number, offset?: number, postType?: string): Promise<Array<Post & { user: User; community: Community }>>;
+  getCommunityMemberCount(communityId: string): Promise<number>;
+  setCommunityPostPinned(postId: string, pinned: boolean): Promise<Post>;
+  moderateRemoveCommunityPost(postId: string): Promise<void>;
+  getTrendingCommunities(limit?: number): Promise<Array<Community & { memberCount: number; creator: User; trendingScore: number }>>;
   getPostsWithCommunity(): Promise<Array<Post & { user: User; community: Community | null }>>;
   getFeedPosts(cursor?: string, limit?: number): Promise<{ posts: any[]; nextCursor: string | null }>;
 
@@ -932,6 +977,9 @@ export interface IStorage {
   // Invite codes
   generateInviteCode(conversationId: string): Promise<string>;
   getConversationByInviteCode(inviteCode: string): Promise<Conversation | undefined>;
+  getConversationByEventId(eventId: string): Promise<Conversation | undefined>;
+  getDissolvableEventGroupConversationIds(): Promise<string[]>;
+  addConversationParticipantIfRoom(conversationId: string, userId: string, maxMembers: number): Promise<boolean>;
   
   // Conversation participants
   addConversationParticipant(conversationId: string, userId: string, role?: string): Promise<ConversationParticipant>;
@@ -946,6 +994,8 @@ export interface IStorage {
   // Conversation messages
   sendConversationMessage(message: InsertConversationMessage): Promise<ConversationMessage>;
   getConversationMessages(conversationId: string, limit?: number, before?: string): Promise<Array<ConversationMessage & { sender: User; replyTo?: ConversationMessage & { sender: User }; story?: Story & { user: User } }>>;
+  getConversationMessage(messageId: string): Promise<ConversationMessage | undefined>;
+  searchConversationMessages(conversationId: string, query: string, limit?: number): Promise<Array<ConversationMessage & { sender: User }>>;
   deleteConversationMessage(messageId: string): Promise<void>;
   
   // Polls
@@ -1410,6 +1460,19 @@ export class DbStorage implements IStorage {
     return { users: attendeeRows, totalCount };
   }
 
+  // Full (uncapped) distinct RSVP'd + confirmed-ticket-holding user id list —
+  // used to seed an event group chat with every current attendee at once.
+  async getAllEventAttendeeIds(eventId: string): Promise<string[]> {
+    const [rsvpRows, ticketRows] = await Promise.all([
+      db.select({ userId: rsvps.userId }).from(rsvps).where(eq(rsvps.eventId, eventId)),
+      db.select({ userId: tickets.userId }).from(tickets).where(and(eq(tickets.eventId, eventId), eq(tickets.status, "confirmed"))),
+    ]);
+    const attendeeIds = new Set<string>();
+    rsvpRows.forEach(r => attendeeIds.add(r.userId));
+    ticketRows.forEach(t => attendeeIds.add(t.userId));
+    return Array.from(attendeeIds);
+  }
+
   async getEventRevenueByIds(eventIds: string[]): Promise<Map<string, number>> {
     if (eventIds.length === 0) return new Map();
     const rows = await db
@@ -1806,6 +1869,22 @@ export class DbStorage implements IStorage {
     // Private stories require viewer to be in allowed list
     const allowedViewers = await this.getStoryAllowedViewers(storyId);
     return allowedViewers.includes(viewerId);
+  }
+
+  // canViewStory() alone doesn't account for the story's own 24h public
+  // window (that lives in getUserStories' inline filter) — this combines
+  // both so story comments genuinely "follow the story's lifecycle": once a
+  // story exits public view, only the owner can still see (and comment on)
+  // it via their Archive, exactly like the story content itself.
+  async canViewStoryNow(viewerId: string, storyId: string): Promise<boolean> {
+    const story = await this.getStory(storyId);
+    if (!story) return false;
+    if (story.userId === viewerId) return true;
+
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    if (new Date(story.createdAt) < twentyFourHoursAgo) return false;
+
+    return this.canViewStory(viewerId, storyId);
   }
 
   async followUser(followerId: string, followingId: string): Promise<Follow> {
@@ -2267,10 +2346,14 @@ export class DbStorage implements IStorage {
   // never need a live COUNT(*).
   async addComment(insertComment: InsertComment): Promise<Comment> {
     const [result] = await db.insert(comments).values(insertComment).returning();
-    await db.update(posts)
-      .set({ commentCount: sql`${posts.commentCount} + 1` })
-      .where(eq(posts.id, insertComment.postId));
-    invalidateCache.posts();
+    // Story comments (postId null, storyId set) skip this — posts.commentCount
+    // has nothing to do with them.
+    if (insertComment.postId) {
+      await db.update(posts)
+        .set({ commentCount: sql`${posts.commentCount} + 1` })
+        .where(eq(posts.id, insertComment.postId));
+      invalidateCache.posts();
+    }
     return result;
   }
 
@@ -2286,10 +2369,12 @@ export class DbStorage implements IStorage {
       .where(eq(comments.id, id))
       .returning();
 
-    await db.update(posts)
-      .set({ commentCount: sql`GREATEST(${posts.commentCount} - 1, 0)` })
-      .where(eq(posts.id, existing.postId));
-    invalidateCache.posts();
+    if (existing.postId) {
+      await db.update(posts)
+        .set({ commentCount: sql`GREATEST(${posts.commentCount} - 1, 0)` })
+        .where(eq(posts.id, existing.postId));
+      invalidateCache.posts();
+    }
     return result;
   }
 
@@ -2310,6 +2395,50 @@ export class DbStorage implements IStorage {
       return {
         ...row.comments,
         user: userWithoutPassword as User,
+      };
+    });
+  }
+
+  // Story comments — a flat list (no lazy per-thread expansion like
+  // getPostComments/getCommentThread) since a story's comment volume is
+  // small and ephemeral; loading everything for the story at once is simpler
+  // and correct at this scale. Soft-deleted rows stay included so any reply
+  // chain under them keeps its "[comment deleted]" placeholder — same reason
+  // getPostComments keeps them too.
+  async getStoryComments(storyId: string, viewerId?: string): Promise<Array<Comment & { user: User; likeCount: number; isLiked: boolean }>> {
+    const result = await db
+      .select()
+      .from(comments)
+      .innerJoin(users, eq(comments.userId, users.id))
+      .where(eq(comments.storyId, storyId))
+      .orderBy(comments.createdAt);
+
+    if (result.length === 0) return [];
+    const commentIds = result.map(r => r.comments.id);
+
+    const likeCountRows = await db
+      .select({ commentId: commentLikes.commentId, count: sql<number>`count(*)::int` })
+      .from(commentLikes)
+      .where(inArray(commentLikes.commentId, commentIds))
+      .groupBy(commentLikes.commentId);
+    const likeCountMap = new Map(likeCountRows.map(r => [r.commentId, r.count]));
+
+    let viewerLikedSet = new Set<string>();
+    if (viewerId) {
+      const viewerLikes = await db
+        .select({ commentId: commentLikes.commentId })
+        .from(commentLikes)
+        .where(and(inArray(commentLikes.commentId, commentIds), eq(commentLikes.userId, viewerId)));
+      viewerLikedSet = new Set(viewerLikes.map(r => r.commentId));
+    }
+
+    return result.map(row => {
+      const { passwordHash, ...userWithoutPassword } = row.users;
+      return {
+        ...row.comments,
+        user: userWithoutPassword as User,
+        likeCount: likeCountMap.get(row.comments.id) ?? 0,
+        isLiked: viewerLikedSet.has(row.comments.id),
       };
     });
   }
@@ -4538,11 +4667,18 @@ export class DbStorage implements IStorage {
       .innerJoin(users, eq(communities.createdByUserId, users.id))
       .orderBy(desc(communities.createdAt));
     
-    return result.map(r => ({
-      ...r.community,
-      memberCount: r.memberCount,
-      creator: r.creator,
-    }));
+    // Pre-existing gap caught while testing this session's other community
+    // work: this returned the full users row — passwordHash included — to
+    // any caller of the public GET /api/communities endpoint. Strip it here
+    // rather than trusting every route to remember to.
+    return result.map(r => {
+      const { passwordHash, ...creatorWithoutPassword } = r.creator;
+      return {
+        ...r.community,
+        memberCount: r.memberCount,
+        creator: creatorWithoutPassword as User,
+      };
+    });
   }
 
   async getUserCommunities(userId: string): Promise<Array<Community & { memberCount: number; role: string }>> {
@@ -4618,10 +4754,15 @@ export class DbStorage implements IStorage {
       .limit(limit)
       .offset(offset);
 
-    return result.map(r => ({
-      ...r.membership,
-      user: r.user,
-    }));
+    // Same passwordHash-leak class as getCommunities() above — this backs
+    // the public GET /api/communities/:id/members endpoint.
+    return result.map(r => {
+      const { passwordHash, ...userWithoutPassword } = r.user;
+      return {
+        ...r.membership,
+        user: userWithoutPassword as User,
+      };
+    });
   }
 
   async getCommunityMemberIds(communityId: string): Promise<string[]> {
@@ -4656,7 +4797,18 @@ export class DbStorage implements IStorage {
     return result[0];
   }
 
-  async getCommunityPosts(communityId: string, limit: number = 30, offset: number = 0): Promise<Array<Post & { user: User; community: Community }>> {
+  // postType is derived, not a stored column — matches the same "text unless
+  // videoUrl/imageUrls/eventId/venueId says otherwise" logic used client-side
+  // wherever a post's type badge is shown.
+  async getCommunityPosts(communityId: string, limit: number = 30, offset: number = 0, postType?: string): Promise<Array<Post & { user: User; community: Community }>> {
+    const typeFilter =
+      postType === "photo" ? sql`array_length(${posts.imageUrls}, 1) > 0` :
+      postType === "video" ? isNotNull(posts.videoUrl) :
+      postType === "event" ? isNotNull(posts.eventId) :
+      postType === "venue" ? isNotNull(posts.venueId) :
+      postType === "text" ? and(isNull(posts.videoUrl), isNull(posts.eventId), isNull(posts.venueId), sql`coalesce(array_length(${posts.imageUrls}, 1), 0) = 0`) :
+      undefined;
+
     const result = await db
       .select({
         post: posts,
@@ -4666,8 +4818,12 @@ export class DbStorage implements IStorage {
       .from(posts)
       .innerJoin(users, eq(posts.userId, users.id))
       .innerJoin(communities, eq(posts.communityId, communities.id))
-      .where(eq(posts.communityId, communityId))
-      .orderBy(desc(posts.createdAt))
+      .where(and(
+        eq(posts.communityId, communityId),
+        eq(posts.moderationStatus, "approved"),
+        typeFilter,
+      ))
+      .orderBy(desc(posts.isPinned), desc(posts.createdAt))
       .limit(limit)
       .offset(offset);
 
@@ -4676,6 +4832,57 @@ export class DbStorage implements IStorage {
       user: r.user,
       community: r.community,
     }));
+  }
+
+  async getCommunityMemberCount(communityId: string): Promise<number> {
+    const [result] = await db
+      .select({ count: count() })
+      .from(communityMemberships)
+      .where(eq(communityMemberships.communityId, communityId));
+    return result?.count ?? 0;
+  }
+
+  // Pin/unpin and moderator post removal are both community-scoped: the
+  // caller (route) is responsible for checking the post actually belongs to
+  // this community and that the caller is owner/moderator — these just do
+  // the write, matching the same division of responsibility as the rest of
+  // this file's moderation methods.
+  async setCommunityPostPinned(postId: string, pinned: boolean): Promise<Post> {
+    const [result] = await db.update(posts).set({ isPinned: pinned }).where(eq(posts.id, postId)).returning();
+    return result;
+  }
+
+  async moderateRemoveCommunityPost(postId: string): Promise<void> {
+    await db.update(posts).set({ moderationStatus: "removed" }).where(eq(posts.id, postId));
+  }
+
+  // Trending communities — weighted recent activity (7d), same
+  // weighted-engagement spirit as getTrendingEvents()/the discovery ranking.
+  async getTrendingCommunities(limit: number = 10): Promise<Array<Community & { memberCount: number; creator: User; trendingScore: number }>> {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const result = await db
+      .select({
+        community: communities,
+        creator: users,
+        memberCount: sql<number>`(SELECT COUNT(*) FROM community_memberships WHERE community_id = ${communities.id})::int`,
+        recentPosts: sql<number>`(SELECT COUNT(*) FROM posts WHERE community_id = ${communities.id} AND created_at >= ${sevenDaysAgo} AND moderation_status = 'approved')::int`,
+        recentJoins: sql<number>`(SELECT COUNT(*) FROM community_memberships WHERE community_id = ${communities.id} AND joined_at >= ${sevenDaysAgo})::int`,
+      })
+      .from(communities)
+      .innerJoin(users, eq(communities.createdByUserId, users.id));
+
+    return result
+      .map(r => {
+        const { passwordHash, ...creatorWithoutPassword } = r.creator;
+        return {
+          ...r.community,
+          memberCount: r.memberCount,
+          creator: creatorWithoutPassword as User,
+          trendingScore: r.recentPosts * 3 + r.recentJoins * 2,
+        };
+      })
+      .sort((a, b) => b.trendingScore - a.trendingScore)
+      .slice(0, limit);
   }
 
   async getCommunityWithDetails(id: string): Promise<(Community & { memberCount: number; creator: User }) | undefined> {
@@ -4690,10 +4897,11 @@ export class DbStorage implements IStorage {
       .where(eq(communities.id, id));
 
     if (!result[0]) return undefined;
+    const { passwordHash, ...creatorWithoutPassword } = result[0].creator;
     return {
       ...result[0].community,
       memberCount: result[0].memberCount,
-      creator: result[0].creator,
+      creator: creatorWithoutPassword as User,
     };
   }
 
@@ -4952,6 +5160,19 @@ export class DbStorage implements IStorage {
     await db.delete(conversations).where(eq(conversations.id, id));
   }
 
+  // Event group chats whose linked event ended more than 7 days ago —
+  // dissolved by eventGroupScheduler.ts. Messages/participants cascade via
+  // the existing conversationMessages/conversationParticipants FKs.
+  async getDissolvableEventGroupConversationIds(): Promise<string[]> {
+    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const result = await db
+      .select({ id: conversations.id })
+      .from(conversations)
+      .innerJoin(events, eq(conversations.eventId, events.id))
+      .where(and(isNotNull(conversations.eventId), lt(events.eventDate, cutoff)));
+    return result.map(r => r.id);
+  }
+
   async generateInviteCode(conversationId: string): Promise<string> {
     const code = Math.random().toString(36).substring(2, 10).toUpperCase();
     await db.update(conversations).set({ inviteCode: code }).where(eq(conversations.id, conversationId));
@@ -4961,6 +5182,27 @@ export class DbStorage implements IStorage {
   async getConversationByInviteCode(inviteCode: string): Promise<Conversation | undefined> {
     const [result] = await db.select().from(conversations).where(eq(conversations.inviteCode, inviteCode));
     return result;
+  }
+
+  async getConversationByEventId(eventId: string): Promise<Conversation | undefined> {
+    const [result] = await db.select().from(conversations).where(eq(conversations.eventId, eventId));
+    return result;
+  }
+
+  // Adds a participant if there's room under MAX_GROUP_MEMBERS (enforced in
+  // messages-routes.ts for explicit adds; re-checked here too since this is
+  // also called from the ticket-purchase/RSVP hooks, which have no route of
+  // their own to gate at). Silently no-ops past capacity or if already a
+  // member — a ticket purchase must never fail because the event chat is full.
+  async addConversationParticipantIfRoom(conversationId: string, userId: string, maxMembers: number): Promise<boolean> {
+    const alreadyIn = await this.isConversationParticipant(conversationId, userId);
+    if (alreadyIn) return false;
+
+    const participants = await this.getConversationParticipants(conversationId);
+    if (participants.length >= maxMembers) return false;
+
+    await this.addConversationParticipant(conversationId, userId, 'member');
+    return true;
   }
 
   async getOrCreateDirectConversation(userId1: string, userId2: string): Promise<Conversation> {
@@ -5108,7 +5350,32 @@ export class DbStorage implements IStorage {
     return result;
   }
 
-  async getConversationMessages(conversationId: string, limit: number = 50, before?: string): Promise<Array<ConversationMessage & { sender: User; replyTo?: ConversationMessage & { sender: User }; story?: Story & { user: User } }>> {
+  // Deleted messages leave a tombstone rather than vanishing (getConversationMessages
+  // used to filter isDeleted=false, which just made them disappear with no
+  // "[message deleted]" placeholder possible). blankIfDeleted() blanks the
+  // actual payload server-side rather than trusting the client to hide it —
+  // same approach as the post-comment soft-delete pattern elsewhere.
+  private blankIfDeleted<T extends ConversationMessage>(message: T): T {
+    if (!message.isDeleted) return message;
+    return {
+      ...message,
+      content: null,
+      imageUrls: [],
+      eventId: null,
+      venueId: null,
+      postId: null,
+      pollId: null,
+      storyId: null,
+      replyToId: null,
+    };
+  }
+
+  async getConversationMessage(messageId: string): Promise<ConversationMessage | undefined> {
+    const [result] = await db.select().from(conversationMessages).where(eq(conversationMessages.id, messageId));
+    return result;
+  }
+
+  async searchConversationMessages(conversationId: string, query: string, limit: number = 50): Promise<Array<ConversationMessage & { sender: User }>> {
     const result = await db
       .select({ message: conversationMessages, sender: users })
       .from(conversationMessages)
@@ -5116,15 +5383,31 @@ export class DbStorage implements IStorage {
       .where(and(
         eq(conversationMessages.conversationId, conversationId),
         eq(conversationMessages.isDeleted, false),
+        ilike(conversationMessages.content, `%${query}%`),
+      ))
+      .orderBy(desc(conversationMessages.createdAt))
+      .limit(limit);
+
+    return result.map(r => ({ ...r.message, sender: r.sender }));
+  }
+
+  async getConversationMessages(conversationId: string, limit: number = 50, before?: string): Promise<Array<ConversationMessage & { sender: User; replyTo?: ConversationMessage & { sender: User }; story?: Story & { user: User } }>> {
+    const result = await db
+      .select({ message: conversationMessages, sender: users })
+      .from(conversationMessages)
+      .innerJoin(users, eq(conversationMessages.senderId, users.id))
+      .where(and(
+        eq(conversationMessages.conversationId, conversationId),
         before ? lt(conversationMessages.createdAt, new Date(before)) : undefined
       ))
       .orderBy(desc(conversationMessages.createdAt))
       .limit(limit);
 
-    // Batch-fetch stories for story_reply messages — one query regardless of thread length
+    // Batch-fetch stories for story_reply messages — one query regardless of thread length.
+    // Deleted messages are excluded here (their storyId gets blanked below anyway).
     const storyIds = [...new Set(
       result
-        .filter(r => r.message.messageType === 'story_reply' && r.message.storyId)
+        .filter(r => !r.message.isDeleted && r.message.messageType === 'story_reply' && r.message.storyId)
         .map(r => r.message.storyId!)
     )];
 
@@ -5142,7 +5425,7 @@ export class DbStorage implements IStorage {
 
     // Collect replyTo IDs and batch-fetch them
     const replyToIds = [...new Set(
-      result.filter(r => r.message.replyToId).map(r => r.message.replyToId!)
+      result.filter(r => !r.message.isDeleted && r.message.replyToId).map(r => r.message.replyToId!)
     )];
 
     const replyToById = new Map<string, ConversationMessage & { sender: User }>();
@@ -5157,12 +5440,16 @@ export class DbStorage implements IStorage {
       }
     }
 
-    const messagesWithData: Array<ConversationMessage & { sender: User; replyTo?: ConversationMessage & { sender: User }; story?: Story & { user: User } }> = result.map(r => ({
-      ...r.message,
-      sender: r.sender,
-      replyTo: r.message.replyToId ? replyToById.get(r.message.replyToId) : undefined,
-      story: r.message.storyId ? storiesById.get(r.message.storyId) : undefined,
-    }));
+    const messagesWithData: Array<ConversationMessage & { sender: User; replyTo?: ConversationMessage & { sender: User }; story?: Story & { user: User } }> = result.map(r => {
+      const blanked = this.blankIfDeleted(r.message);
+      const replyTo = blanked.replyToId ? replyToById.get(blanked.replyToId) : undefined;
+      return {
+        ...blanked,
+        sender: r.sender,
+        replyTo: replyTo ? { ...this.blankIfDeleted(replyTo), sender: replyTo.sender } : undefined,
+        story: blanked.storyId ? storiesById.get(blanked.storyId) : undefined,
+      };
+    });
 
     // Return in chronological order (oldest first)
     return messagesWithData.reverse();

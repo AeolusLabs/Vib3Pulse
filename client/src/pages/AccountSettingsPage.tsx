@@ -16,7 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { Switch } from "@/components/ui/switch";
 import type { User as UserType } from "@shared/schema";
-import { LockIcon, UserIcon, AlertCircleIcon, Loader2Icon, CheckCircleIcon, BellIcon, BellOffIcon } from "@/components/ui/icons";
+import { LockIcon, UserIcon, AlertCircleIcon, Loader2Icon, CheckCircleIcon, BellIcon, BellOffIcon, CheckCheckIcon } from "@/components/ui/icons";
 
 export default function AccountSettingsPage() {
   const [, navigate] = useLocation();
@@ -37,6 +37,18 @@ export default function AccountSettingsPage() {
       return response.json();
     },
     enabled: !!sessionUser,
+  });
+
+  const readReceiptsMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      return await apiRequest("PATCH", "/api/users/me", { readReceiptsEnabled: enabled });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/users/me"] });
+    },
+    onError: () => {
+      toast({ title: "Couldn't update setting", variant: "destructive" });
+    },
   });
 
   const changePasswordMutation = useMutation({
@@ -324,6 +336,34 @@ export default function AccountSettingsPage() {
                   />
                 </div>
               )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <CheckCheckIcon className="h-5 w-5" />
+                Privacy
+              </CardTitle>
+              <CardDescription>
+                Control what other people can see about your activity.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <p className="text-sm font-medium">Read receipts</p>
+                  <p className="text-sm text-muted-foreground">
+                    Let people you message see when you've read their messages. Turning this off also hides theirs from you.
+                  </p>
+                </div>
+                <Switch
+                  checked={userProfile?.readReceiptsEnabled ?? true}
+                  disabled={readReceiptsMutation.isPending}
+                  onCheckedChange={(checked) => readReceiptsMutation.mutate(checked)}
+                  data-testid="switch-read-receipts"
+                />
+              </div>
             </CardContent>
           </Card>
         </div>

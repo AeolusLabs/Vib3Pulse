@@ -44,6 +44,9 @@ import type { User, Conversation, ConversationParticipant, ConversationMessage, 
 import type { AuthUser } from "@/hooks/useAuth";
 import { SendIcon, ArrowLeftIcon, UsersIcon, SettingsIcon, ChartBarIcon, MoreVerticalIcon, UserPlusIcon, LogOutIcon, ShieldIcon, UserMinusIcon, Trash2Icon, Loader2Icon, Link2Icon, CopyIcon, CheckIcon, CameraIcon, CalendarIcon, Building2Icon, XIcon, MapPinIcon } from "@/components/ui/icons";
 
+// Matches MAX_GROUP_MEMBERS in server/routes/messages-routes.ts, enforced there.
+const MAX_GROUP_MEMBERS = 50;
+
 function GCVAttachedEvent({ eventId, isOwn }: { eventId: string; isOwn: boolean }) {
   const [, navigate] = useLocation();
   const { data: event } = useQuery<Event>({
@@ -293,8 +296,8 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
 
         <div className="flex-1 min-w-0">
           <h3 className="font-semibold truncate" data-testid="text-group-name">{conversation.name}</h3>
-          <p className="text-xs text-muted-foreground">
-            {conversation.participants.length} members
+          <p className="text-xs text-muted-foreground" data-testid="text-member-count">
+            {conversation.participants.length}/{MAX_GROUP_MEMBERS} members
           </p>
         </div>
 
@@ -308,7 +311,7 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
             <SheetHeader>
               <SheetTitle>Group Settings</SheetTitle>
               <SheetDescription>
-                {conversation.participants.length} members
+                {conversation.participants.length}/{MAX_GROUP_MEMBERS} members
               </SheetDescription>
             </SheetHeader>
             
@@ -427,16 +430,20 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
               Create Poll
             </DropdownMenuItem>
             {isAdmin && (
-              <DropdownMenuItem 
+              <DropdownMenuItem
                 onClick={() => generateInviteMutation.mutate()}
-                disabled={generateInviteMutation.isPending}
+                disabled={generateInviteMutation.isPending || conversation.participants.length >= MAX_GROUP_MEMBERS}
               >
                 {inviteCopied ? (
                   <CheckIcon className="h-4 w-4 mr-2" />
                 ) : (
                   <Link2Icon className="h-4 w-4 mr-2" />
                 )}
-                {generateInviteMutation.isPending ? "Generating..." : inviteCopied ? "Copied!" : "Copy Invite Link"}
+                {generateInviteMutation.isPending
+                  ? "Generating..."
+                  : conversation.participants.length >= MAX_GROUP_MEMBERS
+                    ? `Group full (${MAX_GROUP_MEMBERS} max)`
+                    : inviteCopied ? "Copied!" : "Copy Invite Link"}
               </DropdownMenuItem>
             )}
             <DropdownMenuSeparator />

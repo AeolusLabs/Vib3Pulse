@@ -6,7 +6,7 @@ import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import { useState } from "react";
 
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import CreateEventModal from "@/components/CreateEventModal";
 import EventDetailsModal from "@/components/EventDetailsModal";
 import { PromoteEventDialog } from "@/components/PromoteEventDialog";
@@ -16,7 +16,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Event as DBEvent } from "@shared/schema";
-import { EditIcon, Trash2Icon, BarChart3Icon, EyeIcon, EyeOffIcon, CalendarIcon, MapPinIcon, QrCodeIcon, MegaphoneIcon, SparklesIcon, DownloadIcon } from "@/components/ui/icons";
+import { EditIcon, Trash2Icon, BarChart3Icon, EyeIcon, EyeOffIcon, CalendarIcon, MapPinIcon, QrCodeIcon, MegaphoneIcon, SparklesIcon, DownloadIcon, MessageSquareIcon } from "@/components/ui/icons";
 import { formatMoney } from "@/lib/currency";
 
 interface Event {
@@ -40,6 +40,7 @@ interface Event {
 
 export default function ManageEventsPage() {
   const { toast } = useToast();
+  const [, navigate] = useLocation();
   const [createEventOpen, setCreateEventOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<DBEvent | undefined>(undefined);
   const [viewingEvent, setViewingEvent] = useState<DBEvent | null>(null);
@@ -63,6 +64,19 @@ export default function ManageEventsPage() {
     },
     onError: (error: any) => {
       toast({ title: "Delete failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const groupChatMutation = useMutation({
+    mutationFn: async (eventId: string) => {
+      const res = await apiRequest("POST", `/api/events/${eventId}/group-chat`, {});
+      return res.json();
+    },
+    onSuccess: (conversation) => {
+      navigate(`/messages/${conversation.id}`);
+    },
+    onError: (error: any) => {
+      toast({ title: "Couldn't create group chat", description: error.message, variant: "destructive" });
     },
   });
 
@@ -284,6 +298,19 @@ export default function ManageEventsPage() {
           >
             <DownloadIcon className="h-4 w-4 mr-2" />
             Guestlist
+          </Button>
+        )}
+
+        {event.status !== 'draft' && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => groupChatMutation.mutate(event.id)}
+            disabled={groupChatMutation.isPending}
+            data-testid={`button-group-chat-${event.id}`}
+          >
+            <MessageSquareIcon className="h-4 w-4 mr-2" />
+            Group Chat
           </Button>
         )}
 

@@ -5,6 +5,8 @@ import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import CreateGroupModal from "@/components/CreateGroupModal";
 import GroupChatView from "@/components/GroupChatView";
+import { ObjectUploader } from "@/components/ObjectUploader";
+import ImageLightbox from "@/components/ImageLightbox";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,7 +33,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import type { User, Message, Event, Venue, Conversation, ConversationParticipant, ConversationMessage, Story } from "@shared/schema";
-import { SendIcon, ArrowLeftIcon, SearchIcon, UserPlusIcon, ReplyIcon, XIcon, CalendarIcon, MapPinIcon, Building2Icon, UsersIcon, PlusIcon, MessageSquareIcon, ChevronDownIcon, ImageIcon, PlayIcon } from "@/components/ui/icons";
+import { SendIcon, ArrowLeftIcon, SearchIcon, UserPlusIcon, ReplyIcon, XIcon, CalendarIcon, MapPinIcon, Building2Icon, UsersIcon, PlusIcon, MessageSquareIcon, ChevronDownIcon, ImageIcon, PlayIcon, CameraIcon, CheckCheckIcon, Trash2Icon } from "@/components/ui/icons";
 
 type ConversationWithDetails = Conversation & {
   participants: Array<ConversationParticipant & { user: User }>;
@@ -204,6 +206,11 @@ export default function MessagesPage() {
   const [createGroupOpen, setCreateGroupOpen] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<ConversationWithDetails | null>(null);
   const [replyingTo, setReplyingTo] = useState<ConversationMessageWithSender | null>(null);
+  const [composerImages, setComposerImages] = useState<string[]>([]);
+  const [lightboxImages, setLightboxImages] = useState<string[] | null>(null);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [threadSearchOpen, setThreadSearchOpen] = useState(false);
+  const [threadSearchQuery, setThreadSearchQuery] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -220,6 +227,16 @@ export default function MessagesPage() {
   const { data: conversationMessages = [], isLoading: messagesLoading } = useQuery<ConversationMessageWithSender[]>({
     queryKey: ['/api/conversations', conversationId, 'messages'],
     enabled: !!conversationId && !!currentUser,
+  });
+
+  const { data: threadSearchResults = [], isLoading: threadSearchLoading } = useQuery<ConversationMessageWithSender[]>({
+    queryKey: ['/api/conversations', conversationId, 'messages', 'search', threadSearchQuery],
+    queryFn: async () => {
+      const res = await fetch(`/api/conversations/${conversationId}/messages/search?q=${encodeURIComponent(threadSearchQuery)}`, { credentials: 'include' });
+      if (!res.ok) throw new Error('Search failed');
+      return res.json();
+    },
+    enabled: threadSearchOpen && !!conversationId && threadSearchQuery.trim().length > 0,
   });
 
   useEffect(() => {
@@ -285,34 +302,49 @@ export default function MessagesPage() {
   });
 
   const sendMessageMutation = useMutation({
-    mutationFn: async ({ content, replyToId, eventId, venueId }: {
+    mutationFn: async ({ content, replyToId, eventId, venueId, imageUrls }: {
       content: string;
       replyToId?: string;
       eventId?: string;
       venueId?: string;
+      imageUrls?: string[];
     }) => {
       return await apiRequest('POST', `/api/conversations/${conversationId}/messages`, {
         content,
-        messageType: eventId ? 'event' : venueId ? 'venue' : 'text',
+        messageType: imageUrls?.length ? 'image' : eventId ? 'event' : venueId ? 'venue' : 'text',
         replyToId,
         eventId,
         venueId,
+        imageUrls,
       });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/conversations', conversationId, 'messages'] });
       queryClient.invalidateQueries({ queryKey: ['/api/conversations'] });
       setMessageText("");
+      setComposerImages([]);
       setReplyingTo(null);
     },
   });
 
+  const deleteMessageMutation = useMutation({
+    mutationFn: async (messageId: string) => {
+      return await apiRequest('DELETE', `/api/conversations/${conversationId}/messages/${messageId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/conversations', conversationId, 'messages'] });
+    },
+    onError: () => {
+      toast({ title: "Couldn't delete message", variant: "destructive" });
+    },
+  });
 
   const handleSendMessage = () => {
-    if (messageText.trim() && conversationId) {
+    if ((messageText.trim() || composerImages.length > 0) && conversationId) {
       sendMessageMutation.mutate({
         content: messageText.trim(),
         replyToId: replyingTo?.id,
+        imageUrls: composerImages.length > 0 ? composerImages : undefined,
       });
     }
   };
@@ -408,6 +440,24 @@ export default function MessagesPage() {
       (p) => p.userId !== currentUser.id
     );
     const otherUser = otherParticipant?.user;
+    // useAuth()'s session payload is a narrow AuthUser, not the full User row
+    // — but getConversationParticipants already returns every participant's
+    // full User (readReceiptsEnabled included), so look up our own row there
+    // instead of widening the auth session type just for this one field.
+    const ownParticipant = selectedConversation.participants.find(
+      (p) => p.userId === currentUser.id
+    );
+
+    // Read receipts are mutual, like WhatsApp's toggle: both people need it on
+    // before either sees "Seen" for the other.
+    const readReceiptsActive = ownParticipant?.user.readReceiptsEnabled !== false && otherUser?.readReceiptsEnabled !== false;
+    const lastOwnMessage = readReceiptsActive
+      ? [...conversationMessages].reverse().find(m => m.senderId === currentUser.id && !m.isDeleted)
+      : undefined;
+    const isLastOwnMessageSeen = !!(lastOwnMessage && otherParticipant?.lastReadAt &&
+      new Date(otherParticipant.lastReadAt) >= new Date(lastOwnMessage.createdAt));
+
+    const displayedMessages = threadSearchOpen ? threadSearchResults : conversationMessages;
 
     return (
       <div className="h-[calc(100dvh-4rem)] md:h-dvh bg-background flex flex-col overflow-hidden">
@@ -438,33 +488,61 @@ export default function MessagesPage() {
                   </p>
                   <p className="text-xs text-muted-foreground leading-tight">@{otherUser.username}</p>
                 </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="rounded-full h-9 w-9 text-muted-foreground hover:text-foreground flex-shrink-0"
+                  onClick={() => { setThreadSearchOpen((v) => !v); setThreadSearchQuery(""); }}
+                  data-testid="button-toggle-thread-search"
+                >
+                  <SearchIcon className="h-4.5 w-4.5" />
+                </Button>
               </>
             )}
           </div>
+          {threadSearchOpen && (
+            <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 pb-3">
+              <div className="relative">
+                <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  autoFocus
+                  type="text"
+                  placeholder="Search this conversation…"
+                  value={threadSearchQuery}
+                  onChange={(e) => setThreadSearchQuery(e.target.value)}
+                  className="pl-10 h-9 rounded-full bg-muted/50 border-border/40"
+                  data-testid="input-thread-search"
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Scrollable messages */}
         <main className="flex-1 overflow-hidden flex flex-col max-w-[1200px] mx-auto w-full px-4 sm:px-6 lg:px-8">
           <ScrollArea className="flex-1 py-4">
-            {messagesLoading ? (
+            {(threadSearchOpen ? threadSearchLoading : messagesLoading) ? (
               <div className="space-y-1 py-2">
                 {[0, 1, 2, 3].map((i) => <MessageBubbleSkeleton key={i} index={i} />)}
               </div>
-            ) : conversationMessages.length === 0 ? (
+            ) : displayedMessages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full py-16 text-center">
                 <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
                   <MessageSquareIcon className="h-7 w-7 text-primary" />
                 </div>
-                <p className="font-medium text-foreground">No messages yet</p>
-                <p className="text-sm text-muted-foreground mt-1">Say hello to start the conversation</p>
+                <p className="font-medium text-foreground">
+                  {threadSearchOpen ? (threadSearchQuery.trim() ? "No matches found" : "Search this conversation") : "No messages yet"}
+                </p>
+                {!threadSearchOpen && <p className="text-sm text-muted-foreground mt-1">Say hello to start the conversation</p>}
               </div>
             ) : (
               <div className="space-y-1">
-                {conversationMessages.map((message, idx) => {
+                {displayedMessages.map((message, idx) => {
                   const isOwnMessage = message.senderId === currentUser?.id;
-                  const prevMsg = conversationMessages[idx - 1];
+                  const prevMsg = displayedMessages[idx - 1];
                   const showTimeDivider = !prevMsg ||
                     new Date(message.createdAt).getTime() - new Date(prevMsg.createdAt).getTime() > 5 * 60 * 1000;
+                  const isLastMessage = !threadSearchOpen && idx === displayedMessages.length - 1;
 
                   return (
                     <div key={message.id}>
@@ -483,45 +561,85 @@ export default function MessagesPage() {
                               isOwnMessage
                                 ? 'bg-violet-600 text-white rounded-2xl rounded-br-sm'
                                 : 'bg-muted text-foreground rounded-2xl rounded-bl-sm'
-                            }`}
+                            } ${message.isDeleted ? 'italic opacity-70' : ''}`}
                           >
-                            {message.messageType === 'story_reply' && (
-                              <StoryReplyCard story={message.story} isOwnMessage={isOwnMessage} />
-                            )}
-                            {message.replyTo && (
-                              <div
-                                className={`mb-2 px-2 py-1.5 rounded-lg border-l-2 ${
-                                  isOwnMessage
-                                    ? 'bg-white/10 border-white/50'
-                                    : 'bg-background/60 border-primary/40'
-                                }`}
-                              >
-                                <p className={`text-[11px] font-medium flex items-center gap-1 mb-0.5 ${isOwnMessage ? 'text-white/70' : 'text-muted-foreground'}`}>
-                                  <ReplyIcon className="h-3 w-3" />
-                                  {message.replyTo.sender?.username || 'Unknown'}
-                                </p>
-                                <p className={`text-xs line-clamp-1 ${isOwnMessage ? 'text-white/60' : 'text-muted-foreground'}`}>
-                                  {message.replyTo.content}
-                                </p>
-                              </div>
-                            )}
-                            {message.content}
-                            {message.eventId && (
-                              <MessageAttachedEvent eventId={message.eventId} isOwnMessage={isOwnMessage} />
-                            )}
-                            {message.venueId && (
-                              <MessageAttachedVenue venueId={message.venueId} isOwnMessage={isOwnMessage} />
+                            {message.isDeleted ? (
+                              <span className={isOwnMessage ? 'text-white/70' : 'text-muted-foreground'}>[message deleted]</span>
+                            ) : (
+                              <>
+                                {message.messageType === 'story_reply' && (
+                                  <StoryReplyCard story={message.story} isOwnMessage={isOwnMessage} />
+                                )}
+                                {message.replyTo && (
+                                  <div
+                                    className={`mb-2 px-2 py-1.5 rounded-lg border-l-2 ${
+                                      isOwnMessage
+                                        ? 'bg-white/10 border-white/50'
+                                        : 'bg-background/60 border-primary/40'
+                                    }`}
+                                  >
+                                    <p className={`text-[11px] font-medium flex items-center gap-1 mb-0.5 ${isOwnMessage ? 'text-white/70' : 'text-muted-foreground'}`}>
+                                      <ReplyIcon className="h-3 w-3" />
+                                      {message.replyTo.sender?.username || 'Unknown'}
+                                    </p>
+                                    <p className={`text-xs line-clamp-1 ${isOwnMessage ? 'text-white/60' : 'text-muted-foreground'}`}>
+                                      {message.replyTo.content}
+                                    </p>
+                                  </div>
+                                )}
+                                {message.imageUrls && message.imageUrls.length > 0 && (
+                                  <div className={`grid gap-1 ${message.imageUrls.length > 1 ? 'grid-cols-2' : 'grid-cols-1'} ${message.content ? 'mb-2' : ''}`}>
+                                    {message.imageUrls.map((url, i) => (
+                                      <img
+                                        key={i}
+                                        src={url}
+                                        alt="Sent image"
+                                        className="rounded-lg object-cover w-full h-32 cursor-pointer"
+                                        onClick={(e) => { e.stopPropagation(); setLightboxImages(message.imageUrls!); setLightboxIndex(i); }}
+                                        data-testid={`img-message-${message.id}-${i}`}
+                                      />
+                                    ))}
+                                  </div>
+                                )}
+                                {message.content}
+                                {message.eventId && (
+                                  <MessageAttachedEvent eventId={message.eventId} isOwnMessage={isOwnMessage} />
+                                )}
+                                {message.venueId && (
+                                  <MessageAttachedVenue venueId={message.venueId} isOwnMessage={isOwnMessage} />
+                                )}
+                              </>
                             )}
                           </div>
-                          <button
-                            className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity p-1 text-muted-foreground hover:text-foreground rounded-full hover:bg-muted"
-                            onClick={() => { setReplyingTo(message); inputRef.current?.focus(); }}
-                            data-testid={`button-reply-${message.id}`}
-                          >
-                            <ReplyIcon className="h-3.5 w-3.5" />
-                          </button>
+                          {!message.isDeleted && (
+                            <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex items-center gap-0.5">
+                              <button
+                                className="p-1 text-muted-foreground hover:text-foreground rounded-full hover:bg-muted"
+                                onClick={() => { setReplyingTo(message); inputRef.current?.focus(); }}
+                                data-testid={`button-reply-${message.id}`}
+                              >
+                                <ReplyIcon className="h-3.5 w-3.5" />
+                              </button>
+                              {isOwnMessage && (
+                                <button
+                                  className="p-1 text-muted-foreground hover:text-destructive rounded-full hover:bg-muted"
+                                  onClick={() => deleteMessageMutation.mutate(message.id)}
+                                  disabled={deleteMessageMutation.isPending}
+                                  data-testid={`button-delete-message-${message.id}`}
+                                >
+                                  <Trash2Icon className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
+                      {isLastMessage && isOwnMessage && isLastOwnMessageSeen && (
+                        <p className="text-right text-[10px] text-muted-foreground/70 flex items-center justify-end gap-1 mt-0.5" data-testid="text-seen-indicator">
+                          <CheckCheckIcon className="h-3 w-3" />
+                          Seen {otherParticipant?.lastReadAt ? formatMessageTime(otherParticipant.lastReadAt) : ''}
+                        </p>
+                      )}
                     </div>
                   );
                 })}
@@ -549,10 +667,37 @@ export default function MessagesPage() {
                 </button>
               </div>
             )}
+            {composerImages.length > 0 && (
+              <div className="mb-2 flex gap-2 flex-wrap">
+                {composerImages.map((url, i) => (
+                  <div key={i} className="relative">
+                    <img src={url} alt="" className="h-16 w-16 rounded-lg object-cover border" />
+                    <button
+                      type="button"
+                      className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center"
+                      onClick={() => setComposerImages((prev) => prev.filter((_, idx) => idx !== i))}
+                      data-testid={`button-remove-composer-image-${i}`}
+                    >
+                      <XIcon className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <form
               onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }}
               className="flex items-center gap-2"
             >
+              <ObjectUploader
+                maxNumberOfFiles={4}
+                maxFileSizeMB={10}
+                onComplete={(urls) => setComposerImages((prev) => [...prev, ...urls].slice(0, 4))}
+                buttonVariant="ghost"
+                buttonSize="icon"
+                buttonClassName="h-11 w-11 rounded-full flex-shrink-0 text-muted-foreground hover:text-foreground"
+              >
+                <CameraIcon className="h-5 w-5" />
+              </ObjectUploader>
               <Input
                 ref={inputRef}
                 type="text"
@@ -564,7 +709,7 @@ export default function MessagesPage() {
               />
               <button
                 type="submit"
-                disabled={!messageText.trim() || sendMessageMutation.isPending}
+                disabled={(!messageText.trim() && composerImages.length === 0) || sendMessageMutation.isPending}
                 className="h-11 w-11 rounded-full bg-violet-600 hover:bg-violet-500 disabled:opacity-40 flex items-center justify-center text-white transition-colors flex-shrink-0"
                 data-testid="button-send"
               >
@@ -573,6 +718,15 @@ export default function MessagesPage() {
             </form>
           </div>
         </main>
+
+        {lightboxImages && (
+          <ImageLightbox
+            images={lightboxImages}
+            initialIndex={lightboxIndex}
+            open={!!lightboxImages}
+            onClose={() => setLightboxImages(null)}
+          />
+        )}
 
         <BottomNavigation />
       </div>

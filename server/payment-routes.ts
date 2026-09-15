@@ -1,7 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { z } from "zod";
 import { storage } from "./storage.js";
-import { wsManager } from "./websocket.js";
 import {
   createCheckout,
   verifyCheckoutSession,
@@ -25,6 +24,8 @@ import { recordTransaction } from "./payments/ledger.js";
 import { computeFeeSplit } from "./payments/fees.js";
 import type { OrganizerSplit } from "./payments/types.js";
 import { sendTicketPurchaseEmail } from "./emailService.js";
+import { MAX_GROUP_MEMBERS } from "./routes/messages-routes.js";
+import { deliverNotification } from "./notifications.js";
 
 function requireAuth(req: Request, res: Response, next: Function) {
   if (!req.isAuthenticated() || !req.user) {
@@ -195,6 +196,13 @@ async function issueEventTickets(params: IssueEventTicketsParams): Promise<Issue
         walletLink: `${baseUrl}/ticket-wallet`,
       });
     }
+
+    // Auto-fill the event's group chat, if the organiser has created one —
+    // one add per buyer regardless of ticket quantity in this order.
+    const eventGroupChat = await storage.getConversationByEventId(event.id);
+    if (eventGroupChat) {
+      await storage.addConversationParticipantIfRoom(eventGroupChat.id, params.userId, MAX_GROUP_MEMBERS);
+    }
   }
 
   return { tickets, alreadyIssued: false, oversold: false };
@@ -348,7 +356,12 @@ export function registerPaymentRoutes(app: Express): void {
       const event = await storage.getEvent(meta.eventId);
       if (event) {
         const buyer = await storage.getUser(meta.userId);
-        await storage.createNotification({
+        // Was a direct storage.createNotification() call — meant this
+        // notification silently never got real-time WebSocket push or a
+        // browser push notification, only ever appearing on the bell's next
+        // poll. deliverNotification() does all three, matching every other
+        // trigger point in the app.
+        await deliverNotification({
           userId: event.organizerId,
           type: "ticket_purchase",
           title: "Ticket Sold",
@@ -358,10 +371,6 @@ export function registerPaymentRoutes(app: Express): void {
           link: `/event/${event.id}`,
           relatedUserId: meta.userId,
           relatedEntityId: tickets[0].id,
-        });
-        wsManager.sendToUser(event.organizerId, {
-          type: "notification",
-          data: { type: "ticket_purchase" },
         });
       }
 

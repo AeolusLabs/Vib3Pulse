@@ -35,11 +35,12 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import StoryInteractionsPanel from "@/components/StoryInteractionsPanel";
+import StoryCommentsSheet from "@/components/StoryCommentsSheet";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { motion, AnimatePresence } from "framer-motion";
-import { XIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpIcon, HeartIcon, EyeIcon, SendIcon, Trash2Icon, Share2Icon, LockIcon, RefreshCwIcon, Volume2Icon, VolumeXIcon } from "@/components/ui/icons";
+import { XIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpIcon, HeartIcon, EyeIcon, SendIcon, Trash2Icon, Share2Icon, LockIcon, RefreshCwIcon, Volume2Icon, VolumeXIcon, MessageCircleIcon } from "@/components/ui/icons";
 
 interface StorySlide {
   id: string;
@@ -96,6 +97,7 @@ export default function StoryViewer({
   const [localLikeStates, setLocalLikeStates] = useState<Record<string, { isLiked: boolean; likeCount: number }>>({});
   const [isVideoMuted, setIsVideoMuted] = useState(true);
   const [showInteractionsPanel, setShowInteractionsPanel] = useState(false);
+  const [showCommentsSheet, setShowCommentsSheet] = useState(false);
   const storyVideoRef = useRef<HTMLVideoElement>(null);
   const holdStartRef = useRef(0);
   const navigatingRef = useRef(false);
@@ -129,6 +131,25 @@ export default function StoryViewer({
     if (!currentStory || isOwnStory) return;
     apiRequest('POST', `/api/stories/${currentStory.id}/view`, undefined).catch(() => {});
   }, [currentStory?.id, isOwnStory]);
+
+  // Reading/typing comments shouldn't race against the story auto-advancing.
+  useEffect(() => {
+    setIsPaused(showCommentsSheet);
+  }, [showCommentsSheet]);
+
+  // Lightweight count fetch per slide so the comment badge is accurate even
+  // before the sheet is ever opened. Same query key as StoryCommentsSheet's
+  // own query, so opening the sheet (which polls while open, for the "live"
+  // feel) shares one cache entry and keeps this badge in sync for free.
+  const { data: commentCountData } = useQuery<{ count: number }>({
+    queryKey: [`/api/stories/${currentStory?.id}/comments`],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/stories/${currentStory!.id}/comments`);
+      return res.json();
+    },
+    enabled: !!currentStory?.id,
+  });
+  const commentCount = commentCountData?.count ?? 0;
 
   // Live interactions data for the story owner
   const { data: interactionsData } = useQuery<{ viewCount: number; likeCount: number }>({
@@ -639,28 +660,38 @@ export default function StoryViewer({
         {/* Bottom action bar */}
         <div className="absolute bottom-0 left-0 right-0 z-20 p-4 pb-6 bg-gradient-to-t from-black/60 via-black/30 to-transparent">
           {isOwnStory ? (
-            /* Owner: tap to open interactions panel */
-            <button
-              className="flex items-center gap-5 w-full"
-              onClick={() => setShowInteractionsPanel(true)}
-              data-testid="button-open-interactions"
-            >
-              <div className="flex items-center gap-1.5">
-                <EyeIcon className="h-5 w-5 text-white/80" />
-                <span className="text-white font-semibold text-sm">
-                  {interactionsData?.viewCount ?? currentStory.viewCount ?? 0}
-                </span>
-                <span className="text-white/60 text-xs">views</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <HeartIcon className="h-5 w-5 text-red-400 fill-red-400" />
-                <span className="text-white font-semibold text-sm">
-                  {interactionsData?.likeCount ?? currentLikeState.likeCount}
-                </span>
-                <span className="text-white/60 text-xs">likes</span>
-              </div>
-              <ChevronUpIcon className="h-4 w-4 text-white/60 ml-auto" />
-            </button>
+            /* Owner: tap to open interactions panel, or comments separately */
+            <div className="flex items-center gap-5 w-full">
+              <button
+                className="flex items-center gap-5"
+                onClick={() => setShowInteractionsPanel(true)}
+                data-testid="button-open-interactions"
+              >
+                <div className="flex items-center gap-1.5">
+                  <EyeIcon className="h-5 w-5 text-white/80" />
+                  <span className="text-white font-semibold text-sm">
+                    {interactionsData?.viewCount ?? currentStory.viewCount ?? 0}
+                  </span>
+                  <span className="text-white/60 text-xs">views</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <HeartIcon className="h-5 w-5 text-red-400 fill-red-400" />
+                  <span className="text-white font-semibold text-sm">
+                    {interactionsData?.likeCount ?? currentLikeState.likeCount}
+                  </span>
+                  <span className="text-white/60 text-xs">likes</span>
+                </div>
+                <ChevronUpIcon className="h-4 w-4 text-white/60" />
+              </button>
+              <button
+                className="flex items-center gap-1.5 ml-auto"
+                onClick={() => setShowCommentsSheet(true)}
+                data-testid="button-open-comments"
+              >
+                <MessageCircleIcon className="h-5 w-5 text-white/80" />
+                <span className="text-white font-semibold text-sm">{commentCount}</span>
+              </button>
+            </div>
           ) : (
             /* Non-owner: reply + like + reshare */
             <>
@@ -721,6 +752,20 @@ export default function StoryViewer({
                 >
                   <Share2Icon className="h-6 w-6" />
                 </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowCommentsSheet(true)}
+                  className="text-white hover:bg-white/20 relative"
+                  data-testid="button-open-comments"
+                >
+                  <MessageCircleIcon className="h-6 w-6" />
+                  {commentCount > 0 && (
+                    <span className="absolute -top-1 -right-1 h-4 min-w-[16px] px-1 rounded-full bg-primary text-white text-[9px] font-bold flex items-center justify-center">
+                      {commentCount}
+                    </span>
+                  )}
+                </Button>
               </div>
             </>
           )}
@@ -753,6 +798,15 @@ export default function StoryViewer({
         storyId={currentStory.id}
         open={showInteractionsPanel}
         onOpenChange={setShowInteractionsPanel}
+      />
+    )}
+
+    {currentStory && storyOwnerId && (
+      <StoryCommentsSheet
+        storyId={currentStory.id}
+        storyOwnerId={storyOwnerId}
+        open={showCommentsSheet}
+        onOpenChange={setShowCommentsSheet}
       />
     )}
     </>

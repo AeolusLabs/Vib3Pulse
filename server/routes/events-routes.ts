@@ -11,6 +11,7 @@ import { deliverNotification } from "../notifications";
 import { refundPayment } from "../payments/index.js";
 import { geocodeAddress, sortByProximity } from "../utils/geo";
 import { rankEvents } from "../utils/eventRanking.js";
+import { MAX_GROUP_MEMBERS } from "./messages-routes.js";
 import QRCode from "qrcode";
 import { eventCreateDto, eventUpdateDto, insertTicketSchema, insertRsvpSchema } from "@shared/schema";
 
@@ -944,6 +945,46 @@ export function registerEventsRoutes(app: Express): void {
     }
   });
 
+  // Create (or fetch the existing) event group chat — organiser only.
+  // Auto-fills with every current confirmed ticket holder + RSVP; new buyers
+  // join automatically afterward via the hooks in payment-routes.ts and the
+  // RSVP route below. Auto-dissolves 7 days after the event
+  // (startEventGroupDissolveJob in server/index.ts).
+  app.post("/api/events/:id/group-chat", requireAuth, async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.id);
+      if (!event) return res.status(404).json({ message: "Event not found" });
+      if (event.organizerId !== req.user!.id) {
+        return res.status(403).json({ message: "Only the organiser can create the event group chat" });
+      }
+
+      const existing = await storage.getConversationByEventId(event.id);
+      if (existing) {
+        const full = await storage.getConversationById(existing.id);
+        return res.json(full);
+      }
+
+      const attendeeIds = await storage.getAllEventAttendeeIds(event.id);
+      const initialMembers = Array.from(new Set([req.user!.id, ...attendeeIds])).slice(0, MAX_GROUP_MEMBERS);
+
+      const conversation = await storage.createConversation(
+        {
+          isGroup: true,
+          name: event.title,
+          createdById: req.user!.id,
+          eventId: event.id,
+        },
+        initialMembers
+      );
+
+      const full = await storage.getConversationById(conversation.id);
+      res.status(201).json(full);
+    } catch (error) {
+      console.error("Error creating event group chat:", error);
+      res.status(500).json({ message: "Failed to create event group chat" });
+    }
+  });
+
   // ── Staff access code routes ──────────────────────────────────────────────
 
   // Generate a new staff code for an event
@@ -1213,6 +1254,12 @@ export function registerEventsRoutes(app: Express): void {
         relatedUserId: userId,
         relatedEntityId: eventId,
       });
+
+      // Auto-fill the event's group chat, if the organiser has created one.
+      const eventGroupChat = await storage.getConversationByEventId(eventId);
+      if (eventGroupChat) {
+        await storage.addConversationParticipantIfRoom(eventGroupChat.id, userId, MAX_GROUP_MEMBERS);
+      }
 
       res.json(rsvp);
     } catch (error) {

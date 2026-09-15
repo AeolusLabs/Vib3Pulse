@@ -611,6 +611,100 @@ export function registerSocialRoutes(app: Express): void {
     }
   });
 
+  // Story comments — a real, persistent comment thread on the story itself
+  // (distinct from the DM-based story_reply above). Both reads and writes go
+  // through canViewStoryNow, which is what makes the thread "follow the
+  // story's lifecycle": once a story exits its public 24h window, only the
+  // owner can still see (and reply within) it, via their Archive.
+  app.get("/api/stories/:storyId/comments", requireAuth, async (req, res) => {
+    try {
+      const { storyId } = req.params;
+      const story = await storage.getStory(storyId);
+      if (!story) return res.status(404).json({ message: "Story not found" });
+
+      const canView = await storage.canViewStoryNow(req.user!.id, storyId);
+      if (!canView) return res.status(403).json({ message: "Not authorized to view this story" });
+
+      const storyComments = await storage.getStoryComments(storyId, req.user!.id);
+      res.json({ comments: storyComments, count: storyComments.filter(c => !c.isDeleted).length });
+    } catch (error) {
+      console.error("Get story comments error:", error);
+      res.status(500).json({ message: "Failed to fetch comments" });
+    }
+  });
+
+  app.post("/api/stories/:storyId/comments", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user!.id;
+      const { storyId } = req.params;
+
+      const story = await storage.getStory(storyId);
+      if (!story) return res.status(404).json({ message: "Story not found" });
+
+      const canView = await storage.canViewStoryNow(userId, storyId);
+      if (!canView) return res.status(403).json({ message: "Not authorized to comment on this story" });
+
+      const { content, parentCommentId } = req.body;
+      if (!content || !content.trim()) {
+        return res.status(400).json({ message: "Comment content is required" });
+      }
+      const sanitizedContent = sanitizeTextOnly(content.trim());
+
+      const comment = await storage.addComment({
+        userId,
+        storyId,
+        parentCommentId: parentCommentId || null,
+        content: sanitizedContent,
+      });
+
+      // Notification is best-effort — never rolls back a comment that already saved.
+      try {
+        const commenter = await storage.getUser(userId);
+        const commenterName = commenter?.displayName || commenter?.username || "Someone";
+        const snippet = sanitizedContent.length > 60 ? sanitizedContent.substring(0, 60) + "..." : sanitizedContent;
+
+        // Notify the story owner on any new comment (unless they're the one
+        // commenting — e.g. replying to someone else's comment on their own story).
+        if (story.userId !== userId) {
+          await deliverNotification({
+            userId: story.userId,
+            type: "story_comment",
+            title: "New Story Comment",
+            message: `${commenterName} commented: "${snippet}"`,
+            link: `/stories/${storyId}`,
+            relatedUserId: userId,
+            relatedEntityId: comment.id,
+          });
+        }
+
+        // If this is the owner replying to a specific commenter, also notify
+        // that commenter — reuses the same notification type, there's only
+        // one "story_comment" declared.
+        if (story.userId === userId && parentCommentId) {
+          const parent = await storage.getComment(parentCommentId);
+          if (parent && parent.userId !== userId) {
+            await deliverNotification({
+              userId: parent.userId,
+              type: "story_comment",
+              title: "Story Owner Replied",
+              message: `${commenterName} replied: "${snippet}"`,
+              link: `/stories/${storyId}`,
+              relatedUserId: userId,
+              relatedEntityId: comment.id,
+            });
+          }
+        }
+      } catch (notifErr) {
+        console.error("Story comment notification failed:", notifErr);
+      }
+
+      res.status(201).json(comment);
+    } catch (error) {
+      console.error("Add story comment error:", error);
+      res.status(500).json({ message: "Failed to add comment" });
+    }
+  });
+
   // Post Interactions - Likes
   app.post("/api/posts/:postId/like", requireAuth, async (req, res) => {
     try {

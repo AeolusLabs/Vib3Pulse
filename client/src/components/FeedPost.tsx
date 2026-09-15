@@ -1,5 +1,6 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { communityTypeStyle } from "@/lib/communityTypes";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -88,7 +89,7 @@ interface FeedPostProps {
   venueId?: string | null;
   attachedEvent?: Event | null;
   attachedVenue?: Venue | null;
-  community?: { id: string; name: string; slug?: string } | null;
+  community?: { id: string; name: string; slug?: string; type?: string } | null;
   mentionedUsers?: MentionedUser[];
   hasActiveStory?: boolean;
   /** When true: renders flat/borderless for the main feed timeline */
@@ -481,7 +482,7 @@ export default function FeedPost({
                 href={`/community/${community.slug ?? community.id}`}
                 onClick={(e) => e.stopPropagation()}
               >
-                <Badge variant="outline" className="text-[11px] py-0 flex-shrink-0 cursor-pointer hover:bg-muted/50" data-testid={`community-tag-${id}`}>
+                <Badge variant="outline" className={`text-[11px] py-0 flex-shrink-0 cursor-pointer hover:opacity-80 ${communityTypeStyle(community.type)}`} data-testid={`community-tag-${id}`}>
                   in {community.name}
                 </Badge>
               </Link>

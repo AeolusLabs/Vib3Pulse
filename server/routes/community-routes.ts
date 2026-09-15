@@ -2,6 +2,9 @@ import type { Express } from "express";
 import { storage } from "../storage";
 import { requireAuth } from "../middleware";
 import { sanitizeTextOnly } from "../security";
+import { communityTypes } from "@shared/schema";
+
+const MAX_COMMUNITY_MEMBERS = 10_000;
 
 export function registerCommunityRoutes(app: Express): void {
   app.get("/api/communities", async (req, res) => {
@@ -25,6 +28,20 @@ export function registerCommunityRoutes(app: Express): void {
     }
   });
 
+  // Trending communities — weighted recent-activity ranking, not just newest.
+  // Registered before the generic /:id route below (same reason /my is up
+  // here too) so "trending" isn't swallowed as a community id.
+  app.get("/api/communities/trending", async (req, res) => {
+    try {
+      const limit = Math.min(parseInt(String(req.query.limit ?? "10"), 10) || 10, 50);
+      const trending = await storage.getTrendingCommunities(limit);
+      res.json(trending);
+    } catch (error) {
+      console.error("Error fetching trending communities:", error);
+      res.status(500).json({ message: "Failed to fetch trending communities" });
+    }
+  });
+
   // Get a specific community
   app.get("/api/communities/:id", async (req, res) => {
     try {
@@ -42,10 +59,14 @@ export function registerCommunityRoutes(app: Express): void {
   // Create a new community
   app.post("/api/communities", requireAuth, async (req, res) => {
     try {
-      const { name, description, coverImageUrl } = req.body;
+      const { name, description, coverImageUrl, type, rules } = req.body;
 
       if (!name || name.trim().length === 0) {
         return res.status(400).json({ message: "Community name is required" });
+      }
+
+      if (type !== undefined && !communityTypes.includes(type)) {
+        return res.status(400).json({ message: `type must be one of: ${communityTypes.join(", ")}` });
       }
 
       // Generate slug from name
@@ -65,6 +86,8 @@ export function registerCommunityRoutes(app: Express): void {
         slug,
         description: description ? sanitizeTextOnly(description) : null,
         coverImageUrl: coverImageUrl || null,
+        type: type || "general",
+        rules: rules ? sanitizeTextOnly(rules) : null,
         createdByUserId: req.user!.id,
       });
 
@@ -92,12 +115,19 @@ export function registerCommunityRoutes(app: Express): void {
         return res.status(403).json({ message: "Only the owner can update this community" });
       }
 
-      const { name, description, coverImageUrl } = req.body;
+      const { name, description, coverImageUrl, type, rules } = req.body;
       const updates: any = {};
 
       if (name) updates.name = sanitizeTextOnly(name.trim());
       if (description !== undefined) updates.description = description ? sanitizeTextOnly(description) : null;
       if (coverImageUrl !== undefined) updates.coverImageUrl = coverImageUrl;
+      if (type !== undefined) {
+        if (!communityTypes.includes(type)) {
+          return res.status(400).json({ message: `type must be one of: ${communityTypes.join(", ")}` });
+        }
+        updates.type = type;
+      }
+      if (rules !== undefined) updates.rules = rules ? sanitizeTextOnly(rules) : null;
 
       const updatedCommunity = await storage.updateCommunity(req.params.id, updates);
       res.json(updatedCommunity);
@@ -141,6 +171,11 @@ export function registerCommunityRoutes(app: Express): void {
       const isMember = await storage.isCommunityMember(req.user!.id, req.params.id);
       if (isMember) {
         return res.status(400).json({ message: "Already a member of this community" });
+      }
+
+      const memberCount = await storage.getCommunityMemberCount(req.params.id);
+      if (memberCount >= MAX_COMMUNITY_MEMBERS) {
+        return res.status(400).json({ message: `This community has reached its ${MAX_COMMUNITY_MEMBERS.toLocaleString()}-member limit` });
       }
 
       const membership = await storage.joinCommunity(req.user!.id, req.params.id);
@@ -191,7 +226,7 @@ export function registerCommunityRoutes(app: Express): void {
     }
   });
 
-  // Get community posts
+  // Get community posts — pinned first, optionally filtered by ?type=
   app.get("/api/communities/:id/posts", async (req, res) => {
     try {
       const community = await storage.getCommunity(req.params.id);
@@ -201,11 +236,70 @@ export function registerCommunityRoutes(app: Express): void {
 
       const limit = Math.min(parseInt(String(req.query.limit ?? "30"), 10) || 30, 100);
       const offset = parseInt(String(req.query.offset ?? "0"), 10) || 0;
-      const posts = await storage.getCommunityPosts(req.params.id, limit, offset);
+      const postType = typeof req.query.type === "string" && req.query.type !== "all" ? req.query.type : undefined;
+      const posts = await storage.getCommunityPosts(req.params.id, limit, offset, postType);
       res.json(posts);
     } catch (error) {
       console.error("Error fetching community posts:", error);
       res.status(500).json({ message: "Failed to fetch community posts" });
+    }
+  });
+
+  // Pin/unpin a post — owner or moderator only.
+  async function requireCommunityModerator(req: any, res: any): Promise<boolean> {
+    const membership = await storage.getCommunityMembership(req.user!.id, req.params.id);
+    if (!membership || !["owner", "moderator"].includes(membership.role)) {
+      res.status(403).json({ message: "Only the owner or a moderator can do this" });
+      return false;
+    }
+    return true;
+  }
+
+  async function getCommunityScopedPost(req: any, res: any) {
+    const post = await storage.getPost(req.params.postId);
+    if (!post || post.communityId !== req.params.id) {
+      res.status(404).json({ message: "Post not found in this community" });
+      return null;
+    }
+    return post;
+  }
+
+  app.post("/api/communities/:id/posts/:postId/pin", requireAuth, async (req, res) => {
+    try {
+      if (!(await requireCommunityModerator(req, res))) return;
+      if (!(await getCommunityScopedPost(req, res))) return;
+      const post = await storage.setCommunityPostPinned(req.params.postId, true);
+      res.json(post);
+    } catch (error) {
+      console.error("Error pinning post:", error);
+      res.status(500).json({ message: "Failed to pin post" });
+    }
+  });
+
+  app.delete("/api/communities/:id/posts/:postId/pin", requireAuth, async (req, res) => {
+    try {
+      if (!(await requireCommunityModerator(req, res))) return;
+      if (!(await getCommunityScopedPost(req, res))) return;
+      const post = await storage.setCommunityPostPinned(req.params.postId, false);
+      res.json(post);
+    } catch (error) {
+      console.error("Error unpinning post:", error);
+      res.status(500).json({ message: "Failed to unpin post" });
+    }
+  });
+
+  // Moderator/owner removes a post from the community — soft moderation
+  // (moderationStatus = 'removed'), consistent with how flagged posts are
+  // already hidden elsewhere, not a hard delete.
+  app.delete("/api/communities/:id/posts/:postId", requireAuth, async (req, res) => {
+    try {
+      if (!(await requireCommunityModerator(req, res))) return;
+      if (!(await getCommunityScopedPost(req, res))) return;
+      await storage.moderateRemoveCommunityPost(req.params.postId);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error removing community post:", error);
+      res.status(500).json({ message: "Failed to remove post" });
     }
   });
 

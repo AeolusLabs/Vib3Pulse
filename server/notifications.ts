@@ -1,10 +1,11 @@
 import { storage } from "./storage";
 import { wsManager } from "./websocket";
 import { sendPushNotification } from "./pushService";
+import type { NotificationType } from "@shared/schema";
 
 export async function deliverNotification(params: {
   userId: string;
-  type: string;
+  type: NotificationType;
   title: string;
   message: string;
   link?: string;

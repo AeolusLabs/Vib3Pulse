@@ -37,6 +37,9 @@ export const users = pgTable("users", {
   // Admin-granted credits letting an account promote an event/venue without
   // paying — each successful promotion (event or venue) consumes exactly one.
   freePromotionCredits: integer("free_promotion_credits").notNull().default(0),
+  // Mutual DM read-receipt visibility, same model as WhatsApp's toggle — off
+  // means you neither send nor see "Seen" status with anyone.
+  readReceiptsEnabled: boolean("read_receipts_enabled").notNull().default(true),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
@@ -62,6 +65,7 @@ export const updateUserSchema = insertUserSchema.pick({
   bannerMode: true,
   bannerVibe: true,
   bannerColor: true,
+  readReceiptsEnabled: true,
 }).partial();
 
 // Gender options enum
@@ -223,6 +227,9 @@ export const posts = pgTable("posts", {
   // Denormalized so feed/trending never need a COUNT(*) join — kept in sync by
   // storage.addComment/deleteComment in the same statement as the write.
   commentCount: integer("comment_count").notNull().default(0),
+  // Community-scoped only — pinning is meaningless (and unreachable) for a
+  // post with no communityId. Enforced at the route level, not a DB constraint.
+  isPinned: boolean("is_pinned").notNull().default(false),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
@@ -232,6 +239,7 @@ export const insertPostSchema = createInsertSchema(posts).omit({
   updatedAt: true,
   moderationStatus: true,
   commentCount: true,
+  isPinned: true,
   imageUrl: true, // Use imageUrls instead
 }).extend({
   content: z.string().min(1).max(280, "Caption must be 280 characters or less"),
@@ -449,6 +457,10 @@ export const conversations = pgTable("conversations", {
   createdById: varchar("created_by_id").references(() => users.id),
   lastMessageAt: timestamp("last_message_at"),
   lastMessagePreview: text("last_message_preview"), // Denormalized snippet — updated on every send to avoid a join at read time
+  // Set only for an organizer-created "event chat" — auto-fills with ticket/RSVP
+  // holders as they buy in, and auto-dissolves 7 days after the event (see
+  // startEventGroupDissolveJob in server/index.ts).
+  eventId: varchar("event_id").references(() => events.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
@@ -589,7 +601,13 @@ export type Like = typeof likes.$inferSelect;
 export const comments = pgTable("comments", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
-  postId: varchar("post_id").notNull().references(() => posts.id, { onDelete: 'cascade' }),
+  // Exactly one of postId/storyId is set (see commentTargetCheck below) — a
+  // comment belongs to a post OR a story, never both. Story comments reuse
+  // this whole table (soft-delete, threading, commentLikes) rather than a
+  // parallel one; storyId comments stay flat in practice (no UI builds deep
+  // threads on them) even though the column supports it either way.
+  postId: varchar("post_id").references(() => posts.id, { onDelete: 'cascade' }),
+  storyId: varchar("story_id").references(() => stories.id, { onDelete: 'cascade' }),
   // Self-reference for unlimited-depth threading (X/Reddit-style). Top-level
   // comments have parentCommentId: null; any reply — to a top-level comment OR
   // to another reply — points at its immediate parent. Deliberately NOT
@@ -601,7 +619,12 @@ export const comments = pgTable("comments", {
   isDeleted: boolean("is_deleted").notNull().default(false),
   deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
-});
+}, (table) => ({
+  commentTargetCheck: check(
+    "comment_target_check",
+    sql`(${table.postId} IS NOT NULL AND ${table.storyId} IS NULL) OR (${table.postId} IS NULL AND ${table.storyId} IS NOT NULL)`
+  ),
+}));
 
 export const insertCommentSchema = createInsertSchema(comments).omit({
   id: true,
@@ -1215,6 +1238,12 @@ export const notificationTypes = [
   "ticket_refund",
   "new_follower",
   "community_post",
+  // Previously used by social-routes.ts without being declared here —
+  // deliverNotification's `type` param is now typed against this array, so
+  // this exact class of drift (a real call site the type system couldn't
+  // catch) won't happen silently again.
+  "mention",
+  "repost",
 ] as const;
 export type NotificationType = typeof notificationTypes[number];
 
@@ -1249,6 +1278,9 @@ export type Notification = typeof notifications.$inferSelect;
 export const communityRoles = ["owner", "moderator", "member"] as const;
 export type CommunityRole = typeof communityRoles[number];
 
+export const communityTypes = ["general", "city", "genre", "safety", "event"] as const;
+export type CommunityType = typeof communityTypes[number];
+
 // Communities table
 export const communities = pgTable("communities", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1256,6 +1288,8 @@ export const communities = pgTable("communities", {
   slug: varchar("slug", { length: 100 }).notNull().unique(),
   description: text("description"),
   coverImageUrl: text("cover_image_url"),
+  type: text("type").notNull().default("general"),
+  rules: text("rules"),
   createdByUserId: varchar("created_by_user_id").notNull().references(() => users.id),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });

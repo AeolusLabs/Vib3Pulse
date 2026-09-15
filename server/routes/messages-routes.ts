@@ -2,6 +2,12 @@ import type { Express } from "express";
 import { storage } from "../storage";
 import { wsManager } from "../websocket";
 import { requireAuth } from "../middleware";
+import { deliverNotification } from "../notifications.js";
+
+// Discord/WhatsApp-scale group cap for this app's own group chats (separate
+// from the platform's Communities, which cap at 10,000 members). Exported so
+// events-routes.ts's event-group-chat creation enforces the same limit.
+export const MAX_GROUP_MEMBERS = 50;
 
 export function registerMessagesRoutes(app: Express): void {
 
@@ -47,6 +53,10 @@ export function registerMessagesRoutes(app: Express): void {
 
       // Ensure creator is included in participants
       const allParticipants = Array.from(new Set([req.user!.id, ...participantIds]));
+
+      if (allParticipants.length > MAX_GROUP_MEMBERS) {
+        return res.status(400).json({ message: `Groups are limited to ${MAX_GROUP_MEMBERS} members` });
+      }
 
       const conversation = await storage.createConversation(
         {
@@ -197,6 +207,11 @@ export function registerMessagesRoutes(app: Express): void {
         return res.status(400).json({ message: "User is already a participant" });
       }
 
+      const currentParticipants = await storage.getConversationParticipants(req.params.id);
+      if (currentParticipants.length >= MAX_GROUP_MEMBERS) {
+        return res.status(400).json({ message: `Groups are limited to ${MAX_GROUP_MEMBERS} members` });
+      }
+
       const participant = await storage.addConversationParticipant(req.params.id, userId, userRole);
       res.status(201).json(participant);
     } catch (error) {
@@ -318,6 +333,11 @@ export function registerMessagesRoutes(app: Express): void {
         return res.json(fullConversation);
       }
 
+      const currentParticipants = await storage.getConversationParticipants(conversation.id);
+      if (currentParticipants.length >= MAX_GROUP_MEMBERS) {
+        return res.status(400).json({ message: `This group is full (${MAX_GROUP_MEMBERS} member limit)` });
+      }
+
       // Add as member
       await storage.addConversationParticipant(conversation.id, req.user!.id, 'member');
       const fullConversation = await storage.getConversationById(conversation.id);
@@ -383,6 +403,28 @@ export function registerMessagesRoutes(app: Express): void {
       const participantIds = participants.map((p) => p.userId);
       wsManager.broadcastToConversation(req.params.id, participantIds, message);
 
+      // new_message was declared in notificationTypes but never fired —
+      // matches every other trigger point's fire-unconditionally convention
+      // (no "is the recipient currently looking at this chat" suppression;
+      // that's a separate, bigger presence feature this doesn't attempt).
+      const sender = await storage.getUser(req.user!.id);
+      const senderName = sender?.displayName || sender?.username || "Someone";
+      const preview = message.content?.trim()
+        ? (message.content.length > 60 ? message.content.slice(0, 60) + "…" : message.content)
+        : messageType === "image" ? "sent a photo" : "sent a message";
+      for (const participant of participants) {
+        if (participant.userId === req.user!.id) continue;
+        await deliverNotification({
+          userId: participant.userId,
+          type: "new_message",
+          title: senderName,
+          message: preview,
+          link: `/messages/${req.params.id}`,
+          relatedUserId: req.user!.id,
+          relatedEntityId: message.id,
+        });
+      }
+
       res.status(201).json(message);
     } catch (error) {
       console.error("Error sending message:", error);
@@ -390,7 +432,9 @@ export function registerMessagesRoutes(app: Express): void {
     }
   });
 
-  // Delete a message
+  // Delete a message — previously any participant could delete anyone's
+  // message (only membership was checked). Now requires being the sender,
+  // or (group chats only) a group admin moderating the conversation.
   app.delete("/api/conversations/:id/messages/:messageId", requireAuth, async (req, res) => {
     try {
       const isParticipant = await storage.isConversationParticipant(req.params.id, req.user!.id);
@@ -398,11 +442,42 @@ export function registerMessagesRoutes(app: Express): void {
         return res.status(403).json({ message: "Not a participant" });
       }
 
+      const message = await storage.getConversationMessage(req.params.messageId);
+      if (!message || message.conversationId !== req.params.id) {
+        return res.status(404).json({ message: "Message not found" });
+      }
+
+      if (message.senderId !== req.user!.id) {
+        const role = await storage.getParticipantRole(req.params.id, req.user!.id);
+        if (role !== 'admin') {
+          return res.status(403).json({ message: "You can only delete your own messages" });
+        }
+      }
+
       await storage.deleteConversationMessage(req.params.messageId);
       res.json({ message: "Message deleted" });
     } catch (error) {
       console.error("Error deleting message:", error);
       res.status(500).json({ message: "Failed to delete message" });
+    }
+  });
+
+  // Search messages within a conversation (participant-only, this thread only)
+  app.get("/api/conversations/:id/messages/search", requireAuth, async (req, res) => {
+    try {
+      const isParticipant = await storage.isConversationParticipant(req.params.id, req.user!.id);
+      if (!isParticipant) {
+        return res.status(403).json({ message: "Not a participant" });
+      }
+
+      const q = (req.query.q as string || "").trim();
+      if (!q) return res.json([]);
+
+      const results = await storage.searchConversationMessages(req.params.id, q);
+      res.json(results);
+    } catch (error) {
+      console.error("Error searching messages:", error);
+      res.status(500).json({ message: "Failed to search messages" });
     }
   });
 
