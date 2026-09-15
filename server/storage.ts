@@ -5328,6 +5328,7 @@ export class DbStorage implements IStorage {
       ? message.content.length > 60 ? message.content.substring(0, 60) + '…' : message.content
       : message.messageType === 'poll' ? 'Created a poll'
       : message.messageType === 'image' ? 'Sent an image'
+      : message.messageType === 'video' ? 'Sent a video'
       : message.messageType === 'event' ? 'Shared an event'
       : message.messageType === 'venue' ? 'Shared a venue'
       : message.messageType === 'post' ? 'Shared a post'
@@ -5361,6 +5362,7 @@ export class DbStorage implements IStorage {
       ...message,
       content: null,
       imageUrls: [],
+      videoUrl: null,
       eventId: null,
       venueId: null,
       postId: null,

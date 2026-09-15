@@ -39,13 +39,18 @@ import { useToast } from "@/hooks/use-toast";
 import PollMessage from "./PollMessage";
 import CreatePollModal from "./CreatePollModal";
 import { ObjectUploader } from "./ObjectUploader";
+import { VideoUploader } from "./VideoUploader";
+import ImageGrid from "./ImageGrid";
+import FeedVideoPlayer from "./FeedVideoPlayer";
 import { MentionInput, renderMessageWithMentions } from "./MentionInput";
 import type { User, Conversation, ConversationParticipant, ConversationMessage, Event, Venue } from "@shared/schema";
 import type { AuthUser } from "@/hooks/useAuth";
-import { SendIcon, ArrowLeftIcon, UsersIcon, SettingsIcon, ChartBarIcon, MoreVerticalIcon, UserPlusIcon, LogOutIcon, ShieldIcon, UserMinusIcon, Trash2Icon, Loader2Icon, Link2Icon, CopyIcon, CheckIcon, CameraIcon, CalendarIcon, Building2Icon, XIcon, MapPinIcon } from "@/components/ui/icons";
+import { SendIcon, ArrowLeftIcon, UsersIcon, SettingsIcon, ChartBarIcon, MoreVerticalIcon, UserPlusIcon, LogOutIcon, ShieldIcon, UserMinusIcon, Trash2Icon, Loader2Icon, Link2Icon, CopyIcon, CheckIcon, CameraIcon, CalendarIcon, Building2Icon, XIcon, MapPinIcon, PlusIcon, ImagesIcon } from "@/components/ui/icons";
 
 // Matches MAX_GROUP_MEMBERS in server/routes/messages-routes.ts, enforced there.
 const MAX_GROUP_MEMBERS = 50;
+// Matches CreatePostModal's cap — keeps the two attachment flows consistent.
+const MAX_CHAT_IMAGES = 4;
 
 function GCVAttachedEvent({ eventId, isOwn }: { eventId: string; isOwn: boolean }) {
   const [, navigate] = useLocation();
@@ -136,8 +141,16 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [memberToRemove, setMemberToRemove] = useState<string | null>(null);
   const [inviteCopied, setInviteCopied] = useState(false);
+  const [selectedImages, setSelectedImages] = useState<string[]>([]);
+  const [videoFileToUpload, setVideoFileToUpload] = useState<File | null>(null);
+  const [uploadedVideoUrl, setUploadedVideoUrl] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const mediaInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+
+  const hasImages = selectedImages.length > 0;
+  const hasVideo = !!(videoFileToUpload || uploadedVideoUrl);
+  const isUploadingVideo = !!videoFileToUpload && !uploadedVideoUrl;
 
   const { data: conversation, isLoading: loadingConversation } = useQuery<ConversationWithDetails>({
     queryKey: ['/api/conversations', conversationId],
@@ -148,17 +161,32 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
   });
 
   const sendMessageMutation = useMutation({
-    mutationFn: async ({ content, eventId, venueId }: { content: string; eventId?: string; venueId?: string }) => {
+    mutationFn: async ({ content, eventId, venueId, images, videoUrl }: { content: string; eventId?: string; venueId?: string; images?: string[]; videoUrl?: string }) => {
+      let imageUrls: string[] | undefined;
+      if (images && images.length > 0) {
+        const uploadRes = await apiRequest('POST', '/api/upload-images', { images });
+        if (!uploadRes.ok) throw new Error('Failed to upload images');
+        const { urls } = await uploadRes.json();
+        imageUrls = urls;
+      }
+
+      const messageType = videoUrl ? 'video' : imageUrls?.length ? 'image' : eventId ? 'event' : venueId ? 'venue' : 'text';
+
       const response = await apiRequest("POST", `/api/conversations/${conversationId}/messages`, {
         content,
-        messageType: eventId ? 'event' : venueId ? 'venue' : 'text',
+        messageType,
         eventId,
         venueId,
+        imageUrls,
+        videoUrl,
       });
       return response.json();
     },
     onSuccess: () => {
       setMessageText("");
+      setSelectedImages([]);
+      setVideoFileToUpload(null);
+      setUploadedVideoUrl(null);
       queryClient.invalidateQueries({ queryKey: ['/api/conversations', conversationId, 'messages'] });
     },
     onError: () => {
@@ -241,8 +269,57 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
   }, [messages]);
 
   const handleSend = () => {
-    if (!messageText.trim()) return;
-    sendMessageMutation.mutate({ content: messageText.trim() });
+    if (!messageText.trim() && !hasImages && !uploadedVideoUrl) return;
+    if (isUploadingVideo) return;
+    sendMessageMutation.mutate({
+      content: messageText.trim(),
+      images: hasImages ? selectedImages : undefined,
+      videoUrl: uploadedVideoUrl || undefined,
+    });
+  };
+
+  const openMediaPicker = () => {
+    if (mediaInputRef.current) {
+      mediaInputRef.current.value = "";
+      mediaInputRef.current.click();
+    }
+  };
+
+  const handleMediaSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
+    const imageFiles = files.filter((f) => f.type.startsWith("image/"));
+    const videoFiles = files.filter((f) => f.type.startsWith("video/"));
+
+    if (videoFiles.length > 0 && imageFiles.length === 0) {
+      setSelectedImages([]);
+      setUploadedVideoUrl(null);
+      setVideoFileToUpload(videoFiles[0]);
+    } else if (imageFiles.length > 0) {
+      setVideoFileToUpload(null);
+      setUploadedVideoUrl(null);
+      const remaining = MAX_CHAT_IMAGES - selectedImages.length;
+      if (remaining <= 0) return;
+      imageFiles.slice(0, remaining).forEach((file) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setSelectedImages((prev) => (prev.length >= MAX_CHAT_IMAGES ? prev : [...prev, reader.result as string]));
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    e.target.value = "";
+  };
+
+  const removeImage = (index: number) => {
+    setSelectedImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const clearVideo = () => {
+    setVideoFileToUpload(null);
+    setUploadedVideoUrl(null);
   };
 
   if (loadingConversation) {
@@ -502,29 +579,46 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
                         currentUserId={currentUser.id}
                         isOwnMessage={isOwn}
                       />
-                    ) : (
-                      <div
-                        className={`rounded-2xl px-4 py-2 ${
-                          isOwn
-                            ? 'bg-primary text-primary-foreground rounded-br-md'
-                            : 'bg-muted rounded-bl-md'
-                        }`}
-                      >
-                        <p className="text-sm whitespace-pre-wrap break-words">
-                          {renderMessageWithMentions(
-                            message.content || '',
-                            currentUser.username,
-                            (username) => navigate(`/profile/${username}`)
+                    ) : (() => {
+                      const hasMedia =
+                        (message.messageType === 'image' && (message.imageUrls?.length ?? 0) > 0) ||
+                        (message.messageType === 'video' && !!message.videoUrl);
+                      return (
+                        <div
+                          className={`rounded-2xl overflow-hidden ${
+                            isOwn
+                              ? 'bg-primary text-primary-foreground rounded-br-md'
+                              : 'bg-muted rounded-bl-md'
+                          } ${hasMedia ? 'p-1' : 'px-4 py-2'}`}
+                        >
+                          {message.messageType === 'image' && (message.imageUrls?.length ?? 0) > 0 && (
+                            <div className="rounded-xl overflow-hidden max-w-[240px]">
+                              <ImageGrid images={message.imageUrls as string[]} maxImages={4} />
+                            </div>
                           )}
-                        </p>
-                        {message.eventId && (
-                          <GCVAttachedEvent eventId={message.eventId} isOwn={isOwn} />
-                        )}
-                        {message.venueId && (
-                          <GCVAttachedVenue venueId={message.venueId} isOwn={isOwn} />
-                        )}
-                      </div>
-                    )}
+                          {message.messageType === 'video' && message.videoUrl && (
+                            <div className="rounded-xl overflow-hidden max-w-[240px]">
+                              <FeedVideoPlayer src={message.videoUrl} autoPlay={false} loop={false} />
+                            </div>
+                          )}
+                          {message.content && (
+                            <p className={`text-sm whitespace-pre-wrap break-words ${hasMedia ? 'px-3 pt-2 pb-1' : ''}`}>
+                              {renderMessageWithMentions(
+                                message.content,
+                                currentUser.username,
+                                (username) => navigate(`/profile/${username}`)
+                              )}
+                            </p>
+                          )}
+                          {message.eventId && (
+                            <GCVAttachedEvent eventId={message.eventId} isOwn={isOwn} />
+                          )}
+                          {message.venueId && (
+                            <GCVAttachedVenue venueId={message.venueId} isOwn={isOwn} />
+                          )}
+                        </div>
+                      );
+                    })()}
                     {showTime && (
                       <span className="text-[10px] text-muted-foreground mt-1">
                         {formatDistanceToNow(new Date(message.createdAt), { addSuffix: true })}
@@ -548,6 +642,41 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
       </ScrollArea>
 
       <div className="p-4 border-t">
+        {/* Pending attachment preview — shown above the composer until sent */}
+        {hasImages && (
+          <div className="flex gap-2 mb-2 flex-wrap">
+            {selectedImages.map((img, i) => (
+              <div key={i} className="relative h-16 w-16 rounded-lg overflow-hidden border flex-shrink-0">
+                <img src={img} alt={`Attachment ${i + 1}`} className="h-full w-full object-cover" />
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="icon"
+                  className="absolute top-0.5 right-0.5 h-5 w-5 rounded-full"
+                  onClick={() => removeImage(i)}
+                  data-testid={`button-remove-attachment-${i}`}
+                >
+                  <XIcon className="h-3 w-3" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+        {hasVideo && (
+          <div className="mb-2 max-w-[200px]">
+            <VideoUploader
+              compact={false}
+              fileToUpload={videoFileToUpload}
+              videoUrl={uploadedVideoUrl}
+              onComplete={(objectPath) => {
+                setUploadedVideoUrl(objectPath);
+                setVideoFileToUpload(null);
+              }}
+              onClear={clearVideo}
+            />
+          </div>
+        )}
+
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -555,15 +684,38 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
           }}
           className="flex gap-2"
         >
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={() => setPollModalOpen(true)}
-            data-testid="button-create-poll"
-          >
-            <ChartBarIcon className="h-5 w-5" />
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                data-testid="button-attachment-menu"
+                aria-label="Add attachment"
+              >
+                <PlusIcon className="h-5 w-5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onClick={openMediaPicker} data-testid="menu-attach-media">
+                <ImagesIcon className="h-4 w-4 mr-2" />
+                Photo or video
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setPollModalOpen(true)} data-testid="menu-attach-poll">
+                <ChartBarIcon className="h-4 w-4 mr-2" />
+                Poll
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <input
+            ref={mediaInputRef}
+            type="file"
+            accept="image/*,video/mp4,video/quicktime,video/webm"
+            multiple
+            className="hidden"
+            onChange={handleMediaSelected}
+            data-testid="input-attachment"
+          />
           <MentionInput
             placeholder="Type @ to mention someone..."
             value={messageText}
@@ -575,7 +727,7 @@ export default function GroupChatView({ conversationId, currentUser, onBack }: G
           <Button
             type="submit"
             size="icon"
-            disabled={!messageText.trim() || sendMessageMutation.isPending}
+            disabled={(!messageText.trim() && !hasImages && !uploadedVideoUrl) || isUploadingVideo || sendMessageMutation.isPending}
             data-testid="button-send"
           >
             {sendMessageMutation.isPending ? (

@@ -500,7 +500,7 @@ export const conversationMessages = pgTable("conversation_messages", {
   conversationId: varchar("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
   senderId: varchar("sender_id").notNull().references(() => users.id),
   content: text("content"),
-  messageType: text("message_type").notNull().default("text"), // 'text', 'event', 'venue', 'post', 'poll', 'image', 'story_reply'
+  messageType: text("message_type").notNull().default("text"), // 'text', 'event', 'venue', 'post', 'poll', 'image', 'video', 'story_reply'
   // Shared content references
   eventId: varchar("event_id").references(() => events.id),
   venueId: varchar("venue_id").references(() => venues.id),
@@ -508,6 +508,7 @@ export const conversationMessages = pgTable("conversation_messages", {
   pollId: varchar("poll_id"), // Will reference polls table
   storyId: varchar("story_id").references(() => stories.id, { onDelete: "set null" }),
   imageUrls: text("image_urls").array().default(sql`'{}'`),
+  videoUrl: text("video_url"),
   replyToId: varchar("reply_to_id"),
   isDeleted: boolean("is_deleted").notNull().default(false),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),

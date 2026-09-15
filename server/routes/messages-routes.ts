@@ -379,7 +379,7 @@ export function registerMessagesRoutes(app: Express): void {
         return res.status(403).json({ message: "Not a participant" });
       }
 
-      const { content, messageType = 'text', eventId, venueId, postId, imageUrls, replyToId } = req.body;
+      const { content, messageType = 'text', eventId, venueId, postId, imageUrls, videoUrl, replyToId } = req.body;
 
       // Validate content exists for text messages
       if (messageType === 'text' && (!content || content.trim().length === 0)) {
@@ -395,6 +395,7 @@ export function registerMessagesRoutes(app: Express): void {
         venueId,
         postId,
         imageUrls,
+        videoUrl,
         replyToId,
       });
 
@@ -411,7 +412,9 @@ export function registerMessagesRoutes(app: Express): void {
       const senderName = sender?.displayName || sender?.username || "Someone";
       const preview = message.content?.trim()
         ? (message.content.length > 60 ? message.content.slice(0, 60) + "…" : message.content)
-        : messageType === "image" ? "sent a photo" : "sent a message";
+        : messageType === "image" ? "sent a photo"
+        : messageType === "video" ? "sent a video"
+        : "sent a message";
       for (const participant of participants) {
         if (participant.userId === req.user!.id) continue;
         await deliverNotification({
