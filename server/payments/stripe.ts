@@ -133,3 +133,58 @@ export function constructStripeWebhookEvent(rawBody: Buffer, signature: string):
   if (!secret) throw new Error("STRIPE_WEBHOOK_SECRET is not set");
   return Stripe.webhooks.constructEvent(rawBody, signature, secret);
 }
+
+// ============================================================
+// STRIPE CONNECT (organizer GBP payout onboarding)
+// ============================================================
+// Express accounts, same shape as the Paystack Subaccount onboarding in
+// paystack.ts. Scope note: this only lets a GBP organizer register a payout
+// destination and reports its real status/schedule — it does not yet change
+// how checkout charges are routed (GBP checkout still charges the platform's
+// own Stripe account with no transfer_data, same as before this change; see
+// the comment on resolveOrganizerSplit in payment-routes.ts). Actually
+// splitting live charges to connected accounts is a separate, deliberately
+// deferred change — it touches the real money path and deserves its own
+// review, not a rider on an onboarding-UI task.
+
+export async function createStripeConnectAccount(email: string, country: string = "GB"): Promise<{ accountId: string }> {
+  const stripe = getStripeClient();
+  const account = await stripe.accounts.create({
+    type: "express",
+    country,
+    email,
+    capabilities: { transfers: { requested: true } },
+    business_type: "individual",
+  });
+  return { accountId: account.id };
+}
+
+export async function createStripeAccountLink(accountId: string, refreshUrl: string, returnUrl: string): Promise<{ url: string }> {
+  const stripe = getStripeClient();
+  const link = await stripe.accountLinks.create({
+    account: accountId,
+    refresh_url: refreshUrl,
+    return_url: returnUrl,
+    type: "account_onboarding",
+  });
+  return { url: link.url };
+}
+
+export interface StripeConnectStatus {
+  detailsSubmitted: boolean;
+  payoutsEnabled: boolean;
+  payoutScheduleInterval?: string; // 'manual' | 'daily' | 'weekly' | 'monthly'
+  payoutScheduleDelayDays?: number;
+}
+
+export async function getStripeConnectStatus(accountId: string): Promise<StripeConnectStatus> {
+  const stripe = getStripeClient();
+  const account = await stripe.accounts.retrieve(accountId);
+  const schedule = account.settings?.payouts?.schedule;
+  return {
+    detailsSubmitted: !!account.details_submitted,
+    payoutsEnabled: !!account.payouts_enabled,
+    payoutScheduleInterval: schedule?.interval,
+    payoutScheduleDelayDays: schedule?.delay_days,
+  };
+}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
@@ -9,17 +9,34 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { CheckCircleIcon, Loader2Icon } from "@/components/ui/icons";
+import { formatMoney } from "@/lib/currency";
+import { format } from "date-fns";
+import { CheckCircleIcon, Loader2Icon, ArrowRightIcon } from "@/components/ui/icons";
+import type { PaymentTransaction } from "@shared/schema";
+
+interface ProviderStatus {
+  detailsSubmitted: boolean;
+  payoutsEnabled: boolean;
+  payoutSchedule?: string;
+}
 
 interface PayoutStatus {
-  stripe: { detailsSubmitted: boolean; payoutsEnabled: boolean } | null;
-  paystack: { detailsSubmitted: boolean; payoutsEnabled: boolean } | null;
+  stripe: ProviderStatus | null;
+  paystack: ProviderStatus | null;
 }
 
 interface Bank {
   name: string;
   code: string;
 }
+
+const TRANSACTION_TYPE_LABELS: Record<string, string> = {
+  ticket_sale: "Ticket sale",
+  venue_ticket_sale: "Venue entry sale",
+  event_promotion: "Event promotion",
+  venue_promotion: "Venue promotion",
+  refund: "Refund",
+};
 
 export default function OrganizerPayoutsPage() {
   const { toast } = useToast();
@@ -35,6 +52,35 @@ export default function OrganizerPayoutsPage() {
   const { data: bankData, isLoading: banksLoading } = useQuery<{ banks: Bank[] }>({
     queryKey: ["/api/organizer/payments/paystack/banks"],
     enabled: !status?.paystack?.payoutsEnabled,
+  });
+
+  const { data: txData, isLoading: txLoading } = useQuery<{ transactions: PaymentTransaction[] }>({
+    queryKey: ["/api/organizer/payments/transactions"],
+  });
+
+  // Returning from Stripe's hosted onboarding (or an expired-link refresh) —
+  // the status query above always re-checks live against Stripe, so a
+  // refetch is enough; just clean the query param so a page reload doesn't
+  // re-trigger this.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("stripe")) {
+      queryClient.invalidateQueries({ queryKey: ["/api/organizer/payments/status"] });
+      window.history.replaceState({}, "", "/organizer/payouts");
+    }
+  }, []);
+
+  const stripeOnboardMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/organizer/payments/stripe/onboard", {});
+      return res.json() as Promise<{ url: string }>;
+    },
+    onSuccess: (data) => {
+      window.location.href = data.url;
+    },
+    onError: (error: any) => {
+      toast({ title: "Couldn't start Stripe onboarding", description: error.message, variant: "destructive" });
+    },
   });
 
   const resolveMutation = useMutation({
@@ -74,6 +120,7 @@ export default function OrganizerPayoutsPage() {
   });
 
   const paystackConnected = !!status?.paystack?.payoutsEnabled;
+  const stripeConnected = !!status?.stripe?.payoutsEnabled;
 
   return (
     <div className="min-h-screen bg-background">
@@ -106,9 +153,10 @@ export default function OrganizerPayoutsPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             {paystackConnected ? (
-              <p className="text-sm text-muted-foreground">
-                Your payout account is connected. Naira ticket sales will pay out to this account going forward.
-              </p>
+              <div className="text-sm text-muted-foreground space-y-1">
+                <p>Your payout account is connected. Naira ticket sales will pay out to this account going forward.</p>
+                {status?.paystack?.payoutSchedule && <p className="text-xs">{status.paystack.payoutSchedule}</p>}
+              </div>
             ) : (
               <>
                 <div className="space-y-2">
@@ -188,13 +236,92 @@ export default function OrganizerPayoutsPage() {
                 <CardTitle>Stripe (GBP payouts)</CardTitle>
                 <CardDescription>For events priced in GBP</CardDescription>
               </div>
-              <Badge variant="outline">Coming soon</Badge>
+              {statusLoading ? (
+                <Loader2Icon className="w-5 h-5 animate-spin text-muted-foreground" />
+              ) : stripeConnected ? (
+                <Badge className="bg-emerald-500/20 text-emerald-500 border-emerald-500/30">
+                  <CheckCircleIcon className="w-3.5 h-3.5 mr-1" /> Connected
+                </Badge>
+              ) : status?.stripe?.detailsSubmitted ? (
+                <Badge variant="outline">Pending review</Badge>
+              ) : (
+                <Badge variant="outline">Not connected</Badge>
+              )}
             </div>
           </CardHeader>
+          <CardContent className="space-y-3">
+            {stripeConnected ? (
+              <div className="text-sm text-muted-foreground space-y-1">
+                <p>Your payout account is connected. GBP ticket sales will pay out to this account going forward.</p>
+                {status?.stripe?.payoutSchedule && <p className="text-xs">{status.stripe.payoutSchedule}</p>}
+              </div>
+            ) : status?.stripe?.detailsSubmitted ? (
+              <p className="text-sm text-muted-foreground">
+                Your details are submitted and Stripe is reviewing your account. This can take a little while — check back soon.
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Connect a Stripe account to receive GBP ticket revenue. You'll be taken to Stripe to enter your bank and identity details.
+              </p>
+            )}
+            <Button
+              type="button"
+              variant={stripeConnected ? "outline" : "default"}
+              onClick={() => stripeOnboardMutation.mutate()}
+              disabled={stripeOnboardMutation.isPending}
+              data-testid="button-connect-stripe"
+            >
+              {stripeOnboardMutation.isPending ? "Redirecting…" : stripeConnected ? (
+                <>Manage on Stripe <ArrowRightIcon className="w-4 h-4 ml-2" /></>
+              ) : status?.stripe?.detailsSubmitted ? (
+                <>Continue setup <ArrowRightIcon className="w-4 h-4 ml-2" /></>
+              ) : (
+                <>Connect with Stripe <ArrowRightIcon className="w-4 h-4 ml-2" /></>
+              )}
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Payout History</CardTitle>
+            <CardDescription>Every ticket sale, promotion charge, and refund across both providers</CardDescription>
+          </CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground">
-              GBP payout setup via Stripe Connect isn't available yet.
-            </p>
+            {txLoading ? (
+              <div className="flex justify-center py-8">
+                <Loader2Icon className="w-5 h-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : !txData?.transactions.length ? (
+              <p className="text-sm text-muted-foreground text-center py-4">No transactions yet.</p>
+            ) : (
+              <div className="space-y-1">
+                {txData.transactions.map((tx) => (
+                  <div
+                    key={tx.id}
+                    className="flex items-center justify-between py-2.5 border-b last:border-b-0 text-sm"
+                    data-testid={`row-transaction-${tx.id}`}
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium truncate">
+                        {TRANSACTION_TYPE_LABELS[tx.type] ?? tx.type}
+                        {tx.status !== "succeeded" && (
+                          <span className="ml-2 text-xs text-muted-foreground">
+                            ({tx.status === "refunded" ? "refunded" : "refund failed"})
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {format(new Date(tx.createdAt), "MMM d, yyyy")} · {tx.provider === "stripe" ? "Stripe" : tx.provider === "paystack" ? "Paystack" : "Free"}
+                      </p>
+                    </div>
+                    <p className={`font-semibold flex-shrink-0 ${tx.type === "refund" ? "text-red-500" : "text-emerald-600 dark:text-emerald-400"}`}>
+                      {tx.type === "refund" ? "-" : ""}{formatMoney(tx.netToOrganizerAmount, tx.currency)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </main>

@@ -524,6 +524,7 @@ export interface IStorage {
   // The money-movement ledger — see server/payments/ledger.ts recordTransaction(),
   // which is the only code that should call this.
   createPaymentTransaction(tx: InsertPaymentTransaction): Promise<PaymentTransaction>;
+  getOrganizerTransactions(organizerId: string, limit?: number, offset?: number): Promise<PaymentTransaction[]>;
 
   getEventTicketTiers(eventId: string): Promise<TicketTier[]>;
   getTicketTier(id: string): Promise<TicketTier | undefined>;
@@ -4384,6 +4385,19 @@ export class DbStorage implements IStorage {
   async createPaymentTransaction(tx: InsertPaymentTransaction): Promise<PaymentTransaction> {
     const result = await db.insert(paymentTransactions).values(tx).returning();
     return result[0];
+  }
+
+  // Payout history for the organizer payouts page — every ledger row for
+  // this organizer regardless of provider (Stripe + Paystack together), most
+  // recent first.
+  async getOrganizerTransactions(organizerId: string, limit: number = 50, offset: number = 0): Promise<PaymentTransaction[]> {
+    return await db
+      .select()
+      .from(paymentTransactions)
+      .where(eq(paymentTransactions.organizerId, organizerId))
+      .orderBy(desc(paymentTransactions.createdAt))
+      .limit(limit)
+      .offset(offset);
   }
 
   async getAllStoriesAdmin(limit: number = 50): Promise<Array<Story & { user: User }>> {
