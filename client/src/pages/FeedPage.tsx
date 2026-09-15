@@ -12,7 +12,6 @@ import StoriesBar from "@/components/StoriesBar";
 import CreateStoryModal from "@/components/CreateStoryModal";
 import CreatePostModal from "@/components/CreatePostModal";
 import FeedPost from "@/components/FeedPost";
-import PostDetailDialog from "@/components/PostDetailDialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
@@ -63,8 +62,6 @@ export default function FeedPage() {
   const [createStoryOpen, setCreateStoryOpen] = useState(false);
   const [createPostOpen, setCreatePostOpen] = useState(false);
   const [feedFilter, setFeedFilter] = useState<string>('following'); // 'following', 'all', or community ID
-  const [selectedPost, setSelectedPost] = useState<any | null>(null);
-  const [highlightCommentId, setHighlightCommentId] = useState<string | null>(null);
   const [attachedEvent, setAttachedEvent] = useState<Event | null>(null);
   const [attachedVenue, setAttachedVenue] = useState<Venue | null>(null);
   const [communityModalOpen, setCommunityModalOpen] = useState(false);
@@ -191,26 +188,16 @@ export default function FeedPage() {
   const isLoading = isViewingCommunity ? isLoadingCommunity : isLoadingMain;
   const isError = isViewingCommunity ? isErrorCommunity : isErrorMain;
 
-  // Open a specific post (and optionally highlight a comment) when arriving
-  // from a notification link: /feed?post=<postId>&comment=<commentId>
-  // Fetches the post directly by ID so it works regardless of the active feed filter.
+  // Older notification links point at /feed?post=<postId>&comment=<commentId>
+  // (still delivered from history) — hand off to the full post page, which
+  // owns fetching the post and highlighting the comment itself.
   const notificationPostId = new URLSearchParams(search).get("post");
   const notificationCommentId = new URLSearchParams(search).get("comment");
   useEffect(() => {
     if (!notificationPostId) return;
-    // Snapshot comment ID before navigate() clears the search string
-    const commentId = notificationCommentId;
-    navigate("/feed", { replace: true });
-    fetch(`/api/posts/${notificationPostId}`, { credentials: "include" })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((post) => {
-        if (post) {
-          setSelectedPost(post);
-          if (commentId) setHighlightCommentId(commentId);
-        }
-      })
-      .catch(console.error);
-  }, [notificationPostId]);
+    const query = notificationCommentId ? `?comment=${notificationCommentId}` : "";
+    navigate(`/posts/${notificationPostId}${query}`, { replace: true });
+  }, [notificationPostId, notificationCommentId]);
 
   // Extract unique @usernames from all posts for avatar lookup
   // Repost items carry the content inside .originalPost, not at the top level
@@ -519,7 +506,7 @@ export default function FeedPage() {
                   mentionedUsers={mentionedUsersData}
                   hasActiveStory={userIdsWithStories.has(displayUser.id)}
                   feedMode={true}
-                  onPostClick={() => setSelectedPost(displayPost)}
+                  onPostClick={() => navigate(`/posts/${displayPost.id}`)}
                 />
               );
             })
@@ -573,26 +560,6 @@ export default function FeedPage() {
           });
         }}
       />
-
-      {selectedPost && (
-        <PostDetailDialog
-          open={!!selectedPost}
-          onClose={() => { setSelectedPost(null); setHighlightCommentId(null); }}
-          postId={selectedPost.id}
-          author={{
-            name: selectedPost.user?.displayName || selectedPost.user?.organizationName || selectedPost.user?.username || selectedPost.author?.name || 'Unknown',
-            username: selectedPost.user?.username || selectedPost.author?.username || 'unknown',
-            avatar: selectedPost.user?.avatarUrl || selectedPost.author?.avatar,
-            userId: selectedPost.user?.id || selectedPost.author?.userId,
-          }}
-          content={selectedPost.content}
-          image={selectedPost.imageUrl || selectedPost.image}
-          imageUrls={selectedPost.imageUrls}
-          videoUrl={selectedPost.videoUrl}
-          createdAt={selectedPost.createdAt}
-          highlightCommentId={highlightCommentId ?? undefined}
-        />
-      )}
 
       <BottomNavigation onCreateClick={() => setCreateStoryOpen(true)} />
 

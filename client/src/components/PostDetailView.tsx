@@ -1,23 +1,23 @@
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import UnifiedShareModal from "@/components/UnifiedShareModal";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 
-import { useState, useEffect, useRef, Fragment } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { format } from "date-fns";
 import CommentItem from "./CommentItem";
+import CommentComposer from "./CommentComposer";
 import ImageGrid from "./ImageGrid";
 import FeedVideoPlayer from "./FeedVideoPlayer";
-import { HeartIcon, MessageCircleIcon, Share2Icon, BookmarkIcon, Repeat2Icon, SendIcon } from "@/components/ui/icons";
+import { HeartIcon, MessageCircleIcon, Share2Icon, Repeat2Icon, ArrowLeftIcon } from "@/components/ui/icons";
 
-interface PostDetailDialogProps {
-  open: boolean;
+interface PostDetailViewProps {
   onClose: () => void;
   postId: string;
   author: {
@@ -35,7 +35,7 @@ interface PostDetailDialogProps {
 }
 
 function renderContentWithLinkedMentionsAndHashtags(
-  content: string, 
+  content: string,
   navigate: (path: string) => void
 ) {
   const parts: (string | JSX.Element)[] = [];
@@ -48,7 +48,7 @@ function renderContentWithLinkedMentionsAndHashtags(
     if (match.index > lastIndex) {
       parts.push(content.slice(lastIndex, match.index));
     }
-    
+
     const token = match[0];
     if (token.startsWith('@')) {
       const username = token.slice(1);
@@ -94,8 +94,16 @@ function formatFullDateTime(date: Date | string): string {
   return format(d, 'h:mm a · MMM d, yyyy');
 }
 
-export default function PostDetailDialog({
-  open,
+function initialFor(user?: { username: string; displayName?: string | null; organizationName?: string | null } | null): string {
+  if (!user) return "?";
+  return (user.displayName || user.organizationName || user.username).charAt(0).toUpperCase();
+}
+
+// Full-bleed page for a single post — replaces the old centered-dialog
+// treatment (PostDetailDialog) so opening a post feels like navigating to a
+// dedicated screen, matching the platform convention of other social apps,
+// with comments inline below rather than crammed into a modal.
+export default function PostDetailView({
   onClose,
   postId,
   author,
@@ -105,7 +113,7 @@ export default function PostDetailDialog({
   videoUrl,
   createdAt,
   highlightCommentId,
-}: PostDetailDialogProps) {
+}: PostDetailViewProps) {
   const allImages = [
     ...(imageUrls || []),
     ...(image && !imageUrls?.includes(image) ? [image] : []),
@@ -116,10 +124,10 @@ export default function PostDetailDialog({
   const [newComment, setNewComment] = useState('');
   const [highlightActive, setHighlightActive] = useState(true);
   const commentRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const keyboardOffset = useKeyboardInset();
 
   const { data: commentsData, isLoading: commentsLoading } = useQuery<{ comments: any[]; count: number }>({
     queryKey: ['/api/posts', postId, 'comments'],
-    enabled: open,
   });
 
   const comments = commentsData?.comments || [];
@@ -148,12 +156,10 @@ export default function PostDetailDialog({
 
   const { data: likeData } = useQuery<{ count: number; isLiked: boolean }>({
     queryKey: ['/api/posts', postId, 'likes'],
-    enabled: open,
   });
 
   const { data: repostData } = useQuery<{ hasReposted: boolean; repostCount: number }>({
     queryKey: ['/api/posts', postId, 'repost-status'],
-    enabled: open,
     queryFn: async () => {
       try {
         const response = await fetch(`/api/posts/${postId}/repost-status`);
@@ -231,8 +237,7 @@ export default function PostDetailDialog({
   const [shareOpen, setShareOpen] = useState(false);
   const handleShare = () => setShareOpen(true);
 
-  const handleSubmitComment = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmitComment = () => {
     if (newComment.trim()) {
       commentMutation.mutate(newComment.trim());
     }
@@ -240,24 +245,24 @@ export default function PostDetailDialog({
 
   return (
     <>
-    <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col p-0 gap-0">
-        <DialogHeader className="px-6 py-4 border-b">
-          <DialogTitle>Post</DialogTitle>
-          <DialogDescription className="sr-only">
-            View full post details, comments, and interact with the post
-          </DialogDescription>
-        </DialogHeader>
+      <div className="h-screen flex flex-col bg-background">
+        {/* Minimal header — just back + title, so the post itself is the
+            focus rather than the app's global search/notification chrome */}
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-border flex-shrink-0">
+          <Button variant="ghost" size="icon" onClick={onClose} data-testid="button-back">
+            <ArrowLeftIcon className="h-5 w-5" />
+          </Button>
+          <h1 className="font-semibold text-lg">Post</h1>
+        </div>
 
-        <div className="flex-1 overflow-y-auto">
-          <div className="p-6">
+        <ScrollArea className="flex-1">
+          <div className="max-w-2xl mx-auto p-4 sm:p-6">
             <div className="flex gap-3">
-              <Avatar 
-                className="h-12 w-12 cursor-pointer hover-elevate" 
+              <Avatar
+                className="h-12 w-12 cursor-pointer hover-elevate"
                 onClick={() => {
                   if (author.userId) navigate(`/user/${author.userId}`);
                   else navigate(`/profile/${author.username}`);
-                  onClose();
                 }}
                 data-testid={`dialog-avatar-${postId}`}
               >
@@ -281,10 +286,7 @@ export default function PostDetailDialog({
 
             <div className="mt-4">
               <p className="text-base whitespace-pre-wrap leading-relaxed" data-testid={`dialog-content-${postId}`}>
-                {renderContentWithLinkedMentionsAndHashtags(content, (path) => {
-                  navigate(path);
-                  onClose();
-                })}
+                {renderContentWithLinkedMentionsAndHashtags(content, navigate)}
               </p>
             </div>
 
@@ -296,8 +298,8 @@ export default function PostDetailDialog({
 
             {!videoUrl && allImages.length > 0 && (
               <div className="mt-4" data-testid={`dialog-images-${postId}`}>
-                <ImageGrid 
-                  images={allImages} 
+                <ImageGrid
+                  images={allImages}
                   maxImages={4}
                   postData={{
                     id: postId,
@@ -377,25 +379,9 @@ export default function PostDetailDialog({
             </div>
 
             <div className="mt-6 pt-4 border-t">
-              <h3 className="font-semibold text-sm mb-4">Comments</h3>
-              
-              <form onSubmit={handleSubmitComment} className="flex gap-2 mb-4">
-                <Input
-                  placeholder="Add a comment..."
-                  value={newComment}
-                  onChange={(e) => setNewComment(e.target.value)}
-                  className="flex-1"
-                  data-testid={`dialog-comment-input-${postId}`}
-                />
-                <Button 
-                  type="submit" 
-                  size="icon"
-                  disabled={!newComment.trim() || commentMutation.isPending}
-                  data-testid={`dialog-comment-submit-${postId}`}
-                >
-                  <SendIcon className="h-4 w-4" />
-                </Button>
-              </form>
+              <h3 className="font-semibold text-sm mb-4">
+                {comments.length > 0 ? `${comments.length} Comment${comments.length === 1 ? '' : 's'}` : 'Comments'}
+              </h3>
 
               {commentsLoading ? (
                 <p className="text-sm text-muted-foreground">Loading comments...</p>
@@ -421,17 +407,8 @@ export default function PostDetailDialog({
                         <CommentItem
                           comment={comment}
                           postId={postId}
-                          onNavigate={(path) => {
-                            navigate(path);
-                            onClose();
-                          }}
                           renderContent={(content) => (
-                            <>
-                              {renderContentWithLinkedMentionsAndHashtags(content, (path) => {
-                                navigate(path);
-                                onClose();
-                              })}
-                            </>
+                            <>{renderContentWithLinkedMentionsAndHashtags(content, navigate)}</>
                           )}
                         />
                       </div>
@@ -441,15 +418,33 @@ export default function PostDetailDialog({
               )}
             </div>
           </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+        </ScrollArea>
 
-    <UnifiedShareModal
-      open={shareOpen}
-      onClose={() => setShareOpen(false)}
-      shareData={{ type: "post", id: postId, title: content.slice(0, 80) || "Post" }}
-    />
+        {/* Composer stays pinned to the bottom of the viewport, above the
+            keyboard, instead of scrolling away with the comment list */}
+        <div
+          className="border-t border-border bg-background px-4 py-3 flex-shrink-0"
+          style={keyboardOffset > 0 ? { paddingBottom: keyboardOffset } : undefined}
+        >
+          <div className="max-w-2xl mx-auto">
+            <CommentComposer
+              value={newComment}
+              onChange={setNewComment}
+              onSubmit={handleSubmitComment}
+              avatarUrl={currentUser?.avatarUrl}
+              avatarInitial={initialFor(currentUser)}
+              disabled={commentMutation.isPending}
+              data-testid="post-detail-composer"
+            />
+          </div>
+        </div>
+      </div>
+
+      <UnifiedShareModal
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        shareData={{ type: "post", id: postId, title: content.slice(0, 80) || "Post" }}
+      />
     </>
   );
 }

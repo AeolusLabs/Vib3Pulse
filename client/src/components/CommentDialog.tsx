@@ -8,9 +8,9 @@ import { cn } from "@/lib/utils";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import CommentItem from "./CommentItem";
-import MentionTextarea from "./MentionTextarea";
-import { SendIcon } from "@/components/ui/icons";
+import CommentComposer from "./CommentComposer";
 
 interface PostSummary {
   authorName: string;
@@ -44,7 +44,7 @@ type Comment = {
 
 export default function CommentDialog({ open, onClose, postId, postSummary }: CommentDialogProps) {
   const [commentText, setCommentText] = useState("");
-  const [keyboardOffset, setKeyboardOffset] = useState(0);
+  const keyboardOffset = useKeyboardInset(open);
   const { toast } = useToast();
   const { data: currentUser } = useAuth();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -75,30 +75,6 @@ export default function CommentDialog({ open, onClose, postId, postSummary }: Co
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [comments]);
-
-  // Keep input toolbar above the virtual keyboard
-  useEffect(() => {
-    const vv = window.visualViewport;
-    if (!vv) return;
-
-    const update = () => {
-      const diff = window.innerHeight - (vv.height + vv.offsetTop);
-      setKeyboardOffset(Math.max(0, diff));
-    };
-
-    if (open) {
-      vv.addEventListener("resize", update);
-      vv.addEventListener("scroll", update);
-      update();
-    } else {
-      setKeyboardOffset(0);
-    }
-
-    return () => {
-      vv.removeEventListener("resize", update);
-      vv.removeEventListener("scroll", update);
-    };
-  }, [open]);
 
   const handleAddComment = () => {
     if (commentText.trim()) addCommentMutation.mutate(commentText);
@@ -197,37 +173,15 @@ export default function CommentDialog({ open, onClose, postId, postSummary }: Co
 
           {/* ── C3: Comment input with current user avatar ── */}
           <div className="px-4 py-3 border-t border-border bg-background flex-shrink-0">
-            <div className="flex items-end gap-2.5">
-              {/* C3: current user avatar */}
-              <Avatar className="h-8 w-8 flex-shrink-0 mb-0.5">
-                <AvatarImage src="" alt={currentUser?.username || "You"} />
-                <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
-                  {currentUserInitial}
-                </AvatarFallback>
-              </Avatar>
-
-              <div className="flex-1 min-w-0">
-                <MentionTextarea
-                  value={commentText}
-                  onChange={setCommentText}
-                  placeholder="Add a comment…"
-                  disabled={addCommentMutation.isPending}
-                  rows={2}
-                  className="text-sm resize-none border-0 bg-muted/40 rounded-xl px-3 py-2 focus-visible:ring-1 focus-visible:ring-primary/50"
-                  data-testid="input-comment"
-                />
-              </div>
-
-              <button
-                onClick={handleAddComment}
-                disabled={!commentText.trim() || addCommentMutation.isPending}
-                className="mb-0.5 h-8 w-8 flex items-center justify-center rounded-full bg-primary text-primary-foreground disabled:opacity-40 hover:bg-primary/90 transition-colors flex-shrink-0"
-                data-testid="button-send-comment"
-                aria-label="Send comment"
-              >
-                <SendIcon className="h-3.5 w-3.5" />
-              </button>
-            </div>
+            <CommentComposer
+              value={commentText}
+              onChange={setCommentText}
+              onSubmit={handleAddComment}
+              avatarUrl={currentUser?.avatarUrl}
+              avatarInitial={currentUserInitial}
+              disabled={addCommentMutation.isPending}
+              data-testid="comment-dialog-composer"
+            />
           </div>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>

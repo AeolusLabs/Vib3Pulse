@@ -1,11 +1,13 @@
-import { useRoute, useLocation } from "wouter";
+import { useRoute, useLocation, useSearch } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import PostDetailDialog from "@/components/PostDetailDialog";
+import PostDetailView from "@/components/PostDetailView";
 
 export default function PostDetailPage() {
   const [, params] = useRoute("/posts/:id");
   const [, navigate] = useLocation();
+  const search = useSearch();
   const postId = params?.id;
+  const highlightCommentId = new URLSearchParams(search).get("comment") ?? undefined;
 
   const { data: post, isLoading } = useQuery<any>({
     queryKey: ["/api/posts", postId],
@@ -34,8 +36,7 @@ export default function PostDetailPage() {
   }
 
   return (
-    <PostDetailDialog
-      open={true}
+    <PostDetailView
       onClose={() => navigate("/feed")}
       postId={post.id}
       author={{
@@ -49,6 +50,7 @@ export default function PostDetailPage() {
       imageUrls={post.imageUrls ?? undefined}
       videoUrl={post.videoUrl ?? undefined}
       createdAt={post.createdAt}
+      highlightCommentId={highlightCommentId}
     />
   );
 }

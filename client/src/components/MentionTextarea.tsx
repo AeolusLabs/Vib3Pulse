@@ -19,6 +19,7 @@ interface MentionTextareaProps {
   rows?: number;
   maxLength?: number;
   className?: string;
+  autoFocus?: boolean;
   "data-testid"?: string;
 }
 
@@ -30,6 +31,7 @@ export default function MentionTextarea({
   rows = 4,
   maxLength,
   className,
+  autoFocus,
   "data-testid": testId,
 }: MentionTextareaProps) {
   const [suggestions, setSuggestions] = useState<UserSuggestion[]>([]);
@@ -157,6 +159,7 @@ export default function MentionTextarea({
         disabled={disabled}
         rows={rows}
         className={className}
+        autoFocus={autoFocus}
         data-testid={testId}
       />
 

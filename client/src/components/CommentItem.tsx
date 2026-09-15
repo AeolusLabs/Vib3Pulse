@@ -25,15 +25,20 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { formatDistanceToNowStrict } from "date-fns";
 import { useLocation } from "wouter";
-import MentionTextarea from "./MentionTextarea";
+import CommentComposer from "./CommentComposer";
 import {
-  SendIcon, HeartIcon, MessageCircleIcon, Share2Icon, ChevronDownIcon, ChevronUpIcon,
+  HeartIcon, MessageCircleIcon, Share2Icon, ChevronDownIcon, ChevronUpIcon,
   MoreHorizontalIcon, Trash2Icon, FlagIcon,
 } from "@/components/ui/icons";
 
 // Reddit/X convention: indent visually caps around this depth so a very deep
 // thread doesn't push content off-screen; the data model has no depth limit.
 const MAX_VISUAL_DEPTH = 5;
+
+function initialFor(user?: { username: string; displayName?: string | null; organizationName?: string | null } | null): string {
+  if (!user) return "?";
+  return (user.displayName || user.organizationName || user.username).charAt(0).toUpperCase();
+}
 
 type CommentUser = {
   id: string;
@@ -359,38 +364,28 @@ export default function CommentItem({
           )}
         </div>
 
-        {/* Reply input */}
+        {/* Reply composer */}
         {showReplyInput && (
-          <div className="mt-2 flex gap-2 items-start">
-            <div className="flex-1">
-              <MentionTextarea
-                value={replyText}
-                onChange={setReplyText}
-                placeholder={`Reply to @${comment.user.username}...`}
-                rows={2}
-                className="text-sm resize-none"
-                data-testid={`input-reply-${comment.id}`}
-              />
-            </div>
-            <div className="flex flex-col gap-1 pt-1">
-              <Button
-                size="icon"
-                className="h-8 w-8"
-                onClick={() => { if (replyText.trim()) replyMutation.mutate(replyText); }}
-                disabled={!replyText.trim() || replyMutation.isPending}
-                data-testid={`button-send-reply-${comment.id}`}
-              >
-                <SendIcon className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-8 w-8 text-muted-foreground"
-                onClick={() => setShowReplyInput(false)}
-              >
-                ✕
-              </Button>
-            </div>
+          <div className="mt-2">
+            <CommentComposer
+              value={replyText}
+              onChange={setReplyText}
+              onSubmit={() => { if (replyText.trim()) replyMutation.mutate(replyText); }}
+              avatarUrl={currentUser?.avatarUrl}
+              avatarInitial={initialFor(currentUser)}
+              placeholder={`Reply to @${comment.user.username}...`}
+              disabled={replyMutation.isPending}
+              autoFocus
+              data-testid={`reply-composer-${comment.id}`}
+            />
+            <button
+              type="button"
+              className="text-xs text-muted-foreground hover:text-foreground mt-1 ml-[42px]"
+              onClick={() => setShowReplyInput(false)}
+              data-testid={`button-cancel-reply-${comment.id}`}
+            >
+              Cancel
+            </button>
           </div>
         )}
 
@@ -670,34 +665,26 @@ function ThreadedReply({ node, postId, depth, childrenByParent, navigate }: Thre
         </div>
 
         {showReplyInput && (
-          <div className="mt-2 flex gap-2 items-start">
-            <div className="flex-1">
-              <MentionTextarea
-                value={replyText}
-                onChange={setReplyText}
-                placeholder={`Reply to @${node.user.username}...`}
-                rows={2}
-                className="text-sm resize-none"
-              />
-            </div>
-            <div className="flex flex-col gap-1 pt-1">
-              <Button
-                size="icon"
-                className="h-8 w-8"
-                onClick={() => { if (replyText.trim()) replyMutation.mutate(replyText); }}
-                disabled={!replyText.trim() || replyMutation.isPending}
-              >
-                <SendIcon className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-8 w-8 text-muted-foreground"
-                onClick={() => setShowReplyInput(false)}
-              >
-                ✕
-              </Button>
-            </div>
+          <div className="mt-2">
+            <CommentComposer
+              value={replyText}
+              onChange={setReplyText}
+              onSubmit={() => { if (replyText.trim()) replyMutation.mutate(replyText); }}
+              avatarUrl={currentUser?.avatarUrl}
+              avatarInitial={initialFor(currentUser)}
+              placeholder={`Reply to @${node.user.username}...`}
+              disabled={replyMutation.isPending}
+              autoFocus
+              data-testid={`reply-composer-${node.id}`}
+            />
+            <button
+              type="button"
+              className="text-xs text-muted-foreground hover:text-foreground mt-1 ml-[42px]"
+              onClick={() => setShowReplyInput(false)}
+              data-testid={`button-cancel-reply-${node.id}`}
+            >
+              Cancel
+            </button>
           </div>
         )}
 
