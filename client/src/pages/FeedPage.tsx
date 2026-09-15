@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useLocation, useSearch } from "wouter";
 import { useQuery, useInfiniteQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import type { Event, Venue, Community } from "@shared/schema";
@@ -12,12 +13,12 @@ import CreateStoryModal from "@/components/CreateStoryModal";
 import CreatePostModal from "@/components/CreatePostModal";
 import FeedPost from "@/components/FeedPost";
 import PostDetailDialog from "@/components/PostDetailDialog";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 
 import CommunityModal from "@/components/CommunityModal";
+import CommunityChip from "@/components/CommunityChip";
 import { SparklesIcon, ImageIcon, PlusIcon, UsersIcon } from "@/components/ui/icons";
 import { PostSkeleton } from "@/components/ui/skeleton-layouts";
 
@@ -52,7 +53,9 @@ type ShareData = {
   name?: string;
 };
 
-type CommunityWithRole = Community & { memberCount: number; role: string };
+type CommunityWithRole = Community & { memberCount: number; role: string; lastPostAt: string | null };
+
+const COMMUNITY_LAST_VISIT_PREFIX = "vib3pulse:community-last-visit:";
 
 export default function FeedPage() {
   const [, navigate] = useLocation();
@@ -66,8 +69,23 @@ export default function FeedPage() {
   const [attachedVenue, setAttachedVenue] = useState<Venue | null>(null);
   const [communityModalOpen, setCommunityModalOpen] = useState(false);
   const [selectedCommunityForPost, setSelectedCommunityForPost] = useState<string | null>(null);
+  const [communityLastVisited, setCommunityLastVisited] = useState<Record<string, string>>({});
   const { toast } = useToast();
   const { data: currentUser } = useAuth();
+
+  const selectCommunityFilter = (id: string) => {
+    setFeedFilter(id);
+    const now = new Date().toISOString();
+    localStorage.setItem(COMMUNITY_LAST_VISIT_PREFIX + id, now);
+    setCommunityLastVisited((prev) => ({ ...prev, [id]: now }));
+  };
+
+  const communityHasUnread = (c: CommunityWithRole) => {
+    if (!c.lastPostAt) return false;
+    const lastVisit = communityLastVisited[c.id] ?? localStorage.getItem(COMMUNITY_LAST_VISIT_PREFIX + c.id);
+    if (!lastVisit) return true;
+    return new Date(c.lastPostAt).getTime() > new Date(lastVisit).getTime();
+  };
 
   // Fetch user's communities
   const { data: myCommunities = [] } = useQuery<CommunityWithRole[]>({
@@ -339,65 +357,85 @@ export default function FeedPage() {
 
       <main className="max-w-[600px] mx-auto px-4 sm:px-6 py-6">
         <div className="mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <h1 className="text-2xl font-serif font-semibold">Feed</h1>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setCommunityModalOpen(true)}
-              data-testid="button-manage-communities"
-            >
-              <UsersIcon className="h-4 w-4 mr-1" />
-              Communities
-            </Button>
-          </div>
-          <ScrollArea className="w-full">
-            <div className="flex gap-2 pb-2">
-              <Button
-                variant={feedFilter === 'following' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setFeedFilter('following')}
-                data-testid="button-filter-following"
-                className="whitespace-nowrap"
-              >
-                Following
-              </Button>
-              <Button
-                variant={feedFilter === 'all' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setFeedFilter('all')}
-                data-testid="button-filter-all"
-                className="whitespace-nowrap"
-              >
-                <SparklesIcon className="h-4 w-4 mr-1" />
-                For You
-              </Button>
-              {myCommunities.map((community) => (
-                <Button
-                  key={community.id}
-                  variant={feedFilter === community.id ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setFeedFilter(community.id)}
-                  data-testid={`button-filter-community-${community.id}`}
-                  className="whitespace-nowrap"
-                >
-                  {community.name}
-                </Button>
-              ))}
-              {currentUser && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCommunityModalOpen(true)}
-                  data-testid="button-add-community"
-                  className="whitespace-nowrap"
-                >
-                  <PlusIcon className="h-4 w-4" />
-                </Button>
+          <h1 className="text-2xl font-serif font-semibold mb-3">Feed</h1>
+
+          {/* Following / For You — a fixed segmented control, kept visually
+              separate from communities below since they're a different kind
+              of filter (feed algorithm vs. a joined space) */}
+          <div className="inline-flex items-center gap-1 p-1 rounded-full bg-muted/50 mb-4">
+            <button
+              type="button"
+              onClick={() => setFeedFilter('following')}
+              className={cn(
+                "px-4 py-1.5 rounded-full text-sm font-medium transition-colors",
+                feedFilter === 'following' ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
               )}
-            </div>
-            <ScrollBar orientation="horizontal" />
-          </ScrollArea>
+              data-testid="button-filter-following"
+            >
+              Following
+            </button>
+            <button
+              type="button"
+              onClick={() => setFeedFilter('all')}
+              className={cn(
+                "px-4 py-1.5 rounded-full text-sm font-medium transition-colors inline-flex items-center gap-1.5",
+                feedFilter === 'all' ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              )}
+              data-testid="button-filter-all"
+            >
+              <SparklesIcon className="h-3.5 w-3.5" />
+              For You
+            </button>
+          </div>
+
+          {/* Communities rail — avatar chips instead of text pills so a
+              joined community is recognizable at a glance and the row scales
+              past a handful of communities without becoming a wall of text */}
+          {myCommunities.length > 0 ? (
+            <ScrollArea className="w-full">
+              <div className="flex gap-3 pb-2">
+                {myCommunities.map((community) => (
+                  <CommunityChip
+                    key={community.id}
+                    name={community.name}
+                    coverImageUrl={community.coverImageUrl}
+                    type={community.type}
+                    active={feedFilter === community.id}
+                    hasUnread={communityHasUnread(community)}
+                    onClick={() => selectCommunityFilter(community.id)}
+                    data-testid={`chip-community-${community.id}`}
+                  />
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setCommunityModalOpen(true)}
+                  className="flex flex-col items-center gap-1 w-16 flex-shrink-0 group"
+                  data-testid="button-see-all-communities"
+                >
+                  <div className="h-14 w-14 rounded-full border-2 border-dashed border-muted-foreground/30 flex items-center justify-center text-muted-foreground group-hover:border-primary/50 group-hover:text-primary transition-colors">
+                    <PlusIcon className="h-5 w-5" />
+                  </div>
+                  <span className="text-xs text-muted-foreground w-full truncate text-center">See all</span>
+                </button>
+              </div>
+              <ScrollBar orientation="horizontal" />
+            </ScrollArea>
+          ) : currentUser && (
+            <button
+              type="button"
+              onClick={() => setCommunityModalOpen(true)}
+              className="flex items-center gap-3 w-full p-3 rounded-xl border border-dashed border-border hover:border-primary/50 hover:bg-muted/30 transition-colors text-left"
+              data-testid="card-discover-communities"
+            >
+              <div className="h-10 w-10 rounded-full bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
+                <UsersIcon className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-sm font-medium">Discover communities</p>
+                <p className="text-xs text-muted-foreground">Join spaces for your city, scene, or interests</p>
+              </div>
+            </button>
+          )}
         </div>
 
         {/* Compose prompt */}

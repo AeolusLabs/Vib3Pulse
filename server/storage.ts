@@ -934,7 +934,7 @@ export interface IStorage {
   getCommunityBySlug(slug: string): Promise<Community | undefined>;
   getCommunityWithDetails(id: string): Promise<(Community & { memberCount: number; creator: User }) | undefined>;
   getCommunities(): Promise<Array<Community & { memberCount: number; creator: User }>>;
-  getUserCommunities(userId: string): Promise<Array<Community & { memberCount: number; role: string }>>;
+  getUserCommunities(userId: string): Promise<Array<Community & { memberCount: number; role: string; lastPostAt: string | null }>>;
   updateCommunity(id: string, updates: Partial<InsertCommunity>): Promise<Community>;
   deleteCommunity(id: string): Promise<void>;
   getCommunityEvents(communityId: string): Promise<Event[]>;
@@ -4681,22 +4681,24 @@ export class DbStorage implements IStorage {
     });
   }
 
-  async getUserCommunities(userId: string): Promise<Array<Community & { memberCount: number; role: string }>> {
+  async getUserCommunities(userId: string): Promise<Array<Community & { memberCount: number; role: string; lastPostAt: string | null }>> {
     const result = await db
       .select({
         community: communities,
         membership: communityMemberships,
         memberCount: sql<number>`(SELECT COUNT(*) FROM community_memberships WHERE community_id = ${communities.id})::int`,
+        lastPostAt: sql<string | null>`(SELECT MAX(created_at) FROM posts WHERE community_id = ${communities.id})`,
       })
       .from(communityMemberships)
       .innerJoin(communities, eq(communityMemberships.communityId, communities.id))
       .where(eq(communityMemberships.userId, userId))
       .orderBy(desc(communityMemberships.joinedAt));
-    
+
     return result.map(r => ({
       ...r.community,
       memberCount: r.memberCount,
       role: r.membership.role,
+      lastPostAt: r.lastPostAt,
     }));
   }
 
