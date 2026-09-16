@@ -3,6 +3,7 @@ import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import crypto from "crypto";
 import sanitizeHtml from "sanitize-html";
 import { storage } from "./storage";
+import { SENSITIVE_RESPONSE_KEYS } from "./auth";
 
 const CSRF_TOKEN_HEADER = "x-csrf-token";
 const CSRF_TOKEN_COOKIE = "csrf-token";
@@ -356,4 +357,47 @@ export function logSecurityEvent(
     ...details,
   };
   console.log(`[SECURITY] ${JSON.stringify(logEntry)}`);
+}
+
+// Recursively deletes known-sensitive keys (passwordHash, reset/verification
+// tokens — see SENSITIVE_RESPONSE_KEYS in auth.ts) from any value, at any
+// depth. Mutates in place; safe on arrays, nested objects, dates, and other
+// non-plain-object values (left untouched).
+const MAX_REDACT_DEPTH = 12;
+
+function redactInPlace(value: unknown, depth: number): void {
+  if (!value || typeof value !== "object" || depth > MAX_REDACT_DEPTH) return;
+
+  if (Array.isArray(value)) {
+    for (const item of value) redactInPlace(item, depth + 1);
+    return;
+  }
+
+  // Only walk plain objects — Date, Buffer, etc. have no sensitive keys and
+  // recursing into them is wasted work at best, wrong at worst.
+  if (value.constructor !== undefined && value.constructor !== Object) return;
+
+  for (const key of Object.keys(value as Record<string, unknown>)) {
+    if (SENSITIVE_RESPONSE_KEYS.has(key)) {
+      delete (value as Record<string, unknown>)[key];
+    } else {
+      redactInPlace((value as Record<string, unknown>)[key], depth + 1);
+    }
+  }
+}
+
+// Last line of defense: every route in this app calls res.json(...) exactly
+// once, and this makes it structurally impossible for that call to leak a
+// password hash or a live reset/verification token, even from a handler that
+// forgot to sanitize its data first (see feedback_schema_migrations.md for
+// why "remember to sanitize" isn't good enough on its own — this exact class
+// of bug has recurred multiple times). Register early, before request
+// logging, so logs never capture the raw fields either.
+export function redactSensitiveFields(req: Request, res: Response, next: NextFunction) {
+  const originalJson = res.json.bind(res);
+  res.json = (body: unknown) => {
+    redactInPlace(body, 0);
+    return originalJson(body);
+  };
+  next();
 }

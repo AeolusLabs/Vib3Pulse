@@ -20,12 +20,13 @@ import { storage, ensureSchema } from "./storage";
 import { comparePassword, userToSessionUser, type SessionUser } from "./auth";
 import { wsManager } from "./websocket";
 import { setupAdminRoutes } from "./admin-routes";
-import { 
-  csrfProtection, 
-  csrfTokenEndpoint, 
-  apiRateLimiter, 
+import {
+  csrfProtection,
+  csrfTokenEndpoint,
+  apiRateLimiter,
   securityHeaders,
-  logSecurityEvent
+  logSecurityEvent,
+  redactSensitiveFields
 } from "./security";
 
 const app = express();
@@ -50,6 +51,10 @@ declare module 'http' {
 
 // Security headers first
 app.use(securityHeaders);
+
+// Last line of defense against ever sending a passwordHash or a live reset/
+// verification token to a client — see redactSensitiveFields() in security.ts.
+app.use(redactSensitiveFields);
 
 // Cookie parser for CSRF token validation
 app.use(cookieParser());

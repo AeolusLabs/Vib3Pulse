@@ -168,6 +168,7 @@ import { Pool } from "pg";
 import { eq, and, gte, gt, lt, or, ilike, desc, sql, count, inArray, notInArray, isNull, isNotNull } from "drizzle-orm";
 import crypto from "crypto";
 import { cached, postsCache, eventsCache, storiesCache, invalidateCache } from "./cache";
+import { toPublicUser, toPublicAdminUser, type PublicUser, type PublicAdminUser } from "./auth";
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -543,7 +544,7 @@ export interface IStorage {
   getTicketByValidationCode(validationCode: string): Promise<Ticket | undefined>;
   createTicket(ticket: InsertTicket): Promise<Ticket>;
   checkInTicket(ticketId: string, organizerId: string): Promise<Ticket>;
-  getEventCheckIns(eventId: string): Promise<Array<Ticket & { user: User }>>;
+  getEventCheckIns(eventId: string): Promise<Array<Ticket & { user: PublicUser }>>;
   // Public "who's going" sample for the Event Detail page — union of RSVP'd
   // and confirmed-ticket-holding users, deduped, capped at `limit` rows
   // returned but totalCount reflects the full distinct attendee count.
@@ -595,8 +596,8 @@ export interface IStorage {
   getAllPosts(): Promise<Post[]>;
   getPost(id: string): Promise<Post | undefined>;
   getUserPosts(userId: string): Promise<Post[]>;
-  getUserLikedPosts(userId: string): Promise<Array<Post & { user: User }>>;
-  getUserRepostedPosts(userId: string): Promise<Array<Post & { user: User }>>;
+  getUserLikedPosts(userId: string): Promise<Array<Post & { user: PublicUser }>>;
+  getUserRepostedPosts(userId: string): Promise<Array<Post & { user: PublicUser }>>;
   createPost(post: InsertPost): Promise<Post>;
   updatePost(id: string, userId: string, content: string): Promise<{ post?: Post; error?: "NOT_FOUND" | "FORBIDDEN" | "EDIT_WINDOW_PASSED" }>;
   deletePost(id: string): Promise<void>;
@@ -696,19 +697,18 @@ export interface IStorage {
   unrepostPost(userId: string, postId: string): Promise<void>;
   hasUserRepostedPost(userId: string, postId: string): Promise<boolean>;
   getPostRepostCount(postId: string): Promise<number>;
-  getPostsWithReposts(): Promise<Array<(Post | { repostedBy: User; originalPost: Post & { user: User }; createdAt: Date }) & { user: User }>>;
 
   // Hashtag methods
   getOrCreateHashtag(tag: string): Promise<Hashtag>;
   addHashtagToPost(postId: string, hashtagId: string): Promise<void>;
   getPostHashtags(postId: string): Promise<Hashtag[]>;
-  getPostsByHashtag(tag: string): Promise<Array<Post & { user: User }>>;
+  getPostsByHashtag(tag: string): Promise<Array<Post & { user: PublicUser }>>;
   getTrendingHashtags(limit?: number): Promise<Hashtag[]>;
 
   // Mention methods
   addMentionToPost(postId: string, mentionedUserId: string): Promise<void>;
-  getPostMentions(postId: string): Promise<User[]>;
-  getUserMentions(userId: string): Promise<Array<Post & { user: User }>>;
+  getPostMentions(postId: string): Promise<PublicUser[]>;
+  getUserMentions(userId: string): Promise<Array<Post & { user: PublicUser }>>;
 
   // Safety buddy system (SMS-based, no app required for buddies)
   createBuddy(params: Omit<InsertSafetyBuddy, "id">): Promise<SafetyBuddy>;
@@ -796,7 +796,7 @@ export interface IStorage {
   checkInVenueTicket(ticketId: string, organizerId: string): Promise<VenueTicket | null>;
   incrementVenueEntryNightTicketsSold(entryNightId: string): Promise<void>;
   claimVenueTicketSlot(entryNightId: string): Promise<boolean>;
-  getVenueEventCheckIns(venueEntryNightId: string): Promise<Array<VenueTicket & { user: User }>>;
+  getVenueEventCheckIns(venueEntryNightId: string): Promise<Array<VenueTicket & { user: PublicUser }>>;
 
   // Venue staff access codes
   createVenueStaffCode(venueEntryNightId: string, organizerId: string, expiresAt: Date): Promise<VenueStaffAccessCode>;
@@ -864,7 +864,7 @@ export interface IStorage {
   createContentReport(report: InsertContentReport): Promise<ContentReport>;
   createPostReport(postId: string, reporterId: string, reason: string, description: string | null): Promise<ContentReport>;
   createCommentReport(commentId: string, reporterId: string, reason: string, description: string | null): Promise<ContentReport>;
-  getContentReports(status?: string, limit?: number, offset?: number): Promise<Array<ContentReport & { reporter: User }>>;
+  getContentReports(status?: string, limit?: number, offset?: number): Promise<Array<ContentReport & { reporter: PublicUser }>>;
   getContentReport(id: string): Promise<ContentReport | undefined>;
   updateContentReport(id: string, updates: { status: string; reviewedBy: string; resolution?: string }): Promise<ContentReport>;
 
@@ -874,7 +874,7 @@ export interface IStorage {
   getActiveSuspension(userId: string): Promise<UserSuspension | undefined>;
   getBulkActiveSuspensions(userIds: string[]): Promise<UserSuspension[]>;
   liftSuspension(suspensionId: string): Promise<UserSuspension>;
-  getAllSuspensions(): Promise<Array<UserSuspension & { user: User; admin: AdminUser }>>;
+  getAllSuspensions(): Promise<Array<UserSuspension & { user: PublicUser; admin: PublicAdminUser }>>;
 
   // Event moderation
   moderateEvent(moderation: InsertEventModeration): Promise<EventModeration>;
@@ -908,19 +908,19 @@ export interface IStorage {
   deleteUser(id: string): Promise<void>;
 
   // Event management for admins
-  getAllEventsAdmin(limit?: number, offset?: number): Promise<Array<Event & { organizer: User; moderationStatus: string; sourceType: 'event' | 'venue_entry' }>>;
+  getAllEventsAdmin(limit?: number, offset?: number): Promise<Array<Event & { organizer: PublicUser; moderationStatus: string; sourceType: 'event' | 'venue_entry' }>>;
   deleteEvent(id: string): Promise<void>;
   moderateVenueEvent(venueEntryNightId: string, action: string): Promise<void>;
 
   // Story management for admins
-  getAllStoriesAdmin(limit?: number): Promise<Array<Story & { user: User }>>;
+  getAllStoriesAdmin(limit?: number): Promise<Array<Story & { user: PublicUser }>>;
   deleteStoryAdmin(id: string): Promise<void>;
 
   // ============================================
   // NOTIFICATIONS
   // ============================================
   createNotification(notification: InsertNotification): Promise<Notification>;
-  getUserNotifications(userId: string, limit?: number): Promise<Array<Notification & { relatedUser: User | null }>>;
+  getUserNotifications(userId: string, limit?: number): Promise<Array<Notification & { relatedUser: PublicUser | null }>>;
   getUnreadNotificationCount(userId: string): Promise<number>;
   markNotificationAsRead(id: string): Promise<Notification>;
   markAllNotificationsAsRead(userId: string): Promise<void>;
@@ -951,7 +951,7 @@ export interface IStorage {
   setCommunityNotifications(userId: string, communityId: string, enabled: boolean): Promise<void>;
 
   // Community posts
-  getCommunityPosts(communityId: string, limit?: number, offset?: number, postType?: string): Promise<Array<Post & { user: User; community: Community }>>;
+  getCommunityPosts(communityId: string, limit?: number, offset?: number, postType?: string): Promise<Array<Post & { user: PublicUser; community: Community }>>;
   getCommunityMemberCount(communityId: string): Promise<number>;
   setCommunityPostPinned(postId: string, pinned: boolean): Promise<Post>;
   moderateRemoveCommunityPost(postId: string): Promise<void>;
@@ -965,9 +965,9 @@ export interface IStorage {
   
   // Conversations
   createConversation(data: InsertConversation, participantIds: string[]): Promise<Conversation>;
-  getConversationById(id: string): Promise<(Conversation & { participants: Array<ConversationParticipant & { user: User }> }) | undefined>;
+  getConversationById(id: string): Promise<(Conversation & { participants: Array<ConversationParticipant & { user: PublicUser }> }) | undefined>;
   getUserConversations(userId: string): Promise<Array<Conversation & {
-    participants: Array<ConversationParticipant & { user: User }>;
+    participants: Array<ConversationParticipant & { user: PublicUser }>;
     unreadCount: number;
   }>>;
   updateConversation(id: string, updates: Partial<InsertConversation>): Promise<Conversation>;
@@ -986,21 +986,21 @@ export interface IStorage {
   removeConversationParticipant(conversationId: string, userId: string): Promise<void>;
   updateParticipantRole(conversationId: string, userId: string, role: string): Promise<ConversationParticipant>;
   isConversationParticipant(conversationId: string, userId: string): Promise<boolean>;
-  getConversationParticipants(conversationId: string): Promise<Array<ConversationParticipant & { user: User }>>;
+  getConversationParticipants(conversationId: string): Promise<Array<ConversationParticipant & { user: PublicUser }>>;
   getParticipantRole(conversationId: string, userId: string): Promise<string | undefined>;
   updateLastReadAt(conversationId: string, userId: string): Promise<void>;
   getUnreadMessageCount(userId: string): Promise<number>;
 
   // Conversation messages
   sendConversationMessage(message: InsertConversationMessage): Promise<ConversationMessage>;
-  getConversationMessages(conversationId: string, limit?: number, before?: string): Promise<Array<ConversationMessage & { sender: User; replyTo?: ConversationMessage & { sender: User }; story?: Story & { user: User } }>>;
+  getConversationMessages(conversationId: string, limit?: number, before?: string): Promise<Array<ConversationMessage & { sender: PublicUser; replyTo?: ConversationMessage & { sender: PublicUser }; story?: Story & { user: PublicUser } }>>;
   getConversationMessage(messageId: string): Promise<ConversationMessage | undefined>;
-  searchConversationMessages(conversationId: string, query: string, limit?: number): Promise<Array<ConversationMessage & { sender: User }>>;
+  searchConversationMessages(conversationId: string, query: string, limit?: number): Promise<Array<ConversationMessage & { sender: PublicUser }>>;
   deleteConversationMessage(messageId: string): Promise<void>;
   
   // Polls
   createPoll(poll: InsertPoll, options: Array<{ text: string; eventId?: string; venueId?: string }>): Promise<Poll & { options: PollOption[] }>;
-  getPoll(id: string): Promise<(Poll & { options: Array<PollOption & { voteCount: number; voters: User[] }>; creator: User }) | undefined>;
+  getPoll(id: string): Promise<(Poll & { options: Array<PollOption & { voteCount: number; voters: PublicUser[] }>; creator: PublicUser }) | undefined>;
   votePoll(pollId: string, optionId: string, userId: string): Promise<PollVote>;
   unvotePoll(pollId: string, optionId: string, userId: string): Promise<void>;
   getUserPollVotes(pollId: string, userId: string): Promise<PollVote[]>;
@@ -1429,14 +1429,14 @@ export class DbStorage implements IStorage {
     return result[0] ?? null;
   }
 
-  async getEventCheckIns(eventId: string): Promise<Array<Ticket & { user: User }>> {
+  async getEventCheckIns(eventId: string): Promise<Array<Ticket & { user: PublicUser }>> {
     const result = await db
       .select()
       .from(tickets)
       .innerJoin(users, eq(tickets.userId, users.id))
       .where(eq(tickets.eventId, eventId));
-    
-    return result.map(row => ({ ...row.tickets, user: row.users }));
+
+    return result.map(row => ({ ...row.tickets, user: toPublicUser(row.users) }));
   }
 
   async getEventAttendeesSample(eventId: string, limit: number = 12): Promise<{ users: Array<Pick<User, "id" | "username" | "displayName" | "avatarUrl">>; totalCount: number }> {
@@ -1595,7 +1595,7 @@ export class DbStorage implements IStorage {
       .orderBy(desc(posts.createdAt));
   }
 
-  async getUserLikedPosts(userId: string): Promise<Array<Post & { user: User }>> {
+  async getUserLikedPosts(userId: string): Promise<Array<Post & { user: PublicUser }>> {
     const likedPosts = await db
       .select({
         post: posts,
@@ -1606,14 +1606,14 @@ export class DbStorage implements IStorage {
       .innerJoin(users, eq(posts.userId, users.id))
       .where(eq(likes.userId, userId))
       .orderBy(desc(likes.createdAt));
-    
+
     return likedPosts.map(row => ({
       ...row.post,
-      user: row.user,
+      user: toPublicUser(row.user),
     }));
   }
 
-  async getUserRepostedPosts(userId: string): Promise<Array<Post & { user: User }>> {
+  async getUserRepostedPosts(userId: string): Promise<Array<Post & { user: PublicUser }>> {
     const repostedPosts = await db
       .select({
         post: posts,
@@ -1624,10 +1624,10 @@ export class DbStorage implements IStorage {
       .innerJoin(users, eq(posts.userId, users.id))
       .where(eq(reposts.userId, userId))
       .orderBy(desc(reposts.createdAt));
-    
+
     return repostedPosts.map(row => ({
       ...row.post,
-      user: row.user,
+      user: toPublicUser(row.user),
     }));
   }
 
@@ -2680,61 +2680,6 @@ export class DbStorage implements IStorage {
     return result[0]?.count || 0;
   }
 
-  async getPostsWithReposts(): Promise<Array<any>> {
-    // Get all original posts with user info
-    const originalPosts = await db.select({
-      post: posts,
-      user: users,
-    })
-    .from(posts)
-    .innerJoin(users, eq(posts.userId, users.id))
-    .orderBy(desc(posts.createdAt));
-
-    // Get all reposts with reposting user info and original post info
-    const repostsList = await db.select({
-      repost: reposts,
-      repostingUser: users,
-    })
-    .from(reposts)
-    .innerJoin(users, eq(reposts.userId, users.id))
-    .orderBy(desc(reposts.createdAt));
-
-    // Create a combined feed with original posts and reposts
-    const feed: any[] = [];
-
-    // Add original posts
-    for (const row of originalPosts) {
-      feed.push({
-        ...row.post,
-        user: row.user,
-        isRepost: false,
-      });
-    }
-
-    // Add reposts with reference to original post
-    for (const row of repostsList) {
-      const originalPost = originalPosts.find(p => p.post.id === row.repost.postId);
-      if (originalPost) {
-        feed.push({
-          id: `repost-${row.repost.id}`,
-          isRepost: true,
-          repostedBy: row.repostingUser,
-          originalPost: {
-            ...originalPost.post,
-            user: originalPost.user,
-          },
-          createdAt: row.repost.createdAt,
-          user: row.repostingUser,
-        });
-      }
-    }
-
-    // Sort by createdAt descending
-    feed.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-    return feed;
-  }
-
   // ============================================
   // HASHTAG METHODS
   // ============================================
@@ -2770,9 +2715,9 @@ export class DbStorage implements IStorage {
     return result.map(r => r.hashtag);
   }
 
-  async getPostsByHashtag(tag: string): Promise<Array<Post & { user: User }>> {
+  async getPostsByHashtag(tag: string): Promise<Array<Post & { user: PublicUser }>> {
     const normalizedTag = tag.toLowerCase().replace(/^#/, '');
-    
+
     const result = await db.select({
       post: posts,
       user: users,
@@ -2784,7 +2729,7 @@ export class DbStorage implements IStorage {
     .where(eq(hashtags.tag, normalizedTag))
     .orderBy(desc(posts.createdAt));
 
-    return result.map(r => ({ ...r.post, user: r.user }));
+    return result.map(r => ({ ...r.post, user: toPublicUser(r.user) }));
   }
 
   async getTrendingHashtags(limit: number = 10): Promise<Hashtag[]> {
@@ -2803,15 +2748,15 @@ export class DbStorage implements IStorage {
     await db.insert(postMentions).values({ postId, mentionedUserId }).onConflictDoNothing();
   }
 
-  async getPostMentions(postId: string): Promise<User[]> {
+  async getPostMentions(postId: string): Promise<PublicUser[]> {
     const result = await db.select({ user: users })
       .from(postMentions)
       .innerJoin(users, eq(postMentions.mentionedUserId, users.id))
       .where(eq(postMentions.postId, postId));
-    return result.map(r => r.user);
+    return result.map(r => toPublicUser(r.user));
   }
 
-  async getUserMentions(userId: string): Promise<Array<Post & { user: User }>> {
+  async getUserMentions(userId: string): Promise<Array<Post & { user: PublicUser }>> {
     const result = await db.select({
       post: posts,
       user: users,
@@ -2822,7 +2767,7 @@ export class DbStorage implements IStorage {
     .where(eq(postMentions.mentionedUserId, userId))
     .orderBy(desc(posts.createdAt));
 
-    return result.map(r => ({ ...r.post, user: r.user }));
+    return result.map(r => ({ ...r.post, user: toPublicUser(r.user) }));
   }
 
   // ==================== SAFETY SYSTEM ====================
@@ -3625,14 +3570,14 @@ export class DbStorage implements IStorage {
     return result.length > 0;
   }
 
-  async getVenueEventCheckIns(venueEntryNightId: string): Promise<Array<VenueTicket & { user: User }>> {
+  async getVenueEventCheckIns(venueEntryNightId: string): Promise<Array<VenueTicket & { user: PublicUser }>> {
     const result = await db
       .select()
       .from(venueTickets)
       .innerJoin(users, eq(venueTickets.userId, users.id))
       .where(eq(venueTickets.venueEntryNightId, venueEntryNightId))
       .orderBy(desc(venueTickets.purchaseDate));
-    return result.map(r => ({ ...r.venue_tickets, user: r.users }));
+    return result.map(r => ({ ...r.venue_tickets, user: toPublicUser(r.users) }));
   }
 
   async createVenueStaffCode(venueEntryNightId: string, organizerId: string, expiresAt: Date): Promise<VenueStaffAccessCode> {
@@ -4156,7 +4101,7 @@ export class DbStorage implements IStorage {
     });
   }
 
-  async getContentReports(status?: string, limit = 50, offset = 0): Promise<Array<ContentReport & { reporter: User }>> {
+  async getContentReports(status?: string, limit = 50, offset = 0): Promise<Array<ContentReport & { reporter: PublicUser }>> {
     const safeLimit = Math.min(Math.max(limit, 1), 100);
     const safeOffset = Math.max(offset, 0);
 
@@ -4174,7 +4119,7 @@ export class DbStorage implements IStorage {
 
     return results.map(r => ({
       ...r.content_reports,
-      reporter: r.users,
+      reporter: toPublicUser(r.users),
     }));
   }
 
@@ -4252,18 +4197,18 @@ export class DbStorage implements IStorage {
     return result[0];
   }
 
-  async getAllSuspensions(): Promise<Array<UserSuspension & { user: User; admin: AdminUser }>> {
+  async getAllSuspensions(): Promise<Array<UserSuspension & { user: PublicUser; admin: PublicAdminUser }>> {
     const result = await db
       .select()
       .from(userSuspensions)
       .innerJoin(users, eq(userSuspensions.userId, users.id))
       .innerJoin(adminUsers, eq(userSuspensions.adminId, adminUsers.id))
       .orderBy(desc(userSuspensions.createdAt));
-    
+
     return result.map(r => ({
       ...r.user_suspensions,
-      user: r.users,
-      admin: r.admin_users,
+      user: toPublicUser(r.users),
+      admin: toPublicAdminUser(r.admin_users),
     }));
   }
 
@@ -4411,7 +4356,7 @@ export class DbStorage implements IStorage {
     await db.delete(users).where(eq(users.id, id));
   }
 
-  async getAllEventsAdmin(limit: number = 50, offset: number = 0): Promise<Array<Event & { organizer: User; moderationStatus: string; sourceType: 'event' | 'venue_entry' }>> {
+  async getAllEventsAdmin(limit: number = 50, offset: number = 0): Promise<Array<Event & { organizer: PublicUser; moderationStatus: string; sourceType: 'event' | 'venue_entry' }>> {
     const eventRows = await db
       .select()
       .from(events)
@@ -4435,7 +4380,7 @@ export class DbStorage implements IStorage {
 
     const mappedEvents = eventRows.map(r => ({
       ...r.events,
-      organizer: r.users,
+      organizer: toPublicUser(r.users),
       moderationStatus: r.events.moderationStatus,
       sourceType: 'event' as const,
     }));
@@ -4467,7 +4412,7 @@ export class DbStorage implements IStorage {
       cancelledAt: null,
       feePassthroughToBuyer: r.venueEntry.feePassthroughToBuyer,
       communityId: null,
-      organizer: r.organizer,
+      organizer: toPublicUser(r.organizer),
       sourceType: 'venue_entry' as const,
     }));
 
@@ -4576,17 +4521,17 @@ export class DbStorage implements IStorage {
       .offset(offset);
   }
 
-  async getAllStoriesAdmin(limit: number = 50): Promise<Array<Story & { user: User }>> {
+  async getAllStoriesAdmin(limit: number = 50): Promise<Array<Story & { user: PublicUser }>> {
     const result = await db
       .select()
       .from(stories)
       .innerJoin(users, eq(stories.userId, users.id))
       .orderBy(desc(stories.createdAt))
       .limit(limit);
-    
+
     return result.map(r => ({
       ...r.stories,
-      user: r.users,
+      user: toPublicUser(r.users),
     }));
   }
 
@@ -4604,7 +4549,7 @@ export class DbStorage implements IStorage {
     return result[0];
   }
 
-  async getUserNotifications(userId: string, limit: number = 50): Promise<Array<Notification & { relatedUser: User | null }>> {
+  async getUserNotifications(userId: string, limit: number = 50): Promise<Array<Notification & { relatedUser: PublicUser | null }>> {
     const result = await db
       .select()
       .from(notifications)
@@ -4612,10 +4557,10 @@ export class DbStorage implements IStorage {
       .where(eq(notifications.userId, userId))
       .orderBy(desc(notifications.createdAt))
       .limit(limit);
-    
+
     return result.map(r => ({
       ...r.notifications,
-      relatedUser: r.users || null,
+      relatedUser: r.users ? toPublicUser(r.users) : null,
     }));
   }
 
@@ -4815,7 +4760,7 @@ export class DbStorage implements IStorage {
   // postType is derived, not a stored column — matches the same "text unless
   // videoUrl/imageUrls/eventId/venueId says otherwise" logic used client-side
   // wherever a post's type badge is shown.
-  async getCommunityPosts(communityId: string, limit: number = 30, offset: number = 0, postType?: string): Promise<Array<Post & { user: User; community: Community }>> {
+  async getCommunityPosts(communityId: string, limit: number = 30, offset: number = 0, postType?: string): Promise<Array<Post & { user: PublicUser; community: Community }>> {
     const typeFilter =
       postType === "photo" ? sql`array_length(${posts.imageUrls}, 1) > 0` :
       postType === "video" ? isNotNull(posts.videoUrl) :
@@ -4844,7 +4789,7 @@ export class DbStorage implements IStorage {
 
     return result.map(r => ({
       ...r.post,
-      user: r.user,
+      user: toPublicUser(r.user),
       community: r.community,
     }));
   }
@@ -4966,7 +4911,7 @@ export class DbStorage implements IStorage {
         const feed: any[] = [];
 
         for (const r of postsResult) {
-          const item = { ...r.post, user: r.user, community: r.community, isRepost: false };
+          const item = { ...r.post, user: toPublicUser(r.user), community: r.community, isRepost: false };
           postMap.set(r.post.id, item);
           feed.push(item);
         }
@@ -4980,13 +4925,14 @@ export class DbStorage implements IStorage {
         for (const r of repostsResult) {
           const originalPost = postMap.get(r.repost.postId);
           if (!originalPost) continue; // original was deleted
+          const repostingUser = toPublicUser(r.repostingUser);
           feed.push({
             id: `repost-${r.repost.id}`,
             isRepost: true,
-            repostedBy: r.repostingUser,
+            repostedBy: repostingUser,
             originalPost,
             createdAt: r.repost.createdAt,
-            user: r.repostingUser,
+            user: repostingUser,
             postId: r.repost.postId,
           });
         }
@@ -5023,7 +4969,7 @@ export class DbStorage implements IStorage {
 
     const postMap = new Map<string, any>();
     for (const r of postsResult) {
-      postMap.set(r.post.id, { ...r.post, user: r.user, community: r.community });
+      postMap.set(r.post.id, { ...r.post, user: toPublicUser(r.user), community: r.community });
     }
 
     // Fetch original posts for reposts not covered by the posts window
@@ -5038,24 +4984,25 @@ export class DbStorage implements IStorage {
         .leftJoin(communities, eq(posts.communityId, communities.id))
         .where(inArray(posts.id, missingIds));
       for (const r of missing) {
-        postMap.set(r.post.id, { ...r.post, user: r.user, community: r.community });
+        postMap.set(r.post.id, { ...r.post, user: toPublicUser(r.user), community: r.community });
       }
     }
 
     const feed: any[] = [];
     for (const r of postsResult) {
-      feed.push({ ...r.post, user: r.user, community: r.community, isRepost: false });
+      feed.push({ ...r.post, user: toPublicUser(r.user), community: r.community, isRepost: false });
     }
     for (const r of repostsResult) {
       const originalPost = postMap.get(r.repost.postId);
       if (!originalPost) continue;
+      const repostingUser = toPublicUser(r.repostingUser);
       feed.push({
         id: `repost-${r.repost.id}`,
         isRepost: true,
-        repostedBy: r.repostingUser,
+        repostedBy: repostingUser,
         originalPost,
         createdAt: r.repost.createdAt,
-        user: r.repostingUser,
+        user: repostingUser,
         postId: r.repost.postId,
       });
     }
@@ -5106,7 +5053,7 @@ export class DbStorage implements IStorage {
     return conversation;
   }
 
-  async getConversationById(id: string): Promise<(Conversation & { participants: Array<ConversationParticipant & { user: User }> }) | undefined> {
+  async getConversationById(id: string): Promise<(Conversation & { participants: Array<ConversationParticipant & { user: PublicUser }> }) | undefined> {
     const result = await db.select().from(conversations).where(eq(conversations.id, id));
     const conversation = result[0];
     
@@ -5121,7 +5068,7 @@ export class DbStorage implements IStorage {
   }
 
   async getUserConversations(userId: string): Promise<Array<Conversation & {
-    participants: Array<ConversationParticipant & { user: User }>;
+    participants: Array<ConversationParticipant & { user: PublicUser }>;
     unreadCount: number;
   }>> {
     // Query 1: get the user's conversation memberships (includes their unreadCount)
@@ -5152,10 +5099,10 @@ export class DbStorage implements IStorage {
       .innerJoin(users, eq(conversationParticipants.userId, users.id))
       .where(inArray(conversationParticipants.conversationId, conversationIds));
 
-    const participantsByConvId = new Map<string, Array<ConversationParticipant & { user: User }>>();
+    const participantsByConvId = new Map<string, Array<ConversationParticipant & { user: PublicUser }>>();
     for (const row of allParticipantRows) {
       const list = participantsByConvId.get(row.participant.conversationId) ?? [];
-      list.push({ ...row.participant, user: row.user });
+      list.push({ ...row.participant, user: toPublicUser(row.user) });
       participantsByConvId.set(row.participant.conversationId, list);
     }
 
@@ -5284,7 +5231,7 @@ export class DbStorage implements IStorage {
     return result.length > 0;
   }
 
-  async getConversationParticipants(conversationId: string): Promise<Array<ConversationParticipant & { user: User }>> {
+  async getConversationParticipants(conversationId: string): Promise<Array<ConversationParticipant & { user: PublicUser }>> {
     const result = await db
       .select({
         participant: conversationParticipants,
@@ -5293,10 +5240,10 @@ export class DbStorage implements IStorage {
       .from(conversationParticipants)
       .innerJoin(users, eq(conversationParticipants.userId, users.id))
       .where(eq(conversationParticipants.conversationId, conversationId));
-    
+
     return result.map(r => ({
       ...r.participant,
-      user: r.user,
+      user: toPublicUser(r.user),
     }));
   }
 
@@ -5392,7 +5339,7 @@ export class DbStorage implements IStorage {
     return result;
   }
 
-  async searchConversationMessages(conversationId: string, query: string, limit: number = 50): Promise<Array<ConversationMessage & { sender: User }>> {
+  async searchConversationMessages(conversationId: string, query: string, limit: number = 50): Promise<Array<ConversationMessage & { sender: PublicUser }>> {
     const result = await db
       .select({ message: conversationMessages, sender: users })
       .from(conversationMessages)
@@ -5405,10 +5352,10 @@ export class DbStorage implements IStorage {
       .orderBy(desc(conversationMessages.createdAt))
       .limit(limit);
 
-    return result.map(r => ({ ...r.message, sender: r.sender }));
+    return result.map(r => ({ ...r.message, sender: toPublicUser(r.sender) }));
   }
 
-  async getConversationMessages(conversationId: string, limit: number = 50, before?: string): Promise<Array<ConversationMessage & { sender: User; replyTo?: ConversationMessage & { sender: User }; story?: Story & { user: User } }>> {
+  async getConversationMessages(conversationId: string, limit: number = 50, before?: string): Promise<Array<ConversationMessage & { sender: PublicUser; replyTo?: ConversationMessage & { sender: PublicUser }; story?: Story & { user: PublicUser } }>> {
     const result = await db
       .select({ message: conversationMessages, sender: users })
       .from(conversationMessages)
@@ -5428,7 +5375,7 @@ export class DbStorage implements IStorage {
         .map(r => r.message.storyId!)
     )];
 
-    const storiesById = new Map<string, Story & { user: User }>();
+    const storiesById = new Map<string, Story & { user: PublicUser }>();
     if (storyIds.length > 0) {
       const storyRows = await db
         .select({ story: stories, storyUser: users })
@@ -5436,7 +5383,7 @@ export class DbStorage implements IStorage {
         .innerJoin(users, eq(stories.userId, users.id))
         .where(inArray(stories.id, storyIds));
       for (const row of storyRows) {
-        storiesById.set(row.story.id, { ...row.story, user: row.storyUser });
+        storiesById.set(row.story.id, { ...row.story, user: toPublicUser(row.storyUser) });
       }
     }
 
@@ -5445,7 +5392,7 @@ export class DbStorage implements IStorage {
       result.filter(r => !r.message.isDeleted && r.message.replyToId).map(r => r.message.replyToId!)
     )];
 
-    const replyToById = new Map<string, ConversationMessage & { sender: User }>();
+    const replyToById = new Map<string, ConversationMessage & { sender: PublicUser }>();
     if (replyToIds.length > 0) {
       const replyRows = await db
         .select({ message: conversationMessages, sender: users })
@@ -5453,16 +5400,16 @@ export class DbStorage implements IStorage {
         .innerJoin(users, eq(conversationMessages.senderId, users.id))
         .where(inArray(conversationMessages.id, replyToIds));
       for (const row of replyRows) {
-        replyToById.set(row.message.id, { ...row.message, sender: row.sender });
+        replyToById.set(row.message.id, { ...row.message, sender: toPublicUser(row.sender) });
       }
     }
 
-    const messagesWithData: Array<ConversationMessage & { sender: User; replyTo?: ConversationMessage & { sender: User }; story?: Story & { user: User } }> = result.map(r => {
+    const messagesWithData: Array<ConversationMessage & { sender: PublicUser; replyTo?: ConversationMessage & { sender: PublicUser }; story?: Story & { user: PublicUser } }> = result.map(r => {
       const blanked = this.blankIfDeleted(r.message);
       const replyTo = blanked.replyToId ? replyToById.get(blanked.replyToId) : undefined;
       return {
         ...blanked,
-        sender: r.sender,
+        sender: toPublicUser(r.sender),
         replyTo: replyTo ? { ...this.blankIfDeleted(replyTo), sender: replyTo.sender } : undefined,
         story: blanked.storyId ? storiesById.get(blanked.storyId) : undefined,
       };
@@ -5508,7 +5455,7 @@ export class DbStorage implements IStorage {
     };
   }
 
-  async getPoll(id: string): Promise<(Poll & { options: Array<PollOption & { voteCount: number; voters: User[] }>; creator: User }) | undefined> {
+  async getPoll(id: string): Promise<(Poll & { options: Array<PollOption & { voteCount: number; voters: PublicUser[] }>; creator: PublicUser }) | undefined> {
     const pollResult = await db
       .select({
         poll: polls,
@@ -5517,20 +5464,20 @@ export class DbStorage implements IStorage {
       .from(polls)
       .innerJoin(users, eq(polls.creatorId, users.id))
       .where(eq(polls.id, id));
-    
+
     if (!pollResult[0]) return undefined;
-    
+
     const { poll, creator } = pollResult[0];
-    
+
     // Get options with vote counts and voters
     const optionsResult = await db
       .select()
       .from(pollOptions)
       .where(eq(pollOptions.pollId, id))
       .orderBy(pollOptions.orderIndex);
-    
-    const optionsWithVotes: Array<PollOption & { voteCount: number; voters: User[] }> = [];
-    
+
+    const optionsWithVotes: Array<PollOption & { voteCount: number; voters: PublicUser[] }> = [];
+
     for (const option of optionsResult) {
       const votesResult = await db
         .select({
@@ -5540,17 +5487,17 @@ export class DbStorage implements IStorage {
         .from(pollVotes)
         .innerJoin(users, eq(pollVotes.userId, users.id))
         .where(eq(pollVotes.optionId, option.id));
-      
+
       optionsWithVotes.push({
         ...option,
         voteCount: votesResult.length,
-        voters: votesResult.map(v => v.user),
+        voters: votesResult.map(v => toPublicUser(v.user)),
       });
     }
-    
+
     return {
       ...poll,
-      creator,
+      creator: toPublicUser(creator),
       options: optionsWithVotes,
     };
   }
