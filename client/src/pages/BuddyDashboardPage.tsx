@@ -1,12 +1,11 @@
 import { useState, useEffect } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useToast } from "@/hooks/use-toast";
+import { useSafetyAlertActions } from "@/hooks/useSafetyAlertActions";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import { AlertLocationMap } from "@/components/safety/AlertLocationMap";
@@ -208,7 +207,6 @@ function RecentAlertRow({
 }
 
 function WatchingCard({ entry, index }: { entry: WatchingEntry; index: number }) {
-  const { toast } = useToast();
   const { protectedUser, activeTimer, recentAlerts } = entry;
   const isInGrace = activeTimer?.status === "grace_period";
   const countdownTarget = isInGrace ? activeTimer?.gracePeriodEndsAt : activeTimer?.expiresAt;
@@ -218,25 +216,11 @@ function WatchingCard({ entry, index }: { entry: WatchingEntry; index: number })
     (a) => a.status === "active" && a.latitude !== null && a.longitude !== null
   );
 
-  // Same endpoints DistressAlertsPage uses — they've supported either-party
-  // resolution (sender or buddy) since Phase 1, so this consolidates the
-  // action onto the dashboard without any new backend work.
-  const resolveMutation = useMutation({
-    mutationFn: (id: string) => apiRequest("POST", `/api/safety/alerts/${id}/resolve`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/safety/watching-over"] });
-      toast({ title: "Marked as safe" });
-    },
-    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
-  });
-  const falseAlarmMutation = useMutation({
-    mutationFn: (id: string) => apiRequest("POST", `/api/safety/alerts/${id}/false-alarm`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/safety/watching-over"] });
-      toast({ title: "Marked as false alarm" });
-    },
-    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
-  });
+  // Same endpoints (and now the same optimistic-update hook) DistressAlertsPage
+  // uses — they've supported either-party resolution (sender or buddy) since
+  // Phase 1, so this consolidates the action onto the dashboard without any
+  // new backend work.
+  const { resolveMutation, falseAlarmMutation } = useSafetyAlertActions();
 
   return (
     <div

@@ -1,10 +1,9 @@
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useToast } from "@/hooks/use-toast";
+import { useSafetyAlertActions } from "@/hooks/useSafetyAlertActions";
 import type { User } from "@shared/schema";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
@@ -87,8 +86,6 @@ function openMapsLink(lat: number, lng: number) {
 }
 
 export default function DistressAlertsPage() {
-  const { toast } = useToast();
-
   const { data, isLoading } = useQuery<{ alerts: SafetyAlert[] }>({
     queryKey: ["/api/safety/alerts"],
     refetchInterval: (query) => {
@@ -97,23 +94,7 @@ export default function DistressAlertsPage() {
     },
   });
 
-  const resolveMutation = useMutation({
-    mutationFn: (id: string) => apiRequest("POST", `/api/safety/alerts/${id}/resolve`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/safety/alerts"] });
-      toast({ title: "Marked as safe" });
-    },
-    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
-  });
-
-  const falseAlarmMutation = useMutation({
-    mutationFn: (id: string) => apiRequest("POST", `/api/safety/alerts/${id}/false-alarm`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/safety/alerts"] });
-      toast({ title: "Marked as false alarm" });
-    },
-    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
-  });
+  const { resolveMutation, falseAlarmMutation } = useSafetyAlertActions();
 
   const alerts = data?.alerts ?? [];
   const activeAlerts = alerts.filter((a) => a.status === "active");
