@@ -18,7 +18,7 @@ import EventDetailsModal from "@/components/EventDetailsModal";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
-import { format } from "date-fns";
+import { format, isPast } from "date-fns";
 import type { User, Event, Post, Venue, Story, VenueEntryNight } from "@shared/schema";
 import { SearchIcon, UserPlusIcon, UserCheckIcon, CalendarIcon, MapPinIcon, UsersIcon, Building2Icon, TrendingUpIcon, SparklesIcon, HeartIcon, TicketIcon, ChevronRightIcon } from "@/components/ui/icons";
 import { FileText } from "lucide-react";
@@ -97,11 +97,15 @@ export default function SearchPage() {
   const { data: allEvents = [] } = useQuery<Event[]>({
     queryKey: ['/api/events'],
     enabled: !isSearching && (activeType === 'all' || activeType === 'events'),
+    refetchInterval: 60000,
+    refetchIntervalInBackground: true,
   });
 
   const { data: allVenueEvents = [] } = useQuery<Array<VenueEntryNight & { venue: Venue }>>({
     queryKey: ['/api/venue-events/upcoming'],
     enabled: !isSearching && (activeType === 'all' || activeType === 'events'),
+    refetchInterval: 60000,
+    refetchIntervalInBackground: true,
   });
 
   // Recommended users based on similar interests and location
@@ -219,9 +223,13 @@ export default function SearchPage() {
     | { kind: 'event'; date: Date; data: Event }
     | { kind: 'venueEvent'; date: Date; data: VenueEntryNight & { venue: Venue } };
 
+  // /api/events never filters by date server-side, and even /api/venue-events/upcoming
+  // (which does) can go stale in-tab since queries default to staleTime: Infinity with
+  // no automatic refetch — filtering by the browser's own clock at render time is the
+  // only way this section reliably excludes an event once its date has passed.
   const combinedAllEvents: CombinedEvent[] = [
-    ...allEvents.map(e => ({ kind: 'event' as const, date: new Date(e.eventDate), data: e })),
-    ...allVenueEvents.map(e => ({ kind: 'venueEvent' as const, date: new Date(e.date), data: e })),
+    ...allEvents.filter(e => !isPast(new Date(e.eventDate))).map(e => ({ kind: 'event' as const, date: new Date(e.eventDate), data: e })),
+    ...allVenueEvents.filter(e => !isPast(new Date(e.date))).map(e => ({ kind: 'venueEvent' as const, date: new Date(e.date), data: e })),
   ].sort((a, b) => a.date.getTime() - b.date.getTime());
 
   return (
