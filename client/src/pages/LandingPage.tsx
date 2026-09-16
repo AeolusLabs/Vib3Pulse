@@ -80,7 +80,7 @@ export default function LandingPage() {
       number: "04",
       icon: ShieldIcon,
       title: "Stay Safe",
-      desc: "Safety Buddy, check-in timers, and one-tap SOS alerts. Go out with confidence.",
+      desc: "Safety Buddy, check-in times, and one-tap SOS alerts. Go out with confidence.",
     },
   ];
 
@@ -458,7 +458,7 @@ export default function LandingPage() {
               </h2>
               <p className="font-sans text-white/60 text-base md:text-lg leading-relaxed mb-10 max-w-lg">
                 Our Safety Buddy system lets you assign a trusted contact, set
-                check-in timers before you head out, and send instant SOS alerts
+                a check-in time before you head out, and send instant SOS alerts
                 with your location. All in one tap.
               </p>
               <Link href="/signup">

@@ -31,11 +31,11 @@ export function AutoSetupTimerDialog({ open, onOpenChange, eventId, eventName, d
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/safety/timer"] });
-      toast({ title: "Check-in timer set", description: "We'll remind you to check in after the event." });
+      toast({ title: "Check-in time set", description: "We'll remind you to check in after the event." });
       onOpenChange(false);
     },
     onError: (e: any) => {
-      toast({ title: "Couldn't set up timer", description: e.message, variant: "destructive" });
+      toast({ title: "Couldn't set up check-in", description: e.message, variant: "destructive" });
       onOpenChange(false);
     },
   });

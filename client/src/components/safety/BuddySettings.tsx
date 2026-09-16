@@ -724,7 +724,7 @@ export function BuddySettings() {
         </CardContent>
       </Card>
 
-      {/* Check-in timer — only when at least one buddy is confirmed */}
+      {/* Check-in time — only when at least one buddy is confirmed */}
       {hasConfirmedBuddy && <CheckInTimer />}
 
       {/* Silent SOS triggers — only useful once there's a confirmed buddy to alert */}

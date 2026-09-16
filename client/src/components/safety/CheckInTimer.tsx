@@ -91,7 +91,7 @@ export function CheckInTimer() {
       apiRequest("POST", "/api/safety/timer", { durationMinutes }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/safety/timer"] });
-      toast({ title: "Timer started", description: "Check in before it expires or your buddy will be alerted." });
+      toast({ title: "Check-in time set", description: "Check in before it expires or your buddy will be alerted." });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
@@ -100,7 +100,7 @@ export function CheckInTimer() {
     mutationFn: () => apiRequest("POST", "/api/safety/timer/checkin"),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/safety/timer"] });
-      toast({ title: "Checked in", description: "You're marked safe. Timer cancelled." });
+      toast({ title: "Checked in", description: "You're marked safe." });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
@@ -109,7 +109,7 @@ export function CheckInTimer() {
     mutationFn: () => apiRequest("DELETE", "/api/safety/timer"),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/safety/timer"] });
-      toast({ title: "Timer cancelled" });
+      toast({ title: "Check-in time cancelled" });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
@@ -127,7 +127,7 @@ export function CheckInTimer() {
     mutationFn: (hours: 1 | 2 | 4) => apiRequest("POST", "/api/safety/timer/extend", { hours }),
     onSuccess: (_data, hours) => {
       queryClient.invalidateQueries({ queryKey: ["/api/safety/timer"] });
-      toast({ title: "Timer extended", description: `Added ${hours} hour${hours === 1 ? "" : "s"}.` });
+      toast({ title: "Check-in time extended", description: `Added ${hours} hour${hours === 1 ? "" : "s"}.` });
     },
     onError: (e: any) => toast({ title: "Couldn't extend", description: e.message, variant: "destructive" }),
   });
@@ -147,10 +147,10 @@ export function CheckInTimer() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <TimerIcon className="h-5 w-5" />
-          Check-In Timer
+          Check-In Time
         </CardTitle>
         <CardDescription>
-          Set a timer. If you don't check in, we'll nudge you a few times before your buddy is alerted automatically.
+          Set a time to check in by. If you don't, we'll nudge you a few times before your buddy is alerted automatically.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -230,7 +230,7 @@ export function CheckInTimer() {
                 {snoozeMutation.isPending ? "Snoozing…" : `I'm fine, extend by 30 min (${3 - timer.snoozeCount} left)`}
               </Button>
             ) : (
-              <p className="text-center text-xs text-muted-foreground">No more snoozes for this timer</p>
+              <p className="text-center text-xs text-muted-foreground">No more snoozes for this check-in</p>
             )}
 
             <div className="flex items-center justify-center gap-2 pt-1">
