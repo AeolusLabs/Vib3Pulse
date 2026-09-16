@@ -4,8 +4,6 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
@@ -54,19 +52,66 @@ function useCountdown(targetIso: string | null) {
   return label;
 }
 
+// Includes a day qualifier once it's not "today" relative to whoever is
+// looking at it right now — since a check-in set for "tomorrow" naturally
+// becomes "today" once that day arrives, this needs no stored day flag, just
+// a fresh comparison against the current date at render time.
 function formatExpiry(iso: string) {
-  return new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  const d = new Date(iso);
+  const now = new Date();
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === now.toDateString()) return time;
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+  if (d.toDateString() === tomorrow.toDateString()) return `${time} tomorrow`;
+  return `${time} ${d.toLocaleDateString(undefined, { weekday: "short" })}`;
 }
 
 function addMinutes(iso: string, minutes: number): string {
   return new Date(new Date(iso).getTime() + minutes * 60_000).toISOString();
 }
 
-const DURATION_PRESETS = [30, 60, 120, 240] as const;
+function toHHMM(date: Date): string {
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+// Round up to the next quarter-hour so a freshly-opened picker doesn't
+// default to an odd time like 14:37.
+function roundUpToNext15Min(date: Date): Date {
+  const d = new Date(date);
+  const remainder = d.getMinutes() % 15;
+  if (remainder !== 0) d.setMinutes(d.getMinutes() + (15 - remainder));
+  d.setSeconds(0, 0);
+  return d;
+}
+
+// The alarm-clock rule: an "HH:MM" time-of-day means the next real occurrence
+// of that clock time — today if it hasn't happened yet, tomorrow if it has
+// (or is close enough to "now" to be ambiguous either way).
+function resolveTargetDate(hhmm: string): Date {
+  const [h, m] = hhmm.split(":").map(Number);
+  const target = new Date();
+  target.setHours(h, m, 0, 0);
+  if (target.getTime() <= Date.now() + 60_000) {
+    target.setDate(target.getDate() + 1);
+  }
+  return target;
+}
+
+const QUICK_OFFSETS = [
+  { label: "+30 min", minutes: 30 },
+  { label: "+1 hr", minutes: 60 },
+  { label: "+2 hr", minutes: 120 },
+  { label: "+4 hr", minutes: 240 },
+] as const;
 
 export function CheckInTimer() {
   const { toast } = useToast();
-  const [customMinutes, setCustomMinutes] = useState("");
+  // Defaults to an hour from now, rounded to a clean quarter-hour — an alarm
+  // picker with a blank/midnight default feels broken, not empty.
+  const [selectedTime, setSelectedTime] = useState(() =>
+    toHHMM(roundUpToNext15Min(new Date(Date.now() + 60 * 60_000)))
+  );
 
   const { data, isLoading } = useQuery<{ timer: SafetyTimer | null }>({
     queryKey: ["/api/safety/timer"],
@@ -132,14 +177,17 @@ export function CheckInTimer() {
     onError: (e: any) => toast({ title: "Couldn't extend", description: e.message, variant: "destructive" }),
   });
 
-  const handleCustomStart = () => {
-    const mins = parseInt(customMinutes, 10);
-    if (isNaN(mins) || mins < 1 || mins > 1440) {
-      toast({ title: "Invalid duration", description: "Enter between 1 and 1440 minutes.", variant: "destructive" });
-      return;
-    }
-    startMutation.mutate(mins);
-    setCustomMinutes("");
+  // Resolved fresh on every render (and again at submit time in
+  // handleSetCheckIn) rather than cached, so it can't go stale while the
+  // picker sits open — see resolveTargetDate for the today/tomorrow rule.
+  const targetDate = selectedTime ? resolveTargetDate(selectedTime) : null;
+  const isTargetTomorrow = !!targetDate && targetDate.toDateString() !== new Date().toDateString();
+
+  const handleSetCheckIn = () => {
+    if (!selectedTime) return;
+    const target = resolveTargetDate(selectedTime);
+    const minutes = Math.min(1440, Math.max(1, Math.round((target.getTime() - Date.now()) / 60_000)));
+    startMutation.mutate(minutes);
   };
 
   return (
@@ -252,70 +300,56 @@ export function CheckInTimer() {
             </div>
           </div>
         ) : (
-          /* Timer setup state */
+          /* Check-in time setup state — alarm-clock style: pick a clock time,
+             not a duration. */
           <div className="space-y-5">
-            {/* Duration presets — staggered entry */}
-            <div className="space-y-2">
+            <div className="text-center p-6 rounded-xl space-y-2 border-2 border-primary/20 bg-primary/5">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest">
-                Duration
+                Check in by
               </p>
-              <div className="grid grid-cols-4 gap-2">
-                {DURATION_PRESETS.map((mins, i) => (
-                  <Button
-                    key={mins}
-                    variant="outline"
-                    size="sm"
-                    onClick={() => startMutation.mutate(mins)}
-                    disabled={startMutation.isPending}
-                    data-testid={`button-timer-${mins}`}
-                    style={{
-                      touchAction: "manipulation",
-                      animationDelay: `${i * 50}ms`,
-                    }}
-                    className="flex flex-col h-auto py-2.5 rounded-xl animate-in fade-in fill-mode-both duration-200"
-                  >
-                    <span className="text-base font-semibold leading-none">
-                      {mins < 60 ? mins : mins / 60}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground mt-0.5">
-                      {mins < 60 ? "min" : "hr"}
-                    </span>
-                  </Button>
-                ))}
-              </div>
+              <Input
+                type="time"
+                value={selectedTime}
+                onChange={(e) => setSelectedTime(e.target.value)}
+                data-testid="input-checkin-time"
+                className="w-auto mx-auto text-center text-4xl font-bold tracking-tight h-auto py-2 border-0 bg-transparent shadow-none focus-visible:ring-1"
+                style={{ fontVariantNumeric: "tabular-nums" }}
+              />
+              {targetDate && (
+                <p className="text-xs text-muted-foreground pt-1" data-testid="text-checkin-day">
+                  {isTargetTomorrow ? "Tomorrow" : "Today"} at{" "}
+                  {targetDate.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+                </p>
+              )}
             </div>
 
-            <Separator />
-
-            {/* Custom duration */}
-            <div className="flex items-end gap-2">
-              <div className="flex-1 space-y-1.5">
-                <Label htmlFor="custom-timer" className="text-xs font-medium text-muted-foreground uppercase tracking-widest">
-                  Custom
-                </Label>
-                <Input
-                  id="custom-timer"
-                  type="number"
-                  min="1"
-                  max="1440"
-                  placeholder="e.g. 90 min"
-                  value={customMinutes}
-                  onChange={(e) => setCustomMinutes(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleCustomStart()}
-                  data-testid="input-custom-timer"
-                  className="rounded-xl"
-                />
-              </div>
-              <Button
-                onClick={handleCustomStart}
-                disabled={startMutation.isPending || !customMinutes}
-                data-testid="button-start-custom-timer"
-                className="rounded-full"
-                style={{ touchAction: "manipulation" }}
-              >
-                Start
-              </Button>
+            <div className="flex items-center justify-center gap-2">
+              {QUICK_OFFSETS.map(({ label, minutes }) => (
+                <Button
+                  key={minutes}
+                  variant="outline"
+                  size="sm"
+                  className="rounded-full h-8 px-3"
+                  onClick={() => setSelectedTime(toHHMM(new Date(Date.now() + minutes * 60_000)))}
+                  data-testid={`button-quick-${minutes}`}
+                  style={{ touchAction: "manipulation" }}
+                >
+                  {label}
+                </Button>
+              ))}
             </div>
+
+            <Button
+              className="w-full rounded-full gap-2"
+              size="lg"
+              onClick={handleSetCheckIn}
+              disabled={startMutation.isPending || !selectedTime}
+              data-testid="button-set-checkin-time"
+              style={{ touchAction: "manipulation" }}
+            >
+              <TimerIcon className="h-4 w-4" />
+              {startMutation.isPending ? "Setting…" : "Set Check-In"}
+            </Button>
           </div>
         )}
       </CardContent>
