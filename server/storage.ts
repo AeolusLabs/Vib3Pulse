@@ -1991,16 +1991,23 @@ export class DbStorage implements IStorage {
   }
 
   async searchEvents(query: string): Promise<Array<Event & { organizer: User }>> {
+    const now = new Date();
     const result = await db
       .select()
       .from(events)
       .innerJoin(users, eq(events.organizerId, users.id))
       .where(
-        or(
-          ilike(events.title, `%${query}%`),
-          ilike(events.description, `%${query}%`),
-          ilike(events.location, `%${query}%`),
-          ilike(events.category, `%${query}%`)
+        and(
+          or(
+            ilike(events.title, `%${query}%`),
+            ilike(events.description, `%${query}%`),
+            ilike(events.location, `%${query}%`),
+            ilike(events.category, `%${query}%`)
+          ),
+          gte(events.eventDate, now),
+          eq(events.isPublished, true),
+          eq(events.isCancelled, false),
+          eq(events.moderationStatus, 'approved')
         )
       )
       .orderBy(desc(events.eventDate));
@@ -2048,14 +2055,20 @@ export class DbStorage implements IStorage {
   }
 
   async searchVenueEvents(query: string): Promise<Array<VenueEntryNight & { venue: Venue }>> {
+    const now = new Date();
     const result = await db
       .select()
       .from(venueEntryNights)
       .innerJoin(venues, eq(venueEntryNights.venueId, venues.id))
       .where(
-        or(
-          ilike(venueEntryNights.name, `%${query}%`),
-          ilike(venueEntryNights.description, `%${query}%`)
+        and(
+          or(
+            ilike(venueEntryNights.name, `%${query}%`),
+            ilike(venueEntryNights.description, `%${query}%`)
+          ),
+          gte(venueEntryNights.date, now),
+          eq(venueEntryNights.isActive, true),
+          eq(venueEntryNights.moderationStatus, 'approved')
         )
       )
       .orderBy(desc(venueEntryNights.date));
