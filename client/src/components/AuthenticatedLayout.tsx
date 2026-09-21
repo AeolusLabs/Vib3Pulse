@@ -60,7 +60,7 @@ export default function AuthenticatedLayout({ children }: AuthenticatedLayoutPro
   return (
     <>
       {user && !user.isVerified && !bannerDismissed && (
-        <div className="sticky top-0 z-50 bg-amber-500/10 border-b border-amber-500/20 px-4 py-2.5 flex items-center justify-between gap-4 text-sm">
+        <div className="sticky top-0 z-[60] bg-amber-500/10 border-b border-amber-500/20 px-4 py-2.5 flex items-center justify-between gap-4 text-sm">
           <span className="text-amber-300/90 leading-snug">
             Please verify your email address to unlock all features.
           </span>
