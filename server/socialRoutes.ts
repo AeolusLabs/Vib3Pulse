@@ -113,10 +113,14 @@ export function registerSocialRoutes(app: Express): void {
         expiresAt: Date.now() + OAUTH_STATE_TTL_MS,
       };
 
-      const baseUrl     = process.env.APP_URL ?? `${req.protocol}://${req.headers.host}`;
-      const callbackUrl = `${baseUrl.replace(/\/$/, "")}/api/auth/social/callback`;
+      const baseUrl = process.env.APP_URL ?? `${req.protocol}://${req.headers.host}`;
+      // `state` is embedded directly in the redirect URL's query string since
+      // Zernio's connect flow has no native state/CSRF param of its own — see
+      // the caveat on generateOAuthUrl.
+      const callbackUrl =
+        `${baseUrl.replace(/\/$/, "")}/api/auth/social/callback?state=${encodeURIComponent(state)}`;
 
-      const authUrl = await zernioClient.generateOAuthUrl(platform, profileId, state, callbackUrl);
+      const authUrl = await zernioClient.generateOAuthUrl(platform, profileId, callbackUrl);
       res.redirect(authUrl);
     } catch (err) {
       if (err instanceof ZernioError) {
@@ -196,7 +200,7 @@ export function registerSocialRoutes(app: Express): void {
         await storage.upsertConnectedSocial({
           userId:          req.user!.id,
           platform:        account.platform,
-          zernioAccountId: account.account_id,
+          zernioAccountId: account._id,
           handle:          account.username ?? null,
         });
       }
@@ -237,13 +241,14 @@ export function registerSocialRoutes(app: Express): void {
         if (event.organizerId !== req.user!.id)        return res.status(403).json({ message: "You do not own this event" });
         if (event.moderationStatus !== "approved")     return res.status(403).json({ message: "Event must be approved before it can be promoted" });
 
-        const profileId = await getOrCreateProfileId(req.user!.id);
-        const content   = buildPostContent(event);
+        const content = buildPostContent(event);
 
         type PlatformResult = { platform: string; success: boolean; error?: string };
         const results: PlatformResult[] = [];
         let postsCreated = 0;
-        let totalCostUsd = 0;
+        // Zernio's real API has no per-post cost field (pricing is metered
+        // separately) — always 0, kept for response-shape compatibility.
+        const totalCostUsd = 0;
 
         // allSettled: one platform's failure does not abort the others
         await Promise.allSettled(
@@ -271,25 +276,38 @@ export function registerSocialRoutes(app: Express): void {
             }
 
             try {
-              const { postId, costUsd } = await zernioClient.postToSocialMedia(
-                profileId,
+              const { post } = await zernioClient.postToSocialMedia(
                 [{ platform, accountId: account.zernioAccountId }],
                 content,
               );
+
+              // Posting is async on Zernio's side — a "failed" status here means
+              // the platform rejected the post immediately (e.g. bad account);
+              // anything else means it was accepted for processing.
+              const platformResult = post.platforms.find((p) => p.platform === platform);
+              const failed = platformResult?.status === "failed";
 
               await storage.insertSocialPost({
                 eventId,
                 userId:       req.user!.id,
                 platform,
-                zernioPostId: postId,
+                zernioPostId: post._id,
                 content,
-                status:       "posted",
-                costUsd:      costUsd.toFixed(2),
+                status:       failed ? "failed" : "posted",
+                errorMessage: failed ? (platformResult?.errorMessage ?? "Posting failed") : undefined,
+                costUsd:      "0",
               });
 
-              postsCreated++;
-              totalCostUsd += costUsd;
-              results.push({ platform, success: true });
+              if (failed) {
+                results.push({
+                  platform,
+                  success: false,
+                  error: platformResult?.errorMessage ?? "Posting failed",
+                });
+              } else {
+                postsCreated++;
+                results.push({ platform, success: true });
+              }
             } catch (err) {
               const errorMessage =
                 err instanceof ZernioError ? err.message : "Posting failed";

@@ -8,14 +8,27 @@ const API_KEY  = process.env.ZERNIO_API_KEY ?? "";
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface ZernioConnectedAccount {
-  platform:   string;
-  username:   string;
-  account_id: string;
+  _id:      string;
+  platform: string;
+  username: string;
+  isActive: boolean;
 }
 
+export interface ZernioPlatformResult {
+  platform:         string;
+  status:           string;
+  platformPostUrl?: string;
+  errorMessage?:    string;
+}
+
+// Zernio's real API has no cost/billing field on posts — pricing is metered
+// separately via /usage/get-billing, not returned per-post.
 export interface ZernioPostResult {
-  post_id:  string;
-  cost_usd: number;
+  post: {
+    _id:       string;
+    status:    string;
+    platforms: ZernioPlatformResult[];
+  };
 }
 
 // Structured error so routes can branch on HTTP status (e.g. 503 vs 400)
@@ -86,58 +99,64 @@ async function zernioFetch<T>(
  * Returns the zernio_profile_id to be stored on the users row.
  */
 export async function createOrganizerProfile(userId: string): Promise<string> {
-  const data = await zernioFetch<{ profile_id: string }>("/v1/profiles", {
+  const data = await zernioFetch<{ profile: { _id: string; name: string } }>("/v1/profiles", {
     method: "POST",
-    body:   JSON.stringify({ external_id: userId }),
+    // `name` is an organizational label only (must be unique per team) — it
+    // has no functional effect on routing, so a stable per-user label is fine.
+    body:   JSON.stringify({ name: `organizer-${userId}` }),
   });
-  return data.profile_id;
+  return data.profile._id;
 }
 
 /**
  * Generate the OAuth redirect URL for a given platform.
  *
- * `state`       — opaque token stored in the session; Zernio passes it back in
- *                 the callback so we can verify it and prevent OAuth CSRF.
- * `callbackUrl` — the absolute URL Zernio should redirect to after the user
- *                 authorises (e.g. https://vib3pulse.app/api/auth/social/callback).
+ * `redirectUrl` — the absolute URL Zernio should send the browser back to once
+ *                 the user authorises. Zernio appends its own query params
+ *                 (`connected`, `profileId`, `accountId`, `username`) to it.
+ *
+ * NOTE: Zernio's connect flow has no native `state`/CSRF param — if the caller
+ * needs to round-trip a CSRF token, it must be embedded directly in
+ * `redirectUrl`'s query string. Zernio's docs describe appending its own
+ * params but don't explicitly confirm existing query params on `redirectUrl`
+ * survive that — verify with a live OAuth connect test before trusting it.
  */
 export async function generateOAuthUrl(
   platform:    string,
   profileId:   string,
-  state:       string,
-  callbackUrl: string,
+  redirectUrl: string,
 ): Promise<string> {
-  const data = await zernioFetch<{ auth_url: string }>(
-    `/v1/profiles/${encodeURIComponent(profileId)}/oauth/url`,
-    {
-      method: "POST",
-      body:   JSON.stringify({ platform, state, redirect_uri: callbackUrl }),
-    },
+  const qs = new URLSearchParams({ profileId, redirect_url: redirectUrl }).toString();
+  const data = await zernioFetch<{ authUrl: string }>(
+    `/v1/connect/${encodeURIComponent(platform)}?${qs}`,
   );
-  return data.auth_url;
+  return data.authUrl;
 }
 
 /**
- * Post content to one or more social accounts.
- * Returns Zernio's post ID and the cost they charged for this operation.
+ * Post content to one or more social accounts. The profile is implied by the
+ * `accountId`s passed in — Zernio's post endpoint takes no separate profileId.
  *
- * Called once per platform in Promise.allSettled so a single platform
- * failure does not abort the others.
+ * Posting is asynchronous on Zernio's side (status starts as "scheduled" /
+ * "publishing"); this returns the initial per-platform status only. A
+ * platform entry with status "failed" was rejected immediately (e.g. bad
+ * account); anything else was accepted for processing — final delivery
+ * confirmation would require polling GET /v1/posts/{id} or a webhook, neither
+ * of which this integration currently implements.
  */
 export async function postToSocialMedia(
-  profileId: string,
-  accounts:  Array<{ platform: string; accountId: string }>,
-  content:   string,
+  accounts: Array<{ platform: string; accountId: string }>,
+  content:  string,
 ): Promise<ZernioPostResult> {
   return zernioFetch<ZernioPostResult>("/v1/posts", {
     method: "POST",
     body:   JSON.stringify({
-      profile_id: profileId,
-      accounts:   accounts.map((a) => ({
-        platform:   a.platform,
-        account_id: a.accountId,
-      })),
       content,
+      platforms: accounts.map((a) => ({
+        platform:  a.platform,
+        accountId: a.accountId,
+      })),
+      publishNow: true,
     }),
   });
 }
@@ -149,8 +168,9 @@ export async function postToSocialMedia(
 export async function listConnectedAccounts(
   profileId: string,
 ): Promise<ZernioConnectedAccount[]> {
+  const qs = new URLSearchParams({ profileId }).toString();
   const data = await zernioFetch<{ accounts: ZernioConnectedAccount[] }>(
-    `/v1/profiles/${encodeURIComponent(profileId)}/accounts`,
+    `/v1/accounts?${qs}`,
   );
   return data.accounts ?? [];
 }

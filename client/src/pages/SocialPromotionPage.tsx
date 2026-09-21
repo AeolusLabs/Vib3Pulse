@@ -166,8 +166,10 @@ export default function SocialPromotionPage() {
 
   // Promote mutation
   const promoteMutation = useMutation({
-    mutationFn: ({ eventId, platforms }: { eventId: string; platforms: string[] }) =>
-      apiRequest("POST", `/api/events/${eventId}/promote`, { platforms }),
+    mutationFn: async ({ eventId, platforms }: { eventId: string; platforms: string[] }) => {
+      const res = await apiRequest("POST", `/api/events/${eventId}/promote`, { platforms });
+      return (await res.json()) as PromoteResult;
+    },
     onSuccess: (data: PromoteResult) => {
       setPromoteResults(data);
       const failed = data.platforms.filter((p) => !p.success);
