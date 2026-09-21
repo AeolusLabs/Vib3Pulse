@@ -17,7 +17,7 @@ import type { Event, Ticket, User, EventStaffAccessCode } from "@shared/schema";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import { CameraIcon, CheckCircle2Icon, XCircleIcon, Loader2Icon, ArrowLeftIcon, UsersIcon, ShieldCheckIcon, PlusIcon, Trash2Icon, LogOutIcon, ScanLineIcon, UserCheckIcon, CopyIcon, QrCodeIcon, DownloadIcon } from "@/components/ui/icons";
-import { Link } from "lucide-react";
+import { Link as LinkIcon } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
