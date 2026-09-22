@@ -1552,6 +1552,7 @@ export const paymentTransactionTypes = [
   "venue_ticket_sale",
   "event_promotion",
   "venue_promotion",
+  "social_promotion",
   "refund",
 ] as const;
 export type PaymentTransactionType = typeof paymentTransactionTypes[number];

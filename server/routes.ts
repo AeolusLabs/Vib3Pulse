@@ -8,6 +8,7 @@ import { registerRatingRoutes } from "./rating-routes";
 import { registerSocialRoutes } from "./socialRoutes";
 import { startBuddyScheduler } from "./buddyScheduler";
 import { startEventGroupDissolveJob } from "./eventGroupScheduler";
+import { startSocialCleanupScheduler } from "./socialCleanupScheduler";
 import { registerMessagesRoutes } from "./routes/messages-routes";
 import { registerVenueRoutes } from "./routes/venue-routes";
 import { registerEventsRoutes } from "./routes/events-routes";
@@ -44,6 +45,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   startSafetyTimerJob();
   startBuddyScheduler();
   startEventGroupDissolveJob();
+  startSocialCleanupScheduler();
 
   return httpServer;
 }

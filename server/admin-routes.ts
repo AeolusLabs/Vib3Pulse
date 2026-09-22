@@ -1172,4 +1172,22 @@ export function setupAdminRoutes(app: Express) {
       res.status(500).json({ message: "Failed to fetch platform stats" });
     }
   });
+
+  // GET /api/admin/social/stale-connections
+  // Connected accounts with no successful blast in 60 days — these cost
+  // Zernio's per-connected-account fee with no offsetting revenue and will be
+  // auto-disconnected by the nightly cleanup job (server/socialCleanupScheduler.ts).
+  app.get("/api/admin/social/stale-connections", requireAdmin, async (req, res) => {
+    try {
+      const stale = await storage.getStaleConnectedSocials(60);
+      res.json(stale.map((c) => ({
+        userId:      c.userId,
+        platform:    c.platform,
+        connectedAt: c.connectedAt,
+      })));
+    } catch (error) {
+      console.error("[Admin] Stale social connections error:", error);
+      res.status(500).json({ message: "Failed to fetch stale connections" });
+    }
+  });
 }

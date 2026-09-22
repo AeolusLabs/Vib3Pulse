@@ -47,7 +47,6 @@ import AdminSetup from "@/pages/admin/AdminSetup";
 import AdminSOS from "@/pages/admin/AdminSOS";
 import AdminSocialDashboard from "@/pages/admin/AdminSocialDashboard";
 import ForgotPasswordPage from "@/pages/ForgotPasswordPage";
-import SocialPromotionPage from "@/pages/SocialPromotionPage";
 import ResetPasswordPage from "@/pages/ResetPasswordPage";
 import VerifyEmailPage from "@/pages/VerifyEmailPage";
 import JoinGroupPage from "@/pages/JoinGroupPage";
@@ -177,12 +176,6 @@ function Router() {
         </AuthenticatedLayout>
       </Route>
 
-      <Route path="/organizer/social">
-        <AuthenticatedLayout>
-          <SocialPromotionPage />
-        </AuthenticatedLayout>
-      </Route>
-      
       <Route path="/venues/:venueId/venue-events">
         <AuthenticatedLayout>
           <VenueEventsPage />

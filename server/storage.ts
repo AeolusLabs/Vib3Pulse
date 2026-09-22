@@ -165,7 +165,7 @@ import {
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import { eq, and, gte, gt, lt, or, ilike, desc, sql, count, inArray, notInArray, isNull, isNotNull } from "drizzle-orm";
+import { eq, and, gte, gt, lt, or, ilike, desc, sql, count, inArray, notInArray, isNull, isNotNull, notExists } from "drizzle-orm";
 import crypto from "crypto";
 import { cached, postsCache, eventsCache, storiesCache, invalidateCache } from "./cache";
 import { toPublicUser, toPublicAdminUser, type PublicUser, type PublicAdminUser } from "./auth";
@@ -1090,6 +1090,12 @@ export interface IStorage {
     platform: string,
     windowMinutes: number,
   ): Promise<SocialPost | undefined>;
+
+  // Active connections with no successful post in `staleDays` — covers both
+  // "never used since connecting" and "not used since its last blast". Used
+  // by the nightly cleanup job to release accounts that are costing Zernio's
+  // per-connected-account fee with no offsetting promotion revenue.
+  getStaleConnectedSocials(staleDays: number): Promise<ConnectedSocial[]>;
 
   // ── Admin analytics (aggregate only, no PII) ──────────────────────────────
 
@@ -6297,6 +6303,24 @@ export class DbStorage implements IStorage {
       ))
       .limit(1);
     return result[0];
+  }
+
+  async getStaleConnectedSocials(staleDays: number): Promise<ConnectedSocial[]> {
+    const cutoff = new Date(Date.now() - staleDays * 24 * 60 * 60 * 1000);
+    return db.select()
+      .from(connectedSocials)
+      .where(and(
+        isNull(connectedSocials.disconnectedAt),
+        lt(connectedSocials.connectedAt, cutoff),
+        notExists(
+          db.select().from(socialPosts).where(and(
+            eq(socialPosts.userId, connectedSocials.userId),
+            eq(socialPosts.platform, connectedSocials.platform),
+            eq(socialPosts.status, "posted"),
+            gte(socialPosts.postedAt, cutoff),
+          )),
+        ),
+      ));
   }
 
   async getSocialDashboardStats(dateFrom: Date): Promise<{

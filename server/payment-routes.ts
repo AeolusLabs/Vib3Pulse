@@ -18,7 +18,8 @@ import {
   verifyPaystackWebhookSignature,
   verifyPaystackTransaction,
 } from "./payments/paystack.js";
-import { insertTicketSchema } from "@shared/schema";
+import { insertTicketSchema, SOCIAL_PLATFORMS, type SocialPlatform } from "@shared/schema";
+import { postEventToSocials } from "./services/socialPromotionService.js";
 import { sensitiveOperationLimiter } from "./security.js";
 import { recordTransaction } from "./payments/ledger.js";
 import { computeFeeSplit } from "./payments/fees.js";
@@ -562,6 +563,19 @@ export function registerPaymentRoutes(app: Express): void {
     return currency === "NGN" ? PROMOTION_PRICES_KOBO[durationDays] : PROMOTION_PRICES_PENCE[durationDays];
   }
 
+  // Flat fee per social blast, regardless of how many platforms are selected —
+  // Zernio's own per-post cost is trivial (bundled "unlimited posts", the one
+  // metered case is X/Twitter at $0.015-$0.20/post). Matches the 3-day in-app
+  // promotion price exactly — a familiar price point that comfortably covers
+  // the real cost driver (the $6/mo-per-connected-account Zernio fee, amortized
+  // across expected usage) plus margin.
+  const SOCIAL_PROMOTION_PRICE_PENCE = 999;   // £9.99
+  const SOCIAL_PROMOTION_PRICE_KOBO  = 250000; // ₦2,500
+
+  function getSocialPromotionPrice(currency: "GBP" | "NGN"): number {
+    return currency === "NGN" ? SOCIAL_PROMOTION_PRICE_KOBO : SOCIAL_PROMOTION_PRICE_PENCE;
+  }
+
   app.post("/api/payments/venue/promote/intent", requireAuth, sensitiveOperationLimiter, async (req, res) => {
     try {
       const { venueId, durationDays } = z.object({
@@ -761,6 +775,123 @@ export function registerPaymentRoutes(app: Express): void {
       }
       console.error("[Payment] Event promote confirm error:", error);
       res.status(500).json({ message: "Failed to confirm event promotion" });
+    }
+  });
+
+  // ============================================================
+  // EVENT SOCIAL PROMOTION PAYMENT (Zernio cross-posting)
+  // ============================================================
+  // Unlike in-app promotion, this has no free-credit path — it's unconditionally
+  // paid. Platforms are chosen at /intent time, then re-read from the payment
+  // intent's own metadata at /confirm rather than trusted from the confirm
+  // body, so a tampered request can't post to platforms that weren't paid for.
+
+  app.post("/api/payments/event/promote-social/intent", requireAuth, sensitiveOperationLimiter, async (req, res) => {
+    try {
+      const { eventId, platforms } = z.object({
+        eventId: z.string().min(1),
+        platforms: z.array(z.enum(SOCIAL_PLATFORMS)).min(1, "Select at least one platform"),
+      }).parse(req.body);
+
+      const event = await storage.getEvent(eventId);
+      if (!event) return res.status(404).json({ message: "Event not found" });
+      if (event.organizerId !== req.user!.id) return res.status(403).json({ message: "You can only promote your own events" });
+      if (event.moderationStatus !== "approved") return res.status(403).json({ message: "Event must be approved before it can be promoted" });
+
+      // Don't charge for a platform that's guaranteed to fail — the dialog UI
+      // should already prevent this, this is the server-side backstop.
+      const unconnected: SocialPlatform[] = [];
+      for (const platform of platforms) {
+        const account = await storage.getConnectedSocial(req.user!.id, platform);
+        if (!account) unconnected.push(platform);
+      }
+      if (unconnected.length > 0) {
+        return res.status(400).json({
+          message: `Connect these platforms before promoting: ${unconnected.join(", ")}`,
+          unconnected,
+        });
+      }
+
+      const currency = asSupportedCurrency(event.currency);
+      const amount = getSocialPromotionPrice(currency);
+
+      const intent = await createPaymentIntent({
+        amountSmallestUnit: amount,
+        currency,
+        userId: req.user!.id,
+        email: req.user!.email,
+        metadata: {
+          type: "social_promotion",
+          eventId,
+          userId: req.user!.id,
+          platforms: JSON.stringify(platforms),
+        },
+      });
+
+      res.json({
+        clientSecret: intent.clientSecret,
+        paymentIntentId: intent.paymentIntentId,
+        provider: intent.provider,
+        currency: intent.currency,
+        amount: formatAmount(amount, currency),
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: error.errors[0]?.message ?? "Invalid request" });
+      }
+      console.error("[Payment] Event social promote intent error:", error);
+      res.status(500).json({ message: "Failed to create social promotion payment" });
+    }
+  });
+
+  app.post("/api/payments/event/promote-social/confirm", requireAuth, async (req, res) => {
+    try {
+      const { eventId, paymentIntentId, provider } = z.object({
+        eventId: z.string().min(1),
+        paymentIntentId: z.string().min(1),
+        provider: z.enum(["stripe", "paystack"]),
+      }).parse(req.body);
+
+      const verified = await verifyPaymentIntent(paymentIntentId, provider);
+      if (!verified || !verified.paid) {
+        return res.status(402).json({ message: "Payment not confirmed" });
+      }
+      if (verified.metadata?.userId !== req.user!.id) {
+        return res.status(403).json({ message: "Payment does not belong to this account" });
+      }
+      if (verified.metadata?.eventId !== eventId) {
+        return res.status(403).json({ message: "Payment does not match this event" });
+      }
+
+      const event = await storage.getEvent(eventId);
+      if (!event) return res.status(404).json({ message: "Event not found" });
+      if (event.organizerId !== req.user!.id) return res.status(403).json({ message: "You can only promote your own events" });
+      if (event.moderationStatus !== "approved") return res.status(403).json({ message: "Event must be approved before it can be promoted" });
+
+      const platforms = JSON.parse(verified.metadata.platforms ?? "[]") as SocialPlatform[];
+      const result = await postEventToSocials(event, req.user!.id, platforms);
+
+      // Promotion revenue is 100% platform's — no organizer split applies.
+      await recordTransaction({
+        type: "social_promotion",
+        provider: verified.provider,
+        providerPaymentId: verified.providerPaymentId,
+        currency: verified.currency,
+        buyerUserId: req.user!.id,
+        eventId,
+        grossAmount: verified.amountSmallestUnit,
+        platformFeeAmount: verified.amountSmallestUnit,
+        netToOrganizerAmount: 0,
+        status: "succeeded",
+      });
+
+      res.json({ message: "Event promoted to social media", ...result });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "eventId, paymentIntentId, and provider are required" });
+      }
+      console.error("[Payment] Event social promote confirm error:", error);
+      res.status(500).json({ message: "Failed to confirm social promotion" });
     }
   });
 
@@ -986,8 +1117,8 @@ export function registerPaymentRoutes(app: Express): void {
   // was actually about to be charged ₦14,999).
   app.get("/api/payments/promotion-prices", (req, res) => {
     res.json({
-      GBP: PROMOTION_PRICES_PENCE,
-      NGN: PROMOTION_PRICES_KOBO,
+      GBP: { ...PROMOTION_PRICES_PENCE, social: SOCIAL_PROMOTION_PRICE_PENCE },
+      NGN: { ...PROMOTION_PRICES_KOBO, social: SOCIAL_PROMOTION_PRICE_KOBO },
     });
   });
 }

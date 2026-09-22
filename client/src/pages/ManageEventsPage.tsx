@@ -47,6 +47,8 @@ export default function ManageEventsPage() {
   const [promoteEventId, setPromoteEventId] = useState<string | null>(null);
   const [promoteEventTitle, setPromoteEventTitle] = useState<string>("");
   const [promoteEventCurrency, setPromoteEventCurrency] = useState<string>("GBP");
+  const [promoteEventIsPromoted, setPromoteEventIsPromoted] = useState<boolean>(false);
+  const [promoteEventPromotedUntil, setPromoteEventPromotedUntil] = useState<Date | null>(null);
   const [showAnalyticsFor, setShowAnalyticsFor] = useState<string | null>(null);
 
   // Fetch real events from API
@@ -132,10 +134,18 @@ export default function ManageEventsPage() {
     };
   };
 
-  const handlePromoteEvent = (eventId: string, eventTitle: string, currency: string) => {
+  const handlePromoteEvent = (
+    eventId: string,
+    eventTitle: string,
+    currency: string,
+    isPromoted: boolean,
+    promotedUntil: Date | null,
+  ) => {
     setPromoteEventId(eventId);
     setPromoteEventTitle(eventTitle);
     setPromoteEventCurrency(currency);
+    setPromoteEventIsPromoted(isPromoted);
+    setPromoteEventPromotedUntil(promotedUntil);
   };
 
   const allEvents = dbEvents.map(transformEvent);
@@ -347,11 +357,11 @@ export default function ManageEventsPage() {
           </Button>
         )}
 
-        {event.status === 'published' && !event.isPromoted && (
+        {event.status === 'published' && (
           <Button
             variant="outline"
             size="sm"
-            onClick={() => handlePromoteEvent(event.id, event.title, (event as any).currency || "GBP")}
+            onClick={() => handlePromoteEvent(event.id, event.title, (event as any).currency || "GBP", event.isPromoted, event.promotedUntil)}
             className="text-purple-600 border-purple-300 hover:bg-purple-50"
             data-testid={`button-promote-${event.id}`}
           >
@@ -519,11 +529,15 @@ export default function ManageEventsPage() {
           eventId={promoteEventId}
           eventTitle={promoteEventTitle}
           currency={promoteEventCurrency}
+          isPromoted={promoteEventIsPromoted}
+          promotedUntil={promoteEventPromotedUntil}
           isOpen={!!promoteEventId}
           onClose={() => {
             setPromoteEventId(null);
             setPromoteEventTitle("");
             setPromoteEventCurrency("GBP");
+            setPromoteEventIsPromoted(false);
+            setPromoteEventPromotedUntil(null);
           }}
         />
       )}
