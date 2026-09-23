@@ -522,7 +522,8 @@ export interface IStorage {
   getUserByEmailVerificationToken(tokenHash: string): Promise<User | undefined>;
   clearEmailVerificationToken(userId: string): Promise<void>;
   setUserVerified(userId: string): Promise<void>;
-  
+  softDeleteUser(userId: string): Promise<void>;
+
   getEvents(): Promise<(Event & { minPrice: number; maxPrice: number })[]>;
   getEventsByCategory(category: string): Promise<(Event & { minPrice: number; maxPrice: number })[]>;
   // eventId -> weighted rsvpCount*2 + ticketCount*3, for feed ranking and trending-in-city.
@@ -1180,6 +1181,7 @@ export class DbStorage implements IStorage {
       avatarUrl: data.avatarUrl ?? null,
       userType: 'social',
       isVerified: true, // Google has already verified the email address
+      onboardingComplete: false, // still needs to pick an account type + fill required profile fields
     } as any).returning();
     return result[0];
   }
@@ -1260,6 +1262,32 @@ export class DbStorage implements IStorage {
 
   async setUserVerified(userId: string): Promise<void> {
     await db.update(users).set({ isVerified: true }).where(eq(users.id, userId));
+  }
+
+  // Scrubs PII and marks the row deleted rather than hard-deleting it — most
+  // users.id foreign keys across the schema have no onDelete cascade, so a
+  // hard delete would either throw a FK violation (any account with real
+  // activity) or, where cascade is set, silently destroy other users' data
+  // (their tickets, DMs, comments referencing this account).
+  async softDeleteUser(userId: string): Promise<void> {
+    await db.update(users).set({
+      deletedAt: new Date(),
+      email: `deleted-${userId}@deleted.vib3pulse.local`,
+      username: `deleted_${userId.slice(0, 8)}`,
+      passwordHash: null,
+      googleId: null,
+      displayName: "Deleted user",
+      avatarUrl: null,
+      bio: null,
+      dateOfBirth: null,
+      gender: null,
+      phoneNumber: null,
+      contactEmail: null,
+      organizationName: null,
+      location: null,
+      socialMediaLinks: [],
+      interests: [],
+    } as any).where(eq(users.id, userId));
   }
 
   async getEvents(): Promise<(Event & { minPrice: number; maxPrice: number })[]> {

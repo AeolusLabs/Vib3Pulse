@@ -27,6 +27,8 @@ export type SessionUser = {
   isVerified?: boolean | null;
   isOfficial?: boolean | null;
   avatarUrl?: string | null;
+  onboardingComplete: boolean;
+  hasPassword: boolean;
 };
 
 export function userToSessionUser(user: User): SessionUser {
@@ -43,6 +45,8 @@ export function userToSessionUser(user: User): SessionUser {
     isVerified: user.isVerified,
     isOfficial: user.isOfficial,
     avatarUrl: user.avatarUrl,
+    onboardingComplete: user.onboardingComplete,
+    hasPassword: !!user.passwordHash,
   };
 }
 

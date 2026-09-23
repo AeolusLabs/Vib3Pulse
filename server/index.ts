@@ -133,6 +133,10 @@ passport.use(
         return done(null, false, { message: "This account uses Google sign-in. Please continue with Google." });
       }
 
+      if (user.deletedAt) {
+        return done(null, false, { message: "This account has been deleted." });
+      }
+
       const isValid = await comparePassword(password, user.passwordHash);
       if (!isValid) {
         return done(null, false, { message: "Invalid username or password" });
@@ -183,6 +187,10 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
             }
           }
 
+          if (user.deletedAt) {
+            return done(null, false);
+          }
+
           const suspension = await storage.getActiveSuspension(user.id);
           if (suspension) {
             return done(null, false);
@@ -204,7 +212,7 @@ passport.serializeUser((user, done) => {
 passport.deserializeUser(async (id: string, done) => {
   try {
     const user = await storage.getUser(id);
-    if (!user) {
+    if (!user || user.deletedAt) {
       return done(null, false);
     }
     const suspension = await storage.getActiveSuspension(id);

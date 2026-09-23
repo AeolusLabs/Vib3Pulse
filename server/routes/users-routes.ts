@@ -13,8 +13,8 @@ import {
   logSecurityEvent,
   rotateCsrfToken,
 } from "../security";
-import { hashPassword, comparePassword, userToSessionUser } from "../auth";
-import { insertUserSchema } from "@shared/schema";
+import { hashPassword, comparePassword, userToSessionUser, toPublicUser } from "../auth";
+import { insertUserSchema, genderOptions } from "@shared/schema";
 import { z } from "zod";
 import { deliverNotification } from "../notifications";
 import { resolveUserId } from "../utils/users";
@@ -35,6 +35,34 @@ const passwordSchema = z.string()
 
 const signupSchema = insertUserSchema.omit({ passwordHash: true }).extend({
   password: passwordSchema,
+});
+
+// Mirrors SignupPage.tsx's step-2/step-3 schemas so an account provisioned via
+// Google (which skips that form entirely) is held to the same requirements —
+// including dateOfBirth, which the manual flow uses for age verification —
+// before it's treated as fully onboarded.
+const completeProfileSchema = z.discriminatedUnion("userType", [
+  z.object({
+    userType: z.literal("social"),
+    displayName: z.string().min(1, "Display name is required"),
+    dateOfBirth: z.string().min(1, "Date of birth is required"),
+    gender: z.enum(genderOptions, { required_error: "Please select your gender" }),
+    bio: z.string().max(500).optional(),
+    interests: z.array(z.string()).min(1, "Please select at least one interest"),
+  }),
+  z.object({
+    userType: z.literal("organizer"),
+    organizationName: z.string().min(1, "Organization name is required"),
+    contactEmail: z.string().email("Please enter a valid email address"),
+    bio: z.string().max(500).optional(),
+    socialMediaLinks: z.array(z.string()).optional(),
+    canManageVenues: z.boolean().optional().default(false),
+  }),
+]);
+
+const deleteAccountSchema = z.object({
+  confirmation: z.literal("DELETE", { errorMap: () => ({ message: 'Type "DELETE" to confirm.' }) }),
+  password: z.string().optional(),
 });
 
 export function registerUsersRoutes(app: Express): void {
@@ -214,7 +242,7 @@ export function registerUsersRoutes(app: Express): void {
       passport.authenticate("google", { failureRedirect: "/login?error=google_auth_failed" }),
       (req, res) => {
         rotateCsrfToken(res);
-        res.redirect("/discover");
+        res.redirect(req.user?.onboardingComplete === false ? "/complete-profile" : "/discover");
       }
     );
   }
@@ -306,6 +334,51 @@ export function registerUsersRoutes(app: Express): void {
     }
   });
 
+  // Finish provisioning an account created via Google OAuth: pick a user type
+  // and fill in the fields that flow normally collects at signup (age
+  // verification for social accounts, org details for organizers).
+  app.patch("/api/auth/complete-profile", requireAuth, sensitiveOperationLimiter, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.user!.id);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      if (user.onboardingComplete) {
+        return res.status(400).json({ message: "Your profile is already complete." });
+      }
+
+      const parsed = completeProfileSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid profile data", errors: parsed.error.errors });
+      }
+      const data = parsed.data;
+
+      const updates: Record<string, unknown> = { userType: data.userType, onboardingComplete: true, bio: data.bio };
+      if (data.userType === "social") {
+        updates.displayName = sanitizeTextOnly(data.displayName);
+        updates.dateOfBirth = data.dateOfBirth;
+        updates.gender = data.gender;
+        updates.interests = data.interests;
+      } else {
+        updates.organizationName = sanitizeTextOnly(data.organizationName);
+        updates.contactEmail = data.contactEmail;
+        updates.socialMediaLinks = data.socialMediaLinks || [];
+        updates.canManageVenues = data.canManageVenues;
+      }
+
+      const updatedUser = await storage.updateUser(user.id, updates as any);
+      req.login(userToSessionUser(updatedUser), (err) => {
+        if (err) {
+          return res.status(500).json({ message: "Profile saved but session refresh failed. Please reload." });
+        }
+        res.json({ user: userToSessionUser(updatedUser) });
+      });
+    } catch (error) {
+      console.error("[AUTH] complete-profile error:", error);
+      res.status(500).json({ message: "Failed to save your profile." });
+    }
+  });
+
   // Change password
   app.patch("/api/auth/change-password", requireAuth, sensitiveOperationLimiter, async (req, res) => {
     try {
@@ -337,6 +410,55 @@ export function registerUsersRoutes(app: Express): void {
     } catch (error) {
       console.error("Error changing password:", error);
       res.status(500).json({ message: "Failed to change password" });
+    }
+  });
+
+  // Self-service account deletion — soft-deletes and anonymizes rather than
+  // hard-deleting (see storage.softDeleteUser for why).
+  app.post("/api/auth/delete-account", requireAuth, sensitiveOperationLimiter, async (req, res) => {
+    try {
+      const parsed = deleteAccountSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.errors[0].message });
+      }
+
+      const user = await storage.getUser(req.user!.id);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      if (user.passwordHash) {
+        if (!parsed.data.password) {
+          return res.status(400).json({ message: "Enter your password to confirm." });
+        }
+        const isValid = await comparePassword(parsed.data.password, user.passwordHash);
+        if (!isValid) {
+          return res.status(400).json({ message: "Incorrect password" });
+        }
+      }
+
+      if (user.userType === "organizer") {
+        const events = await storage.getEventsByOrganizer(user.id);
+        const upcoming = events.filter((e) => !e.isCancelled && e.eventDate.getTime() > Date.now());
+        if (upcoming.length > 0) {
+          return res.status(400).json({
+            message: `You have ${upcoming.length} upcoming event${upcoming.length > 1 ? "s" : ""}. Cancel or reassign ${upcoming.length > 1 ? "them" : "it"} before deleting your account.`,
+          });
+        }
+      }
+
+      await storage.softDeleteUser(user.id);
+      console.log(`[AUTH] Account deleted (self-service): ${user.id}`);
+
+      req.logout((err) => {
+        if (err) console.error("[AUTH] logout after account deletion failed:", err);
+        req.session.destroy(() => {
+          res.json({ message: "Your account has been deleted." });
+        });
+      });
+    } catch (error) {
+      console.error("[AUTH] delete-account error:", error);
+      res.status(500).json({ message: "Failed to delete account." });
     }
   });
 
@@ -510,8 +632,7 @@ export function registerUsersRoutes(app: Express): void {
       req.login(userToSessionUser(updatedUser), (err) => {
         if (err) console.error('Session refresh error after profile update:', err);
       });
-      const { passwordHash, ...userWithoutPassword } = updatedUser as any;
-      res.json(userWithoutPassword);
+      res.json(toPublicUser(updatedUser));
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid profile data", errors: error.errors });

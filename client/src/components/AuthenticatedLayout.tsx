@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
-import { Redirect } from "wouter";
+import { Redirect, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -14,6 +14,7 @@ export default function AuthenticatedLayout({ children }: AuthenticatedLayoutPro
   const { data: user, isLoading, error } = useAuth();
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const { toast } = useToast();
+  const [location] = useLocation();
 
   const resendMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/auth/resend-verification"),
@@ -55,6 +56,12 @@ export default function AuthenticatedLayout({ children }: AuthenticatedLayoutPro
   if (!user) {
     const currentPath = window.location.pathname + window.location.search + window.location.hash;
     return <Redirect to={`/login?redirect=${encodeURIComponent(currentPath)}`} />;
+  }
+
+  // Google-provisioned accounts skip the signup form's account-type choice and
+  // required fields (e.g. age verification) — hold them here until they finish.
+  if (!user.onboardingComplete && location !== "/complete-profile") {
+    return <Redirect to="/complete-profile" />;
   }
 
   return (

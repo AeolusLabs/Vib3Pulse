@@ -9,6 +9,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -16,7 +27,7 @@ import { useToast } from "@/hooks/use-toast";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { Switch } from "@/components/ui/switch";
 import type { User as UserType } from "@shared/schema";
-import { LockIcon, UserIcon, AlertCircleIcon, Loader2Icon, CheckCircleIcon, BellIcon, BellOffIcon, CheckCheckIcon } from "@/components/ui/icons";
+import { LockIcon, UserIcon, AlertCircleIcon, Loader2Icon, CheckCircleIcon, BellIcon, BellOffIcon, CheckCheckIcon, Trash2Icon } from "@/components/ui/icons";
 
 export default function AccountSettingsPage() {
   const [, navigate] = useLocation();
@@ -28,6 +39,8 @@ export default function AccountSettingsPage() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [newUsername, setNewUsername] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
   const { data: userProfile } = useQuery<UserType>({
     queryKey: ["/api/users/me"],
@@ -92,6 +105,25 @@ export default function AccountSettingsPage() {
       toast({
         title: "Error",
         description: error.message || "Failed to change username",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteAccountMutation = useMutation({
+    mutationFn: async (data: { confirmation: string; password?: string }) => {
+      const response = await apiRequest("POST", "/api/auth/delete-account", data);
+      return response;
+    },
+    onSuccess: async () => {
+      toast({ title: "Account deleted", description: "Sorry to see you go." });
+      queryClient.clear();
+      navigate("/");
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Couldn't delete account",
+        description: error.message || "Please try again.",
         variant: "destructive",
       });
     },
@@ -364,6 +396,95 @@ export default function AccountSettingsPage() {
                   data-testid="switch-read-receipts"
                 />
               </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-destructive/30">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-destructive">
+                <Trash2Icon className="h-5 w-5" />
+                Delete Account
+              </CardTitle>
+              <CardDescription>
+                Permanently delete your account. This cannot be undone.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="mb-4 p-3 bg-muted rounded-lg flex items-start gap-2">
+                <AlertCircleIcon className="h-5 w-5 text-muted-foreground mt-0.5 flex-shrink-0" />
+                <p className="text-sm text-muted-foreground">
+                  Your profile, email, and login details are removed and can't be recovered.
+                  Posts, comments, and tickets tied to your account stay visible to others (attributed
+                  to "Deleted user") so their history isn't affected.
+                  {sessionUser.userType === "organizer" && (
+                    <> You'll need to cancel or reassign any upcoming events first.</>
+                  )}
+                </p>
+              </div>
+
+              <AlertDialog onOpenChange={(open) => { if (!open) { setDeletePassword(""); setDeleteConfirmText(""); } }}>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive" data-testid="button-delete-account">
+                    Delete My Account
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This permanently deletes your account. This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <div className="space-y-4 py-2">
+                    {sessionUser.hasPassword && (
+                      <div className="space-y-2">
+                        <Label htmlFor="delete-password">Enter your password</Label>
+                        <Input
+                          id="delete-password"
+                          type="password"
+                          value={deletePassword}
+                          onChange={(e) => setDeletePassword(e.target.value)}
+                          data-testid="input-delete-password"
+                        />
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <Label htmlFor="delete-confirm">Type <strong>DELETE</strong> to confirm</Label>
+                      <Input
+                        id="delete-confirm"
+                        value={deleteConfirmText}
+                        onChange={(e) => setDeleteConfirmText(e.target.value)}
+                        placeholder="DELETE"
+                        data-testid="input-delete-confirm"
+                      />
+                    </div>
+                  </div>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel data-testid="button-cancel-delete">Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      disabled={deleteConfirmText !== "DELETE" || deleteAccountMutation.isPending || (sessionUser.hasPassword && !deletePassword)}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        deleteAccountMutation.mutate({
+                          confirmation: deleteConfirmText,
+                          password: sessionUser.hasPassword ? deletePassword : undefined,
+                        });
+                      }}
+                      data-testid="button-confirm-delete"
+                    >
+                      {deleteAccountMutation.isPending ? (
+                        <>
+                          <Loader2Icon className="h-4 w-4 mr-2 animate-spin" />
+                          Deleting…
+                        </>
+                      ) : (
+                        "Delete Account"
+                      )}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </CardContent>
           </Card>
         </div>

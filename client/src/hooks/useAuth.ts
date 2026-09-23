@@ -14,6 +14,8 @@ export type AuthUser = {
   isVerified?: boolean | null;
   isOfficial?: boolean | null;
   avatarUrl?: string | null;
+  onboardingComplete: boolean;
+  hasPassword: boolean;
 };
 
 type AuthResponse = {

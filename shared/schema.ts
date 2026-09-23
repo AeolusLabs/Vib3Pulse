@@ -33,6 +33,16 @@ export const users = pgTable("users", {
   emailVerificationExpires: timestamp("email_verification_expires"),
   isVerified: boolean("is_verified").notNull().default(false),
   isOfficial: boolean("is_official").notNull().default(false),
+  // False only for accounts provisioned via Google OAuth that haven't picked an
+  // account type / filled the required profile fields yet (see createUserFromGoogle).
+  // Password signups get true immediately since the multi-step form already
+  // collected everything before the account exists.
+  onboardingComplete: boolean("onboarding_complete").notNull().default(true),
+  // Soft-delete: set by the self-service delete-account flow instead of a hard
+  // DB delete, since most users.id foreign keys across the schema have no
+  // onDelete cascade and a hard delete would either fail outright or destroy
+  // other users' data (their tickets, DMs, comments referencing this account).
+  deletedAt: timestamp("deleted_at"),
   zernioProfileId: varchar("zernio_profile_id", { length: 255 }).unique(),
   // Admin-granted credits letting an account promote an event/venue without
   // paying — each successful promotion (event or venue) consumes exactly one.
