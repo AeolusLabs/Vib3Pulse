@@ -90,7 +90,7 @@ export default function AccountSettingsPage() {
   const changeUsernameMutation = useMutation({
     mutationFn: async (data: { newUsername: string }) => {
       const response = await apiRequest("PATCH", "/api/users/me/username", data);
-      return response;
+      return response.json();
     },
     onSuccess: (data: any) => {
       toast({
@@ -98,7 +98,12 @@ export default function AccountSettingsPage() {
         description: `Your username has been updated to @${data.user?.username || newUsername}`,
       });
       setNewUsername("");
-      queryClient.invalidateQueries({ queryKey: ["/api/auth/session"] });
+      // setQueryData, not invalidateQueries: an invalidated query refetches
+      // immediately, and that refetch can beat the server's session-cookie
+      // update to the browser. Hydrating the cache directly from the
+      // mutation's own response (which reflects the now-current session)
+      // avoids that race entirely. See feedback_auth_pattern.md.
+      if (data.user) queryClient.setQueryData(["/api/auth/session"], data.user);
       queryClient.invalidateQueries({ queryKey: ["/api/users/me"] });
     },
     onError: (error: any) => {

@@ -240,10 +240,12 @@ export default function ManageVenuesPage() {
 
   const enableVenuesMutation = useMutation({
     mutationFn: async () => {
-      await apiRequest("PATCH", "/api/users/me", { canManageVenues: true });
+      const res = await apiRequest("PATCH", "/api/users/me", { canManageVenues: true });
+      return res.json();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/auth/session"] });
+    onSuccess: (data: any) => {
+      // setQueryData, not invalidateQueries — see feedback_auth_pattern.md.
+      queryClient.setQueryData(["/api/auth/session"], data);
       toast({ title: "Venue management enabled!", description: "You can now create and manage venues." });
     },
     onError: () => {

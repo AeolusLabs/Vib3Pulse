@@ -127,10 +127,13 @@ export default function EditProfileDialog({ user }: EditProfileDialogProps) {
       const res = await apiRequest("PATCH", `/api/users/${user.id}`, data);
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: [`/api/users/${user.username}`] });
       queryClient.invalidateQueries({ queryKey: [`/api/users/${user.id}/profile`] });
-      queryClient.invalidateQueries({ queryKey: ["/api/auth/session"] });
+      // setQueryData, not invalidateQueries: an invalidated query refetches
+      // immediately, racing the server's session-cookie update. Hydrate from
+      // this mutation's own response instead. See feedback_auth_pattern.md.
+      queryClient.setQueryData(["/api/auth/session"], data);
       toast({ title: "Saved", description: "Profile updated successfully" });
       setOpen(false);
     },

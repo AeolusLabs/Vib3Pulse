@@ -360,6 +360,14 @@ export function registerUsersRoutes(app: Express): void {
         updates.gender = data.gender;
         updates.interests = data.interests;
       } else {
+        // Manual organizer signup never sets displayName (it isn't collected
+        // for that account type), so every display-name fallback across the
+        // app (`displayName || organizationName || username`) shows the org
+        // name. Google accounts arrive with displayName pre-filled from the
+        // profile (createUserFromGoogle) — clear it here so an organizer who
+        // completes onboarding this way matches that same behavior instead of
+        // showing their personal Google name everywhere.
+        updates.displayName = null;
         updates.organizationName = sanitizeTextOnly(data.organizationName);
         updates.contactEmail = data.contactEmail;
         updates.socialMediaLinks = data.socialMediaLinks || [];
@@ -570,17 +578,22 @@ export function registerUsersRoutes(app: Express): void {
 
       const updatedUser = await storage.updateUsername(req.user!.id, newUsername);
 
-      // Update session with new username
+      // req.login() regenerates the session (Passport's default since 0.6, to
+      // guard against session fixation) — that's an async DB round-trip to the
+      // session store. The response must wait for it: sending res.json() before
+      // it resolves races the new session cookie, and if the client's next
+      // request lands before the regenerate finishes, the old session is
+      // already gone and the user appears logged out.
       req.login(userToSessionUser(updatedUser), (err) => {
         if (err) {
           console.error("Error updating session:", err);
+          return res.status(500).json({ message: "Username changed, but refreshing your session failed. Please reload." });
         }
-      });
-
-      res.json({
-        message: "Username changed successfully",
-        user: userToSessionUser(updatedUser),
-        usernameChangesRemaining: updatedUser.usernameChangesRemaining
+        res.json({
+          message: "Username changed successfully",
+          user: userToSessionUser(updatedUser),
+          usernameChangesRemaining: updatedUser.usernameChangesRemaining
+        });
       });
     } catch (error) {
       console.error("Error changing username:", error);
@@ -628,11 +641,18 @@ export function registerUsersRoutes(app: Express): void {
       }
 
       const updatedUser = await storage.updateUser(userId, updates);
-      // Refresh session so updated displayName/avatar immediately reflect in navigation
+      // req.login() regenerates the session (Passport's default since 0.6) —
+      // an async DB round-trip. res.json() must wait inside this callback:
+      // responding before it resolves races the new session cookie and can
+      // leave the client holding a session ID the store already discarded,
+      // which surfaces as "got logged out" on the next request.
       req.login(userToSessionUser(updatedUser), (err) => {
-        if (err) console.error('Session refresh error after profile update:', err);
+        if (err) {
+          console.error('Session refresh error after profile update:', err);
+          return res.status(500).json({ message: "Profile saved, but refreshing your session failed. Please reload." });
+        }
+        res.json(toPublicUser(updatedUser));
       });
-      res.json(toPublicUser(updatedUser));
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid profile data", errors: error.errors });
@@ -930,8 +950,7 @@ export function registerUsersRoutes(app: Express): void {
       }
       const avatarUrl = await storeMedia(imageData, req.user!.id);
       const updatedUser = await storage.updateUser(req.user!.id, { avatarUrl });
-      const { passwordHash, ...userWithoutPassword } = updatedUser;
-      return res.json(userWithoutPassword);
+      return res.json(toPublicUser(updatedUser));
     } catch (error: any) {
       if (error instanceof MediaValidationError) {
         return res.status(400).json({ message: error.message });
@@ -947,8 +966,7 @@ export function registerUsersRoutes(app: Express): void {
       const { avatarPath } = req.body;
       if (!avatarPath) return res.status(400).json({ message: "Avatar path is required" });
       const updatedUser = await storage.updateUser(req.user!.id, { avatarUrl: avatarPath });
-      const { passwordHash, ...userWithoutPassword } = updatedUser;
-      res.json(userWithoutPassword);
+      res.json(toPublicUser(updatedUser));
     } catch (error: any) {
       res.status(500).json({ message: "Failed to update avatar" });
     }
@@ -960,8 +978,7 @@ export function registerUsersRoutes(app: Express): void {
       console.log(`[Avatar Delete] User ${req.user!.id} removing avatar`);
       const updatedUser = await storage.updateUser(req.user!.id, { avatarUrl: null });
       console.log(`[Avatar Delete] Successfully removed avatar for user ${req.user!.id}`);
-      const { passwordHash, ...userWithoutPassword } = updatedUser;
-      res.json(userWithoutPassword);
+      res.json(toPublicUser(updatedUser));
     } catch (error: any) {
       console.error("[Avatar Delete] Error removing avatar:", error?.message || error);
       res.status(500).json({ message: "Failed to remove avatar" });

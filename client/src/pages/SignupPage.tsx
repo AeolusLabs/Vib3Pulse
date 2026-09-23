@@ -375,9 +375,9 @@ export default function SignupPage() {
                               desc: "Create and manage events, sell tickets, and track attendance.",
                             },
                           ].map((option) => (
-                            <div
+                            <label
                               key={option.value}
-                              onClick={() => field.onChange(option.value)}
+                              htmlFor={option.value}
                               className={`flex items-start gap-4 p-5 rounded-2xl border cursor-pointer transition-all duration-200 ${
                                 field.value === option.value
                                   ? "border-violet-500/50 bg-violet-600/[0.07]"
@@ -389,13 +389,13 @@ export default function SignupPage() {
                               <div>
                                 <div className="flex items-center gap-2 mb-1.5">
                                   <option.icon className={`w-4 h-4 ${field.value === option.value ? "text-violet-400" : "text-white/40"}`} />
-                                  <Label htmlFor={option.value} className="font-sans font-semibold text-white text-sm cursor-pointer">
+                                  <span className="font-sans font-semibold text-white text-sm">
                                     {option.title}
-                                  </Label>
+                                  </span>
                                 </div>
                                 <p className="text-white/40 text-xs font-sans leading-relaxed">{option.desc}</p>
                               </div>
-                            </div>
+                            </label>
                           ))}
                         </RadioGroup>
                       </FormControl>
