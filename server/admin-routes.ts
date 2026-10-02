@@ -4,7 +4,7 @@ import crypto from "crypto";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import { Pool } from "pg";
-import { storage } from "./storage";
+import { storage, pool } from "./storage";
 import { invalidateCache, postsCache, eventsCache, storiesCache } from "./cache";
 import { insertAdminUserSchema, adminRoles, type AdminRole } from "@shared/schema";
 import { z } from "zod";
@@ -504,6 +504,52 @@ export function setupAdminRoutes(app: Express) {
     }
   });
 
+  // Time-series dashboard analytics — date-ranged, optionally filtered by
+  // currency/country, with period-over-period totals so the UI can show
+  // growth %. Defaults to the last 30 days.
+  app.get("/api/admin/analytics/overview", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const to = req.query.to ? new Date(req.query.to as string) : new Date();
+      const from = req.query.from ? new Date(req.query.from as string) : new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
+      if (isNaN(from.getTime()) || isNaN(to.getTime())) {
+        return res.status(400).json({ message: "Invalid from/to date" });
+      }
+      const currency = (req.query.currency as string) || undefined;
+      const country = (req.query.country as string) || undefined;
+      const overview = await storage.getAdminAnalyticsOverview({ from, to, currency, country });
+      res.json(overview);
+    } catch (error) {
+      console.error('[ADMIN] analytics overview failed:', error);
+      res.status(500).json({ message: "Failed to get analytics" });
+    }
+  });
+
+  // Dropdown options for the currency/country filters across the admin panel.
+  app.get("/api/admin/meta/filters", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const options = await storage.getAdminFilterOptions();
+      res.json(options);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get filter options" });
+    }
+  });
+
+  // Real health check — DB connectivity + payment provider configuration.
+  // Replaces a previously-hardcoded "all systems operational" card.
+  app.get("/api/admin/health", requireAdmin, async (req: Request, res: Response) => {
+    const health: Record<string, { status: "ok" | "down"; detail?: string }> = {};
+    try {
+      await pool.query("SELECT 1");
+      health.database = { status: "ok" };
+    } catch (error) {
+      health.database = { status: "down", detail: error instanceof Error ? error.message : "query failed" };
+    }
+    health.stripe = { status: process.env.STRIPE_SECRET_KEY ? "ok" : "down", detail: process.env.STRIPE_SECRET_KEY ? undefined : "not configured" };
+    health.paystack = { status: process.env.PAYSTACK_SECRET_KEY ? "ok" : "down", detail: process.env.PAYSTACK_SECRET_KEY ? undefined : "not configured" };
+    health.email = { status: process.env.RESEND_API_KEY ? "ok" : "down", detail: process.env.RESEND_API_KEY ? undefined : "not configured" };
+    res.json(health);
+  });
+
   // Get activity logs
   app.get("/api/admin/activity-logs", requireRole("super_admin", "user_support"), async (req: Request, res: Response) => {
     try {
@@ -677,8 +723,11 @@ export function setupAdminRoutes(app: Express) {
     try {
       const limit = parseInt(req.query.limit as string) || 50;
       const offset = parseInt(req.query.offset as string) || 0;
-      const events = await storage.getAllEventsAdmin(limit, offset);
-      res.json(events);
+      const currency = (req.query.currency as string) || undefined;
+      const country = (req.query.country as string) || undefined;
+      const search = (req.query.search as string) || undefined;
+      const { items, total } = await storage.getAllEventsAdmin({ limit, offset, currency, country, search });
+      res.json({ events: items, total });
     } catch (error) {
       res.status(500).json({ message: "Failed to get events" });
     }
@@ -753,23 +802,31 @@ export function setupAdminRoutes(app: Express) {
     }
   });
 
-  // Delete event
+  // Delete event — sourceType distinguishes a real event from a venue entry
+  // night (both appear merged in the admin events list; they're different
+  // tables). Previously this always called deleteEvent() even for venue_entry
+  // rows, so deleting one either no-opped or hit the wrong row.
   app.delete("/api/admin/events/:id", requireRole("super_admin", "content_moderator"), async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
+      const sourceType = req.query.sourceType === "venue_entry" ? "venue_entry" : "event";
 
-      await storage.deleteEvent(id);
+      if (sourceType === "venue_entry") {
+        await storage.deleteVenueEntryNight(id);
+      } else {
+        await storage.deleteEvent(id);
+      }
 
       await logActivity(
         req.session.adminId!,
-        "delete_event",
-        "event",
+        sourceType === "venue_entry" ? "delete_venue_event" : "delete_event",
+        sourceType === "venue_entry" ? "venue_event" : "event",
         id,
-        `Deleted event`,
+        sourceType === "venue_entry" ? "Deleted venue event" : "Deleted event",
         req.ip
       );
 
-      res.json({ message: "Event deleted" });
+      res.json({ message: sourceType === "venue_entry" ? "Venue event deleted" : "Event deleted" });
     } catch (error) {
       console.error('[ADMIN] Failed to delete event:', error);
       const msg = error instanceof Error ? error.message : "Failed to delete event";
@@ -880,17 +937,30 @@ export function setupAdminRoutes(app: Express) {
   // Get payment/ticket overview
   app.get("/api/admin/finance/overview", requireRole("super_admin", "finance_manager"), async (req: Request, res: Response) => {
     try {
-      const [stats, commissionBps] = await Promise.all([
+      const from = req.query.from ? new Date(req.query.from as string) : undefined;
+      const to = req.query.to ? new Date(req.query.to as string) : undefined;
+      const currency = (req.query.currency as string) || undefined;
+      if ((from && isNaN(from.getTime())) || (to && isNaN(to.getTime()))) {
+        return res.status(400).json({ message: "Invalid from/to date" });
+      }
+
+      const [stats, commissionBps, ledger] = await Promise.all([
         storage.getPlatformStats(),
         storage.getPlatformCommissionBps(),
+        storage.getFinanceLedgerSummary({ from, to, currency }),
       ]);
       res.json({
         revenueByCurrency: stats.revenueByCurrency,
         totalTicketsSold: stats.totalTicketsSold,
         totalVenueTicketsSold: stats.totalVenueTicketsSold,
         commissionBps,
+        // Full ledger breakdown by transaction type (ticket_sale, venue_ticket_sale,
+        // event_promotion, venue_promotion, social_promotion, refund) and currency —
+        // the revenueByCurrency fields above only ever cover ticket sales.
+        ledger,
       });
     } catch (error) {
+      console.error('[ADMIN] finance overview failed:', error);
       res.status(500).json({ message: "Failed to get finance overview" });
     }
   });

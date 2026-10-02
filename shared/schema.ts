@@ -102,6 +102,11 @@ export const events = pgTable("events", {
   eventEndDate: timestamp("event_end_date"),
   location: text("location").notNull(),
   city: text("city"),
+  // Explicit, organizer-chosen — set independently of currency so a future
+  // market that reuses an existing currency (e.g. a second GBP country)
+  // doesn't collide. Backfilled once from currency for pre-existing rows;
+  // never re-derived from city/currency after that. See venues.country.
+  country: text("country"),
   latitude: doublePrecision("latitude"),
   longitude: doublePrecision("longitude"),
   category: text("category").notNull(),
@@ -890,6 +895,9 @@ export const venues = pgTable("venues", {
   imageUrls: text("image_urls").array().default(sql`'{}'`), // Up to 6 venue images
   address: varchar("address", { length: 500 }),
   city: varchar("city", { length: 100 }),
+  // Explicit, organizer-chosen — independent of currency (see events.country
+  // for why). Backfilled once from currency for pre-existing rows.
+  country: varchar("country", { length: 100 }),
   // Explicit, organizer-chosen currency for everything sold under this venue
   // (entry-night tickets, venue promotions) — a venue is one fixed location,
   // so currency lives here rather than per entry-night. Never inferred from

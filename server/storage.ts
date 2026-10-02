@@ -165,7 +165,7 @@ import {
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import { eq, and, gte, gt, lt, or, ilike, desc, sql, count, inArray, notInArray, isNull, isNotNull, notExists } from "drizzle-orm";
+import { eq, and, gte, gt, lt, lte, or, ilike, desc, asc, sql, count, inArray, notInArray, isNull, isNotNull, notExists } from "drizzle-orm";
 import crypto from "crypto";
 import { cached, postsCache, eventsCache, storiesCache, invalidateCache } from "./cache";
 import { toPublicUser, toPublicAdminUser, type PublicUser, type PublicAdminUser } from "./auth";
@@ -903,13 +903,43 @@ export interface IStorage {
     activeOrganizers: number;
   }>;
 
+  // Time-series analytics for the admin dashboard — getPlatformStats() above
+  // is a snapshot only, with no dates and no growth. currency/country filter
+  // the ticket/revenue side (both tables carry currency directly; country is
+  // reached via a join to events/venues) — signups have no country/currency
+  // of their own, so they're always global regardless of those filters.
+  getAdminAnalyticsOverview(filters: { from: Date; to: Date; currency?: string; country?: string }): Promise<{
+    daily: Array<{ date: string; signups: number; ticketsSold: number; revenue: Record<string, number> }>;
+    totals: { signups: number; ticketsSold: number; revenue: Record<string, number> };
+    previousPeriod: { signups: number; ticketsSold: number; revenue: Record<string, number> };
+  }>;
+
+  // Ledger-backed finance breakdown — paymentTransactions is the source of
+  // truth including promotions and refunds; getPlatformStats()'s revenue
+  // figures above only ever cover ticket sales.
+  getFinanceLedgerSummary(filters: { from?: Date; to?: Date; currency?: string }): Promise<Array<{
+    type: string;
+    currency: string;
+    count: number;
+    grossAmount: number;
+    platformFeeAmount: number;
+    netToOrganizerAmount: number;
+  }>>;
+
+  // Dropdown options for the admin currency/country filters — actual values
+  // in use, not a static guessed list.
+  getAdminFilterOptions(): Promise<{ countries: string[]; currencies: string[] }>;
+
   // User management for admins
-  getAllUsers(limit?: number, offset?: number): Promise<User[]>;
-  getUserCount(): Promise<number>;
+  getAllUsers(limit?: number, offset?: number, search?: string): Promise<User[]>;
+  getUserCount(search?: string): Promise<number>;
   deleteUser(id: string): Promise<void>;
 
   // Event management for admins
-  getAllEventsAdmin(limit?: number, offset?: number): Promise<Array<Event & { organizer: PublicUser; moderationStatus: string; sourceType: 'event' | 'venue_entry' }>>;
+  getAllEventsAdmin(filters?: { limit?: number; offset?: number; currency?: string; country?: string; search?: string }): Promise<{
+    items: Array<Event & { organizer: PublicUser; moderationStatus: string; sourceType: 'event' | 'venue_entry' }>;
+    total: number;
+  }>;
   deleteEvent(id: string): Promise<void>;
   moderateVenueEvent(venueEntryNightId: string, action: string): Promise<void>;
 
@@ -4372,17 +4402,175 @@ export class DbStorage implements IStorage {
     };
   }
 
-  async getAllUsers(limit: number = 50, offset: number = 0): Promise<User[]> {
+  async getAdminAnalyticsOverview(filters: { from: Date; to: Date; currency?: string; country?: string }): Promise<{
+    daily: Array<{ date: string; signups: number; ticketsSold: number; revenue: Record<string, number> }>;
+    totals: { signups: number; ticketsSold: number; revenue: Record<string, number> };
+    previousPeriod: { signups: number; ticketsSold: number; revenue: Record<string, number> };
+  }> {
+    const { from, to, currency, country } = filters;
+    const spanMs = to.getTime() - from.getTime();
+    const prevFrom = new Date(from.getTime() - spanMs);
+    const prevTo = from;
+
+    // Signups have no currency/country of their own — always global, date-ranged only.
+    const signupsRange = async (start: Date, end: Date) => {
+      const rows = await db
+        .select({ date: sql<string>`date_trunc('day', ${users.createdAt})::date::text`, count: sql<number>`count(*)::int` })
+        .from(users)
+        .where(and(gte(users.createdAt, start), lt(users.createdAt, end)))
+        .groupBy(sql`date_trunc('day', ${users.createdAt})`)
+        .orderBy(sql`date_trunc('day', ${users.createdAt})`);
+      return rows;
+    };
+
+    // Ticket currency is a direct column; country requires a join to the
+    // owning event/venue. Both tables merge into one per-day, per-currency series.
+    const ticketsRange = async (start: Date, end: Date) => {
+      const ticketConds = [gte(tickets.purchaseDate, start), lt(tickets.purchaseDate, end), eq(tickets.status, 'confirmed')];
+      if (currency) ticketConds.push(eq(tickets.currency, currency));
+      if (country) ticketConds.push(eq(events.country, country));
+      const ticketRows = await db
+        .select({
+          date: sql<string>`date_trunc('day', ${tickets.purchaseDate})::date::text`,
+          currency: tickets.currency,
+          count: sql<number>`count(*)::int`,
+          revenue: sql<number>`coalesce(sum(${tickets.amountPaid}), 0)::int`,
+        })
+        .from(tickets)
+        .innerJoin(events, eq(tickets.eventId, events.id))
+        .where(and(...ticketConds))
+        .groupBy(sql`date_trunc('day', ${tickets.purchaseDate})`, tickets.currency);
+
+      const venueConds = [gte(venueTickets.purchaseDate, start), lt(venueTickets.purchaseDate, end), eq(venueTickets.status, 'confirmed')];
+      if (currency) venueConds.push(eq(venueTickets.currency, currency));
+      if (country) venueConds.push(eq(venues.country, country));
+      const venueRows = await db
+        .select({
+          date: sql<string>`date_trunc('day', ${venueTickets.purchaseDate})::date::text`,
+          currency: venueTickets.currency,
+          count: sql<number>`count(*)::int`,
+          revenue: sql<number>`coalesce(sum(${venueTickets.amountPaid}), 0)::int`,
+        })
+        .from(venueTickets)
+        .innerJoin(venueEntryNights, eq(venueTickets.venueEntryNightId, venueEntryNights.id))
+        .innerJoin(venues, eq(venueEntryNights.venueId, venues.id))
+        .where(and(...venueConds))
+        .groupBy(sql`date_trunc('day', ${venueTickets.purchaseDate})`, venueTickets.currency);
+
+      return [...ticketRows, ...venueRows];
+    };
+
+    const [signupDaily, ticketDaily, signupPrev, ticketPrev] = await Promise.all([
+      signupsRange(from, to),
+      ticketsRange(from, to),
+      signupsRange(prevFrom, prevTo),
+      ticketsRange(prevFrom, prevTo),
+    ]);
+
+    // Merge signup + ticket rows (same-day, possibly multiple currencies) into one row per day.
+    const buildDaily = (signupRows: Array<{ date: string; count: number }>, ticketRows: Array<{ date: string; currency: string; count: number; revenue: number }>) => {
+      const byDate = new Map<string, { date: string; signups: number; ticketsSold: number; revenue: Record<string, number> }>();
+      for (const s of signupRows) {
+        byDate.set(s.date, { date: s.date, signups: Number(s.count), ticketsSold: 0, revenue: {} });
+      }
+      for (const t of ticketRows) {
+        const row = byDate.get(t.date) || { date: t.date, signups: 0, ticketsSold: 0, revenue: {} as Record<string, number> };
+        row.ticketsSold += Number(t.count);
+        row.revenue[t.currency] = (row.revenue[t.currency] || 0) + Number(t.revenue);
+        byDate.set(t.date, row);
+      }
+      return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+    };
+
+    const sumTotals = (signupRows: Array<{ count: number }>, ticketRows: Array<{ currency: string; count: number; revenue: number }>) => {
+      const revenue: Record<string, number> = {};
+      let ticketsSold = 0;
+      for (const t of ticketRows) {
+        revenue[t.currency] = (revenue[t.currency] || 0) + Number(t.revenue);
+        ticketsSold += Number(t.count);
+      }
+      return {
+        signups: signupRows.reduce((sum, s) => sum + Number(s.count), 0),
+        ticketsSold,
+        revenue,
+      };
+    };
+
+    return {
+      daily: buildDaily(signupDaily, ticketDaily),
+      totals: sumTotals(signupDaily, ticketDaily),
+      previousPeriod: sumTotals(signupPrev, ticketPrev),
+    };
+  }
+
+  async getFinanceLedgerSummary(filters: { from?: Date; to?: Date; currency?: string } = {}): Promise<Array<{
+    type: string;
+    currency: string;
+    count: number;
+    grossAmount: number;
+    platformFeeAmount: number;
+    netToOrganizerAmount: number;
+  }>> {
+    const conds = [];
+    if (filters.from) conds.push(gte(paymentTransactions.createdAt, filters.from));
+    if (filters.to) conds.push(lt(paymentTransactions.createdAt, filters.to));
+    if (filters.currency) conds.push(eq(paymentTransactions.currency, filters.currency));
+    const where = conds.length ? and(...conds) : undefined;
+
+    const rows = await db
+      .select({
+        type: paymentTransactions.type,
+        currency: paymentTransactions.currency,
+        count: sql<number>`count(*)::int`,
+        grossAmount: sql<number>`coalesce(sum(${paymentTransactions.grossAmount}), 0)::int`,
+        platformFeeAmount: sql<number>`coalesce(sum(${paymentTransactions.platformFeeAmount}), 0)::int`,
+        netToOrganizerAmount: sql<number>`coalesce(sum(${paymentTransactions.netToOrganizerAmount}), 0)::int`,
+      })
+      .from(paymentTransactions)
+      .where(where)
+      .groupBy(paymentTransactions.type, paymentTransactions.currency)
+      .orderBy(paymentTransactions.type, paymentTransactions.currency);
+
+    return rows.map(r => ({
+      type: r.type,
+      currency: r.currency,
+      count: Number(r.count),
+      grossAmount: Number(r.grossAmount),
+      platformFeeAmount: Number(r.platformFeeAmount),
+      netToOrganizerAmount: Number(r.netToOrganizerAmount),
+    }));
+  }
+
+  async getAdminFilterOptions(): Promise<{ countries: string[]; currencies: string[] }> {
+    const [eventCountries, venueCountries, eventCurrencies, venueCurrencies] = await Promise.all([
+      db.selectDistinct({ v: events.country }).from(events).where(isNotNull(events.country)),
+      db.selectDistinct({ v: venues.country }).from(venues).where(isNotNull(venues.country)),
+      db.selectDistinct({ v: events.currency }).from(events),
+      db.selectDistinct({ v: venues.currency }).from(venues),
+    ]);
+    const countries = Array.from(new Set([...eventCountries, ...venueCountries].map(r => r.v).filter((v): v is string => !!v))).sort();
+    const currencies = Array.from(new Set([...eventCurrencies, ...venueCurrencies].map(r => r.v).filter((v): v is string => !!v))).sort();
+    return { countries, currencies };
+  }
+
+  async getAllUsers(limit: number = 50, offset: number = 0, search?: string): Promise<User[]> {
+    const where = search
+      ? or(ilike(users.username, `%${search}%`), ilike(users.email, `%${search}%`), ilike(users.displayName, `%${search}%`), ilike(users.organizationName, `%${search}%`))
+      : undefined;
     return await db
       .select()
       .from(users)
+      .where(where)
       .orderBy(desc(users.createdAt))
       .limit(limit)
       .offset(offset);
   }
 
-  async getUserCount(): Promise<number> {
-    const [result] = await db.select({ count: count() }).from(users);
+  async getUserCount(search?: string): Promise<number> {
+    const where = search
+      ? or(ilike(users.username, `%${search}%`), ilike(users.email, `%${search}%`), ilike(users.displayName, `%${search}%`), ilike(users.organizationName, `%${search}%`))
+      : undefined;
+    const [result] = await db.select({ count: count() }).from(users).where(where);
     return Number(result?.count || 0);
   }
 
@@ -4390,27 +4578,47 @@ export class DbStorage implements IStorage {
     await db.delete(users).where(eq(users.id, id));
   }
 
-  async getAllEventsAdmin(limit: number = 50, offset: number = 0): Promise<Array<Event & { organizer: PublicUser; moderationStatus: string; sourceType: 'event' | 'venue_entry' }>> {
-    const eventRows = await db
-      .select()
-      .from(events)
-      .innerJoin(users, eq(events.organizerId, users.id))
-      .orderBy(desc(events.eventDate))
-      .limit(limit)
-      .offset(offset);
+  async getAllEventsAdmin(filters: { limit?: number; offset?: number; currency?: string; country?: string; search?: string } = {}): Promise<{
+    items: Array<Event & { organizer: PublicUser; moderationStatus: string; sourceType: 'event' | 'venue_entry' }>;
+    total: number;
+  }> {
+    const { limit = 50, offset = 0, currency, country, search } = filters;
 
-    const venueRows = await db
-      .select({
-        venueEntry: venueEntryNights,
-        venue: venues,
-        organizer: users,
-      })
-      .from(venueEntryNights)
-      .innerJoin(venues, eq(venueEntryNights.venueId, venues.id))
-      .innerJoin(users, eq(venues.ownerId, users.id))
-      .orderBy(desc(venueEntryNights.date))
-      .limit(limit)
-      .offset(offset);
+    const eventConds = [
+      currency ? eq(events.currency, currency) : undefined,
+      country ? eq(events.country, country) : undefined,
+      search ? or(ilike(events.title, `%${search}%`), ilike(events.city, `%${search}%`)) : undefined,
+    ].filter((c): c is NonNullable<typeof c> => c !== undefined);
+    const eventWhere = eventConds.length ? and(...eventConds) : undefined;
+
+    const venueConds = [
+      currency ? eq(venues.currency, currency) : undefined,
+      country ? eq(venues.country, country) : undefined,
+      search ? or(ilike(venueEntryNights.name, `%${search}%`), ilike(venues.city, `%${search}%`)) : undefined,
+    ].filter((c): c is NonNullable<typeof c> => c !== undefined);
+    const venueWhere = venueConds.length ? and(...venueConds) : undefined;
+
+    // Two separate tables feed one combined, sorted, paginated list. Rather
+    // than union them at the SQL level (different column shapes), pull up to
+    // offset+limit rows from each -- bounded and cheap at admin-panel scale
+    // -- merge-sort in JS, then slice the exact requested page. A naive
+    // per-table limit/offset (the previous approach) silently produced a
+    // wrong, interleaved "page 2" for any combined listing.
+    const fetchCap = offset + limit;
+
+    const [eventRows, venueRows, eventTotalRow, venueTotalRow] = await Promise.all([
+      db.select().from(events).innerJoin(users, eq(events.organizerId, users.id))
+        .where(eventWhere).orderBy(desc(events.eventDate)).limit(fetchCap),
+      db.select({ venueEntry: venueEntryNights, venue: venues, organizer: users })
+        .from(venueEntryNights)
+        .innerJoin(venues, eq(venueEntryNights.venueId, venues.id))
+        .innerJoin(users, eq(venues.ownerId, users.id))
+        .where(venueWhere).orderBy(desc(venueEntryNights.date)).limit(fetchCap),
+      db.select({ count: count() }).from(events).where(eventWhere),
+      db.select({ count: count() }).from(venueEntryNights)
+        .innerJoin(venues, eq(venueEntryNights.venueId, venues.id))
+        .where(venueWhere),
+    ]);
 
     const mappedEvents = eventRows.map(r => ({
       ...r.events,
@@ -4428,11 +4636,12 @@ export class DbStorage implements IStorage {
       eventEndDate: r.venueEntry.endTime ?? null,
       location: r.venue.address || r.venue.name,
       city: r.venue.city ?? null,
+      country: r.venue.country ?? null,
       latitude: null,
       longitude: null,
       category: 'venue',
       ticketPrice: r.venueEntry.coverPriceCents,
-      currency: 'GBP',
+      currency: r.venue.currency,
       requiresRSVP: false,
       ticketsAvailable: r.venueEntry.capacity ?? 0,
       ticketsSold: r.venueEntry.ticketsSold,
@@ -4450,9 +4659,14 @@ export class DbStorage implements IStorage {
       sourceType: 'venue_entry' as const,
     }));
 
-    return [...mappedEvents, ...mappedVenueEntries].sort(
+    const merged = [...mappedEvents, ...mappedVenueEntries].sort(
       (a, b) => new Date(b.eventDate).getTime() - new Date(a.eventDate).getTime()
     );
+
+    return {
+      items: merged.slice(offset, offset + limit),
+      total: Number(eventTotalRow[0]?.count || 0) + Number(venueTotalRow[0]?.count || 0),
+    };
   }
 
   async deleteEvent(id: string): Promise<void> {
@@ -6200,8 +6414,18 @@ export class DbStorage implements IStorage {
       SELECT count, last_attempt, locked_until FROM login_attempts WHERE key = ${key}
     `);
     if (result.rows.length === 0) return null;
-    const row = result.rows[0] as { count: number; last_attempt: Date; locked_until: Date | null };
-    return { count: row.count, lastAttempt: row.last_attempt, lockedUntil: row.locked_until };
+    const row = result.rows[0] as { count: number; last_attempt: string | Date; locked_until: string | Date | null };
+    // db.execute() (raw SQL, unlike the query builder) returns timestamptz
+    // columns as ISO strings, not Date objects -- callers (checkLoginThrottle)
+    // call .getTime() on these, so returning the raw string crashed every
+    // login attempt that followed an earlier failed one (the throttle check
+    // runs before the password check, so this blocked even a *correct*
+    // password with a 500 for the rest of the lockout window).
+    return {
+      count: row.count,
+      lastAttempt: new Date(row.last_attempt),
+      lockedUntil: row.locked_until ? new Date(row.locked_until) : null,
+    };
   }
 
   async upsertLoginAttempt(key: string, count: number, lastAttempt: Date, lockedUntil: Date | null): Promise<void> {
