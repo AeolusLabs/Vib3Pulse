@@ -100,21 +100,36 @@ if (process.env.NODE_ENV === "production" && !process.env.APP_URL && !process.en
 }
 
 // Session configuration with strengthened security
-app.use(
-  session({
-    store: sessionStore,
-    secret: sessionSecret,
-    resave: false,
-    saveUninitialized: false,
-    name: "vibepulse.sid",
-    cookie: {
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-    },
-  })
-);
+//
+// Scoped to skip /api/admin/*: admin-routes.ts registers its own, separate
+// express-session instance (cookie "admin.sid", its own store/table) on that
+// prefix. Both middlewares write to the same shared req.session/req.sessionID
+// properties and both patch res.end to auto-persist + set their cookie on
+// response finish -- running both on the same request corrupts that chain:
+// whichever runs second overwrites req.session for the handler, but the
+// first-registered (this one)'s response-finish hook still fires too and
+// ends up issuing a "vibepulse.sid" cookie carrying the *admin* session's
+// data/ID, which neither session store recognizes. Net effect: admin login
+// never actually persists a working admin.sid cookie, and the mismatched
+// internal state throws intermittently inside the login handler. Only one
+// session middleware may touch a given request.
+const mainSession = session({
+  store: sessionStore,
+  secret: sessionSecret,
+  resave: false,
+  saveUninitialized: false,
+  name: "vibepulse.sid",
+  cookie: {
+    maxAge: 30 * 24 * 60 * 60 * 1000,
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+  },
+});
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/admin")) return next();
+  return mainSession(req, res, next);
+});
 
 passport.use(
   new LocalStrategy(async (username, password, done) => {
@@ -227,7 +242,15 @@ passport.deserializeUser(async (id: string, done) => {
 });
 
 app.use(passport.initialize());
-app.use(passport.session());
+// passport.session() reads req.session (the main "vibepulse.sid" session) and
+// throws if it's missing -- which it now deliberately is for /api/admin/*
+// (see the mainSession skip above), since those routes authenticate via the
+// separate admin.sid session instead and never had a regular req.user to
+// deserialize in the first place.
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/admin")) return next();
+  return passport.session()(req, res, next);
+});
 
 // CSRF token endpoint - must be before CSRF protection middleware
 app.get("/api/csrf-token", csrfTokenEndpoint);
