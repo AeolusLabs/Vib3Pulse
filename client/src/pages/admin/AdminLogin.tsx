@@ -8,13 +8,14 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 
 import { apiRequest } from "@/lib/queryClient";
-import { ShieldIcon, LockIcon, UserIcon } from "@/components/ui/icons";
+import { ShieldIcon, LockIcon, UserIcon, EyeIcon, EyeOffIcon } from "@/components/ui/icons";
 
 export default function AdminLogin() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   const loginMutation = useMutation({
     mutationFn: async (data: { username: string; password: string }) => {
@@ -78,14 +79,23 @@ export default function AdminLogin() {
                 <LockIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <Input
                   id="password"
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   placeholder="Enter your password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="pl-10 bg-slate-700/50 border-slate-600 text-white placeholder:text-slate-500"
+                  className="pl-10 pr-10 bg-slate-700/50 border-slate-600 text-white placeholder:text-slate-500"
                   data-testid="input-admin-password"
                   required
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+                  data-testid="button-toggle-admin-password"
+                  aria-label="Toggle password visibility"
+                >
+                  {showPassword ? <EyeOffIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
+                </button>
               </div>
             </div>
             <Button
