@@ -33,9 +33,9 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import AdminLayout from "./AdminLayout";
 import { format } from "date-fns";
-import { PlusIcon, ShieldIcon, UserXIcon, EditIcon } from "@/components/ui/icons";
+import { PlusIcon, ShieldIcon, UserXIcon, EditIcon, UserCheckIcon } from "@/components/ui/icons";
 
-type AdminRole = "super_admin" | "content_moderator" | "user_support" | "event_reviewer" | "finance_manager";
+type AdminRole = "super_admin" | "content_moderator" | "user_support" | "event_reviewer" | "finance_manager" | "analytics_viewer";
 
 interface AdminUser {
   id: string;
@@ -54,6 +54,7 @@ const roleLabels: Record<AdminRole, string> = {
   user_support: "User Support",
   event_reviewer: "Event Reviewer",
   finance_manager: "Finance Manager",
+  analytics_viewer: "Analytics Viewer",
 };
 
 const roleColors: Record<AdminRole, string> = {
@@ -62,6 +63,7 @@ const roleColors: Record<AdminRole, string> = {
   user_support: "border-green-500 text-green-400",
   event_reviewer: "border-amber-500 text-amber-400",
   finance_manager: "border-emerald-500 text-emerald-400",
+  analytics_viewer: "border-cyan-500 text-cyan-400",
 };
 
 export default function AdminStaff() {
@@ -125,6 +127,20 @@ export default function AdminStaff() {
     },
     onError: (error: any) => {
       toast({ title: "Failed to deactivate admin", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const reactivateMutation = useMutation({
+    mutationFn: async (adminId: string) => {
+      const response = await apiRequest("PATCH", `/api/admin/users/admins/${adminId}`, { isActive: true });
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Admin reactivated", description: "The admin account has been reactivated" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users/admins"] });
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to reactivate admin", description: error.message, variant: "destructive" });
     },
   });
 
@@ -275,6 +291,18 @@ export default function AdminStaff() {
                               <UserXIcon className="w-4 h-4" />
                             </Button>
                           )}
+                          {!admin.isActive && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-green-400 hover:text-green-300"
+                              onClick={() => reactivateMutation.mutate(admin.id)}
+                              disabled={reactivateMutation.isPending}
+                              data-testid={`button-reactivate-admin-${admin.id}`}
+                            >
+                              <UserCheckIcon className="w-4 h-4" />
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -351,6 +379,7 @@ export default function AdminStaff() {
                     <SelectItem value="user_support">User Support</SelectItem>
                     <SelectItem value="event_reviewer">Event Reviewer</SelectItem>
                     <SelectItem value="finance_manager">Finance Manager</SelectItem>
+                    <SelectItem value="analytics_viewer">Analytics Viewer</SelectItem>
                     <SelectItem value="super_admin">Super Admin</SelectItem>
                   </SelectContent>
                 </Select>
@@ -360,6 +389,7 @@ export default function AdminStaff() {
                   {formData.role === 'user_support' && "Can manage users, view reports, and access activity logs"}
                   {formData.role === 'event_reviewer' && "Can review and approve events"}
                   {formData.role === 'finance_manager' && "Can view financial reports and revenue data"}
+                  {formData.role === 'analytics_viewer' && "Can view analytics and reporting dashboards only"}
                 </p>
               </div>
             </div>
@@ -400,6 +430,7 @@ export default function AdminStaff() {
                     <SelectItem value="user_support">User Support</SelectItem>
                     <SelectItem value="event_reviewer">Event Reviewer</SelectItem>
                     <SelectItem value="finance_manager">Finance Manager</SelectItem>
+                    <SelectItem value="analytics_viewer">Analytics Viewer</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

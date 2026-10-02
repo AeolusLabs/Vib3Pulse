@@ -4,12 +4,21 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import AdminLayout from "./AdminLayout";
+import AdminPagination from "@/components/admin/AdminPagination";
 import { format } from "date-fns";
 import { SearchIcon, Trash2Icon, EyeIcon, ImageIcon } from "@/components/ui/icons";
+
+const PAGE_SIZE = 20;
 
 interface Story {
   id: string;
@@ -29,10 +38,19 @@ interface Story {
 export default function AdminStories() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [viewStory, setViewStory] = useState<Story | null>(null);
 
-  const { data: stories, isLoading } = useQuery<Story[]>({
-    queryKey: ["/api/admin/stories"],
+  const { data, isLoading } = useQuery<{ stories: Story[]; total: number }>({
+    queryKey: ["/api/admin/stories", offset],
+    queryFn: () =>
+      apiRequest("GET", `/api/admin/stories?limit=${PAGE_SIZE}&offset=${offset}`).then((r) =>
+        r.json()
+      ),
   });
+
+  const stories = data?.stories || [];
+  const total = data?.total || 0;
 
   const deleteMutation = useMutation({
     mutationFn: async (storyId: string) => {
@@ -54,10 +72,10 @@ export default function AdminStories() {
     },
   });
 
-  const filteredStories = stories?.filter(story =>
+  const filteredStories = stories.filter(story =>
     story.user.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
     (story.caption?.toLowerCase().includes(searchQuery.toLowerCase()))
-  ) || [];
+  );
 
   return (
     <AdminLayout>
@@ -135,6 +153,7 @@ export default function AdminStories() {
                           size="sm"
                           variant="ghost"
                           className="flex-1 text-slate-400 hover:text-white"
+                          onClick={() => setViewStory(story)}
                           data-testid={`button-view-story-${story.id}`}
                         >
                           <EyeIcon className="w-4 h-4 mr-1" /> View
@@ -158,8 +177,42 @@ export default function AdminStories() {
                 ))}
               </div>
             )}
+            <AdminPagination
+              offset={offset}
+              limit={PAGE_SIZE}
+              total={total}
+              onOffsetChange={setOffset}
+            />
           </CardContent>
         </Card>
+
+        <Dialog open={!!viewStory} onOpenChange={(open) => !open && setViewStory(null)}>
+          <DialogContent className="bg-slate-800 border-slate-700 max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="text-white">
+                {viewStory ? `@${viewStory.user.username}'s story` : "Story"}
+              </DialogTitle>
+            </DialogHeader>
+            {viewStory && (
+              <div className="flex items-center justify-center bg-slate-900 rounded-lg overflow-hidden max-h-[75vh]">
+                {viewStory.mediaType === "image" ? (
+                  <img
+                    src={viewStory.mediaUrl}
+                    alt="Story"
+                    className="max-w-full max-h-[75vh] object-contain"
+                  />
+                ) : (
+                  <video
+                    src={viewStory.mediaUrl}
+                    className="max-w-full max-h-[75vh] object-contain"
+                    controls
+                    autoPlay
+                  />
+                )}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </AdminLayout>
   );

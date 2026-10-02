@@ -5,6 +5,7 @@ import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import { Pool } from "pg";
 import { storage, pool } from "./storage";
+import { toPublicUser, toPublicAdminUser } from "./auth";
 import { invalidateCache, postsCache, eventsCache, storiesCache } from "./cache";
 import { insertAdminUserSchema, adminRoles, type AdminRole } from "@shared/schema";
 import { z } from "zod";
@@ -215,8 +216,8 @@ export function setupAdminRoutes(app: Express) {
       // Log the initial setup
       await logActivity(newAdmin.id, "initial_setup", "admin", newAdmin.id, "Initial Super Admin account created", req.ip);
 
-      const { passwordHash: _, ...adminWithoutPassword } = newAdmin;
-      res.status(201).json({ 
+      const adminWithoutPassword = toPublicAdminUser(newAdmin);
+      res.status(201).json({
         message: "Super Admin account created successfully! You can now log in.",
         admin: adminWithoutPassword 
       });
@@ -283,7 +284,7 @@ export function setupAdminRoutes(app: Express) {
       // Log activity
       await logActivity(admin.id, "login", "admin", admin.id, "Admin logged in", req.ip);
 
-      const { passwordHash, ...adminWithoutPassword } = admin;
+      const adminWithoutPassword = toPublicAdminUser(admin);
       req.session.save((err) => {
         if (err) {
           console.error('[ADMIN] Session save failed on login:', err);
@@ -318,7 +319,7 @@ export function setupAdminRoutes(app: Express) {
       if (!admin) {
         return res.status(404).json({ message: "Admin not found" });
       }
-      const { passwordHash, ...adminWithoutPassword } = admin;
+      const adminWithoutPassword = toPublicAdminUser(admin);
       res.json(adminWithoutPassword);
     } catch (error) {
       res.status(500).json({ message: "Failed to get admin" });
@@ -366,7 +367,7 @@ export function setupAdminRoutes(app: Express) {
   app.get("/api/admin/users/admins", requireSuperAdmin, async (req: Request, res: Response) => {
     try {
       const admins = await storage.getAllAdminUsers();
-      const adminsWithoutPasswords = admins.map(({ passwordHash, ...rest }) => rest);
+      const adminsWithoutPasswords = admins.map(toPublicAdminUser);
       res.json(adminsWithoutPasswords);
     } catch (error) {
       res.status(500).json({ message: "Failed to get admins" });
@@ -418,7 +419,7 @@ export function setupAdminRoutes(app: Express) {
         req.ip
       );
 
-      const { passwordHash: _, ...adminWithoutPassword } = admin;
+      const adminWithoutPassword = toPublicAdminUser(admin);
       res.status(201).json(adminWithoutPassword);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -452,7 +453,7 @@ export function setupAdminRoutes(app: Express) {
         req.ip
       );
 
-      const { passwordHash, ...adminWithoutPassword } = admin;
+      const adminWithoutPassword = toPublicAdminUser(admin);
       res.json(adminWithoutPassword);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -483,7 +484,7 @@ export function setupAdminRoutes(app: Express) {
         req.ip
       );
 
-      const { passwordHash, ...adminWithoutPassword } = admin;
+      const adminWithoutPassword = toPublicAdminUser(admin);
       res.json(adminWithoutPassword);
     } catch (error) {
       res.status(500).json({ message: "Failed to deactivate admin" });
@@ -554,8 +555,16 @@ export function setupAdminRoutes(app: Express) {
   app.get("/api/admin/activity-logs", requireRole("super_admin", "user_support"), async (req: Request, res: Response) => {
     try {
       const limit = parseInt(req.query.limit as string) || 100;
-      const logs = await storage.getAdminActivityLogs(limit);
-      res.json(logs);
+      const offset = parseInt(req.query.offset as string) || 0;
+      const from = req.query.from ? new Date(req.query.from as string) : undefined;
+      const to = req.query.to ? new Date(req.query.to as string) : undefined;
+      const adminId = (req.query.adminId as string) || undefined;
+      const action = (req.query.action as string) || undefined;
+      if ((from && isNaN(from.getTime())) || (to && isNaN(to.getTime()))) {
+        return res.status(400).json({ message: "Invalid from/to date" });
+      }
+      const { items, total } = await storage.getAdminActivityLogs({ limit, offset, from, to, adminId, action });
+      res.json({ logs: items, total });
     } catch (error) {
       res.status(500).json({ message: "Failed to get activity logs" });
     }
@@ -570,10 +579,11 @@ export function setupAdminRoutes(app: Express) {
     try {
       const limit = parseInt(req.query.limit as string) || 50;
       const offset = parseInt(req.query.offset as string) || 0;
-      const users = await storage.getAllUsers(limit, offset);
-      const totalCount = await storage.getUserCount();
+      const search = (req.query.search as string) || undefined;
+      const users = await storage.getAllUsers(limit, offset, search);
+      const totalCount = await storage.getUserCount(search);
 
-      const usersWithoutPasswords = users.map(({ passwordHash, ...rest }) => rest);
+      const usersWithoutPasswords = users.map(toPublicUser);
 
       const userIds = usersWithoutPasswords.map(u => u.id);
       const activeSuspensions = await storage.getBulkActiveSuspensions(userIds);
@@ -853,8 +863,9 @@ export function setupAdminRoutes(app: Express) {
   app.get("/api/admin/stories", requireRole("super_admin", "content_moderator"), async (req: Request, res: Response) => {
     try {
       const limit = parseInt(req.query.limit as string) || 50;
-      const stories = await storage.getAllStoriesAdmin(limit);
-      res.json(stories);
+      const offset = parseInt(req.query.offset as string) || 0;
+      const { items, total } = await storage.getAllStoriesAdmin(limit, offset);
+      res.json({ stories: items, total });
     } catch (error) {
       res.status(500).json({ message: "Failed to get stories" });
     }
@@ -888,8 +899,8 @@ export function setupAdminRoutes(app: Express) {
       const status = req.query.status as string | undefined;
       const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
       const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
-      const reports = await storage.getContentReports(status, limit, offset);
-      res.json(reports);
+      const { items, total } = await storage.getContentReports(status, limit, offset);
+      res.json({ reports: items, total });
     } catch (error) {
       res.status(500).json({ message: "Failed to get reports" });
     }

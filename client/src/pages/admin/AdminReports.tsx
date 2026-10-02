@@ -33,8 +33,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import AdminLayout from "./AdminLayout";
+import AdminPagination from "@/components/admin/AdminPagination";
 import { format } from "date-fns";
 import { CheckIcon, XIcon, EyeIcon, AlertTriangleIcon } from "@/components/ui/icons";
+
+const PAGE_SIZE = 20;
 
 interface ContentReport {
   id: string;
@@ -55,15 +58,28 @@ interface ContentReport {
 export default function AdminReports() {
   const { toast } = useToast();
   const [selectedTab, setSelectedTab] = useState("pending");
+  const [offset, setOffset] = useState(0);
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
   const [selectedReport, setSelectedReport] = useState<ContentReport | null>(null);
   const [resolution, setResolution] = useState("");
   const [reviewStatus, setReviewStatus] = useState<"reviewed" | "dismissed" | "actioned">("reviewed");
 
-  const { data: reports, isLoading } = useQuery<ContentReport[]>({
-    queryKey: ["/api/admin/reports", selectedTab],
-    queryFn: () => apiRequest("GET", `/api/admin/reports?status=${selectedTab}`).then(r => r.json()),
+  const handleTabChange = (tab: string) => {
+    setSelectedTab(tab);
+    setOffset(0);
+  };
+
+  const { data, isLoading } = useQuery<{ reports: ContentReport[]; total: number }>({
+    queryKey: ["/api/admin/reports", selectedTab, offset],
+    queryFn: () =>
+      apiRequest(
+        "GET",
+        `/api/admin/reports?status=${selectedTab}&limit=${PAGE_SIZE}&offset=${offset}`
+      ).then((r) => r.json()),
   });
+
+  const reports = data?.reports || [];
+  const total = data?.total || 0;
 
   const reviewMutation = useMutation({
     mutationFn: async (data: { reportId: string; status: string; resolution?: string }) => {
@@ -92,7 +108,7 @@ export default function AdminReports() {
     },
   });
 
-  const filteredReports = reports || [];
+  const filteredReports = reports;
 
   const handleReview = () => {
     if (selectedReport) {
@@ -129,7 +145,7 @@ export default function AdminReports() {
           </p>
         </div>
 
-        <Tabs value={selectedTab} onValueChange={setSelectedTab}>
+        <Tabs value={selectedTab} onValueChange={handleTabChange}>
           <TabsList className="bg-slate-800 border border-slate-700">
             <TabsTrigger value="pending" className="data-[state=active]:bg-purple-600">
               Pending
@@ -215,6 +231,12 @@ export default function AdminReports() {
                     </TableBody>
                   </Table>
                 )}
+                <AdminPagination
+                  offset={offset}
+                  limit={PAGE_SIZE}
+                  total={total}
+                  onOffsetChange={setOffset}
+                />
               </CardContent>
             </Card>
           </TabsContent>

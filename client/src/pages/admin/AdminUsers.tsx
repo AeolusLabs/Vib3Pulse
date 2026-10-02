@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -27,8 +27,13 @@ import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import AdminLayout from "./AdminLayout";
+import AdminFilterBar from "@/components/admin/AdminFilterBar";
+import AdminPagination from "@/components/admin/AdminPagination";
+import { exportToCsv } from "@/lib/exportToCsv";
 import { format } from "date-fns";
-import { SearchIcon, BanIcon, EyeIcon, Trash2Icon, CheckCircleIcon, SparklesIcon } from "@/components/ui/icons";
+import { BanIcon, EyeIcon, Trash2Icon, CheckCircleIcon, SparklesIcon, DownloadIcon } from "@/components/ui/icons";
+
+const PAGE_LIMIT = 50;
 
 interface ActiveSuspension {
   id: string;
@@ -45,22 +50,62 @@ interface User {
   createdAt: string;
   activeSuspension: ActiveSuspension | null;
   freePromotionCredits: number;
+  organizationName?: string | null;
+  bio?: string | null;
+  location?: string | null;
+  contactEmail?: string | null;
+  phoneNumber?: string | null;
+  isVerified?: boolean;
+  isOfficial?: boolean;
+  onboardingComplete?: boolean;
 }
 
 export default function AdminUsers() {
   const { toast } = useToast();
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [offset, setOffset] = useState(0);
   const [suspendDialogOpen, setSuspendDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [suspendReason, setSuspendReason] = useState("");
   const [isPermanent, setIsPermanent] = useState(false);
   const [creditsDialogOpen, setCreditsDialogOpen] = useState(false);
   const [creditsInput, setCreditsInput] = useState("0");
 
+  // Debounce the search box ~300ms before it drives a refetch, and reset
+  // back to the first page whenever the effective search term changes.
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setSearch(searchInput);
+      setOffset(0);
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [searchInput]);
+
+  const queryUrl = (() => {
+    const params = new URLSearchParams();
+    params.set("limit", String(PAGE_LIMIT));
+    params.set("offset", String(offset));
+    if (search.trim()) params.set("search", search.trim());
+    return `/api/admin/users?${params.toString()}`;
+  })();
+
   const { data, isLoading } = useQuery<{ users: User[]; total: number }>({
-    queryKey: ["/api/admin/users"],
+    queryKey: [queryUrl],
   });
+
+  // The query key is now the full "/api/admin/users?limit=...&offset=..."
+  // URL (so each page/search/filter combo caches separately), so a plain
+  // invalidateQueries({ queryKey: ["/api/admin/users"] }) no longer matches
+  // it by prefix — match by predicate on the URL prefix instead.
+  const invalidateUsers = () => {
+    queryClient.invalidateQueries({
+      predicate: (query) =>
+        typeof query.queryKey[0] === "string" && query.queryKey[0].startsWith("/api/admin/users"),
+    });
+  };
 
   const suspendMutation = useMutation({
     mutationFn: async (data: { userId: string; reason: string; isPermanent: boolean }) => {
@@ -72,7 +117,7 @@ export default function AdminUsers() {
     },
     onSuccess: () => {
       toast({ title: "User suspended", description: "The user has been suspended successfully" });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      invalidateUsers();
       setSuspendDialogOpen(false);
       setSelectedUser(null);
       setSuspendReason("");
@@ -90,7 +135,7 @@ export default function AdminUsers() {
     },
     onSuccess: () => {
       toast({ title: "Suspension lifted", description: "The user's suspension has been removed" });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      invalidateUsers();
     },
     onError: (error: any) => {
       toast({ title: "Failed to lift suspension", description: error.message, variant: "destructive" });
@@ -104,7 +149,7 @@ export default function AdminUsers() {
     },
     onSuccess: () => {
       toast({ title: "Promotion credits updated" });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      invalidateUsers();
       setCreditsDialogOpen(false);
       setSelectedUser(null);
     },
@@ -120,7 +165,7 @@ export default function AdminUsers() {
     },
     onSuccess: () => {
       toast({ title: "User deleted", description: "The user account has been permanently deleted" });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      invalidateUsers();
       setDeleteDialogOpen(false);
       setSelectedUser(null);
     },
@@ -129,11 +174,8 @@ export default function AdminUsers() {
     },
   });
 
-  const filteredUsers = data?.users.filter(user =>
-    user.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (user.displayName?.toLowerCase().includes(searchQuery.toLowerCase()))
-  ) || [];
+  const users = data?.users || [];
+  const total = data?.total || 0;
 
   const handleSuspend = () => {
     if (selectedUser && suspendReason.trim()) {
@@ -148,34 +190,57 @@ export default function AdminUsers() {
     }
   };
 
+  const handleExport = () => {
+    exportToCsv(
+      "users",
+      users.map((u) => ({
+        id: u.id,
+        username: u.username,
+        email: u.email,
+        displayName: u.displayName,
+        userType: u.userType,
+        status: u.activeSuspension ? "suspended" : "active",
+        freePromotionCredits: u.freePromotionCredits,
+        joined: u.createdAt,
+      }))
+    );
+  };
+
   return (
     <AdminLayout>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-white">User Management</h1>
-            <p className="text-slate-400 mt-1">{data?.total || 0} total users</p>
+            <p className="text-slate-400 mt-1">{total} total users</p>
           </div>
         </div>
 
         <Card className="bg-slate-800/50 border-slate-700">
           <CardHeader>
-            <div className="flex items-center gap-4">
-              <div className="relative flex-1 max-w-sm">
-                <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                <Input
-                  placeholder="Search users..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 bg-slate-700/50 border-slate-600 text-white"
-                  data-testid="input-search-users"
-                />
-              </div>
+            <div className="flex items-center justify-between gap-4">
+              <AdminFilterBar
+                search={searchInput}
+                onSearchChange={setSearchInput}
+                searchPlaceholder="Search users..."
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-slate-600 text-slate-300 shrink-0"
+                onClick={handleExport}
+                disabled={users.length === 0}
+                data-testid="button-export-users"
+              >
+                <DownloadIcon className="w-4 h-4 mr-2" /> Export
+              </Button>
             </div>
           </CardHeader>
           <CardContent>
             {isLoading ? (
               <div className="text-center py-8 text-slate-400">Loading users...</div>
+            ) : users.length === 0 ? (
+              <div className="text-center py-8 text-slate-400">No users found</div>
             ) : (
               <Table>
                 <TableHeader>
@@ -190,7 +255,7 @@ export default function AdminUsers() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredUsers.map((user) => (
+                  {users.map((user) => (
                     <TableRow key={user.id} className="border-slate-700">
                       <TableCell>
                         <div>
@@ -232,6 +297,7 @@ export default function AdminUsers() {
                             size="sm"
                             variant="ghost"
                             className="text-slate-400 hover:text-white"
+                            onClick={() => { setSelectedUser(user); setDetailDialogOpen(true); }}
                             data-testid={`button-view-user-${user.id}`}
                           >
                             <EyeIcon className="w-4 h-4" />
@@ -287,8 +353,97 @@ export default function AdminUsers() {
                 </TableBody>
               </Table>
             )}
+            <AdminPagination offset={offset} limit={PAGE_LIMIT} total={total} onOffsetChange={setOffset} />
           </CardContent>
         </Card>
+
+        {/* User Detail Dialog */}
+        <Dialog open={detailDialogOpen} onOpenChange={setDetailDialogOpen}>
+          <DialogContent className="bg-slate-800 border-slate-700">
+            <DialogHeader>
+              <DialogTitle className="text-white">User Details</DialogTitle>
+              <DialogDescription className="text-slate-400">
+                {selectedUser?.displayName || selectedUser?.username}
+              </DialogDescription>
+            </DialogHeader>
+            {selectedUser && (
+              <div className="space-y-3 py-2 text-sm">
+                <div className="flex justify-between border-b border-slate-700 pb-2">
+                  <span className="text-slate-400">Username</span>
+                  <span className="text-white">@{selectedUser.username}</span>
+                </div>
+                <div className="flex justify-between border-b border-slate-700 pb-2">
+                  <span className="text-slate-400">Email</span>
+                  <span className="text-white">{selectedUser.email}</span>
+                </div>
+                {selectedUser.organizationName && (
+                  <div className="flex justify-between border-b border-slate-700 pb-2">
+                    <span className="text-slate-400">Organization</span>
+                    <span className="text-white">{selectedUser.organizationName}</span>
+                  </div>
+                )}
+                <div className="flex justify-between border-b border-slate-700 pb-2">
+                  <span className="text-slate-400">Account Type</span>
+                  <Badge
+                    variant="outline"
+                    className={selectedUser.userType === 'organizer' ? 'border-purple-500 text-purple-400' : 'border-slate-500 text-slate-400'}
+                  >
+                    {selectedUser.userType}
+                  </Badge>
+                </div>
+                <div className="flex justify-between border-b border-slate-700 pb-2">
+                  <span className="text-slate-400">Joined</span>
+                  <span className="text-white">{format(new Date(selectedUser.createdAt), 'MMM d, yyyy')}</span>
+                </div>
+                <div className="flex justify-between border-b border-slate-700 pb-2">
+                  <span className="text-slate-400">Status</span>
+                  {selectedUser.activeSuspension ? (
+                    <Badge variant="outline" className="border-red-500 text-red-400">Suspended</Badge>
+                  ) : (
+                    <Badge variant="outline" className="border-green-500 text-green-400">Active</Badge>
+                  )}
+                </div>
+                {selectedUser.activeSuspension && (
+                  <div className="border-b border-slate-700 pb-2">
+                    <span className="text-slate-400">Suspension reason</span>
+                    <p className="text-white mt-1">{selectedUser.activeSuspension.reason}</p>
+                    {selectedUser.activeSuspension.isPermanent && (
+                      <Badge variant="outline" className="border-red-500 text-red-400 mt-1">Permanent</Badge>
+                    )}
+                  </div>
+                )}
+                <div className="flex justify-between border-b border-slate-700 pb-2">
+                  <span className="text-slate-400">Promo Credits</span>
+                  <span className="text-white">{selectedUser.freePromotionCredits}</span>
+                </div>
+                {(selectedUser.isVerified || selectedUser.isOfficial) && (
+                  <div className="flex justify-between border-b border-slate-700 pb-2">
+                    <span className="text-slate-400">Badges</span>
+                    <div className="flex gap-2">
+                      {selectedUser.isVerified && (
+                        <Badge variant="outline" className="border-blue-500 text-blue-400">Verified</Badge>
+                      )}
+                      {selectedUser.isOfficial && (
+                        <Badge variant="outline" className="border-amber-500 text-amber-400">Official</Badge>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {selectedUser.location && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Location</span>
+                    <span className="text-white">{selectedUser.location}</span>
+                  </div>
+                )}
+              </div>
+            )}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDetailDialogOpen(false)} className="border-slate-600">
+                Close
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Suspend Dialog */}
         <Dialog open={suspendDialogOpen} onOpenChange={setSuspendDialogOpen}>

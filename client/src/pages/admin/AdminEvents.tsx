@@ -1,9 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { formatMoney } from "@/lib/currency";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -28,8 +27,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import AdminLayout from "./AdminLayout";
+import AdminFilterBar from "@/components/admin/AdminFilterBar";
+import AdminPagination from "@/components/admin/AdminPagination";
+import { exportToCsv } from "@/lib/exportToCsv";
 import { format } from "date-fns";
-import { SearchIcon, CheckIcon, XIcon, FlagIcon, Trash2Icon } from "@/components/ui/icons";
+import { CheckIcon, XIcon, FlagIcon, Trash2Icon, DownloadIcon } from "@/components/ui/icons";
+
+const PAGE_LIMIT = 50;
 
 interface Event {
   id: string;
@@ -42,6 +46,8 @@ interface Event {
   ticketsAvailable: number;
   moderationStatus: string;
   sourceType?: 'event' | 'venue_entry';
+  currency?: string;
+  country?: string;
   organizer: {
     id: string;
     username: string;
@@ -60,16 +66,59 @@ const statusBadge = (status: string) => {
 
 export default function AdminEvents() {
   const { toast } = useToast();
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [currency, setCurrency] = useState<string | undefined>(undefined);
+  const [country, setCountry] = useState<string | undefined>(undefined);
+  const [offset, setOffset] = useState(0);
   const [activeTab, setActiveTab] = useState("all");
   const [moderateDialogOpen, setModerateDialogOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [moderationAction, setModerationAction] = useState<"approved" | "rejected" | "flagged">("approved");
   const [moderationReason, setModerationReason] = useState("");
 
-  const { data: events, isLoading } = useQuery<Event[]>({
-    queryKey: ["/api/admin/events"],
+  // Debounce the search box ~300ms before it drives a server round-trip, and
+  // reset back to the first page whenever the effective search term changes.
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setSearch(searchInput);
+      setOffset(0);
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [searchInput]);
+
+  // Currency/country are real server-side filters too, so changing either
+  // one needs to reset pagination the same way search does.
+  useEffect(() => {
+    setOffset(0);
+  }, [currency, country]);
+
+  const queryUrl = (() => {
+    const params = new URLSearchParams();
+    params.set("limit", String(PAGE_LIMIT));
+    params.set("offset", String(offset));
+    if (search.trim()) params.set("search", search.trim());
+    if (currency) params.set("currency", currency);
+    if (country) params.set("country", country);
+    return `/api/admin/events?${params.toString()}`;
+  })();
+
+  // The endpoint used to return a raw array; it now returns
+  // { events: [...], total } so pagination can work across the full dataset.
+  const { data, isLoading } = useQuery<{ events: Event[]; total: number }>({
+    queryKey: [queryUrl],
   });
+
+  // The query key is now the full "/api/admin/events?limit=...&offset=..."
+  // URL (so each page/search/filter combo caches separately), so a plain
+  // invalidateQueries({ queryKey: ["/api/admin/events"] }) no longer matches
+  // it by prefix — match by predicate on the URL prefix instead.
+  const invalidateEvents = () => {
+    queryClient.invalidateQueries({
+      predicate: (query) =>
+        typeof query.queryKey[0] === "string" && query.queryKey[0].startsWith("/api/admin/events"),
+    });
+  };
 
   const moderateMutation = useMutation({
     mutationFn: async (data: { eventId: string; action: string; reason?: string; sourceType?: string }) => {
@@ -84,7 +133,7 @@ export default function AdminEvents() {
     },
     onSuccess: () => {
       toast({ title: "Event moderated", description: `Event has been ${moderationAction} successfully` });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/events"] });
+      invalidateEvents();
       setModerateDialogOpen(false);
       setSelectedEvent(null);
       setModerationReason("");
@@ -95,20 +144,33 @@ export default function AdminEvents() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async (eventId: string) => {
-      await apiRequest("DELETE", `/api/admin/events/${eventId}`);
+    mutationFn: async (event: Event) => {
+      // The DELETE route used to always hit the main events table, which
+      // either silently no-opped or deleted the wrong row for venue-sourced
+      // entries. It now reads an explicit sourceType query param to route
+      // correctly, so that must be appended whenever the row came from the
+      // venue_entry source.
+      const url = event.sourceType === 'venue_entry'
+        ? `/api/admin/events/${event.id}?sourceType=venue_entry`
+        : `/api/admin/events/${event.id}`;
+      await apiRequest("DELETE", url);
     },
     onSuccess: () => {
       toast({ title: "Event deleted", description: "The event has been deleted successfully" });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/events"] });
+      invalidateEvents();
     },
     onError: (error: any) => {
       toast({ title: "Delete failed", description: error.message, variant: "destructive" });
     },
   });
 
-  const allEvents = events || [];
+  const allEvents = data?.events || [];
+  const total = data?.total || 0;
 
+  // Moderation-status tabs stay a client-side filter over whatever page is
+  // currently loaded (status isn't a server-side filter param on this
+  // endpoint) — only search/currency/country/pagination are real server
+  // round-trips now.
   const counts = {
     all:      allEvents.length,
     pending:  allEvents.filter(e => e.moderationStatus === "pending").length,
@@ -117,13 +179,7 @@ export default function AdminEvents() {
     rejected: allEvents.filter(e => e.moderationStatus === "rejected").length,
   };
 
-  const filtered = allEvents
-    .filter(e => activeTab === "all" || e.moderationStatus === activeTab)
-    .filter(e =>
-      e.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      e.organizer.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      e.location.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+  const filtered = allEvents.filter(e => activeTab === "all" || e.moderationStatus === activeTab);
 
   const handleModerate = () => {
     if (selectedEvent) {
@@ -134,6 +190,24 @@ export default function AdminEvents() {
         sourceType: selectedEvent.sourceType,
       });
     }
+  };
+
+  const handleExport = () => {
+    exportToCsv(
+      "events",
+      filtered.map((e) => ({
+        id: e.id,
+        title: e.title,
+        sourceType: e.sourceType || "event",
+        organizer: e.organizer.organizationName || e.organizer.username,
+        date: e.eventDate,
+        location: e.location,
+        price: e.ticketPrice,
+        currency: e.currency,
+        country: e.country,
+        status: e.moderationStatus,
+      }))
+    );
   };
 
   return (
@@ -166,17 +240,26 @@ export default function AdminEvents() {
 
         <Card className="bg-slate-800/50 border-slate-700">
           <CardHeader>
-            <div className="flex items-center gap-4">
-              <div className="relative flex-1 max-w-sm">
-                <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                <Input
-                  placeholder="Search events..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 bg-slate-700/50 border-slate-600 text-white"
-                  data-testid="input-search-events"
-                />
-              </div>
+            <div className="flex items-center justify-between gap-4">
+              <AdminFilterBar
+                search={searchInput}
+                onSearchChange={setSearchInput}
+                searchPlaceholder="Search events..."
+                currency={currency}
+                onCurrencyChange={setCurrency}
+                country={country}
+                onCountryChange={setCountry}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-slate-600 text-slate-300 shrink-0"
+                onClick={handleExport}
+                disabled={filtered.length === 0}
+                data-testid="button-export-events"
+              >
+                <DownloadIcon className="w-4 h-4 mr-2" /> Export
+              </Button>
             </div>
           </CardHeader>
           <CardContent>
@@ -219,7 +302,7 @@ export default function AdminEvents() {
                         {format(new Date(event.eventDate), 'MMM d, yyyy')}
                       </TableCell>
                       <TableCell className="text-slate-300">
-                        {event.ticketPrice === 0 ? 'Free' : formatMoney(event.ticketPrice, (event as any).currency)}
+                        {event.ticketPrice === 0 ? 'Free' : formatMoney(event.ticketPrice, event.currency)}
                       </TableCell>
                       <TableCell>{statusBadge(event.moderationStatus)}</TableCell>
                       <TableCell className="text-right">
@@ -251,7 +334,7 @@ export default function AdminEvents() {
                           <Button
                             size="sm" variant="ghost"
                             className="text-slate-400 hover:text-red-400"
-                            onClick={() => { if (confirm("Are you sure you want to delete this event?")) deleteMutation.mutate(event.id); }}
+                            onClick={() => { if (confirm("Are you sure you want to delete this event?")) deleteMutation.mutate(event); }}
                             data-testid={`button-delete-event-${event.id}`}
                           >
                             <Trash2Icon className="w-4 h-4" />
@@ -263,6 +346,7 @@ export default function AdminEvents() {
                 </TableBody>
               </Table>
             )}
+            <AdminPagination offset={offset} limit={PAGE_LIMIT} total={total} onOffsetChange={setOffset} />
           </CardContent>
         </Card>
 

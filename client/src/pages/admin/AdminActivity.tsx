@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -9,10 +11,23 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
+import { apiRequest } from "@/lib/queryClient";
+import { exportToCsv } from "@/lib/exportToCsv";
 import AdminLayout from "./AdminLayout";
+import AdminPagination from "@/components/admin/AdminPagination";
+import AdminDateRangePicker from "@/components/admin/AdminDateRangePicker";
 import { format } from "date-fns";
-import { ActivityIcon, LogInIcon, LogOutIcon, UserPlusIcon, BanIcon, FlagIcon, Trash2Icon, CheckIcon, XIcon, EditIcon } from "@/components/ui/icons";
+import { ActivityIcon, LogInIcon, LogOutIcon, UserPlusIcon, BanIcon, FlagIcon, Trash2Icon, CheckIcon, XIcon, EditIcon, DownloadIcon } from "@/components/ui/icons";
+
+const PAGE_SIZE = 50;
 
 interface ActivityLog {
   id: string;
@@ -65,9 +80,60 @@ const actionLabels: Record<string, string> = {
 };
 
 export default function AdminActivity() {
-  const { data: logs, isLoading } = useQuery<ActivityLog[]>({
-    queryKey: ["/api/admin/activity-logs"],
+  const [offset, setOffset] = useState(0);
+  const [dateRange, setDateRange] = useState<{ from?: Date; to?: Date }>({});
+  const [actionFilter, setActionFilter] = useState<string>("all");
+
+  const actionTypes = Object.keys(actionLabels);
+
+  const queryParams = new URLSearchParams();
+  queryParams.set("limit", String(PAGE_SIZE));
+  queryParams.set("offset", String(offset));
+  if (dateRange.from) queryParams.set("from", dateRange.from.toISOString());
+  if (dateRange.to) queryParams.set("to", dateRange.to.toISOString());
+  if (actionFilter !== "all") queryParams.set("action", actionFilter);
+
+  const { data, isLoading } = useQuery<{ logs: ActivityLog[]; total: number }>({
+    queryKey: [
+      "/api/admin/activity-logs",
+      offset,
+      dateRange.from?.toISOString(),
+      dateRange.to?.toISOString(),
+      actionFilter,
+    ],
+    queryFn: () =>
+      apiRequest("GET", `/api/admin/activity-logs?${queryParams.toString()}`).then((r) =>
+        r.json()
+      ),
   });
+
+  const logs = data?.logs || [];
+  const total = data?.total || 0;
+
+  const handleDateRangeChange = (range: { from?: Date; to?: Date }) => {
+    setDateRange(range);
+    setOffset(0);
+  };
+
+  const handleActionFilterChange = (value: string) => {
+    setActionFilter(value);
+    setOffset(0);
+  };
+
+  const handleExport = () => {
+    exportToCsv(
+      "activity-log",
+      logs.map((log) => ({
+        action: actionLabels[log.action] || log.action,
+        admin: log.admin?.username ? `@${log.admin.username}` : "",
+        targetType: log.targetType || "",
+        targetId: log.targetId || "",
+        details: log.details || "",
+        ipAddress: log.ipAddress || "",
+        createdAt: log.createdAt,
+      }))
+    );
+  };
 
   return (
     <AdminLayout>
@@ -81,15 +147,47 @@ export default function AdminActivity() {
 
         <Card className="bg-slate-800/50 border-slate-700">
           <CardHeader>
-            <CardTitle className="text-white flex items-center gap-2">
-              <ActivityIcon className="w-5 h-5 text-purple-400" />
-              Recent Activity
-            </CardTitle>
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <CardTitle className="text-white flex items-center gap-2">
+                <ActivityIcon className="w-5 h-5 text-purple-400" />
+                Recent Activity
+              </CardTitle>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Select value={actionFilter} onValueChange={handleActionFilterChange}>
+                  <SelectTrigger className="bg-slate-700/50 border-slate-600 text-white w-[180px]" data-testid="select-action-filter">
+                    <SelectValue placeholder="All actions" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-800 border-slate-700">
+                    <SelectItem value="all">All actions</SelectItem>
+                    {actionTypes.map((action) => (
+                      <SelectItem key={action} value={action}>
+                        {actionLabels[action]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <AdminDateRangePicker
+                  from={dateRange.from}
+                  to={dateRange.to}
+                  onChange={handleDateRangeChange}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExport}
+                  disabled={logs.length === 0}
+                  className="border-slate-600 text-slate-300"
+                  data-testid="button-export-activity-csv"
+                >
+                  <DownloadIcon className="w-4 h-4 mr-1" /> Export CSV
+                </Button>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
             {isLoading ? (
               <div className="text-center py-8 text-slate-400">Loading activity...</div>
-            ) : logs?.length === 0 ? (
+            ) : logs.length === 0 ? (
               <div className="text-center py-8 text-slate-400">No activity recorded yet</div>
             ) : (
               <Table>
@@ -157,6 +255,12 @@ export default function AdminActivity() {
                 </TableBody>
               </Table>
             )}
+            <AdminPagination
+              offset={offset}
+              limit={PAGE_SIZE}
+              total={total}
+              onOffsetChange={setOffset}
+            />
           </CardContent>
         </Card>
       </div>

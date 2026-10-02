@@ -858,14 +858,17 @@ export interface IStorage {
 
   // Admin activity logs
   logAdminActivity(log: InsertAdminActivityLog): Promise<AdminActivityLog>;
-  getAdminActivityLogs(limit?: number): Promise<Array<AdminActivityLog & { admin: AdminUser }>>;
+  getAdminActivityLogs(filters?: { limit?: number; offset?: number; from?: Date; to?: Date; adminId?: string; action?: string }): Promise<{
+    items: Array<AdminActivityLog & { admin: AdminUser }>;
+    total: number;
+  }>;
   getAdminUserActivityLogs(adminId: string, limit?: number): Promise<AdminActivityLog[]>;
 
   // Content reports
   createContentReport(report: InsertContentReport): Promise<ContentReport>;
   createPostReport(postId: string, reporterId: string, reason: string, description: string | null): Promise<ContentReport>;
   createCommentReport(commentId: string, reporterId: string, reason: string, description: string | null): Promise<ContentReport>;
-  getContentReports(status?: string, limit?: number, offset?: number): Promise<Array<ContentReport & { reporter: PublicUser }>>;
+  getContentReports(status?: string, limit?: number, offset?: number): Promise<{ items: Array<ContentReport & { reporter: PublicUser }>; total: number }>;
   getContentReport(id: string): Promise<ContentReport | undefined>;
   updateContentReport(id: string, updates: { status: string; reviewedBy: string; resolution?: string }): Promise<ContentReport>;
 
@@ -944,7 +947,7 @@ export interface IStorage {
   moderateVenueEvent(venueEntryNightId: string, action: string): Promise<void>;
 
   // Story management for admins
-  getAllStoriesAdmin(limit?: number): Promise<Array<Story & { user: PublicUser }>>;
+  getAllStoriesAdmin(limit?: number, offset?: number): Promise<{ items: Array<Story & { user: PublicUser }>; total: number }>;
   deleteStoryAdmin(id: string): Promise<void>;
 
   // ============================================
@@ -4100,18 +4103,32 @@ export class DbStorage implements IStorage {
     return result[0];
   }
 
-  async getAdminActivityLogs(limit: number = 100): Promise<Array<AdminActivityLog & { admin: AdminUser }>> {
-    const result = await db
-      .select()
-      .from(adminActivityLogs)
-      .innerJoin(adminUsers, eq(adminActivityLogs.adminId, adminUsers.id))
-      .orderBy(desc(adminActivityLogs.createdAt))
-      .limit(limit);
-    
-    return result.map(r => ({
-      ...r.admin_activity_logs,
-      admin: r.admin_users,
-    }));
+  async getAdminActivityLogs(filters: { limit?: number; offset?: number; from?: Date; to?: Date; adminId?: string; action?: string } = {}): Promise<{
+    items: Array<AdminActivityLog & { admin: AdminUser }>;
+    total: number;
+  }> {
+    const { limit = 100, offset = 0, from, to, adminId, action } = filters;
+    const conds = [
+      from ? gte(adminActivityLogs.createdAt, from) : undefined,
+      to ? lt(adminActivityLogs.createdAt, to) : undefined,
+      adminId ? eq(adminActivityLogs.adminId, adminId) : undefined,
+      action ? eq(adminActivityLogs.action, action) : undefined,
+    ].filter((c): c is NonNullable<typeof c> => c !== undefined);
+    const where = conds.length ? and(...conds) : undefined;
+
+    const [result, totalRow] = await Promise.all([
+      db.select().from(adminActivityLogs)
+        .innerJoin(adminUsers, eq(adminActivityLogs.adminId, adminUsers.id))
+        .where(where)
+        .orderBy(desc(adminActivityLogs.createdAt))
+        .limit(limit).offset(offset),
+      db.select({ count: count() }).from(adminActivityLogs).where(where),
+    ]);
+
+    return {
+      items: result.map(r => ({ ...r.admin_activity_logs, admin: r.admin_users })),
+      total: Number(totalRow[0]?.count || 0),
+    };
   }
 
   async getAdminUserActivityLogs(adminId: string, limit: number = 50): Promise<AdminActivityLog[]> {
@@ -4165,26 +4182,24 @@ export class DbStorage implements IStorage {
     });
   }
 
-  async getContentReports(status?: string, limit = 50, offset = 0): Promise<Array<ContentReport & { reporter: PublicUser }>> {
+  async getContentReports(status?: string, limit = 50, offset = 0): Promise<{ items: Array<ContentReport & { reporter: PublicUser }>; total: number }> {
     const safeLimit = Math.min(Math.max(limit, 1), 100);
     const safeOffset = Math.max(offset, 0);
+    const where = status ? eq(contentReports.status, status) : undefined;
 
-    const query = db
-      .select()
-      .from(contentReports)
-      .innerJoin(users, eq(contentReports.reporterId, users.id))
-      .orderBy(desc(contentReports.createdAt))
-      .limit(safeLimit)
-      .offset(safeOffset);
+    const [results, totalRow] = await Promise.all([
+      db.select().from(contentReports)
+        .innerJoin(users, eq(contentReports.reporterId, users.id))
+        .where(where)
+        .orderBy(desc(contentReports.createdAt))
+        .limit(safeLimit).offset(safeOffset),
+      db.select({ count: count() }).from(contentReports).where(where),
+    ]);
 
-    const results = status
-      ? await query.where(eq(contentReports.status, status))
-      : await query;
-
-    return results.map(r => ({
-      ...r.content_reports,
-      reporter: toPublicUser(r.users),
-    }));
+    return {
+      items: results.map(r => ({ ...r.content_reports, reporter: toPublicUser(r.users) })),
+      total: Number(totalRow[0]?.count || 0),
+    };
   }
 
   async getContentReport(id: string): Promise<ContentReport | undefined> {
@@ -4769,18 +4784,19 @@ export class DbStorage implements IStorage {
       .offset(offset);
   }
 
-  async getAllStoriesAdmin(limit: number = 50): Promise<Array<Story & { user: PublicUser }>> {
-    const result = await db
-      .select()
-      .from(stories)
-      .innerJoin(users, eq(stories.userId, users.id))
-      .orderBy(desc(stories.createdAt))
-      .limit(limit);
+  async getAllStoriesAdmin(limit: number = 50, offset: number = 0): Promise<{ items: Array<Story & { user: PublicUser }>; total: number }> {
+    const [result, totalRow] = await Promise.all([
+      db.select().from(stories)
+        .innerJoin(users, eq(stories.userId, users.id))
+        .orderBy(desc(stories.createdAt))
+        .limit(limit).offset(offset),
+      db.select({ count: count() }).from(stories),
+    ]);
 
-    return result.map(r => ({
-      ...r.stories,
-      user: toPublicUser(r.users),
-    }));
+    return {
+      items: result.map(r => ({ ...r.stories, user: toPublicUser(r.users) })),
+      total: Number(totalRow[0]?.count || 0),
+    };
   }
 
   async deleteStoryAdmin(id: string): Promise<void> {
