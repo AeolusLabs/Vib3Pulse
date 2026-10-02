@@ -44,6 +44,7 @@ import AdminReports from "@/pages/admin/AdminReports";
 import AdminFinance from "@/pages/admin/AdminFinance";
 import AdminStaff from "@/pages/admin/AdminStaff";
 import AdminActivity from "@/pages/admin/AdminActivity";
+import AdminSettings from "@/pages/admin/AdminSettings";
 import AdminSetup from "@/pages/admin/AdminSetup";
 import AdminSOS from "@/pages/admin/AdminSOS";
 import AdminSocialDashboard from "@/pages/admin/AdminSocialDashboard";
@@ -222,6 +223,7 @@ function Router() {
       <Route path="/admin/finance" component={AdminFinance} />
       <Route path="/admin/staff" component={AdminStaff} />
       <Route path="/admin/activity" component={AdminActivity} />
+      <Route path="/admin/settings" component={AdminSettings} />
       <Route path="/admin/sos" component={AdminSOS} />
       <Route path="/admin/social" component={AdminSocialDashboard} />
 

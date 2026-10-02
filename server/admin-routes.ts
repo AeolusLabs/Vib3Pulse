@@ -8,12 +8,13 @@ import { storage } from "./storage";
 import { invalidateCache, postsCache, eventsCache, storiesCache } from "./cache";
 import { insertAdminUserSchema, adminRoles, type AdminRole } from "@shared/schema";
 import { z } from "zod";
-import { 
-  authRateLimiter, 
-  checkLoginThrottle, 
-  recordLoginAttempt, 
-  clearLoginAttempts, 
-  logSecurityEvent 
+import {
+  authRateLimiter,
+  checkLoginThrottle,
+  recordLoginAttempt,
+  clearLoginAttempts,
+  logSecurityEvent,
+  sensitiveOperationLimiter,
 } from "./security";
 
 const pgSession = connectPgSimple(session);
@@ -321,6 +322,39 @@ export function setupAdminRoutes(app: Express) {
       res.json(adminWithoutPassword);
     } catch (error) {
       res.status(500).json({ message: "Failed to get admin" });
+    }
+  });
+
+  // Change own password — any logged-in admin, any role
+  app.patch("/api/admin/me/password", requireAdmin, sensitiveOperationLimiter, async (req: Request, res: Response) => {
+    try {
+      const schema = z.object({
+        currentPassword: z.string().min(1, "Current password is required"),
+        newPassword: z.string().min(8, "New password must be at least 8 characters"),
+      });
+      const { currentPassword, newPassword } = schema.parse(req.body);
+
+      const admin = await storage.getAdminUser(req.session.adminId!);
+      if (!admin) {
+        return res.status(404).json({ message: "Admin not found" });
+      }
+
+      const isValid = await bcrypt.compare(currentPassword, admin.passwordHash);
+      if (!isValid) {
+        return res.status(400).json({ message: "Current password is incorrect" });
+      }
+
+      const passwordHash = await bcrypt.hash(newPassword, 12);
+      await storage.updateAdminUser(admin.id, { passwordHash });
+      await logActivity(admin.id, "update", "admin", admin.id, "Changed own password", req.ip);
+
+      res.json({ message: "Password changed successfully" });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: error.errors[0].message });
+      }
+      console.error("Admin change-password error:", error);
+      res.status(500).json({ message: "Failed to change password" });
     }
   });
 
