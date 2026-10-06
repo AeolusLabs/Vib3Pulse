@@ -162,6 +162,7 @@ import {
   paymentTransactions,
   type PaymentTransaction,
   type InsertPaymentTransaction,
+  type EventLinks,
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
@@ -1012,6 +1013,7 @@ export interface IStorage {
   generateInviteCode(conversationId: string): Promise<string>;
   getConversationByInviteCode(inviteCode: string): Promise<Conversation | undefined>;
   getConversationByEventId(eventId: string): Promise<Conversation | undefined>;
+  getEventLinks(userId?: string): Promise<Record<string, EventLinks>>;
   getDissolvableEventGroupConversationIds(): Promise<string[]>;
   addConversationParticipantIfRoom(conversationId: string, userId: string, maxMembers: number): Promise<boolean>;
   
@@ -5408,6 +5410,38 @@ export class DbStorage implements IStorage {
   async getConversationByInviteCode(inviteCode: string): Promise<Conversation | undefined> {
     const [result] = await db.select().from(conversations).where(eq(conversations.inviteCode, inviteCode));
     return result;
+  }
+
+  // Community + event-group-chat badges for event cards, keyed by eventId. Only
+  // events that have at least one are included. groupChatId is exposed solely to
+  // participants (ticket/RSVP holders + organizer); everyone else just gets hasGroupChat.
+  async getEventLinks(userId?: string): Promise<Record<string, EventLinks>> {
+    const out: Record<string, EventLinks> = {};
+    const withCommunity = await db
+      .select({ eventId: events.id, slug: communities.slug, name: communities.name })
+      .from(events)
+      .innerJoin(communities, eq(events.communityId, communities.id));
+    for (const r of withCommunity) {
+      out[r.eventId] = { communitySlug: r.slug, communityName: r.name, hasGroupChat: false };
+    }
+    const chats = await db
+      .select({ id: conversations.id, eventId: conversations.eventId })
+      .from(conversations)
+      .where(isNotNull(conversations.eventId));
+    const memberOf = new Set<string>();
+    if (userId) {
+      const rows = await db
+        .select({ conversationId: conversationParticipants.conversationId })
+        .from(conversationParticipants)
+        .where(eq(conversationParticipants.userId, userId));
+      rows.forEach((r) => memberOf.add(r.conversationId));
+    }
+    for (const c of chats) {
+      const link = (out[c.eventId!] ??= { hasGroupChat: false });
+      link.hasGroupChat = true;
+      if (memberOf.has(c.id)) link.groupChatId = c.id;
+    }
+    return out;
   }
 
   async getConversationByEventId(eventId: string): Promise<Conversation | undefined> {

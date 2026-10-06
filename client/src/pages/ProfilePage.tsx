@@ -34,6 +34,7 @@ import { useOrganizerRating } from "@/hooks/use-ratings";
 import RatingDisplay from "@/components/RatingDisplay";
 import StoryViewer from "@/components/StoryViewer";
 import { ImageIcon } from "@/components/ui/icons";
+import EventLinkBadges from "@/components/EventLinkBadges";
 
 type ArchivedStory = {
   id: string;
@@ -769,6 +770,7 @@ export default function ProfilePage() {
                           <p className="font-semibold text-foreground line-clamp-1 mb-1" data-testid="text-event-title">
                             {event.title}
                           </p>
+                          <EventLinkBadges eventId={event.id} className="mb-1.5" />
                           <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
                             <CalendarIcon className="h-3.5 w-3.5" />
                             {format(new Date(event.eventDate), "MMM d, yyyy · h:mm a")}

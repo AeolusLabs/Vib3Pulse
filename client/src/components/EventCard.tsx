@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { CalendarIcon, MapPinIcon, UserIcon, TicketIcon, SettingsIcon } from "@/components/ui/icons";
 import { useEventRatings } from "@/hooks/use-ratings";
 import RatingDisplay from "@/components/RatingDisplay";
+import EventLinkBadges from "@/components/EventLinkBadges";
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
   GBP: "£", USD: "$", EUR: "€", NGN: "₦", CAD: "C$", AUD: "A$", ZAR: "R", GHS: "₵",
@@ -107,6 +108,7 @@ export default function EventCard({
             {organizer.name}
           </span>
         </div>
+        <EventLinkBadges eventId={id} className="mt-2" />
       </CardContent>
 
       <CardFooter className="p-4 pt-0 flex items-center justify-between gap-2">

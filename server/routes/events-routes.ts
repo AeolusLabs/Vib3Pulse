@@ -217,6 +217,15 @@ export function registerEventsRoutes(app: Express): void {
     }
   });
 
+  // Registered before /api/events/:id so "links" isn't treated as an event id.
+  app.get("/api/events/links", async (req, res) => {
+    try {
+      res.json(await storage.getEventLinks(req.isAuthenticated() ? req.user!.id : undefined));
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch event links" });
+    }
+  });
+
   app.get("/api/events/:id", async (req, res) => {
     try {
       const event = await storage.getEvent(req.params.id);

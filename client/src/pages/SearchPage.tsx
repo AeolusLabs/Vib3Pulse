@@ -22,6 +22,7 @@ import { format, isPast } from "date-fns";
 import type { User, Event, Post, Venue, Story, VenueEntryNight } from "@shared/schema";
 import { SearchIcon, UserPlusIcon, UserCheckIcon, CalendarIcon, MapPinIcon, UsersIcon, Building2Icon, TrendingUpIcon, SparklesIcon, HeartIcon, TicketIcon, ChevronRightIcon } from "@/components/ui/icons";
 import { FileText } from "lucide-react";
+import EventLinkBadges from "@/components/EventLinkBadges";
 
 type SearchResults = {
   users: User[];
@@ -653,6 +654,7 @@ function EventResultCard({ event, navigate }: { event: Event & { organizer?: Use
       )}
       <div className="p-3">
         <h4 className="font-semibold text-sm text-foreground truncate mb-1">{event.title}</h4>
+        <EventLinkBadges eventId={event.id} className="mb-1.5" />
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
           <span className="flex items-center gap-1 truncate"><MapPinIcon className="h-3 w-3 flex-shrink-0" />{event.location}</span>
           <span className="flex-shrink-0 px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">{event.category}</span>
@@ -815,6 +817,7 @@ function TrendingEventCard({ event, onSelect }: { event: TrendingEvent; onSelect
       </div>
       <div className="p-3">
         <h4 className="font-semibold text-sm text-foreground truncate mb-1">{event.title}</h4>
+        <EventLinkBadges eventId={event.id} className="mb-1.5" />
         <div className="flex items-center gap-1 text-xs text-muted-foreground mb-2">
           <MapPinIcon className="h-3 w-3 flex-shrink-0" />
           <span className="truncate">{event.location}</span>

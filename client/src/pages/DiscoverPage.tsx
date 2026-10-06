@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 
 import { format, isPast } from "date-fns";
 import { Link, useSearch } from "wouter";
+import EventLinkBadges from "@/components/EventLinkBadges";
 import { useGeolocation } from "@/hooks/useGeolocation";
 import type { Event, Venue } from "@shared/schema";
 import { CalendarIcon, MapPinIcon, UsersIcon, SparklesIcon, Building2Icon, MusicIcon, ClockIcon, TrendingUpIcon, Navigation2Icon, Loader2Icon, XCircleIcon, RefreshCwIcon, Share2Icon, TicketIcon } from "@/components/ui/icons";
@@ -415,6 +416,7 @@ export default function DiscoverPage() {
                           </h3>
                           {renderDistanceBadge(event.distance)}
                         </div>
+                        <EventLinkBadges eventId={event.id} className="mt-1" />
                       </CardHeader>
                       <CardContent className="space-y-2">
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -471,6 +473,7 @@ export default function DiscoverPage() {
                             {event.category}
                           </Badge>
                         </div>
+                        <EventLinkBadges eventId={event.id} className="mt-1" />
                       </CardHeader>
                       <CardContent className="space-y-2">
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -529,6 +532,7 @@ export default function DiscoverPage() {
                             {event.category}
                           </Badge>
                         </div>
+                        <EventLinkBadges eventId={event.id} className="mt-1" />
                       </CardHeader>
                       <CardContent className="space-y-2">
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -702,6 +706,7 @@ export default function DiscoverPage() {
                                 <h3 className="font-semibold text-base line-clamp-2">{event.title}</h3>
                                 <Badge variant="secondary" className="text-xs">{event.category}</Badge>
                               </div>
+                              <EventLinkBadges eventId={event.id} className="mt-1" />
                             </CardHeader>
                             <CardContent className="space-y-1 pb-3">
                               <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -818,6 +823,7 @@ export default function DiscoverPage() {
                         {event.category}
                       </Badge>
                     </div>
+                    <EventLinkBadges eventId={event.id} className="mt-1" />
                     {hasLocation && (event as EventWithDistance).distance !== undefined && (
                       <div className="flex items-center">
                         {renderDistanceBadge((event as EventWithDistance).distance)}

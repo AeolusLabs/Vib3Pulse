@@ -144,6 +144,15 @@ export const insertEventSchema = createInsertSchema(events).omit({
   eventEndDate: z.coerce.date().optional().nullable(),
 });
 
+// Community / event-group-chat badges shown on event cards (GET /api/events/links).
+// groupChatId is only present for chat participants; others get hasGroupChat only.
+export type EventLinks = {
+  communitySlug?: string;
+  communityName?: string;
+  hasGroupChat: boolean;
+  groupChatId?: string;
+};
+
 export type InsertEvent = z.infer<typeof insertEventSchema>;
 export type Event = typeof events.$inferSelect;
 
