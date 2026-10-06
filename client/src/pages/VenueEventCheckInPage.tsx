@@ -753,7 +753,7 @@ function OrganizerView({
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span
-                            className="font-mono text-xl font-bold tracking-[0.3em] cursor-pointer select-all"
+                            className="font-mono text-xl font-bold tracking-widest sm:tracking-[0.3em] break-all min-w-0 max-w-full cursor-pointer select-all"
                             title="Click to copy code"
                             onClick={() => {
                               navigator.clipboard.writeText(sc.code);
