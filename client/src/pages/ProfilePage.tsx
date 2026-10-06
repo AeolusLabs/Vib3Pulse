@@ -35,6 +35,7 @@ import RatingDisplay from "@/components/RatingDisplay";
 import StoryViewer from "@/components/StoryViewer";
 import { ImageIcon } from "@/components/ui/icons";
 import EventLinkBadges from "@/components/EventLinkBadges";
+import { ticketsRemaining } from "@/lib/tickets";
 
 type ArchivedStory = {
   id: string;
@@ -789,7 +790,7 @@ export default function ProfilePage() {
                               </span>
                             )}
                             <span className="text-xs text-muted-foreground">
-                              {event.ticketsAvailable} available
+                              {ticketsRemaining(event) <= 0 ? "Sold out" : `${ticketsRemaining(event)} available`}
                             </span>
                           </div>
                         </div>

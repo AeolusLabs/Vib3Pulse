@@ -106,6 +106,11 @@ export default function TicketWalletPage() {
           const body: { ticket: TicketType; event?: Event } = await response.json();
           // Refetch tickets to show the newly purchased ticket
           queryClient.invalidateQueries({ queryKey: ["/api/tickets"] });
+          // staleTime is Infinity, so availability on every event list/modal
+          // stays frozen unless invalidated here.
+          queryClient.invalidateQueries({
+            predicate: (q) => typeof q.queryKey[0] === "string" && q.queryKey[0].startsWith("/api/events"),
+          });
           toast({
             title: "Ticket purchased!",
             description: "Your ticket has been added to your wallet.",

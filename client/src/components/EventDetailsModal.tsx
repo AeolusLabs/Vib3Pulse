@@ -142,7 +142,13 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
   });
   const liveTicketsAvailable = liveEvent?.ticketsAvailable ?? event.ticketsAvailable;
   const liveTicketsSold = liveEvent?.ticketsSold ?? event.ticketsSold;
-  const liveTicketsRemaining = liveTicketsAvailable - liveTicketsSold;
+  // Tiered events track capacity per-tier; events.tickets_sold is only bumped for tier-less events.
+  const tierList: Array<{ quantity: number; sold: number }> = ticketTiers ?? [];
+  const tierTotal = tierList.reduce((n, t) => n + t.quantity, 0);
+  const tierRemaining = tierList.reduce((n, t) => n + (t.quantity - t.sold), 0);
+  const hasTierCapacity = tierList.length > 0;
+  const liveTicketsRemaining = hasTierCapacity ? tierRemaining : liveTicketsAvailable - liveTicketsSold;
+  const liveTicketsTotal = hasTierCapacity ? tierTotal : liveTicketsAvailable;
 
   const { data: attendeesData } = useQuery<{ users: Array<{ id: string; username: string; displayName: string | null; avatarUrl: string | null }>; totalCount: number }>({
     queryKey: ["/api/events", event.id, "attendees"],
@@ -377,7 +383,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
                     ? `${liveTicketsAvailable} spots available`
                     : liveTicketsRemaining <= 0
                       ? "Sold out"
-                      : `${liveTicketsRemaining} of ${liveTicketsAvailable} tickets available`}
+                      : `${liveTicketsRemaining} of ${liveTicketsTotal} tickets available`}
                 </p>
               </div>
 

@@ -525,8 +525,8 @@ export interface IStorage {
   setUserVerified(userId: string): Promise<void>;
   softDeleteUser(userId: string): Promise<void>;
 
-  getEvents(): Promise<(Event & { minPrice: number; maxPrice: number })[]>;
-  getEventsByCategory(category: string): Promise<(Event & { minPrice: number; maxPrice: number })[]>;
+  getEvents(): Promise<(Event & { minPrice: number; maxPrice: number; ticketsRemaining: number })[]>;
+  getEventsByCategory(category: string): Promise<(Event & { minPrice: number; maxPrice: number; ticketsRemaining: number })[]>;
   // eventId -> weighted rsvpCount*2 + ticketCount*3, for feed ranking and trending-in-city.
   getEventEngagementCounts(): Promise<Map<string, number>>;
   getBulkEventTicketTiers(eventIds: string[]): Promise<TicketTier[]>;
@@ -1325,7 +1325,7 @@ export class DbStorage implements IStorage {
     } as any).where(eq(users.id, userId));
   }
 
-  async getEvents(): Promise<(Event & { minPrice: number; maxPrice: number })[]> {
+  async getEvents(): Promise<(Event & { minPrice: number; maxPrice: number; ticketsRemaining: number })[]> {
     return cached(
       'events',
       async () => {
@@ -1334,6 +1334,7 @@ export class DbStorage implements IStorage {
             event: events,
             minPrice: sql<number>`COALESCE(MIN(${ticketTiers.priceSmallestUnit}), ${events.ticketPrice})::int`,
             maxPrice: sql<number>`COALESCE(MAX(${ticketTiers.priceSmallestUnit}), ${events.ticketPrice})::int`,
+            ticketsRemaining: sql<number>`COALESCE(SUM(${ticketTiers.quantity} - ${ticketTiers.sold}), ${events.ticketsAvailable} - ${events.ticketsSold})::int`,
           })
           .from(events)
           .leftJoin(ticketTiers, eq(ticketTiers.eventId, events.id))
@@ -1341,7 +1342,7 @@ export class DbStorage implements IStorage {
           .groupBy(events.id)
           .orderBy(events.eventDate);
 
-        return rows.map(r => ({ ...r.event, minPrice: r.minPrice, maxPrice: r.maxPrice }));
+        return rows.map(r => ({ ...r.event, minPrice: r.minPrice, maxPrice: r.maxPrice, ticketsRemaining: r.ticketsRemaining }));
       },
       eventsCache,
     );
@@ -1375,12 +1376,13 @@ export class DbStorage implements IStorage {
     );
   }
 
-  async getEventsByCategory(category: string): Promise<(Event & { minPrice: number; maxPrice: number })[]> {
+  async getEventsByCategory(category: string): Promise<(Event & { minPrice: number; maxPrice: number; ticketsRemaining: number })[]> {
     const rows = await db
       .select({
         event: events,
         minPrice: sql<number>`COALESCE(MIN(${ticketTiers.priceSmallestUnit}), ${events.ticketPrice})::int`,
         maxPrice: sql<number>`COALESCE(MAX(${ticketTiers.priceSmallestUnit}), ${events.ticketPrice})::int`,
+        ticketsRemaining: sql<number>`COALESCE(SUM(${ticketTiers.quantity} - ${ticketTiers.sold}), ${events.ticketsAvailable} - ${events.ticketsSold})::int`,
       })
       .from(events)
       .leftJoin(ticketTiers, eq(ticketTiers.eventId, events.id))
@@ -1391,7 +1393,7 @@ export class DbStorage implements IStorage {
       ))
       .groupBy(events.id)
       .orderBy(events.eventDate);
-    return rows.map(r => ({ ...r.event, minPrice: r.minPrice, maxPrice: r.maxPrice }));
+    return rows.map(r => ({ ...r.event, minPrice: r.minPrice, maxPrice: r.maxPrice, ticketsRemaining: r.ticketsRemaining }));
   }
 
   async getBulkEventTicketTiers(eventIds: string[]): Promise<TicketTier[]> {
@@ -3625,6 +3627,7 @@ export class DbStorage implements IStorage {
           gte(ticketTiers.quantity, sql`${ticketTiers.sold} + ${quantity}`)
         ))
         .returning({ id: ticketTiers.id });
+      if (result.length > 0) invalidateCache.events();
       return result.length > 0;
     }
 
@@ -3636,6 +3639,8 @@ export class DbStorage implements IStorage {
         gte(events.ticketsAvailable, sql`${events.ticketsSold} + ${quantity}`)
       ))
       .returning({ id: events.id });
+    // getEvents() is cached for 10 min and carries ticketsSold / ticketsRemaining.
+    if (result.length > 0) invalidateCache.events();
     return result.length > 0;
   }
 

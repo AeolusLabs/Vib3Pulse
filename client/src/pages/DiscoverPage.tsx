@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { format, isPast } from "date-fns";
 import { Link, useSearch } from "wouter";
 import EventLinkBadges from "@/components/EventLinkBadges";
+import { ticketsRemaining } from "@/lib/tickets";
 import { useGeolocation } from "@/hooks/useGeolocation";
 import type { Event, Venue } from "@shared/schema";
 import { CalendarIcon, MapPinIcon, UsersIcon, SparklesIcon, Building2Icon, MusicIcon, ClockIcon, TrendingUpIcon, Navigation2Icon, Loader2Icon, XCircleIcon, RefreshCwIcon, Share2Icon, TicketIcon } from "@/components/ui/icons";
@@ -845,7 +846,7 @@ export default function DiscoverPage() {
                     </div>
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <UsersIcon className="h-4 w-4" />
-                      <span>{event.ticketsAvailable} tickets available</span>
+                      <span>{ticketsRemaining(event) <= 0 ? "Sold out" : `${ticketsRemaining(event)} tickets available`}</span>
                     </div>
                   </CardContent>
                   <CardFooter className="flex items-center justify-between gap-2">
