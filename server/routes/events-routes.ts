@@ -11,6 +11,7 @@ import { deliverNotification } from "../notifications";
 import { refundPayment } from "../payments/index.js";
 import { geocodeAddress, sortByProximity } from "../utils/geo";
 import { rankEvents } from "../utils/eventRanking.js";
+import { staffCodeExpiry } from "../utils/staffCodeExpiry.js";
 import { MAX_GROUP_MEMBERS } from "./messages-routes.js";
 import QRCode from "qrcode";
 import { eventCreateDto, eventUpdateDto, insertTicketSchema, insertRsvpSchema } from "@shared/schema";
@@ -862,6 +863,15 @@ export function registerEventsRoutes(app: Express): void {
         return res.status(400).json({ message: "This ticket is not for this event" });
       }
 
+      // Refunded / cancelled tickets must not get in (checkInTicket doesn't look at status).
+      if (ticket.status !== "confirmed") {
+        return res.json({
+          valid: false,
+          alreadyCheckedIn: false,
+          message: `Ticket is ${ticket.status} and cannot be used`,
+        });
+      }
+
       if (ticket.checkedInAt) {
         const ticketUser = await storage.getUser(ticket.userId);
         return res.json({
@@ -1004,10 +1014,9 @@ export function registerEventsRoutes(app: Express): void {
       if (event.organizerId !== req.user!.id) {
         return res.status(403).json({ message: "Only the organiser can generate staff codes" });
       }
-      // Codes expire at event end time OR 24 h from now, whichever is sooner
-      const eventEnd = event.eventDate ? new Date(event.eventDate) : null;
-      const in24h = new Date(Date.now() + 24 * 60 * 60 * 1000);
-      const expiresAt = eventEnd && eventEnd < in24h ? eventEnd : in24h;
+      // Valid through the end of the event (+ grace) — NOT its start time.
+      const expiresAt = staffCodeExpiry(new Date(event.eventDate), event.eventEndDate ? new Date(event.eventEndDate) : null);
+      if (!expiresAt) return res.status(400).json({ message: "This event has already ended" });
 
       const staffCode = await storage.createStaffCode(event.id, req.user!.id, expiresAt);
       res.json(staffCode);

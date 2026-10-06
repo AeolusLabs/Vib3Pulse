@@ -6,6 +6,7 @@ import { requireAuth, requireOrganizer } from "../middleware";
 import { authRateLimiter } from "../security";
 import { geocodeAddress, sortByProximity } from "../utils/geo";
 import { generateRecurrenceDates, shiftByDelta, type RecurrenceInterval } from "../utils/recurrence.js";
+import { staffCodeExpiry } from "../utils/staffCodeExpiry.js";
 import { insertVenueSchema, insertVenueEntryNightSchema, venueCategories } from "@shared/schema";
 
 export function registerVenueRoutes(app: Express): void {
@@ -422,9 +423,8 @@ export function registerVenueRoutes(app: Express): void {
       if (!venue || venue.ownerId !== req.user!.id) {
         return res.status(403).json({ message: "Only the venue owner can generate staff codes" });
       }
-      const eventEnd = entryNight.date ? new Date(entryNight.date) : null;
-      const in24h = new Date(Date.now() + 24 * 60 * 60 * 1000);
-      const expiresAt = eventEnd && eventEnd < in24h ? eventEnd : in24h;
+      const expiresAt = staffCodeExpiry(new Date(entryNight.date), entryNight.endTime ? new Date(entryNight.endTime) : null);
+      if (!expiresAt) return res.status(400).json({ message: "This event has already ended" });
       const staffCode = await storage.createVenueStaffCode(entryNight.id, req.user!.id, expiresAt);
       res.json(staffCode);
     } catch (error) {
