@@ -17,6 +17,24 @@ import { computeFeeSplit } from "../payments/fees.js";
 import QRCode from "qrcode";
 import { eventCreateDto, eventUpdateDto, insertTicketSchema, insertRsvpSchema } from "@shared/schema";
 
+// Organiser-typed free text on the event details view: same strip-markup treatment as
+// title/description. Only touches keys that are present, so PUT stays a partial update.
+function sanitizeEventDetails<T extends Record<string, any>>(d: T): T {
+  const out: Record<string, any> = { ...d };
+  for (const k of ["dressCode", "venueName", "refundPolicy", "goodToKnow"] as const) {
+    if (typeof out[k] === "string") out[k] = sanitizeTextOnly(out[k]).trim() || null;
+  }
+  if (Array.isArray(out.lineup)) {
+    out.lineup = out.lineup
+      .map((l: { name: string; time?: string }) => ({
+        name: sanitizeTextOnly(l.name).trim(),
+        ...(l.time ? { time: sanitizeTextOnly(l.time).trim() } : {}),
+      }))
+      .filter((l: { name: string }) => l.name);
+  }
+  return out as T;
+}
+
 export function registerEventsRoutes(app: Express): void {
   async function addPriceRangesToEvents<T extends { id: string; ticketPrice: number }>(evts: T[]): Promise<(T & { minPrice: number; maxPrice: number })[]> {
     if (evts.length === 0) return [];
@@ -334,7 +352,7 @@ export function registerEventsRoutes(app: Express): void {
       }
 
       const sanitizedData = {
-        ...parsedData,
+        ...sanitizeEventDetails(parsedData),
         title: sanitizeTextOnly(parsedData.title || ""),
         description: sanitizeTextOnly(parsedData.description || ""),
         location: sanitizeTextOnly(parsedData.location || ""),
@@ -406,7 +424,7 @@ export function registerEventsRoutes(app: Express): void {
 
       // If location changed, re-geocode
       let updateData = {
-        ...parsedData,
+        ...sanitizeEventDetails(parsedData),
         // Strip external ticket URL if user is not verified - always set to null for non-verified
         externalTicketUrl: (currentUser?.isVerified || currentUser?.isOfficial)
           ? parsedData.externalTicketUrl
@@ -520,6 +538,9 @@ export function registerEventsRoutes(app: Express): void {
         eventId: req.params.eventId,
         salesEndDate: tier.salesEndDate ? new Date(tier.salesEndDate) : null,
         dayDate: tier.dayDate ? new Date(tier.dayDate) : null,
+        description: typeof tier.description === "string" && tier.description.trim()
+          ? sanitizeTextOnly(tier.description).trim().slice(0, 140)
+          : null,
       }));
 
       const createdTiers = await storage.createTicketTiers(tiersWithEventId);

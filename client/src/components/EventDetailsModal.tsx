@@ -15,7 +15,7 @@ import type { Event, Community } from "@shared/schema";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   CalendarIcon, MapPinIcon, UsersIcon, TicketIcon, CheckCircleIcon, ExternalLinkIcon,
-  Share2Icon, XIcon, ArrowLeftIcon, AlertTriangleIcon, ChevronDownIcon,
+  Share2Icon, XIcon, ArrowLeftIcon, AlertTriangleIcon, ChevronDownIcon, ClockIcon, InfoIcon,
 } from "@/components/ui/icons";
 import { useEventRatings, useUserEventRating, useSubmitRating } from "@/hooks/use-ratings";
 import RatingInput from "@/components/RatingInput";
@@ -153,6 +153,11 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
     refetchInterval: 15000,
   });
   const organizer = liveEvent?.organizer?.id ? liveEvent.organizer : undefined;
+  // Organiser-entered details (all optional). liveEvent starts as the list's snapshot, so
+  // older cached rows without these fields simply render nothing extra.
+  const details = liveEvent ?? event;
+  const lineup = (details.lineup ?? []).filter((l) => l.name);
+  const hasGoodToKnow = !!(details.dressCode || details.goodToKnow);
   const isCancelled = !!(liveEvent?.isCancelled ?? event.isCancelled);
   const liveTicketsAvailable = liveEvent?.ticketsAvailable ?? event.ticketsAvailable;
   const liveTicketsSold = liveEvent?.ticketsSold ?? event.ticketsSold;
@@ -480,9 +485,13 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
                   <MapPinIcon className="h-5 w-5 text-muted-foreground flex-shrink-0 mt-0.5" />
                   <div className="min-w-0 flex-1">
                     <div>
-                      <p className="font-medium break-words" data-testid="modal-event-location">{event.location}</p>
-                      {event.city && !event.location.includes(event.city) && (
-                        <p className="text-sm text-muted-foreground">{event.city}</p>
+                      <p className="font-medium break-words" data-testid="modal-event-location">{details.venueName || event.location}</p>
+                      {details.venueName ? (
+                        <p className="text-sm text-muted-foreground break-words">{event.location}</p>
+                      ) : (
+                        event.city && !event.location.includes(event.city) && (
+                          <p className="text-sm text-muted-foreground">{event.city}</p>
+                        )
                       )}
                     </div>
                   </div>
@@ -492,6 +501,25 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
                     </a>
                   </Button>
                 </div>
+
+                {details.doorsOpenAt && (
+                  <div className="flex items-start gap-3" data-testid="modal-event-doors">
+                    <ClockIcon className="h-5 w-5 text-muted-foreground flex-shrink-0 mt-0.5" />
+                    <p className="font-medium">Doors open {format(new Date(details.doorsOpenAt), "h:mm a")}</p>
+                  </div>
+                )}
+
+                {(details.ageRestriction !== "all" || details.parentalGuidance === "advised") && (
+                  <div className="flex items-start gap-3" data-testid="modal-event-age">
+                    <InfoIcon className="h-5 w-5 text-muted-foreground flex-shrink-0 mt-0.5" />
+                    <p className="font-medium">
+                      {details.ageRestriction !== "all" ? `${details.ageRestriction} only` : "All ages"}
+                      {details.parentalGuidance === "advised" && (
+                        <span className="font-normal text-muted-foreground"> · Parental guidance advised</span>
+                      )}
+                    </p>
+                  </div>
+                )}
 
                 {!!attendeesData?.totalCount && (
                   <div className="flex items-center gap-3">
@@ -593,6 +621,39 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
                   </button>
                 )}
               </section>
+
+              {lineup.length > 0 && (
+                <section aria-labelledby="lineup-heading" data-testid="modal-event-lineup">
+                  <h3 id="lineup-heading" className="text-sm font-semibold mb-2">Line-up</h3>
+                  <ul className="divide-y">
+                    {lineup.map((act, i) => (
+                      <li key={i} className="flex items-baseline justify-between gap-4 py-2.5 text-sm">
+                        <span className="font-medium break-words">{act.name}</span>
+                        {act.time && <span className="text-muted-foreground tabular-nums flex-shrink-0">{act.time}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
+              {hasGoodToKnow && (
+                <section aria-labelledby="gtk-heading" className="space-y-2" data-testid="modal-event-good-to-know">
+                  <h3 id="gtk-heading" className="text-sm font-semibold">Good to know</h3>
+                  {details.dressCode && (
+                    <p className="text-sm"><span className="text-muted-foreground">Dress code · </span>{details.dressCode}</p>
+                  )}
+                  {details.goodToKnow && (
+                    <p className="text-sm leading-relaxed text-foreground/80 whitespace-pre-wrap max-w-[68ch]">{details.goodToKnow}</p>
+                  )}
+                </section>
+              )}
+
+              {details.refundPolicy && (
+                <section aria-labelledby="refund-heading" data-testid="modal-event-refund-policy">
+                  <h3 id="refund-heading" className="text-sm font-semibold mb-1.5">Refund policy</h3>
+                  <p className="text-sm leading-relaxed text-foreground/80 whitespace-pre-wrap max-w-[68ch]">{details.refundPolicy}</p>
+                </section>
+              )}
 
               {isEventEnded && (
                 <section aria-labelledby="ratings-heading">

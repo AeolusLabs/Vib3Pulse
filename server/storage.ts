@@ -341,6 +341,22 @@ export async function ensureSchema() {
       ON social_posts(posted_at)
   `);
 
+  // Event details view fields (doors, age limit, lineup, policies) + tier descriptions.
+  // All additive/nullable-or-defaulted, so safe to run on every boot.
+  for (const ddl of [
+    "ALTER TABLE events ADD COLUMN IF NOT EXISTS doors_open_at TIMESTAMP",
+    "ALTER TABLE events ADD COLUMN IF NOT EXISTS age_restriction TEXT NOT NULL DEFAULT 'all'",
+    "ALTER TABLE events ADD COLUMN IF NOT EXISTS parental_guidance TEXT NOT NULL DEFAULT 'none'",
+    "ALTER TABLE events ADD COLUMN IF NOT EXISTS dress_code TEXT",
+    "ALTER TABLE events ADD COLUMN IF NOT EXISTS venue_name TEXT",
+    "ALTER TABLE events ADD COLUMN IF NOT EXISTS lineup JSONB",
+    "ALTER TABLE events ADD COLUMN IF NOT EXISTS refund_policy TEXT",
+    "ALTER TABLE events ADD COLUMN IF NOT EXISTS good_to_know TEXT",
+    "ALTER TABLE ticket_tiers ADD COLUMN IF NOT EXISTS description TEXT",
+  ]) {
+    await pool.query(ddl);
+  }
+
   // Event ticket oversell guard + soft-cancellation (payment system Phase 1 fixes)
   await pool.query(`
     ALTER TABLE events ADD COLUMN IF NOT EXISTS tickets_sold INTEGER NOT NULL DEFAULT 0

@@ -29,7 +29,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Event, EventCreateDto, EventUpdateDto } from "@shared/schema";
-import { XIcon, UploadIcon, PlusIcon, Trash2Icon, Edit2Icon, ExternalLinkIcon, Loader2Icon } from "@/components/ui/icons";
+import { XIcon, UploadIcon, PlusIcon, Trash2Icon, Edit2Icon, ExternalLinkIcon, Loader2Icon, ChevronDownIcon } from "@/components/ui/icons";
 
 interface TicketTier {
   id: string;
@@ -38,6 +38,7 @@ interface TicketTier {
   quantity: number;
   salesEndDate: string;
   dayDate?: string; // For multi-day events: null/undefined = all-days pass, date string = specific day
+  description?: string; // Short "what's included" line shown in the ticket picker
 }
 
 interface ExternalTicketLink {
@@ -60,6 +61,13 @@ interface EventFormData {
   location: string;
   ageRestriction: "all" | "18+" | "21+";
   parentalGuidance: "none" | "advised";
+  // Optional "event details" shown on the public event view
+  doorsOpenTime: string; // HH:MM on the start date; "" = not set
+  venueName: string;
+  dressCode: string;
+  lineup: { name: string; time: string }[];
+  goodToKnow: string;
+  refundPolicy: string;
   entryType: "free" | "ticketed" | "external";
   currency: string;
   thumbnailUrl: string;
@@ -131,6 +139,12 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
     location: "",
     ageRestriction: "all",
     parentalGuidance: "none",
+    doorsOpenTime: "",
+    venueName: "",
+    dressCode: "",
+    lineup: [],
+    goodToKnow: "",
+    refundPolicy: "",
     entryType: "free",
     currency: deriveDefaultCurrency(),
     thumbnailUrl: "",
@@ -191,8 +205,14 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
         isMultiDay: isMultiDayEvent,
         locationType: "physical" as const,
         location: event.location,
-        ageRestriction: "all" as const,
-        parentalGuidance: "none" as const,
+        ageRestriction: ((event as any).ageRestriction ?? "all") as "all" | "18+" | "21+",
+        parentalGuidance: ((event as any).parentalGuidance ?? "none") as "none" | "advised",
+        doorsOpenTime: (event as any).doorsOpenAt ? new Date((event as any).doorsOpenAt).toTimeString().slice(0, 5) : "",
+        venueName: (event as any).venueName ?? "",
+        dressCode: (event as any).dressCode ?? "",
+        lineup: ((event as any).lineup ?? []).map((l: any) => ({ name: l.name, time: l.time ?? "" })),
+        goodToKnow: (event as any).goodToKnow ?? "",
+        refundPolicy: (event as any).refundPolicy ?? "",
         entryType: event.externalTicketUrl ? "external" as const : (event.ticketPrice > 0 ? "ticketed" as const : "free" as const),
         currency: (event as any).currency || deriveDefaultCurrency(),
         thumbnailUrl: event.imageUrl || "",
@@ -206,6 +226,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
           quantity: tier.quantity,
           salesEndDate: tier.salesEndDate ? new Date(tier.salesEndDate).toISOString().split('T')[0] : startDateStr,
           dayDate: tier.dayDate ? new Date(tier.dayDate).toISOString().split('T')[0] : undefined,
+          description: tier.description ?? "",
         })) : (event.ticketPrice > 0 ? [{
           id: "1",
           name: "General Admission",
@@ -250,6 +271,12 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
         location: "",
         ageRestriction: "all",
         parentalGuidance: "none",
+        doorsOpenTime: "",
+        venueName: "",
+        dressCode: "",
+        lineup: [],
+        goodToKnow: "",
+        refundPolicy: "",
         entryType: "free",
         currency: deriveDefaultCurrency(),
         thumbnailUrl: "",
@@ -287,6 +314,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
             quantity: ticket.quantity,
             salesEndDate: ticket.salesEndDate || null,
             dayDate: ticket.dayDate || null,
+            description: ticket.description?.trim() || null,
           }));
 
           const tiersResponse = await apiRequest('POST', `/api/events/${event.id}/ticket-tiers`, { tiers });
@@ -359,6 +387,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
             quantity: ticket.quantity,
             salesEndDate: ticket.salesEndDate || null,
             dayDate: ticket.dayDate || null,
+            description: ticket.description?.trim() || null,
           }));
 
           const tiersResponse = await apiRequest('POST', `/api/events/${updatedEvent.id}/ticket-tiers`, { tiers });
@@ -452,6 +481,16 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
       externalTicketLinks: formData.entryType === "external" ? formData.externalTicketLinks : undefined,
       createCommunity: formData.createCommunity,
       communityName: formData.communityName,
+      ageRestriction: formData.ageRestriction,
+      parentalGuidance: formData.parentalGuidance,
+      doorsOpenAt: formData.doorsOpenTime ? new Date(`${formData.startDate}T${formData.doorsOpenTime}`).toISOString() : null,
+      venueName: formData.venueName.trim() || null,
+      dressCode: formData.dressCode.trim() || null,
+      lineup: formData.lineup
+        .filter((l) => l.name.trim())
+        .map((l) => ({ name: l.name.trim(), ...(l.time.trim() ? { time: l.time.trim() } : {}) })),
+      goodToKnow: formData.goodToKnow.trim() || null,
+      refundPolicy: formData.refundPolicy.trim() || null,
     };
     
     if (isEditMode && event) {
@@ -887,6 +926,117 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
               </div>
             </div>
 
+            <details className="group rounded-lg border" data-testid="section-event-details">
+              <summary className="flex min-h-[44px] cursor-pointer list-none items-center justify-between px-4 py-2 text-sm font-medium">
+                <span>More details <span className="font-normal text-muted-foreground">(optional, shown on your event page)</span></span>
+                <ChevronDownIcon className="h-4 w-4 text-muted-foreground transition-transform duration-200 group-open:rotate-180" aria-hidden />
+              </summary>
+              <div className="space-y-4 border-t p-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="venue-name">Venue name</Label>
+                    <Input
+                      id="venue-name"
+                      placeholder="e.g., The Cause, Tottenham"
+                      maxLength={120}
+                      value={formData.venueName}
+                      onChange={(e) => updateFormData({ venueName: e.target.value })}
+                      data-testid="input-venue-name"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="doors-open">Doors open</Label>
+                    <Input
+                      id="doors-open"
+                      type="time"
+                      value={formData.doorsOpenTime}
+                      onChange={(e) => updateFormData({ doorsOpenTime: e.target.value })}
+                      data-testid="input-doors-open"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="dress-code">Dress code</Label>
+                  <Input
+                    id="dress-code"
+                    placeholder="e.g., Smart casual, no trainers"
+                    maxLength={120}
+                    value={formData.dressCode}
+                    onChange={(e) => updateFormData({ dressCode: e.target.value })}
+                    data-testid="input-dress-code"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Line-up</Label>
+                  {formData.lineup.map((act, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <Input
+                        aria-label={`Act ${i + 1} name`}
+                        placeholder="Artist / host"
+                        maxLength={80}
+                        value={act.name}
+                        onChange={(e) => updateFormData({ lineup: formData.lineup.map((l, j) => (j === i ? { ...l, name: e.target.value } : l)) })}
+                        data-testid={`input-lineup-name-${i}`}
+                      />
+                      <Input
+                        aria-label={`Act ${i + 1} set time`}
+                        className="w-32 flex-shrink-0"
+                        placeholder="Time"
+                        maxLength={40}
+                        value={act.time}
+                        onChange={(e) => updateFormData({ lineup: formData.lineup.map((l, j) => (j === i ? { ...l, time: e.target.value } : l)) })}
+                        data-testid={`input-lineup-time-${i}`}
+                      />
+                      <Button
+                        type="button" variant="ghost" size="icon" className="h-11 w-11 flex-shrink-0"
+                        aria-label={`Remove act ${i + 1}`}
+                        onClick={() => updateFormData({ lineup: formData.lineup.filter((_, j) => j !== i) })}
+                      >
+                        <Trash2Icon className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  ))}
+                  {formData.lineup.length < 30 && (
+                    <Button
+                      type="button" variant="outline" size="sm" className="min-h-[44px]"
+                      onClick={() => updateFormData({ lineup: [...formData.lineup, { name: "", time: "" }] })}
+                      data-testid="button-add-lineup"
+                    >
+                      <PlusIcon className="h-4 w-4 mr-1" />Add act
+                    </Button>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="good-to-know">Good to know</Label>
+                  <Textarea
+                    id="good-to-know"
+                    rows={3}
+                    maxLength={1500}
+                    placeholder="ID required, bag policy, accessibility, parking, cloakroom…"
+                    value={formData.goodToKnow}
+                    onChange={(e) => updateFormData({ goodToKnow: e.target.value })}
+                    data-testid="input-good-to-know"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="refund-policy">Refund policy</Label>
+                  <Textarea
+                    id="refund-policy"
+                    rows={2}
+                    maxLength={1000}
+                    placeholder="e.g., Tickets are non-refundable unless the event is cancelled."
+                    value={formData.refundPolicy}
+                    onChange={(e) => updateFormData({ refundPolicy: e.target.value })}
+                    data-testid="input-refund-policy"
+                  />
+                </div>
+              </div>
+            </details>
+
             <div className="space-y-2">
               <Label>Entry Type *</Label>
               <RadioGroup
@@ -1218,6 +1368,17 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                                     </p>
                                   </div>
                                 )}
+
+                                <div className="space-y-2 md:col-span-2">
+                                  <Label>Description (optional)</Label>
+                                  <Input
+                                    placeholder="e.g., Includes one drink and fast-track entry"
+                                    maxLength={140}
+                                    value={ticket.description ?? ""}
+                                    onChange={(e) => updateTicket(ticket.id, { description: e.target.value })}
+                                    data-testid={`input-ticket-description-${index}`}
+                                  />
+                                </div>
                               </div>
                             </div>
                           </CardContent>

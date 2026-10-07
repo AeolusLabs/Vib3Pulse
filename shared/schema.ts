@@ -132,7 +132,18 @@ export const events = pgTable("events", {
   // pays ticketPrice + fee, organizer nets the full ticketPrice. See computeFeeSplit().
   feePassthroughToBuyer: boolean("fee_passthrough_to_buyer").notNull().default(false),
   communityId: varchar("community_id").references(() => communities.id, { onDelete: "set null" }),
+  // Ticketing-page details (all optional) — shown on the event details view.
+  doorsOpenAt: timestamp("doors_open_at"),
+  ageRestriction: text("age_restriction").notNull().default("all"), // 'all' | '18+' | '21+'
+  parentalGuidance: text("parental_guidance").notNull().default("none"), // 'none' | 'advised'
+  dressCode: text("dress_code"),
+  venueName: text("venue_name"),
+  lineup: jsonb("lineup").$type<LineupEntry[]>(),
+  refundPolicy: text("refund_policy"),
+  goodToKnow: text("good_to_know"),
 });
+
+export type LineupEntry = { name: string; time?: string };
 
 export const insertEventSchema = createInsertSchema(events).omit({
   id: true,
@@ -142,6 +153,14 @@ export const insertEventSchema = createInsertSchema(events).omit({
 }).extend({
   eventDate: z.coerce.date(),
   eventEndDate: z.coerce.date().optional().nullable(),
+  doorsOpenAt: z.coerce.date().optional().nullable(),
+  ageRestriction: z.enum(["all", "18+", "21+"]).default("all"),
+  parentalGuidance: z.enum(["none", "advised"]).default("none"),
+  dressCode: z.string().max(120).optional().nullable(),
+  venueName: z.string().max(120).optional().nullable(),
+  lineup: z.array(z.object({ name: z.string().min(1).max(80), time: z.string().max(40).optional() })).max(30).optional().nullable(),
+  refundPolicy: z.string().max(1000).optional().nullable(),
+  goodToKnow: z.string().max(1500).optional().nullable(),
 });
 
 // Community / event-group-chat badges shown on event cards (GET /api/events/links).
@@ -160,6 +179,7 @@ export type Event = typeof events.$inferSelect;
 export const eventCreateDto = insertEventSchema.extend({
   eventDate: z.string().datetime().transform((val) => new Date(val)),
   eventEndDate: z.string().datetime().transform((val) => new Date(val)).optional().nullable(),
+  doorsOpenAt: z.string().datetime().transform((val) => new Date(val)).optional().nullable(),
   currency: z.string().optional().default("GBP"),
   createCommunity: z.boolean().optional(),
   communityName: z.string().optional(),
@@ -181,6 +201,7 @@ export const ticketTiers = pgTable("ticket_tiers", {
   sold: integer("sold").notNull().default(0),
   salesEndDate: timestamp("sales_end_date"),
   dayDate: timestamp("day_date"),
+  description: text("description"), // e.g. "Includes one drink" — shown in the ticket picker
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
