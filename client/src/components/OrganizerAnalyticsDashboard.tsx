@@ -20,6 +20,9 @@ import {
 } from "lucide-react";
 import { formatMoneyCompact } from "@/lib/currency";
 import { buildFunnel, conversionPct } from "@shared/analyticsMath";
+import { PageHeader } from "@/components/manage/PageHeader";
+import { UnderlineTabs } from "@/components/manage/UnderlineTabs";
+import { StatusChip } from "@/components/manage/StatusChip";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -111,10 +114,12 @@ function PeriodButton({ current, value, label, onChange }: {
   const active = current === value;
   return (
     <button
+      type="button"
       onClick={() => onChange(value)}
-      className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer ${
+      aria-pressed={active}
+      className={`min-h-[40px] rounded-full px-4 text-sm font-medium transition-[background-color,color,transform] duration-150 ease-out active:scale-[0.97] cursor-pointer ${
         active
-          ? "bg-violet-600 text-white shadow-sm"
+          ? "bg-primary text-primary-foreground"
           : "text-muted-foreground hover:text-foreground hover:bg-muted"
       }`}
     >
@@ -123,28 +128,6 @@ function PeriodButton({ current, value, label, onChange }: {
   );
 }
 
-function KpiCard({ label, value, sub, icon, accent = false }: {
-  label: string; value: string; sub?: string; icon: React.ReactNode; accent?: boolean;
-}) {
-  return (
-    <div className={`flex items-start gap-3 p-4 rounded-xl border ${
-      accent
-        ? "border-violet-200 dark:border-violet-800/60 bg-violet-50/50 dark:bg-violet-950/20"
-        : "border-border bg-card"
-    }`}>
-      <div className={`mt-0.5 shrink-0 ${accent ? "text-violet-600 dark:text-violet-400" : "text-muted-foreground"}`}>
-        {icon}
-      </div>
-      <div className="min-w-0">
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
-        <p className={`text-2xl font-bold tabular-nums leading-tight ${accent ? "text-violet-700 dark:text-violet-300" : ""}`}>
-          {value}
-        </p>
-        {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
-      </div>
-    </div>
-  );
-}
 
 function ConversionFunnel({ views, engaged, buyers }: { views: number; engaged: number; buyers: number }) {
   // Stage maths lives in shared/analyticsMath so the funnel, the KPI card and the table agree.
@@ -167,8 +150,8 @@ function ConversionFunnel({ views, engaged, buyers }: { views: number; engaged: 
             </div>
             <div className="flex-1 relative h-8 bg-muted rounded-md overflow-hidden">
               <div
-                className={`h-full ${colors[i]} rounded-md transition-[width] duration-500 ease-out`}
-                style={{ width: `${stage.widthPct}%` }}
+                className={`h-full w-full origin-left ${colors[i]} rounded-md transition-transform duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none`}
+                style={{ transform: `scaleX(${stage.widthPct / 100})` }}
               />
             </div>
             <div className="w-16 shrink-0 text-sm font-bold tabular-nums">{formatCompact(stage.count)}</div>
@@ -203,7 +186,7 @@ function SellThroughBar({ tickets, capacity, isFree }: { tickets: number; capaci
   return (
     <div className="flex items-center gap-2 min-w-[120px]">
       <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-        <div className={`h-full ${color} rounded-full transition-all`} style={{ width: `${pct}%` }} />
+        <div className={`h-full w-full origin-left ${color} rounded-full transition-transform duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none`} style={{ transform: `scaleX(${pct / 100})` }} />
       </div>
       <span className="text-xs tabular-nums text-muted-foreground shrink-0">{tickets}/{capacity}</span>
       <span className="text-xs tabular-nums font-medium shrink-0">{pct}%</span>
@@ -261,6 +244,7 @@ function EmptyState() {
 export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Props) {
   const [period, setPeriod] = useState<Period>("all");
   const [sort, setSort] = useState<{ field: SortField; dir: SortDir }>({ field: "tickets", dir: "desc" });
+  const [tab, setTab] = useState<"overview" | "events" | "audience">("overview");
 
   const queryKey = period === "all"
     ? [`/api/organizers/${organizerId}/demographics`]
@@ -353,72 +337,78 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
   // event's own currency and are exact regardless.
   const primaryCurrency = eventBreakdown[0]?.currency ?? "GBP";
 
+  const kpis = [
+    { label: "Revenue", value: formatMoneyCompact(totalRevenue, primaryCurrency), sub: "from ticket sales", accent: true },
+    { label: "Tickets sold", value: formatCompact(totalTicketsSold), sub: aggregateSellThrough !== null ? `${aggregateSellThrough}% sell-through` : "paid tickets, all events" },
+    { label: "Conversion", value: totalViews > 0 ? `${conversionRate}%` : "—", sub: totalViews > 0 ? "of views RSVP or buy" : "No views recorded yet" },
+    { label: "Avg ticket", value: averageTicketPrice > 0 ? formatMoneyCompact(averageTicketPrice, primaryCurrency) : "Free", sub: "per ticket sold" },
+    { label: "Events", value: String(totalEvents), sub: `${totalRsvps} RSVPs in total` },
+  ];
+
+  // One plain-language takeaway so the numbers say something at a glance.
+  const converting = eventBreakdown
+    .map((e) => ({ e, conv: perEventConversion(e.views, e.converted) }))
+    .filter((x): x is { e: EventBreakdownItem; conv: number } => x.conv !== null && x.conv > 0)
+    .sort((a, b) => b.conv - a.conv)[0];
+  const insight =
+    totalViews === 0
+      ? "Views are counted from now on. Conversion appears once people start opening your events."
+      : converting
+        ? `${converting.e.title} converts best: ${converting.conv}% of viewers RSVP or buy.`
+        : "People are viewing your events but nobody has RSVP'd or bought yet.";
+
   return (
     <div className="space-y-7">
 
-      {/* ── Header ──────────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-4 justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Performance report for <span className="font-medium text-foreground">{organizerName}</span>
-          </p>
-        </div>
-        <div className="flex items-center gap-1 p-1 rounded-lg bg-muted/60 border border-border w-fit">
-          <PeriodButton current={period} value="all" label="All time" onChange={setPeriod} />
-          <PeriodButton current={period} value="90d" label="90 days" onChange={setPeriod} />
-          <PeriodButton current={period} value="30d" label="30 days" onChange={setPeriod} />
-        </div>
+      {/* ── Header + stat band (replaces the old header and the grid of KPI cards) ── */}
+      <div>
+        <PageHeader
+          eyebrow="Analytics"
+          title="How your events are doing"
+          summary={<>Performance report for <span className="font-medium text-foreground">{organizerName}</span></>}
+          actions={
+            <div className="flex w-fit items-center gap-1 rounded-full border bg-muted/40 p-1" role="group" aria-label="Date range">
+              <PeriodButton current={period} value="all" label="All time" onChange={setPeriod} />
+              <PeriodButton current={period} value="90d" label="90 days" onChange={setPeriod} />
+              <PeriodButton current={period} value="30d" label="30 days" onChange={setPeriod} />
+            </div>
+          }
+        />
+        <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border bg-border lg:grid-cols-5 [&>div:last-child]:col-span-2 lg:[&>div:last-child]:col-span-1" data-testid="kpi-strip">
+          {kpis.map((k) => (
+            <div key={k.label} className="bg-card p-4 sm:p-5">
+              <dt className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">{k.label}</dt>
+              <dd className={`mt-2 text-2xl font-bold leading-none tabular-nums ${k.accent ? "text-primary" : ""}`}>{k.value}</dd>
+              <dd className="mt-1.5 text-xs text-muted-foreground">{k.sub}</dd>
+            </div>
+          ))}
+        </dl>
       </div>
 
-      {/* ── KPI Strip ─────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <KpiCard
-          accent
-          label="Revenue"
-          value={formatMoneyCompact(totalRevenue, primaryCurrency)}
-          sub="from ticket sales"
-          icon={<DollarSignIcon className="h-4 w-4" />}
+      {/* ── Tabbed sections ───────────────────────────────────── */}
+      <Tabs value={tab} onValueChange={(v) => setTab(v as "overview" | "events" | "audience")}>
+        <UnderlineTabs
+          value={tab}
+          items={[
+            { value: "overview", label: "Overview", icon: <TrendingUpIcon className="h-4 w-4" />, testId: "tab-overview" },
+            { value: "events", label: "Events", count: totalEvents, icon: <CalendarIcon className="h-4 w-4" />, testId: "tab-events" },
+            { value: "audience", label: "Audience", icon: <Users className="h-4 w-4" />, testId: "tab-audience" },
+          ]}
         />
-        <KpiCard
-          label="Tickets sold"
-          value={formatCompact(totalTicketsSold)}
-          sub={aggregateSellThrough !== null ? `${aggregateSellThrough}% sell-through` : "across all events"}
-          icon={<TicketIcon className="h-4 w-4" />}
-        />
-        <KpiCard
-          label="Conversion"
-          value={totalViews > 0 ? `${conversionRate}%` : "—"}
-          sub={totalViews > 0 ? "of views RSVP or buy" : "No views recorded yet"}
-          icon={<TrendingUpIcon className="h-4 w-4" />}
-        />
-        <KpiCard
-          label="Avg ticket"
-          value={averageTicketPrice > 0 ? formatMoneyCompact(averageTicketPrice, primaryCurrency) : "Free"}
-          sub="per ticket sold"
-          icon={<TrendingUp className="h-4 w-4" />}
-        />
-        <KpiCard
-          label="Events hosted"
-          value={String(totalEvents)}
-          sub={`${totalRsvps} total RSVPs`}
-          icon={<CalendarIcon className="h-4 w-4" />}
-        />
-      </div>
 
-      {/* ── Conversion Funnel ──────────────────────────────────── */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <TrendingUpIcon className="h-4 w-4 text-violet-500" />
-            Conversion Funnel
-          </CardTitle>
-          <p className="text-xs text-muted-foreground">
-            Where attendees are in their journey — views to RSVPs to paid tickets
+        {/* ── Overview tab ── */}
+        <TabsContent value="overview" className="space-y-5 mt-5 animate-in fade-in-0 duration-200 motion-reduce:animate-none">
+          {/* Insight + funnel */}
+          <p className="flex items-start gap-2 text-sm" data-testid="analytics-insight">
+            <TrendingUpIcon className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" />
+            <span>{insight}</span>
           </p>
-        </CardHeader>
-        <CardContent>
-          <ConversionFunnel views={totalViews} engaged={convertedTotal} buyers={buyers} />
+
+          <section aria-labelledby="funnel-heading" className="rounded-2xl border p-5 sm:p-6">
+            <h2 id="funnel-heading" className="text-base font-semibold">Conversion funnel</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">From viewing an event to buying a ticket</p>
+            <div className="mt-5">
+              <ConversionFunnel views={totalViews} engaged={convertedTotal} buyers={buyers} />
           {totalViews > 0 && (
             <div className="mt-5 pt-4 border-t grid grid-cols-3 text-center gap-2">
               <div>
@@ -442,19 +432,8 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
               </div>
             </div>
           )}
-        </CardContent>
-      </Card>
-
-      {/* ── Tabbed sections ───────────────────────────────────── */}
-      <Tabs defaultValue="events">
-        <TabsList className="grid grid-cols-3 w-full max-w-sm">
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="events">Events</TabsTrigger>
-          <TabsTrigger value="audience">Audience</TabsTrigger>
-        </TabsList>
-
-        {/* ── Overview tab ── */}
-        <TabsContent value="overview" className="space-y-5 mt-5">
+            </div>
+          </section>
 
           {/* Best performer */}
           {bestSellingEvent && (
@@ -510,12 +489,12 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
                           <div className="flex items-center gap-2">
                             <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
                               <div
-                                className={`h-full rounded-full ${
+                                className={`h-full w-full origin-left rounded-full transition-transform duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${
                                   pct >= 80 ? "bg-emerald-500" :
                                   pct >= 50 ? "bg-violet-500" :
                                   pct >= 20 ? "bg-amber-500" : "bg-slate-400"
                                 }`}
-                                style={{ width: `${pct}%` }}
+                                style={{ transform: `scaleX(${pct / 100})` }}
                               />
                             </div>
                             <span className="text-xs tabular-nums text-muted-foreground w-20 text-right">
@@ -586,7 +565,7 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
         </TabsContent>
 
         {/* ── Events tab ── */}
-        <TabsContent value="events" className="mt-5">
+        <TabsContent value="events" className="mt-5 animate-in fade-in-0 duration-200 motion-reduce:animate-none">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-base flex items-center gap-2">
@@ -598,7 +577,40 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
               </p>
             </CardHeader>
             <CardContent className="p-0">
-              <div className="overflow-x-auto">
+              <ul className="divide-y md:hidden" data-testid="events-mobile-list">
+                {sortedEvents.map((event) => {
+                  const status = eventStatus(event.eventDate);
+                  const conv = perEventConversion(event.views, event.converted);
+                  return (
+                    <li key={event.eventId} className="p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate font-medium">{event.title}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {new Date(event.eventDate).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                          </p>
+                        </div>
+                        <StatusChip kind={status.label === "Upcoming" ? "live" : "ended"} label={status.label} />
+                      </div>
+                      <dl className="mt-3 grid grid-cols-4 gap-2 text-center">
+                        {[
+                          ["RSVPs", String(event.rsvps)],
+                          ["Tickets", String(event.tickets)],
+                          ["Revenue", event.revenue > 0 ? formatMoneyCompact(event.revenue, event.currency) : "—"],
+                          ["Conv.", conv !== null ? `${conv}%` : "—"],
+                        ].map(([label, value]) => (
+                          <div key={label}>
+                            <dt className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">{label}</dt>
+                            <dd className="mt-0.5 text-sm font-semibold tabular-nums">{value}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                      <div className="mt-3"><SellThroughBar tickets={event.tickets} capacity={event.capacity} isFree={event.isFree} /></div>
+                    </li>
+                  );
+                })}
+              </ul>
+              <div className="hidden overflow-x-auto md:block">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b bg-muted/40">
@@ -712,7 +724,7 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
         </TabsContent>
 
         {/* ── Audience tab ── */}
-        <TabsContent value="audience" className="space-y-5 mt-5">
+        <TabsContent value="audience" className="space-y-5 mt-5 animate-in fade-in-0 duration-200 motion-reduce:animate-none">
 
           {/* Age distribution charts */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">

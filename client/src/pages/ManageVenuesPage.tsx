@@ -1,7 +1,8 @@
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import { useState } from "react";
@@ -10,12 +11,163 @@ import { Link } from "wouter";
 import CreateVenueModal from "@/components/CreateVenueModal";
 import { PromoteVenueDialog } from "@/components/PromoteVenueDialog";
 import { VenueAnalytics } from "@/components/VenueAnalytics";
+import { PageHeader } from "@/components/manage/PageHeader";
+import { UnderlineTabs } from "@/components/manage/UnderlineTabs";
+import { StatusChip } from "@/components/manage/StatusChip";
+import { ConfirmDialog } from "@/components/manage/ConfirmDialog";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import type { Venue } from "@shared/schema";
-import { EditIcon, Trash2Icon, BarChart3Icon, MapPinIcon, ClockIcon, MusicIcon, CalendarIcon, MegaphoneIcon, SparklesIcon, Building2Icon, PlusIcon, DollarSignIcon, LockIcon, EyeIcon } from "@/components/ui/icons";
+import {
+  EditIcon, Trash2Icon, BarChart3Icon, MapPinIcon, MusicIcon, CalendarIcon, MegaphoneIcon, SparklesIcon,
+  Building2Icon, PlusIcon, DollarSignIcon, EyeIcon, SearchIcon, MoreHorizontalIcon,
+} from "@/components/ui/icons";
+
+const categoryLabels: Record<string, string> = {
+  nightclub: "Nightclub",
+  bar: "Bar",
+  lounge: "Lounge",
+  pub: "Pub",
+  rooftop: "Rooftop",
+  sports_bar: "Sports Bar",
+  wine_bar: "Wine Bar",
+  cocktail_bar: "Cocktail Bar",
+  live_music: "Live Music Venue",
+  comedy_club: "Comedy Club",
+};
+
+const isCurrentlyPromoted = (v: Venue, now = new Date()) =>
+  !!(v.isPromoted && v.promotedUntil && new Date(v.promotedUntil) > now);
+
+interface RowProps {
+  venue: Venue;
+  statsOpen: boolean;
+  deleting: boolean;
+  onEdit: () => void;
+  onToggleStats: () => void;
+  onPromote: () => void;
+  onDelete: () => void;
+}
+
+// Module-level so rows keep their state across page re-renders.
+function VenueRow({ venue, statsOpen, deleting, onEdit, onToggleStats, onPromote, onDelete }: RowProps) {
+  const promoted = isCurrentlyPromoted(venue);
+  const gallery = venue.imageUrls ?? [];
+  const music = Array.isArray(venue.musicTypes) ? venue.musicTypes.slice(0, 3).join(", ") : "";
+
+  return (
+    <li className="group/row" data-testid={`venue-row-${venue.id}`}>
+      <div className="grid grid-cols-[72px_minmax(0,1fr)] items-start gap-x-4 gap-y-3 p-4 transition-colors duration-150 hover:bg-muted/30 sm:p-5 md:grid-cols-[104px_minmax(0,1fr)_auto]">
+        <div className="relative aspect-square overflow-hidden rounded-xl bg-muted md:aspect-[4/3]">
+          <img
+            src={venue.coverImageUrl || venue.imageUrl || "/placeholder-venue.jpg"}
+            alt=""
+            loading="lazy"
+            className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover/row:scale-[1.03] motion-reduce:transition-none"
+          />
+        </div>
+
+        <div className="min-w-0">
+          <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+            {venue.isVerified && <StatusChip kind="verified" />}
+            {promoted && <StatusChip kind="promoted" />}
+            <span className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+              {categoryLabels[venue.category] || venue.category}
+            </span>
+          </div>
+          <h3 className="line-clamp-2 text-base font-semibold leading-snug sm:text-lg" data-testid={`text-venue-name-${venue.id}`}>
+            {venue.name}
+          </h3>
+          <div className="mt-1 space-y-0.5 text-sm text-muted-foreground">
+            <p className="flex items-center gap-2" data-testid={`text-venue-address-${venue.id}`}>
+              <MapPinIcon className="h-3.5 w-3.5 flex-shrink-0" />
+              <span className="truncate">{venue.address || venue.city || "Location not set"}</span>
+            </p>
+            {music && (
+              <p className="flex items-center gap-2">
+                <MusicIcon className="h-3.5 w-3.5 flex-shrink-0" />
+                <span className="truncate">{music}</span>
+              </p>
+            )}
+            {venue.ageRestriction && (
+              <p className="flex items-center gap-2">
+                <Building2Icon className="h-3.5 w-3.5 flex-shrink-0" />
+                <span>{venue.ageRestriction}+ only</span>
+              </p>
+            )}
+          </div>
+          {gallery.length > 0 && (
+            <div className="mt-2.5 flex items-center gap-1.5" aria-label={`${gallery.length} gallery photo${gallery.length === 1 ? "" : "s"}`}>
+              {gallery.slice(0, 4).map((url, i) => (
+                <img key={i} src={url} alt="" loading="lazy" className="h-9 w-9 rounded-md object-cover" />
+              ))}
+              {gallery.length > 4 && <span className="text-xs text-muted-foreground">+{gallery.length - 4}</span>}
+            </div>
+          )}
+        </div>
+
+        <div className="col-span-2 flex flex-wrap items-center gap-2 md:col-span-1 md:justify-end">
+          <Button variant="outline" size="sm" className="min-h-[44px] active:scale-[0.97] transition-transform duration-150 ease-out" onClick={onEdit} data-testid={`button-edit-venue-${venue.id}`}>
+            <EditIcon className="mr-2 h-4 w-4" />Edit
+          </Button>
+          <Button variant="outline" size="sm" asChild className="min-h-[44px] active:scale-[0.97] transition-transform duration-150 ease-out" data-testid={`button-manage-events-${venue.id}`}>
+            <Link href={`/venues/${venue.id}/venue-events`}><CalendarIcon className="mr-2 h-4 w-4" />Venue events</Link>
+          </Button>
+          <Button
+            variant={statsOpen ? "secondary" : "ghost"}
+            size="sm"
+            className="min-h-[44px] active:scale-[0.97] transition-transform duration-150 ease-out"
+            onClick={onToggleStats}
+            aria-expanded={statsOpen}
+            data-testid={`button-view-stats-${venue.id}`}
+          >
+            <BarChart3Icon className="mr-2 h-4 w-4" />Stats
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-11 w-11" aria-label={`More actions for ${venue.name}`} data-testid={`button-more-${venue.id}`}>
+                <MoreHorizontalIcon className="h-5 w-5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-[200px]">
+              <DropdownMenuItem asChild className="min-h-[40px]" data-testid={`button-view-as-visitor-${venue.id}`}>
+                <Link href={`/venue/${venue.id}`}><EyeIcon className="mr-2 h-4 w-4" />View as visitor</Link>
+              </DropdownMenuItem>
+              {!promoted && (
+                <DropdownMenuItem className="min-h-[40px]" onSelect={onPromote} data-testid={`button-promote-${venue.id}`}>
+                  <MegaphoneIcon className="mr-2 h-4 w-4" />Promote venue
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="min-h-[40px] text-destructive focus:text-destructive" disabled={deleting} onSelect={onDelete} data-testid={`button-delete-venue-${venue.id}`}>
+                <Trash2Icon className="mr-2 h-4 w-4" />Delete venue
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+
+      {statsOpen && (
+        <div className="px-4 pb-5 sm:px-5 animate-in fade-in-0 slide-in-from-top-1 duration-200 motion-reduce:animate-none">
+          <VenueAnalytics venueId={venue.id} />
+        </div>
+      )}
+    </li>
+  );
+}
+
+function RowSkeleton() {
+  return (
+    <li className="grid grid-cols-[72px_1fr] gap-4 p-4 md:grid-cols-[104px_1fr]">
+      <Skeleton className="aspect-square rounded-xl md:aspect-[4/3]" />
+      <div className="space-y-2"><Skeleton className="h-4 w-24" /><Skeleton className="h-5 w-3/4" /><Skeleton className="h-4 w-1/2" /></div>
+    </li>
+  );
+}
+
+type TabKey = "all" | "promoted";
 
 export default function ManageVenuesPage() {
   const { data: user, isLoading: authLoading } = useAuth();
@@ -25,8 +177,11 @@ export default function ManageVenuesPage() {
   const [promoteVenueName, setPromoteVenueName] = useState<string>("");
   const [promoteVenueCurrency, setPromoteVenueCurrency] = useState<string>("GBP");
   const [showAnalyticsFor, setShowAnalyticsFor] = useState<string | null>(null);
+  const [tab, setTab] = useState<TabKey>("all");
+  const [query, setQuery] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<Venue | null>(null);
   const { toast } = useToast();
-  
+
   const { data: venues = [], isLoading } = useQuery<Venue[]>({
     queryKey: ["/api/my-venues"],
   });
@@ -44,200 +199,6 @@ export default function ManageVenuesPage() {
     },
   });
 
-  const now = new Date();
-  const activeVenues = venues.filter(v => {
-    if (!v.isPromoted) return true;
-    const promotedUntil = v.promotedUntil ? new Date(v.promotedUntil) : null;
-    return !promotedUntil || promotedUntil > now;
-  });
-  
-  const promotedVenues = venues.filter(v => {
-    const promotedUntil = v.promotedUntil ? new Date(v.promotedUntil) : null;
-    return v.isPromoted && promotedUntil && promotedUntil > now;
-  });
-
-  const handleEditVenue = (venue: Venue) => {
-    setEditingVenue(venue);
-    setCreateVenueOpen(true);
-  };
-
-  const handleDeleteVenue = (venueId: string) => {
-    if (confirm("Are you sure you want to delete this venue?")) {
-      deleteMutation.mutate(venueId);
-    }
-  };
-
-  const handlePromoteVenue = (venueId: string, venueName: string, currency: string) => {
-    setPromoteVenueId(venueId);
-    setPromoteVenueName(venueName);
-    setPromoteVenueCurrency(currency);
-  };
-
-  const categoryLabels: Record<string, string> = {
-    nightclub: "Nightclub",
-    bar: "Bar",
-    lounge: "Lounge",
-    pub: "Pub",
-    rooftop: "Rooftop",
-    sports_bar: "Sports Bar",
-    wine_bar: "Wine Bar",
-    cocktail_bar: "Cocktail Bar",
-    live_music: "Live Music Venue",
-    comedy_club: "Comedy Club"
-  };
-
-  const VenueManagementCard = ({ venue }: { venue: Venue }) => {
-    const isPromoted = venue.isPromoted && venue.promotedUntil && new Date(venue.promotedUntil) > now;
-    
-    return (
-      <Card className="overflow-hidden">
-        <CardHeader className="p-0">
-          <div className="relative h-48">
-            <img
-              src={venue.coverImageUrl || venue.imageUrl || "/placeholder-venue.jpg"}
-              alt={venue.name}
-              className="w-full h-full object-cover"
-            />
-            <div className="absolute top-2 right-2 flex flex-col gap-1">
-              {isPromoted && (
-                <Badge className="bg-gradient-to-r from-purple-500 to-pink-500 text-white">
-                  <SparklesIcon className="h-3 w-3 mr-1" />
-                  Featured
-                </Badge>
-              )}
-              {venue.isVerified && (
-                <Badge className="bg-blue-500 text-white">Verified</Badge>
-              )}
-            </div>
-            <div className="absolute bottom-2 left-2">
-              <Badge variant="category">
-                {categoryLabels[venue.category] || venue.category}
-              </Badge>
-            </div>
-          </div>
-        </CardHeader>
-        
-        <CardContent className="pt-4 space-y-3">
-          <div>
-            <h3 className="font-semibold text-lg line-clamp-1" data-testid={`text-venue-name-${venue.id}`}>
-              {venue.name}
-            </h3>
-          </div>
-
-          <div className="space-y-1 text-sm text-muted-foreground">
-            <p className="flex items-center gap-2" data-testid={`text-venue-address-${venue.id}`}>
-              <MapPinIcon className="h-4 w-4 flex-shrink-0" />
-              <span className="line-clamp-1">{venue.address || venue.city || "Location not set"}</span>
-            </p>
-            {venue.musicTypes && Array.isArray(venue.musicTypes) && venue.musicTypes.length > 0 && (
-              <p className="flex items-center gap-2">
-                <MusicIcon className="h-4 w-4 flex-shrink-0" />
-                <span className="line-clamp-1">{venue.musicTypes.slice(0, 2).join(", ")}</span>
-              </p>
-            )}
-            {venue.ageRestriction && (
-              <p className="flex items-center gap-2">
-                <Building2Icon className="h-4 w-4 flex-shrink-0" />
-                <span>{venue.ageRestriction}+ only</span>
-              </p>
-            )}
-          </div>
-
-          {venue.imageUrls && venue.imageUrls.length > 0 && (
-            <div>
-              <p className="text-xs text-muted-foreground mb-1.5">Gallery ({venue.imageUrls.length} photo{venue.imageUrls.length !== 1 ? "s" : ""})</p>
-              <div className="flex gap-1.5 overflow-x-auto pb-1">
-                {venue.imageUrls.map((url, i) => (
-                  <img
-                    key={i}
-                    src={url}
-                    alt={`Gallery ${i + 1}`}
-                    className="h-14 w-14 rounded object-cover flex-shrink-0"
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-        </CardContent>
-
-        <CardFooter className="flex flex-wrap gap-2 pt-4 border-t">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleEditVenue(venue)}
-            data-testid={`button-edit-venue-${venue.id}`}
-          >
-            <EditIcon className="h-4 w-4 mr-2" />
-            Edit
-          </Button>
-          
-          <Button
-            variant="outline"
-            size="sm"
-            asChild
-            data-testid={`button-manage-events-${venue.id}`}
-          >
-            <Link href={`/venues/${venue.id}/venue-events`}>
-              <CalendarIcon className="h-4 w-4 mr-2" />
-              Venue Events
-            </Link>
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            asChild
-            data-testid={`button-view-as-visitor-${venue.id}`}
-          >
-            <Link href={`/venue/${venue.id}`}>
-              <EyeIcon className="h-4 w-4 mr-2" />
-              View as Visitor
-            </Link>
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowAnalyticsFor(showAnalyticsFor === venue.id ? null : venue.id)}
-            data-testid={`button-view-stats-${venue.id}`}
-          >
-            <BarChart3Icon className="h-4 w-4 mr-2" />
-            Stats
-          </Button>
-
-          {!isPromoted && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handlePromoteVenue(venue.id, venue.name, (venue as any).currency || "GBP")}
-              className="text-purple-600 border-purple-300 hover:bg-purple-50"
-              data-testid={`button-promote-${venue.id}`}
-            >
-              <MegaphoneIcon className="h-4 w-4 mr-2" />
-              Promote
-            </Button>
-          )}
-
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => handleDeleteVenue(venue.id)}
-            disabled={deleteMutation.isPending}
-            data-testid={`button-delete-venue-${venue.id}`}
-          >
-            <Trash2Icon className="h-4 w-4 text-destructive" />
-          </Button>
-        </CardFooter>
-        
-        {showAnalyticsFor === venue.id && (
-          <div className="px-6 pb-6">
-            <VenueAnalytics venueId={venue.id} />
-          </div>
-        )}
-      </Card>
-    );
-  };
-
   const enableVenuesMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("PATCH", "/api/users/me", { canManageVenues: true });
@@ -253,15 +214,55 @@ export default function ManageVenuesPage() {
     },
   });
 
+  const openCreate = () => { setEditingVenue(undefined); setCreateVenueOpen(true); };
+  const promotedVenues = venues.filter((v) => isCurrentlyPromoted(v));
+  const q = query.trim().toLowerCase();
+  const filter = (list: Venue[]) =>
+    list.filter((v) => !q || v.name.toLowerCase().includes(q) || (v.address ?? "").toLowerCase().includes(q) || (v.city ?? "").toLowerCase().includes(q));
+
+  const renderList = (list: Venue[], emptyTitle: string, emptyBody: string, showCreate: boolean) => {
+    if (isLoading) {
+      return <ul className="divide-y rounded-2xl border bg-card">{[0, 1, 2].map((i) => <RowSkeleton key={i} />)}</ul>;
+    }
+    if (list.length === 0) {
+      return (
+        <div className="rounded-2xl border border-dashed px-6 py-14 text-center">
+          <p className="font-medium">{q ? "No venues match your search" : emptyTitle}</p>
+          <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">{q ? "Try a different name or place." : emptyBody}</p>
+          {showCreate && !q && (
+            <Button className="mt-5 min-h-[44px] rounded-full" onClick={openCreate}>
+              <PlusIcon className="mr-2 h-4 w-4" />Add your first venue
+            </Button>
+          )}
+        </div>
+      );
+    }
+    return (
+      <ul className="divide-y overflow-hidden rounded-2xl border bg-card">
+        {list.map((venue) => (
+          <VenueRow
+            key={venue.id}
+            venue={venue}
+            statsOpen={showAnalyticsFor === venue.id}
+            deleting={deleteMutation.isPending}
+            onEdit={() => { setEditingVenue(venue); setCreateVenueOpen(true); }}
+            onToggleStats={() => setShowAnalyticsFor(showAnalyticsFor === venue.id ? null : venue.id)}
+            onPromote={() => { setPromoteVenueId(venue.id); setPromoteVenueName(venue.name); setPromoteVenueCurrency((venue as any).currency || "GBP"); }}
+            onDelete={() => setPendingDelete(venue)}
+          />
+        ))}
+      </ul>
+    );
+  };
+
   if (authLoading) {
     return (
       <div className="min-h-screen bg-background pb-20 md:pb-0">
         <Navigation />
-        <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="text-center py-16">
-            <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-r-transparent" />
-            <p className="mt-4 text-muted-foreground">Loading...</p>
-          </div>
+        <main className="mx-auto max-w-[1100px] px-4 py-8 sm:px-6 lg:px-8" aria-busy="true">
+          <Skeleton className="mb-2 h-4 w-24" />
+          <Skeleton className="mb-8 h-10 w-64" />
+          <ul className="divide-y rounded-2xl border bg-card">{[0, 1].map((i) => <RowSkeleton key={i} />)}</ul>
         </main>
         <BottomNavigation />
       </div>
@@ -269,62 +270,49 @@ export default function ManageVenuesPage() {
   }
 
   if (!user?.canManageVenues) {
+    const benefits = [
+      { icon: Building2Icon, title: "List your venue", body: "A profile with photos, hours and amenities." },
+      { icon: DollarSignIcon, title: "Sell entry tickets", body: "Entry nights with cover charges and capacity limits." },
+      { icon: MegaphoneIcon, title: "Get discovered", body: "Be featured on Discover to reach more guests." },
+      { icon: BarChart3Icon, title: "See what works", body: "Views, ticket sales and engagement in one place." },
+    ];
     return (
       <div className="min-h-screen bg-background pb-20 md:pb-0">
         <Navigation />
-        <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <Card className="max-w-2xl mx-auto">
-            <CardHeader className="text-center">
-              <div className="mx-auto bg-muted rounded-full p-4 w-fit mb-4">
-                <LockIcon className="h-8 w-8 text-muted-foreground" />
-              </div>
-              <CardTitle className="text-2xl">Venue Management</CardTitle>
-              <CardDescription className="text-base">
-                List your club, bar, or lounge on Vib3Pulse and start selling entry tickets
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="grid gap-4 text-sm">
-                <div className="flex items-start gap-3">
-                  <Building2Icon className="h-5 w-5 text-primary mt-0.5" />
-                  <div>
-                    <p className="font-medium">List Your Venue</p>
-                    <p className="text-muted-foreground">Create a profile for your venue with photos, hours, and amenities</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <DollarSignIcon className="h-5 w-5 text-primary mt-0.5" />
-                  <div>
-                    <p className="font-medium">Sell Entry Tickets</p>
-                    <p className="text-muted-foreground">Set up entry nights with cover charges and manage capacity</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <MegaphoneIcon className="h-5 w-5 text-primary mt-0.5" />
-                  <div>
-                    <p className="font-medium">Promote Your Venue</p>
-                    <p className="text-muted-foreground">Get featured on the discover page to attract more guests</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <BarChart3Icon className="h-5 w-5 text-primary mt-0.5" />
-                  <div>
-                    <p className="font-medium">Track Analytics</p>
-                    <p className="text-muted-foreground">See views, ticket sales, and engagement metrics</p>
-                  </div>
-                </div>
-              </div>
-              <Button 
+        <main className="mx-auto max-w-[1100px] px-4 py-10 sm:px-6 lg:px-8">
+          <div className="grid gap-10 md:grid-cols-[1.1fr_1fr] md:items-start">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">Venues</p>
+              <h1 className="mt-1 font-serif text-4xl font-bold leading-[1.05] tracking-tight sm:text-5xl">
+                Fill your room, any night of the week.
+              </h1>
+              <p className="mt-4 max-w-[52ch] text-muted-foreground">
+                List your club, bar or lounge on Vib3Pulse and start selling entry tickets to people already looking for a night out.
+              </p>
+              <Button
                 onClick={() => enableVenuesMutation.mutate()}
                 disabled={enableVenuesMutation.isPending}
-                className="w-full"
                 size="lg"
+                className="mt-7 min-h-[48px] rounded-full px-7 active:scale-[0.97] transition-transform duration-150 ease-out"
                 data-testid="button-enable-venues"
               >
-                {enableVenuesMutation.isPending ? "Enabling..." : "Enable Venue Management"}
+                {enableVenuesMutation.isPending ? "Enabling…" : "Enable venue management"}
               </Button>
-            </CardContent>
-          </Card>
+            </div>
+            <ul className="space-y-5">
+              {benefits.map((b) => (
+                <li key={b.title} className="flex items-start gap-4">
+                  <span className="mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                    <b.icon className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <p className="font-medium">{b.title}</p>
+                    <p className="text-sm text-muted-foreground">{b.body}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
         </main>
         <BottomNavigation />
       </div>
@@ -335,87 +323,69 @@ export default function ManageVenuesPage() {
     <div className="min-h-screen bg-background pb-20 md:pb-0">
       <Navigation />
 
-      <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
-          <h1 className="text-3xl font-serif font-bold" data-testid="heading-manage-venues">
-            Manage Venues
-          </h1>
-          <Button onClick={() => { setEditingVenue(undefined); setCreateVenueOpen(true); }} data-testid="button-create-new-venue">
-            <PlusIcon className="h-4 w-4 mr-2" />
-            Add New Venue
-          </Button>
-        </div>
+      <main className="mx-auto max-w-[1100px] px-4 py-8 sm:px-6 lg:px-8">
+        <PageHeader
+          eyebrow="Venues"
+          title="Manage venues"
+          titleTestId="heading-manage-venues"
+          summary={isLoading ? "Loading your venues…" : `${venues.length} ${venues.length === 1 ? "venue" : "venues"} · ${promotedVenues.length} featured`}
+          actions={
+            <Button className="min-h-[44px] rounded-full active:scale-[0.97] transition-transform duration-150 ease-out" onClick={openCreate} data-testid="button-create-new-venue">
+              <PlusIcon className="mr-2 h-4 w-4" />Add venue
+            </Button>
+          }
+        />
 
-        <Tabs defaultValue="all" className="w-full">
-          <TabsList className="grid w-full max-w-md grid-cols-2 mb-8">
-            <TabsTrigger value="all" data-testid="tab-all-venues">
-              All Venues ({venues.length})
-            </TabsTrigger>
-            <TabsTrigger value="promoted" data-testid="tab-promoted">
-              Featured ({promotedVenues.length})
-            </TabsTrigger>
-          </TabsList>
+        <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)} className="w-full">
+          <UnderlineTabs
+            value={tab}
+            items={[
+              { value: "all", label: "All venues", count: venues.length, testId: "tab-all-venues" },
+              { value: "promoted", label: "Featured", count: promotedVenues.length, icon: <SparklesIcon className="h-3.5 w-3.5" />, testId: "tab-promoted" },
+            ]}
+          />
 
-          <TabsContent value="all">
-            {isLoading ? (
-              <div className="text-center py-16">
-                <p className="text-muted-foreground">Loading venues...</p>
-              </div>
-            ) : venues.length === 0 ? (
-              <Card className="p-16">
-                <div className="text-center space-y-4">
-                  <Building2Icon className="h-16 w-16 mx-auto text-muted-foreground" />
-                  <div>
-                    <h3 className="text-xl font-semibold mb-2">No venues yet</h3>
-                    <p className="text-muted-foreground mb-4">
-                      Add your first venue to start selling entry tickets
-                    </p>
-                    <Button onClick={() => { setEditingVenue(undefined); setCreateVenueOpen(true); }}>
-                      <PlusIcon className="h-4 w-4 mr-2" />
-                      Add Your First Venue
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {venues.map((venue) => (
-                  <VenueManagementCard key={venue.id} venue={venue} />
-                ))}
-              </div>
-            )}
+          {venues.length > 4 && (
+            <div className="relative mt-5">
+              <SearchIcon className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search by name or place"
+                aria-label="Search your venues"
+                className="h-11 rounded-full pl-10"
+                data-testid="input-search-venues"
+              />
+            </div>
+          )}
+
+          <TabsContent value="all" className="mt-5">
+            {renderList(filter(venues), "No venues yet", "Add your first venue to start selling entry tickets.", true)}
           </TabsContent>
-
-          <TabsContent value="promoted">
-            {isLoading ? (
-              <div className="text-center py-16">
-                <p className="text-muted-foreground">Loading venues...</p>
-              </div>
-            ) : promotedVenues.length === 0 ? (
-              <div className="text-center py-16">
-                <SparklesIcon className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                <p className="text-muted-foreground">No promoted venues</p>
-                <p className="text-sm text-muted-foreground mt-2">
-                  Promote your venues to get more visibility
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {promotedVenues.map((venue) => (
-                  <VenueManagementCard key={venue.id} venue={venue} />
-                ))}
-              </div>
-            )}
+          <TabsContent value="promoted" className="mt-5">
+            {renderList(filter(promotedVenues), "No featured venues", "Promote a venue to give it more visibility on Discover.", false)}
           </TabsContent>
         </Tabs>
       </main>
 
       <BottomNavigation />
 
-      <CreateVenueModal 
-        open={createVenueOpen} 
+      <CreateVenueModal
+        open={createVenueOpen}
         onOpenChange={setCreateVenueOpen}
         editingVenue={editingVenue}
+      />
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        title={`Delete "${pendingDelete?.name ?? ""}"?`}
+        description="This removes the venue and its listing. It can't be undone."
+        confirmLabel="Delete venue"
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          if (pendingDelete) deleteMutation.mutate(pendingDelete.id);
+          setPendingDelete(null);
+        }}
       />
 
       <PromoteVenueDialog
