@@ -1,50 +1,56 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import UnifiedShareModal from "@/components/UnifiedShareModal";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 
 import { format } from "date-fns";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
 import type { Event, Community } from "@shared/schema";
-import { Card } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { CalendarIcon, MapPinIcon, UsersIcon, TicketIcon, CheckCircleIcon, ExternalLinkIcon, Share2Icon, XIcon, MinusIcon, PlusIcon } from "@/components/ui/icons";
+import {
+  CalendarIcon, MapPinIcon, UsersIcon, TicketIcon, CheckCircleIcon, ExternalLinkIcon,
+  Share2Icon, XIcon, ArrowLeftIcon, AlertTriangleIcon, ChevronDownIcon,
+} from "@/components/ui/icons";
 import { useEventRatings, useUserEventRating, useSubmitRating } from "@/hooks/use-ratings";
 import RatingInput from "@/components/RatingInput";
 import RatingDisplay from "@/components/RatingDisplay";
+import { directionsUrl, downloadIcs, googleCalendarUrl, type CalendarEvent } from "@/lib/eventLinks";
+import { formatPrice } from "@/components/event-details/format";
+import OrganizerRow, { type PublicOrganizer } from "@/components/event-details/OrganizerRow";
+import SimilarEvents from "@/components/event-details/SimilarEvents";
+import TicketPicker, { tierStatus, type PickerTier, type Quote } from "@/components/event-details/TicketPicker";
 
 interface EventDetailsModalProps {
   event: Event;
   onClose: () => void;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function getCurrencySymbol(code?: string | null): string {
-  const map: Record<string, string> = {
-    GBP: "£", USD: "$", EUR: "€", NGN: "₦", CAD: "C$", AUD: "A$", ZAR: "R", GHS: "₵",
-  };
-  return map[code ?? "GBP"] ?? "£";
+const FLAT_TIER_ID = "__flat__";
+const UNLIMITED_SPOTS = 9999; // CreateEventModal stores free events as 9999 = "no cap"
+const THREE_HOURS = 3 * 60 * 60 * 1000;
+
+// Staggered first-paint reveal (30–80ms steps). Opacity + transform only, off for reduced-motion.
+const rise = (i: number) => ({
+  className: "animate-in fade-in-0 slide-in-from-bottom-2 duration-300 fill-mode-both motion-reduce:animate-none",
+  style: { animationDelay: `${i * 50}ms` },
+});
+
+function Eyebrow({ children }: { children: React.ReactNode }) {
+  return <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">{children}</p>;
 }
 
-function formatPrice(smallest: number, currency?: string | null): string {
-  return `${getCurrencySymbol(currency)}${(smallest / 100).toFixed(2)}`;
-}
-
-function EventStatusBadge({ eventDate, eventEndDate }: { eventDate: string | Date; eventEndDate?: string | Date | null }) {
+function statusOf(start: number, end: number, cancelled: boolean): { label: string; tone: string } {
   const now = Date.now();
-  const start = new Date(eventDate).getTime();
-  const end = eventEndDate ? new Date(eventEndDate).getTime() : start + 3 * 60 * 60 * 1000; // assume 3h if no end date
-
-  if (now < start) return <Badge variant="outline" className="text-blue-500 border-blue-500">Upcoming</Badge>;
-  if (now >= start && now <= end) return <Badge className="bg-green-600">Live Now</Badge>;
-  return <Badge variant="outline" className="text-muted-foreground">Ended</Badge>;
+  if (cancelled) return { label: "Cancelled", tone: "text-destructive" };
+  if (now < start) return { label: "Upcoming", tone: "text-primary" };
+  if (now <= end) return { label: "Live now", tone: "text-green-500" };
+  return { label: "Ended", tone: "text-muted-foreground" };
 }
 
 export default function EventDetailsModal({ event, onClose }: EventDetailsModalProps) {
@@ -52,16 +58,17 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
   const { data: currentUser } = useAuth();
   const [, navigate] = useLocation();
   const [isProcessing, setIsProcessing] = useState(false);
-  const [showTierSelection, setShowTierSelection] = useState(false);
   const [selectedTier, setSelectedTier] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [isEditingRating, setIsEditingRating] = useState(false);
+  const [descExpanded, setDescExpanded] = useState(false);
+  const ticketsRef = useRef<HTMLElement>(null);
 
-  const isEventEnded =
-    (event.eventEndDate ? new Date(event.eventEndDate).getTime() : new Date(event.eventDate).getTime() + 3 * 60 * 60 * 1000)
-    < Date.now();
+  const start = new Date(event.eventDate).getTime();
+  const end = event.eventEndDate ? new Date(event.eventEndDate).getTime() : start + THREE_HOURS;
+  const isEventEnded = end < Date.now();
 
   const { data: eventRatingStats } = useEventRatings(isEventEnded ? event.id : undefined);
   const { data: userEventRating } = useUserEventRating(isEventEnded && currentUser ? event.id : undefined);
@@ -114,7 +121,13 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
     },
   });
 
-  const { data: ticketTiers, isLoading: isLoadingTiers } = useQuery({
+  const { data: myTickets } = useQuery<Array<{ eventId: string; status: string }>>({
+    queryKey: ["/api/tickets"],
+    enabled: !!currentUser,
+  });
+  const hasTicket = !!myTickets?.some((t) => t.eventId === event.id && t.status === "confirmed");
+
+  const { data: ticketTiers, isLoading: isLoadingTiers } = useQuery<PickerTier[]>({
     queryKey: ["/api/events", event.id, "ticket-tiers"],
     queryFn: async () => {
       const response = await fetch(`/api/events/${event.id}/ticket-tiers`, { credentials: "include" });
@@ -126,11 +139,10 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
     refetchInterval: 15000,
   });
 
-  // Live top-level ticket availability (flat-price events with no tiers).
-  // The `event` prop is a point-in-time snapshot handed down by whichever
-  // list opened this modal and never refreshes on its own for as long as the
-  // modal stays open — same staleness problem as ticketTiers above.
-  const { data: liveEvent } = useQuery<Event>({
+  // Live top-level ticket availability (flat-price events with no tiers) plus the
+  // public organiser. The `event` prop is a point-in-time snapshot handed down by
+  // whichever list opened this modal and never refreshes on its own.
+  const { data: liveEvent } = useQuery<Event & { organizer?: PublicOrganizer }>({
     queryKey: ["/api/events", event.id],
     queryFn: async () => {
       const response = await fetch(`/api/events/${event.id}`);
@@ -140,15 +152,10 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
     initialData: event,
     refetchInterval: 15000,
   });
+  const organizer = liveEvent?.organizer?.id ? liveEvent.organizer : undefined;
+  const isCancelled = !!(liveEvent?.isCancelled ?? event.isCancelled);
   const liveTicketsAvailable = liveEvent?.ticketsAvailable ?? event.ticketsAvailable;
   const liveTicketsSold = liveEvent?.ticketsSold ?? event.ticketsSold;
-  // Tiered events track capacity per-tier; events.tickets_sold is only bumped for tier-less events.
-  const tierList: Array<{ quantity: number; sold: number }> = ticketTiers ?? [];
-  const tierTotal = tierList.reduce((n, t) => n + t.quantity, 0);
-  const tierRemaining = tierList.reduce((n, t) => n + (t.quantity - t.sold), 0);
-  const hasTierCapacity = tierList.length > 0;
-  const liveTicketsRemaining = hasTierCapacity ? tierRemaining : liveTicketsAvailable - liveTicketsSold;
-  const liveTicketsTotal = hasTierCapacity ? tierTotal : liveTicketsAvailable;
 
   const { data: attendeesData } = useQuery<{ users: Array<{ id: string; username: string; displayName: string | null; avatarUrl: string | null }>; totalCount: number }>({
     queryKey: ["/api/events", event.id, "attendees"],
@@ -194,41 +201,140 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
     },
   });
 
-  const hasTiers = !!ticketTiers && ticketTiers.length > 0;
-
-  const handlePurchaseTicket = () => {
-    // Always route through the purchase dialog — even flat-priced events (no
-    // configured tiers) need a place to pick quantity before checkout.
-    setSelectedTier(null);
-    setQuantity(1);
-    setShowTierSelection(true);
-  };
-
-  const handleConfirmPurchase = () => {
-    if (hasTiers && !selectedTier) return;
-    setIsProcessing(true);
-    purchaseTicketMutation.mutate({ tierId: selectedTier ?? undefined, quantity });
-  };
-
-  const selectedTierData = hasTiers ? ticketTiers.find((t: any) => t.id === selectedTier) : undefined;
-  const remainingForSelection = hasTiers
-    ? (selectedTierData ? selectedTierData.quantity - selectedTierData.sold : undefined)
-    : liveTicketsRemaining;
-  const maxQuantity = Math.max(1, Math.min(10, remainingForSelection ?? 10));
-  const unitPrice = hasTiers ? (selectedTierData?.priceSmallestUnit ?? 0) : event.ticketPrice;
-
-  // Tiered events track capacity per-tier (ticketTiers.quantity/sold), not on
-  // the event row — event.ticketsAvailable/ticketsSold only applies when
-  // there are no tiers, so "sold out" has to be computed differently for each.
-  const isSoldOut = hasTiers
-    ? ticketTiers.every((t: any) => t.quantity - t.sold <= 0)
-    : liveTicketsRemaining <= 0;
-
-  const handleShare = () => setShareOpen(true);
-
+  // ── Ticket selection ──────────────────────────────────────────────────────
   const isFreeEvent = event.ticketPrice === 0;
   const requiresRSVP = event.requiresRSVP;
   const hasExternalTickets = !!event.externalTicketUrl;
+  const hasTiers = !!ticketTiers && ticketTiers.length > 0;
+
+  // Tiered events track capacity per-tier (events.tickets_sold is only bumped for
+  // tier-less events), so a flat event is presented as a single "General admission" row.
+  const pickerTiers: PickerTier[] = hasTiers
+    ? ticketTiers!
+    : [{
+        id: FLAT_TIER_ID,
+        name: "General admission",
+        priceSmallestUnit: event.ticketPrice,
+        currency,
+        quantity: liveTicketsAvailable,
+        sold: liveTicketsSold,
+      }];
+  const availableTiers = pickerTiers.filter((t) => tierStatus(t).available);
+  const isSoldOut = !isLoadingTiers && availableTiers.length === 0;
+  // Only one thing to buy → pre-select it so the buyer isn't asked to pick from a list of one.
+  const effectiveTier = selectedTier ?? (availableTiers.length === 1 ? availableTiers[0].id : null);
+  const selectedTierData = pickerTiers.find((t) => t.id === effectiveTier);
+  const remainingForSelection = selectedTierData ? selectedTierData.quantity - selectedTierData.sold : 0;
+  const maxQuantity = Math.max(1, Math.min(10, remainingForSelection));
+  const safeQuantity = Math.min(quantity, maxQuantity);
+  const unitPrice = selectedTierData?.priceSmallestUnit ?? 0;
+  const lowestPrice = availableTiers.length ? Math.min(...availableTiers.map((t) => t.priceSmallestUnit)) : event.ticketPrice;
+
+  const { data: quote } = useQuery<Quote>({
+    queryKey: ["/api/events", event.id, "quote", effectiveTier, safeQuantity],
+    queryFn: async () => {
+      const qs = new URLSearchParams({ quantity: String(safeQuantity) });
+      if (effectiveTier && effectiveTier !== FLAT_TIER_ID) qs.set("tierId", effectiveTier);
+      const response = await fetch(`/api/events/${event.id}/quote?${qs}`);
+      if (!response.ok) throw new Error("Failed to fetch quote");
+      return response.json();
+    },
+    enabled: !isFreeEvent && !hasExternalTickets && !!effectiveTier,
+    staleTime: 60_000,
+  });
+
+  const scrollToTickets = () => {
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    ticketsRef.current?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+  };
+
+  const handleCheckout = () => {
+    if (!effectiveTier) return scrollToTickets();
+    setIsProcessing(true);
+    purchaseTicketMutation.mutate({
+      tierId: effectiveTier === FLAT_TIER_ID ? undefined : effectiveTier,
+      quantity: safeQuantity,
+    });
+  };
+
+  const calendarEvent: CalendarEvent = {
+    title: event.title,
+    description: event.description,
+    location: event.location,
+    start: new Date(event.eventDate),
+    end: event.eventEndDate ? new Date(event.eventEndDate) : null,
+  };
+
+  const status = statusOf(start, end, isCancelled);
+  const longDescription = (event.description?.length ?? 0) > 280;
+  const unlimitedSpots = liveTicketsAvailable >= UNLIMITED_SPOTS;
+  const spotsLeft = Math.max(0, liveTicketsAvailable - liveTicketsSold);
+
+  // ── Sticky action bar (always reachable; the page can be long on a phone) ──
+  let summary: React.ReactNode;
+  let action: React.ReactNode;
+  const primary = "flex-1 sm:flex-none sm:min-w-[200px] min-h-[48px] rounded-full text-base active:scale-[0.97] transition-transform duration-150 ease-out";
+
+  if (isCancelled) {
+    summary = <span className="text-destructive font-medium">This event was cancelled</span>;
+    action = <Button className={primary} disabled data-testid="button-purchase-ticket">Event cancelled</Button>;
+  } else if (isEventEnded) {
+    summary = <span className="text-muted-foreground">This event has ended</span>;
+    action = <Button className={primary} disabled data-testid="button-purchase-ticket">Event ended</Button>;
+  } else if (hasExternalTickets) {
+    summary = <span className="text-muted-foreground">Tickets sold by the organiser</span>;
+    action = (
+      <Button className={primary} asChild data-testid="button-get-external-tickets">
+        <a href={event.externalTicketUrl!} target="_blank" rel="noopener noreferrer">
+          <ExternalLinkIcon className="h-4 w-4 mr-2" />Get tickets
+        </a>
+      </Button>
+    );
+  } else if (isFreeEvent) {
+    summary = <span className="font-semibold">Free</span>;
+    action = (
+      <Button
+        className={primary}
+        onClick={() => rsvpMutation.mutate()}
+        disabled={rsvpMutation.isPending || hasRSVPed || isLoadingRSVPs}
+        data-testid="button-rsvp"
+      >
+        {isLoadingRSVPs ? "Loading…" : hasRSVPed ? (
+          <><CheckCircleIcon className="h-4 w-4 mr-2" />You're going</>
+        ) : rsvpMutation.isPending ? "Processing…" : requiresRSVP ? "RSVP for free" : "RSVP"}
+      </Button>
+    );
+  } else if (isSoldOut) {
+    summary = <span className="font-medium">Sold out</span>;
+    action = <Button className={primary} disabled data-testid="button-purchase-ticket">Sold out</Button>;
+  } else if (effectiveTier) {
+    const total = quote?.total ?? unitPrice * safeQuantity;
+    summary = (
+      <span>
+        <span className="block font-semibold tabular-nums">{formatPrice(total, currency)}</span>
+        <span className="block text-xs text-muted-foreground">{safeQuantity} × {selectedTierData?.name}</span>
+      </span>
+    );
+    action = (
+      <Button className={primary} onClick={handleCheckout} disabled={isProcessing} data-testid="button-purchase-ticket">
+        {isProcessing ? "Redirecting…" : <><TicketIcon className="h-4 w-4 mr-2" />Checkout</>}
+      </Button>
+    );
+  } else {
+    summary = (
+      <span>
+        <span className="block text-xs text-muted-foreground">From</span>
+        <span className="block font-semibold tabular-nums">{formatPrice(lowestPrice, currency)}</span>
+      </span>
+    );
+    action = (
+      <Button className={primary} onClick={scrollToTickets} disabled={isLoadingTiers} data-testid="button-purchase-ticket">
+        <TicketIcon className="h-4 w-4 mr-2" />Select tickets
+      </Button>
+    );
+  }
+
+  const iconBtn = "h-11 w-11 rounded-full bg-black/60 text-white flex items-center justify-center transition-[background-color,transform] duration-150 ease-out hover:bg-black/80 active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white";
 
   return (
     <>
@@ -261,99 +367,205 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
 
       <Dialog open={true} onOpenChange={onClose}>
         <DialogContent
-          className="max-w-2xl max-h-[90vh] overflow-y-auto p-0"
+          // Phone: full-height sheet. Desktop: centred dialog. The primitive's own close
+          // button is hidden — our back/close control lives on the hero.
+          className={[
+            "p-0 gap-0 sm:max-w-2xl sm:max-h-[90vh] sm:rounded-2xl [&>button.absolute]:hidden",
+            "max-sm:h-[100dvh] max-sm:max-h-[100dvh] max-sm:max-w-none max-sm:rounded-none",
+            "max-sm:left-0 max-sm:top-0 max-sm:translate-x-0 max-sm:translate-y-0",
+            "max-sm:data-[state=open]:slide-in-from-left-0 max-sm:data-[state=open]:slide-in-from-top-0",
+            "max-sm:data-[state=closed]:slide-out-to-left-0 max-sm:data-[state=closed]:slide-out-to-top-0",
+          ].join(" ")}
           data-testid="modal-event-details"
           onInteractOutside={(e) => { if (lightboxOpen) e.preventDefault(); }}
           onEscapeKeyDown={(e) => { if (lightboxOpen) { e.preventDefault(); setLightboxOpen(false); } }}
         >
-          {/* Hero image — shows full image uncropped, click to open fullscreen lightbox */}
-          {event.imageUrl && (
-            <button
-              className="w-full overflow-hidden rounded-t-lg flex-shrink-0 cursor-zoom-in block bg-black"
-              onClick={() => setLightboxOpen(true)}
-              aria-label="View full image"
-            >
-              <img
-                src={event.imageUrl}
-                alt={event.title}
-                className="w-full max-h-72 object-contain hover:opacity-90 transition-opacity duration-200"
-              />
-            </button>
-          )}
+          <div className="relative">
+            {/* Hero — full image uncropped over a soft copy of itself; tap to enlarge */}
+            <div className="relative aspect-[16/10] sm:aspect-[16/8] bg-black overflow-hidden">
+              {event.imageUrl ? (
+                <>
+                  <img src={event.imageUrl} alt="" aria-hidden className="absolute inset-0 h-full w-full object-cover blur-[18px] scale-110 opacity-60" />
+                  <button
+                    type="button"
+                    className="relative block h-full w-full cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white"
+                    onClick={() => setLightboxOpen(true)}
+                    aria-label="View full image"
+                  >
+                    <img src={event.imageUrl} alt={event.title} className="h-full w-full object-contain" />
+                  </button>
+                </>
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                  <CalendarIcon className="h-10 w-10 opacity-40" />
+                </div>
+              )}
+              <div className="absolute inset-x-3 top-3 flex items-center justify-between">
+                <button type="button" className={iconBtn} onClick={onClose} aria-label="Close" data-testid="button-close-modal">
+                  <ArrowLeftIcon className="h-5 w-5 sm:hidden" />
+                  <XIcon className="h-5 w-5 hidden sm:block" />
+                </button>
+                <button type="button" className={iconBtn} onClick={() => setShareOpen(true)} aria-label="Share event" data-testid="button-share">
+                  <Share2Icon className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
 
-          {/* Main content */}
-          <div className="p-5 space-y-4">
-            {/* Title row */}
-            <DialogHeader>
-              <div className="flex items-start justify-between gap-3">
-                <DialogTitle className="text-xl leading-snug" data-testid="modal-event-title">
+            <div className="px-5 pt-5 pb-6 space-y-6">
+              {isCancelled && (
+                <div role="alert" className="flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/10 p-3.5">
+                  <AlertTriangleIcon className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
+                  <p className="text-sm">
+                    <span className="font-semibold">This event has been cancelled.</span>{" "}
+                    <span className="text-muted-foreground">Ticket holders are being refunded.</span>
+                  </p>
+                </div>
+              )}
+
+              {/* Title block */}
+              <DialogHeader {...rise(0)} className={`${rise(0).className} space-y-2 text-left`}>
+                <Eyebrow>
+                  <span data-testid="modal-event-category">{event.category}</span>
+                  {" · "}
+                  <span className={status.tone}>{status.label}</span>
+                </Eyebrow>
+                <DialogTitle className="font-serif text-3xl leading-[1.05] tracking-tight" data-testid="modal-event-title">
                   {event.title}
                 </DialogTitle>
-                <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-                  <Badge variant="secondary" data-testid="modal-event-category">{event.category}</Badge>
-                  <EventStatusBadge eventDate={event.eventDate} eventEndDate={event.eventEndDate} />
-                </div>
-              </div>
-              <DialogDescription className="sr-only">{event.description?.slice(0, 120)}</DialogDescription>
-            </DialogHeader>
+                <DialogDescription className="sr-only">{event.description?.slice(0, 120)}</DialogDescription>
+              </DialogHeader>
 
-            {/* Details */}
-            <div className="space-y-2.5">
-              <div className="flex items-center gap-3">
-                <CalendarIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                <div>
-                  <p className="font-medium text-sm" data-testid="modal-event-date">
-                    {format(new Date(event.eventDate), "EEEE, MMMM d, yyyy")}
+              {hasTicket && !isCancelled && (
+                <div {...rise(1)} className={`${rise(1).className} flex items-center justify-between gap-3 rounded-xl bg-primary/10 p-3.5`}>
+                  <p className="flex items-center gap-2 text-sm font-medium">
+                    <CheckCircleIcon className="h-5 w-5 text-primary" />You're going
                   </p>
-                  <p className="text-xs text-muted-foreground">
-                    {format(new Date(event.eventDate), "h:mm a")}
-                    {event.eventEndDate && ` — ${format(new Date(event.eventEndDate), "h:mm a")}`}
-                  </p>
+                  <Button size="sm" variant="outline" className="rounded-full min-h-[44px] active:scale-[0.97] transition-transform" onClick={() => navigate("/ticket-wallet")}>
+                    View ticket
+                  </Button>
                 </div>
-              </div>
+              )}
 
-              <div className="flex items-center gap-3">
-                <MapPinIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                <p className="text-sm" data-testid="modal-event-location">{event.location}</p>
-              </div>
-
-              {communityData && (
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <UsersIcon className="h-4 w-4 text-primary flex-shrink-0" />
-                    <div className="min-w-0">
-                      <button
-                        className="text-sm font-medium hover:underline truncate block text-left"
-                        onClick={() => {
-                          onClose();
-                          navigate(`/community/${(communityData as any).slug ?? communityData.id}`);
-                        }}
-                      >
-                        {communityData.name}
-                      </button>
-                      <p className="text-xs text-muted-foreground">
-                        {communityData.memberCount.toLocaleString()} {communityData.memberCount === 1 ? "member" : "members"}
+              {/* Key facts */}
+              <div {...rise(2)} className={`${rise(2).className} space-y-4`}>
+                <div className="flex items-start gap-3">
+                  <CalendarIcon className="h-5 w-5 text-muted-foreground flex-shrink-0 mt-0.5" />
+                  <div className="min-w-0 flex-1">
+                    <div>
+                      <p className="font-medium" data-testid="modal-event-date">{format(new Date(event.eventDate), "EEEE, d MMMM yyyy")}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {format(new Date(event.eventDate), "h:mm a")}
+                        {event.eventEndDate && ` – ${format(new Date(event.eventEndDate), "h:mm a")}`}
                       </p>
                     </div>
                   </div>
+                  {!isEventEnded && !isCancelled && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm" className="rounded-full min-h-[44px] gap-1 flex-shrink-0 active:scale-[0.97] transition-transform" aria-label="Add to calendar">
+                          Add <ChevronDownIcon className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem asChild>
+                          <a href={googleCalendarUrl(calendarEvent)} target="_blank" rel="noopener noreferrer">Google Calendar</a>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => downloadIcs(calendarEvent)}>Apple / Outlook (.ics)</DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <MapPinIcon className="h-5 w-5 text-muted-foreground flex-shrink-0 mt-0.5" />
+                  <div className="min-w-0 flex-1">
+                    <div>
+                      <p className="font-medium break-words" data-testid="modal-event-location">{event.location}</p>
+                      {event.city && !event.location.includes(event.city) && (
+                        <p className="text-sm text-muted-foreground">{event.city}</p>
+                      )}
+                    </div>
+                  </div>
+                  <Button variant="outline" size="sm" className="rounded-full min-h-[44px] flex-shrink-0 active:scale-[0.97] transition-transform" asChild>
+                    <a href={directionsUrl(event.location, event.latitude, event.longitude)} target="_blank" rel="noopener noreferrer" aria-label="Get directions">
+                      Directions
+                    </a>
+                  </Button>
+                </div>
+
+                {!!attendeesData?.totalCount && (
+                  <div className="flex items-center gap-3">
+                    <div className="flex -space-x-2 flex-shrink-0">
+                      {attendeesData.users.slice(0, 5).map((u) => (
+                        <Avatar key={u.id} className="h-7 w-7 border-2 border-background" data-testid={`avatar-attendee-${u.id}`}>
+                          <AvatarImage src={u.avatarUrl || ""} alt={u.displayName || u.username} />
+                          <AvatarFallback className="text-[10px]">{(u.displayName || u.username)[0]?.toUpperCase()}</AvatarFallback>
+                        </Avatar>
+                      ))}
+                    </div>
+                    <p className="text-sm text-muted-foreground" data-testid="modal-event-attendees">
+                      {attendeesData.totalCount} {attendeesData.totalCount === 1 ? "person" : "people"} going
+                    </p>
+                  </div>
+                )}
+
+                {isFreeEvent && !unlimitedSpots && !isCancelled && (
+                  <p className="text-sm text-muted-foreground" data-testid="modal-event-tickets-available">
+                    {spotsLeft === 0 ? "No spots left" : `${spotsLeft} of ${liveTicketsAvailable} spots left`}
+                  </p>
+                )}
+              </div>
+
+              {organizer && (
+                <div {...rise(3)} className={rise(3).className}>
+                  <OrganizerRow organizer={organizer} currentUserId={currentUser?.id} onNavigate={onClose} />
+                </div>
+              )}
+
+              {/* Tickets */}
+              {!isFreeEvent && !hasExternalTickets && !isCancelled && !isEventEnded && (
+                <section ref={ticketsRef} aria-labelledby="tickets-heading" className="scroll-mt-4 space-y-3">
+                  <h3 id="tickets-heading" className="text-sm font-semibold">Tickets</h3>
+                  {isLoadingTiers ? (
+                    <p className="text-sm text-muted-foreground">Loading ticket options…</p>
+                  ) : (
+                    <TicketPicker
+                      tiers={pickerTiers}
+                      currency={currency}
+                      selectedTier={effectiveTier}
+                      onSelectTier={(id) => { setSelectedTier(id); setQuantity(1); }}
+                      quantity={safeQuantity}
+                      onQuantity={setQuantity}
+                      maxQuantity={maxQuantity}
+                      quote={quote}
+                      fallbackTotal={unitPrice * safeQuantity}
+                    />
+                  )}
+                </section>
+              )}
+
+              {communityData && (
+                <div className="flex items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    className="flex items-center gap-3 min-w-0 text-left rounded-lg -m-1 p-1 transition-[background-color,transform] duration-150 ease-out hover:bg-muted/50 active:scale-[0.98]"
+                    onClick={() => { onClose(); navigate(`/community/${(communityData as any).slug ?? communityData.id}`); }}
+                  >
+                    <UsersIcon className="h-5 w-5 text-primary flex-shrink-0" />
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium truncate">{communityData.name}</span>
+                      <span className="block text-xs text-muted-foreground">
+                        {communityData.memberCount.toLocaleString()} {communityData.memberCount === 1 ? "member" : "members"}
+                      </span>
+                    </span>
+                  </button>
                   {currentUser && (
                     communityMembership?.isMember ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="flex-shrink-0"
-                        onClick={() => leaveCommunityMutation.mutate()}
-                        disabled={leaveCommunityMutation.isPending}
-                      >
+                      <Button variant="outline" size="sm" className="rounded-full min-h-[44px] flex-shrink-0" onClick={() => leaveCommunityMutation.mutate()} disabled={leaveCommunityMutation.isPending}>
                         {leaveCommunityMutation.isPending ? "Leaving…" : "Leave"}
                       </Button>
                     ) : (
-                      <Button
-                        size="sm"
-                        className="flex-shrink-0"
-                        onClick={() => joinCommunityMutation.mutate()}
-                        disabled={joinCommunityMutation.isPending}
-                      >
+                      <Button size="sm" className="rounded-full min-h-[44px] flex-shrink-0" onClick={() => joinCommunityMutation.mutate()} disabled={joinCommunityMutation.isPending}>
                         {joinCommunityMutation.isPending ? "Joining…" : "Join"}
                       </Button>
                     )
@@ -361,117 +573,43 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
                 </div>
               )}
 
-              {!!attendeesData?.totalCount && (
-                <div className="flex items-center gap-3">
-                  <div className="flex -space-x-2 flex-shrink-0">
-                    {attendeesData.users.slice(0, 6).map((u) => (
-                      <Avatar key={u.id} className="h-7 w-7 border-2 border-background" data-testid={`avatar-attendee-${u.id}`}>
-                        <AvatarImage src={u.avatarUrl || ""} alt={u.displayName || u.username} />
-                        <AvatarFallback className="text-[10px]">
-                          {(u.displayName || u.username)[0]?.toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
-                    ))}
-                  </div>
-                  <p className="text-sm text-muted-foreground" data-testid="modal-event-attendees">
-                    {attendeesData.totalCount} {attendeesData.totalCount === 1 ? "person" : "people"} going
-                  </p>
-                </div>
-              )}
-
-              <div className="flex items-center gap-3">
-                <UsersIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                <p className="text-sm" data-testid="modal-event-tickets-available">
-                  {isFreeEvent
-                    ? `${liveTicketsAvailable} spots available`
-                    : liveTicketsRemaining <= 0
-                      ? "Sold out"
-                      : `${liveTicketsRemaining} of ${liveTicketsTotal} tickets available`}
+              {/* About */}
+              <section aria-labelledby="about-heading">
+                <h3 id="about-heading" className="text-sm font-semibold mb-1.5">About this event</h3>
+                <p
+                  className={`text-sm leading-relaxed text-foreground/80 whitespace-pre-wrap max-w-[68ch] ${longDescription && !descExpanded ? "line-clamp-4" : ""}`}
+                  data-testid="modal-event-description"
+                >
+                  {event.description}
                 </p>
-              </div>
+                {longDescription && (
+                  <button
+                    type="button"
+                    className="mt-1 min-h-[44px] text-sm font-medium text-primary hover:underline"
+                    onClick={() => setDescExpanded((v) => !v)}
+                    aria-expanded={descExpanded}
+                  >
+                    {descExpanded ? "Show less" : "Show more"}
+                  </button>
+                )}
+              </section>
 
-              {/* Ticket pricing */}
-              {hasExternalTickets ? (
-                <div className="flex items-center gap-3">
-                  <ExternalLinkIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                  <Badge variant="default" className="bg-blue-500" data-testid="modal-event-price">External Tickets</Badge>
-                </div>
-              ) : isFreeEvent ? (
-                <div className="flex items-center gap-3">
-                  <TicketIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                  <Badge variant="default" className="bg-green-600" data-testid="modal-event-price">Free Event</Badge>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-3">
-                    <TicketIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                    <p className="text-sm font-semibold">Ticket Options</p>
-                  </div>
-                  {isLoadingTiers ? (
-                    <p className="text-xs text-muted-foreground ml-7">Loading ticket options…</p>
-                  ) : ticketTiers && ticketTiers.length > 0 ? (
-                    <div className="ml-7 space-y-2" data-testid="ticket-tiers-list">
-                      {ticketTiers.map((tier: any, index: number) => (
-                        <div
-                          key={tier.id}
-                          className="flex items-center justify-between p-3 rounded-md border"
-                          data-testid={`ticket-tier-${index}`}
-                        >
-                          <div>
-                            <p className="text-sm font-medium" data-testid={`tier-name-${index}`}>{tier.name}</p>
-                            <p className="text-xs text-muted-foreground">{tier.quantity} available</p>
-                          </div>
-                          <p className="font-semibold" data-testid={`tier-price-${index}`}>
-                            {formatPrice(tier.priceSmallestUnit, tier.currency ?? currency)}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-muted-foreground ml-7" data-testid="modal-event-price">
-                      {formatPrice(event.ticketPrice, currency)}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <Separator />
-
-            {/* About */}
-            <div>
-              <h3 className="text-sm font-semibold mb-1.5">About This Event</h3>
-              <DialogDescription className="text-sm whitespace-pre-wrap text-foreground/80" data-testid="modal-event-description">
-                {event.description}
-              </DialogDescription>
-            </div>
-
-            {isEventEnded && (
-              <>
-                <Separator />
-                <div>
+              {isEventEnded && (
+                <section aria-labelledby="ratings-heading">
                   <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-sm font-semibold">Ratings</h3>
-                    <RatingDisplay
-                      averageRating={eventRatingStats?.averageRating}
-                      totalRatings={eventRatingStats?.totalRatings ?? 0}
-                      size="sm"
-                    />
+                    <h3 id="ratings-heading" className="text-sm font-semibold">Ratings</h3>
+                    <RatingDisplay averageRating={eventRatingStats?.averageRating} totalRatings={eventRatingStats?.totalRatings ?? 0} size="sm" />
                   </div>
 
                   {!currentUser ? (
                     <p className="text-xs text-muted-foreground">Sign in to rate this event.</p>
                   ) : userEventRating?.hasRated && !isEditingRating ? (
-                    <div className="flex items-center justify-between gap-3 p-3 rounded-md border bg-muted/30">
+                    <div className="flex items-center justify-between gap-3 p-3 rounded-xl border bg-muted/30">
                       <div>
-                        <p className="text-sm font-medium flex items-center gap-1">
-                          Your rating: {userEventRating.rating} ★
-                        </p>
-                        {userEventRating.reviewText && (
-                          <p className="text-xs text-muted-foreground mt-1">{userEventRating.reviewText}</p>
-                        )}
+                        <p className="text-sm font-medium flex items-center gap-1">Your rating: {userEventRating.rating} ★</p>
+                        {userEventRating.reviewText && <p className="text-xs text-muted-foreground mt-1">{userEventRating.reviewText}</p>}
                       </div>
-                      <Button size="sm" variant="outline" onClick={() => setIsEditingRating(true)} data-testid="button-edit-rating">
+                      <Button size="sm" variant="outline" className="min-h-[44px]" onClick={() => setIsEditingRating(true)} data-testid="button-edit-rating">
                         Edit
                       </Button>
                     </div>
@@ -485,69 +623,20 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
                       errorMessage={submitEventRating.isError ? (submitEventRating.error as any)?.message ?? "Failed to submit rating" : null}
                       onCancel={userEventRating?.hasRated ? () => setIsEditingRating(false) : undefined}
                       onSubmit={(rating, reviewText) => {
-                        submitEventRating.mutate({ rating, reviewText }, {
-                          onSuccess: () => setIsEditingRating(false),
-                        });
+                        submitEventRating.mutate({ rating, reviewText }, { onSuccess: () => setIsEditingRating(false) });
                       }}
                     />
                   )}
-                </div>
-              </>
-            )}
-
-            <Separator />
-
-            {/* Actions — stack on mobile, row on sm+ */}
-            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-              {hasExternalTickets ? (
-                <Button className="flex-1" asChild data-testid="button-get-external-tickets">
-                  <a href={event.externalTicketUrl!} target="_blank" rel="noopener noreferrer">
-                    <ExternalLinkIcon className="h-4 w-4 mr-2" />
-                    Get Tickets
-                  </a>
-                </Button>
-              ) : isFreeEvent && requiresRSVP ? (
-                <Button
-                  className="flex-1"
-                  onClick={() => rsvpMutation.mutate()}
-                  disabled={rsvpMutation.isPending || hasRSVPed || isLoadingRSVPs}
-                  data-testid="button-rsvp"
-                >
-                  {isLoadingRSVPs ? "Loading…" : hasRSVPed ? (
-                    <><CheckCircleIcon className="h-4 w-4 mr-2" />Already RSVP'd</>
-                  ) : rsvpMutation.isPending ? "Processing…" : (
-                    <><CheckCircleIcon className="h-4 w-4 mr-2" />RSVP for Free</>
-                  )}
-                </Button>
-              ) : !isFreeEvent ? (
-                <Button
-                  className="flex-1"
-                  onClick={handlePurchaseTicket}
-                  disabled={isProcessing || isSoldOut}
-                  data-testid="button-purchase-ticket"
-                >
-                  {isProcessing ? "Redirecting…" : isSoldOut ? "Sold Out" : (
-                    <><TicketIcon className="h-4 w-4 mr-2" />Purchase Ticket</>
-                  )}
-                </Button>
-              ) : (
-                <Button
-                  className="flex-1"
-                  onClick={() => rsvpMutation.mutate()}
-                  disabled={rsvpMutation.isPending || hasRSVPed || isLoadingRSVPs}
-                  data-testid="button-rsvp"
-                >
-                  {isLoadingRSVPs ? "Loading…" : hasRSVPed ? "Already RSVP'd" : rsvpMutation.isPending ? "Processing…" : "RSVP (No ticket required)"}
-                </Button>
+                </section>
               )}
 
-              <Button variant="outline" size="icon" onClick={handleShare} data-testid="button-share">
-                <Share2Icon className="h-4 w-4" />
-              </Button>
+              <SimilarEvents event={event} />
+            </div>
 
-              <Button variant="outline" onClick={onClose} data-testid="button-close-modal">
-                Close
-              </Button>
+            {/* Sticky action bar — stays reachable however long the page is */}
+            <div className="sticky bottom-0 z-10 flex items-center gap-4 border-t bg-background px-5 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+              <div className="min-w-0 text-sm" data-testid="modal-event-price">{summary}</div>
+              <div className="ml-auto flex flex-1 sm:flex-none justify-end">{action}</div>
             </div>
           </div>
         </DialogContent>
@@ -558,98 +647,6 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
         onClose={() => setShareOpen(false)}
         shareData={{ type: "event", id: event.id, title: event.title, imageUrl: event.imageUrl }}
       />
-
-      {/* Purchase modal — tier selection (if configured) + quantity */}
-      <Dialog open={showTierSelection} onOpenChange={setShowTierSelection}>
-        <DialogContent className="sm:max-w-md" data-testid="dialog-tier-selection">
-          <DialogHeader>
-            <DialogTitle>{hasTiers ? "Select Ticket Tier" : "Purchase Ticket"}</DialogTitle>
-            <DialogDescription>
-              {hasTiers ? `Choose your ticket type for ${event.title}` : `Choose how many tickets for ${event.title}`}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-4">
-            {isLoadingTiers ? (
-              <p className="text-sm text-muted-foreground">Loading ticket options…</p>
-            ) : hasTiers ? (
-              <div className="space-y-3">
-                {ticketTiers.map((tier: any) => (
-                  <Card
-                    key={tier.id}
-                    className={`p-4 cursor-pointer transition-all hover-elevate ${
-                      selectedTier === tier.id ? "border-primary bg-primary/5" : "border-border"
-                    }`}
-                    onClick={() => { setSelectedTier(tier.id); setQuantity(1); }}
-                    data-testid={`tier-option-${tier.id}`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <h4 className="font-semibold text-sm" data-testid={`tier-option-name-${tier.id}`}>{tier.name}</h4>
-                        <p className="text-xs text-muted-foreground">{tier.quantity - tier.sold} available</p>
-                      </div>
-                      <p className="text-base font-bold" data-testid={`tier-option-price-${tier.id}`}>
-                        {formatPrice(tier.priceSmallestUnit, tier.currency ?? currency)}
-                      </p>
-                    </div>
-                  </Card>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">No ticket tiers available.</p>
-            )}
-
-            {(!hasTiers || selectedTier) && (
-              <div className="flex items-center justify-between rounded-lg border p-3">
-                <span className="text-sm font-medium">Quantity</span>
-                <div className="flex items-center gap-3">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                    disabled={quantity <= 1}
-                    data-testid="button-quantity-decrease"
-                  >
-                    <MinusIcon className="h-3.5 w-3.5" />
-                  </Button>
-                  <span className="w-6 text-center font-semibold" data-testid="text-quantity">{quantity}</span>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={() => setQuantity((q) => Math.min(maxQuantity, q + 1))}
-                    disabled={quantity >= maxQuantity}
-                    data-testid="button-quantity-increase"
-                  >
-                    <PlusIcon className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {(!hasTiers || selectedTier) && (
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Total</span>
-                <span className="font-bold text-base" data-testid="text-purchase-total">
-                  {formatPrice(unitPrice * quantity, currency)}
-                </span>
-              </div>
-            )}
-          </div>
-
-          <div className="flex gap-3">
-            <Button variant="outline" onClick={() => setShowTierSelection(false)} className="flex-1" data-testid="button-cancel-tier-selection">
-              Cancel
-            </Button>
-            <Button onClick={handleConfirmPurchase} disabled={hasTiers && !selectedTier} className="flex-1" data-testid="button-confirm-purchase">
-              Continue to Checkout
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }

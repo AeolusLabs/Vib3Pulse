@@ -13,6 +13,7 @@ import { geocodeAddress, sortByProximity } from "../utils/geo";
 import { rankEvents } from "../utils/eventRanking.js";
 import { staffCodeExpiry } from "../utils/staffCodeExpiry.js";
 import { MAX_GROUP_MEMBERS } from "./messages-routes.js";
+import { computeFeeSplit } from "../payments/fees.js";
 import QRCode from "qrcode";
 import { eventCreateDto, eventUpdateDto, insertTicketSchema, insertRsvpSchema } from "@shared/schema";
 
@@ -233,9 +234,47 @@ export function registerEventsRoutes(app: Express): void {
       if (!event) {
         return res.status(404).json({ message: "Event not found" });
       }
-      res.json(event);
+      // Public view of the organiser only — the full user row (email etc.) must not leave the server.
+      const { id, username, displayName, avatarUrl, isVerified, bio } = event.organizer;
+      res.json({ ...event, organizer: { id, username, displayName, avatarUrl, isVerified, bio } });
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch event" });
+    }
+  });
+
+  // What the buyer will actually be charged for a selection, including the booking
+  // fee when the organiser passes it on. Same computeFeeSplit() the checkout uses.
+  app.get("/api/events/:id/quote", async (req, res) => {
+    try {
+      const { tierId, quantity } = z.object({
+        tierId: z.string().optional(),
+        quantity: z.coerce.number().int().min(1).max(10).default(1),
+      }).parse(req.query);
+      const event = await storage.getEvent(req.params.id);
+      if (!event) return res.status(404).json({ message: "Event not found" });
+
+      let unit = event.ticketPrice;
+      let currency = event.currency;
+      if (tierId) {
+        const tier = await storage.getTicketTier(tierId);
+        if (!tier || tier.eventId !== event.id) return res.status(400).json({ message: "Invalid ticket tier" });
+        unit = tier.priceSmallestUnit;
+        currency = tier.currency ?? event.currency;
+      }
+      const baseAmount = unit * quantity;
+      const split = computeFeeSplit({
+        baseAmount,
+        commissionBps: await storage.getPlatformCommissionBps(),
+        passthroughToBuyer: event.feePassthroughToBuyer,
+      });
+      res.json({
+        baseAmount,
+        fee: split.buyerCharge - baseAmount,
+        total: split.buyerCharge,
+        currency,
+      });
+    } catch (error) {
+      res.status(400).json({ message: "Invalid quote request" });
     }
   });
 
