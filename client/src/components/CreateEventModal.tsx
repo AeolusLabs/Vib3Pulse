@@ -351,6 +351,27 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
 
   const updateEventMutation = useMutation<Event, Error, EventUpdateDto>({
     mutationFn: async ({ id, ...eventData }) => {
+      // Tiers first: the server refuses to drop a tier that has sales (or shrink it below
+      // what's sold), and that must fail BEFORE the event itself is changed. Kept tiers are
+      // updated in place so their sold counts and issued tickets stay intact.
+      const tiers = formData.entryType === "ticketed"
+        ? formData.tickets.map(ticket => ({
+            id: ticket.id, // unknown ids (newly added rows) are treated as new tiers server-side
+            name: ticket.name,
+            priceSmallestUnit: Math.round(ticket.price * 100),
+            currency: formData.currency || "GBP",
+            quantity: ticket.quantity,
+            salesEndDate: ticket.salesEndDate || null,
+            dayDate: ticket.dayDate || null,
+            description: ticket.description?.trim() || null,
+          }))
+        : [];
+      const tiersResponse = await apiRequest('PUT', `/api/events/${id}/ticket-tiers`, { tiers });
+      if (!tiersResponse.ok) {
+        const errorData = await tiersResponse.json().catch(() => ({ message: 'Failed to update ticket tiers' }));
+        throw new Error(errorData.message || 'Failed to update ticket tiers');
+      }
+
       const response = await apiRequest('PUT', `/api/events/${id}`, eventData);
       if (!response.ok) {
         if (response.status === 413) {
@@ -361,57 +382,14 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
       }
       return await response.json();
     },
-    onSuccess: async (updatedEvent) => {
-      try {
-        // Always delete existing tiers first
-        const existingTiersResponse = await fetch(`/api/events/${updatedEvent.id}/ticket-tiers`, {
-          credentials: "include",
-        });
-        if (existingTiersResponse.ok) {
-          const existingTiers = await existingTiersResponse.json();
-          if (existingTiers.length > 0) {
-            await Promise.all(
-              existingTiers.map((tier: any) =>
-                apiRequest('DELETE', `/api/ticket-tiers/${tier.id}`)
-              )
-            );
-          }
-        }
-
-        // Create new tiers only if ticketed and has tiers
-        if (formData.entryType === "ticketed" && formData.tickets.length > 0) {
-          const tiers = formData.tickets.map(ticket => ({
-            name: ticket.name,
-            priceSmallestUnit: Math.round(ticket.price * 100),
-            currency: formData.currency || "GBP",
-            quantity: ticket.quantity,
-            salesEndDate: ticket.salesEndDate || null,
-            dayDate: ticket.dayDate || null,
-            description: ticket.description?.trim() || null,
-          }));
-
-          const tiersResponse = await apiRequest('POST', `/api/events/${updatedEvent.id}/ticket-tiers`, { tiers });
-          if (!tiersResponse.ok) {
-            const errorData = await tiersResponse.json().catch(() => ({ message: 'Failed to update ticket tiers' }));
-            throw new Error(errorData.message || 'Failed to update ticket tiers');
-          }
-        }
-
-        queryClient.invalidateQueries({ queryKey: ["/api/events"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/events/my-events"] });
-        toast({
-          title: "Event updated!",
-          description: "Your event has been successfully updated.",
-        });
-        onClose();
-      } catch (error: any) {
-        toast({
-          title: "Error updating ticket tiers",
-          description: error.message || "Failed to update ticket tiers. Please try again.",
-          variant: "destructive",
-        });
-        // Don't close modal - let user retry
-      }
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/events"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/events/my-events"] });
+      toast({
+        title: "Event updated!",
+        description: "Your event has been successfully updated.",
+      });
+      onClose();
     },
     onError: (error) => {
       toast({

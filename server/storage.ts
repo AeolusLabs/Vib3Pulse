@@ -169,6 +169,7 @@ import { Pool } from "pg";
 import { eq, and, gte, gt, lt, lte, or, ilike, desc, asc, sql, count, inArray, notInArray, isNull, isNotNull, notExists } from "drizzle-orm";
 import crypto from "crypto";
 import { cached, postsCache, eventsCache, storiesCache, invalidateCache } from "./cache";
+import { planTierSync } from "./utils/tierSync";
 import { toPublicUser, toPublicAdminUser, type PublicUser, type PublicAdminUser } from "./auth";
 
 export const pool = new Pool({
@@ -601,6 +602,7 @@ export interface IStorage {
   getTicketTier(id: string): Promise<TicketTier | undefined>;
   createTicketTier(tier: InsertTicketTier): Promise<TicketTier>;
   createTicketTiers(tiers: InsertTicketTier[]): Promise<TicketTier[]>;
+  syncEventTicketTiers(eventId: string, desired: Array<Omit<InsertTicketTier, "eventId"> & { id?: string }>): Promise<TicketTier[]>;
   updateTicketTier(id: string, tier: Partial<InsertTicketTier>): Promise<TicketTier>;
   deleteTicketTier(id: string): Promise<void>;
   deleteEventTicketTiers(eventId: string): Promise<void>;
@@ -1598,6 +1600,39 @@ export class DbStorage implements IStorage {
     if (tiers.length === 0) return [];
     const result = await db.insert(ticketTiers).values(tiers).returning();
     return result;
+  }
+
+  // Saves an event's tiers on edit in ONE transaction (see planTierSync): kept tiers are
+  // updated in place so their id / sold count / issued tickets survive, instead of the old
+  // delete-everything-and-recreate that the tickets FK blocks once anything has sold.
+  // Rows are locked FOR UPDATE so a concurrent purchase can't slip between plan and apply.
+  async syncEventTicketTiers(eventId: string, desired: Array<Omit<InsertTicketTier, "eventId"> & { id?: string }>): Promise<TicketTier[]> {
+    return db.transaction(async (tx) => {
+      const rows = await tx.select().from(ticketTiers).where(eq(ticketTiers.eventId, eventId)).for("update");
+      const issued = rows.length
+        ? await tx
+            .select({ tierId: tickets.ticketTierId, n: sql<number>`count(*)::int` })
+            .from(tickets)
+            .where(inArray(tickets.ticketTierId, rows.map((r) => r.id)))
+            .groupBy(tickets.ticketTierId)
+        : [];
+      const issuedByTier = new Map(issued.map((i) => [i.tierId, i.n]));
+
+      const plan = planTierSync(
+        rows.map((r) => ({ id: r.id, name: r.name, sold: Math.max(r.sold, issuedByTier.get(r.id) ?? 0) })),
+        desired,
+      );
+
+      if (plan.removeIds.length) await tx.delete(ticketTiers).where(inArray(ticketTiers.id, plan.removeIds));
+      for (const { id, ...fields } of plan.update) {
+        await tx.update(ticketTiers).set(fields).where(and(eq(ticketTiers.id, id), eq(ticketTiers.eventId, eventId)));
+      }
+      if (plan.insert.length) {
+        await tx.insert(ticketTiers).values(plan.insert.map(({ id: _drop, ...t }) => ({ ...t, eventId })));
+      }
+      invalidateCache.events();
+      return tx.select().from(ticketTiers).where(eq(ticketTiers.eventId, eventId));
+    });
   }
 
   async updateTicketTier(id: string, tier: Partial<InsertTicketTier>): Promise<TicketTier> {

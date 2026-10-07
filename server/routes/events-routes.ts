@@ -14,6 +14,7 @@ import { rankEvents } from "../utils/eventRanking.js";
 import { staffCodeExpiry } from "../utils/staffCodeExpiry.js";
 import { MAX_GROUP_MEMBERS } from "./messages-routes.js";
 import { computeFeeSplit } from "../payments/fees.js";
+import { TierSyncError } from "../utils/tierSync.js";
 import QRCode from "qrcode";
 import { eventCreateDto, eventUpdateDto, insertTicketSchema, insertRsvpSchema } from "@shared/schema";
 
@@ -548,6 +549,51 @@ export function registerEventsRoutes(app: Express): void {
     } catch (error) {
       console.error('Error creating ticket tiers:', error);
       res.status(500).json({ message: "Failed to create ticket tiers" });
+    }
+  });
+
+  // Replace an event's tiers with the edited list (atomic; keeps sold counts). Tiers with
+  // sales can be edited but not removed or shrunk below what's sold -> 409 with a reason.
+  app.put("/api/events/:eventId/ticket-tiers", requireOrganizer, async (req, res) => {
+    try {
+      const event = await storage.getEvent(req.params.eventId);
+      if (!event) return res.status(404).json({ message: "Event not found" });
+      if (event.organizerId !== req.user!.id) {
+        return res.status(403).json({ message: "Not authorized to edit this event" });
+      }
+
+      const { tiers } = z.object({
+        tiers: z.array(z.object({
+          id: z.string().optional(),
+          name: z.string().trim().min(1).max(100),
+          priceSmallestUnit: z.number().int().min(0),
+          currency: z.string().default("GBP"),
+          quantity: z.number().int().min(0),
+          salesEndDate: z.string().nullable().optional(),
+          dayDate: z.string().nullable().optional(),
+          description: z.string().nullable().optional(),
+        })).max(50),
+      }).parse(req.body);
+
+      const saved = await storage.syncEventTicketTiers(
+        req.params.eventId,
+        tiers.map((t) => ({
+          id: t.id,
+          name: sanitizeTextOnly(t.name).trim(),
+          priceSmallestUnit: t.priceSmallestUnit,
+          currency: t.currency,
+          quantity: t.quantity,
+          salesEndDate: t.salesEndDate ? new Date(t.salesEndDate) : null,
+          dayDate: t.dayDate ? new Date(t.dayDate) : null,
+          description: t.description?.trim() ? sanitizeTextOnly(t.description).trim().slice(0, 140) : null,
+        })),
+      );
+      res.json(saved);
+    } catch (error) {
+      if (error instanceof TierSyncError) return res.status(409).json({ message: error.message });
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Invalid ticket tier data", errors: error.errors });
+      console.error("Error syncing ticket tiers:", error);
+      res.status(500).json({ message: "Failed to update ticket tiers" });
     }
   });
 
