@@ -235,7 +235,9 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
       {/* Full-screen lightbox — portalled to body so it sits above Radix's stacking context */}
       {lightboxOpen && event.imageUrl && createPortal(
         <div
-          className="fixed inset-0 z-[9999] bg-black flex items-center justify-center"
+          // pointer-events-auto: Radix sets body{pointer-events:none} while the Dialog is
+          // open, and this portal lives on body — without it nothing here is clickable.
+          className="fixed inset-0 z-[9999] bg-black flex items-center justify-center pointer-events-auto"
           onClick={() => setLightboxOpen(false)}
           role="dialog"
           aria-label="Full image view"
@@ -262,6 +264,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
           className="max-w-2xl max-h-[90vh] overflow-y-auto p-0"
           data-testid="modal-event-details"
           onInteractOutside={(e) => { if (lightboxOpen) e.preventDefault(); }}
+          onEscapeKeyDown={(e) => { if (lightboxOpen) { e.preventDefault(); setLightboxOpen(false); } }}
         >
           {/* Hero image — shows full image uncropped, click to open fullscreen lightbox */}
           {event.imageUrl && (
