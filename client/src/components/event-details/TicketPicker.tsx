@@ -1,4 +1,5 @@
 import { format } from "date-fns";
+import { daysLeftLabel, salesDaysLeft, salesEndInstant } from "@shared/ticketSales";
 import { Button } from "@/components/ui/button";
 import { MinusIcon, PlusIcon, TicketIcon } from "@/components/ui/icons";
 import { formatPrice } from "./format";
@@ -33,18 +34,41 @@ interface Props {
 }
 
 const LOW_STOCK = 10;
+const SALES_URGENT_DAYS = 3;
+
+export interface TierStatus {
+  label: string; // stock state: Available / Only N left / Sold out / Sales ended
+  available: boolean;
+  urgent: boolean; // low stock
+  salesNote?: string; // "Sales end Tue 20 Oct · 13 days left" — shown whenever the tier has an end date
+  salesUrgent?: boolean; // ending within a few days
+}
 
 // Availability copy never relies on colour alone — the words carry the state.
-export function tierStatus(t: PickerTier, now = Date.now()): { label: string; available: boolean; urgent: boolean } {
+export function tierStatus(t: PickerTier, now = Date.now()): TierStatus {
   const remaining = t.quantity - t.sold;
-  const end = t.salesEndDate ? new Date(t.salesEndDate).getTime() : null;
-  if (end !== null && end < now) return { label: "Sales ended", available: false, urgent: false };
+  const end = salesEndInstant(t.salesEndDate);
+  const ended = end !== null && now >= end;
+  const days = t.salesEndDate && !ended ? salesDaysLeft(t.salesEndDate, new Date(now)) : null;
+  const salesNote = t.salesEndDate && days !== null && days >= 0
+    ? `Sales end ${format(new Date(t.salesEndDate), "EEE d MMM")} · ${daysLeftLabel(days)}`
+    : undefined;
+  const salesUrgent = days !== null && days <= SALES_URGENT_DAYS;
+
+  if (ended) return { label: "Sales ended", available: false, urgent: false };
   if (remaining <= 0) return { label: "Sold out", available: false, urgent: false };
-  if (remaining <= LOW_STOCK) return { label: `Only ${remaining} left`, available: true, urgent: true };
-  if (end !== null && end - now < 7 * 24 * 3600 * 1000) {
-    return { label: `Sales end ${format(new Date(end), "EEE d MMM")}`, available: true, urgent: false };
-  }
-  return { label: "Available", available: true, urgent: false };
+  if (remaining <= LOW_STOCK) return { label: `Only ${remaining} left`, available: true, urgent: true, salesNote, salesUrgent };
+  return { label: "Available", available: true, urgent: false, salesNote, salesUrgent };
+}
+
+// Earliest upcoming sales deadline across tiers still on sale — drives the section summary.
+export function nextSalesDeadline(tiers: PickerTier[], now = Date.now()): { date: Date; days: number } | null {
+  const ends = tiers
+    .filter((t) => t.salesEndDate && tierStatus(t, now).available)
+    .map((t) => new Date(t.salesEndDate as string | Date))
+    .sort((a, b) => +a - +b);
+  if (!ends.length) return null;
+  return { date: ends[0], days: salesDaysLeft(ends[0], new Date(now)) };
 }
 
 export default function TicketPicker({
@@ -83,6 +107,11 @@ export default function TicketPicker({
                 <span className={`block text-xs mt-0.5 ${st.urgent ? "text-amber-500 font-medium" : "text-muted-foreground"}`}>
                   {st.label}
                 </span>
+                {st.salesNote && (
+                  <span className={`block text-xs ${st.salesUrgent ? "text-amber-500 font-medium" : "text-muted-foreground"}`}>
+                    {st.salesNote}
+                  </span>
+                )}
               </span>
               <span className="font-semibold flex-shrink-0" data-testid={`tier-price-${i}`}>
                 {formatPrice(t.priceSmallestUnit, t.currency ?? currency)}

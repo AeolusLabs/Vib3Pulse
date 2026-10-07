@@ -23,6 +23,7 @@ import { postEventToSocials } from "./services/socialPromotionService.js";
 import { sensitiveOperationLimiter } from "./security.js";
 import { recordTransaction } from "./payments/ledger.js";
 import { computeFeeSplit } from "./payments/fees.js";
+import { salesHaveEnded } from "@shared/ticketSales";
 import type { OrganizerSplit } from "./payments/types.js";
 import { sendTicketPurchaseEmail } from "./emailService.js";
 import { MAX_GROUP_MEMBERS } from "./routes/messages-routes.js";
@@ -235,6 +236,10 @@ export function registerPaymentRoutes(app: Express): void {
         return res.status(403).json({ message: "This event is not yet available for ticket purchase" });
       }
 
+      if (event.isCancelled) {
+        return res.status(400).json({ message: "This event has been cancelled" });
+      }
+
       let perTicketAmount = event.ticketPrice;
       let tierName = event.title;
 
@@ -242,6 +247,10 @@ export function registerPaymentRoutes(app: Express): void {
         const tier = await storage.getTicketTier(ticketTierId);
         if (!tier || tier.eventId !== eventId) {
           return res.status(400).json({ message: "Invalid ticket tier" });
+        }
+        // The UI greys out ended tiers, but the API is what actually has to refuse them.
+        if (salesHaveEnded(tier.salesEndDate)) {
+          return res.status(400).json({ message: `Ticket sales for "${tier.name}" have ended` });
         }
         perTicketAmount = tier.priceSmallestUnit;
         tierName = `${event.title} — ${tier.name}`;

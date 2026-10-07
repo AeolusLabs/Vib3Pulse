@@ -13,6 +13,7 @@ interface AnalyticsData {
   clicks: number;
   rsvps: number;
   ticketsSold: number;
+  conversionRate: number | null; // null = no views recorded yet
 }
 
 export function EventAnalytics({ eventId }: EventAnalyticsProps) {
@@ -61,14 +62,14 @@ export function EventAnalytics({ eventId }: EventAnalyticsProps) {
       bgColor: "bg-green-500/10",
     },
     {
-      label: "RSVPs",
+      label: "RSVPs / interested",
       value: analytics.rsvps,
       icon: CalendarIcon,
       color: "text-purple-500",
       bgColor: "bg-purple-500/10",
     },
     {
-      label: "Tickets Sold",
+      label: "Paid tickets",
       value: analytics.ticketsSold,
       icon: TicketIcon,
       color: "text-orange-500",
@@ -76,9 +77,9 @@ export function EventAnalytics({ eventId }: EventAnalyticsProps) {
     },
   ];
 
-  const conversionRate = analytics.views > 0 
-    ? (((analytics.rsvps + analytics.ticketsSold) / analytics.views) * 100).toFixed(1)
-    : "0";
+  // Computed server-side from distinct people (a free RSVP also issues a ticket, so adding the
+  // two columns here would count them twice). null -> "—" rather than a misleading 0%.
+  const conversionRate = analytics.conversionRate;
 
   return (
     <Card data-testid="card-analytics">
@@ -109,11 +110,13 @@ export function EventAnalytics({ eventId }: EventAnalyticsProps) {
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Conversion Rate</span>
             <span className="text-lg font-semibold text-primary" data-testid="text-conversion-rate">
-              {conversionRate}%
+              {conversionRate === null ? "—" : `${conversionRate}%`}
             </span>
           </div>
           <p className="text-xs text-muted-foreground mt-1">
-            Based on RSVPs and ticket purchases vs. total views
+            {conversionRate === null
+              ? "No views recorded yet. Conversion appears once people start viewing this event."
+              : "People who RSVP'd or bought a ticket, as a share of views"}
           </p>
         </div>
       </CardContent>

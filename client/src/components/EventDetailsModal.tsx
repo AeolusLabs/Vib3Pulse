@@ -24,7 +24,9 @@ import { directionsUrl, downloadIcs, googleCalendarUrl, type CalendarEvent } fro
 import { formatPrice } from "@/components/event-details/format";
 import OrganizerRow, { type PublicOrganizer } from "@/components/event-details/OrganizerRow";
 import SimilarEvents from "@/components/event-details/SimilarEvents";
-import TicketPicker, { tierStatus, type PickerTier, type Quote } from "@/components/event-details/TicketPicker";
+import TicketPicker, { nextSalesDeadline, tierStatus, type PickerTier, type Quote } from "@/components/event-details/TicketPicker";
+import { daysLeftLabel } from "@shared/ticketSales";
+import { trackEventClick, trackEventView } from "@/lib/eventTracking";
 
 interface EventDetailsModalProps {
   event: Event;
@@ -84,6 +86,9 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, [toast]);
+
+  // Count a view once per session (the server ignores the organiser's own views).
+  useEffect(() => { trackEventView(event.id); }, [event.id]);
 
   const currency = (event as any).currency as string | undefined;
   const communityId = (event as any).communityId as string | undefined;
@@ -162,7 +167,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
   const liveTicketsAvailable = liveEvent?.ticketsAvailable ?? event.ticketsAvailable;
   const liveTicketsSold = liveEvent?.ticketsSold ?? event.ticketsSold;
 
-  const { data: attendeesData } = useQuery<{ users: Array<{ id: string; username: string; displayName: string | null; avatarUrl: string | null }>; totalCount: number }>({
+  const { data: attendeesData } = useQuery<{ users: Array<{ id: string; username: string; displayName: string | null; avatarUrl: string | null }>; totalCount: number; interestedCount?: number }>({
     queryKey: ["/api/events", event.id, "attendees"],
     queryFn: async () => {
       const response = await fetch(`/api/events/${event.id}/attendees`);
@@ -191,19 +196,41 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
     },
   });
 
+  // Free events: RSVP books a free ticket. Paid / external events: RSVP is "interested" (no ticket).
+  const interestOnly = event.ticketPrice > 0 || !!event.externalTicketUrl;
+
+  const refreshRsvpData = () => {
+    queryClient.invalidateQueries({ queryKey: ["/api/rsvps"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/tickets"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/events", event.id, "attendees"] });
+  };
+
   const rsvpMutation = useMutation({
     mutationFn: async () => {
-      await apiRequest("POST", "/api/rsvps", { eventId: event.id });
+      if (!currentUser) throw new Error("Sign in to RSVP");
+      const res = await apiRequest("POST", "/api/rsvps", { eventId: event.id });
+      return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/rsvps"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/tickets"] });
-      toast({ title: "RSVP Confirmed!", description: "You've successfully RSVP'd to this event." });
-      onClose();
+      refreshRsvpData();
+      if (interestOnly) {
+        toast({ title: "Marked as interested", description: "The organiser can see you're interested." });
+      } else {
+        toast({ title: "RSVP confirmed!", description: "You're going. Your free ticket is in your wallet." });
+      }
     },
-    onError: () => {
-      toast({ title: "RSVP Failed", description: "Unable to RSVP. You may have already RSVP'd.", variant: "destructive" });
+    onError: (error: any) => {
+      toast({ title: "Couldn't RSVP", description: error?.message || "Please try again.", variant: "destructive" });
     },
+  });
+
+  const cancelRsvpMutation = useMutation({
+    mutationFn: async () => { await apiRequest("DELETE", `/api/rsvps/${event.id}`); },
+    onSuccess: () => {
+      refreshRsvpData();
+      toast({ title: interestOnly ? "Removed interest" : "RSVP cancelled" });
+    },
+    onError: () => toast({ title: "Couldn't cancel", description: "Please try again.", variant: "destructive" }),
   });
 
   // ── Ticket selection ──────────────────────────────────────────────────────
@@ -225,6 +252,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
         sold: liveTicketsSold,
       }];
   const availableTiers = pickerTiers.filter((t) => tierStatus(t).available);
+  const salesDeadline = nextSalesDeadline(pickerTiers);
   const isSoldOut = !isLoadingTiers && availableTiers.length === 0;
   // Only one thing to buy → pre-select it so the buyer isn't asked to pick from a list of one.
   const effectiveTier = selectedTier ?? (availableTiers.length === 1 ? availableTiers[0].id : null);
@@ -249,12 +277,14 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
   });
 
   const scrollToTickets = () => {
+    trackEventClick(event.id);
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     ticketsRef.current?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
   };
 
   const handleCheckout = () => {
     if (!effectiveTier) return scrollToTickets();
+    trackEventClick(event.id);
     setIsProcessing(true);
     purchaseTicketMutation.mutate({
       tierId: effectiveTier === FLAT_TIER_ID ? undefined : effectiveTier,
@@ -290,9 +320,26 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
     summary = <span className="text-muted-foreground">Tickets sold by the organiser</span>;
     action = (
       <Button className={primary} asChild data-testid="button-get-external-tickets">
-        <a href={event.externalTicketUrl!} target="_blank" rel="noopener noreferrer">
+        <a href={event.externalTicketUrl!} target="_blank" rel="noopener noreferrer" onClick={() => trackEventClick(event.id)}>
           <ExternalLinkIcon className="h-4 w-4 mr-2" />Get tickets
         </a>
+      </Button>
+    );
+  } else if (isFreeEvent && hasRSVPed) {
+    summary = (
+      <span className="flex items-center gap-2 font-semibold">
+        <CheckCircleIcon className="h-5 w-5 text-primary" />You're going
+      </span>
+    );
+    action = (
+      <Button
+        variant="outline"
+        className={primary}
+        onClick={() => cancelRsvpMutation.mutate()}
+        disabled={cancelRsvpMutation.isPending}
+        data-testid="button-cancel-rsvp"
+      >
+        {cancelRsvpMutation.isPending ? "Cancelling…" : "Cancel RSVP"}
       </Button>
     );
   } else if (isFreeEvent) {
@@ -300,13 +347,13 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
     action = (
       <Button
         className={primary}
-        onClick={() => rsvpMutation.mutate()}
-        disabled={rsvpMutation.isPending || hasRSVPed || isLoadingRSVPs}
+        onClick={() => { trackEventClick(event.id); rsvpMutation.mutate(); }}
+        disabled={rsvpMutation.isPending || isLoadingRSVPs}
         data-testid="button-rsvp"
       >
-        {isLoadingRSVPs ? "Loading…" : hasRSVPed ? (
-          <><CheckCircleIcon className="h-4 w-4 mr-2" />You're going</>
-        ) : rsvpMutation.isPending ? "Processing…" : requiresRSVP ? "RSVP for free" : "RSVP"}
+        {isLoadingRSVPs ? "Loading…" : rsvpMutation.isPending ? "Processing…" : (
+          <><CheckCircleIcon className="h-4 w-4 mr-2" />{requiresRSVP ? "RSVP for free" : "RSVP"}</>
+        )}
       </Button>
     );
   } else if (isSoldOut) {
@@ -410,7 +457,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
                   <ArrowLeftIcon className="h-5 w-5 sm:hidden" />
                   <XIcon className="h-5 w-5 hidden sm:block" />
                 </button>
-                <button type="button" className={iconBtn} onClick={() => setShareOpen(true)} aria-label="Share event" data-testid="button-share">
+                <button type="button" className={iconBtn} onClick={() => { trackEventClick(event.id); setShareOpen(true); }} aria-label="Share event" data-testid="button-share">
                   <Share2Icon className="h-5 w-5" />
                 </button>
               </div>
@@ -473,9 +520,9 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem asChild>
-                          <a href={googleCalendarUrl(calendarEvent)} target="_blank" rel="noopener noreferrer">Google Calendar</a>
+                          <a href={googleCalendarUrl(calendarEvent)} target="_blank" rel="noopener noreferrer" onClick={() => trackEventClick(event.id)}>Google Calendar</a>
                         </DropdownMenuItem>
-                        <DropdownMenuItem onSelect={() => downloadIcs(calendarEvent)}>Apple / Outlook (.ics)</DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => { trackEventClick(event.id); downloadIcs(calendarEvent); }}>Apple / Outlook (.ics)</DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   )}
@@ -496,7 +543,7 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
                     </div>
                   </div>
                   <Button variant="outline" size="sm" className="rounded-full min-h-[44px] flex-shrink-0 active:scale-[0.97] transition-transform" asChild>
-                    <a href={directionsUrl(event.location, event.latitude, event.longitude)} target="_blank" rel="noopener noreferrer" aria-label="Get directions">
+                    <a href={directionsUrl(event.location, event.latitude, event.longitude)} target="_blank" rel="noopener noreferrer" aria-label="Get directions" onClick={() => trackEventClick(event.id)}>
                       Directions
                     </a>
                   </Button>
@@ -544,6 +591,32 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
                 )}
               </div>
 
+              {interestOnly && !isEventEnded && !isCancelled && (
+                <div className="flex items-center gap-3" data-testid="modal-event-interested">
+                  <Button
+                    type="button"
+                    variant={hasRSVPed ? "default" : "outline"}
+                    className="rounded-full min-h-[44px] active:scale-[0.97] transition-transform duration-150 ease-out"
+                    aria-pressed={!!hasRSVPed}
+                    disabled={rsvpMutation.isPending || cancelRsvpMutation.isPending || isLoadingRSVPs}
+                    onClick={() => {
+                      if (hasRSVPed) return cancelRsvpMutation.mutate();
+                      trackEventClick(event.id);
+                      rsvpMutation.mutate();
+                    }}
+                    data-testid="button-rsvp"
+                  >
+                    {hasRSVPed && <CheckCircleIcon className="h-4 w-4 mr-2" />}
+                    {hasRSVPed ? "Interested" : "I'm interested"}
+                  </Button>
+                  {!!attendeesData?.interestedCount && (
+                    <span className="text-sm text-muted-foreground">
+                      {attendeesData.interestedCount} interested
+                    </span>
+                  )}
+                </div>
+              )}
+
               {organizer && (
                 <div {...rise(3)} className={rise(3).className}>
                   <OrganizerRow organizer={organizer} currentUserId={currentUser?.id} onNavigate={onClose} />
@@ -553,7 +626,17 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
               {/* Tickets */}
               {!isFreeEvent && !hasExternalTickets && !isCancelled && !isEventEnded && (
                 <section ref={ticketsRef} aria-labelledby="tickets-heading" className="scroll-mt-4 space-y-3">
-                  <h3 id="tickets-heading" className="text-sm font-semibold">Tickets</h3>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <h3 id="tickets-heading" className="text-sm font-semibold">Tickets</h3>
+                    {salesDeadline && (
+                      <p
+                        className={`text-xs text-right ${salesDeadline.days <= 3 ? "text-amber-500 font-medium" : "text-muted-foreground"}`}
+                        data-testid="modal-sales-end"
+                      >
+                        Sales end {format(salesDeadline.date, "EEE d MMM")} · {daysLeftLabel(salesDeadline.days)}
+                      </p>
+                    )}
+                  </div>
                   {isLoadingTiers ? (
                     <p className="text-sm text-muted-foreground">Loading ticket options…</p>
                   ) : (

@@ -170,6 +170,7 @@ import { eq, and, gte, gt, lt, lte, or, ilike, desc, asc, sql, count, inArray, n
 import crypto from "crypto";
 import { cached, postsCache, eventsCache, storiesCache, invalidateCache } from "./cache";
 import { planTierSync } from "./utils/tierSync";
+import { conversionPct } from "@shared/analyticsMath";
 import { toPublicUser, toPublicAdminUser, type PublicUser, type PublicAdminUser } from "./auth";
 
 export const pool = new Pool({
@@ -567,7 +568,7 @@ export interface IStorage {
   // Public "who's going" sample for the Event Detail page — union of RSVP'd
   // and confirmed-ticket-holding users, deduped, capped at `limit` rows
   // returned but totalCount reflects the full distinct attendee count.
-  getEventAttendeesSample(eventId: string, limit?: number): Promise<{ users: Array<Pick<User, "id" | "username" | "displayName" | "avatarUrl">>; totalCount: number }>;
+  getEventAttendeesSample(eventId: string, limit?: number): Promise<{ users: Array<Pick<User, "id" | "username" | "displayName" | "avatarUrl">>; totalCount: number; interestedCount: number }>;
   getAllEventAttendeeIds(eventId: string): Promise<string[]>;
   // Single grouped query (not N+1) — real revenue per event for an event-list
   // view like Manage Events, as opposed to getOrganizerDemographics's heavier
@@ -777,7 +778,7 @@ export interface IStorage {
 
   trackEventView(eventId: string, userId?: string): Promise<void>;
   trackEventClick(eventId: string, actionType: string, userId?: string): Promise<void>;
-  getEventAnalytics(eventId: string): Promise<{ views: number; clicks: number; rsvps: number; ticketsSold: number }>;
+  getEventAnalytics(eventId: string): Promise<{ views: number; clicks: number; rsvps: number; ticketsSold: number; conversionRate: number | null }>;
   promoteEvent(eventId: string, durationDays: number): Promise<Event>;
   getPromotedEvents(): Promise<Event[]>;
   createEventPost(userId: string, eventId: string, content: string, imageUrl?: string): Promise<Post>;
@@ -847,6 +848,7 @@ export interface IStorage {
       rsvps: number;
       tickets: number;
       views: number;
+      converted: number; // distinct people who RSVP'd or bought a paid ticket
       revenue: number;
       currency: string;
       ticketPrice: number;
@@ -859,6 +861,9 @@ export interface IStorage {
     averageTicketPrice: number;
     bestSellingEvent: { title: string; tickets: number; revenue: number; currency: string } | null;
     conversionRate: number;
+    convertedTotal: number; // distinct (event, person) pairs that RSVP'd or bought
+    buyers: number; // distinct (event, person) pairs that bought a paid ticket
+    rsvpBuyers: number; // of those, people who both RSVP'd (interested) and bought a paid ticket
   }>;
 
   // ============================================
@@ -1528,17 +1533,26 @@ export class DbStorage implements IStorage {
     return result.map(row => ({ ...row.tickets, user: toPublicUser(row.users) }));
   }
 
-  async getEventAttendeesSample(eventId: string, limit: number = 12): Promise<{ users: Array<Pick<User, "id" | "username" | "displayName" | "avatarUrl">>; totalCount: number }> {
-    const [rsvpRows, ticketRows] = await Promise.all([
+  // On paid / external-ticket events an RSVP is only "interested" (no ticket), so it must not
+  // count as going or seed the group chat; on free events an RSVP is a real booking.
+  private async rsvpIsInterestOnly(eventId: string): Promise<boolean> {
+    const [ev] = await db.select({ price: events.ticketPrice, ext: events.externalTicketUrl }).from(events).where(eq(events.id, eventId));
+    return !!ev && (ev.price > 0 || !!ev.ext);
+  }
+
+  async getEventAttendeesSample(eventId: string, limit: number = 12): Promise<{ users: Array<Pick<User, "id" | "username" | "displayName" | "avatarUrl">>; totalCount: number; interestedCount: number }> {
+    const [rsvpRows, ticketRows, interestOnly] = await Promise.all([
       db.select({ userId: rsvps.userId }).from(rsvps).where(eq(rsvps.eventId, eventId)),
       db.select({ userId: tickets.userId }).from(tickets).where(and(eq(tickets.eventId, eventId), eq(tickets.status, "confirmed"))),
+      this.rsvpIsInterestOnly(eventId),
     ]);
 
     const attendeeIds = new Set<string>();
-    rsvpRows.forEach(r => attendeeIds.add(r.userId));
     ticketRows.forEach(t => attendeeIds.add(t.userId));
+    if (!interestOnly) rsvpRows.forEach(r => attendeeIds.add(r.userId));
+    const interestedCount = interestOnly ? rsvpRows.filter(r => !attendeeIds.has(r.userId)).length : 0;
     const totalCount = attendeeIds.size;
-    if (totalCount === 0) return { users: [], totalCount: 0 };
+    if (totalCount === 0) return { users: [], totalCount: 0, interestedCount };
 
     const sampleIds = Array.from(attendeeIds).slice(0, limit);
     const attendeeRows = await db
@@ -1546,18 +1560,19 @@ export class DbStorage implements IStorage {
       .from(users)
       .where(inArray(users.id, sampleIds));
 
-    return { users: attendeeRows, totalCount };
+    return { users: attendeeRows, totalCount, interestedCount };
   }
 
   // Full (uncapped) distinct RSVP'd + confirmed-ticket-holding user id list —
   // used to seed an event group chat with every current attendee at once.
   async getAllEventAttendeeIds(eventId: string): Promise<string[]> {
-    const [rsvpRows, ticketRows] = await Promise.all([
+    const [rsvpRows, ticketRows, interestOnly] = await Promise.all([
       db.select({ userId: rsvps.userId }).from(rsvps).where(eq(rsvps.eventId, eventId)),
       db.select({ userId: tickets.userId }).from(tickets).where(and(eq(tickets.eventId, eventId), eq(tickets.status, "confirmed"))),
+      this.rsvpIsInterestOnly(eventId),
     ]);
     const attendeeIds = new Set<string>();
-    rsvpRows.forEach(r => attendeeIds.add(r.userId));
+    if (!interestOnly) rsvpRows.forEach(r => attendeeIds.add(r.userId));
     ticketRows.forEach(t => attendeeIds.add(t.userId));
     return Array.from(attendeeIds);
   }
@@ -1682,6 +1697,18 @@ export class DbStorage implements IStorage {
     await db
       .delete(rsvps)
       .where(and(eq(rsvps.userId, userId), eq(rsvps.eventId, eventId)));
+    // A free RSVP also issued a free ticket — void it so it can't be scanned at the door.
+    // Paid tickets (amount_paid > 0) and already-scanned ones are never touched.
+    await db
+      .update(tickets)
+      .set({ status: "cancelled" })
+      .where(and(
+        eq(tickets.userId, userId),
+        eq(tickets.eventId, eventId),
+        eq(tickets.status, "confirmed"),
+        eq(tickets.amountPaid, 0),
+        isNull(tickets.checkedInAt),
+      ));
   }
 
   async getPosts(): Promise<Array<Post & { user: User }>> {
@@ -3367,7 +3394,7 @@ export class DbStorage implements IStorage {
     });
   }
 
-  async getEventAnalytics(eventId: string): Promise<{ views: number; clicks: number; rsvps: number; ticketsSold: number }> {
+  async getEventAnalytics(eventId: string): Promise<{ views: number; clicks: number; rsvps: number; ticketsSold: number; conversionRate: number | null }> {
     const viewsResult = await db
       .select({ count: count() })
       .from(eventAnalytics)
@@ -3378,21 +3405,25 @@ export class DbStorage implements IStorage {
       .from(eventAnalytics)
       .where(and(eq(eventAnalytics.eventId, eventId), eq(eventAnalytics.actionType, 'click')));
     
-    const rsvpsResult = await db
-      .select({ count: count() })
-      .from(rsvps)
-      .where(eq(rsvps.eventId, eventId));
-    
-    const ticketsResult = await db
-      .select({ count: count() })
+    // RSVPs = distinct people. Paid tickets only: a free RSVP also issues a free ticket, which would
+    // otherwise count the same person twice (once as an RSVP, once as a "sale").
+    const rsvpRows = await db.select({ userId: rsvps.userId }).from(rsvps).where(eq(rsvps.eventId, eventId));
+    const paidRows = await db
+      .select({ userId: tickets.userId })
       .from(tickets)
-      .where(eq(tickets.eventId, eventId));
-    
+      .where(and(eq(tickets.eventId, eventId), eq(tickets.status, 'confirmed'), gt(tickets.amountPaid, 0)));
+
+    const converted = new Set<string>();
+    rsvpRows.forEach(r => converted.add(r.userId));
+    paidRows.forEach(t => converted.add(t.userId));
+    const views = viewsResult[0]?.count || 0;
+
     return {
-      views: viewsResult[0]?.count || 0,
+      views,
       clicks: clicksResult[0]?.count || 0,
-      rsvps: rsvpsResult[0]?.count || 0,
-      ticketsSold: ticketsResult[0]?.count || 0,
+      rsvps: new Set(rsvpRows.map(r => r.userId)).size,
+      ticketsSold: paidRows.length,
+      conversionRate: conversionPct(views, converted.size),
     };
   }
 
@@ -3827,6 +3858,7 @@ export class DbStorage implements IStorage {
       rsvps: number;
       tickets: number;
       views: number;
+      converted: number; // distinct people who RSVP'd or bought a paid ticket
       revenue: number;
       currency: string;
       ticketPrice: number;
@@ -3839,6 +3871,9 @@ export class DbStorage implements IStorage {
     averageTicketPrice: number;
     bestSellingEvent: { title: string; tickets: number; revenue: number; currency: string } | null;
     conversionRate: number;
+    convertedTotal: number;
+    buyers: number;
+    rsvpBuyers: number;
   }> {
     const { startDate, endDate } = options ?? {};
 
@@ -3861,6 +3896,9 @@ export class DbStorage implements IStorage {
         averageTicketPrice: 0,
         bestSellingEvent: null,
         conversionRate: 0,
+        convertedTotal: 0,
+        buyers: 0,
+        rsvpBuyers: 0,
       };
     }
 
@@ -3883,12 +3921,12 @@ export class DbStorage implements IStorage {
 
     // Attendees: union of RSVP + ticket user IDs within the date window
     const rsvpUsers = await db
-      .select({ userId: rsvps.userId })
+      .select({ userId: rsvps.userId, eventId: rsvps.eventId })
       .from(rsvps)
       .where(and(inArray(rsvps.eventId, eventIds), ...rsvpDateFilters));
 
     const ticketUsers = await db
-      .select({ userId: tickets.userId })
+      .select({ userId: tickets.userId, eventId: tickets.eventId, amountPaid: tickets.amountPaid })
       .from(tickets)
       .where(and(
         inArray(tickets.eventId, eventIds),
@@ -3952,8 +3990,21 @@ export class DbStorage implements IStorage {
         percentage: totalUsers > 0 ? Math.round((c / totalUsers) * 100) : 0,
       }));
 
+    // "Tickets sold" = paid tickets. Free-event RSVPs also issue a free ticket (already counted as RSVPs).
+    const paidTickets = ticketUsers.filter(t => (t.amountPaid ?? 0) > 0);
     const totalRsvps = rsvpUsers.length;
-    const totalTicketsSold = ticketUsers.length;
+    const totalTicketsSold = paidTickets.length;
+
+    // Conversion counts each (event, person) once, however many ways they converted.
+    const rsvpPairs = new Set(rsvpUsers.map(r => `${r.eventId}:${r.userId}`));
+    const paidPairs = new Set(paidTickets.map(t => `${t.eventId}:${t.userId}`));
+    const convertedPairs = new Set<string>([...Array.from(rsvpPairs), ...Array.from(paidPairs)]);
+    const rsvpBuyers = Array.from(paidPairs).filter(p => rsvpPairs.has(p)).length;
+    const convertedByEvent = new Map<string, number>();
+    convertedPairs.forEach(p => {
+      const evId = p.slice(0, p.indexOf(':'));
+      convertedByEvent.set(evId, (convertedByEvent.get(evId) ?? 0) + 1);
+    });
 
     // Total views within date window
     const viewsResult = await db
@@ -3976,7 +4027,7 @@ export class DbStorage implements IStorage {
 
           db.select({ count: count() })
             .from(tickets)
-            .where(and(eq(tickets.eventId, event.id), eq(tickets.status, 'confirmed'), ...ticketDateFilters)),
+            .where(and(eq(tickets.eventId, event.id), eq(tickets.status, 'confirmed'), gt(tickets.amountPaid, 0), ...ticketDateFilters)),
 
           db.select({ total: sql<number>`coalesce(sum(${tickets.amountPaid}), 0)` })
             .from(tickets)
@@ -3997,6 +4048,7 @@ export class DbStorage implements IStorage {
           rsvps: evtRsvps[0]?.count || 0,
           tickets: evtTickets[0]?.count || 0,
           views: evtViews[0]?.count || 0,
+          converted: convertedByEvent.get(event.id) ?? 0,
           revenue: Number(evtRevenue[0]?.total) || 0,
           currency: event.currency,
           ticketPrice: event.ticketPrice || 0,
@@ -4020,6 +4072,7 @@ export class DbStorage implements IStorage {
       .where(and(
         inArray(tickets.eventId, eventIds),
         eq(tickets.status, 'confirmed'),
+        gt(tickets.amountPaid, 0),
         ...ticketDateFilters,
       ));
 
@@ -4092,10 +4145,8 @@ export class DbStorage implements IStorage {
       ? { title: sortedByTickets[0].title, tickets: sortedByTickets[0].tickets, revenue: sortedByTickets[0].revenue, currency: sortedByTickets[0].currency }
       : null;
 
-    // Conversion = (RSVPs + tickets) / views — ticket purchases already unique per user
-    const conversionRate = totalViews > 0
-      ? Math.round(((totalRsvps + totalTicketsSold) / totalViews) * 1000) / 10
-      : 0;
+    // Conversion = distinct people who RSVP'd or bought / views, capped at 100%.
+    const conversionRate = conversionPct(totalViews, convertedPairs.size) ?? 0;
 
     return {
       totalEvents: organizerEvents.length,
@@ -4111,6 +4162,9 @@ export class DbStorage implements IStorage {
       averageTicketPrice,
       bestSellingEvent,
       conversionRate,
+      convertedTotal: convertedPairs.size,
+      buyers: paidPairs.size,
+      rsvpBuyers,
     };
   }
 
@@ -4728,6 +4782,14 @@ export class DbStorage implements IStorage {
       cancelledAt: null,
       feePassthroughToBuyer: r.venueEntry.feePassthroughToBuyer,
       communityId: null,
+      doorsOpenAt: null,
+      ageRestriction: 'all',
+      parentalGuidance: 'none',
+      dressCode: null,
+      venueName: null,
+      lineup: null,
+      refundPolicy: null,
+      goodToKnow: null,
       organizer: toPublicUser(r.organizer),
       sourceType: 'venue_entry' as const,
     }));

@@ -822,6 +822,10 @@ export function registerEventsRoutes(app: Express): void {
   app.post("/api/events/:id/track-view", async (req, res) => {
     try {
       const userId = req.user?.id;
+      const event = await storage.getEvent(req.params.id);
+      if (!event) return res.status(404).json({ message: "Event not found" });
+      // An organiser checking their own page isn't an audience view.
+      if (userId && userId === event.organizerId) return res.json({ message: "Ignored" });
       await storage.trackEventView(req.params.id, userId);
       res.json({ message: "View tracked" });
     } catch (error) {
@@ -832,12 +836,13 @@ export function registerEventsRoutes(app: Express): void {
 
   app.post("/api/events/:id/track-click", async (req, res) => {
     try {
-      const { actionType } = req.body;
-      if (!actionType || typeof actionType !== 'string') {
-        return res.status(400).json({ message: "Invalid action type" });
-      }
+      // Only the interaction type the dashboards count, not arbitrary client-supplied strings.
+      const { actionType } = z.object({ actionType: z.literal("click") }).parse(req.body);
 
       const userId = req.user?.id;
+      const event = await storage.getEvent(req.params.id);
+      if (!event) return res.status(404).json({ message: "Event not found" });
+      if (userId && userId === event.organizerId) return res.json({ message: "Ignored" });
       await storage.trackEventClick(req.params.id, actionType, userId);
       res.json({ message: "Click tracked" });
     } catch (error) {
@@ -1345,9 +1350,8 @@ export function registerEventsRoutes(app: Express): void {
         return res.status(403).json({ message: "This event is not yet available for RSVP" });
       }
 
-      // Only allow RSVPs for free events
-      if (event.ticketPrice > 0) {
-        return res.status(400).json({ message: "This is a paid event, please purchase a ticket instead" });
+      if (event.isCancelled) {
+        return res.status(400).json({ message: "This event has been cancelled" });
       }
 
       // Check if RSVP already exists
@@ -1358,6 +1362,12 @@ export function registerEventsRoutes(app: Express): void {
 
       const rsvpData = insertRsvpSchema.parse({ userId, eventId });
       const rsvp = await storage.createRsvp(rsvpData);
+
+      // Paid / external-ticket events: an RSVP is just "I'm interested" — a signal for the
+      // organiser, not a booking. No ticket, no group-chat seat, no notification.
+      if (event.ticketPrice > 0 || event.externalTicketUrl) {
+        return res.json(rsvp);
+      }
 
       // Also create a ticket for the free event
       const ticketData = insertTicketSchema.parse({

@@ -19,6 +19,7 @@ import {
   Minus, ExternalLink, AlertCircle, TrendingUp,
 } from "lucide-react";
 import { formatMoneyCompact } from "@/lib/currency";
+import { buildFunnel, conversionPct } from "@shared/analyticsMath";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -30,6 +31,7 @@ interface EventBreakdownItem {
   rsvps: number;
   tickets: number;
   views: number;
+  converted: number;
   revenue: number;
   currency: string;
   ticketPrice: number;
@@ -52,6 +54,9 @@ interface DemographicsData {
   averageTicketPrice: number;
   bestSellingEvent: { title: string; tickets: number; revenue: number; currency: string } | null;
   conversionRate: number;
+  convertedTotal: number;
+  buyers: number;
+  rsvpBuyers: number;
 }
 
 type SortField = "title" | "tickets" | "revenue" | "sellThrough" | "conversion" | "rsvps";
@@ -93,9 +98,9 @@ function eventStatus(eventDate: string): { label: string; color: string } {
   return { label: "Past", color: "bg-muted text-muted-foreground" };
 }
 
-function perEventConversion(views: number, rsvps: number, tickets: number): number {
-  if (views === 0) return 0;
-  return Math.round(((rsvps + tickets) / views) * 1000) / 10;
+// null = no views recorded, shown as "—" (never a fake 0%)
+function perEventConversion(views: number, converted: number): number | null {
+  return conversionPct(views, converted);
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -141,58 +146,44 @@ function KpiCard({ label, value, sub, icon, accent = false }: {
   );
 }
 
-function ConversionFunnel({ views, rsvps, tickets }: { views: number; rsvps: number; tickets: number }) {
-  const stages = [
-    { label: "Views", count: views, color: "bg-slate-400 dark:bg-slate-600" },
-    { label: "RSVPs", count: rsvps, color: "bg-violet-400 dark:bg-violet-600" },
-    { label: "Tickets", count: tickets, color: "bg-violet-700 dark:bg-violet-500" },
-  ];
-
-  const max = Math.max(views, 1);
+function ConversionFunnel({ views, engaged, buyers }: { views: number; engaged: number; buyers: number }) {
+  // Stage maths lives in shared/analyticsMath so the funnel, the KPI card and the table agree.
+  const stages = buildFunnel(views, engaged, buyers);
+  const colors = ["bg-slate-400 dark:bg-slate-600", "bg-violet-400 dark:bg-violet-600", "bg-violet-700 dark:bg-violet-500"];
 
   return (
     <div className="space-y-3">
-      {stages.map((stage, i) => {
-        const pct = Math.round((stage.count / max) * 100);
-        const dropPct = i > 0 && stages[i - 1].count > 0
-          ? Math.round((1 - stage.count / stages[i - 1].count) * 100)
-          : null;
-        const pctOfViews = views > 0 ? Math.round((stage.count / views) * 100) : 0;
-
-        return (
-          <div key={stage.label}>
-            {dropPct !== null && (
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1.5 pl-1">
-                <ArrowRight className="h-3 w-3" />
-                <span>{dropPct}% did not continue</span>
-              </div>
-            )}
-            <div className="flex items-center gap-3">
-              <div className="w-20 shrink-0 text-right">
-                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{stage.label}</span>
-              </div>
-              <div className="flex-1 relative h-8 bg-muted rounded-md overflow-hidden">
-                <div
-                  className={`h-full ${stage.color} rounded-md transition-all duration-500`}
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
-              <div className="w-28 shrink-0 flex items-baseline gap-1.5">
-                <span className="text-sm font-bold tabular-nums">{formatCompact(stage.count)}</span>
-                {i > 0 && (
-                  <span className="text-xs text-muted-foreground tabular-nums">
-                    ({pctOfViews}%)
-                  </span>
-                )}
-              </div>
+      {stages.map((stage, i) => (
+        <div key={stage.key}>
+          {i > 0 && stage.rate !== null && (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1.5 pl-1">
+              <ArrowRight className="h-3 w-3" />
+              <span>{stage.rate}% of the previous step</span>
             </div>
+          )}
+          <div className="flex items-center gap-3">
+            <div className="w-24 shrink-0 text-right">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{stage.label}</span>
+            </div>
+            <div className="flex-1 relative h-8 bg-muted rounded-md overflow-hidden">
+              <div
+                className={`h-full ${colors[i]} rounded-md transition-[width] duration-500 ease-out`}
+                style={{ width: `${stage.widthPct}%` }}
+              />
+            </div>
+            <div className="w-16 shrink-0 text-sm font-bold tabular-nums">{formatCompact(stage.count)}</div>
           </div>
-        );
-      })}
+        </div>
+      ))}
 
-      {views === 0 && rsvps === 0 && tickets === 0 && (
+      {views === 0 && engaged === 0 && buyers === 0 && (
         <p className="text-sm text-muted-foreground text-center py-4">
           No activity yet. Views and ticket sales will appear here once your events go live.
+        </p>
+      )}
+      {views === 0 && (engaged > 0 || buyers > 0) && (
+        <p className="text-xs text-muted-foreground text-center">
+          Views are counted from when tracking started, so earlier activity has no view count.
         </p>
       )}
     </div>
@@ -309,7 +300,7 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
         case "revenue": valA = a.revenue; valB = b.revenue; break;
         case "rsvps": valA = a.rsvps; valB = b.rsvps; break;
         case "sellThrough": valA = sellThrough(a.tickets, a.capacity); valB = sellThrough(b.tickets, b.capacity); break;
-        case "conversion": valA = perEventConversion(a.views, a.rsvps, a.tickets); valB = perEventConversion(b.views, b.rsvps, b.tickets); break;
+        case "conversion": valA = perEventConversion(a.views, a.converted) ?? -1; valB = perEventConversion(b.views, b.converted) ?? -1; break;
         default: return sort.dir === "asc"
           ? a.title.localeCompare(b.title)
           : b.title.localeCompare(a.title);
@@ -349,7 +340,7 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
 
   const {
     totalRevenue, totalTicketsSold, totalViews, totalRsvps, totalEvents,
-    conversionRate, averageTicketPrice, bestSellingEvent,
+    conversionRate, convertedTotal, buyers, rsvpBuyers, averageTicketPrice, bestSellingEvent,
     ageDistribution, genderDistribution, ticketSalesByAge, ticketSalesByGender,
     eventBreakdown,
   } = data;
@@ -397,8 +388,8 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
         />
         <KpiCard
           label="Conversion"
-          value={`${conversionRate}%`}
-          sub="view → engagement"
+          value={totalViews > 0 ? `${conversionRate}%` : "—"}
+          sub={totalViews > 0 ? "of views RSVP or buy" : "No views recorded yet"}
           icon={<TrendingUpIcon className="h-4 w-4" />}
         />
         <KpiCard
@@ -427,29 +418,27 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
           </p>
         </CardHeader>
         <CardContent>
-          <ConversionFunnel views={totalViews} rsvps={totalRsvps} tickets={totalTicketsSold} />
+          <ConversionFunnel views={totalViews} engaged={convertedTotal} buyers={buyers} />
           {totalViews > 0 && (
             <div className="mt-5 pt-4 border-t grid grid-cols-3 text-center gap-2">
               <div>
-                <p className="text-xs text-muted-foreground uppercase tracking-wider mb-0.5">RSVP rate</p>
-                <p className="text-lg font-bold tabular-nums">
-                  {totalViews > 0 ? `${Math.round((totalRsvps / totalViews) * 100)}%` : "—"}
-                </p>
-                <p className="text-xs text-muted-foreground">of views RSVP</p>
+                <p className="text-xs text-muted-foreground uppercase tracking-wider mb-0.5">Conversion</p>
+                <p className="text-lg font-bold tabular-nums">{conversionRate}%</p>
+                <p className="text-xs text-muted-foreground">of views RSVP or buy</p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground uppercase tracking-wider mb-0.5">Ticket rate</p>
+                <p className="text-xs text-muted-foreground uppercase tracking-wider mb-0.5">Buy rate</p>
                 <p className="text-lg font-bold tabular-nums">
-                  {totalViews > 0 ? `${Math.round((totalTicketsSold / totalViews) * 100)}%` : "—"}
+                  {convertedTotal > 0 ? `${Math.round((buyers / convertedTotal) * 100)}%` : "—"}
                 </p>
-                <p className="text-xs text-muted-foreground">of views buy</p>
+                <p className="text-xs text-muted-foreground">of those who engaged</p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground uppercase tracking-wider mb-0.5">RSVP → ticket</p>
+                <p className="text-xs text-muted-foreground uppercase tracking-wider mb-0.5">Interested → bought</p>
                 <p className="text-lg font-bold tabular-nums">
-                  {totalRsvps > 0 ? `${Math.round((totalTicketsSold / totalRsvps) * 100)}%` : "—"}
+                  {totalRsvps > 0 ? `${Math.round((rsvpBuyers / totalRsvps) * 100)}%` : "—"}
                 </p>
-                <p className="text-xs text-muted-foreground">RSVPs convert</p>
+                <p className="text-xs text-muted-foreground">of RSVPs bought a ticket</p>
               </div>
             </div>
           )}
@@ -630,7 +619,7 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
                   <tbody>
                     {sortedEvents.map((event, idx) => {
                       const status = eventStatus(event.eventDate);
-                      const conv = perEventConversion(event.views, event.rsvps, event.tickets);
+                      const conv = perEventConversion(event.views, event.converted);
                       return (
                         <tr
                           key={event.eventId}
@@ -675,11 +664,11 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
                           </td>
                           <td className="py-3 px-3 text-right">
                             <span className={`text-xs tabular-nums font-medium ${
-                              conv >= 10 ? "text-emerald-700 dark:text-emerald-400" :
-                              conv >= 5 ? "text-amber-600 dark:text-amber-400" :
+                              (conv ?? 0) >= 10 ? "text-emerald-700 dark:text-emerald-400" :
+                              (conv ?? 0) >= 5 ? "text-amber-600 dark:text-amber-400" :
                               "text-muted-foreground"
                             }`}>
-                              {event.views > 0 ? `${conv}%` : "—"}
+                              {conv !== null ? `${conv}%` : "—"}
                             </span>
                           </td>
                           <td className="py-3 px-4">
@@ -711,7 +700,7 @@ export function OrganizerAnalyticsDashboard({ organizerId, organizerName }: Prop
                         {formatMoneyCompact(totalRevenue, primaryCurrency)}
                       </td>
                       <td className="py-3 px-3 text-right text-xs text-muted-foreground tabular-nums">
-                        {conversionRate}%
+                        {totalViews > 0 ? `${conversionRate}%` : "—"}
                       </td>
                       <td />
                     </tr>
