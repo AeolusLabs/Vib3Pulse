@@ -256,3 +256,24 @@ This email was sent by ${APP_NAME}.
     return false;
   }
 }
+
+
+export async function sendQueueSlaAlertEmail({ to, count, oldestHours, slaHours, link }: { to: string; count: number; oldestHours: number; slaHours: number; link: string }): Promise<boolean> {
+  try {
+    const { error } = await resend.emails.send({
+      from: `${APP_NAME} <${FROM_EMAIL}>`,
+      to: [to],
+      subject: `[${APP_NAME}] ${count} social event${count === 1 ? "" : "s"} waiting past the ${slaHours}h review target`,
+      text: `${count} public social event${count === 1 ? " has" : "s have"} been in the moderation queue longer than ${slaHours} hours (oldest: ${oldestHours} hours).\n\nReview the queue: ${link}\n`,
+      html: `<p>${count} public social event${count === 1 ? " has" : "s have"} been in the moderation queue longer than <strong>${slaHours} hours</strong> (oldest: ${oldestHours} hours).</p><p><a href="${link}">Open the moderation queue</a></p>`,
+    });
+    if (error) {
+      console.error("[EMAIL] SLA alert failed:", error);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error("[EMAIL] SLA alert error:", (e as Error).message);
+    return false;
+  }
+}

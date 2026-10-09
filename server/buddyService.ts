@@ -52,7 +52,7 @@ function isNigerianNumber(phone: string): boolean {
 // delivery_logs row for whichever provider actually succeeded, so a later
 // webhook (Twilio's statusCallback, or Termii's dashboard-configured one)
 // has something to update by provider message ID.
-async function sendSmsWithFallback(phone: string, body: string, context: "safety_alert" | "buddy_invite"): Promise<void> {
+export async function sendSmsWithFallback(phone: string, body: string, context: "safety_alert" | "buddy_invite" | "phone_otp"): Promise<void> {
   const primaryIsNigeria = isNigerianNumber(phone);
   try {
     const providerMessageId = primaryIsNigeria ? await sendNigeriaSMS(phone, body) : await sendUKSMS(phone, body);

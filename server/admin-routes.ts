@@ -9,6 +9,8 @@ import { toPublicUser, toPublicAdminUser } from "./auth";
 import { invalidateCache, postsCache, eventsCache, storiesCache } from "./cache";
 import { insertAdminUserSchema, adminRoles, type AdminRole } from "@shared/schema";
 import { z } from "zod";
+import { requireAdmin, requireAdminPending, requireRole, requireSuperAdmin, isMfaEnrolled, mfaRequired } from "./services/adminSecurity";
+import { registerAdminSocialRoutes } from "./routes/admin-social-routes";
 import {
   authRateLimiter,
   checkLoginThrottle,
@@ -28,37 +30,10 @@ declare module "express-session" {
   }
 }
 
-// Admin authentication middleware
-export function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  if (!req.session?.adminId) {
-    return res.status(401).json({ message: "Admin authentication required" });
-  }
-  next();
-}
-
-// Role-based access control middleware
-export function requireRole(...allowedRoles: AdminRole[]) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    if (!req.session?.adminId) {
-      return res.status(401).json({ message: "Admin authentication required" });
-    }
-    if (!req.session.adminRole || !allowedRoles.includes(req.session.adminRole)) {
-      return res.status(403).json({ message: "Insufficient permissions" });
-    }
-    next();
-  };
-}
-
-// Super admin only middleware
-export function requireSuperAdmin(req: Request, res: Response, next: NextFunction) {
-  if (!req.session?.adminId) {
-    return res.status(401).json({ message: "Admin authentication required" });
-  }
-  if (req.session.adminRole !== "super_admin") {
-    return res.status(403).json({ message: "Super admin access required" });
-  }
-  next();
-}
+// Auth gate, role checks and MFA enforcement live in services/adminSecurity.ts (they re-read the
+// admin row on every request, so deactivation and demotion apply immediately). Re-exported here
+// because other modules import them from this file.
+export { requireAdmin, requireRole, requireSuperAdmin };
 
 // Helper to log admin activity
 async function logActivity(adminId: string, action: string, targetType?: string, targetId?: string, details?: string, ipAddress?: string) {
@@ -277,6 +252,10 @@ export function setupAdminRoutes(app: Express) {
       // Set session
       req.session.adminId = admin.id;
       req.session.adminRole = admin.role as AdminRole;
+      // Super-admins must pass MFA (or enrol) before any admin route works; enforced in the gate.
+      const needsMfa = mfaRequired() && admin.role === "super_admin"; // off by default: password-only sign-in
+      req.session.mfaVerified = !needsMfa;
+      const mfaState = needsMfa ? ((await isMfaEnrolled(admin.id)) ? "verify" : "enroll") : null;
 
       // Update last login
       await storage.updateAdminLastLogin(admin.id);
@@ -290,7 +269,7 @@ export function setupAdminRoutes(app: Express) {
           console.error('[ADMIN] Session save failed on login:', err);
           return res.status(500).json({ message: "Login failed" });
         }
-        res.json({ admin: adminWithoutPassword });
+        res.json({ admin: adminWithoutPassword, mfa: mfaState });
       });
     } catch (error) {
       console.error("Admin login error:", error);
@@ -299,7 +278,7 @@ export function setupAdminRoutes(app: Express) {
   });
 
   // Admin logout
-  app.post("/api/admin/logout", requireAdmin, async (req: Request, res: Response) => {
+  app.post("/api/admin/logout", requireAdminPending, async (req: Request, res: Response) => {
     const adminId = req.session.adminId!;
     await logActivity(adminId, "logout", "admin", adminId, "Admin logged out", req.ip);
     
@@ -313,14 +292,15 @@ export function setupAdminRoutes(app: Express) {
   });
 
   // Get current admin
-  app.get("/api/admin/me", requireAdmin, async (req: Request, res: Response) => {
+  app.get("/api/admin/me", requireAdminPending, async (req: Request, res: Response) => {
     try {
       const admin = await storage.getAdminUser(req.session.adminId!);
       if (!admin) {
         return res.status(404).json({ message: "Admin not found" });
       }
       const adminWithoutPassword = toPublicAdminUser(admin);
-      res.json(adminWithoutPassword);
+      const required = mfaRequired() && admin.role === "super_admin";
+      res.json({ ...adminWithoutPassword, mfa: { required, enrolled: required ? await isMfaEnrolled(admin.id) : false, verified: !!req.session.mfaVerified } });
     } catch (error) {
       res.status(500).json({ message: "Failed to get admin" });
     }
@@ -575,7 +555,7 @@ export function setupAdminRoutes(app: Express) {
   // ============================================
 
   // Get all platform users
-  app.get("/api/admin/users", requireRole("super_admin", "user_support", "content_moderator"), async (req: Request, res: Response) => {
+  app.get("/api/admin/users", requireRole("super_admin", "admin", "user_support", "content_moderator"), async (req: Request, res: Response) => {
     try {
       const limit = parseInt(req.query.limit as string) || 50;
       const offset = parseInt(req.query.offset as string) || 0;
@@ -633,7 +613,7 @@ export function setupAdminRoutes(app: Express) {
   });
 
   // Suspend user
-  app.post("/api/admin/users/:id/suspend", requireRole("super_admin", "user_support"), async (req: Request, res: Response) => {
+  app.post("/api/admin/users/:id/suspend", requireRole("super_admin", "admin", "user_support"), async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
       const suspendSchema = z.object({
@@ -671,7 +651,7 @@ export function setupAdminRoutes(app: Express) {
   });
 
   // Lift user suspension
-  app.post("/api/admin/users/:userId/suspensions/:suspensionId/lift", requireRole("super_admin", "user_support"), async (req: Request, res: Response) => {
+  app.post("/api/admin/users/:userId/suspensions/:suspensionId/lift", requireRole("super_admin", "admin", "user_support"), async (req: Request, res: Response) => {
     try {
       const { suspensionId } = req.params;
 
@@ -693,7 +673,7 @@ export function setupAdminRoutes(app: Express) {
   });
 
   // Get all suspensions
-  app.get("/api/admin/suspensions", requireRole("super_admin", "user_support"), async (req: Request, res: Response) => {
+  app.get("/api/admin/suspensions", requireRole("super_admin", "admin", "user_support"), async (req: Request, res: Response) => {
     try {
       const suspensions = await storage.getAllSuspensions();
       res.json(suspensions);
@@ -747,6 +727,9 @@ export function setupAdminRoutes(app: Express) {
   app.post("/api/admin/events/:id/moderate", requireRole("super_admin", "event_reviewer", "content_moderator"), async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
+      if ((await storage.getEventGate(id))?.kind === "social") {
+        return res.status(400).json({ message: "Social events are moderated from the moderation queue (a reason is required).", code: "USE_MODERATION_QUEUE" });
+      }
       const moderateSchema = z.object({
         action: z.enum(["approved", "rejected", "flagged"]),
         reason: z.string().optional(),
@@ -820,6 +803,9 @@ export function setupAdminRoutes(app: Express) {
     try {
       const { id } = req.params;
       const sourceType = req.query.sourceType === "venue_entry" ? "venue_entry" : "event";
+      if (sourceType === "event" && (await storage.getEventGate(id))?.kind === "social") {
+        return res.status(400).json({ message: "Remove social events from the moderation queue (a reason is required).", code: "USE_MODERATION_QUEUE" });
+      }
 
       if (sourceType === "venue_entry") {
         await storage.deleteVenueEntryNight(id);
@@ -1305,4 +1291,8 @@ export function setupAdminRoutes(app: Express) {
       res.status(500).json({ message: "Failed to fetch stale connections" });
     }
   });
+
+  // Social-event moderation, host controls, config, MFA, reveal grants, metrics.
+  registerAdminSocialRoutes(app);
+
 }

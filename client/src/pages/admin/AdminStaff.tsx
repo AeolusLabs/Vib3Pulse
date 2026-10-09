@@ -35,7 +35,7 @@ import AdminLayout from "./AdminLayout";
 import { format } from "date-fns";
 import { PlusIcon, ShieldIcon, UserXIcon, EditIcon, UserCheckIcon } from "@/components/ui/icons";
 
-type AdminRole = "super_admin" | "content_moderator" | "user_support" | "event_reviewer" | "finance_manager" | "analytics_viewer";
+type AdminRole = "super_admin" | "admin" | "content_moderator" | "user_support" | "event_reviewer" | "finance_manager" | "analytics_viewer";
 
 interface AdminUser {
   id: string;
@@ -50,6 +50,7 @@ interface AdminUser {
 
 const roleLabels: Record<AdminRole, string> = {
   super_admin: "Super Admin",
+  admin: "Admin (users and settings)",
   content_moderator: "Content Moderator",
   user_support: "User Support",
   event_reviewer: "Event Reviewer",
@@ -59,6 +60,7 @@ const roleLabels: Record<AdminRole, string> = {
 
 const roleColors: Record<AdminRole, string> = {
   super_admin: "border-purple-500 text-purple-400",
+  admin: "border-fuchsia-500 text-fuchsia-400",
   content_moderator: "border-blue-500 text-blue-400",
   user_support: "border-green-500 text-green-400",
   event_reviewer: "border-amber-500 text-amber-400",

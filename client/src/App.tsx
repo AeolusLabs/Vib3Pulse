@@ -58,6 +58,15 @@ import StoryDetailPage from "@/pages/StoryDetailPage";
 import CommunityPage from "@/pages/CommunityPage";
 import PostDetailPage from "@/pages/PostDetailPage";
 import PublicAlertPage from "@/pages/PublicAlertPage";
+import InvitePage from "@/pages/InvitePage";
+import AdminModeration from "@/pages/admin/AdminModeration";
+import AdminHosts from "@/pages/admin/AdminHosts";
+import AdminModerationSettings from "@/pages/admin/AdminModerationSettings";
+import AdminRevealAccess from "@/pages/admin/AdminRevealAccess";
+import AdminSocialMetrics from "@/pages/admin/AdminSocialMetrics";
+import SocialEventsPage from "@/pages/SocialEventsPage";
+import SocialEventCreatePage from "@/pages/SocialEventCreatePage";
+import SocialEventHostPage from "@/pages/SocialEventHostPage";
 import { SafetyTriggersProvider } from "@/components/safety/SafetyTriggersProvider";
 
 function Router() {
@@ -209,6 +218,24 @@ function Router() {
 
       <Route path="/join/:code" component={JoinGroupPage} />
 
+      {/* Social events: /i/:token is public (guests have no account); the rest need a login. */}
+      <Route path="/i/:token" component={InvitePage} />
+      <Route path="/social-events/new">
+        <AuthenticatedLayout>
+          <SocialEventCreatePage />
+        </AuthenticatedLayout>
+      </Route>
+      <Route path="/social-events/:id">
+        <AuthenticatedLayout>
+          <SocialEventHostPage />
+        </AuthenticatedLayout>
+      </Route>
+      <Route path="/social-events">
+        <AuthenticatedLayout>
+          <SocialEventsPage />
+        </AuthenticatedLayout>
+      </Route>
+
       {/* Staff scanner — no AuthenticatedLayout, bouncers don't have accounts */}
       <Route path="/scanner" component={ScannerPage} />
 
@@ -226,6 +253,11 @@ function Router() {
       <Route path="/admin/settings" component={AdminSettings} />
       <Route path="/admin/sos" component={AdminSOS} />
       <Route path="/admin/social" component={AdminSocialDashboard} />
+      <Route path="/admin/moderation" component={AdminModeration} />
+      <Route path="/admin/hosts" component={AdminHosts} />
+      <Route path="/admin/social-events" component={AdminSocialMetrics} />
+      <Route path="/admin/reveal" component={AdminRevealAccess} />
+      <Route path="/admin/moderation-settings" component={AdminModerationSettings} />
 
       <Route component={NotFound} />
     </Switch>

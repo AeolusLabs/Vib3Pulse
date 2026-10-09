@@ -14,6 +14,7 @@ import { rankEvents } from "../utils/eventRanking.js";
 import { staffCodeExpiry } from "../utils/staffCodeExpiry.js";
 import { MAX_GROUP_MEMBERS } from "./messages-routes.js";
 import { computeFeeSplit } from "../payments/fees.js";
+import { getFeaturableHostIds, hideIfReportThresholdMet } from "../services/eventAbuse";
 import { TierSyncError } from "../utils/tierSync.js";
 import QRCode from "qrcode";
 import { eventCreateDto, eventUpdateDto, insertTicketSchema, insertRsvpSchema } from "@shared/schema";
@@ -127,10 +128,12 @@ export function registerEventsRoutes(app: Express): void {
   app.get("/api/events/featured", async (_req, res) => {
     try {
       const now = new Date();
-      const featured = (await storage.getEvents())
+      const upcoming = (await storage.getEvents())
         .filter(e => new Date(e.eventDate) >= now)
-        .sort((a, b) => new Date(a.eventDate).getTime() - new Date(b.eventDate).getTime())
-        .slice(0, 8);
+        .sort((a, b) => new Date(a.eventDate).getTime() - new Date(b.eventDate).getTime());
+      // Featured placement is reserved for social events whose host has a clean history.
+      const featurable = await getFeaturableHostIds(upcoming.filter(e => e.kind === "social").map(e => e.organizerId));
+      const featured = upcoming.filter(e => e.kind !== "social" || featurable.has(e.organizerId)).slice(0, 8);
       res.json(featured);
     } catch (error) {
       console.error('Error fetching featured events:', error);
@@ -740,6 +743,8 @@ export function registerEventsRoutes(app: Express): void {
           }
         }
 
+        // Link-only guests (no account) have nobody to notify; they see the cancellation on their invite page.
+        if (!ticket.userId) continue;
         await deliverNotification({
           userId: ticket.userId,
           type: "ticket_refund",
@@ -858,13 +863,38 @@ export function registerEventsRoutes(app: Express): void {
       if (!reason || typeof reason !== "string") {
         return res.status(400).json({ message: "Reason is required" });
       }
-      await storage.createContentReport({
-        reporterId: req.user!.id,
-        contentType: "event",
-        contentId: req.params.id,
-        reason,
-        description: description || null,
-      });
+      // Social events: the gate only lets public, approved ones through to here.
+      const gate = await storage.getEventGate(req.params.id);
+      const isSocial = gate?.kind === "social";
+      if (isSocial && gate!.organizerId === req.user!.id) {
+        return res.status(400).json({ message: "You can't report your own event" });
+      }
+      try {
+        await storage.createContentReport({
+          reporterId: req.user!.id,
+          contentType: "event",
+          contentId: req.params.id,
+          reason: isSocial ? reason.slice(0, 100) : reason,
+          description: description ? String(description).slice(0, 1000) : null,
+        });
+      } catch (e: any) {
+        if (e?.code === "23505") return res.json({ message: "You've already reported this event" }); // unique(reporter, content)
+        throw e;
+      }
+      if (isSocial && (await hideIfReportThresholdMet(req.params.id))) {
+        const ev = await storage.getEventGate(req.params.id);
+        const full = ev ? await storage.getSocialEventForHost(ev.id, ev.organizerId) : undefined;
+        if (full) {
+          deliverNotification({
+            userId: full.organizerId,
+            type: "event_moderation",
+            title: "Your event is under review",
+            message: `"${full.title}" was reported by several people and is hidden while we review it. If you think this is a mistake, you can appeal from the event page.`,
+            link: `/social-events/${full.id}`,
+            relatedEntityId: full.id,
+          }).catch((e) => console.error("[SocialEvents] takedown notification failed:", e));
+        }
+      }
       res.json({ message: "Report submitted" });
     } catch (error) {
       res.status(500).json({ message: "Failed to submit report" });
@@ -897,7 +927,7 @@ export function registerEventsRoutes(app: Express): void {
         return res.status(403).json({ message: "Not authorized to view this ticket" });
       }
 
-      const holder = await storage.getUser(ticket.userId);
+      const holder = (ticket.userId ? await storage.getUser(ticket.userId) : undefined);
       const holderName = holder?.displayName || holder?.username || "Ticket Holder";
 
       const qrCodeDataUrl = await QRCode.toDataURL(ticket.validationCode, {
@@ -984,7 +1014,7 @@ export function registerEventsRoutes(app: Express): void {
       }
 
       if (ticket.checkedInAt) {
-        const ticketUser = await storage.getUser(ticket.userId);
+        const ticketUser = (ticket.userId ? await storage.getUser(ticket.userId) : undefined);
         return res.json({
           valid: false,
           alreadyCheckedIn: true,
@@ -997,7 +1027,7 @@ export function registerEventsRoutes(app: Express): void {
       // Atomic check-in — returns null if a concurrent request beat us
       const updatedTicket = await storage.checkInTicket(ticket.id, scannerId);
       if (!updatedTicket) {
-        const ticketUser = await storage.getUser(ticket.userId);
+        const ticketUser = (ticket.userId ? await storage.getUser(ticket.userId) : undefined);
         return res.json({
           valid: false,
           alreadyCheckedIn: true,
@@ -1010,7 +1040,7 @@ export function registerEventsRoutes(app: Express): void {
         await storage.incrementStaffCodeScanCount(staffCodeId);
       }
 
-      const ticketUser = await storage.getUser(updatedTicket.userId);
+      const ticketUser = (updatedTicket.userId ? await storage.getUser(updatedTicket.userId) : undefined);
       res.json({
         valid: true,
         alreadyCheckedIn: false,
@@ -1344,6 +1374,10 @@ export function registerEventsRoutes(app: Express): void {
       const event = await storage.getEvent(eventId);
       if (!event) {
         return res.status(404).json({ message: "Event not found" });
+      }
+
+      if (event.kind === 'social') {
+        return res.status(400).json({ message: "Use your invitation link to RSVP to this event" });
       }
 
       if (event.moderationStatus !== 'approved') {

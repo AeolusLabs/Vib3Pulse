@@ -1,4 +1,4 @@
-import { useRoute } from "wouter";
+import { useRoute, Redirect } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import EventDetailsModal from "@/components/EventDetailsModal";
@@ -29,6 +29,9 @@ export default function EventDetailPage() {
       </div>
     );
   }
+
+  // Social events have their own RSVP page; the commercial ticket modal doesn't apply.
+  if ((event as any).kind === "social") return <Redirect to={`/i/${event.id}`} replace />;
 
   const modStatus = (event as any).moderationStatus;
   if (user?.id !== event.organizerId && modStatus && modStatus !== "approved") {

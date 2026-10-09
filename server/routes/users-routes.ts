@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import passport from "passport";
 import { storage } from "../storage";
+import { eraseSocialDataForUser } from "../services/guestPrivacy";
 import { requireAuth } from "../middleware";
 import {
   authRateLimiter,
@@ -33,9 +34,15 @@ const passwordSchema = z.string()
   .regex(/[0-9]/, "Password must contain at least one number")
   .regex(/[^A-Za-z0-9]/, "Password must contain at least one special character");
 
-const signupSchema = insertUserSchema.omit({ passwordHash: true }).extend({
-  password: passwordSchema,
-});
+// Signup accepts ONLY what the signup form collects. This used to be insertUserSchema minus the password hash,
+// i.e. every other column: a crafted request could set isVerified, isOfficial, freePromotionCredits, verifiedPhone...
+// Anything outside the list is silently dropped (not rejected, so a stray extra field can't break a real signup).
+const signupSchema = insertUserSchema
+  .pick({
+    email: true, username: true, userType: true, displayName: true, dateOfBirth: true, gender: true, bio: true,
+    interests: true, organizationName: true, contactEmail: true, socialMediaLinks: true, canManageVenues: true,
+  })
+  .extend({ password: passwordSchema });
 
 // Mirrors SignupPage.tsx's step-2/step-3 schemas so an account provisioned via
 // Google (which skips that form entirely) is held to the same requirements —
@@ -455,8 +462,10 @@ export function registerUsersRoutes(app: Express): void {
         }
       }
 
+      // Guest data first (RSVPs, hosted events' guest lists, verified phone, devices), then the account itself.
+      const erased = await eraseSocialDataForUser(user.id);
       await storage.softDeleteUser(user.id);
-      console.log(`[AUTH] Account deleted (self-service): ${user.id}`);
+      console.log(`[AUTH] Account deleted (self-service): ${user.id} (social: ${erased.rsvpsRemoved} RSVPs, ${erased.eventsClosed} hosted events)`);
 
       req.logout((err) => {
         if (err) console.error("[AUTH] logout after account deletion failed:", err);

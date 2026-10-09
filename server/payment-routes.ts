@@ -699,6 +699,7 @@ export function registerPaymentRoutes(app: Express): void {
 
       const event = await storage.getEvent(eventId);
       if (!event) return res.status(404).json({ message: "Event not found" });
+      if (event.kind === "social") return res.status(400).json({ message: "Social events can't be promoted" });
       if (event.organizerId !== req.user!.id) return res.status(403).json({ message: "You can only promote your own events" });
 
       const usedFreeCredit = await storage.claimFreePromotionCredit(req.user!.id);
@@ -750,6 +751,7 @@ export function registerPaymentRoutes(app: Express): void {
 
       const event = await storage.getEvent(eventId);
       if (!event) return res.status(404).json({ message: "Event not found" });
+      if (event.kind === "social") return res.status(400).json({ message: "Social events can't be promoted" });
       if (event.organizerId !== req.user!.id) return res.status(403).json({ message: "You can only promote your own events" });
 
       const verified = await verifyPaymentIntent(paymentIntentId, provider);
@@ -804,6 +806,7 @@ export function registerPaymentRoutes(app: Express): void {
 
       const event = await storage.getEvent(eventId);
       if (!event) return res.status(404).json({ message: "Event not found" });
+      if (event.kind === "social") return res.status(400).json({ message: "Social events can't be promoted" });
       if (event.organizerId !== req.user!.id) return res.status(403).json({ message: "You can only promote your own events" });
       if (event.moderationStatus !== "approved") return res.status(403).json({ message: "Event must be approved before it can be promoted" });
 
@@ -874,6 +877,7 @@ export function registerPaymentRoutes(app: Express): void {
 
       const event = await storage.getEvent(eventId);
       if (!event) return res.status(404).json({ message: "Event not found" });
+      if (event.kind === "social") return res.status(400).json({ message: "Social events can't be promoted" });
       if (event.organizerId !== req.user!.id) return res.status(403).json({ message: "You can only promote your own events" });
       if (event.moderationStatus !== "approved") return res.status(403).json({ message: "Event must be approved before it can be promoted" });
 

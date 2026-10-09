@@ -128,6 +128,7 @@ import {
   venueAnalytics,
   adminUsers,
   adminActivityLogs,
+  guestDataAudit,
   contentReports,
   userSuspensions,
   eventModerations,
@@ -166,7 +167,7 @@ import {
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import { eq, and, gte, gt, lt, lte, or, ilike, desc, asc, sql, count, inArray, notInArray, isNull, isNotNull, notExists } from "drizzle-orm";
+import { eq, ne, and, gte, gt, lt, lte, or, ilike, desc, asc, sql, count, inArray, notInArray, isNull, isNotNull, notExists } from "drizzle-orm";
 import crypto from "crypto";
 import { cached, postsCache, eventsCache, storiesCache, invalidateCache } from "./cache";
 import { planTierSync } from "./utils/tierSync";
@@ -180,7 +181,10 @@ export const pool = new Pool({
   connectionTimeoutMillis: 5000,
   statement_timeout: 10000,
 });
-const db = drizzle(pool);
+// An idle client can be dropped by the DB/proxy at any time. Without a listener, pg
+// re-throws that as an unhandled 'error' event and the whole process exits.
+pool.on("error", (err) => console.error("[DB] idle client error (pool will reconnect):", err.message));
+export const db = drizzle(pool);
 
 // Idempotent schema migration — runs at server startup to add new columns safely
 export async function ensureSchema() {
@@ -193,10 +197,16 @@ export async function ensureSchema() {
   await pool.query(`
     ALTER TABLE events ADD COLUMN IF NOT EXISTS moderation_status TEXT NOT NULL DEFAULT 'pending'
   `);
-  // Backfill: existing published events are already live — mark them approved
+  // Backfill: existing published events are already live — mark them approved.
+  // COMMERCIAL events only. This statement runs on every server start, and social events use
+  // 'pending' as a real review state (new-account holds, auto-flags, edits under review): without
+  // this guard a restart or deploy would silently approve everything waiting in the moderation queue.
+  await pool.query(`
+    ALTER TABLE events ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'commercial'
+  `);
   await pool.query(`
     UPDATE events SET moderation_status = 'approved'
-    WHERE is_published = true AND moderation_status = 'pending'
+    WHERE is_published = true AND moderation_status = 'pending' AND kind = 'commercial'
   `);
   await pool.query(`
     ALTER TABLE venue_entry_nights ADD COLUMN IF NOT EXISTS moderation_status TEXT NOT NULL DEFAULT 'pending'
@@ -551,8 +561,8 @@ export interface IStorage {
   getEvent(id: string): Promise<(Event & { organizer: User; community: (Community & { memberCount: number }) | null }) | undefined>;
   getUserEvents(userId: string): Promise<Event[]>;
   getEventsByOrganizer(organizerId: string): Promise<Event[]>;
-  createEvent(event: InsertEvent): Promise<Event>;
-  updateEvent(id: string, event: Partial<InsertEvent>): Promise<Event>;
+  createEvent(event: typeof events.$inferInsert): Promise<Event>;
+  updateEvent(id: string, event: Partial<typeof events.$inferInsert>): Promise<Event>;
   setEventPublished(id: string, published: boolean): Promise<Event>;
   
   getUserTickets(userId: string): Promise<Array<Ticket & { event: Event }>>;
@@ -578,6 +588,17 @@ export interface IStorage {
   // Pass ticketTierId when the purchase was for a specific tier, null for a plain event ticket.
   // quantity claims multiple slots in a single atomic check (all-or-nothing).
   claimEventTicketSlot(eventId: string, ticketTierId: string | null, quantity?: number): Promise<boolean>;
+  // Social events (free invite/RSVP) - see the DbStorage block for semantics.
+  getEventGate(id: string): Promise<{ id: string; kind: string; visibility: string; organizerId: string; moderationStatus: string; isCancelled: boolean } | undefined>;
+  getSocialEventByInviteToken(token: string): Promise<Event | undefined>;
+  getSocialEventForHost(eventId: string, hostId: string): Promise<Event | undefined>;
+  getSocialEventsByHost(hostId: string): Promise<Array<Event & { yesCount: number; headcount: number; declinedCount: number }>>;
+  getSocialTicket(eventId: string, who: { userId?: string | null; tokenHash?: string | null }): Promise<Ticket | undefined>;
+  getSocialGuests(eventId: string): Promise<Array<{ id: string; name: string; attending: boolean; plusOneCount: number; hasAccount: boolean; respondedAt: Date; addressApproved: boolean; removed: boolean }>>;
+  upsertSocialRsvp(p: { eventId: string; userId: string | null; existingTokenHash: string | null; newTokenHash: string | null; name: string; attending: boolean; plusOneCount: number; autoApproveAddress: boolean }): Promise<{ full: true } | { removed: true; full: false } | { full: false; removed?: false; ticket: Ticket; created: boolean; attendingChanged: boolean }>;
+  getPublicSocialEvent(id: string): Promise<Event | undefined>;
+  setSocialGuestStatus(eventId: string, ticketId: string, action: 'approve' | 'remove'): Promise<Ticket | undefined>;
+  createGuestDataAudit(row: typeof guestDataAudit.$inferInsert): Promise<void>;
   // Event cancellation with refunds — orchestration (calling the payment provider) lives
   // in the route handler; storage only provides the DB primitives it needs.
   getConfirmedTicketsForEvent(eventId: string): Promise<Ticket[]>;
@@ -1361,7 +1382,7 @@ export class DbStorage implements IStorage {
           })
           .from(events)
           .leftJoin(ticketTiers, eq(ticketTiers.eventId, events.id))
-          .where(and(eq(events.isPublished, true), eq(events.moderationStatus, 'approved')))
+          .where(and(eq(events.isPublished, true), eq(events.moderationStatus, 'approved'), eq(events.visibility, 'public')))
           .groupBy(events.id)
           .orderBy(events.eventDate);
 
@@ -1412,6 +1433,7 @@ export class DbStorage implements IStorage {
       .where(and(
         eq(events.isPublished, true),
         eq(events.moderationStatus, 'approved'),
+        eq(events.visibility, 'public'),
         ilike(events.category, category),
       ))
       .groupBy(events.id)
@@ -1449,21 +1471,183 @@ export class DbStorage implements IStorage {
     };
   }
 
+  // ---------------------------------------------------------------------------
+  // Social events (free invite/RSVP events). Tickets here are price-0 `tickets`
+  // rows (paymentProvider 'free'); guests without an account hold a row with
+  // userId NULL + guestTokenHash. Capacity reuses events.ticketsAvailable/ticketsSold,
+  // counted in HEADS (the guest + their plus-one count).
+  // ---------------------------------------------------------------------------
+  async getEventGate(id: string): Promise<{ id: string; kind: string; visibility: string; organizerId: string; moderationStatus: string; isCancelled: boolean } | undefined> {
+    const [r] = await db
+      .select({ id: events.id, kind: events.kind, visibility: events.visibility, organizerId: events.organizerId, moderationStatus: events.moderationStatus, isCancelled: events.isCancelled })
+      .from(events)
+      .where(eq(events.id, id));
+    return r;
+  }
+
+  async getSocialEventByInviteToken(token: string): Promise<Event | undefined> {
+    const [e] = await db.select().from(events).where(and(eq(events.inviteToken, token), eq(events.kind, 'social')));
+    return e;
+  }
+
+  async getSocialEventForHost(eventId: string, hostId: string): Promise<Event | undefined> {
+    const [e] = await db.select().from(events).where(and(eq(events.id, eventId), eq(events.organizerId, hostId), eq(events.kind, 'social')));
+    return e;
+  }
+
+  async getSocialEventsByHost(hostId: string): Promise<Array<Event & { yesCount: number; headcount: number; declinedCount: number }>> {
+    const rows = await db.select().from(events).where(and(eq(events.organizerId, hostId), eq(events.kind, 'social'))).orderBy(desc(events.eventDate));
+    if (rows.length === 0) return [];
+    const agg = await db
+      .select({
+        eventId: tickets.eventId,
+        yes: sql<number>`count(*) filter (where ${tickets.status} = 'confirmed')::int`,
+        heads: sql<number>`coalesce(sum(1 + ${tickets.plusOneCount}) filter (where ${tickets.status} = 'confirmed'), 0)::int`,
+        declined: sql<number>`count(*) filter (where ${tickets.status} = 'declined')::int`,
+      })
+      .from(tickets)
+      .where(inArray(tickets.eventId, rows.map(r => r.id)))
+      .groupBy(tickets.eventId);
+    const byEvent = new Map(agg.map(a => [a.eventId, a]));
+    return rows.map(r => ({
+      ...r,
+      yesCount: byEvent.get(r.id)?.yes ?? 0,
+      headcount: byEvent.get(r.id)?.heads ?? 0,
+      declinedCount: byEvent.get(r.id)?.declined ?? 0,
+    }));
+  }
+
+  async getSocialTicket(eventId: string, who: { userId?: string | null; tokenHash?: string | null }): Promise<Ticket | undefined> {
+    const match = who.userId
+      ? eq(tickets.userId, who.userId)
+      : who.tokenHash ? eq(tickets.guestTokenHash, who.tokenHash) : undefined;
+    if (!match) return undefined;
+    const [t] = await db.select().from(tickets).where(and(eq(tickets.eventId, eventId), match));
+    return t;
+  }
+
+  async getSocialGuests(eventId: string): Promise<Array<{ id: string; name: string; attending: boolean; plusOneCount: number; hasAccount: boolean; respondedAt: Date; addressApproved: boolean; removed: boolean }>> {
+    const rows = await db
+      .select({ t: tickets, displayName: users.displayName, username: users.username })
+      .from(tickets)
+      .leftJoin(users, eq(tickets.userId, users.id))
+      .where(and(eq(tickets.eventId, eventId), isNull(tickets.purgedAt)))
+      .orderBy(asc(tickets.purchaseDate));
+    return rows.map(r => ({
+      id: r.t.id,
+      name: r.t.guestName || r.displayName || r.username || "Guest",
+      attending: r.t.status === 'confirmed',
+      plusOneCount: r.t.plusOneCount,
+      hasAccount: !!r.t.userId,
+      respondedAt: r.t.purchaseDate,
+      addressApproved: !!r.t.addressApprovedAt,
+      removed: r.t.status === 'removed',
+    }));
+  }
+
+  // Create or update one guest's RSVP, serialised per event by a row lock so the
+  // capacity check can't race. Returns {full:true} if the new headcount won't fit.
+  async upsertSocialRsvp(p: {
+    eventId: string;
+    userId: string | null;
+    existingTokenHash: string | null; // identifies an existing no-account guest
+    newTokenHash: string | null; // set only when creating a brand-new no-account guest
+    name: string;
+    attending: boolean;
+    plusOneCount: number;
+    autoApproveAddress: boolean;
+  }): Promise<{ full: true } | { removed: true; full: false } | { full: false; removed?: false; ticket: Ticket; created: boolean; attendingChanged: boolean }> {
+    return db.transaction(async (tx) => {
+      await tx.select({ id: events.id }).from(events).where(eq(events.id, p.eventId)).for('update');
+
+      const match = p.userId ? eq(tickets.userId, p.userId) : p.existingTokenHash ? eq(tickets.guestTokenHash, p.existingTokenHash) : undefined;
+      const [existing] = match ? await tx.select().from(tickets).where(and(eq(tickets.eventId, p.eventId), match)) : [];
+
+      if (existing && existing.status === 'removed') return { removed: true as const, full: false as const };
+
+      const oldHeads = existing && existing.status === 'confirmed' ? 1 + existing.plusOneCount : 0;
+      const newHeads = p.attending ? 1 + p.plusOneCount : 0;
+      const delta = newHeads - oldHeads;
+      if (delta !== 0) {
+        const ok = await tx
+          .update(events)
+          .set({ ticketsSold: sql`${events.ticketsSold} + ${delta}` })
+          .where(and(
+            eq(events.id, p.eventId),
+            delta > 0 ? gte(events.ticketsAvailable, sql`${events.ticketsSold} + ${delta}`) : gte(events.ticketsSold, sql`${-delta}`),
+          ))
+          .returning({ id: events.id });
+        if (ok.length === 0) return { full: true as const };
+      }
+
+      const fields = {
+        status: p.attending ? 'confirmed' : 'declined',
+        plusOneCount: p.attending ? p.plusOneCount : 0,
+        guestName: p.name,
+        // An approval the host already gave survives edits; otherwise only private events auto-approve.
+        addressApprovedAt: p.attending ? (existing?.addressApprovedAt ?? (p.autoApproveAddress ? new Date() : null)) : null,
+      };
+      if (existing) {
+        const [t] = await tx.update(tickets).set(fields).where(eq(tickets.id, existing.id)).returning();
+        return { full: false as const, ticket: t, created: false, attendingChanged: (existing.status === 'confirmed') !== p.attending };
+      }
+      const [t] = await tx.insert(tickets).values({
+        eventId: p.eventId,
+        userId: p.userId,
+        guestTokenHash: p.userId ? null : p.newTokenHash,
+        paymentProvider: 'free',
+        amountPaid: 0,
+        ...fields,
+      }).returning();
+      return { full: false as const, ticket: t, created: true, attendingChanged: true };
+    });
+  }
+
+  async getPublicSocialEvent(id: string): Promise<Event | undefined> {
+    const [e] = await db.select().from(events).where(and(eq(events.id, id), eq(events.kind, 'social'), eq(events.visibility, 'public')));
+    return e;
+  }
+
+  // Host actions on one RSVP of a public event. 'approve' releases the exact address to that
+  // guest; 'remove' evicts them (their seats are freed and they cannot RSVP again).
+  async setSocialGuestStatus(eventId: string, ticketId: string, action: 'approve' | 'remove'): Promise<Ticket | undefined> {
+    return db.transaction(async (tx) => {
+      await tx.select({ id: events.id }).from(events).where(eq(events.id, eventId)).for('update');
+      const [t] = await tx.select().from(tickets).where(and(eq(tickets.id, ticketId), eq(tickets.eventId, eventId)));
+      if (!t || t.status === 'removed') return undefined;
+      if (action === 'approve') {
+        if (t.status !== 'confirmed') return undefined;
+        const [u] = await tx.update(tickets).set({ addressApprovedAt: t.addressApprovedAt ?? new Date() }).where(eq(tickets.id, t.id)).returning();
+        return u;
+      }
+      if (t.status === 'confirmed') {
+        await tx.update(events).set({ ticketsSold: sql`greatest(${events.ticketsSold} - ${1 + t.plusOneCount}, 0)` }).where(eq(events.id, eventId));
+      }
+      const [u] = await tx.update(tickets).set({ status: 'removed', plusOneCount: 0, addressApprovedAt: null }).where(eq(tickets.id, t.id)).returning();
+      return u;
+    });
+  }
+
+  async createGuestDataAudit(row: typeof guestDataAudit.$inferInsert): Promise<void> {
+    await db.insert(guestDataAudit).values(row);
+  }
+
   async getUserEvents(userId: string): Promise<Event[]> {
-    return await db.select().from(events).where(eq(events.organizerId, userId));
+    return await db.select().from(events).where(and(eq(events.organizerId, userId), eq(events.visibility, 'public')));
   }
 
   async getEventsByOrganizer(organizerId: string): Promise<Event[]> {
-    return await db.select().from(events).where(eq(events.organizerId, organizerId)).orderBy(events.eventDate);
+    // Commercial events only: social events have their own host list (getSocialEventsByHost) and must not appear on profiles/analytics.
+    return await db.select().from(events).where(and(eq(events.organizerId, organizerId), eq(events.kind, 'commercial'))).orderBy(events.eventDate);
   }
 
-  async createEvent(insertEvent: InsertEvent): Promise<Event> {
+  async createEvent(insertEvent: typeof events.$inferInsert): Promise<Event> {
     const result = await db.insert(events).values(insertEvent).returning();
     invalidateCache.events();
     return result[0];
   }
 
-  async updateEvent(id: string, eventUpdate: Partial<InsertEvent>): Promise<Event> {
+  async updateEvent(id: string, eventUpdate: Partial<typeof events.$inferInsert>): Promise<Event> {
     const result = await db.update(events).set(eventUpdate).where(eq(events.id, id)).returning();
     invalidateCache.events();
     return result[0];
@@ -1479,7 +1663,7 @@ export class DbStorage implements IStorage {
       .select()
       .from(tickets)
       .innerJoin(events, eq(tickets.eventId, events.id))
-      .where(eq(tickets.userId, userId));
+      .where(and(eq(tickets.userId, userId), notInArray(tickets.status, ['declined', 'removed'])));
     
     return result.map(row => ({
       ...row.tickets,
@@ -1548,7 +1732,7 @@ export class DbStorage implements IStorage {
     ]);
 
     const attendeeIds = new Set<string>();
-    ticketRows.forEach(t => attendeeIds.add(t.userId));
+    ticketRows.forEach(t => { if (t.userId) attendeeIds.add(t.userId); });
     if (!interestOnly) rsvpRows.forEach(r => attendeeIds.add(r.userId));
     const interestedCount = interestOnly ? rsvpRows.filter(r => !attendeeIds.has(r.userId)).length : 0;
     const totalCount = attendeeIds.size;
@@ -1573,7 +1757,7 @@ export class DbStorage implements IStorage {
     ]);
     const attendeeIds = new Set<string>();
     if (!interestOnly) rsvpRows.forEach(r => attendeeIds.add(r.userId));
-    ticketRows.forEach(t => attendeeIds.add(t.userId));
+    ticketRows.forEach(t => { if (t.userId) attendeeIds.add(t.userId); });
     return Array.from(attendeeIds);
   }
 
@@ -2156,7 +2340,8 @@ export class DbStorage implements IStorage {
           gte(events.eventDate, now),
           eq(events.isPublished, true),
           eq(events.isCancelled, false),
-          eq(events.moderationStatus, 'approved')
+          eq(events.moderationStatus, 'approved'),
+          eq(events.visibility, 'public')
         )
       )
       .orderBy(desc(events.eventDate));
@@ -3415,7 +3600,7 @@ export class DbStorage implements IStorage {
 
     const converted = new Set<string>();
     rsvpRows.forEach(r => converted.add(r.userId));
-    paidRows.forEach(t => converted.add(t.userId));
+    paidRows.forEach(t => { if (t.userId) converted.add(t.userId); });
     const views = viewsResult[0]?.count || 0;
 
     return {
@@ -3446,7 +3631,7 @@ export class DbStorage implements IStorage {
     return await db
       .select()
       .from(events)
-      .where(and(eq(events.isPromoted, true), gte(events.promotedUntil, now)))
+      .where(and(eq(events.isPromoted, true), gte(events.promotedUntil, now), eq(events.visibility, 'public')))
       .orderBy(desc(events.promotedUntil));
   }
 
@@ -3879,7 +4064,7 @@ export class DbStorage implements IStorage {
 
     // Always return all organizer events regardless of date filter —
     // the date range applies to activity (views, RSVPs, ticket purchases), not event existence.
-    const organizerEvents = await db.select().from(events).where(eq(events.organizerId, organizerId));
+    const organizerEvents = await db.select().from(events).where(and(eq(events.organizerId, organizerId), eq(events.kind, 'commercial')));
 
     if (organizerEvents.length === 0) {
       return {
@@ -3936,7 +4121,7 @@ export class DbStorage implements IStorage {
 
     const userIdSet = new Set<string>();
     rsvpUsers.forEach(r => userIdSet.add(r.userId));
-    ticketUsers.forEach(t => userIdSet.add(t.userId));
+    ticketUsers.forEach(t => { if (t.userId) userIdSet.add(t.userId); });
     const allUserIds = Array.from(userIdSet);
 
     let userDemographics: { dateOfBirth: string | null; gender: string | null }[] = [];
@@ -4790,6 +4975,19 @@ export class DbStorage implements IStorage {
       lineup: null,
       refundPolicy: null,
       goodToKnow: null,
+      kind: 'commercial',
+      visibility: 'public',
+      socialType: null,
+      exactAddress: null,
+      maxPlusOnes: 0,
+      inviteToken: null,
+      servesAlcohol: false,
+      queueReason: null,
+      autoFlags: [],
+      flagOutcome: null,
+      queuedAt: null,
+      guestDataPurgedAt: null,
+      createdAt: r.venueEntry.createdAt,
       organizer: toPublicUser(r.organizer),
       sourceType: 'venue_entry' as const,
     }));

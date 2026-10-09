@@ -12,6 +12,11 @@ import { startSocialCleanupScheduler } from "./socialCleanupScheduler";
 import { registerMessagesRoutes } from "./routes/messages-routes";
 import { registerVenueRoutes } from "./routes/venue-routes";
 import { registerEventsRoutes } from "./routes/events-routes";
+import { registerSocialEventGate, registerSocialEventRoutes, registerGuestDataExportBlock } from "./routes/social-events-routes";
+import { startGuestRetentionJob } from "./services/guestPrivacy";
+import { registerPhoneRoutes } from "./routes/phone-routes";
+import { startModerationSlaJob } from "./services/moderationJobs";
+import { startRevealExpiryJob } from "./services/revealGrants";
 import { registerSocialRoutes as registerNewSocialRoutes } from "./routes/social-routes";
 import { registerUsersRoutes } from "./routes/users-routes";
 import { registerNotificationRoutes } from "./routes/notification-routes";
@@ -31,7 +36,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerMessagesRoutes(app);
   registerMediaRoutes(app);
   registerVenueRoutes(app);
+  // Gate first: social events must 404 on the generic /api/events/:id/* routes below.
+  registerGuestDataExportBlock(app);
+  registerSocialEventGate(app);
   registerEventsRoutes(app);
+  registerSocialEventRoutes(app);
+  registerPhoneRoutes(app);
   registerNewSocialRoutes(app);
   registerNotificationRoutes(app);
   registerCommunityRoutes(app);
@@ -46,6 +56,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   startBuddyScheduler();
   startEventGroupDissolveJob();
   startSocialCleanupScheduler();
+  startModerationSlaJob();
+  startRevealExpiryJob();
+  startGuestRetentionJob();
 
   return httpServer;
 }

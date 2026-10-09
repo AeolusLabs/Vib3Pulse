@@ -69,9 +69,16 @@ const SENSITIVE_USER_FIELDS = [
   "passwordResetExpires",
   "emailVerificationToken",
   "emailVerificationExpires",
+  // The phone number a host verified for social events. Never part of a public user object: it would
+  // otherwise ride along in every feed, event organiser block and admin list that embeds a user.
+  "verifiedPhone",
 ] as const;
 
-export type PublicUser = Omit<User, typeof SENSITIVE_USER_FIELDS[number]>;
+// Hidden from every public user object (feeds, organiser blocks, admin lists) but, unlike the fields above,
+// NOT stripped by key name from all responses: safety buddies legitimately return a "phoneNumber" to their owner.
+const PUBLIC_HIDDEN_USER_FIELDS = ["phoneNumber"] as const;
+
+export type PublicUser = Omit<User, typeof SENSITIVE_USER_FIELDS[number] | typeof PUBLIC_HIDDEN_USER_FIELDS[number]>;
 
 export function toPublicUser(user: User): PublicUser {
   const {
@@ -80,6 +87,8 @@ export function toPublicUser(user: User): PublicUser {
     passwordResetExpires,
     emailVerificationToken,
     emailVerificationExpires,
+    verifiedPhone,
+    phoneNumber,
     ...safe
   } = user;
   return safe;
@@ -98,4 +107,11 @@ export function toPublicAdminUser(admin: AdminUser): PublicAdminUser {
 // Wired up as global response middleware in server/index.ts.
 export const SENSITIVE_RESPONSE_KEYS = new Set<string>([
   ...SENSITIVE_USER_FIELDS,
+  // Social events: these ride along on any `select()` of events/tickets. The
+  // social routes emit them deliberately under different keys (address, inviteUrl,
+  // name) after their own access checks, so a generic endpoint can never leak them.
+  "exactAddress",
+  "inviteToken",
+  "guestTokenHash",
+  "guestName",
 ]);

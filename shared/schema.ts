@@ -50,6 +50,11 @@ export const users = pgTable("users", {
   // Mutual DM read-receipt visibility, same model as WhatsApp's toggle — off
   // means you neither send nor see "Seen" status with anyone.
   readReceiptsEnabled: boolean("read_receipts_enabled").notNull().default(true),
+  // Set only by the OTP flow. phoneNumber above is free text and unverified;
+  // verifiedPhone is the normalised E.164 value, unique so one phone = one
+  // verified account (also what phone bans key on).
+  verifiedPhone: text("verified_phone").unique(),
+  phoneVerifiedAt: timestamp("phone_verified_at"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
@@ -69,7 +74,6 @@ export const updateUserSchema = insertUserSchema.pick({
   organizationName: true,
   contactEmail: true,
   socialMediaLinks: true,
-  phoneNumber: true,
   canManageVenues: true,
   avatarUrl: true,
   bannerMode: true,
@@ -141,6 +145,25 @@ export const events = pgTable("events", {
   lineup: jsonb("lineup").$type<LineupEntry[]>(),
   refundPolicy: text("refund_policy"),
   goodToKnow: text("good_to_know"),
+  // --- Social events (free, invite/RSVP) ---
+  // 'commercial' = every pre-existing organizer event. Social events are forced to
+  // price 0 with no tiers / external URL / promotion / payouts (enforced in routes).
+  kind: text("kind").notNull().default("commercial"), // 'commercial' | 'social'
+  visibility: text("visibility").notNull().default("public"), // 'public' | 'private'
+  socialType: text("social_type"), // 'birthday' | 'party' | 'wedding' | 'other' (social only)
+  // `location` stays the public-safe text for social events (area); the exact
+  // address lives here and is only returned after the host approves an RSVP.
+  exactAddress: text("exact_address"),
+  maxPlusOnes: integer("max_plus_ones").notNull().default(0), // per-RSVP cap; plus-ones are a COUNT only
+  inviteToken: text("invite_token").unique(), // shared invite-link token; stripped from all generic responses
+  servesAlcohol: boolean("serves_alcohol").notNull().default(false),
+  // Moderation queue bookkeeping (moderationStatus above stays the source of truth)
+  queueReason: text("queue_reason"), // 'new_account_review' | 'report_threshold' | 'auto_flag' | 'appeal' | 'edit_requested'
+  autoFlags: text("auto_flags").array().notNull().default(sql`'{}'`), // 'external_link' | 'contact_pattern' | 'free_entry_payment'
+  flagOutcome: text("flag_outcome"), // 'approved' | 'rejected' — set when a flagged event is resolved (auto-flag precision)
+  queuedAt: timestamp("queued_at"),
+  guestDataPurgedAt: timestamp("guest_data_purged_at"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
 export type LineupEntry = { name: string; time?: string };
@@ -150,6 +173,21 @@ export const insertEventSchema = createInsertSchema(events).omit({
   ticketsSold: true,
   isCancelled: true,
   cancelledAt: true,
+  // Social-event / moderation columns are never client-settable through the
+  // commercial create/update DTOs - social events have their own DTO + routes.
+  kind: true,
+  visibility: true,
+  socialType: true,
+  exactAddress: true,
+  maxPlusOnes: true,
+  inviteToken: true,
+  servesAlcohol: true,
+  queueReason: true,
+  autoFlags: true,
+  flagOutcome: true,
+  queuedAt: true,
+  guestDataPurgedAt: true,
+  createdAt: true,
 }).extend({
   eventDate: z.coerce.date(),
   eventEndDate: z.coerce.date().optional().nullable(),
@@ -216,7 +254,9 @@ export type TicketTier = typeof ticketTiers.$inferSelect;
 
 export const tickets = pgTable("tickets", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").notNull().references(() => users.id),
+  // Nullable so link-based invitees without an account can hold a price-0 ticket;
+  // CHECK below guarantees every row has either an account or a guest token.
+  userId: varchar("user_id").references(() => users.id),
   eventId: varchar("event_id").notNull().references(() => events.id),
   ticketTierId: varchar("ticket_tier_id").references(() => ticketTiers.id),
   purchaseDate: timestamp("purchase_date").notNull().default(sql`now()`),
@@ -228,7 +268,17 @@ export const tickets = pgTable("tickets", {
   validationCode: varchar("validation_code").notNull().unique().default(sql`gen_random_uuid()`),
   checkedInAt: timestamp("checked_in_at"),
   checkedInBy: varchar("checked_in_by").references(() => users.id),
-});
+  // Social-event RSVP fields. status gains 'declined' | 'pending_approval'.
+  // Only name, RSVP status and plus-one COUNT are collected — nothing else.
+  guestName: text("guest_name"),
+  guestTokenHash: text("guest_token_hash").unique(), // sha256 of the emailed/shared manage-RSVP token
+  plusOneCount: integer("plus_one_count").notNull().default(0),
+  addressApprovedAt: timestamp("address_approved_at"), // host approval; gates exactAddress
+  optedOutAt: timestamp("opted_out_at"), // non-user opt-out → data purged
+  purgedAt: timestamp("purged_at"), // retention / deletion job marker
+}, (table) => ({
+  hasOwner: check("tickets_user_or_guest_chk", sql`${table.userId} IS NOT NULL OR ${table.guestTokenHash} IS NOT NULL OR ${table.purgedAt} IS NOT NULL`),
+}));
 
 export const insertTicketSchema = createInsertSchema(tickets).omit({
   id: true,
@@ -1132,6 +1182,7 @@ export type VenueAnalytics = typeof venueAnalytics.$inferSelect;
 // Admin roles enum
 export const adminRoles = [
   "super_admin",
+  "admin",
   "content_moderator", 
   "user_support",
   "event_reviewer",
@@ -1178,6 +1229,9 @@ export const adminActivityLogs = pgTable("admin_activity_logs", {
   targetType: text("target_type"),
   targetId: varchar("target_id"),
   details: text("details"),
+  // Required by app code for every moderation/user/config action. Nullable only
+  // because pre-existing rows have none. The table is append-only (DB trigger).
+  reason: text("reason"),
   ipAddress: text("ip_address"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
@@ -1243,7 +1297,7 @@ export type InsertUserSuspension = z.infer<typeof insertUserSuspensionSchema>;
 export type UserSuspension = typeof userSuspensions.$inferSelect;
 
 // Event moderation status
-export const eventModerationStatus = ["pending", "approved", "rejected", "flagged"] as const;
+export const eventModerationStatus = ["pending", "approved", "rejected", "flagged", "hidden", "changes_requested", "removed"] as const;
 export type EventModerationStatus = typeof eventModerationStatus[number];
 
 // Event moderation actions
@@ -1253,6 +1307,8 @@ export const eventModerations = pgTable("event_moderations", {
   adminId: varchar("admin_id").notNull().references(() => adminUsers.id),
   action: text("action").notNull(),
   reason: text("reason"),
+  // When the event entered the queue (snapshot), for median time-to-review.
+  queuedAt: timestamp("queued_at"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
@@ -1293,6 +1349,12 @@ export const notificationTypes = [
   // catch) won't happen silently again.
   "mention",
   "repost",
+  // Social-event moderation → host notifications (always carry the reason)
+  "event_moderation",
+  "host_sanction",
+  "appeal_resolved",
+  "rsvp_approved",
+  "rsvp_removed",
 ] as const;
 export type NotificationType = typeof notificationTypes[number];
 
@@ -1634,3 +1696,226 @@ export const insertPaymentTransactionSchema = createInsertSchema(paymentTransact
 
 export type InsertPaymentTransaction = z.infer<typeof insertPaymentTransactionSchema>;
 export type PaymentTransaction = typeof paymentTransactions.$inferSelect;
+
+// ============================================
+// SOCIAL EVENTS — abuse controls, trust, moderation config, reveal grants
+// ============================================
+
+// One row per OTP attempt. codeHash is a hash, never the code; consumedAt makes a
+// code single-use. Verified result lands on users.verifiedPhone / phoneVerifiedAt.
+export const phoneVerifications = pgTable("phone_verifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  phone: text("phone").notNull(), // E.164
+  codeHash: text("code_hash").notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  expiresAt: timestamp("expires_at").notNull(),
+  consumedAt: timestamp("consumed_at"),
+  ipAddress: text("ip_address"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+// Device <-> account links (signed httpOnly device cookie, hashed). Powers
+// "linked accounts sharing this device" and device bans. Best-effort, not forensic.
+export const userDevices = pgTable("user_devices", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  deviceHash: text("device_hash").notNull(),
+  lastIp: text("last_ip"),
+  firstSeenAt: timestamp("first_seen_at").notNull().default(sql`now()`),
+  lastSeenAt: timestamp("last_seen_at").notNull().default(sql`now()`),
+}, (table) => ({
+  uniqueUserDevice: unique().on(table.userId, table.deviceHash),
+}));
+
+// kind: 'phone' (valueHash = sha256 of E.164) | 'device' (valueHash = deviceHash) | 'user'.
+// Hashed so the ban list isn't a phone-number directory. liftedAt null = active.
+export const bans = pgTable("bans", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  kind: text("kind").notNull(),
+  valueHash: text("value_hash").notNull(),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }),
+  reason: text("reason").notNull(),
+  adminId: varchar("admin_id").notNull().references(() => adminUsers.id),
+  liftedAt: timestamp("lifted_at"),
+  liftedBy: varchar("lifted_by").references(() => adminUsers.id),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+// type: 'warn' | 'strike'. Strikes count toward trust tier / auto-ban rules in config.
+export const userStrikes = pgTable("user_strikes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  eventId: varchar("event_id").references(() => events.id, { onDelete: "set null" }),
+  type: text("type").notNull(),
+  reason: text("reason").notNull(),
+  adminId: varchar("admin_id").notNull().references(() => adminUsers.id),
+  expiresAt: timestamp("expires_at"),
+  revokedAt: timestamp("revoked_at"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+// Host trust tier + featured eligibility + abusive-reporter flag. Absent row = 'new'.
+// Every override records who/why so the admin UI can show and audit it.
+export const userTrust = pgTable("user_trust", {
+  userId: varchar("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  trustTier: text("trust_tier").notNull().default("new"), // 'new' | 'standard' | 'trusted'
+  tierOverrideBy: varchar("tier_override_by").references(() => adminUsers.id),
+  tierOverrideReason: text("tier_override_reason"),
+  tierOverrideAt: timestamp("tier_override_at"),
+  featuredEligible: boolean("featured_eligible").notNull().default(false),
+  featuredOverrideBy: varchar("featured_override_by").references(() => adminUsers.id),
+  featuredOverrideReason: text("featured_override_reason"),
+  featuredOverrideAt: timestamp("featured_override_at"),
+  abusiveReporterAt: timestamp("abusive_reporter_at"),
+  abusiveReporterBy: varchar("abusive_reporter_by").references(() => adminUsers.id),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
+export const hostTrustTiers = ["new", "standard", "trusted"] as const;
+export type HostTrustTier = typeof hostTrustTiers[number];
+
+// Admin-editable thresholds (key -> JSON value). Defaults are seeded by the
+// migration, not hardcoded in routes. Every write is audit-logged by the admin route.
+export const moderationConfig = pgTable("moderation_config", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").notNull(),
+  updatedBy: varchar("updated_by").references(() => adminUsers.id),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
+// Seed values only (migration inserts these with ON CONFLICT DO NOTHING); runtime
+// reads go through the moderation_config table.
+export const MODERATION_CONFIG_DEFAULTS = {
+  report_auto_hide_threshold: 3,
+  new_account_weekly_public_limit: 1,
+  min_account_age_days: 7,
+  new_account_window_days: 30, // an account younger than this is "new" for review/pattern rules
+  guest_data_retention_days: 30,
+  blocked_patterns: ["whatsapp", "telegram", "t.me/", "wa.me/", "dm me", "contact me on", "http://", "https://", "www."],
+  reveal_grant_default_hours: 48,
+  reveal_grant_max_hours: 168,
+  queue_sla_hours: 24,
+  strikes_for_auto_ban: 3,
+  trusted_after_clean_events: 3, // completed public events with no strikes before a host counts as 'trusted'
+  guest_data_hold_extra_days: 30, // extra days guest data may be kept while a moderation case about the event is open
+} as const;
+export type ModerationConfigKey = keyof typeof MODERATION_CONFIG_DEFAULTS;
+
+// Append-only (DB trigger blocks UPDATE/DELETE/TRUNCATE). Every read of guest-level
+// data or an exact address - by host, admin, grantee or system - writes a row.
+export const guestDataAudit = pgTable("guest_data_audit", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  actorType: text("actor_type").notNull(), // 'host' | 'super_admin' | 'grantee' | 'system'
+  actorUserId: varchar("actor_user_id"), // no FK: SET NULL would be an UPDATE the append-only trigger blocks
+  actorAdminId: varchar("actor_admin_id").references(() => adminUsers.id),
+  // No FK on event/ticket: the log must outlive deletion of what it describes.
+  eventId: varchar("event_id").notNull(),
+  ticketId: varchar("ticket_id"),
+  dataAccessed: text("data_accessed").notNull(), // 'guest_list' | 'guest_record' | 'exact_address' | 'purge'
+  grantId: varchar("grant_id"),
+  caseType: text("case_type"),
+  caseId: varchar("case_id"),
+  reason: text("reason"),
+  ipAddress: text("ip_address"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+// Reveal authority is always a scoped, expiring GRANT, never a role/flag.
+// Created only by a super-admin (enforced in route + test); a grantee cannot create,
+// extend or re-delegate. Validity = revokedAt IS NULL AND expiresAt > now(), checked
+// server-side on every request. eventId is always set (a "case" resolves to its event);
+// caseType/caseId link the report or moderation item that justifies it.
+export const revealGrants = pgTable("reveal_grants", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  grantorId: varchar("grantor_id").notNull().references(() => adminUsers.id),
+  granteeId: varchar("grantee_id").notNull().references(() => adminUsers.id),
+  eventId: varchar("event_id").notNull().references(() => events.id),
+  caseType: text("case_type").notNull(), // 'report' | 'moderation_item'
+  caseId: varchar("case_id").notNull(),
+  reason: text("reason").notNull(),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  expiresAt: timestamp("expires_at").notNull(),
+  revokedAt: timestamp("revoked_at"),
+  revokedBy: varchar("revoked_by").references(() => adminUsers.id),
+}, (table) => ({
+  expiresAfterCreated: check("reveal_grants_expiry_chk", sql`${table.expiresAt} > ${table.createdAt}`),
+  notSelf: check("reveal_grants_not_self_chk", sql`${table.grantorId} <> ${table.granteeId}`),
+}));
+
+// Host appeals against a moderation action; open appeals surface in the admin queue.
+export const moderationAppeals = pgTable("moderation_appeals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  subjectType: text("subject_type").notNull(), // 'event' | 'strike' | 'ban' | 'suspension'
+  subjectId: varchar("subject_id").notNull(),
+  message: text("message").notNull(),
+  status: text("status").notNull().default("open"), // 'open' | 'upheld' | 'denied'
+  resolvedBy: varchar("resolved_by").references(() => adminUsers.id),
+  resolvedAt: timestamp("resolved_at"),
+  resolutionReason: text("resolution_reason"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+// TOTP for admins. secretEnc is AES-GCM ciphertext (key from env, never in DB).
+// lastUsedStep blocks code replay inside the same 30s window.
+export const adminMfa = pgTable("admin_mfa", {
+  adminId: varchar("admin_id").primaryKey().references(() => adminUsers.id, { onDelete: "cascade" }),
+  secretEnc: text("secret_enc").notNull(),
+  enabledAt: timestamp("enabled_at"), // null until first code is confirmed
+  lastUsedStep: integer("last_used_step"),
+  recoveryCodeHashes: text("recovery_code_hashes").array().notNull().default(sql`'{}'`),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export type PhoneVerification = typeof phoneVerifications.$inferSelect;
+export type UserDevice = typeof userDevices.$inferSelect;
+export type Ban = typeof bans.$inferSelect;
+export type UserStrike = typeof userStrikes.$inferSelect;
+export type UserTrust = typeof userTrust.$inferSelect;
+export type GuestDataAudit = typeof guestDataAudit.$inferSelect;
+export type RevealGrant = typeof revealGrants.$inferSelect;
+export type ModerationAppeal = typeof moderationAppeals.$inferSelect;
+export type AdminMfa = typeof adminMfa.$inferSelect;
+
+// Social event input contract (shared by client + server). Phase 2 wires the routes.
+export const socialEventTypes = ["birthday", "party", "wedding", "other"] as const;
+export type SocialEventType = typeof socialEventTypes[number];
+export const eventVisibilities = ["public", "private"] as const;
+export type EventVisibility = typeof eventVisibilities[number];
+
+// ---- Social event DTOs (create / edit / RSVP) ----
+const optionalText = (max: number) => z.string().trim().max(max).optional().nullable();
+
+export const socialEventCreateDto = z.object({
+  title: z.string().trim().min(1).max(120),
+  description: z.string().trim().min(1).max(2000),
+  socialType: z.enum(socialEventTypes),
+  visibility: z.enum(eventVisibilities).default("private"),
+  eventDate: z.string().datetime().transform((v) => new Date(v)),
+  eventEndDate: z.string().datetime().transform((v) => new Date(v)).optional().nullable(),
+  // Public-safe area text ("Shoreditch, London"). The street address is separate and gated.
+  location: z.string().trim().min(1).max(120),
+  city: optionalText(80),
+  exactAddress: z.string().trim().min(1).max(300),
+  capacity: z.number().int().min(1).max(1000),
+  maxPlusOnes: z.number().int().min(0).max(5).default(0),
+  dressCode: optionalText(120),
+  schedule: z.array(z.object({ name: z.string().trim().min(1).max(80), time: z.string().trim().max(40).optional() })).max(30).optional().nullable(),
+  ageRestriction: z.enum(["all", "18+", "21+"]).default("all"),
+  servesAlcohol: z.boolean().default(false),
+  imageUrl: z.string().max(500).regex(/^(https:\/\/|\/)/, "Image must be an https URL or an uploaded path").optional().nullable(),
+});
+export const socialEventUpdateDto = socialEventCreateDto.omit({ visibility: true, socialType: true }).partial();
+export type SocialEventCreateDto = z.input<typeof socialEventCreateDto>;
+
+export const socialRsvpDto = z.object({
+  name: z.string().trim().min(1).max(80),
+  attending: z.boolean(),
+  plusOneCount: z.number().int().min(0).max(5).default(0),
+}).strict(); // anything else (dietary needs, health, phone...) is rejected, not silently stored
+export type SocialRsvpDto = z.input<typeof socialRsvpDto>;
+
+export const socialAppealDto = z.object({
+  message: z.string().trim().min(10, "Tell us a little more (at least 10 characters)").max(1000),
+});

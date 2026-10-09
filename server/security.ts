@@ -156,6 +156,17 @@ export const sensitiveOperationLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Public (no-account) invite endpoints: per-IP, generous enough for a household
+// on one network, tight enough to stop guest-spam / token guessing.
+export const inviteRsvpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 40,
+  keyGenerator: (req) => ipKeyGenerator(req.ip ?? ""),
+  message: { message: "Too many requests. Please try again shortly.", code: "RATE_LIMITED" },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 export const verificationEmailLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
   max: 3,

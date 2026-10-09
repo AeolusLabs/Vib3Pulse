@@ -7,10 +7,11 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { UsersIcon, CalendarIcon, ImageIcon, FlagIcon, DollarSignIcon, ShieldIcon, ActivityIcon, LogOutIcon, MenuIcon, XIcon, ChevronRightIcon, AlertTriangleIcon, MegaphoneIcon, SettingsIcon } from "@/components/ui/icons";
+import { UsersIcon, CalendarIcon, ImageIcon, FlagIcon, DollarSignIcon, ShieldIcon, ActivityIcon, LogOutIcon, MenuIcon, XIcon, ChevronRightIcon, AlertTriangleIcon, MegaphoneIcon, SettingsIcon, LockIcon } from "@/components/ui/icons";
+import AdminMfaGate from "./AdminMfaGate";
 import { LayoutDashboard } from "lucide-react";
 
-type AdminRole = "super_admin" | "content_moderator" | "user_support" | "event_reviewer" | "finance_manager" | "analytics_viewer";
+type AdminRole = "super_admin" | "admin" | "content_moderator" | "user_support" | "event_reviewer" | "finance_manager" | "analytics_viewer";
 
 interface AdminUser {
   id: string;
@@ -20,6 +21,7 @@ interface AdminUser {
   role: AdminRole;
   isActive: boolean;
   createdAt: string;
+  mfa?: { required: boolean; enrolled: boolean; verified: boolean };
 }
 
 interface NavItem {
@@ -34,13 +36,43 @@ const navItems: NavItem[] = [
     label: "Dashboard",
     path: "/admin/dashboard",
     icon: <LayoutDashboard className="w-5 h-5" />,
-    roles: ["super_admin", "content_moderator", "user_support", "event_reviewer", "finance_manager", "analytics_viewer"],
+    roles: ["super_admin", "admin", "content_moderator", "user_support", "event_reviewer", "finance_manager", "analytics_viewer"],
   },
   {
     label: "Users",
     path: "/admin/users",
     icon: <UsersIcon className="w-5 h-5" />,
-    roles: ["super_admin", "user_support", "content_moderator"],
+    roles: ["super_admin", "admin", "user_support", "content_moderator"],
+  },
+  {
+    label: "Moderation",
+    path: "/admin/moderation",
+    icon: <FlagIcon className="w-5 h-5" />,
+    roles: ["super_admin", "content_moderator", "event_reviewer"],
+  },
+  {
+    label: "Hosts",
+    path: "/admin/hosts",
+    icon: <UsersIcon className="w-5 h-5" />,
+    roles: ["super_admin", "admin"],
+  },
+  {
+    label: "Social events",
+    path: "/admin/social-events",
+    icon: <ActivityIcon className="w-5 h-5" />,
+    roles: ["super_admin", "admin", "content_moderator", "event_reviewer", "analytics_viewer"],
+  },
+  {
+    label: "Reveal access",
+    path: "/admin/reveal",
+    icon: <LockIcon className="w-5 h-5" />,
+    roles: ["super_admin", "content_moderator", "event_reviewer"],
+  },
+  {
+    label: "Moderation settings",
+    path: "/admin/moderation-settings",
+    icon: <SettingsIcon className="w-5 h-5" />,
+    roles: ["super_admin", "admin"],
   },
   {
     label: "Events",
@@ -94,12 +126,13 @@ const navItems: NavItem[] = [
     label: "Settings",
     path: "/admin/settings",
     icon: <SettingsIcon className="w-5 h-5" />,
-    roles: ["super_admin", "content_moderator", "user_support", "event_reviewer", "finance_manager", "analytics_viewer"],
+    roles: ["super_admin", "admin", "content_moderator", "user_support", "event_reviewer", "finance_manager", "analytics_viewer"],
   },
 ];
 
 const roleLabels: Record<AdminRole, string> = {
   super_admin: "Super Admin",
+  admin: "Admin",
   content_moderator: "Content Moderator",
   user_support: "User Support",
   event_reviewer: "Event Reviewer",
@@ -149,9 +182,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     return null;
   }
 
+  // Super-admins must enrol in / pass two-factor before any page loads (the server enforces it on every request).
+  if (admin.mfa?.required && !admin.mfa.verified) {
+    return <AdminMfaGate enrolled={admin.mfa.enrolled} onLogout={() => logoutMutation.mutate()} />;
+  }
+
   const filteredNavItems = navItems.filter(item => 
     item.roles.includes(admin.role)
   );
+
+  // Direct URLs to the social-event admin pages: say so plainly instead of rendering an empty shell
+  // (the server refuses these roles regardless; this is just the friendly side of that).
+  const SOCIAL_ADMIN_PATHS = ["/admin/moderation", "/admin/hosts", "/admin/social-events", "/admin/reveal", "/admin/moderation-settings"];
+  const here = navItems.find((n) => n.path === location);
+  const blocked = !!here && SOCIAL_ADMIN_PATHS.includes(here.path) && !here.roles.includes(admin.role);
 
   return (
     <div className="min-h-screen bg-slate-900 flex">
@@ -245,7 +289,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         sidebarOpen ? "ml-64" : "ml-16"
       )}>
         <div className="p-6">
-          {children}
+          {blocked ? (
+            <div className="mx-auto max-w-md rounded-xl border border-slate-700 bg-slate-800/50 p-8 text-center" data-testid="no-access">
+              <p className="font-medium text-white">You don't have access to this page</p>
+              <p className="mt-1 text-sm text-slate-400">Your role ({roleLabels[admin.role]}) doesn't include it. Ask a super-admin if you think that's wrong.</p>
+            </div>
+          ) : children}
         </div>
       </main>
     </div>

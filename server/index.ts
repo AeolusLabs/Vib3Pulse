@@ -14,6 +14,7 @@ import { Strategy as LocalStrategy } from "passport-local";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import connectPgSimple from "connect-pg-simple";
 import cookieParser from "cookie-parser";
+import { deviceMiddleware } from "./services/enforcement";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { storage, ensureSchema } from "./storage";
@@ -251,6 +252,9 @@ app.use((req, res, next) => {
   if (req.path.startsWith("/api/admin")) return next();
   return passport.session()(req, res, next);
 });
+
+// Signed device cookie + user<->device link, used for device bans and linked-account lookups.
+app.use("/api", deviceMiddleware);
 
 // CSRF token endpoint - must be before CSRF protection middleware
 app.get("/api/csrf-token", csrfTokenEndpoint);

@@ -118,6 +118,14 @@ export default function Navigation({ onSearch }: NavigationProps) {
                     </Link>
                   </DropdownMenuItem>
                 )}
+                {user && (
+                  <DropdownMenuItem asChild data-testid="menu-invitations">
+                    <Link href="/social-events">
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      Invitations
+                    </Link>
+                  </DropdownMenuItem>
+                )}
                 {user?.userType === "organizer" && (
                   <>
                     <DropdownMenuItem asChild data-testid="menu-my-events">
