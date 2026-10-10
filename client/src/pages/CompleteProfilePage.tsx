@@ -96,7 +96,7 @@ export default function CompleteProfilePage() {
       await apiRequest("PATCH", "/api/auth/complete-profile", { userType: roleData.userType, ...data });
       await queryClient.invalidateQueries({ queryKey: ["/api/auth/session"] });
       toast({ title: "You're all set!", description: "Welcome to Vib3Pulse." });
-      setLocation("/discover");
+      setLocation("/feed");
     } catch (error: any) {
       toast({ title: "Couldn't save your profile", description: error.message || "Please try again.", variant: "destructive" });
     } finally {
@@ -117,7 +117,7 @@ export default function CompleteProfilePage() {
   }
 
   if (sessionUser.onboardingComplete) {
-    return <Redirect to="/discover" />;
+    return <Redirect to="/feed" />;
   }
 
   return (

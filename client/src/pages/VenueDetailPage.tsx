@@ -198,7 +198,7 @@ export default function VenueDetailPage() {
         <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center">
           <h1 className="text-2xl font-semibold mb-4">Venue not found</h1>
           <p className="text-muted-foreground mb-6">The venue you're looking for doesn't exist.</p>
-          <Link href="/discover">
+          <Link href="/search">
             <Button>
               <ArrowLeftIcon className="h-4 w-4 mr-2" />
               Back to Discover
@@ -245,7 +245,7 @@ export default function VenueDetailPage() {
       <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 -mt-32 relative z-20">
 
         {/* Back button */}
-        <Link href="/discover">
+        <Link href="/search">
           <Button variant="ghost" size="sm" className="mb-4 bg-background/80 backdrop-blur-sm hover:bg-background" data-testid="button-back">
             <ArrowLeftIcon className="h-4 w-4 mr-2" />
             Back to Discover

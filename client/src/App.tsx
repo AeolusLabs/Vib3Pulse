@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Switch, Route } from "wouter";
+import { Switch, Route, Redirect } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { WebSocketProvider } from "@/providers/WebSocketProvider";
@@ -10,7 +10,6 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import AuthenticatedLayout from "@/components/AuthenticatedLayout";
 import NotFound from "@/pages/not-found";
 import LandingPage from "@/pages/LandingPage";
-import DiscoverPage from "@/pages/DiscoverPage";
 import EventDetailPage from "@/pages/EventDetailPage";
 import ProfilePage from "@/pages/ProfilePage";
 import UserProfilePage from "@/pages/UserProfilePage";
@@ -79,7 +78,10 @@ function Router() {
       <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/verify-email" component={VerifyEmailPage} />
       <Route path="/complete-profile" component={CompleteProfilePage} />
-      <Route path="/discover" component={DiscoverPage} />
+      {/* /discover was merged into /search; keep old shared links (?venue=, ?event=) working */}
+      <Route path="/discover">
+        <Redirect to={`/search${window.location.search}`} />
+      </Route>
       <Route path="/event/:id" component={EventDetailPage} />
       <Route path="/profile/:username" component={ProfilePage} />
       
@@ -129,7 +131,7 @@ function Router() {
       </Route>
       
       <Route path="/search">
-        <AuthenticatedLayout>
+        <AuthenticatedLayout allowAnonymous>
           <SearchPage />
         </AuthenticatedLayout>
       </Route>

@@ -4,7 +4,7 @@ import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { useUnreadMessagesCount } from "@/hooks/useUnreadMessagesCount";
-import { HomeIcon, CompassIcon, MessageCircleIcon, MenuIcon, XIcon, Building2Icon, SearchIcon } from "@/components/ui/icons";
+import { HomeIcon, CompassIcon, MessageCircleIcon, MenuIcon, XIcon, Building2Icon } from "@/components/ui/icons";
 
 export default function MenuTray() {
   const [isOpen, setIsOpen] = useState(false);
@@ -49,9 +49,9 @@ export default function MenuTray() {
                   Feed
                 </Button>
               </Link>
-              <Link href="/discover">
+              <Link href="/search">
                 <Button
-                  variant={location === '/discover' ? 'default' : 'ghost'}
+                  variant={location === '/search' ? 'default' : 'ghost'}
                   size="sm"
                   className="w-full justify-start"
                   onClick={() => setIsOpen(false)}
@@ -59,18 +59,6 @@ export default function MenuTray() {
                 >
                   <CompassIcon className="h-4 w-4 mr-2" />
                   Discover
-                </Button>
-              </Link>
-              <Link href="/search">
-                <Button
-                  variant={location === '/search' ? 'default' : 'ghost'}
-                  size="sm"
-                  className="w-full justify-start"
-                  onClick={() => setIsOpen(false)}
-                  data-testid="link-search"
-                >
-                  <SearchIcon className="h-4 w-4 mr-2" />
-                  Search
                 </Button>
               </Link>
               <Link href="/messages">

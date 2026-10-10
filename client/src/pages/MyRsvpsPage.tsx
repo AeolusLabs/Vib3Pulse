@@ -79,7 +79,7 @@ export default function MyRsvpsPage() {
               <p className="text-muted-foreground mb-4">
                 Browse events and RSVP to free events you're interested in
               </p>
-              <Button onClick={() => navigate("/discover")} data-testid="button-discover-events">
+              <Button onClick={() => navigate("/search")} data-testid="button-discover-events">
                 Discover Events
               </Button>
             </div>

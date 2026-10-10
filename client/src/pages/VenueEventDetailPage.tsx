@@ -135,7 +135,7 @@ export default function VenueEventDetailPage() {
         <Navigation />
         <main className="max-w-[900px] mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center">
           <h1 className="text-2xl font-semibold mb-4">Event not found</h1>
-          <Link href="/discover">
+          <Link href="/search">
             <Button><ArrowLeftIcon className="h-4 w-4 mr-2" />Back to Discover</Button>
           </Link>
         </main>
@@ -212,7 +212,7 @@ export default function VenueEventDetailPage() {
       </div>
 
       <main className="max-w-[900px] mx-auto px-4 sm:px-6 lg:px-8 -mt-24 relative z-20 pb-8">
-        <Link href="/discover">
+        <Link href="/search">
           <Button variant="ghost" size="sm" className="mb-4 bg-background/80 backdrop-blur-sm hover:bg-background">
             <ArrowLeftIcon className="h-4 w-4 mr-2" />Back to Discover
           </Button>

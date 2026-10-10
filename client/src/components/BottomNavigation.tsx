@@ -1,7 +1,7 @@
 
 import { Link, useLocation } from "wouter";
 import { useUnreadMessagesCount } from "@/hooks/useUnreadMessagesCount";
-import { CompassIcon, LayoutGridIcon, SearchIcon, MessageCircleIcon, TicketIcon } from "@/components/ui/icons";
+import { CompassIcon, LayoutGridIcon, MessageCircleIcon, TicketIcon } from "@/components/ui/icons";
 
 interface BottomNavigationProps {
   onCreateClick?: () => void;
@@ -13,9 +13,8 @@ export default function BottomNavigation({ onCreateClick }: BottomNavigationProp
 
   const navItems = [
     { icon: LayoutGridIcon, label: "Feed", path: "/feed", testId: "nav-feed" },
-    { icon: CompassIcon, label: "Discover", path: "/discover", testId: "nav-discover" },
+    { icon: CompassIcon, label: "Discover", path: "/search", testId: "nav-discover" },
     { icon: TicketIcon, label: "Tickets", path: "/ticket-wallet", testId: "nav-tickets" },
-    { icon: SearchIcon, label: "Search", path: "/search", testId: "nav-search" },
     { icon: MessageCircleIcon, label: "Messages", path: "/messages", testId: "nav-messages" },
   ];
 

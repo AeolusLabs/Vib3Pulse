@@ -621,7 +621,7 @@ export default function FeedPost({
           {displayVenue && (
             <Card
               className="mt-3 border border-primary/25 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors"
-              onClick={(e) => { e.stopPropagation(); navigate(`/discover?venue=${displayVenue.id}`); }}
+              onClick={(e) => { e.stopPropagation(); navigate(`/search?venue=${displayVenue.id}`); }}
               data-testid={`attached-venue-${id}`}
             >
               <CardContent className="p-3">

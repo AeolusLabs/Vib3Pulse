@@ -10,7 +10,7 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { data: user, isLoading, error } = useAuth();
   const [location] = useLocation();
 
-  const publicRoutes = ["/login", "/signup", "/", "/discover"];
+  const publicRoutes = ["/login", "/signup", "/", "/search"];
   
   const normalizedLocation = location.split('?')[0].split('#')[0];
 

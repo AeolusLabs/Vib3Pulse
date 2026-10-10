@@ -8,9 +8,11 @@ import { useToast } from "@/hooks/use-toast";
 
 interface AuthenticatedLayoutProps {
   children: React.ReactNode;
+  /** Render for logged-out visitors instead of redirecting to login. */
+  allowAnonymous?: boolean;
 }
 
-export default function AuthenticatedLayout({ children }: AuthenticatedLayoutProps) {
+export default function AuthenticatedLayout({ children, allowAnonymous }: AuthenticatedLayoutProps) {
   const { data: user, isLoading, error } = useAuth();
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const { toast } = useToast();
@@ -52,6 +54,8 @@ export default function AuthenticatedLayout({ children }: AuthenticatedLayoutPro
       </div>
     );
   }
+
+  if (!user && allowAnonymous) return <>{children}</>;
 
   if (!user) {
     const currentPath = window.location.pathname + window.location.search + window.location.hash;

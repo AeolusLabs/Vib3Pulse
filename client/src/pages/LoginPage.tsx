@@ -54,7 +54,7 @@ export default function LoginPage() {
       }
       toast({ title: "Welcome back!", description: "You've successfully signed in." });
       const params = new URLSearchParams(window.location.search);
-      setLocation(params.get("redirect") || "/discover");
+      setLocation(params.get("redirect") || "/feed");
     } catch (error: any) {
       toast({
         title: "Login failed",

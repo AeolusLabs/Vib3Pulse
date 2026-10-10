@@ -1,9 +1,12 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { formatMoney } from "@/lib/currency";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
+import FilterBar from "@/components/FilterBar";
+import UnifiedShareModal, { type ShareData } from "@/components/UnifiedShareModal";
+import { useGeolocation } from "@/hooks/useGeolocation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,7 +23,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { format, isPast } from "date-fns";
 import type { User, Event, Post, Venue, Story, VenueEntryNight } from "@shared/schema";
-import { SearchIcon, UserPlusIcon, UserCheckIcon, CalendarIcon, MapPinIcon, UsersIcon, Building2Icon, TrendingUpIcon, SparklesIcon, HeartIcon, TicketIcon, ChevronRightIcon } from "@/components/ui/icons";
+import { SearchIcon, UserPlusIcon, UserCheckIcon, CalendarIcon, MapPinIcon, UsersIcon, Building2Icon, TrendingUpIcon, SparklesIcon, HeartIcon, TicketIcon, ChevronRightIcon, Share2Icon, Navigation2Icon, Loader2Icon, XCircleIcon, RefreshCwIcon, ClockIcon } from "@/components/ui/icons";
 import { FileText } from "lucide-react";
 import EventLinkBadges from "@/components/EventLinkBadges";
 
@@ -36,6 +39,18 @@ type TrendingPost = Post & { user: User; likeCount: number; commentCount: number
 type TrendingEvent = Event & { organizer: User; rsvpCount: number; ticketCount: number };
 type TrendingVenue = Venue & { viewCount: number };
 type TrendingStory = Story & { user: User; likeCount: number };
+type EventWithDistance = Event & { distance?: number | null };
+type VenueWithDistance = Venue & { distance?: number | null };
+
+// Shared by the event/venue cards: share button, deep-link highlight, distance badge.
+type CardExtras = {
+  highlighted?: boolean;
+  featured?: boolean;
+  distanceLabel?: string;
+  onShare?: (e: React.MouseEvent) => void;
+};
+
+const highlightClass = "ring-4 ring-primary ring-offset-2 scale-[1.02]";
 
 const typeFilters = [
   { key: "all", label: "All", icon: SearchIcon },
@@ -49,9 +64,43 @@ export default function SearchPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [activeType, setActiveType] = useState("all");
-  const [selectedEvent, setSelectedEvent] = useState<TrendingEvent | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState("All Events");
+  const [eventsShownLimit, setEventsShownLimit] = useState(20);
+  const [activeShareData, setActiveShareData] = useState<ShareData | null>(null);
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const [, navigate] = useLocation();
   const { toast } = useToast();
+
+  // Deep links from shared URLs (/search?event=ID, /search?venue=ID)
+  const urlParams = new URLSearchParams(useSearch());
+  const sharedEventId = urlParams.get("event");
+  const sharedVenueId = urlParams.get("venue");
+
+  const {
+    latitude,
+    longitude,
+    city,
+    loading: locationLoading,
+    error: locationError,
+    permissionStatus,
+    requestLocation,
+    clearLocation,
+    hasLocation,
+    formatDistance,
+  } = useGeolocation();
+
+  const distanceLabel = (d: number | null | undefined) => (d == null ? undefined : formatDistance(d));
+
+  const handleShareEvent = (event: Event, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setActiveShareData({ type: "event", id: event.id, title: event.title, imageUrl: event.imageUrl });
+  };
+
+  const handleShareVenue = (venue: Venue, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setActiveShareData({ type: "venue", id: venue.id, name: venue.name, imageUrl: venue.coverImageUrl || venue.imageUrl });
+  };
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -95,16 +144,70 @@ export default function SearchPage() {
 
   const isSearching = debouncedQuery.trim().length >= 2;
 
-  const { data: allEvents = [] } = useQuery<Event[]>({
-    queryKey: ['/api/events'],
-    enabled: !isSearching && (activeType === 'all' || activeType === 'events'),
+  const browsingEvents = !isSearching && (activeType === 'all' || activeType === 'events');
+  const browsingVenues = !isSearching && (activeType === 'all' || activeType === 'venues');
+
+  // Ranked server-side (recency / follow-graph / proximity / engagement); lat/lon
+  // activate the proximity term and add `distance` to each event.
+  const { data: allEvents = [] } = useQuery<EventWithDistance[]>({
+    queryKey: ['/api/events', latitude, longitude],
+    queryFn: async () => {
+      const params = hasLocation ? `?lat=${latitude}&lon=${longitude}` : "";
+      const response = await fetch(`/api/events${params}`);
+      if (!response.ok) throw new Error("Failed to fetch events");
+      return response.json();
+    },
+    enabled: browsingEvents,
+    refetchInterval: 60000,
+    refetchIntervalInBackground: true,
+  });
+
+  const { data: happeningNowEvents = [] } = useQuery<EventWithDistance[]>({
+    queryKey: ['/api/events/happening-now', latitude, longitude],
+    queryFn: async () => {
+      const response = await fetch(`/api/events/happening-now?lat=${latitude}&lon=${longitude}&hours=3`);
+      if (!response.ok) return [];
+      return response.json();
+    },
+    enabled: browsingEvents && hasLocation,
+    refetchInterval: 60000,
+  });
+
+  const { data: promotedEvents = [] } = useQuery<Event[]>({
+    queryKey: ['/api/events/promoted'],
+    enabled: browsingEvents,
+    refetchInterval: 60000,
+    refetchIntervalInBackground: true,
+  });
+
+  const { data: promotedVenues = [] } = useQuery<VenueWithDistance[]>({
+    queryKey: ['/api/venues/promoted'],
+    enabled: browsingVenues,
+    refetchInterval: 60000,
+    refetchIntervalInBackground: true,
+  });
+
+  const { data: nearbyVenues = [] } = useQuery<VenueWithDistance[]>({
+    queryKey: ['/api/venues/nearby', latitude, longitude],
+    queryFn: async () => {
+      const response = await fetch(`/api/venues/nearby?lat=${latitude}&lon=${longitude}&maxDistance=50`);
+      if (!response.ok) return [];
+      return response.json();
+    },
+    enabled: browsingVenues && hasLocation,
+    refetchInterval: 60000,
+  });
+
+  const { data: allVenues = [] } = useQuery<Venue[]>({
+    queryKey: ['/api/venues'],
+    enabled: browsingVenues,
     refetchInterval: 60000,
     refetchIntervalInBackground: true,
   });
 
   const { data: allVenueEvents = [] } = useQuery<Array<VenueEntryNight & { venue: Venue }>>({
     queryKey: ['/api/venue-events/upcoming'],
-    enabled: !isSearching && (activeType === 'all' || activeType === 'events'),
+    enabled: browsingEvents,
     refetchInterval: 60000,
     refetchIntervalInBackground: true,
   });
@@ -228,10 +331,67 @@ export default function SearchPage() {
   // (which does) can go stale in-tab since queries default to staleTime: Infinity with
   // no automatic refetch — filtering by the browser's own clock at render time is the
   // only way this section reliably excludes an event once its date has passed.
+  const matchesCategory = (e: Event) => selectedCategory === "All Events" || e.category === selectedCategory;
+  const isUpcoming = (e: Event) => !isPast(new Date(e.eventDate));
+
+  const filteredPromotedEvents = promotedEvents.filter(e => isUpcoming(e) && matchesCategory(e));
+  const nonPromotedEvents = allEvents.filter(e => isUpcoming(e) && matchesCategory(e) && !promotedEvents.some(pe => pe.id === e.id));
+
+  // Venue events have no category, so a category filter hides them.
   const combinedAllEvents: CombinedEvent[] = [
-    ...allEvents.filter(e => !isPast(new Date(e.eventDate))).map(e => ({ kind: 'event' as const, date: new Date(e.eventDate), data: e })),
-    ...allVenueEvents.filter(e => !isPast(new Date(e.date))).map(e => ({ kind: 'venueEvent' as const, date: new Date(e.date), data: e })),
+    ...nonPromotedEvents.map(e => ({ kind: 'event' as const, date: new Date(e.eventDate), data: e })),
+    ...(selectedCategory === "All Events" ? allVenueEvents : [])
+      .filter(e => !isPast(new Date(e.date)))
+      .map(e => ({ kind: 'venueEvent' as const, date: new Date(e.date), data: e })),
   ].sort((a, b) => a.date.getTime() - b.date.getTime());
+
+  // Prefer nearby ordering for featured venues when location is on.
+  const displayPromotedVenues = hasLocation && nearbyVenues.length > 0
+    ? nearbyVenues.filter(v => promotedVenues.some(pv => pv.id === v.id))
+    : promotedVenues;
+
+  useEffect(() => { setEventsShownLimit(20); }, [selectedCategory, hasLocation]);
+
+  // Shared link: widen the list if the target sits past the "load more" cutoff.
+  useEffect(() => {
+    if (!sharedEventId) return;
+    const idx = combinedAllEvents.findIndex(i => i.kind === 'event' && String(i.data.id) === sharedEventId);
+    if (idx >= eventsShownLimit) setEventsShownLimit(idx + 1);
+  }, [sharedEventId, combinedAllEvents.length, eventsShownLimit]);
+
+  // Scroll to and highlight a shared event/venue (venue wins if both are present).
+  useEffect(() => {
+    const type = sharedVenueId ? "venue" : sharedEventId ? "event" : null;
+    const targetId = sharedVenueId || sharedEventId;
+    if (!type || !targetId) return;
+
+    const testIds = type === "event"
+      ? [`featured-event-${targetId}`, `search-event-${targetId}`, `trending-event-${targetId}`]
+      : [`featured-venue-${targetId}`, `search-venue-${targetId}`, `trending-venue-${targetId}`];
+
+    setHighlightedId(targetId);
+    let attempts = 0;
+    let clearTimer: ReturnType<typeof setTimeout> | null = null;
+    const interval = setInterval(() => {
+      attempts++;
+      const el = testIds.map(id => document.querySelector(`[data-testid="${id}"]`)).find(Boolean);
+      if (el) {
+        clearInterval(interval);
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        clearTimer = setTimeout(() => setHighlightedId(null), 5000);
+      } else if (attempts >= 20) {
+        clearInterval(interval);
+        setHighlightedId(null);
+      }
+    }, 300);
+
+    return () => {
+      clearInterval(interval);
+      if (clearTimer) clearTimeout(clearTimer);
+    };
+  }, [sharedEventId, sharedVenueId]);
+
+  const isHighlighted = (id: string | number) => highlightedId === String(id);
 
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
@@ -239,7 +399,7 @@ export default function SearchPage() {
 
       <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <div className="mb-6">
-          <h1 className="text-3xl font-bold font-serif text-foreground mb-4">Search & Discover</h1>
+          <h1 className="text-3xl font-bold font-serif text-foreground mb-4">Discover</h1>
           
           <div className="relative mb-4">
             <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
@@ -254,7 +414,7 @@ export default function SearchPage() {
           </div>
 
           <div className="flex gap-2 overflow-x-auto pb-2">
-            {typeFilters.map((filter) => (
+            {typeFilters.filter((f) => currentUser || (f.key !== "users" && f.key !== "posts")).map((filter) => (
               <Button
                 key={filter.key}
                 variant={activeType === filter.key ? "default" : "outline"}
@@ -321,7 +481,7 @@ export default function SearchPage() {
                   {(searchResults.events.length > 0 || searchResults.venueEvents.length > 0) && (
                     <SearchResultSection title="Events" icon={CalendarIcon}>
                       {searchResults.events.map((event) => (
-                        <EventResultCard key={`event-${event.id}`} event={event} navigate={navigate} />
+                        <EventResultCard key={`event-${event.id}`} event={event} onSelect={setSelectedEvent} />
                       ))}
                       {searchResults.venueEvents.map((ve) => (
                         <VenueEventResultCard key={`ve-${ve.id}`} venueEvent={ve} navigate={navigate} />
@@ -352,7 +512,7 @@ export default function SearchPage() {
 
                 <TabsContent value="events" className="space-y-3">
                   {searchResults.events.map((event) => (
-                    <EventResultCard key={`event-${event.id}`} event={event} navigate={navigate} />
+                    <EventResultCard key={`event-${event.id}`} event={event} onSelect={setSelectedEvent} />
                   ))}
                   {searchResults.venueEvents.map((ve) => (
                     <VenueEventResultCard key={`ve-${ve.id}`} venueEvent={ve} navigate={navigate} />
@@ -375,6 +535,132 @@ export default function SearchPage() {
           </div>
         ) : (
           <div className="space-y-8">
+            {/* Location prompt / denied / active */}
+            {!hasLocation && permissionStatus !== "denied" && (
+              <div className="p-4 rounded-lg bg-gradient-to-r from-purple-100 to-pink-100 dark:from-purple-950/40 dark:to-pink-950/40 border border-purple-200 dark:border-purple-800">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-full bg-purple-200 dark:bg-purple-800">
+                      <MapPinIcon className="h-5 w-5 text-purple-600 dark:text-purple-300" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-sm">Enable Location</p>
+                      <p className="text-xs text-muted-foreground">See events and venues near you</p>
+                    </div>
+                  </div>
+                  <Button size="sm" onClick={requestLocation} disabled={locationLoading} data-testid="button-enable-location">
+                    {locationLoading ? (
+                      <><Loader2Icon className="h-4 w-4 mr-2 animate-spin" />Getting location...</>
+                    ) : (
+                      <><Navigation2Icon className="h-4 w-4 mr-2" />Enable Location</>
+                    )}
+                  </Button>
+                </div>
+                {locationError && <p className="text-xs text-destructive mt-2">{locationError}</p>}
+              </div>
+            )}
+
+            {permissionStatus === "denied" && (
+              <div className="p-4 rounded-lg bg-gradient-to-r from-amber-100 to-orange-100 dark:from-amber-950/40 dark:to-orange-950/40 border border-amber-300 dark:border-amber-800">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-full bg-amber-200 dark:bg-amber-800">
+                      <XCircleIcon className="h-5 w-5 text-amber-600 dark:text-amber-300" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-sm">Location Access Denied</p>
+                      <p className="text-xs text-muted-foreground">
+                        To see nearby events, please enable location in your browser settings and refresh the page.
+                      </p>
+                    </div>
+                  </div>
+                  <Button size="sm" variant="outline" onClick={clearLocation} data-testid="button-clear-location">
+                    <RefreshCwIcon className="h-4 w-4 mr-2" />
+                    Reset & Try Again
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {hasLocation && city && (
+              <Badge variant="outline" className="bg-green-50 dark:bg-green-950/30 border-green-300 text-green-700 dark:text-green-400">
+                <Navigation2Icon className="h-3 w-3 mr-1" />
+                Showing events near {city}
+              </Badge>
+            )}
+
+            {(activeType === "all" || activeType === "events") && (
+              <FilterBar selectedCategory={selectedCategory} onCategoryChange={setSelectedCategory} />
+            )}
+
+            {/* Happening now (location only) */}
+            {browsingEvents && hasLocation && happeningNowEvents.length > 0 && (
+              <section data-testid="happening-now-grid">
+                <h2 className="text-xl font-semibold font-serif flex items-center gap-2 mb-4">
+                  <ClockIcon className="h-5 w-5 text-orange-500" />
+                  Happening Near You Now
+                  <Badge variant="secondary" className="text-xs">Within 3 hours</Badge>
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {happeningNowEvents.slice(0, 3).map((event) => (
+                    <EventResultCard
+                      key={`now-${event.id}`}
+                      event={event}
+                      onSelect={setSelectedEvent}
+                      onShare={(e) => handleShareEvent(event, e)}
+                      distanceLabel={distanceLabel(event.distance)}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Featured (promoted) events */}
+            {browsingEvents && filteredPromotedEvents.length > 0 && (
+              <section data-testid="featured-events-grid">
+                <h2 className="text-xl font-semibold font-serif flex items-center gap-2 mb-4">
+                  <SparklesIcon className="h-5 w-5 text-purple-500" />
+                  Featured Events
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filteredPromotedEvents.map((event) => (
+                    <EventResultCard
+                      key={`featured-${event.id}`}
+                      event={event}
+                      featured
+                      onSelect={setSelectedEvent}
+                      onShare={(e) => handleShareEvent(event, e)}
+                      highlighted={isHighlighted(event.id)}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Featured (promoted) venues */}
+            {browsingVenues && displayPromotedVenues.length > 0 && (
+              <section data-testid="featured-venues-grid">
+                <h2 className="text-xl font-semibold font-serif flex items-center gap-2 mb-4">
+                  <SparklesIcon className="h-5 w-5 text-purple-500" />
+                  Featured Venues
+                  {hasLocation && <Badge variant="outline" className="text-xs">Sorted by distance</Badge>}
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {displayPromotedVenues.map((venue) => (
+                    <VenueResultCard
+                      key={`featured-${venue.id}`}
+                      venue={venue}
+                      featured
+                      navigate={navigate}
+                      onShare={(e) => handleShareVenue(venue, e)}
+                      highlighted={isHighlighted(venue.id)}
+                      distanceLabel={distanceLabel(venue.distance)}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
             {/* Recommended users based on interests/location - shown when Users filter is active */}
             {activeType === "users" && currentUser && (
               <section data-testid="section-recommended-users">
@@ -458,9 +744,6 @@ export default function SearchPage() {
                     <TrendingUpIcon className="h-5 w-5 text-primary" />
                     Trending Events
                   </h2>
-                  <Button variant="ghost" size="sm" onClick={() => navigate('/discover')} data-testid="link-view-all-events">
-                    View all <ChevronRightIcon className="h-4 w-4 ml-1" />
-                  </Button>
                 </div>
                 <ScrollArea className="w-full whitespace-nowrap">
                   <div className="flex gap-4 pb-4">
@@ -479,23 +762,45 @@ export default function SearchPage() {
               </section>
             )}
 
-            {(activeType === "all" || activeType === "events") && combinedAllEvents.length > 0 && (
+            {browsingEvents && (
               <section>
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-semibold font-serif flex items-center gap-2">
                     <CalendarIcon className="h-5 w-5 text-primary" />
-                    All Events
+                    {hasLocation ? "Events Near You" : "All Events"}
+                    {hasLocation && <Badge variant="outline" className="text-xs">Sorted by distance</Badge>}
                   </h2>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {combinedAllEvents.map((item) =>
-                    item.kind === 'event' ? (
-                      <EventResultCard key={`event-${item.data.id}`} event={item.data as Event & { organizer: User }} navigate={navigate} />
-                    ) : (
-                      <VenueEventResultCard key={`ve-${item.data.id}`} venueEvent={item.data} navigate={navigate} />
-                    )
-                  )}
-                </div>
+                {combinedAllEvents.length === 0 ? (
+                  <div className="text-center py-12" data-testid="text-no-events">
+                    <p className="text-muted-foreground">No events found</p>
+                    <p className="text-sm text-muted-foreground mt-1">Try a different category</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" data-testid="events-grid">
+                    {combinedAllEvents.slice(0, eventsShownLimit).map((item) =>
+                      item.kind === 'event' ? (
+                        <EventResultCard
+                          key={`event-${item.data.id}`}
+                          event={item.data as EventWithDistance}
+                          onSelect={setSelectedEvent}
+                          onShare={(e) => handleShareEvent(item.data as Event, e)}
+                          highlighted={isHighlighted(item.data.id)}
+                          distanceLabel={hasLocation ? distanceLabel((item.data as EventWithDistance).distance) : undefined}
+                        />
+                      ) : (
+                        <VenueEventResultCard key={`ve-${item.data.id}`} venueEvent={item.data} navigate={navigate} />
+                      )
+                    )}
+                  </div>
+                )}
+                {combinedAllEvents.length > eventsShownLimit && (
+                  <div className="text-center py-6">
+                    <Button variant="outline" onClick={() => setEventsShownLimit(n => n + 20)} data-testid="button-load-more-events">
+                      Load more ({combinedAllEvents.length - eventsShownLimit} remaining)
+                    </Button>
+                  </div>
+                )}
               </section>
             )}
 
@@ -524,7 +829,28 @@ export default function SearchPage() {
               </section>
             )}
 
-            {(activeType === "all" || activeType === "posts") && trendingPosts.length > 0 && (
+            {browsingVenues && allVenues.length > 0 && (
+              <section>
+                <h2 className="text-xl font-semibold font-serif flex items-center gap-2 mb-4">
+                  <Building2Icon className="h-5 w-5 text-primary" />
+                  All Venues
+                  <span className="text-sm font-normal text-muted-foreground">({allVenues.length})</span>
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4" data-testid="all-venues-grid">
+                  {allVenues.map((venue) => (
+                    <VenueResultCard
+                      key={venue.id}
+                      venue={venue}
+                      navigate={navigate}
+                      onShare={(e) => handleShareVenue(venue, e)}
+                      highlighted={isHighlighted(venue.id)}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {currentUser && (activeType === "all" || activeType === "posts") && trendingPosts.length > 0 && (
               <section>
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-semibold font-serif flex items-center gap-2">
@@ -558,6 +884,14 @@ export default function SearchPage() {
         <EventDetailsModal
           event={selectedEvent}
           onClose={() => setSelectedEvent(null)}
+        />
+      )}
+
+      {activeShareData && (
+        <UnifiedShareModal
+          open={!!activeShareData}
+          onClose={() => setActiveShareData(null)}
+          shareData={activeShareData}
         />
       )}
     </div>
@@ -631,12 +965,12 @@ function UserResultCard({ user, sessionUser, isFollowing, onFollowToggle, naviga
   );
 }
 
-function EventResultCard({ event, navigate }: { event: Event & { organizer?: User }; navigate: (path: string) => void }) {
+function EventResultCard({ event, onSelect, highlighted, featured, onShare, distanceLabel }: { event: Event & { organizer?: User }; onSelect: (event: Event) => void } & CardExtras) {
   return (
     <div
-      className="rounded-xl border border-border/40 bg-card hover:border-primary/30 hover:bg-muted/10 transition-all duration-200 cursor-pointer overflow-hidden"
-      onClick={() => navigate(`/events/${event.id}`)}
-      data-testid={`search-event-${event.id}`}
+      className={`rounded-xl border bg-card hover:border-primary/30 hover:bg-muted/10 transition-all duration-500 cursor-pointer overflow-hidden ${featured ? "border-purple-300" : "border-border/40"} ${highlighted ? highlightClass : ""}`}
+      onClick={() => onSelect(event)}
+      data-testid={`${featured ? "featured" : "search"}-event-${event.id}`}
     >
       {event.imageUrl && (
         <div className="relative aspect-[16/7] overflow-hidden">
@@ -658,6 +992,19 @@ function EventResultCard({ event, navigate }: { event: Event & { organizer?: Use
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
           <span className="flex items-center gap-1 truncate"><MapPinIcon className="h-3 w-3 flex-shrink-0" />{event.location}</span>
           <span className="flex-shrink-0 px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">{event.category}</span>
+          {distanceLabel && (
+            <span className="flex-shrink-0 flex items-center gap-1"><Navigation2Icon className="h-3 w-3" />{distanceLabel}</span>
+          )}
+          {onShare && (
+            <button
+              className="ml-auto flex-shrink-0 p-1 rounded hover:bg-muted"
+              onClick={onShare}
+              aria-label="Share event"
+              data-testid={`button-share-event-${event.id}`}
+            >
+              <Share2Icon className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -697,16 +1044,17 @@ function VenueEventResultCard({ venueEvent, navigate }: { venueEvent: VenueEntry
   );
 }
 
-function VenueResultCard({ venue, navigate }: { venue: Venue; navigate: (path: string) => void }) {
+function VenueResultCard({ venue, navigate, highlighted, featured, onShare, distanceLabel }: { venue: Venue; navigate: (path: string) => void } & CardExtras) {
+  const image = venue.coverImageUrl || venue.imageUrl;
   return (
     <div
-      className="rounded-xl border border-border/40 bg-card hover:border-primary/30 hover:bg-muted/10 transition-all duration-200 cursor-pointer overflow-hidden"
+      className={`rounded-xl border bg-card hover:border-primary/30 hover:bg-muted/10 transition-all duration-500 cursor-pointer overflow-hidden ${featured ? "border-purple-300" : "border-border/40"} ${highlighted ? highlightClass : ""}`}
       onClick={() => navigate(`/venue/${venue.id}`)}
-      data-testid={`search-venue-${venue.id}`}
+      data-testid={`${featured ? "featured" : "search"}-venue-${venue.id}`}
     >
-      {venue.imageUrl && (
+      {image && (
         <div className="relative aspect-[16/7] overflow-hidden">
-          <img src={venue.imageUrl} alt={venue.name} className="w-full h-full object-cover" />
+          <img src={image} alt={venue.name} className="w-full h-full object-cover" />
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
           <span className="absolute bottom-2 left-3 text-xs font-semibold text-white/90 bg-black/40 px-2 py-0.5 rounded-full backdrop-blur-sm capitalize">{venue.category}</span>
         </div>
@@ -716,6 +1064,19 @@ function VenueResultCard({ venue, navigate }: { venue: Venue; navigate: (path: s
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
           <MapPinIcon className="h-3 w-3 flex-shrink-0" />
           <span className="truncate">{venue.city || venue.location}</span>
+          {distanceLabel && (
+            <span className="flex-shrink-0 flex items-center gap-1 ml-2"><Navigation2Icon className="h-3 w-3" />{distanceLabel}</span>
+          )}
+          {onShare && (
+            <button
+              className="ml-auto flex-shrink-0 p-1 rounded hover:bg-muted"
+              onClick={onShare}
+              aria-label="Share venue"
+              data-testid={`button-share-venue-${venue.id}`}
+            >
+              <Share2Icon className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
     </div>

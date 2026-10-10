@@ -58,7 +58,7 @@ type ContactItem =
 function getShareUrl(data: ShareData): string {
   const base = window.location.origin;
   if (data.type === "event") return `${base}/event/${data.id}`;
-  if (data.type === "venue") return `${base}/discover?venue=${data.id}`;
+  if (data.type === "venue") return `${base}/search?venue=${data.id}`;
   if (data.type === "post") return `${base}/posts/${data.id}`;
   return base;
 }

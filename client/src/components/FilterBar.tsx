@@ -44,17 +44,19 @@ export default function FilterBar({
         <ScrollBar orientation="horizontal" />
       </ScrollArea>
 
-      <Select defaultValue="upcoming" onValueChange={onSortChange}>
-        <SelectTrigger className="w-full sm:w-[180px]" data-testid="select-sort">
-          <SelectValue placeholder="Sort by" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="upcoming">Upcoming</SelectItem>
-          <SelectItem value="popular">Most Popular</SelectItem>
-          <SelectItem value="price-low">Price: Low to High</SelectItem>
-          <SelectItem value="price-high">Price: High to Low</SelectItem>
-        </SelectContent>
-      </Select>
+      {onSortChange && (
+        <Select defaultValue="upcoming" onValueChange={onSortChange}>
+          <SelectTrigger className="w-full sm:w-[180px]" data-testid="select-sort">
+            <SelectValue placeholder="Sort by" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="upcoming">Upcoming</SelectItem>
+            <SelectItem value="popular">Most Popular</SelectItem>
+            <SelectItem value="price-low">Price: Low to High</SelectItem>
+            <SelectItem value="price-high">Price: High to Low</SelectItem>
+          </SelectContent>
+        </Select>
+      )}
     </div>
   );
 }

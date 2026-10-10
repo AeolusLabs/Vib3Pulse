@@ -127,7 +127,7 @@ export default function SignupPage() {
       await queryClient.invalidateQueries({ queryKey: ["/api/auth/session"] });
       toast({ title: "Account created!", description: "Welcome to Vib3Pulse. Let's explore!" });
       const params = new URLSearchParams(window.location.search);
-      setLocation(params.get("redirect") || "/discover");
+      setLocation(params.get("redirect") || "/feed");
     } catch (error: any) {
       toast({ title: "Signup failed", description: error.message || "Could not create account. Please try again.", variant: "destructive" });
     } finally {

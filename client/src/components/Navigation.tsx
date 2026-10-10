@@ -64,7 +64,7 @@ export default function Navigation({ onSearch }: NavigationProps) {
           <div className="flex items-center gap-3">
             <MenuTray />
             
-            <Link href="/discover" className="no-underline">
+            <Link href="/feed" className="no-underline">
               <h1 className="font-serif text-2xl font-bold text-primary hover-elevate px-3 py-1 rounded-md" data-testid="link-home">
                 Vib3Pulse
               </h1>

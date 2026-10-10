@@ -249,7 +249,7 @@ export function registerUsersRoutes(app: Express): void {
       passport.authenticate("google", { failureRedirect: "/login?error=google_auth_failed" }),
       (req, res) => {
         rotateCsrfToken(res);
-        res.redirect(req.user?.onboardingComplete === false ? "/complete-profile" : "/discover");
+        res.redirect(req.user?.onboardingComplete === false ? "/complete-profile" : "/feed");
       }
     );
   }
@@ -1041,10 +1041,16 @@ export function registerUsersRoutes(app: Express): void {
   });
 
   // Universal search endpoint
-  app.get("/api/search", requireAuth, async (req, res) => {
+  // Public: logged-out visitors can search events + venues only (users/posts need a session).
+  app.get("/api/search", async (req, res) => {
     try {
       const query = (req.query.q as string || "").trim();
-      const types = req.query.types ? (req.query.types as string).split(",") : undefined;
+      let types = req.query.types ? (req.query.types as string).split(",") : undefined;
+      if (!req.user) {
+        const publicTypes = ["events", "venueEvents", "venues"];
+        types = (types ?? publicTypes).filter((t) => publicTypes.includes(t));
+        if (types.length === 0) types = ["events"];
+      }
 
       if (query.length < 2) {
         return res.json({
@@ -1061,6 +1067,10 @@ export function registerUsersRoutes(app: Express): void {
       }
 
       const results = await storage.universalSearch(query, types);
+      if (!req.user) {
+        // Event rows embed the full organizer user (email, googleId, DOB...). Event cards don't need it.
+        results.events = results.events.map(({ organizer, ...event }) => event as typeof results.events[number]);
+      }
       res.json(results);
     } catch (error) {
       console.error("Universal search error:", error);
