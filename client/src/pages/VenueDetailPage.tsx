@@ -1,15 +1,19 @@
 import { useState } from "react";
-import { useParams, Link } from "wouter";
+import { useParams, Link, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import ImageLightbox from "@/components/ImageLightbox";
+import UnifiedShareModal from "@/components/UnifiedShareModal";
+import { useGeolocation } from "@/hooks/useGeolocation";
+import {
+  VenueHero, VenueHeader, VenueActions, NextNightCard, GoodToKnow, UpcomingNights,
+  VenueAbout, LocationCard, SafetyShortcut, VenueHost, StickyEntryBar, pickNextNight,
+} from "@/components/venue/VenueSections";
 import { VenueGalleryManager } from "@/components/VenueGalleryManager";
 import { useAuth } from "@/hooks/useAuth";
 import { CardPaymentForm } from "@/components/payments/CardPaymentForm";
@@ -19,8 +23,8 @@ import { format } from "date-fns";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Venue, VenueEntryNight } from "@shared/schema";
-import { MapPinIcon, PhoneIcon, GlobeIcon, ClockIcon, MusicIcon, UsersIcon, CalendarIcon, ShieldIcon, SparklesIcon, ArrowLeftIcon, TicketIcon, CheckCircleIcon, AlertCircleIcon } from "@/components/ui/icons";
-import { Accessibility, Star } from "lucide-react";
+import { ArrowLeftIcon, CheckCircleIcon } from "@/components/ui/icons";
+import { Star } from "lucide-react";
 import { useVenueRatings, useUserVenueRating, useSubmitVenueRating } from "@/hooks/use-ratings";
 import RatingInput from "@/components/RatingInput";
 import RatingDisplay from "@/components/RatingDisplay";
@@ -104,8 +108,10 @@ function VenueTicketPaymentForm({
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function VenueDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const [, navigate] = useLocation();
   const { toast } = useToast();
   const { data: currentUser } = useAuth();
+  const { getDistanceFromUser } = useGeolocation();
 
   const [selectedEntryNight, setSelectedEntryNight] = useState<VenueEntryNight | null>(null);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
@@ -115,6 +121,8 @@ export default function VenueDetailPage() {
   const [galleryLightboxOpen, setGalleryLightboxOpen] = useState(false);
   const [galleryLightboxIndex, setGalleryLightboxIndex] = useState(0);
   const [isEditingRating, setIsEditingRating] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [addressCopied, setAddressCopied] = useState(false);
 
   const { data: venue, isLoading: venueLoading } = useQuery<Venue & { owner: any }>({
     queryKey: ["/api/venues", id],
@@ -136,6 +144,31 @@ export default function VenueDetailPage() {
   });
 
   const isVenueOwner = currentUser?.id === venue?.ownerId;
+  const ownerId: string | undefined = venue?.owner?.id;
+
+  const { data: followingUsers = [] } = useQuery<Array<{ id: string }>>({
+    queryKey: ["/api/follows/me/following"],
+    enabled: !!currentUser && !!ownerId && !isVenueOwner,
+  });
+  const isFollowingOwner = followingUsers.some((u) => u.id === ownerId);
+
+  const followMutation = useMutation({
+    mutationFn: async () => {
+      if (!ownerId) return;
+      await apiRequest(isFollowingOwner ? "DELETE" : "POST", `/api/follows/${ownerId}`, {});
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/follows/me/following"] }),
+    onError: (e: any) => toast({ title: e.message || "Couldn't update follow", variant: "destructive" }),
+  });
+
+  const messageMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/conversations/direct", { userId: ownerId });
+      return res.json();
+    },
+    onSuccess: (conversation: { id: string }) => navigate(`/messages/${conversation.id}`),
+    onError: (e: any) => toast({ title: e.message || "Couldn't open the chat", variant: "destructive" }),
+  });
 
   const createPaymentMutation = useMutation({
     mutationFn: async (venueEntryNightId: string) => {
@@ -154,6 +187,8 @@ export default function VenueDetailPage() {
     },
   });
 
+  const buyingId = createPaymentMutation.isPending ? (createPaymentMutation.variables as string) : null;
+
   const handleClosePayment = () => {
     setSelectedEntryNight(null);
     setClientSecret(null);
@@ -162,12 +197,19 @@ export default function VenueDetailPage() {
   };
 
   const handlePaymentSuccess = () => {
-    setSelectedEntryNight(null);
-    setClientSecret(null);
-    setPaymentIntentId(null);
-    setPaymentProvider("stripe");
+    handleClosePayment();
     setShowSuccess(true);
     setTimeout(() => setShowSuccess(false), 3000);
+  };
+
+  const handleCopyAddress = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setAddressCopied(true);
+      setTimeout(() => setAddressCopied(false), 1500);
+    } catch {
+      toast({ title: "Couldn't copy the address", description: text });
+    }
   };
 
   // ── Loading state ───────────────────────────────────────────────────────────
@@ -175,14 +217,12 @@ export default function VenueDetailPage() {
     return (
       <div className="min-h-screen bg-background pb-20 md:pb-0">
         <Navigation />
-        <div className="h-[400px] md:h-[500px] bg-muted animate-pulse" />
-        <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 -mt-32 relative z-20">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-2 space-y-4">
-              <Skeleton className="h-64 w-full rounded-xl" />
-              <Skeleton className="h-40 w-full rounded-xl" />
-            </div>
-            <Skeleton className="h-64 w-full rounded-xl" />
+        <div className="h-[236px] sm:h-[300px] bg-muted animate-pulse" />
+        <main className="max-w-[1100px] mx-auto px-4 sm:px-6 lg:px-8 pt-5">
+          <div className="space-y-4">
+            <Skeleton className="h-10 w-2/3" />
+            <Skeleton className="h-16 w-full rounded-xl" />
+            <Skeleton className="h-48 w-full rounded-2xl" />
           </div>
         </main>
         <BottomNavigation />
@@ -210,428 +250,148 @@ export default function VenueDetailPage() {
     );
   }
 
-  const isPromoted = venue.isPromoted && venue.promotedUntil && new Date(venue.promotedUntil) > new Date();
-  const heroImage = venue.coverImageUrl || venue.imageUrl;
-  const ownerInitials = (venue.owner?.displayName || venue.owner?.username || "?")
-    .slice(0, 2).toUpperCase();
-  const accessibilityFeatures: string[] = (venue as any).accessibilityFeatures || [];
+  const isPromoted = !!(venue.isPromoted && venue.promotedUntil && new Date(venue.promotedUntil) > new Date());
   const galleryImages: string[] = venue.imageUrls || [];
+  const heroImage = venue.coverImageUrl || venue.imageUrl;
+  const photos = Array.from(new Set([heroImage, ...galleryImages].filter((x): x is string => !!x)));
+  const nextNight = pickNextNight(entryNights);
+  const distanceMiles =
+    venue.latitude != null && venue.longitude != null ? getDistanceFromUser(venue.latitude, venue.longitude) : null;
+  const distanceLabel = distanceMiles == null ? null : distanceMiles < 0.5 ? "Nearby" : `${distanceMiles.toFixed(1)} mi away`;
+
+  const openGallery = (i: number) => { setGalleryLightboxIndex(i); setGalleryLightboxOpen(true); };
+  const startBuy = (nightId: string) => createPaymentMutation.mutate(nightId);
 
   return (
-    <div className="min-h-screen bg-background pb-20 md:pb-0">
+    <div className={`min-h-screen bg-background md:pb-0 ${nextNight ? "pb-40" : "pb-20"}`}>
       <Navigation />
 
-      {/* ── Hero ─────────────────────────────────────────────────────────────── */}
-      <div className="relative h-[400px] md:h-[500px] overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-t from-background/95 via-background/40 to-transparent z-10" />
-        {heroImage ? (
-          <img
-            src={heroImage}
-            alt={venue.name}
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <div className="w-full h-full bg-gradient-to-br from-purple-900 via-purple-800 to-pink-900" />
-        )}
-        {isPromoted && (
-          <Badge className="absolute top-4 right-4 z-20 bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-lg">
-            <SparklesIcon className="h-3.5 w-3.5 mr-1" />
-            Featured Venue
-          </Badge>
-        )}
-      </div>
+      <VenueHero venue={venue} photos={photos} onOpenGallery={openGallery} onShare={() => setShareOpen(true)} />
 
-      {/* ── Main content overlapping hero ────────────────────────────────────── */}
-      <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 -mt-32 relative z-20">
+      {/* Phone: one column, ordered by what a person decides first. Desktop: story left, tickets + place right. */}
+      <main className="max-w-[1100px] mx-auto px-4 sm:px-6 lg:px-8 pt-5 pb-8">
+        <div className="flex flex-col gap-7 lg:grid lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-10 lg:items-start">
 
-        {/* Back button */}
-        <Link href="/search">
-          <Button variant="ghost" size="sm" className="mb-4 bg-background/80 backdrop-blur-sm hover:bg-background" data-testid="button-back">
-            <ArrowLeftIcon className="h-4 w-4 mr-2" />
-            Back to Discover
-          </Button>
-        </Link>
+          <div className="contents lg:flex lg:flex-col lg:gap-8 lg:min-w-0">
+            <div className="order-1 lg:order-none">
+              <VenueHeader
+                venue={venue}
+                categoryLabel={categoryLabels[venue.category] || venue.category}
+                isPromoted={isPromoted}
+                rating={venueRatingStats?.averageRating}
+                ratingCount={venueRatingStats?.totalRatings ?? 0}
+                distanceLabel={distanceLabel}
+              />
+            </div>
+            <div className="order-2 lg:order-none">
+              <VenueActions venue={venue} onShare={() => setShareOpen(true)} />
+            </div>
+            <div className="order-4 lg:order-none"><GoodToKnow venue={venue} nights={entryNights} /></div>
+            <div className="order-5 lg:order-none">
+              <UpcomingNights venue={venue} nights={entryNights} onBuy={startBuy} buyingId={buyingId} loading={nightsLoading} />
+            </div>
+            <div className="order-6 lg:order-none"><VenueAbout venue={venue} /></div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-
-          {/* ── Left / main column ─────────────────────────────────────────── */}
-          <div className="lg:col-span-2 space-y-6">
-
-            {/* Primary info card */}
-            <Card className="shadow-lg">
-              <CardContent className="p-6 md:p-8">
-
-                {/* Badges */}
-                <div className="flex flex-wrap gap-2 mb-3">
-                  <Badge variant="default">
-                    {categoryLabels[venue.category] || venue.category}
-                  </Badge>
-                  {venue.isVerified && (
-                    <Badge className="bg-blue-500 hover:bg-blue-600 text-white gap-1">
-                      <ShieldIcon className="h-3 w-3" />
-                      Verified
-                    </Badge>
-                  )}
-                </div>
-
-                {/* Venue name */}
-                <h1 className="font-serif text-3xl md:text-4xl font-bold mb-5" data-testid="text-venue-name">
-                  {venue.name}
-                </h1>
-
-                {/* Owner row */}
-                {venue.owner && (
-                  <div className="flex items-center gap-4 mb-6 pb-6 border-b">
-                    <Avatar className="h-12 w-12 ring-2 ring-border">
-                      <AvatarImage src={venue.owner.avatarUrl || ""} alt={venue.owner.username} />
-                      <AvatarFallback className="bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 font-semibold">
-                        {ownerInitials}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold truncate">
-                        {venue.owner.displayName || venue.owner.username}
-                      </p>
-                      <p className="text-sm text-muted-foreground">Venue Owner</p>
-                    </div>
-                    {venue.phone && (
-                      <Button variant="outline" size="sm" asChild>
-                        <a href={`tel:${venue.phone}`}>
-                          <PhoneIcon className="h-4 w-4 mr-2" />
-                          Contact
-                        </a>
-                      </Button>
+            <section className="order-9 lg:order-none" data-testid="section-ratings">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground flex items-center gap-2">
+                  <Star className="h-4 w-4" />Ratings and reviews
+                </h2>
+                <RatingDisplay averageRating={venueRatingStats?.averageRating} totalRatings={venueRatingStats?.totalRatings ?? 0} />
+              </div>
+              {!currentUser ? (
+                <p className="text-sm text-muted-foreground">
+                  <Link href={`/login?redirect=${encodeURIComponent(`/venue/${venue.id}`)}`} className="text-primary underline">Sign in</Link> to rate this venue.
+                </p>
+              ) : userVenueRating?.hasRated && !isEditingRating ? (
+                <div className="flex items-center justify-between gap-3 p-3 rounded-lg border bg-card">
+                  <div>
+                    <p className="text-sm font-medium">Your rating: {userVenueRating.rating} ★</p>
+                    {userVenueRating.reviewText && (
+                      <p className="text-xs text-muted-foreground mt-1">{userVenueRating.reviewText}</p>
                     )}
                   </div>
-                )}
-
-                {/* Key info grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-                  {(venue.address || venue.city) && (
-                    <div className="flex items-start gap-3">
-                      <MapPinIcon className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
-                      <div>
-                        <p className="font-semibold text-sm">Location</p>
-                        <p className="text-sm text-muted-foreground" data-testid="text-venue-address">
-                          {venue.address}{venue.address && venue.city && ", "}{venue.city}
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                  {venue.hours && (
-                    <div className="flex items-start gap-3">
-                      <ClockIcon className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
-                      <div>
-                        <p className="font-semibold text-sm">Hours</p>
-                        <p className="text-sm text-muted-foreground">{venue.hours}</p>
-                      </div>
-                    </div>
-                  )}
-                  {venue.ageRestriction && (
-                    <div className="flex items-start gap-3">
-                      <UsersIcon className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
-                      <div>
-                        <p className="font-semibold text-sm">Age Policy</p>
-                        <p className="text-sm text-muted-foreground">{venue.ageRestriction}+ only</p>
-                      </div>
-                    </div>
-                  )}
-                  {venue.dressCode && (
-                    <div className="flex items-start gap-3">
-                      <ShieldIcon className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
-                      <div>
-                        <p className="font-semibold text-sm">Dress Code</p>
-                        <p className="text-sm text-muted-foreground">{venue.dressCode}</p>
-                      </div>
-                    </div>
-                  )}
-                  {venue.website && (
-                    <div className="flex items-start gap-3">
-                      <GlobeIcon className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
-                      <div>
-                        <p className="font-semibold text-sm">Website</p>
-                        <a
-                          href={venue.website}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-sm text-primary hover:underline"
-                        >
-                          Visit Website
-                        </a>
-                      </div>
-                    </div>
-                  )}
+                  <Button size="sm" variant="outline" className="h-11" onClick={() => setIsEditingRating(true)} data-testid="button-edit-venue-rating">
+                    Edit
+                  </Button>
                 </div>
+              ) : (
+                <RatingInput
+                  label={userVenueRating?.hasRated ? "Update your rating" : "Rate this venue"}
+                  initialRating={userVenueRating?.rating ?? 0}
+                  initialReviewText={userVenueRating?.reviewText}
+                  submitLabel={userVenueRating?.hasRated ? "Update rating" : "Submit rating"}
+                  isPending={submitVenueRating.isPending}
+                  errorMessage={submitVenueRating.isError ? (submitVenueRating.error as any)?.message ?? "Failed to submit rating" : null}
+                  onCancel={userVenueRating?.hasRated ? () => setIsEditingRating(false) : undefined}
+                  onSubmit={(rating, reviewText) => {
+                    submitVenueRating.mutate({ rating, reviewText }, {
+                      onSuccess: () => setIsEditingRating(false),
+                    });
+                  }}
+                />
+              )}
+            </section>
 
-                {/* Description */}
-                {venue.description && (
-                  <div className="mb-6 pb-6 border-b">
-                    <h3 className="font-serif text-lg font-semibold mb-2">About</h3>
-                    <p className="text-muted-foreground leading-relaxed" data-testid="text-venue-description">
-                      {venue.description}
-                    </p>
-                  </div>
-                )}
-
-                {/* Music types */}
-                {venue.musicTypes && venue.musicTypes.length > 0 && (
-                  <div className="mb-6">
-                    <h3 className="font-semibold text-sm flex items-center gap-2 mb-3">
-                      <MusicIcon className="h-4 w-4 text-primary" />
-                      Music
-                    </h3>
-                    <div className="flex flex-wrap gap-2">
-                      {venue.musicTypes.map(type => (
-                        <Badge key={type} variant="outline">{type}</Badge>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Amenities */}
-                {venue.amenities && venue.amenities.length > 0 && (
-                  <div className="mb-6">
-                    <h3 className="font-semibold text-sm mb-3">Amenities</h3>
-                    <div className="flex flex-wrap gap-2">
-                      {venue.amenities.map(amenity => (
-                        <Badge key={amenity} variant="secondary">{amenity}</Badge>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Accessibility */}
-                {accessibilityFeatures.length > 0 && (
-                  <div>
-                    <h3 className="font-semibold text-sm flex items-center gap-2 mb-3">
-                      <Accessibility className="h-4 w-4 text-green-600 dark:text-green-400" />
-                      Accessibility
-                    </h3>
-                    <div className="flex flex-wrap gap-2">
-                      {accessibilityFeatures.map(feature => (
-                        <Badge
-                          key={feature}
-                          className="bg-green-100 text-green-800 border-green-200 hover:bg-green-100 dark:bg-green-900/30 dark:text-green-300 dark:border-green-700"
-                          variant="outline"
-                        >
-                          {feature}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Gallery */}
-            {galleryImages.length > 0 && (
-              <Card className="shadow-lg overflow-hidden">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-lg">Gallery</CardTitle>
-                </CardHeader>
-                <CardContent className="px-6 pb-6">
-                  <div className={`grid gap-2 rounded-xl overflow-hidden ${
-                    galleryImages.length === 1 ? "grid-cols-1" :
-                    galleryImages.length === 2 ? "grid-cols-2" :
-                    galleryImages.length <= 4 ? "grid-cols-2 md:grid-cols-4" :
-                    "grid-cols-2 md:grid-cols-3"
-                  }`}>
-                    {galleryImages.map((imgUrl, idx) => (
-                      <div
-                        key={idx}
-                        className={`relative overflow-hidden rounded-lg cursor-pointer group ${
-                          galleryImages.length === 3 && idx === 0 ? "md:row-span-2" : ""
-                        }`}
-                        onClick={() => { setGalleryLightboxIndex(idx); setGalleryLightboxOpen(true); }}
-                        data-testid={`button-gallery-image-${idx}`}
-                      >
-                        <img
-                          src={imgUrl}
-                          alt={`${venue.name} gallery ${idx + 1}`}
-                          className={`w-full object-cover transition-transform group-hover:scale-105 ${
-                            galleryImages.length === 1 ? "h-64" :
-                            galleryImages.length === 3 && idx === 0 ? "h-full min-h-40" :
-                            "aspect-square"
-                          }`}
-                          data-testid={`img-venue-gallery-${idx}`}
-                        />
-                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/25 transition-colors" />
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
+            {venue.owner && (
+              <div className="order-10 lg:order-none">
+                <VenueHost
+                  owner={venue.owner}
+                  canInteract={!!currentUser && !isVenueOwner}
+                  isFollowing={isFollowingOwner}
+                  onFollow={() => followMutation.mutate()}
+                  followPending={followMutation.isPending}
+                  onMessage={() => messageMutation.mutate()}
+                />
+              </div>
             )}
 
-            {/* Ratings & Reviews */}
-            <Card className="shadow-lg">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <Star className="h-5 w-5 text-primary" />
-                    Ratings &amp; Reviews
-                  </CardTitle>
-                  <RatingDisplay
-                    averageRating={venueRatingStats?.averageRating}
-                    totalRatings={venueRatingStats?.totalRatings ?? 0}
-                  />
-                </div>
-              </CardHeader>
-              <CardContent>
-                {!currentUser ? (
-                  <p className="text-sm text-muted-foreground">Sign in to rate this venue.</p>
-                ) : userVenueRating?.hasRated && !isEditingRating ? (
-                  <div className="flex items-center justify-between gap-3 p-3 rounded-md border bg-muted/30">
-                    <div>
-                      <p className="text-sm font-medium">Your rating: {userVenueRating.rating} ★</p>
-                      {userVenueRating.reviewText && (
-                        <p className="text-xs text-muted-foreground mt-1">{userVenueRating.reviewText}</p>
-                      )}
-                    </div>
-                    <Button size="sm" variant="outline" onClick={() => setIsEditingRating(true)} data-testid="button-edit-venue-rating">
-                      Edit
-                    </Button>
-                  </div>
-                ) : (
-                  <RatingInput
-                    label={userVenueRating?.hasRated ? "Update your rating" : "Rate this venue"}
-                    initialRating={userVenueRating?.rating ?? 0}
-                    initialReviewText={userVenueRating?.reviewText}
-                    submitLabel={userVenueRating?.hasRated ? "Update rating" : "Submit rating"}
-                    isPending={submitVenueRating.isPending}
-                    errorMessage={submitVenueRating.isError ? (submitVenueRating.error as any)?.message ?? "Failed to submit rating" : null}
-                    onCancel={userVenueRating?.hasRated ? () => setIsEditingRating(false) : undefined}
-                    onSubmit={(rating, reviewText) => {
-                      submitVenueRating.mutate({ rating, reviewText }, {
-                        onSuccess: () => setIsEditingRating(false),
-                      });
-                    }}
-                  />
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Owner-only gallery management */}
             {isVenueOwner && (
-              <Card className="shadow-lg">
+              <Card className="order-10 lg:order-none">
                 <CardContent className="pt-6">
-                  <VenueGalleryManager
-                    venueId={venue.id}
-                    imageUrls={galleryImages}
-                    maxImages={6}
-                  />
+                  <VenueGalleryManager venueId={venue.id} imageUrls={galleryImages} maxImages={6} />
                 </CardContent>
               </Card>
             )}
           </div>
 
-          {/* ── Right / sidebar ────────────────────────────────────────────── */}
-          <div className="space-y-6">
-            <Card className="shadow-lg sticky top-4">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <TicketIcon className="h-5 w-5 text-primary" />
-                  Venue Events
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {nightsLoading ? (
-                  <div className="space-y-3">
-                    <Skeleton className="h-24 w-full rounded-lg" />
-                    <Skeleton className="h-24 w-full rounded-lg" />
-                  </div>
-                ) : entryNights.length === 0 ? (
-                  <div className="text-center py-6">
-                    <CalendarIcon className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
-                    <p className="text-sm text-muted-foreground">No upcoming events.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {entryNights.map((night) => {
-                      const ev = night as any;
-                      const spotsLeft = night.capacity != null
-                        ? night.capacity - night.ticketsSold
-                        : null;
-                      const soldOut = spotsLeft !== null && spotsLeft <= 0;
-                      return (
-                        <div
-                          key={night.id}
-                          className="rounded-xl border bg-muted/30 p-4 space-y-3"
-                        >
-                          {/* Thumbnail */}
-                          {ev.imageUrl && (
-                            <img
-                              src={ev.imageUrl}
-                              alt={night.name}
-                              className="w-full h-28 object-cover rounded-lg"
-                            />
-                          )}
-                          <div className="flex items-start gap-2 text-sm text-muted-foreground">
-                            <CalendarIcon className="h-4 w-4 mt-0.5 flex-shrink-0 text-primary" />
-                            <span>
-                              {format(new Date(night.date), "EEE, MMM d 'at' h:mm a")}
-                              {ev.endTime && ` — ${format(new Date(ev.endTime), "h:mm a")}`}
-                            </span>
-                          </div>
-                          {night.name && (
-                            <p className="font-semibold text-sm flex items-center gap-1.5">
-                              {night.name}
-                              {(ev.recurrence && ev.recurrence !== "none") && (
-                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 text-purple-600 border-purple-300">
-                                  {ev.recurrence === "weekly" ? "Weekly" : ev.recurrence === "biweekly" ? "Bi-weekly" : "Monthly"}
-                                </Badge>
-                              )}
-                            </p>
-                          )}
-                          {night.description && (
-                            <p className="text-xs text-muted-foreground line-clamp-2">{night.description}</p>
-                          )}
-                          <div className="flex items-center justify-between pt-1 gap-2 flex-wrap">
-                            <div>
-                              <span className="text-xl font-bold">
-                                £{(night.coverPriceCents / 100).toFixed(2)}
-                              </span>
-                              {spotsLeft !== null && !soldOut && (
-                                <p className="text-xs text-muted-foreground">{spotsLeft} spots left</p>
-                              )}
-                            </div>
-                            <div className="flex gap-2">
-                              <Link href={`/venue-events/${night.id}`}>
-                                <Button size="sm" variant="outline" data-testid={`button-view-event-${night.id}`}>
-                                  Details
-                                </Button>
-                              </Link>
-                              <Button
-                                size="sm"
-                                onClick={() => createPaymentMutation.mutate(night.id)}
-                                disabled={createPaymentMutation.isPending || soldOut}
-                                className="bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 text-white"
-                                data-testid={`button-buy-ticket-${night.id}`}
-                              >
-                                {soldOut ? "Sold Out" : createPaymentMutation.isPending ? "..." : "Buy Ticket"}
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+          <div className="contents lg:flex lg:flex-col lg:gap-6 lg:sticky lg:top-4 lg:min-w-0">
+            {nextNight && (
+              <div className="order-3 lg:order-none">
+                <NextNightCard venue={venue} night={nextNight} onBuy={() => startBuy(nextNight.id)} buying={buyingId === nextNight.id} />
+              </div>
+            )}
+            <div className="order-7 lg:order-none">
+              <LocationCard venue={venue} onCopy={handleCopyAddress} copied={addressCopied} />
+            </div>
+            {currentUser?.userType === "social" && (
+              <div className="order-8 lg:order-none"><SafetyShortcut /></div>
+            )}
           </div>
         </div>
       </main>
 
+      {nextNight && (
+        <StickyEntryBar venue={venue} night={nextNight} onBuy={() => startBuy(nextNight.id)} buying={buyingId === nextNight.id} />
+      )}
+
       <BottomNavigation />
 
       {/* ── Gallery lightbox ───────────────────────────────────────────────── */}
-      {galleryImages.length > 0 && (
+      {photos.length > 0 && (
         <ImageLightbox
-          images={galleryImages}
+          images={photos}
           initialIndex={galleryLightboxIndex}
           open={galleryLightboxOpen}
           onClose={() => setGalleryLightboxOpen(false)}
+        />
+      )}
+
+      {shareOpen && (
+        <UnifiedShareModal
+          open={shareOpen}
+          onClose={() => setShareOpen(false)}
+          shareData={{ type: "venue", id: venue.id, name: venue.name, imageUrl: heroImage }}
         />
       )}
 
