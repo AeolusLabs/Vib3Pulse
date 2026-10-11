@@ -988,6 +988,7 @@ export const venues = pgTable("venues", {
   imageUrl: varchar("image_url", { length: 512 }), // Legacy - primary image
   coverImageUrl: varchar("cover_image_url", { length: 512 }),
   imageUrls: text("image_urls").array().default(sql`'{}'`), // Up to 6 venue images
+  menuImageUrls: text("menu_image_urls").array().default(sql`'{}'`), // Up to 10 menu page images
   address: varchar("address", { length: 500 }),
   city: varchar("city", { length: 100 }),
   // Explicit, organizer-chosen — independent of currency (see events.country
@@ -1023,6 +1024,7 @@ export const insertVenueSchema = createInsertSchema(venues).omit({
   isVerified: true,
 }).extend({
   imageUrls: z.array(z.string()).max(6, "Maximum 6 images allowed").optional(),
+  menuImageUrls: z.array(z.string()).max(10, "Maximum 10 menu pages allowed").optional(),
   openingHours: openingHoursSchema.nullable().optional(),
 });
 

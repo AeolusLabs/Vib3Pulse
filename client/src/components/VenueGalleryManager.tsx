@@ -11,9 +11,21 @@ interface VenueGalleryManagerProps {
   venueId: string;
   imageUrls: string[];
   maxImages?: number;
+  /** Which venue column this manages: the photo gallery (default) or the menu pages. */
+  field?: "imageUrls" | "menuImageUrls";
+  title?: string;
+  /** Singular noun used in labels, e.g. "photo" or "menu page". */
+  noun?: string;
 }
 
-export function VenueGalleryManager({ venueId, imageUrls: propImageUrls, maxImages = 6 }: VenueGalleryManagerProps) {
+export function VenueGalleryManager({
+  venueId,
+  imageUrls: propImageUrls,
+  maxImages = 6,
+  field = "imageUrls",
+  title = "Manage Gallery",
+  noun = "photo",
+}: VenueGalleryManagerProps) {
   const { toast } = useToast();
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null);
   const [replaceIndex, setReplaceIndex] = useState<number | null>(null);
@@ -28,7 +40,7 @@ export function VenueGalleryManager({ venueId, imageUrls: propImageUrls, maxImag
 
   const updateGalleryMutation = useMutation({
     mutationFn: async (newImageUrls: string[]) => {
-      const response = await apiRequest("PATCH", `/api/venues/${venueId}`, { imageUrls: newImageUrls });
+      const response = await apiRequest("PATCH", `/api/venues/${venueId}`, { [field]: newImageUrls });
       return response.json();
     },
     onMutate: async (newImageUrls) => {
@@ -37,16 +49,16 @@ export function VenueGalleryManager({ venueId, imageUrls: propImageUrls, maxImag
     },
     onSuccess: (data) => {
       // Update local state with server response to ensure consistency
-      if (data?.imageUrls) {
-        setLocalImageUrls(data.imageUrls);
+      if (data?.[field]) {
+        setLocalImageUrls(data[field]);
       }
       queryClient.invalidateQueries({ queryKey: ["/api/venues", venueId] });
-      toast({ title: "Gallery updated successfully" });
+      toast({ title: field === "menuImageUrls" ? "Menu updated" : "Gallery updated successfully" });
     },
     onError: () => {
       // Revert to props on error
       setLocalImageUrls(propImageUrls);
-      toast({ title: "Failed to update gallery", variant: "destructive" });
+      toast({ title: field === "menuImageUrls" ? "Failed to update menu" : "Failed to update gallery", variant: "destructive" });
     },
   });
 
@@ -72,9 +84,9 @@ export function VenueGalleryManager({ venueId, imageUrls: propImageUrls, maxImag
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Manage Gallery</h3>
+        <h3 className="text-lg font-semibold">{title}</h3>
         <span className="text-sm text-muted-foreground">
-          {localImageUrls.length}/{maxImages} images
+          {localImageUrls.length}/{maxImages} {noun}s
         </span>
       </div>
 
@@ -84,7 +96,7 @@ export function VenueGalleryManager({ venueId, imageUrls: propImageUrls, maxImag
             <div key={`${url}-${idx}`} className="relative aspect-video rounded-lg overflow-hidden border">
               <img 
                 src={url} 
-                alt={`Gallery ${idx + 1}`} 
+                alt={`${noun} ${idx + 1}`} 
                 className="w-full h-full object-cover"
               />
               <div className="absolute top-1.5 right-1.5 flex gap-1">
@@ -95,8 +107,8 @@ export function VenueGalleryManager({ venueId, imageUrls: propImageUrls, maxImag
                   className="h-7 w-7 rounded-full shadow-md bg-background/80 backdrop-blur-sm"
                   onClick={() => setReplaceIndex(idx)}
                   disabled={updateGalleryMutation.isPending}
-                  data-testid={`button-replace-gallery-${idx}`}
-                  title="Replace image"
+                  data-testid={`button-replace-${field}-${idx}`}
+                  title={`Replace ${noun}`}
                 >
                   <ReplaceIcon className="h-3.5 w-3.5" />
                 </Button>
@@ -107,8 +119,8 @@ export function VenueGalleryManager({ venueId, imageUrls: propImageUrls, maxImag
                   className="h-7 w-7 rounded-full shadow-md"
                   onClick={() => setDeleteIndex(idx)}
                   disabled={updateGalleryMutation.isPending}
-                  data-testid={`button-delete-gallery-${idx}`}
-                  title="Delete image"
+                  data-testid={`button-delete-${field}-${idx}`}
+                  title={`Delete ${noun}`}
                 >
                   <Trash2Icon className="h-3.5 w-3.5" />
                 </Button>
@@ -128,7 +140,7 @@ export function VenueGalleryManager({ venueId, imageUrls: propImageUrls, maxImag
             buttonSize="default"
           >
             <UploadIcon className="h-4 w-4 mr-2" />
-            Add Photos
+            Add {noun === "photo" ? "Photos" : "Menu Pages"}
           </ObjectUploader>
           <p className="text-xs text-muted-foreground flex items-center gap-2">
             <CameraIcon className="h-3 w-3" />
@@ -140,9 +152,9 @@ export function VenueGalleryManager({ venueId, imageUrls: propImageUrls, maxImag
       <Dialog open={deleteIndex !== null} onOpenChange={() => setDeleteIndex(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete Image</DialogTitle>
+            <DialogTitle>Delete {noun}</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete this image from your gallery? This action cannot be undone.
+              Are you sure you want to delete this {noun}? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2">
@@ -153,7 +165,7 @@ export function VenueGalleryManager({ venueId, imageUrls: propImageUrls, maxImag
               variant="destructive" 
               onClick={() => deleteIndex !== null && handleDeleteImage(deleteIndex)}
               disabled={updateGalleryMutation.isPending}
-              data-testid="button-confirm-delete"
+              data-testid={`button-confirm-delete-${field}`}
             >
               {updateGalleryMutation.isPending ? "Deleting..." : "Delete"}
             </Button>
@@ -164,9 +176,9 @@ export function VenueGalleryManager({ venueId, imageUrls: propImageUrls, maxImag
       <Dialog open={replaceIndex !== null} onOpenChange={() => setReplaceIndex(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Replace Image</DialogTitle>
+            <DialogTitle>Replace {noun}</DialogTitle>
             <DialogDescription>
-              Choose a new image to replace the current one.
+              Choose a new image to replace the current {noun}.
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">

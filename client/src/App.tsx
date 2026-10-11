@@ -1,5 +1,5 @@
-import { useEffect } from "react";
-import { Switch, Route, Redirect } from "wouter";
+import { useEffect, useLayoutEffect } from "react";
+import { Switch, Route, Redirect, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { WebSocketProvider } from "@/providers/WebSocketProvider";
@@ -68,8 +68,18 @@ import SocialEventCreatePage from "@/pages/SocialEventCreatePage";
 import SocialEventHostPage from "@/pages/SocialEventHostPage";
 import { SafetyTriggersProvider } from "@/components/safety/SafetyTriggersProvider";
 
+// New page, new scroll position: without this, opening a venue from the middle of Discover lands you
+// mid-page. Keyed on the path only, so a query-string change (like the ?venue= highlight) doesn't reset it.
+function ScrollToTopOnNavigate() {
+  const [location] = useLocation();
+  useLayoutEffect(() => { window.scrollTo(0, 0); }, [location]);
+  return null;
+}
+
 function Router() {
   return (
+    <>
+    <ScrollToTopOnNavigate />
     <Switch>
       <Route path="/" component={LandingPage} />
       <Route path="/login" component={LoginPage} />
@@ -263,6 +273,7 @@ function Router() {
 
       <Route component={NotFound} />
     </Switch>
+    </>
   );
 }
 

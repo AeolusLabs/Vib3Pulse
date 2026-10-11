@@ -31,9 +31,13 @@ interface ImageGridProps {
   className?: string;
   postData?: PostData;
   currentUser?: CurrentUser | null;
+  /** Sizing classes for each slide image. Defaults to the feed-post look (cover, 200 to 420px tall). */
+  imageClassName?: string;
+  /** Background behind slides that don't fill the frame (use with object-contain, e.g. menu pages). */
+  slideBgClassName?: string;
 }
 
-export default function ImageGrid({ images, maxImages = 4, className = "", postData, currentUser }: ImageGridProps) {
+export default function ImageGrid({ images, maxImages = 4, className = "", postData, currentUser, imageClassName, slideBgClassName = "" }: ImageGridProps) {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [activeSlide, setActiveSlide] = useState(0);
@@ -67,14 +71,14 @@ export default function ImageGrid({ images, maxImages = 4, className = "", postD
     return (
       <>
         <div
-          className={`relative rounded-xl overflow-hidden cursor-pointer ${className}`}
+          className={`relative rounded-xl overflow-hidden cursor-pointer ${slideBgClassName} ${className}`}
           onClick={() => openLightbox(0)}
           data-testid="image-grid-item-0"
         >
           <img
             src={displayImages[0]}
             alt="Post image"
-            className="w-full object-cover max-h-[480px]"
+            className={imageClassName ?? "w-full object-cover max-h-[480px]"}
           />
           {/* Bottom fade so text below image reads cleanly */}
           <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-black/10 to-transparent pointer-events-none" />
@@ -106,7 +110,7 @@ export default function ImageGrid({ images, maxImages = 4, className = "", postD
           {displayImages.map((image, index) => (
             <div
               key={index}
-              className="flex-shrink-0 w-full cursor-pointer"
+              className={`flex-shrink-0 w-full cursor-pointer ${slideBgClassName}`}
               style={{ scrollSnapAlign: "start" }}
               onClick={() => openLightbox(index)}
               data-testid={`image-grid-item-${index}`}
@@ -114,7 +118,7 @@ export default function ImageGrid({ images, maxImages = 4, className = "", postD
               <img
                 src={image}
                 alt={`Image ${index + 1}`}
-                className="w-full object-cover max-h-[420px] min-h-[200px]"
+                className={imageClassName ?? "w-full object-cover max-h-[420px] min-h-[200px]"}
               />
             </div>
           ))}

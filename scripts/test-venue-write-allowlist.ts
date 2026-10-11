@@ -112,6 +112,14 @@ check("update: openingHours can be cleared", hoursNull.status === 200 && (await 
 const whole = await call("PATCH", `/api/venues/${vid}`, { ...(await venueRow(vid)), name: "Allowlist Club 3", created_at: undefined });
 check("update: whole-object payload still accepted (extra keys stripped)", whole.status === 200 && (await venueRow(vid)).name === "Allowlist Club 3");
 
+const menuPatch = await call("PATCH", `/api/venues/${vid}`, { menuImageUrls: ["https://x.test/menu-1.jpg", "https://x.test/menu-2.jpg"] });
+check("update: owner can set menu pages", menuPatch.status === 200 && (await venueRow(vid)).menu_image_urls?.length === 2);
+const menuTooMany = await call("PATCH", `/api/venues/${vid}`, { menuImageUrls: Array.from({ length: 11 }, (_, i) => `https://x.test/${i}.jpg`) });
+check("update: more than 10 menu pages rejected with 400", menuTooMany.status === 400);
+check("update: rejected menu update left the saved pages untouched", (await venueRow(vid)).menu_image_urls?.length === 2);
+const menuHijack = await call("PATCH", `/api/venues/${otherVenue}`, { menuImageUrls: ["https://x.test/evil.jpg"] });
+check("update: cannot change another owner's menu", menuHijack.status === 403 && ((await venueRow(otherVenue)).menu_image_urls ?? []).length === 0);
+
 const notMine = await call("PATCH", `/api/venues/${otherVenue}`, { name: "hijack" });
 check("update: other owner's venue still 403", notMine.status === 403);
 

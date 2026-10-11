@@ -12,7 +12,7 @@ import UnifiedShareModal from "@/components/UnifiedShareModal";
 import { useGeolocation } from "@/hooks/useGeolocation";
 import {
   VenueHero, VenueHeader, VenueActions, NextNightCard, GoodToKnow, UpcomingNights,
-  VenueAbout, LocationCard, SafetyShortcut, VenueHost, StickyEntryBar, pickNextNight,
+  VenueAbout, VenueMenu, LocationCard, SafetyShortcut, VenueHost, StickyEntryBar, pickNextNight,
 } from "@/components/venue/VenueSections";
 import { VenueGalleryManager } from "@/components/VenueGalleryManager";
 import { RatingBreakdown, VenueReviewList } from "@/components/venue/VenueReviews";
@@ -269,7 +269,7 @@ export default function VenueDetailPage() {
     <div className={`min-h-screen bg-background md:pb-0 ${nextNight ? "pb-40" : "pb-20"}`}>
       <Navigation />
 
-      <VenueHero venue={venue} photos={photos} onOpenGallery={openGallery} onShare={() => setShareOpen(true)} />
+      <VenueHero venue={venue} photos={photos} onOpenGallery={openGallery} />
 
       {/* Phone: one column, ordered by what a person decides first. Desktop: story left, tickets + place right. */}
       <main className="max-w-[1100px] mx-auto px-4 sm:px-6 lg:px-8 pt-5 pb-8">
@@ -293,6 +293,7 @@ export default function VenueDetailPage() {
             <div className="order-5 lg:order-none">
               <UpcomingNights venue={venue} nights={entryNights} onBuy={startBuy} buyingId={buyingId} loading={nightsLoading} />
             </div>
+            <div className="order-5 lg:order-none"><VenueMenu venue={venue} /></div>
             <div className="order-6 lg:order-none"><VenueAbout venue={venue} /></div>
 
             <section className="order-9 lg:order-none" data-testid="section-ratings">
@@ -357,8 +358,16 @@ export default function VenueDetailPage() {
 
             {isVenueOwner && (
               <Card className="order-10 lg:order-none">
-                <CardContent className="pt-6">
+                <CardContent className="pt-6 space-y-8">
                   <VenueGalleryManager venueId={venue.id} imageUrls={galleryImages} maxImages={6} />
+                  <VenueGalleryManager
+                    venueId={venue.id}
+                    imageUrls={venue.menuImageUrls ?? []}
+                    maxImages={10}
+                    field="menuImageUrls"
+                    title="Manage Menu"
+                    noun="menu page"
+                  />
                 </CardContent>
               </Card>
             )}

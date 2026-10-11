@@ -1,10 +1,11 @@
 import { Link } from "wouter";
 import { format, isToday, isTomorrow, differenceInCalendarDays } from "date-fns";
-import { ArrowLeft, Check, Copy, Images, MapPin, MessageCircle, Navigation, Phone, Share2, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Check, Copy, MapPin, MessageCircle, Navigation, Phone, Share2, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { formatMoney } from "@/lib/currency";
+import ImageGrid from "@/components/ImageGrid";
 import type { NightSocialProof } from "@/hooks/use-venue-social";
 import { OpenNowStatus } from "@/components/venue/OpenNowStatus";
 import { SaveVenueButton } from "@/components/venue/SaveVenueButton";
@@ -53,16 +54,24 @@ const SectionTitle = ({ children }: { children: React.ReactNode }) => (
 );
 
 // ─── hero ────────────────────────────────────────────────────────────────────
+function BackToDiscover({ className = "" }: { className?: string }) {
+  return (
+    <Link href="/search">
+      <Button variant="ghost" size="sm" className={`h-11 -ml-3 ${className}`} data-testid="button-back">
+        <ArrowLeft className="h-4 w-4 mr-2" />Back to Discover
+      </Button>
+    </Link>
+  );
+}
+
 export function VenueHero({
   venue,
   photos,
   onOpenGallery,
-  onShare,
 }: {
   venue: Venue;
   photos: string[];
   onOpenGallery: (index: number) => void;
-  onShare: () => void;
 }) {
   const [first, ...rest] = photos;
   const tiles = rest.slice(0, 4);
@@ -70,37 +79,25 @@ export function VenueHero({
 
   return (
     <>
-      {/* Phone / tablet: one image, photo counter, back + share */}
-      <div className="relative h-[236px] sm:h-[300px] bg-muted lg:hidden">
-        {first && (
-          <button type="button" className="absolute inset-0 w-full h-full" onClick={() => onOpenGallery(0)} aria-label="Open photo gallery" data-testid="button-hero-gallery">
-            <img src={first} alt={venue.name} className="w-full h-full object-cover" />
-          </button>
-        )}
-        <div className="absolute inset-x-3 top-3 flex justify-between pointer-events-none">
-          <Link href="/search">
-            <Button size="icon" variant="secondary" className="pointer-events-auto h-11 w-11 rounded-full bg-background/80 backdrop-blur-sm" aria-label="Back to Discover" data-testid="button-back">
-              <ArrowLeft className="h-5 w-5" />
-            </Button>
-          </Link>
-          <Button size="icon" variant="secondary" className="pointer-events-auto h-11 w-11 rounded-full bg-background/80 backdrop-blur-sm" onClick={onShare} aria-label="Share venue" data-testid="button-share-hero">
-            <Share2 className="h-5 w-5" />
-          </Button>
-        </div>
-        {photos.length > 1 && (
-          <button type="button" onClick={() => onOpenGallery(0)} className="absolute right-3 bottom-3 inline-flex items-center gap-1.5 rounded-full bg-background/80 backdrop-blur-sm px-3 py-1.5 text-xs font-medium">
-            <Images className="h-3.5 w-3.5" />1 / {photos.length}
-          </button>
+      {/* Phone / tablet: same Back button as the other detail pages, then a swipeable photo carousel
+          (arrows, counter, dots; tap opens the full-screen viewer). */}
+      <div className="lg:hidden px-4 sm:px-6 pt-2">
+        <BackToDiscover />
+        {photos.length > 0 && (
+          <div className="mt-1" data-testid="carousel-venue-photos">
+            <ImageGrid
+              images={photos}
+              maxImages={photos.length}
+              imageClassName="w-full h-[236px] sm:h-[300px] object-cover"
+              slideBgClassName="bg-muted"
+            />
+          </div>
         )}
       </div>
 
       {/* Desktop: five-photo mosaic */}
       <div className="hidden lg:block max-w-[1100px] mx-auto px-8 pt-4">
-        <Link href="/search">
-          <Button variant="ghost" size="sm" className="mb-3 -ml-3" data-testid="button-back-desktop">
-            <ArrowLeft className="h-4 w-4 mr-2" />Back to Discover
-          </Button>
-        </Link>
+        <BackToDiscover className="mb-3" />
         {first && (
         <div className={`grid gap-1.5 h-[340px] rounded-2xl overflow-hidden ${tiles.length ? "grid-cols-4 grid-rows-2" : "grid-cols-1"}`}>
           <button type="button" onClick={() => onOpenGallery(0)} className={`bg-muted relative ${tiles.length ? "col-span-2 row-span-2" : ""}`} aria-label="Open photo gallery">
@@ -118,6 +115,25 @@ export function VenueHero({
         )}
       </div>
     </>
+  );
+}
+
+// ─── menu ────────────────────────────────────────────────────────────────────
+/** Menu pages are images: swipe between them, tap one to enlarge. Hidden when the venue has no menu. */
+export function VenueMenu({ venue }: { venue: Venue }) {
+  const pages = (venue.menuImageUrls ?? []).filter(Boolean);
+  if (pages.length === 0) return null;
+  return (
+    <section data-testid="section-venue-menu">
+      <SectionTitle>Menu</SectionTitle>
+      <ImageGrid
+        images={pages}
+        maxImages={pages.length}
+        imageClassName="w-full h-[min(70vh,520px)] object-contain"
+        slideBgClassName="bg-muted"
+      />
+      {pages.length > 1 && <p className="mt-2 text-xs text-muted-foreground">Swipe for more pages. Tap a page to enlarge.</p>}
+    </section>
   );
 }
 
