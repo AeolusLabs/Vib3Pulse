@@ -11,6 +11,8 @@ import { startEventGroupDissolveJob } from "./eventGroupScheduler";
 import { startSocialCleanupScheduler } from "./socialCleanupScheduler";
 import { registerMessagesRoutes } from "./routes/messages-routes";
 import { registerVenueRoutes } from "./routes/venue-routes";
+import { registerVenueSavedRoutes } from "./routes/venue-saved-routes";
+import { registerVenueSocialRoutes } from "./routes/venue-social-routes";
 import { registerEventsRoutes } from "./routes/events-routes";
 import { registerSocialEventGate, registerSocialEventRoutes, registerGuestDataExportBlock } from "./routes/social-events-routes";
 import { startGuestRetentionJob } from "./services/guestPrivacy";
@@ -36,6 +38,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerMessagesRoutes(app);
   registerMediaRoutes(app);
   registerVenueRoutes(app);
+  registerVenueSavedRoutes(app);
+  registerVenueSocialRoutes(app);
   // Gate first: social events must 404 on the generic /api/events/:id/* routes below.
   registerGuestDataExportBlock(app);
   registerSocialEventGate(app);

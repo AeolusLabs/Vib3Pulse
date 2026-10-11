@@ -5,6 +5,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { formatMoney } from "@/lib/currency";
+import type { NightSocialProof } from "@/hooks/use-venue-social";
+import { OpenNowStatus } from "@/components/venue/OpenNowStatus";
+import { SaveVenueButton } from "@/components/venue/SaveVenueButton";
 import type { Venue, VenueEntryNight } from "@shared/schema";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -155,6 +158,7 @@ export function VenueHeader({
         )}
         {distanceLabel && <span className="font-medium text-foreground">{distanceLabel}</span>}
       </div>
+      <OpenNowStatus openingHours={venue.openingHours} className="mt-2.5" />
     </header>
   );
 }
@@ -167,8 +171,9 @@ export function VenueActions({ venue, onShare }: { venue: Venue; onShare: () => 
   ];
   const cell =
     "flex flex-col items-center justify-center gap-1.5 min-h-[64px] rounded-xl border bg-card text-sm font-medium transition-[transform,border-color] duration-150 ease-out active:scale-[0.97] hover-elevate";
+  const cellCount = actions.length + 2; // + Share + Save
   return (
-    <div className={`grid gap-2 ${actions.length === 2 ? "grid-cols-3" : "grid-cols-2"}`}>
+    <div className={`grid gap-2 ${cellCount === 4 ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3"}`}>
       {actions.map(({ key, label, icon: Icon, href, external }) => (
         <a key={key} href={href} className={cell} {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})} data-testid={`button-${key}`}>
           <Icon className="h-5 w-5" />{label}
@@ -177,21 +182,55 @@ export function VenueActions({ venue, onShare }: { venue: Venue; onShare: () => 
       <button type="button" onClick={onShare} className={cell} data-testid="button-share-venue">
         <Share2 className="h-5 w-5" />Share
       </button>
+      <SaveVenueButton venueId={venue.id} />
     </div>
   );
 }
 
 // ─── tonight / next night ────────────────────────────────────────────────────
+/** "86 going · Amara and 2 friends" with up to three friend avatars. Hidden until someone is going. */
+function GoingProof({ proof }: { proof?: NightSocialProof }) {
+  if (!proof || proof.going < 1) return null;
+  const [first] = proof.friends;
+  const firstName = first ? first.displayName || first.username : null;
+  const others = proof.friendsCount - 1;
+  const friendsText = !firstName
+    ? null
+    : proof.friendsCount === 1
+      ? `${firstName} is going`
+      : `${firstName} and ${others} ${others === 1 ? "other friend" : "other friends"} going`;
+  return (
+    <div className="flex items-center gap-2.5 text-sm text-muted-foreground" data-testid="text-going-proof">
+      {proof.friends.length > 0 && (
+        <span className="flex">
+          {proof.friends.map((f, i) => (
+            <Avatar key={f.id} className={`h-6 w-6 border-2 border-card ${i > 0 ? "-ml-2" : ""}`}>
+              <AvatarImage src={f.avatarUrl || ""} alt={f.displayName || f.username} />
+              <AvatarFallback className="text-[10px] font-semibold">{(f.displayName || f.username).slice(0, 1).toUpperCase()}</AvatarFallback>
+            </Avatar>
+          ))}
+        </span>
+      )}
+      <span>
+        <b className="font-medium text-foreground">{proof.going} going</b>
+        {friendsText && <> · {friendsText}</>}
+      </span>
+    </div>
+  );
+}
+
 export function NextNightCard({
   venue,
   night,
   onBuy,
   buying,
+  proof,
 }: {
   venue: Venue;
   night: VenueEntryNight;
   onBuy: () => void;
   buying: boolean;
+  proof?: NightSocialProof;
 }) {
   const when = nightWhen(night);
   const soldOut = isSoldOut(night);
@@ -230,6 +269,7 @@ export function NextNightCard({
           </div>
         </div>
       )}
+      <GoingProof proof={proof} />
       {night.description && <p className="text-sm text-muted-foreground line-clamp-2">{night.description}</p>}
       <div className="flex gap-2">
         <Link href={`/venue-events/${night.id}`} className="flex-none">

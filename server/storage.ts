@@ -123,6 +123,7 @@ import {
   deliveryLogs,
   eventAnalytics,
   venues,
+  savedVenues,
   venueEntryNights,
   venueTickets,
   venueAnalytics,
@@ -809,6 +810,10 @@ export interface IStorage {
   getVenues(): Promise<Venue[]>;
   getVenue(id: string): Promise<(Venue & { owner: User }) | undefined>;
   getVenuesByOwner(ownerId: string): Promise<Venue[]>;
+  saveVenue(userId: string, venueId: string): Promise<void>;
+  unsaveVenue(userId: string, venueId: string): Promise<void>;
+  isVenueSaved(userId: string, venueId: string): Promise<boolean>;
+  getSavedVenues(userId: string): Promise<Venue[]>;
   createVenue(venue: InsertVenue): Promise<Venue>;
   updateVenue(id: string, venue: Partial<InsertVenue>): Promise<Venue>;
   verifyVenue(id: string, isVerified: boolean): Promise<Venue>;
@@ -3681,6 +3686,34 @@ export class DbStorage implements IStorage {
       .from(venues)
       .where(eq(venues.ownerId, ownerId))
       .orderBy(desc(venues.createdAt));
+  }
+
+  // Idempotent: saving twice / unsaving a never-saved venue is a no-op.
+  async saveVenue(userId: string, venueId: string): Promise<void> {
+    await db.insert(savedVenues).values({ userId, venueId }).onConflictDoNothing();
+  }
+
+  async unsaveVenue(userId: string, venueId: string): Promise<void> {
+    await db.delete(savedVenues).where(and(eq(savedVenues.userId, userId), eq(savedVenues.venueId, venueId)));
+  }
+
+  async isVenueSaved(userId: string, venueId: string): Promise<boolean> {
+    const rows = await db
+      .select({ venueId: savedVenues.venueId })
+      .from(savedVenues)
+      .where(and(eq(savedVenues.userId, userId), eq(savedVenues.venueId, venueId)))
+      .limit(1);
+    return rows.length > 0;
+  }
+
+  async getSavedVenues(userId: string): Promise<Venue[]> {
+    const rows = await db
+      .select({ venue: venues })
+      .from(savedVenues)
+      .innerJoin(venues, eq(savedVenues.venueId, venues.id))
+      .where(eq(savedVenues.userId, userId))
+      .orderBy(desc(savedVenues.createdAt));
+    return rows.map((r) => r.venue);
   }
 
   async createVenue(venue: InsertVenue): Promise<Venue> {

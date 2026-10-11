@@ -16,7 +16,8 @@ import { SUPPORTED_CURRENCIES as CURRENCIES, deriveDefaultCurrency, type PayoutS
 
 import { ObjectUploader } from "@/components/ObjectUploader";
 import ImageLightbox from "@/components/ImageLightbox";
-import type { Venue, InsertVenue } from "@shared/schema";
+import type { Venue, InsertVenue, OpeningHours } from "@shared/schema";
+import { Switch } from "@/components/ui/switch";
 import { XIcon, UploadIcon, ImageIcon, MoreVerticalIcon, Trash2Icon, RefreshCwIcon, Building2Icon, MapPinIcon, MusicIcon, EyeIcon } from "@/components/ui/icons";
 import { Accessibility } from "lucide-react";
 
@@ -83,6 +84,27 @@ function SectionHeader({
   );
 }
 
+// Display order Mon..Sun; keys are JS getDay() values (0 = Sunday).
+const hoursDays = [
+  { key: "1", label: "Monday" }, { key: "2", label: "Tuesday" }, { key: "3", label: "Wednesday" },
+  { key: "4", label: "Thursday" }, { key: "5", label: "Friday" }, { key: "6", label: "Saturday" }, { key: "0", label: "Sunday" },
+] as const;
+
+const browserTimezone = () => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch { return "UTC"; }
+};
+
+const timezoneOptions = (current: string) => {
+  let all: string[] = [];
+  try { all = (Intl as any).supportedValuesOf?.("timeZone") ?? []; } catch { /* older browsers */ }
+  return all.includes(current) ? all : [current, ...all];
+};
+
+const defaultOpeningHours = (): OpeningHours => ({
+  timezone: browserTimezone(),
+  days: { "0": null, "1": null, "2": null, "3": null, "4": { open: "22:00", close: "04:00" }, "5": { open: "22:00", close: "04:00" }, "6": { open: "22:00", close: "04:00" } },
+});
+
 const emptyForm = {
   name: "",
   category: "",
@@ -96,6 +118,7 @@ const emptyForm = {
   phone: "",
   website: "",
   hours: "",
+  openingHours: null as OpeningHours | null,
   dressCode: "",
   ageRestriction: "",
   musicTypes: [] as string[],
@@ -173,6 +196,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
         phone: editingVenue.phone || "",
         website: editingVenue.website || "",
         hours: editingVenue.hours || "",
+        openingHours: editingVenue.openingHours ?? null,
         dressCode: editingVenue.dressCode || "",
         ageRestriction: editingVenue.ageRestriction?.toString() || "",
         musicTypes: editingVenue.musicTypes || [],
@@ -230,6 +254,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
       phone: formData.phone || null,
       website: formData.website || null,
       hours: formData.hours || null,
+      openingHours: formData.openingHours,
       dressCode: formData.dressCode || null,
       ageRestriction: formData.ageRestriction ? (parseInt(formData.ageRestriction, 10) || null) : null,
       musicTypes: formData.musicTypes.length > 0 ? formData.musicTypes : null,
@@ -419,6 +444,85 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
                       placeholder="e.g. Mon–Thu 5pm–2am, Fri–Sat 5pm–4am, Sun Closed"
                       data-testid="input-venue-hours"
                     />
+                  </div>
+
+                  {/* Structured hours power the "Open now" status on the venue page */}
+                  <div className="space-y-3 rounded-lg border p-3 sm:p-4">
+                    <div className="flex items-center justify-between gap-3 min-h-[44px]">
+                      <div>
+                        <Label htmlFor="structured-hours-toggle" className="text-sm font-medium">Show "Open now" status</Label>
+                        <p className="text-xs text-muted-foreground">Set weekly hours so guests see if you're open and when you close.</p>
+                      </div>
+                      <Switch
+                        id="structured-hours-toggle"
+                        checked={!!formData.openingHours}
+                        onCheckedChange={(on) => setFormData(prev => ({ ...prev, openingHours: on ? defaultOpeningHours() : null }))}
+                        data-testid="switch-structured-hours"
+                      />
+                    </div>
+
+                    {formData.openingHours && (
+                      <>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="hours-timezone" className="text-xs">Timezone</Label>
+                          <select
+                            id="hours-timezone"
+                            value={formData.openingHours.timezone}
+                            onChange={(e) => setFormData(prev => prev.openingHours ? { ...prev, openingHours: { ...prev.openingHours, timezone: e.target.value } } : prev)}
+                            className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm"
+                            data-testid="select-hours-timezone"
+                          >
+                            {timezoneOptions(formData.openingHours.timezone).map(tz => <option key={tz} value={tz}>{tz}</option>)}
+                          </select>
+                        </div>
+
+                        <div className="divide-y">
+                          {hoursDays.map(({ key, label }) => {
+                            const day = formData.openingHours!.days[key];
+                            const setDay = (value: { open: string; close: string } | null) =>
+                              setFormData(prev => prev.openingHours
+                                ? { ...prev, openingHours: { ...prev.openingHours, days: { ...prev.openingHours.days, [key]: value } } }
+                                : prev);
+                            return (
+                              <div key={key} className="flex flex-wrap items-center gap-x-3 gap-y-2 py-2 min-h-[52px]">
+                                <div className="flex items-center gap-3 w-full sm:w-44">
+                                  <Switch
+                                    checked={!!day}
+                                    onCheckedChange={(on) => setDay(on ? { open: "22:00", close: "04:00" } : null)}
+                                    aria-label={`${label} open`}
+                                    data-testid={`switch-hours-${key}`}
+                                  />
+                                  <span className="text-sm font-medium">{label}</span>
+                                  {!day && <span className="text-sm text-muted-foreground ml-auto sm:ml-0">Closed</span>}
+                                </div>
+                                {day && (
+                                  <div className="flex items-center gap-2">
+                                    <Input
+                                      type="time"
+                                      value={day.open}
+                                      onChange={(e) => e.target.value && setDay({ ...day, open: e.target.value })}
+                                      className="h-11 w-[8.5rem]"
+                                      aria-label={`${label} opens`}
+                                      data-testid={`input-hours-open-${key}`}
+                                    />
+                                    <span className="text-sm text-muted-foreground">to</span>
+                                    <Input
+                                      type="time"
+                                      value={day.close}
+                                      onChange={(e) => e.target.value && setDay({ ...day, close: e.target.value })}
+                                      className="h-11 w-[8.5rem]"
+                                      aria-label={`${label} closes`}
+                                      data-testid={`input-hours-close-${key}`}
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <p className="text-xs text-muted-foreground">A closing time earlier than the opening time means you close after midnight, e.g. 22:00 to 04:00.</p>
+                      </>
+                    )}
                   </div>
                 </CardContent>
               </Card>

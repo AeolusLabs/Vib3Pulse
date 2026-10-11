@@ -15,6 +15,8 @@ import {
   VenueAbout, LocationCard, SafetyShortcut, VenueHost, StickyEntryBar, pickNextNight,
 } from "@/components/venue/VenueSections";
 import { VenueGalleryManager } from "@/components/VenueGalleryManager";
+import { RatingBreakdown, VenueReviewList } from "@/components/venue/VenueReviews";
+import { useVenueSocialProof } from "@/hooks/use-venue-social";
 import { useAuth } from "@/hooks/useAuth";
 import { CardPaymentForm } from "@/components/payments/CardPaymentForm";
 import { formatMoney } from "@/lib/currency";
@@ -130,6 +132,7 @@ export default function VenueDetailPage() {
   });
 
   const { data: venueRatingStats } = useVenueRatings(id);
+  const { data: socialProof } = useVenueSocialProof(id);
   const { data: userVenueRating } = useUserVenueRating(currentUser ? id : undefined);
   const submitVenueRating = useSubmitVenueRating(id ?? "");
 
@@ -299,6 +302,12 @@ export default function VenueDetailPage() {
                 </h2>
                 <RatingDisplay averageRating={venueRatingStats?.averageRating} totalRatings={venueRatingStats?.totalRatings ?? 0} />
               </div>
+              <RatingBreakdown
+                average={venueRatingStats?.averageRating}
+                total={venueRatingStats?.totalRatings ?? 0}
+                distribution={venueRatingStats?.distribution}
+              />
+              <VenueReviewList venueId={venue.id} />
               {!currentUser ? (
                 <p className="text-sm text-muted-foreground">
                   <Link href={`/login?redirect=${encodeURIComponent(`/venue/${venue.id}`)}`} className="text-primary underline">Sign in</Link> to rate this venue.
@@ -358,7 +367,7 @@ export default function VenueDetailPage() {
           <div className="contents lg:flex lg:flex-col lg:gap-6 lg:sticky lg:top-4 lg:min-w-0">
             {nextNight && (
               <div className="order-3 lg:order-none">
-                <NextNightCard venue={venue} night={nextNight} onBuy={() => startBuy(nextNight.id)} buying={buyingId === nextNight.id} />
+                <NextNightCard venue={venue} night={nextNight} onBuy={() => startBuy(nextNight.id)} buying={buyingId === nextNight.id} proof={socialProof?.[nextNight.id]} />
               </div>
             )}
             <div className="order-7 lg:order-none">

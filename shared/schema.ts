@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, integer, boolean, unique, doublePrecision, check, jsonb, numeric } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, integer, boolean, unique, primaryKey, doublePrecision, check, jsonb, numeric } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -963,6 +963,21 @@ export const venueCategories = ["Club", "Pub", "Lounge", "Bar", "Nightclub", "Ro
 export type VenueCategory = typeof venueCategories[number];
 
 // Venues table for clubs, pubs, lounges
+// Structured weekly opening hours. Keys "0".."6" = Sunday..Saturday (JS getDay()).
+// A day is null when closed; close <= open means the session runs past midnight and
+// belongs to the day it opened on (Fri 22:00 -> 04:00 is Friday's session).
+const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use HH:mm (24h)");
+const hoursDay = z.object({ open: hhmm, close: hhmm }).nullable();
+export const openingHoursSchema = z.object({
+  timezone: z.string().max(64).refine((tz) => {
+    try { new Intl.DateTimeFormat("en-GB", { timeZone: tz }); return true; } catch { return false; }
+  }, "Unknown timezone"),
+  days: z.object({
+    "0": hoursDay, "1": hoursDay, "2": hoursDay, "3": hoursDay, "4": hoursDay, "5": hoursDay, "6": hoursDay,
+  }).strict(),
+}).strict();
+export type OpeningHours = z.infer<typeof openingHoursSchema>;
+
 export const venues = pgTable("venues", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   ownerId: varchar("owner_id").notNull().references(() => users.id),
@@ -986,6 +1001,7 @@ export const venues = pgTable("venues", {
   phone: varchar("phone", { length: 50 }),
   website: varchar("website", { length: 255 }),
   hours: text("hours"),
+  openingHours: jsonb("opening_hours").$type<OpeningHours>(), // structured; `hours` text stays as fallback
   amenities: text("amenities").array().default(sql`'{}'`),
   accessibilityFeatures: text("accessibility_features").array().default(sql`'{}'`),
   musicTypes: text("music_types").array().default(sql`'{}'`),
@@ -1007,12 +1023,31 @@ export const insertVenueSchema = createInsertSchema(venues).omit({
   isVerified: true,
 }).extend({
   imageUrls: z.array(z.string()).max(6, "Maximum 6 images allowed").optional(),
+  openingHours: openingHoursSchema.nullable().optional(),
 });
 
 export type InsertVenue = z.infer<typeof insertVenueSchema>;
 export type Venue = typeof venues.$inferSelect;
 
+// What a venue owner may write through the API. Ownership, verification, paid promotion and
+// coordinates (geocoded server-side) are server-controlled and never accepted from a request.
+// zod strips unknown keys, so a client that sends back a whole venue object keeps working.
+export const venueWriteSchema = insertVenueSchema.omit({
+  ownerId: true,
+  isPromoted: true,
+  promotedUntil: true,
+  latitude: true,
+  longitude: true,
+});
+export const venueUpdateSchema = venueWriteSchema.partial();
+
 // Venue events (formerly "entry nights") - ticketed events at venues
+export const savedVenues = pgTable("saved_venues", {
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  venueId: varchar("venue_id").notNull().references(() => venues.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+}, (t) => ({ pk: primaryKey({ columns: [t.userId, t.venueId] }) }));
+
 export const venueEntryNights = pgTable("venue_entry_nights", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   venueId: varchar("venue_id").notNull().references(() => venues.id, { onDelete: "cascade" }),
@@ -1057,6 +1092,16 @@ export const insertVenueEntryNightSchema = createInsertSchema(venueEntryNights).
 
 export type InsertVenueEntryNight = z.infer<typeof insertVenueEntryNightSchema>;
 export type VenueEntryNight = typeof venueEntryNights.$inferSelect;
+
+// What a venue owner may write to a venue event. `moderationStatus` is admin-only (nothing is
+// public until an admin approves it), `venueId` comes from the URL, `recurrenceParentId` from the
+// recurrence generator, and `ticketsSold` is only ever changed by ticket sales.
+export const venueEntryNightWriteSchema = insertVenueEntryNightSchema.omit({
+  venueId: true,
+  moderationStatus: true,
+  recurrenceParentId: true,
+});
+export const venueEntryNightUpdateSchema = venueEntryNightWriteSchema.partial();
 
 // Venue entry tickets - tickets purchased for venue entry nights
 export const venueTickets = pgTable("venue_tickets", {

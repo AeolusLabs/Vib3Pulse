@@ -7,7 +7,7 @@ import { authRateLimiter } from "../security";
 import { geocodeAddress, sortByProximity } from "../utils/geo";
 import { generateRecurrenceDates, shiftByDelta, type RecurrenceInterval } from "../utils/recurrence.js";
 import { staffCodeExpiry } from "../utils/staffCodeExpiry.js";
-import { insertVenueSchema, insertVenueEntryNightSchema, venueCategories } from "@shared/schema";
+import { venueWriteSchema, venueUpdateSchema, venueEntryNightWriteSchema, venueEntryNightUpdateSchema, venueCategories } from "@shared/schema";
 
 export function registerVenueRoutes(app: Express): void {
   // ==================== VENUE ROUTES ====================
@@ -122,17 +122,20 @@ export function registerVenueRoutes(app: Express): void {
         }
       }
 
-      const venueData = insertVenueSchema.parse({
-        ...req.body,
-        location,
+      // Allow-listed fields only; owner and coordinates are set here, never taken from the body.
+      const venueData = {
+        ...venueWriteSchema.parse({ ...req.body, location }),
         ownerId: req.user!.id,
         latitude,
         longitude,
-      });
+      };
 
       const venue = await storage.createVenue(venueData);
       res.status(201).json(venue);
     } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid venue data", errors: error.flatten() });
+      }
       console.error("Create venue error:", error);
       res.status(400).json({ message: "Failed to create venue" });
     }
@@ -155,8 +158,12 @@ export function registerVenueRoutes(app: Express): void {
         return res.status(403).json({ message: "You can only update your own venues" });
       }
 
+      // Allow-listed fields only (see venueWriteSchema): ownership, verification, promotion and
+      // coordinates can't be changed through this route.
+      const updates: Record<string, unknown> & { address?: string | null; city?: string | null; latitude?: number; longitude?: number } =
+        venueUpdateSchema.parse(req.body);
+
       // Re-geocode if address or city changed
-      const updates = { ...req.body };
       const addressChanged = updates.address !== undefined || updates.city !== undefined;
       if (addressChanged) {
         const address = updates.address ?? venue.address;
@@ -174,6 +181,9 @@ export function registerVenueRoutes(app: Express): void {
       const updatedVenue = await storage.updateVenue(req.params.id, updates);
       res.json(updatedVenue);
     } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid venue data", errors: error.flatten() });
+      }
       console.error("Update venue error:", error);
       res.status(400).json({ message: "Failed to update venue" });
     }
@@ -284,10 +294,11 @@ export function registerVenueRoutes(app: Express): void {
         return res.status(403).json({ message: "You can only create events for your own venues" });
       }
       const { recurrenceEndDate, ...body } = req.body;
-      const eventData = insertVenueEntryNightSchema.parse({
-        ...body,
+      // Allow-listed fields only: a new night is always created "pending" for admin approval.
+      const eventData = {
+        ...venueEntryNightWriteSchema.parse(body),
         venueId: req.params.venueId,
-      });
+      };
       const event = await storage.createVenueEntryNight(eventData);
 
       if (eventData.recurrence && eventData.recurrence !== "none") {
@@ -311,6 +322,9 @@ export function registerVenueRoutes(app: Express): void {
 
       res.status(201).json(event);
     } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid venue event data", errors: error.flatten() });
+      }
       console.error("Create venue event error:", error);
       res.status(400).json({ message: "Failed to create venue event" });
     }
@@ -337,9 +351,13 @@ export function registerVenueRoutes(app: Express): void {
           updateData[field] = null;
         }
       }
-      const updatedEvent = await storage.updateVenueEntryNight(req.params.id, updateData);
+      // Allow-listed fields only: moderation status, venue and sales counters can't be changed here.
+      const updatedEvent = await storage.updateVenueEntryNight(req.params.id, venueEntryNightUpdateSchema.parse(updateData));
       res.json(updatedEvent);
     } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid venue event data", errors: error.flatten() });
+      }
       console.error("Update venue event error:", error);
       res.status(400).json({ message: "Failed to update venue event" });
     }
