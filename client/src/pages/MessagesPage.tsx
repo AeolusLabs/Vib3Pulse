@@ -1,401 +1,58 @@
-import { useState, useRef, useEffect } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { useParams, useLocation } from "wouter";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useLocation, useParams } from "wouter";
+import { MessageSquare, Plus, Search, X } from "lucide-react";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
-import CreateGroupModal from "@/components/CreateGroupModal";
-import GroupChatView from "@/components/GroupChatView";
-import { ObjectUploader } from "@/components/ObjectUploader";
-import ImageLightbox from "@/components/ImageLightbox";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Skeleton } from "@/components/ui/skeleton";
-import { ConversationItemSkeleton, MessageBubbleSkeleton } from "@/components/ui/skeleton-layouts";
-import { Badge } from "@/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-
-import { format, formatDistanceToNow } from "date-fns";
-import { apiRequest, queryClient } from "@/lib/queryClient";
-import { useToast } from "@/hooks/use-toast";
+import { ConversationItemSkeleton } from "@/components/ui/skeleton-layouts";
 import { useAuth } from "@/hooks/useAuth";
-import type { User, Message, Event, Venue, Conversation, ConversationParticipant, ConversationMessage, Story } from "@shared/schema";
-import { SendIcon, ArrowLeftIcon, SearchIcon, UserPlusIcon, ReplyIcon, XIcon, CalendarIcon, MapPinIcon, Building2Icon, UsersIcon, PlusIcon, MessageSquareIcon, ChevronDownIcon, ImageIcon, PlayIcon, CameraIcon, CheckCheckIcon, Trash2Icon } from "@/components/ui/icons";
+import ConversationRow from "@/components/chat/ConversationRow";
+import NewMessageSheet from "@/components/chat/NewMessageSheet";
+import ThreadView from "@/components/chat/ThreadView";
+import { conversationTitle } from "@/components/chat/chatUtils";
+import type { ConversationWithDetails } from "@/components/chat/types";
 
-type ConversationWithDetails = Conversation & {
-  participants: Array<ConversationParticipant & { user: User }>;
-  unreadCount: number;
-};
+type Filter = "all" | "direct" | "groups" | "unread";
 
-function MessageAttachedEvent({ eventId, isOwnMessage }: { eventId: string; isOwnMessage: boolean }) {
-  const [, navigate] = useLocation();
-  const { data: event } = useQuery<Event>({
-    queryKey: ['/api/events', eventId],
-    enabled: !!eventId,
-  });
-
-  if (!event) return null;
-
-  return (
-    <div 
-      className={`mt-2 p-2 rounded-lg cursor-pointer ${
-        isOwnMessage 
-          ? 'bg-primary-foreground/20 hover:bg-primary-foreground/30' 
-          : 'bg-background/50 hover:bg-background/70'
-      }`}
-      onClick={(e) => {
-        e.stopPropagation();
-        navigate(`/event/${event.id}`);
-      }}
-    >
-      <div className="flex gap-2">
-        {event.imageUrl && (
-          <img 
-            src={event.imageUrl} 
-            alt={event.title}
-            className="w-12 h-12 rounded object-cover flex-shrink-0"
-          />
-        )}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1 mb-0.5">
-            <CalendarIcon className="h-3 w-3" />
-            <span className="text-xs font-medium">Event</span>
-          </div>
-          <p className="text-sm font-medium line-clamp-1">{event.title}</p>
-          <p className="text-xs opacity-70 flex items-center gap-1">
-            <MapPinIcon className="h-3 w-3" />
-            <span className="line-clamp-1">{event.location}</span>
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function MessageAttachedVenue({ venueId, isOwnMessage }: { venueId: string; isOwnMessage: boolean }) {
-  const [, navigate] = useLocation();
-  const { data: venue } = useQuery<Venue>({
-    queryKey: ['/api/venues', venueId],
-    enabled: !!venueId,
-  });
-
-  if (!venue) return null;
-
-  return (
-    <div 
-      className={`mt-2 p-2 rounded-lg cursor-pointer ${
-        isOwnMessage 
-          ? 'bg-primary-foreground/20 hover:bg-primary-foreground/30' 
-          : 'bg-background/50 hover:bg-background/70'
-      }`}
-      onClick={(e) => {
-        e.stopPropagation();
-        navigate(`/venue/${venue.id}`);
-      }}
-    >
-      <div className="flex gap-2">
-        {(venue.coverImageUrl || venue.imageUrl) && (
-          <img 
-            src={venue.coverImageUrl || venue.imageUrl || ""} 
-            alt={venue.name}
-            className="w-12 h-12 rounded object-cover flex-shrink-0"
-          />
-        )}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1 mb-0.5">
-            <Building2Icon className="h-3 w-3" />
-            <span className="text-xs font-medium">Venue</span>
-          </div>
-          <p className="text-sm font-medium line-clamp-1">{venue.name}</p>
-          {venue.city && (
-            <p className="text-xs opacity-70 flex items-center gap-1">
-              <MapPinIcon className="h-3 w-3" />
-              <span className="line-clamp-1">{venue.city}</span>
-            </p>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-type ConversationMessageWithSender = ConversationMessage & {
-  sender: User;
-  replyTo?: ConversationMessage & { sender: User };
-  story?: Story & { user: User };
-};
-
-function StoryReplyCard({ story, isOwnMessage }: { story?: Story & { user: User }; isOwnMessage: boolean }) {
-  const [, navigate] = useLocation();
-  const isExpired = story ? (story.expiresAt ? new Date(story.expiresAt) < new Date() : false) : true;
-  const isAvailable = !!story && !isExpired;
-
-  return (
-    <div className="mb-2.5">
-      <div
-        role={isAvailable ? "button" : undefined}
-        tabIndex={isAvailable ? 0 : undefined}
-        className={`relative w-28 h-[198px] rounded-xl overflow-hidden select-none bg-black/30 ${
-          isAvailable
-            ? "cursor-pointer active:scale-[0.97] transition-transform"
-            : "cursor-default opacity-60"
-        }`}
-        onClick={(e) => {
-          if (!isAvailable) return;
-          e.stopPropagation();
-          navigate(`/stories/${story!.id}`);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && isAvailable) navigate(`/stories/${story!.id}`);
-        }}
-      >
-        {isAvailable ? (
-          <img src={story!.imageUrl} alt="Story" className="absolute inset-0 w-full h-full object-cover" />
-        ) : (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
-            <ImageIcon className={`h-5 w-5 ${isOwnMessage ? "text-white/40" : "text-muted-foreground/60"}`} />
-            <p className={`text-[10px] ${isOwnMessage ? "text-white/40" : "text-muted-foreground/60"}`}>
-              Story expired
-            </p>
-          </div>
-        )}
-        {isAvailable && (
-          <>
-            {story!.type === "video" && (
-              <div className="absolute top-1.5 left-1.5">
-                <div className="bg-black/50 rounded-full p-1">
-                  <PlayIcon className="h-3 w-3 text-white" />
-                </div>
-              </div>
-            )}
-            <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/70 to-transparent px-2 py-2">
-              <p className="text-white text-[10px] font-medium leading-tight truncate">
-                @{story!.user.username}
-              </p>
-            </div>
-          </>
-        )}
-      </div>
-      <p className={`text-[10px] mt-1 ${isOwnMessage ? "text-white/50" : "text-muted-foreground"}`}>
-        Replied to story
-      </p>
-    </div>
-  );
-}
-
+// Phone: the inbox and a thread are separate screens (route-driven). md and up: inbox on the left,
+// the open chat on the right, so switching chats is one click.
 export default function MessagesPage() {
   const { conversationId } = useParams<{ conversationId?: string }>();
   const [, navigate] = useLocation();
-  const [messageText, setMessageText] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
-  const [newChatDialogOpen, setNewChatDialogOpen] = useState(false);
-  const [createGroupOpen, setCreateGroupOpen] = useState(false);
-  const [selectedConversation, setSelectedConversation] = useState<ConversationWithDetails | null>(null);
-  const [replyingTo, setReplyingTo] = useState<ConversationMessageWithSender | null>(null);
-  const [composerImages, setComposerImages] = useState<string[]>([]);
-  const [lightboxImages, setLightboxImages] = useState<string[] | null>(null);
-  const [lightboxIndex, setLightboxIndex] = useState(0);
-  const [threadSearchOpen, setThreadSearchOpen] = useState(false);
-  const [threadSearchQuery, setThreadSearchQuery] = useState("");
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const { toast } = useToast();
-
   const { data: currentUser, isLoading: loadingUser } = useAuth();
+  const [filter, setFilter] = useState<Filter>("all");
+  const [query, setQuery] = useState("");
+  const [newOpen, setNewOpen] = useState(false);
 
-  const { data: conversations, isLoading: conversationsLoading } = useQuery<ConversationWithDetails[]>({
-    queryKey: ['/api/conversations'],
+  const { data: conversations, isLoading } = useQuery<ConversationWithDetails[]>({
+    queryKey: ["/api/conversations"],
     enabled: !!currentUser,
-    refetchOnMount: 'always',
+    refetchOnMount: "always",
     staleTime: 0,
   });
 
-  const { data: conversationMessages = [], isLoading: messagesLoading } = useQuery<ConversationMessageWithSender[]>({
-    queryKey: ['/api/conversations', conversationId, 'messages'],
-    enabled: !!conversationId && !!currentUser,
-  });
+  const unreadTotal = useMemo(() => (conversations ?? []).filter((c) => c.unreadCount > 0).length, [conversations]);
 
-  const { data: threadSearchResults = [], isLoading: threadSearchLoading } = useQuery<ConversationMessageWithSender[]>({
-    queryKey: ['/api/conversations', conversationId, 'messages', 'search', threadSearchQuery],
-    queryFn: async () => {
-      const res = await fetch(`/api/conversations/${conversationId}/messages/search?q=${encodeURIComponent(threadSearchQuery)}`, { credentials: 'include' });
-      if (!res.ok) throw new Error('Search failed');
-      return res.json();
-    },
-    enabled: threadSearchOpen && !!conversationId && threadSearchQuery.trim().length > 0,
-  });
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearchQuery(searchQuery);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
-
-
-  const currentUserId = currentUser?.id;
-  const { data: followingList = [], isLoading: followingLoading, refetch: refetchFollowing } = useQuery<User[]>({
-    queryKey: ['/api/follows/me/following'],
-    enabled: !!currentUserId,
-    staleTime: 30000,
-    refetchOnMount: true,
-  });
-
-  useEffect(() => {
-    if (newChatDialogOpen && currentUserId) {
-      refetchFollowing();
-    }
-  }, [newChatDialogOpen, currentUserId, refetchFollowing]);
-
-  const filteredFollowing = followingList.filter(user => {
-    if (!debouncedSearchQuery) return true;
-    const searchLower = debouncedSearchQuery.toLowerCase();
-    return (
-      user.username.toLowerCase().includes(searchLower) ||
-      (user.displayName?.toLowerCase().includes(searchLower)) ||
-      (user.organizationName?.toLowerCase().includes(searchLower))
-    );
-  });
-
-
-
-  useEffect(() => {
-    if (conversationId && conversations) {
-      const found = conversations.find((c) => c.id === conversationId);
-      if (found) {
-        setSelectedConversation(found);
-      }
-    } else if (!conversationId) {
-      setSelectedConversation(null);
-    }
-    setReplyingTo(null);
-  }, [conversationId, conversations]);
-
-  const createDirectConversationMutation = useMutation({
-    mutationFn: async (userId: string) => {
-      const response = await apiRequest("POST", "/api/conversations/direct", { userId });
-      return response.json();
-    },
-    onSuccess: (conversation) => {
-      queryClient.invalidateQueries({ queryKey: ['/api/conversations'] });
-      setNewChatDialogOpen(false);
-      setSearchQuery("");
-      navigate(`/messages/${conversation.id}`);
-    },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to start conversation", variant: "destructive" });
-    },
-  });
-
-  const sendMessageMutation = useMutation({
-    mutationFn: async ({ content, replyToId, eventId, venueId, imageUrls }: {
-      content: string;
-      replyToId?: string;
-      eventId?: string;
-      venueId?: string;
-      imageUrls?: string[];
-    }) => {
-      return await apiRequest('POST', `/api/conversations/${conversationId}/messages`, {
-        content,
-        messageType: imageUrls?.length ? 'image' : eventId ? 'event' : venueId ? 'venue' : 'text',
-        replyToId,
-        eventId,
-        venueId,
-        imageUrls,
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/conversations', conversationId, 'messages'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/conversations'] });
-      setMessageText("");
-      setComposerImages([]);
-      setReplyingTo(null);
-    },
-  });
-
-  const deleteMessageMutation = useMutation({
-    mutationFn: async (messageId: string) => {
-      return await apiRequest('DELETE', `/api/conversations/${conversationId}/messages/${messageId}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/conversations', conversationId, 'messages'] });
-    },
-    onError: () => {
-      toast({ title: "Couldn't delete message", variant: "destructive" });
-    },
-  });
-
-  const handleSendMessage = () => {
-    if ((messageText.trim() || composerImages.length > 0) && conversationId) {
-      sendMessageMutation.mutate({
-        content: messageText.trim(),
-        replyToId: replyingTo?.id,
-        imageUrls: composerImages.length > 0 ? composerImages : undefined,
-      });
-    }
-  };
-
-  useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [conversationMessages]);
-
-  useEffect(() => {
-    if (conversationId && inputRef.current) {
-      inputRef.current.focus();
-    }
-  }, [conversationId]);
-
-  const formatMessageTime = (date: Date) => {
-    const now = new Date();
-    const messageDate = new Date(date);
-    const diffInHours = (now.getTime() - messageDate.getTime()) / (1000 * 60 * 60);
-    
-    if (diffInHours < 24) {
-      return format(messageDate, 'p');
-    } else if (diffInHours < 168) {
-      return format(messageDate, 'EEE p');
-    } else {
-      return format(messageDate, 'MMM d, p');
-    }
-  };
-
-  const handleBack = () => {
-    navigate('/messages');
-    setSelectedConversation(null);
-  };
-
-  const handleGroupCreated = (id: string) => {
-    navigate(`/messages/${id}`);
-  };
-
-  const handleSelectConversation = (conv: ConversationWithDetails) => {
-    navigate(`/messages/${conv.id}`);
-  };
+  const visible = useMemo(() => {
+    if (!currentUser) return [];
+    const q = query.trim().toLowerCase();
+    return (conversations ?? []).filter((c) => {
+      if (filter === "direct" && c.isGroup) return false;
+      if (filter === "groups" && !c.isGroup) return false;
+      if (filter === "unread" && c.unreadCount === 0) return false;
+      if (!q) return true;
+      return conversationTitle(c, currentUser.id).toLowerCase().includes(q) || (c.lastMessagePreview ?? "").toLowerCase().includes(q);
+    });
+  }, [conversations, filter, query, currentUser]);
 
   if (loadingUser) {
     return (
-      <div className="min-h-screen flex flex-col bg-background">
+      <div className="min-h-screen bg-background pb-20 md:pb-0">
         <Navigation onSearch={() => {}} />
-        <main className="flex-1 container mx-auto px-4 py-6 pb-20 max-w-2xl">
-          <div className="space-y-1">
-            {[0, 1, 2, 3].map((i) => <ConversationItemSkeleton key={i} index={i} />)}
-          </div>
+        <main className="mx-auto max-w-2xl px-4 py-6">
+          {[0, 1, 2, 3].map((i) => <ConversationItemSkeleton key={i} index={i} />)}
         </main>
         <BottomNavigation />
       </div>
@@ -404,15 +61,13 @@ export default function MessagesPage() {
 
   if (!currentUser) {
     return (
-      <div className="min-h-screen flex flex-col bg-background">
+      <div className="flex min-h-screen flex-col bg-background">
         <Navigation onSearch={() => {}} />
-        <main className="flex-1 flex items-center justify-center px-4 pb-20">
+        <main className="flex flex-1 items-center justify-center px-4 pb-20">
           <div className="text-center">
-            <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
-              <MessageSquareIcon className="h-7 w-7 text-primary" />
-            </div>
-            <h2 className="text-xl font-semibold mb-2">Sign in to chat</h2>
-            <p className="text-muted-foreground text-sm">Message friends and create group chats</p>
+            <span className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-full bg-primary/10"><MessageSquare className="h-7 w-7 text-primary" /></span>
+            <h2 className="mb-2 font-serif text-2xl font-bold">Sign in to chat</h2>
+            <p className="text-sm text-muted-foreground">Message friends and create group chats</p>
           </div>
         </main>
         <BottomNavigation />
@@ -420,535 +75,99 @@ export default function MessagesPage() {
     );
   }
 
-  if (conversationId && selectedConversation?.isGroup) {
-    return (
-      <div className="min-h-screen flex flex-col bg-background">
-        <div className="flex-1 h-[calc(100vh-64px)]">
-          <GroupChatView
-            conversationId={conversationId}
-            currentUser={currentUser}
-            onBack={handleBack}
-          />
-        </div>
-        <BottomNavigation />
-      </div>
-    );
-  }
-
-  if (conversationId && selectedConversation && !selectedConversation.isGroup) {
-    const otherParticipant = selectedConversation.participants.find(
-      (p) => p.userId !== currentUser.id
-    );
-    const otherUser = otherParticipant?.user;
-    // useAuth()'s session payload is a narrow AuthUser, not the full User row
-    // — but getConversationParticipants already returns every participant's
-    // full User (readReceiptsEnabled included), so look up our own row there
-    // instead of widening the auth session type just for this one field.
-    const ownParticipant = selectedConversation.participants.find(
-      (p) => p.userId === currentUser.id
-    );
-
-    // Read receipts are mutual, like WhatsApp's toggle: both people need it on
-    // before either sees "Seen" for the other.
-    const readReceiptsActive = ownParticipant?.user.readReceiptsEnabled !== false && otherUser?.readReceiptsEnabled !== false;
-    const lastOwnMessage = readReceiptsActive
-      ? [...conversationMessages].reverse().find(m => m.senderId === currentUser.id && !m.isDeleted)
-      : undefined;
-    const isLastOwnMessageSeen = !!(lastOwnMessage && otherParticipant?.lastReadAt &&
-      new Date(otherParticipant.lastReadAt) >= new Date(lastOwnMessage.createdAt));
-
-    const displayedMessages = threadSearchOpen ? threadSearchResults : conversationMessages;
-
-    return (
-      <div className="h-[calc(100dvh-4rem)] md:h-dvh bg-background flex flex-col overflow-hidden">
-        {/* Sticky chat header */}
-        <div className="flex-shrink-0 border-b border-border/50 bg-background/95 backdrop-blur-sm">
-          <Navigation onSearch={() => {}} />
-          <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center gap-3">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="rounded-full h-9 w-9 text-muted-foreground hover:text-foreground"
-              onClick={handleBack}
-              data-testid="button-back"
-            >
-              <ArrowLeftIcon className="h-5 w-5" />
-            </Button>
-            {otherUser && (
-              <>
-                <Avatar className="h-9 w-9 ring-2 ring-primary/20">
-                  <AvatarImage src={otherUser.avatarUrl || ""} alt={otherUser.displayName || otherUser.username} />
-                  <AvatarFallback className="bg-primary/10 text-primary font-semibold text-sm">
-                    {(otherUser.displayName || otherUser.organizationName || otherUser.username).charAt(0).toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-sm text-foreground leading-tight truncate" data-testid="text-other-user-name">
-                    {otherUser.displayName || otherUser.organizationName || otherUser.username}
-                  </p>
-                  <p className="text-xs text-muted-foreground leading-tight">@{otherUser.username}</p>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="rounded-full h-9 w-9 text-muted-foreground hover:text-foreground flex-shrink-0"
-                  onClick={() => { setThreadSearchOpen((v) => !v); setThreadSearchQuery(""); }}
-                  data-testid="button-toggle-thread-search"
-                >
-                  <SearchIcon className="h-4.5 w-4.5" />
-                </Button>
-              </>
-            )}
-          </div>
-          {threadSearchOpen && (
-            <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 pb-3">
-              <div className="relative">
-                <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  autoFocus
-                  type="text"
-                  placeholder="Search this conversation…"
-                  value={threadSearchQuery}
-                  onChange={(e) => setThreadSearchQuery(e.target.value)}
-                  className="pl-10 h-9 rounded-full bg-muted/50 border-border/40"
-                  data-testid="input-thread-search"
-                />
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Scrollable messages */}
-        <main className="flex-1 overflow-hidden flex flex-col max-w-[1200px] mx-auto w-full px-4 sm:px-6 lg:px-8">
-          <ScrollArea className="flex-1 py-4">
-            {(threadSearchOpen ? threadSearchLoading : messagesLoading) ? (
-              <div className="space-y-1 py-2">
-                {[0, 1, 2, 3].map((i) => <MessageBubbleSkeleton key={i} index={i} />)}
-              </div>
-            ) : displayedMessages.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full py-16 text-center">
-                <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-                  <MessageSquareIcon className="h-7 w-7 text-primary" />
-                </div>
-                <p className="font-medium text-foreground">
-                  {threadSearchOpen ? (threadSearchQuery.trim() ? "No matches found" : "Search this conversation") : "No messages yet"}
-                </p>
-                {!threadSearchOpen && <p className="text-sm text-muted-foreground mt-1">Say hello to start the conversation</p>}
-              </div>
-            ) : (
-              <div className="space-y-1">
-                {displayedMessages.map((message, idx) => {
-                  const isOwnMessage = message.senderId === currentUser?.id;
-                  const prevMsg = displayedMessages[idx - 1];
-                  const showTimeDivider = !prevMsg ||
-                    new Date(message.createdAt).getTime() - new Date(prevMsg.createdAt).getTime() > 5 * 60 * 1000;
-                  const isLastMessage = !threadSearchOpen && idx === displayedMessages.length - 1;
-
-                  return (
-                    <div key={message.id}>
-                      {showTimeDivider && (
-                        <p className="text-center text-[11px] text-muted-foreground/60 my-3">
-                          {formatMessageTime(message.createdAt)}
-                        </p>
-                      )}
-                      <div
-                        className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'} group mb-0.5`}
-                        data-testid={`message-${message.id}`}
-                      >
-                        <div className={`flex items-end gap-1.5 max-w-[75%] ${isOwnMessage ? 'flex-row-reverse' : 'flex-row'}`}>
-                          <div
-                            className={`px-4 py-2.5 text-sm leading-relaxed break-words ${
-                              isOwnMessage
-                                ? 'bg-violet-600 text-white rounded-2xl rounded-br-sm'
-                                : 'bg-muted text-foreground rounded-2xl rounded-bl-sm'
-                            } ${message.isDeleted ? 'italic opacity-70' : ''}`}
-                          >
-                            {message.isDeleted ? (
-                              <span className={isOwnMessage ? 'text-white/70' : 'text-muted-foreground'}>[message deleted]</span>
-                            ) : (
-                              <>
-                                {message.messageType === 'story_reply' && (
-                                  <StoryReplyCard story={message.story} isOwnMessage={isOwnMessage} />
-                                )}
-                                {message.replyTo && (
-                                  <div
-                                    className={`mb-2 px-2 py-1.5 rounded-lg border-l-2 ${
-                                      isOwnMessage
-                                        ? 'bg-white/10 border-white/50'
-                                        : 'bg-background/60 border-primary/40'
-                                    }`}
-                                  >
-                                    <p className={`text-[11px] font-medium flex items-center gap-1 mb-0.5 ${isOwnMessage ? 'text-white/70' : 'text-muted-foreground'}`}>
-                                      <ReplyIcon className="h-3 w-3" />
-                                      {message.replyTo.sender?.username || 'Unknown'}
-                                    </p>
-                                    <p className={`text-xs line-clamp-1 ${isOwnMessage ? 'text-white/60' : 'text-muted-foreground'}`}>
-                                      {message.replyTo.content}
-                                    </p>
-                                  </div>
-                                )}
-                                {message.imageUrls && message.imageUrls.length > 0 && (
-                                  <div className={`grid gap-1 ${message.imageUrls.length > 1 ? 'grid-cols-2' : 'grid-cols-1'} ${message.content ? 'mb-2' : ''}`}>
-                                    {message.imageUrls.map((url, i) => (
-                                      <img
-                                        key={i}
-                                        src={url}
-                                        alt="Sent image"
-                                        className="rounded-lg object-cover w-full h-32 cursor-pointer"
-                                        onClick={(e) => { e.stopPropagation(); setLightboxImages(message.imageUrls!); setLightboxIndex(i); }}
-                                        data-testid={`img-message-${message.id}-${i}`}
-                                      />
-                                    ))}
-                                  </div>
-                                )}
-                                {message.content}
-                                {message.eventId && (
-                                  <MessageAttachedEvent eventId={message.eventId} isOwnMessage={isOwnMessage} />
-                                )}
-                                {message.venueId && (
-                                  <MessageAttachedVenue venueId={message.venueId} isOwnMessage={isOwnMessage} />
-                                )}
-                              </>
-                            )}
-                          </div>
-                          {!message.isDeleted && (
-                            <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex items-center gap-0.5">
-                              <button
-                                className="p-1 text-muted-foreground hover:text-foreground rounded-full hover:bg-muted"
-                                onClick={() => { setReplyingTo(message); inputRef.current?.focus(); }}
-                                data-testid={`button-reply-${message.id}`}
-                              >
-                                <ReplyIcon className="h-3.5 w-3.5" />
-                              </button>
-                              {isOwnMessage && (
-                                <button
-                                  className="p-1 text-muted-foreground hover:text-destructive rounded-full hover:bg-muted"
-                                  onClick={() => deleteMessageMutation.mutate(message.id)}
-                                  disabled={deleteMessageMutation.isPending}
-                                  data-testid={`button-delete-message-${message.id}`}
-                                >
-                                  <Trash2Icon className="h-3.5 w-3.5" />
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      {isLastMessage && isOwnMessage && isLastOwnMessageSeen && (
-                        <p className="text-right text-[10px] text-muted-foreground/70 flex items-center justify-end gap-1 mt-0.5" data-testid="text-seen-indicator">
-                          <CheckCheckIcon className="h-3 w-3" />
-                          Seen {otherParticipant?.lastReadAt ? formatMessageTime(otherParticipant.lastReadAt) : ''}
-                        </p>
-                      )}
-                    </div>
-                  );
-                })}
-                <div ref={messagesEndRef} />
-              </div>
-            )}
-          </ScrollArea>
-
-          {/* Reply banner + input bar */}
-          <div className="flex-shrink-0 pb-4 md:pb-6">
-            {replyingTo && (
-              <div className="mb-2 px-4 py-2.5 bg-muted/60 rounded-xl border border-border/40 flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium text-primary flex items-center gap-1 mb-0.5">
-                    <ReplyIcon className="h-3 w-3" />Replying to @{replyingTo.sender?.username || 'Unknown'}
-                  </p>
-                  <p className="text-xs text-muted-foreground line-clamp-1">{replyingTo.content}</p>
-                </div>
-                <button
-                  className="text-muted-foreground hover:text-foreground p-0.5 rounded flex-shrink-0"
-                  onClick={() => setReplyingTo(null)}
-                  data-testid="button-cancel-reply"
-                >
-                  <XIcon className="h-4 w-4" />
-                </button>
-              </div>
-            )}
-            {composerImages.length > 0 && (
-              <div className="mb-2 flex gap-2 flex-wrap">
-                {composerImages.map((url, i) => (
-                  <div key={i} className="relative">
-                    <img src={url} alt="" className="h-16 w-16 rounded-lg object-cover border" />
-                    <button
-                      type="button"
-                      className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center"
-                      onClick={() => setComposerImages((prev) => prev.filter((_, idx) => idx !== i))}
-                      data-testid={`button-remove-composer-image-${i}`}
-                    >
-                      <XIcon className="h-3 w-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <form
-              onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }}
-              className="flex items-center gap-2"
-            >
-              <ObjectUploader
-                maxNumberOfFiles={4}
-                maxFileSizeMB={10}
-                onComplete={(urls) => setComposerImages((prev) => [...prev, ...urls].slice(0, 4))}
-                buttonVariant="ghost"
-                buttonSize="icon"
-                buttonClassName="h-11 w-11 rounded-full flex-shrink-0 text-muted-foreground hover:text-foreground"
-              >
-                <CameraIcon className="h-5 w-5" />
-              </ObjectUploader>
-              <Input
-                ref={inputRef}
-                type="text"
-                placeholder="Type a message…"
-                value={messageText}
-                onChange={(e) => setMessageText(e.target.value)}
-                className="flex-1 h-11 rounded-full bg-muted/50 border-border/40 focus-visible:ring-1 focus-visible:ring-primary px-5 text-sm"
-                data-testid="input-message"
-              />
-              <button
-                type="submit"
-                disabled={(!messageText.trim() && composerImages.length === 0) || sendMessageMutation.isPending}
-                className="h-11 w-11 rounded-full bg-violet-600 hover:bg-violet-500 disabled:opacity-40 flex items-center justify-center text-white transition-colors flex-shrink-0"
-                data-testid="button-send"
-              >
-                <SendIcon className="h-4 w-4" />
-              </button>
-            </form>
-          </div>
-        </main>
-
-        {lightboxImages && (
-          <ImageLightbox
-            images={lightboxImages}
-            initialIndex={lightboxIndex}
-            open={!!lightboxImages}
-            onClose={() => setLightboxImages(null)}
-          />
-        )}
-
-        <BottomNavigation />
-      </div>
-    );
-  }
+  const filters: Array<{ key: Filter; label: string }> = [
+    { key: "all", label: "All" },
+    { key: "direct", label: "Direct" },
+    { key: "groups", label: "Groups" },
+    { key: "unread", label: "Unread" },
+  ];
 
   return (
-    <div className="min-h-screen bg-background pb-20 md:pb-0">
-      <Navigation onSearch={() => {}} />
+    <div className="min-h-screen bg-background">
+      {/* A phone thread is full screen, so the top bar only shows on the inbox (and always on desktop). */}
+      <div className={conversationId ? "hidden md:block" : ""}><Navigation onSearch={() => {}} /></div>
 
-      <main className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-3xl font-bold font-serif text-foreground">Messages</h1>
-          
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button data-testid="button-new-message">
-                <PlusIcon className="h-4 w-4 mr-2" />
-                New Message
-                <ChevronDownIcon className="h-4 w-4 ml-2" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem 
-                onClick={() => setNewChatDialogOpen(true)}
-                data-testid="menu-item-new-chat"
-              >
-                <MessageSquareIcon className="h-4 w-4 mr-2" />
-                New Chat
-              </DropdownMenuItem>
-              <DropdownMenuItem 
-                onClick={() => setCreateGroupOpen(true)}
-                data-testid="menu-item-new-group"
-              >
-                <UsersIcon className="h-4 w-4 mr-2" />
-                New Group
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+      <div className={`mx-auto flex w-full max-w-[1200px] md:border-x ${conversationId ? "h-[calc(100dvh-4rem)]" : "h-[calc(100dvh-8rem)]"} md:h-[calc(100dvh-4rem)]`}>
+        <section
+          className={`min-h-0 w-full flex-col border-r md:flex md:w-[360px] md:flex-none lg:w-[400px] ${conversationId ? "hidden" : "flex"}`}
+          aria-label="Conversations"
+        >
+          <div className="flex items-center gap-3 px-4 pb-2 pt-4">
+            <h1 className="flex-1 font-serif text-3xl font-bold leading-none">Messages</h1>
+            <Button type="button" variant="outline" size="icon" className="h-11 w-11 rounded-xl" onClick={() => setNewOpen(true)} aria-label="New message" data-testid="button-new-message">
+              <Plus className="h-5 w-5" />
+            </Button>
+          </div>
 
-        {conversationsLoading ? (
-          <div className="rounded-xl border border-border/40 overflow-hidden divide-y divide-border/30">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="flex items-center gap-4 p-4">
-                <Skeleton className="h-14 w-14 rounded-full flex-shrink-0" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-4 w-32" />
-                  <Skeleton className="h-3 w-48" />
-                </div>
-              </div>
+          <div className="relative px-4 pb-2 pt-1">
+            <Search className="pointer-events-none absolute left-7 top-1/2 h-4 w-4 -translate-y-[calc(50%-2px)] text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search chats"
+              className="h-11 rounded-xl pl-10 pr-10"
+              data-testid="input-search-conversations"
+            />
+            {query && (
+              <button type="button" className="absolute right-6 top-1/2 grid h-8 w-8 -translate-y-[calc(50%-2px)] place-items-center rounded-full" onClick={() => setQuery("")} aria-label="Clear search"><X className="h-4 w-4" /></button>
+            )}
+          </div>
+
+          <div className="flex gap-2 overflow-x-auto px-4 pb-3" role="group" aria-label="Filter conversations">
+            {filters.map((f) => (
+              <button
+                key={f.key}
+                type="button"
+                aria-pressed={filter === f.key}
+                onClick={() => setFilter(f.key)}
+                className={`inline-flex min-h-[40px] flex-none items-center gap-1.5 whitespace-nowrap rounded-full border px-4 text-sm font-medium transition-[background-color,transform] active:scale-[0.97] ${
+                  filter === f.key ? "border-primary bg-primary text-primary-foreground" : "bg-card hover-elevate"
+                }`}
+                data-testid={`filter-${f.key}`}
+              >
+                {f.label}
+                {f.key === "unread" && unreadTotal > 0 && <small className="text-xs opacity-85">{unreadTotal}</small>}
+              </button>
             ))}
           </div>
-        ) : !conversations || conversations.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 text-center">
-            <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-              <MessageSquareIcon className="h-7 w-7 text-primary" />
+
+          <div className="min-h-0 flex-1 overflow-y-auto border-t" data-testid="list-conversations">
+            {isLoading ? (
+              [0, 1, 2, 3].map((i) => <ConversationItemSkeleton key={i} index={i} />)
+            ) : (conversations ?? []).length === 0 ? (
+              <div className="flex flex-col items-center px-6 py-20 text-center">
+                <span className="mb-4 grid h-16 w-16 place-items-center rounded-full bg-primary/10"><MessageSquare className="h-7 w-7 text-primary" /></span>
+                <p className="font-semibold">No messages yet</p>
+                <p className="mt-1 text-sm text-muted-foreground">Start a chat or create a group</p>
+                <Button className="mt-5 h-11" onClick={() => setNewOpen(true)}>New message</Button>
+              </div>
+            ) : visible.length === 0 ? (
+              <p className="px-6 py-16 text-center text-sm text-muted-foreground" data-testid="text-no-matches">
+                {query ? "No chats match your search." : filter === "unread" ? "You're all caught up." : "Nothing here yet."}
+              </p>
+            ) : (
+              visible.map((c) => (
+                <ConversationRow key={c.id} conv={c} meId={currentUser.id} active={c.id === conversationId} onOpen={(conv) => navigate(`/messages/${conv.id}`)} />
+              ))
+            )}
+          </div>
+        </section>
+
+        <section className={`min-h-0 min-w-0 flex-1 flex-col md:flex ${conversationId ? "flex" : "hidden"}`} aria-label="Conversation">
+          {conversationId ? (
+            <ThreadView key={conversationId} conversationId={conversationId} currentUser={currentUser} onBack={() => navigate("/messages")} />
+          ) : (
+            <div className="m-auto max-w-xs px-6 text-center" data-testid="empty-thread">
+              <span className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-full bg-primary/10"><MessageSquare className="h-7 w-7 text-primary" /></span>
+              <p className="font-serif text-xl font-bold">Pick a chat</p>
+              <p className="mt-1 text-sm text-muted-foreground">Choose a conversation on the left, or start a new one.</p>
             </div>
-            <p className="font-semibold text-foreground">No messages yet</p>
-            <p className="text-sm text-muted-foreground mt-1">Start a conversation or create a group to chat</p>
-          </div>
-        ) : (
-          <div className="rounded-xl border border-border/40 overflow-hidden divide-y divide-border/30">
-            {conversations.map((conv) => {
-              const isGroup = conv.isGroup;
-              const otherParticipants = conv.participants.filter(
-                (p) => p.userId !== currentUser.id
-              );
-              const hasUnread = conv.unreadCount > 0;
-
-              return (
-                <div
-                  key={conv.id}
-                  className="flex items-center gap-4 p-4 cursor-pointer hover:bg-muted/40 transition-colors"
-                  onClick={() => handleSelectConversation(conv)}
-                  data-testid={`conversation-${conv.id}`}
-                >
-                  <div className="relative flex-shrink-0">
-                    {isGroup ? (
-                      <Avatar className={`h-14 w-14 ${hasUnread ? 'ring-2 ring-violet-500/50' : ''}`}>
-                        <AvatarImage src={conv.avatarUrl || ""} alt={conv.name || "Group"} />
-                        <AvatarFallback className="bg-primary/10 text-primary">
-                          <UsersIcon className="h-5 w-5" />
-                        </AvatarFallback>
-                      </Avatar>
-                    ) : (
-                      <Avatar className={`h-14 w-14 ${hasUnread ? 'ring-2 ring-violet-500/50' : ''}`}>
-                        <AvatarImage
-                          src={otherParticipants[0]?.user.avatarUrl || ""}
-                          alt={otherParticipants[0]?.user.displayName || otherParticipants[0]?.user.username}
-                        />
-                        <AvatarFallback className="bg-primary/10 text-primary font-semibold">
-                          {(otherParticipants[0]?.user.displayName || otherParticipants[0]?.user.username || "?")[0].toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
-                    )}
-                    {hasUnread && (
-                      <span
-                        className="absolute -top-0.5 -right-0.5 h-5 min-w-[20px] flex items-center justify-center rounded-full bg-violet-600 text-white text-[10px] font-bold px-1"
-                        data-testid={`badge-unread-${conv.id}`}
-                      >
-                        {conv.unreadCount}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-0.5 gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <h3 className={`truncate text-sm ${hasUnread ? 'font-bold text-foreground' : 'font-semibold text-foreground/90'}`}>
-                          {isGroup
-                            ? conv.name
-                            : otherParticipants[0]?.user.displayName ||
-                              otherParticipants[0]?.user.username ||
-                              "Unknown"}
-                        </h3>
-                        {isGroup && (
-                          <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full shrink-0 flex items-center gap-0.5">
-                            <UsersIcon className="h-2.5 w-2.5" />
-                            {conv.participants.length}
-                          </span>
-                        )}
-                      </div>
-                      {conv.lastMessageAt && (
-                        <span className={`text-xs shrink-0 ${hasUnread ? 'text-violet-400 font-medium' : 'text-muted-foreground'}`}>
-                          {formatDistanceToNow(new Date(conv.lastMessageAt), { addSuffix: true })}
-                        </span>
-                      )}
-                    </div>
-                    <p className={`text-sm truncate ${hasUnread ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
-                      {conv.lastMessagePreview ?? "Start the conversation"}
-                    </p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </main>
+          )}
+        </section>
+      </div>
 
       <BottomNavigation />
-
-      <Dialog open={newChatDialogOpen} onOpenChange={setNewChatDialogOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>New Chat</DialogTitle>
-            <DialogDescription>
-              Choose someone you follow to start a conversation
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div className="relative">
-              <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                type="text"
-                placeholder="Filter by name or username..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-                data-testid="input-filter-following"
-              />
-            </div>
-
-            <ScrollArea className="h-[300px]">
-              {followingLoading ? (
-                <div className="space-y-3">
-                  {[1, 2, 3].map((i) => (
-                    <Skeleton key={i} className="h-16 w-full" />
-                  ))}
-                </div>
-              ) : followingList.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <UserPlusIcon className="h-12 w-12 mx-auto mb-2 opacity-20" />
-                  <p>You're not following anyone yet</p>
-                  <p className="text-sm mt-1">Follow people to message them</p>
-                </div>
-              ) : filteredFollowing.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <SearchIcon className="h-12 w-12 mx-auto mb-2 opacity-20" />
-                  <p>No matches found</p>
-                </div>
-              ) : (
-                <div className="rounded-xl border border-border/40 overflow-hidden divide-y divide-border/30">
-                  {filteredFollowing.map((user) => (
-                    <div
-                      key={user.id}
-                      className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-muted/40 transition-colors duration-150"
-                      onClick={() => createDirectConversationMutation.mutate(user.id)}
-                      data-testid={`following-user-${user.id}`}
-                    >
-                      <Avatar className="h-10 w-10 ring-2 ring-border/40">
-                        <AvatarImage src={user.avatarUrl || ""} alt={user.displayName || user.username} />
-                        <AvatarFallback className="bg-primary/10 text-primary font-semibold">
-                          {(user.displayName || user.organizationName || user.username).charAt(0).toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-sm text-foreground truncate">
-                          {user.displayName || user.organizationName || user.username}
-                        </p>
-                        <p className="text-xs text-muted-foreground truncate">@{user.username}</p>
-                      </div>
-                      {user.userType === "organizer" && (
-                        <span className="text-[10px] font-semibold bg-violet-600/20 text-violet-400 px-2 py-0.5 rounded-full shrink-0">
-                          Organizer
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </ScrollArea>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <CreateGroupModal
-        open={createGroupOpen}
-        onOpenChange={setCreateGroupOpen}
-        onGroupCreated={handleGroupCreated}
-      />
+      <NewMessageSheet open={newOpen} onOpenChange={setNewOpen} onCreated={(id) => navigate(`/messages/${id}`)} />
     </div>
   );
 }
