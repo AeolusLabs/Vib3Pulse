@@ -6,7 +6,8 @@ import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { SparklesIcon, CheckIcon, ZapIcon, CrownIcon, RocketIcon } from "@/components/ui/icons";
+import { SparklesIcon, CheckIcon, ZapIcon, CrownIcon, RocketIcon, GlobeIcon } from "@/components/ui/icons";
+import { SocialPromotePanel } from "@/components/social/SocialPromotePanel";
 import { CardPaymentForm } from "@/components/payments/CardPaymentForm";
 import { formatMoney } from "@/lib/currency";
 
@@ -25,7 +26,23 @@ const promotionPackageMeta = [
   { duration: 30, label: "1 Month", icon: RocketIcon, popular: false, description: "Maximum impact" },
 ];
 
+type Mode = "choice" | "inapp" | "social";
+
+interface UpcomingNight { id: string; name: string; date: string }
+
 export function PromoteVenueDialog({ open, onOpenChange, venueId, venueName, currency }: PromoteVenueDialogProps) {
+  const [mode, setMode] = useState<Mode>("choice");
+  // Social promotion can push the whole venue or one of its upcoming nights.
+  const [nightId, setNightId] = useState<string>("");
+  const { data: nights = [] } = useQuery<UpcomingNight[]>({
+    queryKey: ["/api/venues", venueId, "venue-events", "upcoming"],
+    queryFn: async () => {
+      const res = await fetch(`/api/venues/${venueId}/venue-events/upcoming`, { credentials: "include" });
+      return res.ok ? res.json() : [];
+    },
+    enabled: open && mode === "social",
+  });
+
   // Fetched, not hardcoded — see PromoteEventDialog.tsx for why (a client-side
   // GBP-only price table would silently mismatch what NGN venues are charged).
   const { data: promotionPrices } = useQuery<Record<string, Record<number, number>>>({
@@ -85,6 +102,8 @@ export function PromoteVenueDialog({ open, onOpenChange, venueId, venueName, cur
   });
 
   const handleClose = () => {
+    setMode("choice");
+    setNightId("");
     setPaymentStep("select");
     setClientSecret(null);
     setPaymentIntentId(null);
@@ -96,7 +115,7 @@ export function PromoteVenueDialog({ open, onOpenChange, venueId, venueName, cur
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="font-serif text-2xl flex items-center gap-2">
             <SparklesIcon className="h-6 w-6 text-purple-500" />
@@ -107,7 +126,73 @@ export function PromoteVenueDialog({ open, onOpenChange, venueId, venueName, cur
           </DialogDescription>
         </DialogHeader>
 
-        {paymentStep === "select" ? (
+        {mode === "choice" && (
+          <>
+            <div className="py-2 space-y-3">
+              <button
+                type="button"
+                className="w-full text-left flex items-center gap-3 rounded-lg border p-4 hover-elevate"
+                onClick={() => setMode("inapp")}
+                data-testid="button-choose-inapp"
+              >
+                <SparklesIcon className="h-6 w-6 text-purple-500 flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="font-medium">Feature in the app</p>
+                  <p className="text-sm text-muted-foreground">Featured placement on Discover and in search</p>
+                </div>
+              </button>
+              <button
+                type="button"
+                className="w-full text-left flex items-center gap-3 rounded-lg border p-4 hover-elevate"
+                onClick={() => setMode("social")}
+                data-testid="button-choose-social"
+              >
+                <GlobeIcon className="h-6 w-6 text-purple-500 flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="font-medium">Social media promotion</p>
+                  <p className="text-sm text-muted-foreground">
+                    Post your venue or an upcoming night to your connected accounts, now or scheduled. Included in a monthly plan.
+                  </p>
+                </div>
+              </button>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={handleClose} data-testid="button-cancel-promote">Cancel</Button>
+            </DialogFooter>
+          </>
+        )}
+
+        {mode === "social" && (
+          <>
+            <div className="space-y-1.5">
+              <label htmlFor="venue-promo-target" className="text-xs font-medium text-muted-foreground">What to promote</label>
+              <select
+                id="venue-promo-target"
+                value={nightId}
+                onChange={(e) => setNightId(e.target.value)}
+                className="w-full rounded-md border bg-background px-2 py-2 text-sm"
+                data-testid="select-venue-promo-target"
+              >
+                <option value="">The venue ({venueName})</option>
+                {nights.map((n) => (
+                  <option key={n.id} value={n.id}>
+                    {n.name} · {new Date(n.date).toLocaleDateString(undefined, { dateStyle: "medium" })}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <SocialPromotePanel
+              key={nightId || "venue"}
+              target={nightId ? { venueNightId: nightId } : { venueId }}
+              currency={currency}
+              isOpen={open}
+              onBack={() => setMode("choice")}
+              onDone={handleClose}
+            />
+          </>
+        )}
+
+        {mode === "inapp" && (paymentStep === "select" ? (
           <>
             <div className="space-y-4 py-4">
               <div className="grid grid-cols-2 gap-3">
@@ -190,7 +275,7 @@ export function PromoteVenueDialog({ open, onOpenChange, venueId, venueName, cur
               />
             )}
           </div>
-        )}
+        ))}
       </DialogContent>
     </Dialog>
   );

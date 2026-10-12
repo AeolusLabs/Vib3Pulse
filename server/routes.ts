@@ -6,9 +6,12 @@ import { registerOrganizerPaymentsRoutes } from "./organizer-payments-routes";
 import { buddyRouter } from "./buddyRoutes";
 import { registerRatingRoutes } from "./rating-routes";
 import { registerSocialRoutes } from "./socialRoutes";
+import { registerSocialPlanRoutes } from "./socialPlanRoutes";
+import { registerZernioWebhook } from "./zernioWebhook";
 import { startBuddyScheduler } from "./buddyScheduler";
 import { startEventGroupDissolveJob } from "./eventGroupScheduler";
 import { startSocialCleanupScheduler } from "./socialCleanupScheduler";
+import { startSocialCampaignScheduler } from "./socialCampaignScheduler";
 import { registerMessagesRoutes } from "./routes/messages-routes";
 import { registerVenueRoutes } from "./routes/venue-routes";
 import { registerVenueSavedRoutes } from "./routes/venue-saved-routes";
@@ -62,11 +65,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/safety", buddyRouter);
   registerRatingRoutes(app);
   registerSocialRoutes(app);
+  registerSocialPlanRoutes(app);
+  registerZernioWebhook(app);
 
   startSafetyTimerJob();
   startBuddyScheduler();
   startEventGroupDissolveJob();
   startSocialCleanupScheduler();
+  startSocialCampaignScheduler();
   startModerationSlaJob();
   startRevealExpiryJob();
   startGuestRetentionJob();

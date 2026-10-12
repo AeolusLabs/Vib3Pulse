@@ -391,6 +391,9 @@ export default function ManageEventsPage() {
           summary={isLoading ? "Loading your events…" : `${publishedEvents.length} live · ${draftEvents.length} ${draftEvents.length === 1 ? "draft" : "drafts"} · ${pastEvents.length} past`}
           actions={
             <>
+              <Link href="/organizer/social">
+                <Button variant="outline" className="min-h-[44px] rounded-full" data-testid="button-social-promotions">Social</Button>
+              </Link>
               <Link href="/organizer/payouts">
                 <Button variant="outline" className="min-h-[44px] rounded-full" data-testid="button-payouts">Payouts</Button>
               </Link>

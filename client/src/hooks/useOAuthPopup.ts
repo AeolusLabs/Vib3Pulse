@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 // Opens a popup to the Zernio OAuth connect flow and listens for the
 // same-origin postMessage the callback route sends on completion
 // (server/socialRoutes.ts's /api/auth/social/callback).
-export function useOAuthPopup(onSuccess: () => void) {
+export function useOAuthPopup(onSuccess: () => void, onError?: (message: string) => void) {
   const popupRef = useRef<Window | null>(null);
 
   const open = (platform: string) => {
@@ -18,12 +18,14 @@ export function useOAuthPopup(onSuccess: () => void) {
       if (e.data && typeof e.data === "object" && "success" in e.data) {
         if (e.data.success) {
           onSuccess();
+        } else if (onError) {
+          onError(typeof e.data.error === "string" ? e.data.error : "Couldn't connect that account.");
         }
       }
     };
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [onSuccess]);
+  }, [onSuccess, onError]);
 
   return open;
 }

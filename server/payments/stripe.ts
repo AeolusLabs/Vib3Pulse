@@ -128,6 +128,49 @@ export async function refundStripePayment(paymentIntentId: string): Promise<void
   await stripe.refunds.create({ payment_intent: paymentIntentId });
 }
 
+// Monthly auto-renewing subscription via Stripe Checkout. The price is built
+// inline from the server's own catalog (price_data), so there are no Stripe
+// Price objects to keep in sync. Metadata is copied onto the subscription so
+// every renewal invoice carries it (read back in handleStripeInvoicePaid).
+export async function createStripeSubscriptionCheckout(params: {
+  userId: string;
+  email: string;
+  tier: string;
+  productName: string;
+  amountSmallestUnit: number;
+  currency: string;
+  successUrl: string;
+  cancelUrl: string;
+}): Promise<{ url: string }> {
+  const stripe = getStripeClient();
+  const metadata = { type: "social_plan", billing: "recurring", tier: params.tier, userId: params.userId };
+  const session = await stripe.checkout.sessions.create({
+    mode: "subscription",
+    payment_method_types: ["card"],
+    customer_email: params.email,
+    line_items: [{
+      quantity: 1,
+      price_data: {
+        currency: params.currency.toLowerCase(),
+        unit_amount: params.amountSmallestUnit,
+        recurring: { interval: "month" },
+        product_data: { name: params.productName },
+      },
+    }],
+    metadata,
+    subscription_data: { metadata },
+    success_url: params.successUrl,
+    cancel_url: params.cancelUrl,
+  });
+  if (!session.url) throw new Error("Stripe did not return a checkout URL");
+  return { url: session.url };
+}
+
+export async function cancelStripeSubscriptionAtPeriodEnd(subscriptionId: string): Promise<void> {
+  const stripe = getStripeClient();
+  await stripe.subscriptions.update(subscriptionId, { cancel_at_period_end: true });
+}
+
 export function constructStripeWebhookEvent(rawBody: Buffer, signature: string): Stripe.Event {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!secret) throw new Error("STRIPE_WEBHOOK_SECRET is not set");

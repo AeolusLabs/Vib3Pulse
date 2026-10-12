@@ -1672,6 +1672,11 @@ export const connectedSocials = pgTable("connected_socials", {
   // callback. Prevents OAuth CSRF — the callback must present a matching value.
   oauthState: varchar("oauth_state", { length: 128 }),
   oauthStateExpiresAt: timestamp("oauth_state_expires_at"),
+  // Set by the Zernio account.disconnected webhook (token died / access removed);
+  // cleared when the account is reconnected.
+  needsReconnect: boolean("needs_reconnect").notNull().default(false),
+  // One-time "plans are here" notice sent to accounts that predate social plans.
+  planNoticeSentAt: timestamp("plan_notice_sent_at"),
 }, (table) => ({
   uniqueUserPlatform: unique().on(table.userId, table.platform),
 }));
@@ -1690,7 +1695,11 @@ export type ConnectedSocial = typeof connectedSocials.$inferSelect;
 // NULL values do not trigger the unique constraint, so retries insert cleanly.
 export const socialPosts = pgTable("social_posts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  eventId: varchar("event_id").notNull().references(() => events.id, { onDelete: "cascade" }),
+  // What was promoted: an event, a venue, or one night at a venue (venue_night_id implies
+  // venue_id). Exactly one of event_id / venue_id is set.
+  eventId: varchar("event_id").references(() => events.id, { onDelete: "cascade" }),
+  venueId: varchar("venue_id").references(() => venues.id, { onDelete: "cascade" }),
+  venueNightId: varchar("venue_night_id").references(() => venueEntryNights.id, { onDelete: "cascade" }),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   platform: varchar("platform", { length: 50 }).notNull(),
   zernioPostId: varchar("zernio_post_id", { length: 255 }).unique(),
@@ -1701,6 +1710,14 @@ export const socialPosts = pgTable("social_posts", {
   // DECIMAL(10,2) — Drizzle maps numeric() to string in TypeScript to preserve
   // precision. Use parseFloat() when summing in application code.
   costUsd: numeric("cost_usd", { precision: 10, scale: 2 }).notNull().default("0"),
+  // Set by the Zernio post.published webhook. status "posted" only means Zernio
+  // accepted the post; confirmed_at means the platform actually published it.
+  confirmedAt: timestamp("confirmed_at"),
+  platformPostUrl: text("platform_post_url"),
+  // Which campaign / scheduled send produced this post (null for posts made before campaigns
+  // existed). Lets a late Zernio failure be traced back to the campaign it should un-spend.
+  campaignId: varchar("campaign_id").references(() => socialCampaigns.id, { onDelete: "set null" }),
+  sendId: varchar("send_id").references(() => socialCampaignSends.id, { onDelete: "set null" }),
 });
 
 export const insertSocialPostSchema = createInsertSchema(socialPosts)
@@ -1712,6 +1729,105 @@ export const insertSocialPostSchema = createInsertSchema(socialPosts)
 
 export type InsertSocialPost = z.infer<typeof insertSocialPostSchema>;
 export type SocialPost = typeof socialPosts.$inferSelect;
+
+// social_passes — one row per PAID PERIOD of a social plan (see shared/socialPlans.ts).
+// A recurring subscription adds a new row each time the provider collects a renewal,
+// so campaign usage resets cleanly per period and history is kept. provider_payment_id
+// is UNIQUE (Stripe invoice id / Paystack reference / one-off payment id): the confirm
+// route and the provider webhook can both try to create the same pass, only one wins.
+export const socialPasses = pgTable("social_passes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tier: varchar("tier", { length: 20 }).notNull(),             // starter | growth | pro
+  billing: varchar("billing", { length: 20 }).notNull(),       // recurring | one_off
+  provider: varchar("provider", { length: 20 }).notNull(),     // stripe | paystack
+  currency: varchar("currency", { length: 3 }).notNull(),
+  amountPaid: integer("amount_paid").notNull(),                 // smallest currency unit
+  providerPaymentId: text("provider_payment_id").notNull().unique(),
+  providerSubscriptionId: text("provider_subscription_id"),
+  providerCustomerId: text("provider_customer_id"),
+  startsAt: timestamp("starts_at").notNull().default(sql`now()`),
+  endsAt: timestamp("ends_at").notNull(),
+  campaignsUsed: integer("campaigns_used").notNull().default(0),
+  autoRenew: boolean("auto_renew").notNull().default(false),
+  expiryReminderSentAt: timestamp("expiry_reminder_sent_at"),
+  // Bought top-ups, added to the tier's limits for this period only (see social_topups).
+  extraCampaigns: integer("extra_campaigns").notNull().default(0),
+  extraPlatforms: integer("extra_platforms").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+}, (table) => ({
+  userEndsIdx: index("idx_social_passes_user_ends").on(table.userId, table.endsAt),
+  subscriptionIdx: index("idx_social_passes_subscription").on(table.providerSubscriptionId),
+}));
+
+export type SocialPass = typeof socialPasses.$inferSelect;
+
+// social_topups — extra campaigns / extra connected platforms bought on top of the current pass.
+// They apply to that pass only and end with it. provider_payment_id is UNIQUE so the confirm
+// route and the provider webhook can both try to apply the same payment, but only one wins.
+export const socialTopups = pgTable("social_topups", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  passId: varchar("pass_id").notNull().references(() => socialPasses.id, { onDelete: "cascade" }),
+  pack: varchar("pack", { length: 30 }).notNull(),
+  kind: varchar("kind", { length: 20 }).notNull(),             // campaigns | platform
+  amount: integer("amount").notNull(),                          // campaigns or platforms added
+  provider: varchar("provider", { length: 20 }).notNull(),
+  currency: varchar("currency", { length: 3 }).notNull(),
+  amountPaid: integer("amount_paid").notNull(),
+  providerPaymentId: text("provider_payment_id").notNull().unique(),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+export type SocialTopup = typeof socialTopups.$inferSelect;
+
+// social_campaigns / social_campaign_sends — a scheduled promotion. A campaign takes ONE
+// campaign from the pass allowance and has 1..N sends (times). The send job claims due
+// sends with SELECT ... FOR UPDATE SKIP LOCKED, so two servers never post the same send.
+// allowance_released makes the "give the campaign back" step happen at most once.
+export const socialCampaigns = pgTable("social_campaigns", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  eventId: varchar("event_id").references(() => events.id, { onDelete: "cascade" }),
+  venueId: varchar("venue_id").references(() => venues.id, { onDelete: "cascade" }),
+  venueNightId: varchar("venue_night_id").references(() => venueEntryNights.id, { onDelete: "cascade" }),
+  passId: varchar("pass_id").notNull().references(() => socialPasses.id, { onDelete: "cascade" }),
+  platforms: jsonb("platforms").$type<string[]>().notNull(),
+  timezone: text("timezone").notNull().default("UTC"),
+  status: varchar("status", { length: 20 }).notNull().default("active"), // active | cancelled
+  allowanceReleased: boolean("allowance_released").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  cancelledAt: timestamp("cancelled_at"),
+}, (table) => ({
+  userIdx: index("idx_social_campaigns_user").on(table.userId, table.createdAt),
+}));
+
+export const socialCampaignSends = pgTable("social_campaign_sends", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  campaignId: varchar("campaign_id").notNull().references(() => socialCampaigns.id, { onDelete: "cascade" }),
+  sendIndex: integer("send_index").notNull(),
+  runAt: timestamp("run_at").notNull(),
+  // scheduled | sending | sent | partial | failed | skipped | cancelled
+  status: varchar("status", { length: 20 }).notNull().default("scheduled"),
+  attempts: integer("attempts").notNull().default(0),
+  claimedAt: timestamp("claimed_at"),
+  finishedAt: timestamp("finished_at"),
+  result: jsonb("result"),
+  note: text("note"),
+}, (table) => ({
+  dueIdx: index("idx_social_sends_due").on(table.status, table.runAt),
+  campaignIdx: index("idx_social_sends_campaign").on(table.campaignId),
+}));
+
+// Zernio webhook deliveries already handled. Delivery is at-least-once, so the event id
+// (X-Zernio-Event-Id) is the dedupe key.
+export const zernioWebhookEvents = pgTable("zernio_webhook_events", {
+  eventId: text("event_id").primaryKey(),
+  eventType: text("event_type").notNull(),
+  receivedAt: timestamp("received_at").notNull().default(sql`now()`),
+});
+
+export type SocialCampaign = typeof socialCampaigns.$inferSelect;
+export type SocialCampaignSend = typeof socialCampaignSends.$inferSelect;
 
 // ============================================
 // PAYOUTS & PLATFORM FEE (Phase 2)

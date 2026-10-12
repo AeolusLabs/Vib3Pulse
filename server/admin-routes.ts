@@ -9,6 +9,7 @@ import { toPublicUser, toPublicAdminUser } from "./auth";
 import { invalidateCache, postsCache, eventsCache, storiesCache } from "./cache";
 import { insertAdminUserSchema, adminRoles, type AdminRole } from "@shared/schema";
 import { z } from "zod";
+import { getSocialPlanAdminStats } from "./services/socialAdminStats";
 import { requireAdmin, requireAdminPending, requireRole, requireSuperAdmin, isMfaEnrolled, mfaRequired } from "./services/adminSecurity";
 import { registerAdminSocialRoutes } from "./routes/admin-social-routes";
 import {
@@ -1289,6 +1290,17 @@ export function setupAdminRoutes(app: Express) {
     } catch (error) {
       console.error("[Admin] Stale social connections error:", error);
       res.status(500).json({ message: "Failed to fetch stale connections" });
+    }
+  });
+
+  // GET /api/admin/social/plans
+  // Plan revenue, estimated Zernio/X/card costs, margin, and the should-be-zero health lists.
+  app.get("/api/admin/social/plans", requireRole("super_admin", "finance_manager"), async (_req, res) => {
+    try {
+      res.json(await getSocialPlanAdminStats());
+    } catch (error) {
+      console.error("[Admin] Social plans stats error:", error);
+      res.status(500).json({ message: "Failed to fetch social plan stats" });
     }
   });
 

@@ -1,248 +1,104 @@
-# Zernio Social Integration — Manual Testing Checklist
+# Social promotion (Zernio) — testing
 
-Work through these sections top-to-bottom. Each section has a **Setup** note and numbered test cases. Mark each ✅ pass / ❌ fail / ⏭️ skip (no Zernio creds yet).
+Social promotion is sold as **monthly plans** (Starter / Growth / Pro), monthly (auto-renewing) or a one-off 30-day pass. A plan gives a number of connected platforms and campaigns; a campaign posts an event, a venue, or a venue night to the organizer's connected accounts, now or at scheduled times. Source of truth for tiers, limits and prices: `shared/socialPlans.ts`.
 
----
+## 1. Automated checks (no live accounts needed)
 
-## Prerequisites
-
-| Item | How to verify |
-|------|--------------|
-| `ZERNIO_API_KEY` set in env | `echo $ZERNIO_API_KEY` — must start with `zernio_live_` |
-| `ZERNIO_BASE_URL` set | e.g. `https://api.zernio.com` — no trailing slash |
-| DB migration ran | `psql $DATABASE_URL -c "\d connected_socials"` — table must exist |
-| Server starts clean | `npm run dev` — no import errors in console |
-
----
-
-## 1 — Database Schema
-
-**Setup:** Connect to the Postgres DB directly.
-
-- [ ] `connected_socials` table exists with columns: `id`, `user_id`, `platform`, `zernio_account_id`, `handle`, `connected_at`, `disconnected_at`, `oauth_state`, `oauth_state_expires_at`
-- [ ] `social_posts` table exists with columns: `id`, `event_id`, `user_id`, `platform`, `zernio_post_id`, `content`, `status`, `error_message`, `posted_at`, `cost_usd`
-- [ ] `users.zernio_profile_id` column exists (`VARCHAR(255) UNIQUE`)
-- [ ] `UNIQUE(user_id, platform)` constraint exists on `connected_socials`
-- [ ] `idx_connected_socials_user` index exists
-- [ ] `idx_social_posts_event_platform` index exists
-- [ ] `idx_social_posts_posted_at` index exists
-
-**Verify with:**
-```sql
-SELECT column_name FROM information_schema.columns
-WHERE table_name IN ('connected_socials','social_posts')
-ORDER BY table_name, ordinal_position;
+```
+node --env-file=.env scripts/run-social-plans-test.mjs
 ```
 
----
-
-## 2 — Zernio HTTP Client
-
-**Setup:** Set a bad API key (`ZERNIO_API_KEY=bad`) to test error handling, then restore the real one.
-
-- [ ] With missing `ZERNIO_API_KEY`: `createOrganizerProfile` throws `ZernioError` with status 500 and message containing "ZERNIO_API_KEY"
-- [ ] With missing `ZERNIO_BASE_URL`: same shape of error
-- [ ] With valid key: `createOrganizerProfile` returns a non-empty string profile ID
-- [ ] Network timeout / Zernio 5xx: route returns HTTP 503 (not 500) — check via `ZERNIO_BASE_URL=http://localhost:1` (nothing listening)
-- [ ] Zernio 4xx (e.g. 404 profile not found): route forwards the status, not 500
-- [ ] **No API key in logs**: search server output for the literal `ZERNIO_API_KEY` value — must not appear
-
----
-
-## 3 — OAuth Connect Flow
-
-**Setup:** Log in as an organizer account. Open DevTools → Network.
-
-### 3a — Happy path
-
-- [ ] Visit `/organizer/social` — page loads, "No accounts connected" state shown
-- [ ] Click "Connect" for any platform — popup opens (not a new tab)
-- [ ] Popup redirects to `https://api.zernio.com/...` (Zernio OAuth page)
-- [ ] After authorising on Zernio: popup sends `postMessage({ success: true })` and closes
-- [ ] Parent page receives message and calls `refetchSocials()` — connected account appears without a page reload
-- [ ] Toast "Account connected" appears
-
-### 3b — OAuth CSRF protection
-
-- [ ] Manually open `/api/auth/social/callback?state=WRONGVALUE` in a new tab (while logged in) — should return HTML that closes the popup, **not** save any account
-- [ ] Check server logs: `oauth_state_mismatch` security event logged
-- [ ] Open callback with no `state` param — same result, `oauth_state_missing` logged
-- [ ] Open callback after the 10-minute TTL (`oauth_state_expires_at` has passed) — should fail gracefully with "OAuth session expired" message
-
-### 3c — Non-organizer blocked
-
-- [ ] Log in as a regular user (not organizer)
-- [ ] `GET /api/auth/social/connect?platform=instagram` → HTTP 403 `"Only organizers can connect social accounts"`
-
-### 3d — Invalid platform
-
-- [ ] `GET /api/auth/social/connect?platform=myspace` → HTTP 400
-
----
-
-## 4 — Connected Socials List
-
-**Setup:** Organizer with at least one connected account.
-
-- [ ] `GET /api/organizer/connected-socials` returns array of `{ platform, handle, connectedAt }`
-- [ ] `disconnected_at IS NOT NULL` accounts are **not** returned (soft-deleted ones hidden)
-- [ ] Unauthenticated request → HTTP 401
-- [ ] Regular user (non-organizer) → HTTP 403
-
----
-
-## 5 — Disconnect Social Account
-
-**Setup:** Organizer with `instagram` connected.
-
-- [ ] `POST /api/organizer/disconnect-social { platform: "instagram" }` → HTTP 200 `{ success: true }`
-- [ ] Re-fetch `/api/organizer/connected-socials` — `instagram` no longer appears
-- [ ] DB: `disconnected_at` is set on the row (soft delete, row still exists)
-- [ ] Zernio revoke called (check Zernio dashboard or mock the call)
-- [ ] **Zernio revoke fails**: server still returns 200, `disconnected_at` is still set locally, error is captured in Sentry (check Sentry or look for `[Social] Zernio disconnect failed` log)
-- [ ] Trying to disconnect a platform that is not connected → HTTP 404
-- [ ] Another organizer cannot disconnect a different organizer's account (test by sending the request with the wrong session)
-- [ ] Reconnecting the same platform after disconnect: `POST /api/auth/social/connect` for `instagram` again — `ON CONFLICT … DO UPDATE` should clear `disconnected_at` and restore the account
-
----
-
-## 6 — Event Promotion (POST /api/events/:id/promote)
-
-**Setup:** Organizer with `instagram` and `twitter` connected; one **approved** event and one **draft** event.
-
-### 6a — Happy path
-
-- [ ] `POST /api/events/:id/promote { platforms: ["instagram","twitter"] }` → HTTP 200
-- [ ] Response: `{ postsCreated: 2, totalCostUsd: <number>, platforms: [{platform, success:true}, ...] }`
-- [ ] Two rows inserted in `social_posts` with `status="posted"`
-- [ ] `zernio_post_id` and `cost_usd` populated on successful rows
-
-### 6b — Partial failure
-
-- [ ] Connect `instagram` but not `twitter`. Post to both → response has `postsCreated: 1`, `failed: ["twitter"]`
-- [ ] `social_posts` row for `twitter` has `status="failed"`, `error_message="twitter not connected"`
-- [ ] Response HTTP status is still **200** (partial is not an error)
-
-### 6c — Ownership check
-
-- [ ] Another organizer tries to promote event they don't own → HTTP 403 `"You do not own this event"`
-
-### 6d — Moderation check
-
-- [ ] Promote a **draft** or **pending** event → HTTP 403 `"Event must be approved before it can be promoted"`
-
-### 6e — Idempotency guard
-
-- [ ] POST promote for `instagram` (success). Within 2 minutes, POST again for `instagram` → result shows `success: false, error: "Already posted recently"` for that platform
-- [ ] After 2+ minutes: same request succeeds again
-
-### 6f — Rate limit
-
-- [ ] Send 21 promote requests within 1 hour (use a loop or repeated curl) — the 21st returns HTTP 429 with `"Too many promote requests"`
-- [ ] Rate limit is keyed to **user ID** not IP — two organizers on the same IP each get their own 20/h quota
-
-### 6g — Content sanitization
-
-- [ ] Create an event with title `<script>alert(1)</script>`, promote it
-- [ ] Check `social_posts.content` — HTML tags stripped, plain text only
-- [ ] Category with spaces/symbols (`Hip Hop & RnB!`) → hashtag becomes `#HipHopRnB` (alphanumeric only)
-
-### 6h — Validation
-
-- [ ] `{ platforms: [] }` → HTTP 400 `"Select at least one platform"`
-- [ ] `{ platforms: ["myspace"] }` → HTTP 400
-- [ ] Missing body → HTTP 400
-- [ ] Event ID does not exist → HTTP 404
-- [ ] Unauthenticated → HTTP 401
-
----
-
-## 7 — Admin Social Routes
-
-**Setup:** Log in as admin (`super_admin` or `finance_manager`).
-
-### 7a — GET /api/admin/social/dashboard
-
-- [ ] Returns `{ stats, daily_posts, by_platform }`
-- [ ] `stats.total_posts` matches `SELECT COUNT(*) FROM social_posts WHERE posted_at >= now() - interval '30 days'`
-- [ ] `stats.total_cost_usd` matches `SELECT SUM(cost_usd) …`
-- [ ] `stats.posts_failed` matches `SELECT COUNT(*) … WHERE status='failed'`
-- [ ] Non-admin request → HTTP 401/403
-
-### 7b — GET /api/admin/social/organizers
-
-- [ ] Returns array; each item has `user_id`, `org_name`, `connected_accounts`, `posts_this_month`, `cost_this_month`
-- [ ] No `email` field in any response item
-- [ ] `?limit=5&offset=0` returns at most 5 rows
-- [ ] `limit` capped at 200 (send `?limit=9999` — response has ≤200 rows)
-
-### 7c — GET /api/admin/social/costs
-
-- [ ] Returns `{ this_month_actual, monthly_projection, by_platform, daily, trend_direction }`
-- [ ] `monthly_projection` is a plausible number (not NaN, not 0 when there are posts)
-- [ ] `trend_direction` is one of `"up"`, `"down"`, `"stable"`
-- [ ] `by_platform` is an object keyed by platform name with string cost values
-
-### 7d — GET /api/admin/social/platforms
-
-- [ ] Returns array of `{ platform, posts_this_month, cost_this_month }`
-- [ ] Only platforms that have actual posts appear
-- [ ] Content moderator role → HTTP 403 (route is restricted to super_admin, finance_manager, analytics_viewer)
-
----
-
-## 8 — Frontend: SocialPromotionPage (/organizer/social)
-
-**Setup:** Log in as an organizer in the browser.
-
-- [ ] Page loads at `/organizer/social` without crashing
-- [ ] Loading skeletons shown while data fetches
-- [ ] "No accounts connected" empty state shown when none connected
-- [ ] Connected accounts grid renders (avatar initial, handle, disconnect button)
-- [ ] "Connect a new account" buttons render only for unconnected platforms
-- [ ] Once all platforms connected, "All platforms connected" message shown
-- [ ] Clicking a connect button opens a popup (not a redirect)
-- [ ] After popup closes with success: toast appears + accounts list refreshes
-- [ ] Disconnect button removes account from grid; selected platform checkbox removed from promote form
-- [ ] Event selector shows only approved events (draft events excluded)
-- [ ] Platform checkboxes only appear for **connected** platforms
-- [ ] "Select all" / "Deselect all" toggle works
-- [ ] Promote button disabled when no event selected
-- [ ] Promote button disabled when no platforms selected
-- [ ] Promote button shows spinner and "Posting to N platforms…" during mutation
-- [ ] Results card appears after promote: green checkmark for success, red X for failure
-- [ ] Non-organizer user sees "Organizer access only" gate (not a crash)
-- [ ] Page is mobile-responsive (test at 375 px width)
-
----
-
-## 9 — Frontend: AdminSocialDashboard (/admin/social)
-
-**Setup:** Log in as admin.
-
-- [ ] Page accessible from admin sidebar "Social Media" nav item
-- [ ] Nav item visible to `super_admin`, `finance_manager`, `analytics_viewer` — hidden for `content_moderator`, `user_support`, `event_reviewer`
-- [ ] 4 stat cards render with correct values (cross-check against DB)
-- [ ] Loading skeleton shown while queries are in-flight
-- [ ] Cost projection card shows month-to-date + projected total + trend badge
-- [ ] Trend badge shows correct colour (red=up, green=down, grey=stable)
-- [ ] Platform breakdown table sorts by post count descending
-- [ ] "No data yet" empty state shown when tables are empty
-- [ ] Organizer activity table renders `org_name` (not email)
-- [ ] Page does not crash when all counts are zero
-
----
-
-## 10 — Security Regression
-
-- [ ] CSRF: social routes require the CSRF cookie+header token (same as all `/api/*` routes) — remove `X-CSRF-Token` header → HTTP 403
-- [ ] SQL injection: send `platform = "'; DROP TABLE connected_socials; --"` in disconnect body → HTTP 400 (Zod rejects before DB)
-- [ ] XSS in `org_name`: insert organizer with `org_name = '<img src=x onerror=alert(1)>'` → check admin dashboard renders it as escaped text (React default)
-- [ ] Zernio API key not leaked: check full server log output for the literal value of `ZERNIO_API_KEY` — must not appear anywhere
-- [ ] Admin routes require `req.session.adminId` — calling `/api/admin/social/dashboard` with a regular user session (not admin) returns HTTP 401
-
----
-
-## Done
-
-Once all sections pass, the Zernio social integration is production-ready. Items marked ⏭️ (no live creds) should be retested once a real Zernio sandbox account is available.
+Creates a scratch database, builds the schema, runs `scripts/test-social-plans.ts` with Zernio and Resend faked, and drops the database. It never touches `DATABASE_URL`'s own database. Currently ~150 checks covering:
+
+- passes: activation, replayed payments, tier precedence, expiry, purchase blocking, the platform cap, the campaign allowance under simultaneous requests
+- Stripe `invoice.paid` / subscription changes / one-off intents, Paystack first charge, renewal, subscription end
+- scheduling rules, send job, X-once-per-campaign, cancel/allowance return, interrupted sends, event pulled before send
+- venue and venue-night promotion
+- plan lifecycle: lapsed-account disconnect, expiry reminder, launch notice
+- top-ups: extra campaigns / platforms, caps, replays, wrong amounts, webhooks
+- late Zernio failures: a post rejected after Zernio accepted it flips the send and gives the campaign back (once)
+- Zernio webhook signature + events, admin stats, Zernio bill maths
+
+## 2. Setup for live testing
+
+| Item | Notes |
+|------|-------|
+| `ZERNIO_API_KEY`, `ZERNIO_BASE_URL` | key starts `zernio_live_`; base URL has no trailing slash |
+| `ZERNIO_WEBHOOK_SECRET` | any long random string; must equal the secret registered with Zernio |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | use **test** keys; webhook must deliver `invoice.paid`, `customer.subscription.updated`, `customer.subscription.deleted`, `payment_intent.succeeded` |
+| `PAYSTACK_SECRET_KEY` | use a **test** key; webhook must deliver `charge.success`, `subscription.create`, `subscription.disable`, `subscription.not_renew` |
+| `APP_URL` | public URL; used in post text, checkout return URLs, emails |
+| `RESEND_API_KEY`, `FROM_EMAIL` | expiry reminders and the launch notice |
+
+Register the Zernio webhook once per environment:
+
+```
+APP_URL=https://<your app> ZERNIO_WEBHOOK_SECRET=<secret> node --env-file=.env scripts/register-zernio-webhook.mjs
+```
+
+Then send a test delivery from Zernio (`POST /v1/webhooks/test`) and confirm the server answers 200 (a wrong secret answers 400, a missing `ZERNIO_WEBHOOK_SECRET` answers 503).
+
+## 3. Manual checks that need live providers
+
+Mark each ✅ / ❌ / ⏭️. These are the paths the automated suite fakes, so they are the highest risk.
+
+### 3a. Buying a plan
+- [ ] `/organizer/social` with no plan shows the plan picker; GBP and NGN prices match `shared/socialPlans.ts`
+- [ ] **One-off, GBP (Stripe test card):** pay → plan shows active for 30 days, Starter meters 0 / 3 campaigns
+- [ ] **One-off, NGN (Paystack test card):** same
+- [ ] Buying any plan while one is active → refused with the end date and a pointer to top-ups (there is no mid-period upgrade)
+- [ ] **Monthly, GBP:** redirected to Stripe Checkout → returns to `/organizer/social?social_plan=success` → "Activating your plan…" then active (webhook `invoice.paid`)
+- [ ] **Monthly, NGN:** redirected to Paystack → returns → active. In Paystack, the plan named `vib3-social-<tier>-<kobo>` exists
+- [ ] Renewal: trigger the next invoice/charge (Stripe test clock / Paystack) → a second pass row appears, campaigns reset to 0
+- [ ] **Cancel renewal** (both providers) → provider shows the subscription cancelling/disabled; plan stays active to the end of the period
+- [ ] Failed renewal payment → no new pass; the old one runs out
+
+### 3a-2. Top-ups
+- [ ] Use up all campaigns → the promote dialog offers +2 / +5 campaigns, charged in the currency the plan was bought in
+- [ ] Pay (Stripe test card, then Paystack test card) → meter grows by the pack size immediately; one `social_topups` row and one ledger row
+- [ ] At the platform cap → "+1 connected platform" is offered; after paying, the extra platform connects; a 3rd platform top-up is refused (max 2)
+- [ ] Close the browser right after paying → the webhook still applies the top-up (no double apply when you come back)
+- [ ] Top-up bought, then the plan period ends → extras are gone with it (they do not carry over)
+- [ ] Top-up payment that can't be applied (plan ended between paying and applying) → refunded automatically; check `payment_issues` if the refund call fails
+
+### 3b. Connecting accounts
+- [ ] No plan → connect is refused ("Choose a social plan…")
+- [ ] Connect up to the cap (Starter 2); a third is refused in the dialog, and by the server if you hit `/api/auth/social/connect` directly
+- [ ] Connect two platforms at the same time in two popups → no more than the cap end up connected; extras are revoked on Zernio
+- [ ] **OAuth `redirect_url`:** the `state` query parameter survives Zernio's redirect (see the caveat in `server/zernio.ts` `generateOAuthUrl`). If connect always fails with "Security check failed", this is why
+- [ ] Disconnect removes it on Zernio and locally
+
+### 3c. Posting
+- [ ] Post now to Instagram + X → both appear on the real accounts with the right text and link
+- [ ] Post a **venue** and a **venue night** → text is the venue/night text, link goes to `/venues/<id>`
+- [ ] Posting the same thing twice within 2 minutes → "Already posted recently"
+- [ ] A 4th send to one platform inside 24 h → "Daily limit reached"
+- [ ] After a post is published, `social_posts.confirmed_at` and `platform_post_url` fill in (webhook `post.published`)
+- [ ] Break a token (revoke the app in the platform's settings) → `account.disconnected` marks the account "Needs reconnect"; posting to it is refused; Reconnect clears it
+- [ ] A post the platform rejects → `post.failed` flips the row to `failed` with the reason, the send shows Failed/Partly posted, and **if every post of the campaign failed the campaign comes back to the meter** (one that still has a published post stays spent)
+
+### 3d. Scheduling
+- [ ] Schedule 2–3 times (Growth) → "Already scheduled" lists them; each posts at its time (check within ~1 minute)
+- [ ] **X posts only once** across the campaign's sends; the other platforms post every time
+- [ ] A time that is <5 min away, <30 min after another, after the event/night starts, or after the plan ends → refused with a clear message
+- [ ] Cancel ≥15 min before the first post → campaign returns to the meter; cancel closer (or after a send) → it stays used
+- [ ] Unapprove the event before its send time → the send is **skipped** (reason shown) and the campaign returns
+- [ ] Restart the server mid-send (or kill it) → send shows "Failed · Interrupted while posting" after ~10 min, is not re-posted
+- [ ] Timezone: pick 18:00 in your local time; it posts at 18:00 local
+
+### 3e. Plan end and lifecycle
+- [ ] One-off pass: reminder email arrives ~3 days before the end (set `ends_at` to now()+2 days in a test DB to trigger it; the job runs hourly at :17)
+- [ ] 7 days after the plan ends, connected accounts are disconnected on Zernio and in the app
+- [ ] **Launch notice:** an organizer with accounts connected before plans existed gets one email; accounts are disconnected after `SOCIAL_PLANS_LAUNCHED_AT` + 7 days (19 Oct 2026) if they pick no plan
+
+### 3f. Admin (`/admin/social`, finance_manager or super_admin)
+- [ ] Plan revenue, estimated costs and margin appear and match `payment_transactions` (type `social_promotion`) for the last 30 days
+- [ ] Health checks read 0 where they should (over-cap users, stuck sends, unconfirmed posts)
+- [ ] Other admin roles do not see the plan section (the API answers 403)
+
+## 4. Security regression
+- [ ] Zernio API key and webhook secret never appear in server logs
+- [ ] `/api/webhooks/zernio` with a bad or missing signature → 400; duplicate delivery (same `X-Zernio-Event-Id`) → 200 `duplicate`, no second change
+- [ ] Plan/campaign routes reject non-organizers (403) and unauthenticated users (401)
+- [ ] Another organizer cannot cancel your campaign (404) or promote your event/venue (403)
+- [ ] A payment intent made for one tier cannot activate another (amount and tier are checked against the catalog)

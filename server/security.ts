@@ -41,6 +41,7 @@ export function rotateCsrfToken(res: Response): string {
 // Only webhooks are exempt since they're called by external services without CSRF tokens
 const CSRF_EXEMPT_PATHS = [
   "/webhooks/stripe",
+  "/webhooks/zernio", // HMAC-signed by Zernio (X-Zernio-Signature)
   "/stripe/webhook",
   "/webhook",
   "/safety/buddy-sms-reply", // Twilio/Termii inbound SMS webhook

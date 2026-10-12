@@ -92,6 +92,115 @@ function StatCard({
   );
 }
 
+interface PlanStats {
+  activePlans: { total: number; byTier: Record<string, { recurring: number; one_off: number }> };
+  revenue30d: { byCurrency: Record<string, number>; gbp: number; payments: number };
+  costs30d: { zernioAccountsBilled: number; zernioGbp: number; xPosts: number; xGbp: number; cardFeesGbp: number; totalGbp: number };
+  marginGbp: number;
+  marginPct: number | null;
+  health: {
+    overCapUsers: number; needsReconnect: number; expiring7d: number; scheduled24h: number;
+    failedSends7d: number; stuckSending: number; unconfirmedPosts: number;
+  };
+  assumptions: { usdPerGbp: number; ngnPerGbp: number; xUsdPerPost: number; cardFeePct: number; cardFeeFixedGbp: number };
+}
+
+const gbp = (n: number) => `£${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// Plan revenue vs estimated cost, plus checks that should read zero. Finance/super-admin only;
+// for other roles the API answers 403 and the section simply isn't shown.
+function PlansSection() {
+  const { data, isLoading, isError } = useQuery<PlanStats>({
+    queryKey: ["/api/admin/social/plans"],
+    retry: false,
+  });
+  if (isError) return null;
+  if (isLoading || !data) return <Skeleton className="h-40 w-full bg-slate-700/50" />;
+
+  const { health } = data;
+  // [label, value, bad when non-zero?]
+  const checks: Array<[string, number, boolean]> = [
+    ["Users over their plan's platform cap", health.overCapUsers, true],
+    ["Accounts needing reconnect", health.needsReconnect, false],
+    ["Sends stuck in \"sending\" over 10 min", health.stuckSending, true],
+    ["Posts not confirmed by Zernio after 1 h", health.unconfirmedPosts, true],
+    ["Failed or partial sends (7 d)", health.failedSends7d, false],
+    ["Plans ending within 7 days, not renewing", health.expiring7d, false],
+    ["Sends scheduled in the next 24 h", health.scheduled24h, false],
+  ];
+
+  return (
+    <div className="space-y-4" data-testid="section-social-plans">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard title="Plan revenue (30 d)" value={gbp(data.revenue30d.gbp)}
+          sub={`${data.revenue30d.payments} payment${data.revenue30d.payments === 1 ? "" : "s"}`}
+          icon={<DollarSignIcon className="w-5 h-5" />} color="text-emerald-400" iconBg="bg-emerald-500/20" />
+        <StatCard title="Estimated costs (30 d)" value={gbp(data.costs30d.totalGbp)}
+          sub={`Zernio ${gbp(data.costs30d.zernioGbp)} · X ${gbp(data.costs30d.xGbp)} · cards ${gbp(data.costs30d.cardFeesGbp)}`}
+          icon={<TrendingUpIcon className="w-5 h-5" />} color="text-amber-400" iconBg="bg-amber-500/20" />
+        <StatCard title="Margin" value={gbp(data.marginGbp)}
+          sub={data.marginPct === null ? "No revenue yet" : `${data.marginPct}% of revenue`}
+          icon={<DollarSignIcon className="w-5 h-5" />} color={data.marginGbp >= 0 ? "text-emerald-400" : "text-red-400"} iconBg="bg-emerald-500/20" />
+        <StatCard title="Zernio accounts billed" value={data.costs30d.zernioAccountsBilled}
+          sub={`${data.activePlans.total} active plan${data.activePlans.total === 1 ? "" : "s"}`}
+          icon={<UsersIcon className="w-5 h-5" />} color="text-blue-400" iconBg="bg-blue-500/20" />
+      </div>
+
+      <Card className="bg-slate-800/50 border-slate-700">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-slate-200 text-base">Active plans</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow className="border-slate-700 hover:bg-transparent">
+                <TableHead className="text-slate-400">Tier</TableHead>
+                <TableHead className="text-slate-400 text-right">Monthly</TableHead>
+                <TableHead className="text-slate-400 text-right">One-off</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {Object.entries(data.activePlans.byTier).map(([tier, n]) => (
+                <TableRow key={tier} className="border-slate-700 hover:bg-slate-700/20">
+                  <TableCell className="text-slate-200 capitalize font-medium">{tier}</TableCell>
+                  <TableCell className="text-slate-300 text-right">{n.recurring}</TableCell>
+                  <TableCell className="text-slate-300 text-right">{n.one_off}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Card className="bg-slate-800/50 border-slate-700">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-slate-200 text-base flex items-center gap-2">
+            <AlertTriangleIcon className="h-4 w-4 text-amber-400" />
+            Health checks
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <ul>
+            {checks.map(([label, value, badWhenNonZero]) => (
+              <li key={label} className="flex items-center justify-between gap-3 border-t border-slate-700 px-4 py-2.5 text-sm">
+                <span className="text-slate-300">{label}</span>
+                <Badge className={`border font-normal ${value > 0 && badWhenNonZero ? "bg-red-500/10 text-red-400 border-red-500/20" : "bg-slate-500/10 text-slate-300 border-slate-500/20"}`}>
+                  {value}
+                </Badge>
+              </li>
+            ))}
+          </ul>
+        </CardContent>
+      </Card>
+
+      <p className="text-xs text-slate-500">
+        Costs are estimates, not Zernio's invoice: ${data.assumptions.usdPerGbp} per £1, ₦{data.assumptions.ngnPerGbp} per £1, X at up to ${data.assumptions.xUsdPerPost} per post,
+        cards at {(data.assumptions.cardFeePct * 100).toFixed(2)}% + {gbp(data.assumptions.cardFeeFixedGbp)}. Edit them in shared/socialPlans.ts.
+      </p>
+    </div>
+  );
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 export default function AdminSocialDashboard() {
@@ -99,15 +208,11 @@ export default function AdminSocialDashboard() {
     queryKey: ["/api/admin/social/dashboard"],
   });
 
-  const { data: costs, isLoading: costsLoading } = useQuery<CostsData>({
-    queryKey: ["/api/admin/social/costs"],
-  });
-
   const { data: organizers = [], isLoading: orgsLoading } = useQuery<OrganizerStat[]>({
     queryKey: ["/api/admin/social/organizers"],
   });
 
-  const loading = dashLoading || costsLoading;
+  const loading = dashLoading;
 
   return (
     <AdminLayout>
@@ -120,9 +225,11 @@ export default function AdminSocialDashboard() {
             Social Media Analytics
           </h1>
           <p className="text-slate-400 mt-1 text-sm">
-            Zernio integration usage — last 30 days
+            Plans, revenue and Zernio usage — last 30 days
           </p>
         </div>
+
+        <PlansSection />
 
         {/* Stat cards */}
         {loading ? (
@@ -136,21 +243,13 @@ export default function AdminSocialDashboard() {
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <StatCard
               title="Total Posts (30 d)"
               value={dashboard?.stats.total_posts ?? 0}
               icon={<MegaphoneIcon className="w-5 h-5" />}
               color="text-purple-400"
               iconBg="bg-purple-500/20"
-            />
-            <StatCard
-              title="Total Spend (30 d)"
-              value={`$${parseFloat(dashboard?.stats.total_cost_usd ?? "0").toFixed(2)}`}
-              sub={`MTD: $${parseFloat(costs?.this_month_actual ?? "0").toFixed(2)}`}
-              icon={<DollarSignIcon className="w-5 h-5" />}
-              color="text-emerald-400"
-              iconBg="bg-emerald-500/20"
             />
             <StatCard
               title="Platforms Active"
@@ -167,33 +266,6 @@ export default function AdminSocialDashboard() {
               iconBg="bg-red-500/20"
             />
           </div>
-        )}
-
-        {/* Cost projection + trend */}
-        {!costsLoading && costs && (
-          <Card className="bg-slate-800/50 border-slate-700">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-slate-200 text-base flex items-center justify-between">
-                <span className="flex items-center gap-2">
-                  <TrendingUpIcon className="h-4 w-4 text-emerald-400" />
-                  Monthly Cost Projection
-                </span>
-                <TrendBadge direction={costs.trend_direction} />
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <div className="flex gap-8">
-                <div>
-                  <p className="text-slate-400 text-xs">Month-to-date</p>
-                  <p className="text-xl font-bold text-white">${parseFloat(costs.this_month_actual).toFixed(2)}</p>
-                </div>
-                <div>
-                  <p className="text-slate-400 text-xs">Projected full month</p>
-                  <p className="text-xl font-bold text-emerald-400">${parseFloat(costs.monthly_projection).toFixed(2)}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
         )}
 
         {/* Platform breakdown */}
@@ -215,13 +287,12 @@ export default function AdminSocialDashboard() {
                   <TableRow className="border-slate-700 hover:bg-transparent">
                     <TableHead className="text-slate-400">Platform</TableHead>
                     <TableHead className="text-slate-400 text-right">Posts</TableHead>
-                    <TableHead className="text-slate-400 text-right">Spend</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {(dashboard?.by_platform ?? []).length === 0 ? (
                     <TableRow className="border-slate-700">
-                      <TableCell colSpan={3} className="text-slate-500 text-center py-6">
+                      <TableCell colSpan={2} className="text-slate-500 text-center py-6">
                         No data yet
                       </TableCell>
                     </TableRow>
@@ -234,9 +305,6 @@ export default function AdminSocialDashboard() {
                             {row.platform}
                           </TableCell>
                           <TableCell className="text-slate-300 text-right">{row.posts}</TableCell>
-                          <TableCell className="text-slate-300 text-right">
-                            ${parseFloat(row.cost).toFixed(2)}
-                          </TableCell>
                         </TableRow>
                       ))
                   )}
@@ -266,13 +334,12 @@ export default function AdminSocialDashboard() {
                     <TableHead className="text-slate-400">Organizer</TableHead>
                     <TableHead className="text-slate-400 text-right">Linked</TableHead>
                     <TableHead className="text-slate-400 text-right">Posts</TableHead>
-                    <TableHead className="text-slate-400 text-right">Spend</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {organizers.length === 0 ? (
                     <TableRow className="border-slate-700">
-                      <TableCell colSpan={4} className="text-slate-500 text-center py-6">
+                      <TableCell colSpan={3} className="text-slate-500 text-center py-6">
                         No organizer activity yet
                       </TableCell>
                     </TableRow>
@@ -287,9 +354,6 @@ export default function AdminSocialDashboard() {
                         </TableCell>
                         <TableCell className="text-slate-300 text-right">
                           {org.posts_this_month}
-                        </TableCell>
-                        <TableCell className="text-slate-300 text-right">
-                          ${parseFloat(org.cost_this_month ?? "0").toFixed(2)}
                         </TableCell>
                       </TableRow>
                     ))

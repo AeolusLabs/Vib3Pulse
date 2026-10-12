@@ -277,3 +277,55 @@ export async function sendQueueSlaAlertEmail({ to, count, oldestHours, slaHours,
     return false;
   }
 }
+
+export async function sendSocialPlanExpiryEmail({ to, userName, planLabel, endsAt, graceDays, link }: {
+  to: string; userName?: string; planLabel: string; endsAt: Date; graceDays: number; link: string;
+}): Promise<boolean> {
+  const when = endsAt.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  try {
+    const { error } = await resend.emails.send({
+      from: `${APP_NAME} <${FROM_EMAIL}>`,
+      to: [to],
+      subject: `Your ${APP_NAME} ${planLabel} social plan ends on ${when}`,
+      text: `Hi${userName ? ` ${userName}` : ""},
+
+Your ${planLabel} social promotion plan ends on ${when}. After that you won't be able to post or schedule campaigns, and ${graceDays} days later your connected social accounts are disconnected.
+
+Renew any time: ${link}
+`,
+      html: `<p>Hi${userName ? ` ${userName}` : ""},</p><p>Your <strong>${planLabel}</strong> social promotion plan ends on <strong>${when}</strong>. After that you won't be able to post or schedule campaigns, and ${graceDays} days later your connected social accounts are disconnected.</p><p><a href="${link}">Renew your plan</a></p>`,
+    });
+    if (error) {
+      console.error("[EMAIL] Social plan expiry email failed:", error);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error("[EMAIL] Social plan expiry email error:", (e as Error).message);
+    return false;
+  }
+}
+
+export async function sendSocialPlansNoticeEmail({ to, userName, platforms, cutoff, link }: {
+  to: string; userName?: string; platforms: string[]; cutoff: Date; link: string;
+}): Promise<boolean> {
+  const when = cutoff.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  const list = platforms.join(", ");
+  try {
+    const { error } = await resend.emails.send({
+      from: `${APP_NAME} <${FROM_EMAIL}>`,
+      to: [to],
+      subject: `Action needed: choose a ${APP_NAME} social plan by ${when}`,
+      text: `Hi${userName ? ` ${userName}` : ""},\n\nSocial promotion on ${APP_NAME} now runs on monthly plans (from £9.99 / ₦18,500). Your connected accounts (${list}) will be disconnected on ${when} unless you choose a plan before then.\n\nChoose a plan: ${link}\n`,
+      html: `<p>Hi${userName ? ` ${userName}` : ""},</p><p>Social promotion on ${APP_NAME} now runs on monthly plans (from £9.99 / ₦18,500). Your connected accounts (<strong>${list}</strong>) will be disconnected on <strong>${when}</strong> unless you choose a plan before then.</p><p><a href="${link}">Choose a plan</a></p>`,
+    });
+    if (error) {
+      console.error("[EMAIL] Social plans notice failed:", error);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error("[EMAIL] Social plans notice error:", (e as Error).message);
+    return false;
+  }
+}

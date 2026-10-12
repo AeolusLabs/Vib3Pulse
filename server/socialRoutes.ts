@@ -8,6 +8,7 @@ import { logSecurityEvent } from "./security";
 import * as zernioClient from "./zernio";
 import { ZernioError } from "./zernio";
 import { SOCIAL_PLATFORMS } from "@shared/schema";
+import { canConnectPlatform, getActivePass, passLimits } from "./services/socialPlans";
 
 const PLATFORM_WHITELIST = new Set<string>(SOCIAL_PLATFORMS);
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -53,6 +54,13 @@ export function registerSocialRoutes(app: Express): void {
       }
       if (req.user!.userType !== "organizer") {
         return res.status(403).json({ message: "Only organizers can connect social accounts" });
+      }
+
+      // Every connected account costs us a monthly Zernio fee, so connecting needs
+      // a plan and is capped by the plan's platform limit.
+      const gate = await canConnectPlatform(req.user!.id, platform);
+      if (!gate.ok) {
+        return res.status(gate.status).json({ code: gate.code, message: gate.message });
       }
 
       const profileId = await getOrCreateProfileId(req.user!.id);
@@ -149,13 +157,39 @@ export function registerSocialRoutes(app: Express): void {
       // against unexpected platform names appearing if Zernio adds new ones
       const valid = accounts.filter((a) => PLATFORM_WHITELIST.has(a.platform));
 
+      // Enforce the plan's platform cap here too: the /connect gate can be raced
+      // (several popups at once), and Zernio lists every account on the profile.
+      // Anything beyond the cap is revoked on Zernio so it never starts billing us.
+      const pass = await getActivePass(req.user!.id);
+      const cap = (pass && passLimits(pass)?.maxPlatforms) || 0;
+      const activePlatforms = new Set((await storage.getConnectedSocials(req.user!.id)).map((c) => c.platform));
+      const rejected: typeof valid = [];
+
       for (const account of valid) {
+        if (!activePlatforms.has(account.platform) && activePlatforms.size >= cap) {
+          rejected.push(account);
+          continue;
+        }
         await storage.upsertConnectedSocial({
           userId:          req.user!.id,
           platform:        account.platform,
           zernioAccountId: account._id,
           handle:          account.username ?? null,
         });
+        activePlatforms.add(account.platform);
+      }
+
+      for (const account of rejected) {
+        try {
+          await zernioClient.disconnectAccount(account._id);
+        } catch (err) {
+          Sentry.captureException(err, { extra: { userId: req.user!.id, platform: account.platform, reason: "over_plan_cap" } });
+        }
+      }
+      if (rejected.length > 0) {
+        return sendResult(false, cap === 0
+          ? "Choose a social plan before connecting accounts."
+          : "Your plan's platform limit is reached. Disconnect one or upgrade to connect more.");
       }
 
       sendResult(true);
@@ -177,9 +211,10 @@ export function registerSocialRoutes(app: Express): void {
       const accounts = await storage.getConnectedSocials(req.user!.id);
       res.json(
         accounts.map((a) => ({
-          platform:    a.platform,
-          handle:      a.handle,
-          connectedAt: a.connectedAt,
+          platform:       a.platform,
+          handle:         a.handle,
+          connectedAt:    a.connectedAt,
+          needsReconnect: a.needsReconnect,
         })),
       );
     } catch (err) {

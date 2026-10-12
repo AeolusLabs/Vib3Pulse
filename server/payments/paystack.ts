@@ -98,6 +98,11 @@ export async function verifyPaystackTransaction(reference: string): Promise<Veri
       currency: (data.currency?.toUpperCase() ?? "NGN") as "GBP" | "NGN",
       amountSmallestUnit: data.amount,
       metadata: {
+        // Pass through everything the initializer attached (type, tier, billing,
+        // platforms, ...) — callers previously only saw the fixed fields below,
+        // so any new metadata key silently came back undefined. Known fields
+        // below still override.
+        ...(meta as Record<string, string>),
         // Two metadata shapes reach this function: checkout sessions (event
         // tickets) use {itemId, itemType}; inline sessions (venue entry,
         // promotions) set {venueEntryNightId} etc. directly. Recognize both —
@@ -151,6 +156,69 @@ export async function createPaystackInlineSession(params: CreatePaymentIntentPar
     paymentIntentId: data.reference,
     clientSecret: data.access_code,
   };
+}
+
+// Monthly auto-renewing subscription. Paystack bills a subscription from a Plan,
+// so we find (or create) a plan whose name encodes tier + amount — a price change
+// therefore gets a fresh plan instead of mutating one existing subscribers are on.
+// Passing `plan` to /transaction/initialize makes the first successful charge
+// start the subscription; Paystack then re-charges the saved card each month.
+export async function createPaystackSubscriptionCheckout(params: {
+  email: string;
+  userId: string;
+  tier: string;
+  planName: string;
+  amountSmallestUnit: number;
+  callbackUrl: string;
+}): Promise<{ url: string }> {
+  const plans = await paystackRequest<Array<{ name: string; plan_code: string }>>("/plan?perPage=100");
+  let planCode = plans.find((p) => p.name === params.planName)?.plan_code;
+  if (!planCode) {
+    const created = await paystackRequest<{ plan_code: string }>("/plan", {
+      method: "POST",
+      body: JSON.stringify({
+        name: params.planName,
+        amount: params.amountSmallestUnit,
+        interval: "monthly",
+        currency: "NGN",
+      }),
+    });
+    planCode = created.plan_code;
+  }
+
+  const reference = `vib3_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  const data = await paystackRequest<PaystackInitData>("/transaction/initialize", {
+    method: "POST",
+    body: JSON.stringify({
+      email: params.email,
+      amount: params.amountSmallestUnit,
+      currency: "NGN",
+      reference,
+      plan: planCode,
+      callback_url: params.callbackUrl,
+      metadata: { type: "social_plan", billing: "recurring", tier: params.tier, userId: params.userId },
+    }),
+  });
+  return { url: data.authorization_url };
+}
+
+// Turn off auto-renew for every active social-plan subscription this customer
+// has. Paystack needs the subscription's email_token to disable it.
+export async function cancelPaystackSocialSubscriptions(customerCode: string): Promise<number> {
+  const subs = await paystackRequest<Array<{ subscription_code: string; status: string; plan?: { name?: string } }>>(
+    `/subscription?customer=${encodeURIComponent(customerCode)}&perPage=100`,
+  );
+  let cancelled = 0;
+  for (const s of subs) {
+    if (s.status !== "active" || !s.plan?.name?.startsWith("vib3-social-")) continue;
+    const detail = await paystackRequest<{ email_token: string }>(`/subscription/${encodeURIComponent(s.subscription_code)}`);
+    await paystackRequest<unknown>("/subscription/disable", {
+      method: "POST",
+      body: JSON.stringify({ code: s.subscription_code, token: detail.email_token }),
+    });
+    cancelled++;
+  }
+  return cancelled;
 }
 
 export async function refundPaystackPayment(reference: string): Promise<void> {
