@@ -31,6 +31,7 @@ import BuddySettingsPage from "@/pages/BuddySettingsPage";
 import BuddyDashboardPage from "@/pages/BuddyDashboardPage";
 import MapPage from "@/pages/MapPage";
 import LookoutPage from "@/pages/LookoutPage";
+import AvatarEditorPage from "@/pages/AvatarEditorPage";
 import DistressAlertsPage from "@/pages/DistressAlertsPage";
 import AccountSettingsPage from "@/pages/AccountSettingsPage";
 import ManageVenuesPage from "@/pages/ManageVenuesPage";
@@ -201,6 +202,12 @@ function Router() {
       <Route path="/lookout">
         <AuthenticatedLayout>
           <LookoutPage />
+        </AuthenticatedLayout>
+      </Route>
+
+      <Route path="/avatar">
+        <AuthenticatedLayout>
+          <AvatarEditorPage />
         </AuthenticatedLayout>
       </Route>
 

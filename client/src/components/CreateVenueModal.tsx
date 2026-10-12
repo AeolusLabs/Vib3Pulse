@@ -20,6 +20,8 @@ import type { Venue, InsertVenue, OpeningHours } from "@shared/schema";
 import { Switch } from "@/components/ui/switch";
 import { XIcon, UploadIcon, ImageIcon, MoreVerticalIcon, Trash2Icon, RefreshCwIcon, Building2Icon, MapPinIcon, MusicIcon, EyeIcon } from "@/components/ui/icons";
 import { Accessibility } from "lucide-react";
+import BuildingPicker from "@/components/venue/BuildingPicker";
+import type { BuildingConfig } from "@shared/building";
 
 interface CreateVenueModalProps {
   open: boolean;
@@ -124,6 +126,7 @@ const emptyForm = {
   musicTypes: [] as string[],
   amenities: [] as string[],
   accessibilityFeatures: [] as string[],
+  building: null as BuildingConfig | null,
 };
 
 export default function CreateVenueModal({ open, onOpenChange, editingVenue }: CreateVenueModalProps) {
@@ -202,6 +205,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
         musicTypes: editingVenue.musicTypes || [],
         amenities: editingVenue.amenities || [],
         accessibilityFeatures: (editingVenue as any).accessibilityFeatures || [],
+        building: editingVenue.building ?? null,
       });
     } else {
       setFormData({ ...emptyForm, currency: deriveDefaultCurrency() });
@@ -266,6 +270,7 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
       musicTypes: formData.musicTypes.length > 0 ? formData.musicTypes : null,
       amenities: formData.amenities.length > 0 ? formData.amenities : null,
       accessibilityFeatures: formData.accessibilityFeatures.length > 0 ? formData.accessibilityFeatures : [],
+      building: formData.building,
     };
     createMutation.mutate(payload as Partial<InsertVenue>);
   };
@@ -364,6 +369,13 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
                       data-testid="input-venue-description"
                     />
                   </div>
+                </CardContent>
+              </Card>
+
+              {/* Map marker: how the venue looks on the map */}
+              <Card>
+                <CardContent className="pt-5">
+                  <BuildingPicker kind="venue" category={formData.category} value={formData.building} onChange={(building) => setFormData((prev) => ({ ...prev, building }))} />
                 </CardContent>
               </Card>
 

@@ -6,6 +6,7 @@ import { requireAuth } from "../middleware";
 import {
   authRateLimiter,
   sensitiveOperationLimiter,
+  avatarLimiter,
   verificationEmailLimiter,
   checkLoginThrottle,
   recordLoginAttempt,
@@ -16,6 +17,8 @@ import {
 } from "../security";
 import { hashPassword, comparePassword, userToSessionUser, toPublicUser } from "../auth";
 import { insertUserSchema, genderOptions } from "@shared/schema";
+import { validateAvatarConfig, avatarSaveUpdates, photoSetUpdates, photoDeleteUpdates, isAvatarImageUrl, type AvatarConfig } from "@shared/avatar";
+import { avatarPictureSvg } from "@shared/avatar-render/render";
 import { z } from "zod";
 import { deliverNotification } from "../notifications";
 import { resolveUserId } from "../utils/users";
@@ -629,6 +632,24 @@ export function registerUsersRoutes(app: Express): void {
       const { updateUserSchema } = await import("@shared/schema");
       let updates = updateUserSchema.parse(req.body);
 
+      // avatarUrl in a profile edit means "this photo": avatar images are only set through PUT /api/users/me/avatar,
+      // and choosing or removing a photo while the avatar is the picture switches that mode off (parked photo handled).
+      if (updates.avatarUrl !== undefined) {
+        if (updates.avatarUrl !== null && isAvatarImageUrl(updates.avatarUrl)) {
+          delete updates.avatarUrl;
+        } else {
+          const cur = await storage.getUser(userId);
+          if (cur) Object.assign(updates, updates.avatarUrl === null ? photoDeleteUpdates(cur) : photoSetUpdates(cur, updates.avatarUrl).updates);
+        }
+      }
+
+      // Nothing left to change (e.g. only an ignored avatar image url was sent): answer with the current profile.
+      if (Object.keys(updates).length === 0) {
+        const cur = await storage.getUser(userId);
+        if (!cur) return res.status(404).json({ message: "User not found" });
+        return res.json(toPublicUser(cur));
+      }
+
       // Sanitize text fields in profile updates
       if (updates.displayName) updates.displayName = sanitizeTextOnly(updates.displayName);
       if (updates.bio) updates.bio = sanitizeTextOnly(updates.bio);
@@ -669,6 +690,66 @@ export function registerUsersRoutes(app: Express): void {
       }
       console.error('Error updating profile:', error);
       res.status(500).json({ message: "Failed to update profile" });
+    }
+  });
+
+  // Avatar: its own route so frequent saves are not charged to the 5/hour profile-edit limiter.
+  // The body is validated strictly (400 names the failing field) and only known keys are stored.
+  app.put("/api/users/me/avatar", requireAuth, avatarLimiter, async (req, res) => {
+    try {
+      if (!req.body || typeof req.body !== "object" || !("avatar" in req.body)) {
+        return res.status(400).json({ message: "Invalid avatar", field: "avatar" });
+      }
+      let avatar: AvatarConfig | null = null;
+      if (req.body.avatar !== null) {
+        const v = validateAvatarConfig(req.body.avatar);
+        if (!v.ok) return res.status(400).json({ message: "Invalid avatar", field: v.field });
+        avatar = v.value;
+      }
+      const usePicture = req.body.usePicture;
+      if (usePicture !== undefined && typeof usePicture !== "boolean") {
+        return res.status(400).json({ message: "Invalid avatar", field: "usePicture" });
+      }
+      // usePicture decides whether the avatar replaces the photo everywhere (users.avatarUrl); omitted keeps the current mode.
+      const current = await storage.getUser(req.user!.id);
+      if (!current) return res.status(404).json({ message: "User not found" });
+      const updatedUser = await storage.updateUser(req.user!.id, avatarSaveUpdates(current, avatar, usePicture));
+      // Same rule as the profile PATCH: respond only after req.login's session regeneration finishes.
+      req.login(userToSessionUser(updatedUser), (err) => {
+        if (err) {
+          console.error("Session refresh error after avatar update:", err);
+          return res.status(500).json({ message: "Avatar saved, but refreshing your session failed. Please reload." });
+        }
+        // Session fields (hasPassword etc.) are merged in because clients cache this response as the session user.
+        res.json({ ...toPublicUser(updatedUser), ...userToSessionUser(updatedUser) });
+      });
+    } catch (error) {
+      console.error("Error updating avatar:", error);
+      res.status(500).json({ message: "Failed to update avatar" });
+    }
+  });
+
+  // Rendered avatar picture (used as users.avatarUrl when the avatar is the profile picture). Public: avatar
+  // config is public profile data. The ?v= content hash makes a URL immutable, so browsers cache it for a year.
+  app.get("/api/avatar-img/:file", async (req, res) => {
+    try {
+      const m = /^([0-9a-f-]{36})\.svg$/i.exec(req.params.file);
+      if (!m) return res.status(404).end();
+      const user = await storage.getUser(m[1]);
+      const svg = user?.avatar ? avatarPictureSvg(user.avatar) : "";
+      if (!user || !svg) return res.status(404).end();
+      const versioned = typeof req.query.v === "string" && /^[0-9a-f]{8}$/.test(req.query.v);
+      res.set({
+        "Content-Type": "image/svg+xml; charset=utf-8",
+        "Cache-Control": versioned ? "public, max-age=31536000, immutable" : "public, max-age=300",
+        "X-Content-Type-Options": "nosniff",
+        // The image is generated from fixed enums, but lock it down anyway: no scripts, no fetches, no framing tricks.
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+      });
+      res.send(svg);
+    } catch (error) {
+      console.error("Error serving avatar image:", error);
+      res.status(500).end();
     }
   });
 
@@ -957,13 +1038,13 @@ export function registerUsersRoutes(app: Express): void {
       if (!imageData || !imageData.startsWith('data:image')) {
         return res.status(400).json({ message: "Invalid image data" });
       }
-      // Delete old avatar media if it was a DB-backed URL
+      // A new photo is an explicit choice of that photo: avatar-as-picture goes off and the old photo's media is deleted.
       const currentUser = await storage.getUser(req.user!.id);
-      if (currentUser?.avatarUrl) {
-        await storage.deleteMediaByUrls([currentUser.avatarUrl]);
-      }
+      if (!currentUser) return res.status(404).json({ message: "User not found" });
       const avatarUrl = await storeMedia(imageData, req.user!.id);
-      const updatedUser = await storage.updateUser(req.user!.id, { avatarUrl });
+      const { updates, replaced } = photoSetUpdates(currentUser, avatarUrl);
+      if (replaced) await storage.deleteMediaByUrls([replaced]);
+      const updatedUser = await storage.updateUser(req.user!.id, updates);
       return res.json(toPublicUser(updatedUser));
     } catch (error: any) {
       if (error instanceof MediaValidationError) {
@@ -979,7 +1060,10 @@ export function registerUsersRoutes(app: Express): void {
     try {
       const { avatarPath } = req.body;
       if (!avatarPath) return res.status(400).json({ message: "Avatar path is required" });
-      const updatedUser = await storage.updateUser(req.user!.id, { avatarUrl: avatarPath });
+      if (typeof avatarPath !== "string" || isAvatarImageUrl(avatarPath)) return res.status(400).json({ message: "Invalid avatar path" });
+      const currentUser = await storage.getUser(req.user!.id);
+      if (!currentUser) return res.status(404).json({ message: "User not found" });
+      const updatedUser = await storage.updateUser(req.user!.id, photoSetUpdates(currentUser, avatarPath).updates);
       res.json(toPublicUser(updatedUser));
     } catch (error: any) {
       res.status(500).json({ message: "Failed to update avatar" });
@@ -990,7 +1074,9 @@ export function registerUsersRoutes(app: Express): void {
   app.delete("/api/users/me/avatar", requireAuth, async (req, res) => {
     try {
       console.log(`[Avatar Delete] User ${req.user!.id} removing avatar`);
-      const updatedUser = await storage.updateUser(req.user!.id, { avatarUrl: null });
+      const currentUser = await storage.getUser(req.user!.id);
+      if (!currentUser) return res.status(404).json({ message: "User not found" });
+      const updatedUser = await storage.updateUser(req.user!.id, photoDeleteUpdates(currentUser));
       console.log(`[Avatar Delete] Successfully removed avatar for user ${req.user!.id}`);
       res.json(toPublicUser(updatedUser));
     } catch (error: any) {

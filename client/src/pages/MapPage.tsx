@@ -8,13 +8,17 @@ import { useToast } from "@/hooks/use-toast";
 import { formatMoney } from "@/lib/currency";
 import { Button } from "@/components/ui/button";
 import Navigation from "@/components/Navigation";
+import { avatarPinSvg } from "@shared/avatar-render/render";
+import { buildingSvg } from "@shared/avatar-render/building";
+import { resolveBuilding, type BuildingConfig } from "@shared/building";
+import type { AvatarConfig } from "@shared/avatar";
 import BottomNavigation from "@/components/BottomNavigation";
 import { Building2Icon, CalendarIcon, EyeIcon, EyeOffIcon, Navigation2Icon, SearchIcon, XIcon } from "@/components/ui/icons";
 
-interface MapFriend { id: string; username: string; displayName: string | null; avatarUrl: string | null; latitude: number; longitude: number; updatedAt: string }
+interface MapFriend { id: string; username: string; displayName: string | null; avatarUrl: string | null; avatar?: AvatarConfig | null; latitude: number; longitude: number; updatedAt: string }
 interface Going { id: string; displayName: string | null; username: string; avatarUrl: string | null }
-interface MapEvent { friendsGoing?: { count: number; sample: Going[] }; id: string; title: string; eventDate: string; eventEndDate: string | null; latitude: number; longitude: number; imageUrl: string | null; location: string; category: string; ticketPrice: number; currency: string }
-interface MapVenue { id: string; name: string; category: string; imageUrl: string | null; address: string | null; latitude: number; longitude: number }
+interface MapEvent { friendsGoing?: { count: number; sample: Going[] }; id: string; title: string; eventDate: string; eventEndDate: string | null; latitude: number; longitude: number; imageUrl: string | null; location: string; category: string; ticketPrice: number; currency: string; building?: BuildingConfig | null; isPromoted?: boolean }
+interface MapVenue { id: string; name: string; category: string; imageUrl: string | null; address: string | null; latitude: number; longitude: number; building?: BuildingConfig | null; isVerified?: boolean; isPromoted?: boolean }
 interface Audience { audience: "friends" | "selected"; viewerIds: string[]; friends: { id: string; username: string; displayName: string | null; avatarUrl: string | null }[] }
 interface SearchResults { events?: any[]; venues?: any[] }
 interface Nearby { friends: MapFriend[]; events: MapEvent[]; venues: MapVenue[] }
@@ -48,6 +52,16 @@ const friendName = (f: MapFriend) => f.displayName || f.username;
 
 const SHADOW = "box-shadow:0 4px 12px rgba(0,0,0,.45)";
 function friendIcon(f: MapFriend, selected: boolean) {
+  // A friend with an avatar is a pin badge (tail points at the spot); otherwise photo, then initial.
+  const pin = avatarPinSvg(f.avatar);
+  if (pin) {
+    const glow = selected ? "drop-shadow(0 0 7px #9B6FEF) drop-shadow(0 0 2px #fff)" : "drop-shadow(0 3px 3px rgba(0,0,0,.45))";
+    return L.divIcon({
+      className: "vp-pin",
+      iconSize: [0, 0],
+      html: `<div title="${esc(friendName(f))}" style="transform:translate(-50%,-100%);width:${selected ? 52 : 44}px;filter:${glow}">${pin}</div>`,
+    });
+  }
   const ring = selected ? "#fff" : "#9B6FEF";
   const inner = f.avatarUrl
     ? `<img src="${esc(f.avatarUrl)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%"/>`
@@ -60,17 +74,23 @@ function friendIcon(f: MapFriend, selected: boolean) {
 }
 function eventIcon(e: MapEvent, selected: boolean) {
   const t = e.title.length > 18 ? `${e.title.slice(0, 17)}…` : e.title;
+  // The organizer's building (or the category default) with the title underneath; promoted listings glow amber.
+  const svg = buildingSvg(resolveBuilding("event", e.category, e.building), { glow: e.isPromoted ? "promoted" : undefined, decorative: true });
+  const glow = selected ? "drop-shadow(0 0 7px #9B6FEF) drop-shadow(0 0 2px #fff)" : "drop-shadow(0 3px 3px rgba(0,0,0,.45))";
   return L.divIcon({
     className: "vp-pin",
     iconSize: [0, 0],
-    html: `<div style="transform:translate(-50%,-50%);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;background:#7C46D6;color:#fff;border-radius:999px;padding:6px 12px;font:600 12px Jost,sans-serif;box-shadow:0 6px 16px rgba(124,70,214,.45);${selected ? "outline:2px solid #fff;" : ""}">${esc(t)}</div>`,
+    html: `<div style="transform:translate(-50%,-80%);display:flex;flex-direction:column;align-items:center;gap:1px"><div style="width:${selected ? 76 : 64}px;filter:${glow}">${svg}</div><span style="white-space:nowrap;background:#7C46D6;color:#fff;border-radius:999px;padding:2px 9px;font:600 11px Jost,sans-serif;${selected ? "outline:2px solid #fff;" : ""}">${esc(t)}</span></div>`,
   });
 }
 function venueIcon(v: MapVenue, selected: boolean) {
+  // The owner's building (or the category default); verified venues glow violet, promoted ones amber.
+  const svg = buildingSvg(resolveBuilding("venue", v.category, v.building), { glow: v.isPromoted ? "promoted" : v.isVerified ? "verified" : undefined, decorative: true });
+  const glow = selected ? "drop-shadow(0 0 7px #9B6FEF) drop-shadow(0 0 2px #fff)" : "drop-shadow(0 3px 3px rgba(0,0,0,.45))";
   return L.divIcon({
     className: "vp-pin",
     iconSize: [0, 0],
-    html: `<div title="${esc(v.name)}" style="transform:translate(-50%,-50%);width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:#1c1c1e;color:#f7f6f3;border:1.5px solid ${selected ? "#fff" : "rgba(247,246,243,.35)"};${SHADOW}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V8l8-5 8 5v13M9 21v-6h6v6"/></svg></div>`,
+    html: `<div title="${esc(v.name)}" style="transform:translate(-50%,-80%);width:${selected ? 68 : 56}px;filter:${glow}">${svg}</div>`,
   });
 }
 const meIcon = L.divIcon({

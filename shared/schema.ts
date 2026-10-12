@@ -2,6 +2,20 @@ import { sql } from "drizzle-orm";
 import { pgTable, text, varchar, timestamp, integer, boolean, unique, primaryKey, doublePrecision, check, jsonb, numeric, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+import type { AvatarConfig } from "./avatar";
+import { validateBuildingConfig, type BuildingConfig } from "./building";
+
+// Request-side schema for a venue/event building: strict (names the failing field in the zod issue path),
+// unknown keys dropped, null clears it, absent leaves it alone.
+export const buildingInputSchema = z.unknown().transform((v, ctx) => {
+  if (v === null || v === undefined) return v as null | undefined;
+  const r = validateBuildingConfig(v);
+  if (!r.ok) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: [r.field], message: `Invalid building (${r.field})` });
+    return z.NEVER;
+  }
+  return r.value;
+});
 
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -23,6 +37,10 @@ export const users = pgTable("users", {
   phoneNumber: text("phone_number"),
   canManageVenues: boolean("can_manage_venues").default(false),
   avatarUrl: text("avatar_url"),
+  // Customizable 2D avatar (config only, validated by sanitizeAvatarConfig in shared/avatar.ts). Null = not created yet.
+  avatar: jsonb("avatar").$type<AvatarConfig | null>(),
+  // The real photo, parked while the avatar is the picture (avatarUrl then points at /api/avatar-img/...). See shared/avatar.ts.
+  profilePhotoUrl: text("profile_photo_url"),
   bannerMode: text("banner_mode"),
   bannerVibe: text("banner_vibe"),
   bannerColor: text("banner_color"),
@@ -60,7 +78,8 @@ export const users = pgTable("users", {
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
-export const insertUserSchema = createInsertSchema(users).omit({
+// avatar is typed loosely here on purpose: the PATCH route runs it through sanitizeAvatarConfig before storing.
+export const insertUserSchema = createInsertSchema(users, { avatar: z.custom<AvatarConfig>().nullable().optional() }).omit({
   id: true,
   createdAt: true,
 });
@@ -128,6 +147,8 @@ export const events = pgTable("events", {
   externalTicketUrl: text("external_ticket_url"),
   isPromoted: boolean("is_promoted").notNull().default(false),
   promotedUntil: timestamp("promoted_until"),
+  // Map building (style + accent) chosen by the organizer; null = category default. See shared/building.ts.
+  building: jsonb("building").$type<BuildingConfig | null>(),
   isPublished: boolean("is_published").notNull().default(true),
   moderationStatus: text("moderation_status").notNull().default("pending"),
   // Soft-cancellation — set by cancelEventWithRefunds() instead of hard-deleting
@@ -171,7 +192,7 @@ export const events = pgTable("events", {
 
 export type LineupEntry = { name: string; time?: string };
 
-export const insertEventSchema = createInsertSchema(events).omit({
+export const insertEventSchema = createInsertSchema(events, { building: buildingInputSchema }).omit({
   id: true,
   ticketsSold: true,
   isCancelled: true,
@@ -1016,12 +1037,14 @@ export const venues = pgTable("venues", {
   longitude: doublePrecision("longitude"),
   isPromoted: boolean("is_promoted").notNull().default(false),
   promotedUntil: timestamp("promoted_until"),
+  // Map building (style + accent) chosen by the owner; null = category default. See shared/building.ts.
+  building: jsonb("building").$type<BuildingConfig | null>(),
   isVerified: boolean("is_verified").notNull().default(false),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
   updatedAt: timestamp("updated_at").default(sql`now()`),
 });
 
-export const insertVenueSchema = createInsertSchema(venues).omit({
+export const insertVenueSchema = createInsertSchema(venues, { building: buildingInputSchema }).omit({
   id: true,
   createdAt: true,
   updatedAt: true,

@@ -143,6 +143,7 @@ export const apiRateLimiter = rateLimit({
   keyGenerator: (req) => (req.user as any)?.id ?? ipKeyGenerator(req.ip ?? ""),
   skip: (req) =>
     req.path.startsWith("/auth/session") ||
+    req.path.startsWith("/avatar-img") ||
     req.path.startsWith("/media"),
 });
 
@@ -155,6 +156,16 @@ export const sensitiveOperationLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+});
+
+// Avatar saves: people iterate on their look, so this is far gentler than sensitiveOperationLimiter (5/h).
+export const avatarLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 60,
+  message: { message: "You're saving too fast. Please try again in a bit.", code: "RATE_LIMITED" },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req.user as any)?.id ?? ipKeyGenerator(req.ip ?? ""),
 });
 
 // Public (no-account) invite endpoints: per-IP, generous enough for a household

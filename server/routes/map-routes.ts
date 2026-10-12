@@ -142,7 +142,7 @@ export function registerMapRoutes(app: Express): void {
 
       const [friends, nearEvents, nearVenues] = await Promise.all([
         friendIds.length ? db.select({
-          id: users.id, username: users.username, displayName: users.displayName, avatarUrl: users.avatarUrl,
+          id: users.id, username: users.username, displayName: users.displayName, avatarUrl: users.avatarUrl, avatar: users.avatar,
           latitude: userLocations.latitude, longitude: userLocations.longitude, updatedAt: userLocations.updatedAt,
         }).from(userLocations)
           .innerJoin(users, eq(users.id, userLocations.userId))
@@ -161,6 +161,7 @@ export function registerMapRoutes(app: Express): void {
           id: events.id, title: events.title, eventDate: events.eventDate, eventEndDate: events.eventEndDate,
           latitude: events.latitude, longitude: events.longitude, imageUrl: events.imageUrl,
           location: events.location, category: events.category, ticketPrice: events.ticketPrice, currency: events.currency,
+          building: events.building, isPromoted: events.isPromoted,
         }).from(events)
           .where(and(
             eq(events.isPublished, true), eq(events.moderationStatus, "approved"), eq(events.visibility, "public"),
@@ -173,6 +174,7 @@ export function registerMapRoutes(app: Express): void {
         db.select({
           id: venues.id, name: venues.name, category: venues.category, imageUrl: venues.imageUrl,
           address: venues.address, latitude: venues.latitude, longitude: venues.longitude,
+          building: venues.building, isVerified: venues.isVerified, isPromoted: venues.isPromoted,
         }).from(venues).where(box(venues.latitude, venues.longitude)).limit(60),
       ]);
 

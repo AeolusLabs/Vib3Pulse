@@ -29,6 +29,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Event, EventCreateDto, EventUpdateDto } from "@shared/schema";
+import BuildingPicker from "@/components/venue/BuildingPicker";
+import type { BuildingConfig } from "@shared/building";
 import { XIcon, UploadIcon, PlusIcon, Trash2Icon, Edit2Icon, ExternalLinkIcon, Loader2Icon, ChevronDownIcon } from "@/components/ui/icons";
 
 interface TicketTier {
@@ -51,6 +53,7 @@ interface EventFormData {
   // Step 1
   name: string;
   type: string;
+  building: BuildingConfig | null;
   description: string;
   startDate: string;
   startTime: string;
@@ -129,6 +132,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
   const [formData, setFormData] = useState<EventFormData>({
     name: "",
     type: "",
+    building: null,
     description: "",
     startDate: "",
     startTime: "",
@@ -238,6 +242,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
         rsvpGeneratesTicket: true,
         createCommunity: false,
         communityName: "",
+        building: event.building ?? null,
       });
       
       // Fetch existing ticket tiers if this is a ticketed event
@@ -261,6 +266,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
       setFormData({
         name: "",
         type: "",
+        building: null,
         description: "",
         startDate: "",
         startTime: "",
@@ -469,6 +475,7 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
         .map((l) => ({ name: l.name.trim(), ...(l.time.trim() ? { time: l.time.trim() } : {}) })),
       goodToKnow: formData.goodToKnow.trim() || null,
       refundPolicy: formData.refundPolicy.trim() || null,
+      building: formData.building,
     };
     
     if (isEditMode && event) {
@@ -711,6 +718,8 @@ export default function CreateEventModal({ open, onClose, event }: CreateEventMo
                 </SelectContent>
               </Select>
             </div>
+
+            <BuildingPicker kind="event" category={formData.type} value={formData.building} onChange={(building) => updateFormData({ building })} />
 
             <div className="space-y-2">
               <Label htmlFor="event-description">Event Description *</Label>

@@ -292,6 +292,18 @@ export async function ensureSchema() {
   await pool.query(`
     ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL
   `);
+  await pool.query(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar JSONB
+  `);
+  await pool.query(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo_url TEXT
+  `);
+  await pool.query(`
+    ALTER TABLE venues ADD COLUMN IF NOT EXISTS building JSONB
+  `);
+  await pool.query(`
+    ALTER TABLE events ADD COLUMN IF NOT EXISTS building JSONB
+  `);
 
   // ── Zernio Social Media Integration ─────────────────────────────────────────
 
@@ -1473,6 +1485,8 @@ export class DbStorage implements IStorage {
       googleId: null,
       displayName: "Deleted user",
       avatarUrl: null,
+      avatar: null,
+      profilePhotoUrl: null,
       bio: null,
       dateOfBirth: null,
       gender: null,
@@ -5117,6 +5131,7 @@ export class DbStorage implements IStorage {
       externalTicketUrl: null,
       isPromoted: false,
       promotedUntil: null,
+      building: null, // venue entry nights have no building of their own
       isPublished: r.venueEntry.isActive,
       moderationStatus: r.venueEntry.moderationStatus,
       isCancelled: false,

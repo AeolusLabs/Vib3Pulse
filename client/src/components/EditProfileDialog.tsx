@@ -12,6 +12,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Link } from "wouter";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -205,6 +206,10 @@ export default function EditProfileDialog({ user }: EditProfileDialogProps) {
           <DialogTitle>Edit Profile</DialogTitle>
           <DialogDescription>Update your profile information</DialogDescription>
         </DialogHeader>
+
+        <Button asChild variant="outline" size="sm" className="w-fit min-h-11">
+          <Link href="/avatar">Edit avatar</Link>
+        </Button>
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">

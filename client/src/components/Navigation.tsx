@@ -119,6 +119,14 @@ export default function Navigation({ onSearch }: NavigationProps) {
                   </DropdownMenuItem>
                 )}
                 {user && (
+                  <DropdownMenuItem asChild data-testid="menu-avatar">
+                    <Link href="/avatar">
+                      <UserIcon className="mr-2 h-4 w-4" />
+                      Avatar
+                    </Link>
+                  </DropdownMenuItem>
+                )}
+                {user && (
                   <DropdownMenuItem asChild data-testid="menu-invitations">
                     <Link href="/social-events">
                       <CalendarIcon className="mr-2 h-4 w-4" />

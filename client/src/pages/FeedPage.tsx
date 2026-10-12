@@ -9,6 +9,7 @@ import type { Event, Venue, Community } from "@shared/schema";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import StoriesBar from "@/components/StoriesBar";
+import AvatarPrompt from "@/components/avatar/AvatarPrompt";
 import CreateStoryModal from "@/components/CreateStoryModal";
 import CreatePostModal from "@/components/CreatePostModal";
 import FeedPost from "@/components/FeedPost";
@@ -343,6 +344,7 @@ export default function FeedPage() {
       />
 
       <main className="max-w-[600px] mx-auto px-4 sm:px-6 py-6">
+        <AvatarPrompt />
         <div className="mb-6">
           <h1 className="text-2xl font-serif font-semibold mb-3">Feed</h1>
 

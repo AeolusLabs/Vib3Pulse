@@ -1,5 +1,6 @@
 import bcrypt from "bcrypt";
 import { User, AdminUser } from "@shared/schema";
+import type { AvatarConfig } from "@shared/avatar";
 
 const SALT_ROUNDS = 12;
 
@@ -27,6 +28,7 @@ export type SessionUser = {
   isVerified?: boolean | null;
   isOfficial?: boolean | null;
   avatarUrl?: string | null;
+  avatar?: AvatarConfig | null;
   onboardingComplete: boolean;
   hasPassword: boolean;
 };
@@ -45,6 +47,7 @@ export function userToSessionUser(user: User): SessionUser {
     isVerified: user.isVerified,
     isOfficial: user.isOfficial,
     avatarUrl: user.avatarUrl,
+    avatar: user.avatar ?? null,
     onboardingComplete: user.onboardingComplete,
     hasPassword: !!user.passwordHash,
   };

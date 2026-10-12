@@ -1,6 +1,7 @@
 import { useQuery, UseQueryResult } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { clearWalletCache } from "@/lib/walletCache";
+import type { AvatarConfig } from "@shared/avatar";
 
 export type AuthUser = {
   id: string;
@@ -15,6 +16,7 @@ export type AuthUser = {
   isVerified?: boolean | null;
   isOfficial?: boolean | null;
   avatarUrl?: string | null;
+  avatar?: AvatarConfig | null;
   onboardingComplete: boolean;
   hasPassword: boolean;
 };

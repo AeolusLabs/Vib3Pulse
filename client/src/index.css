@@ -319,3 +319,16 @@
 .vp-dark .vp-tiles {
   filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.85) saturate(0.6);
 }
+
+/* Avatar art: the svg fills its container; idle blink and breathe only for people who allow motion. */
+.avatar-art > svg { display: block; width: 100%; height: auto; }
+@media (prefers-reduced-motion: no-preference) {
+  .avatar-breathe { animation: avatar-breathe 4.6s ease-in-out infinite; transform-origin: 50% 100%; transform-box: fill-box; }
+  .avatar-blink { animation: avatar-blink 5.2s infinite; transform-origin: 50% 50%; transform-box: fill-box; }
+}
+@keyframes avatar-breathe { 50% { transform: translateY(-1.6px); } }
+@keyframes avatar-blink { 0%, 94%, 100% { transform: scaleY(1); } 97% { transform: scaleY(.08); } }
+/* Map pins: block-level so no inline baseline gap lifts the pin tip off its spot. */
+.vp-pin svg { display: block; }
+/* Map pins: many on screen at once, so no idle animation. */
+.vp-pin .avatar-breathe, .vp-pin .avatar-blink, .vp-pin-art .avatar-breathe, .vp-pin-art .avatar-blink { animation: none; }
