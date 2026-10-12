@@ -25,10 +25,14 @@ type Selected = { type: "friend"; item: MapFriend } | { type: "event"; item: Map
 const FALLBACK_CENTER: [number, number] = [51.5072, -0.1276];
 const RADIUS_KM = 5;
 const HEARTBEAT_MS = 60_000;
-const TILES = {
-  dark: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-  light: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-};
+// Tile source. Defaults to OpenStreetMap's own tiles (no key; fine at light volume, no dark style, so dark
+// mode darkens them with a CSS filter). Set VITE_MAP_TILES_URL (+ optional _DARK_URL / _ATTRIBUTION) at build
+// time to use a keyed provider such as MapTiler or Mapbox. Don't use CARTO's free tiles: without a paid key
+// they come back with an "API KEY REQUIRED" watermark.
+const env = import.meta.env as Record<string, string | undefined>;
+const TILE_URL = env.VITE_MAP_TILES_URL || "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+const TILE_DARK_URL = env.VITE_MAP_TILES_DARK_URL;
+const TILE_ATTRIBUTION = env.VITE_MAP_TILES_ATTRIBUTION || '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 const isDark = () => document.documentElement.classList.contains("dark");
@@ -188,14 +192,18 @@ export default function MapPage() {
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
     const map = L.map(containerRef.current, { center: FALLBACK_CENTER, zoom: 14, zoomControl: false, attributionControl: true });
-    tileRef.current = L.tileLayer(isDark() ? TILES.dark : TILES.light, {
-      maxZoom: 19, subdomains: "abcd",
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    }).addTo(map);
+    const url = () => (isDark() && TILE_DARK_URL) || TILE_URL;
+    // Without a real dark style, darken the light tiles (see .vp-dark .vp-tiles in index.css).
+    const applyTheme = () => {
+      containerRef.current?.classList.toggle("vp-dark", isDark() && !TILE_DARK_URL);
+      tileRef.current?.setUrl(url());
+    };
+    tileRef.current = L.tileLayer(url(), { maxZoom: 19, attribution: TILE_ATTRIBUTION, className: "vp-tiles" }).addTo(map);
+    applyTheme();
     layerRef.current = L.layerGroup().addTo(map);
     map.on("click", () => setSelected(null));
     mapRef.current = map;
-    const obs = new MutationObserver(() => tileRef.current?.setUrl(isDark() ? TILES.dark : TILES.light));
+    const obs = new MutationObserver(applyTheme);
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
     return () => { obs.disconnect(); map.remove(); mapRef.current = null; };
   }, []);
