@@ -566,7 +566,7 @@ export interface IStorage {
   updateEvent(id: string, event: Partial<typeof events.$inferInsert>): Promise<Event>;
   setEventPublished(id: string, published: boolean): Promise<Event>;
   
-  getUserTickets(userId: string): Promise<Array<Ticket & { event: Event }>>;
+  getUserTickets(userId: string): Promise<Array<Ticket & { event: Event; tier: { id: string; name: string } | null }>>;
   getTicket(id: string): Promise<Ticket | undefined>;
   getTicketByPaymentIntent(paymentIntentId: string): Promise<Ticket | undefined>;
   // Plural counterpart for multi-ticket (quantity > 1) purchases, which all share
@@ -848,6 +848,7 @@ export interface IStorage {
   // Venue staff access codes
   createVenueStaffCode(venueEntryNightId: string, organizerId: string, expiresAt: Date): Promise<VenueStaffAccessCode>;
   getVenueStaffCodeByCode(code: string): Promise<VenueStaffAccessCode | undefined>;
+  getVenueStaffCodeByPin(venueEntryNightId: string, pin: string): Promise<VenueStaffAccessCode | undefined>;
   redeemVenueStaffCode(id: string, staffName: string, ip: string, ua: string, scannerToken: string): Promise<VenueStaffAccessCode>;
   getVenueStaffCodeByScannerToken(token: string): Promise<VenueStaffAccessCode | undefined>;
   getVenueEntryNightStaffCodes(venueEntryNightId: string, organizerId: string): Promise<VenueStaffAccessCode[]>;
@@ -1209,6 +1210,19 @@ export interface IStorage {
     postsThisMonth: number;
     costThisMonth: string;
   }>>;
+}
+
+// Staff PINs are typed at the door, so they are 6 digits (leading zeros allowed). Uniqueness is per
+// event / night via a unique index; a collision (23505) just draws a fresh PIN.
+async function insertWithUniquePin<T>(insert: (pin: string) => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    const pin = crypto.randomInt(0, 1_000_000).toString().padStart(6, "0");
+    try {
+      return await insert(pin);
+    } catch (err: any) {
+      if (err?.code !== "23505" || attempt >= 20) throw err;
+    }
+  }
 }
 
 export class DbStorage implements IStorage {
@@ -1663,16 +1677,18 @@ export class DbStorage implements IStorage {
     return result[0];
   }
 
-  async getUserTickets(userId: string): Promise<Array<Ticket & { event: Event }>> {
+  async getUserTickets(userId: string): Promise<Array<Ticket & { event: Event; tier: { id: string; name: string } | null }>> {
     const result = await db
-      .select()
+      .select({ ticket: tickets, event: events, tierId: ticketTiers.id, tierName: ticketTiers.name })
       .from(tickets)
       .innerJoin(events, eq(tickets.eventId, events.id))
+      .leftJoin(ticketTiers, eq(tickets.ticketTierId, ticketTiers.id))
       .where(and(eq(tickets.userId, userId), notInArray(tickets.status, ['declined', 'removed'])));
-    
+
     return result.map(row => ({
-      ...row.tickets,
-      event: row.events,
+      ...row.ticket,
+      event: row.event,
+      tier: row.tierId ? { id: row.tierId, name: row.tierName! } : null,
     }));
   }
 
@@ -3956,10 +3972,20 @@ export class DbStorage implements IStorage {
 
   async createVenueStaffCode(venueEntryNightId: string, organizerId: string, expiresAt: Date): Promise<VenueStaffAccessCode> {
     const code = crypto.randomBytes(32).toString("hex");
+    return insertWithUniquePin(async (pin) => {
+      const result = await db
+        .insert(venueStaffAccessCodes)
+        .values({ venueEntryNightId, organizerId, code, expiresAt, pin })
+        .returning();
+      return result[0];
+    });
+  }
+
+  async getVenueStaffCodeByPin(venueEntryNightId: string, pin: string): Promise<VenueStaffAccessCode | undefined> {
     const result = await db
-      .insert(venueStaffAccessCodes)
-      .values({ venueEntryNightId, organizerId, code, expiresAt })
-      .returning();
+      .select()
+      .from(venueStaffAccessCodes)
+      .where(and(eq(venueStaffAccessCodes.venueEntryNightId, venueEntryNightId), eq(venueStaffAccessCodes.pin, pin)));
     return result[0];
   }
 
@@ -6540,10 +6566,20 @@ export class DbStorage implements IStorage {
 
   async createStaffCode(eventId: string, organizerId: string, expiresAt: Date): Promise<EventStaffAccessCode> {
     const code = crypto.randomBytes(32).toString("hex");
+    return insertWithUniquePin(async (pin) => {
+      const result = await db
+        .insert(eventStaffAccessCodes)
+        .values({ eventId, organizerId, code, expiresAt, pin })
+        .returning();
+      return result[0];
+    });
+  }
+
+  async getStaffCodeByPin(eventId: string, pin: string): Promise<EventStaffAccessCode | undefined> {
     const result = await db
-      .insert(eventStaffAccessCodes)
-      .values({ eventId, organizerId, code, expiresAt })
-      .returning();
+      .select()
+      .from(eventStaffAccessCodes)
+      .where(and(eq(eventStaffAccessCodes.eventId, eventId), eq(eventStaffAccessCodes.pin, pin)));
     return result[0];
   }
 

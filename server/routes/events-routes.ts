@@ -12,6 +12,7 @@ import { refundPayment } from "../payments/index.js";
 import { geocodeAddress, sortByProximity } from "../utils/geo";
 import { rankEvents } from "../utils/eventRanking.js";
 import { staffCodeExpiry } from "../utils/staffCodeExpiry.js";
+import { handleTicketValidate, handleStaffRedeem } from "../utils/doorAccess.js";
 import { MAX_GROUP_MEMBERS } from "./messages-routes.js";
 import { computeFeeSplit } from "../payments/fees.js";
 import { getFeaturableHostIds, hideIfReportThresholdMet } from "../services/eventAbuse";
@@ -944,114 +945,9 @@ export function registerEventsRoutes(app: Express): void {
     }
   });
 
-  // Validate a ticket by validation code (organizer session OR staff scanner token)
-  app.post("/api/tickets/validate", async (req, res) => {
-    try {
-      const requestSchema = z.object({
-        validationCode: z.string().min(1),
-        eventId: z.string().min(1),
-      });
-
-      const parseResult = requestSchema.safeParse(req.body);
-      if (!parseResult.success) {
-        return res.status(400).json({
-          message: "Invalid request data",
-          errors: parseResult.error.errors,
-        });
-      }
-
-      const { validationCode, eventId } = parseResult.data;
-
-      // Resolve who is scanning: organizer session or staff scanner token
-      let scannerId: string;
-      let staffCodeId: string | null = null;
-
-      const scannerToken = req.headers["x-scanner-token"] as string | undefined;
-
-      if (scannerToken) {
-        const staffCode = await storage.getStaffCodeByScannerToken(scannerToken);
-        if (!staffCode || staffCode.status !== "active") {
-          return res.status(401).json({ message: "Invalid or expired scanner token" });
-        }
-        if (new Date() > staffCode.expiresAt) {
-          return res.status(401).json({ message: "Scanner token has expired" });
-        }
-        if (staffCode.eventId !== eventId) {
-          return res.status(403).json({ message: "Scanner not authorised for this event" });
-        }
-        // Use organizer's ID for checkedInBy so audit trail links to the account
-        const event = await storage.getEvent(eventId);
-        if (!event) return res.status(404).json({ message: "Event not found" });
-        scannerId = event.organizerId;
-        staffCodeId = staffCode.id;
-      } else if (req.isAuthenticated()) {
-        const event = await storage.getEvent(eventId);
-        if (!event) return res.status(404).json({ message: "Event not found" });
-        if (event.organizerId !== req.user!.id) {
-          return res.status(403).json({ message: "Not authorised to validate tickets for this event" });
-        }
-        scannerId = req.user!.id;
-      } else {
-        return res.status(401).json({ message: "Authentication required" });
-      }
-
-      const ticket = await storage.getTicketByValidationCode(validationCode);
-      if (!ticket) {
-        return res.status(404).json({ message: "Invalid ticket code" });
-      }
-
-      if (ticket.eventId !== eventId) {
-        return res.status(400).json({ message: "This ticket is not for this event" });
-      }
-
-      // Refunded / cancelled tickets must not get in (checkInTicket doesn't look at status).
-      if (ticket.status !== "confirmed") {
-        return res.json({
-          valid: false,
-          alreadyCheckedIn: false,
-          message: `Ticket is ${ticket.status} and cannot be used`,
-        });
-      }
-
-      if (ticket.checkedInAt) {
-        const ticketUser = (ticket.userId ? await storage.getUser(ticket.userId) : undefined);
-        return res.json({
-          valid: false,
-          alreadyCheckedIn: true,
-          message: "Ticket already used",
-          checkedInAt: ticket.checkedInAt,
-          ticket: { ...ticket, user: ticketUser },
-        });
-      }
-
-      // Atomic check-in — returns null if a concurrent request beat us
-      const updatedTicket = await storage.checkInTicket(ticket.id, scannerId);
-      if (!updatedTicket) {
-        const ticketUser = (ticket.userId ? await storage.getUser(ticket.userId) : undefined);
-        return res.json({
-          valid: false,
-          alreadyCheckedIn: true,
-          message: "Ticket already used",
-          ticket: { ...ticket, user: ticketUser },
-        });
-      }
-
-      if (staffCodeId) {
-        await storage.incrementStaffCodeScanCount(staffCodeId);
-      }
-
-      const ticketUser = (updatedTicket.userId ? await storage.getUser(updatedTicket.userId) : undefined);
-      res.json({
-        valid: true,
-        alreadyCheckedIn: false,
-        message: "Ticket validated successfully",
-        ticket: { ...updatedTicket, user: ticketUser },
-      });
-    } catch (error) {
-      console.error('Error validating ticket:', error);
-      res.status(500).json({ message: "Failed to validate ticket" });
-    }
-  });
+  // Validate a ticket by full validation code or 8-char short code (organizer session OR staff
+  // scanner token). Logic shared with venue nights: server/utils/doorAccess.ts.
+  app.post("/api/tickets/validate", (req, res) => handleTicketValidate("event", req, res));
 
   // Get check-in status for an event (for organizers)
   app.get("/api/events/:eventId/check-ins", requireAuth, async (req, res) => {
@@ -1199,56 +1095,17 @@ export function registerEventsRoutes(app: Express): void {
     }
   });
 
-  // Bouncer redeems a staff code → gets scanner token (no auth required)
+  // Bouncer redeems a staff code → gets scanner token (no auth required).
+  // Long-code only: the code identifies the event. The typeable PIN needs an event, so it lives on
+  // /api/events/:eventId/staff-access/validate.
   app.post("/api/scanner/auth", authRateLimiter, async (req, res) => {
-    try {
-      const schema = z.object({
-        code: z.string().length(64),
-        staffName: z.string().min(1).max(80),
-      });
-      const parsed = schema.safeParse(req.body);
-      if (!parsed.success) {
-        return res.status(400).json({ message: "Invalid request", errors: parsed.error.errors });
-      }
-      const { code, staffName } = parsed.data;
-
-      const staffCode = await storage.getStaffCodeByCode(code);
-      if (!staffCode) {
-        return res.status(404).json({ message: "Invalid code" });
-      }
-      if (staffCode.status === "revoked") {
-        return res.status(403).json({ message: "This code has been revoked" });
-      }
-      if (staffCode.status === "active") {
-        return res.status(409).json({ message: "This code has already been used by someone else" });
-      }
-      if (new Date() > staffCode.expiresAt) {
-        return res.status(410).json({ message: "This code has expired" });
-      }
-
-      const event = await storage.getEvent(staffCode.eventId);
-      if (!event) return res.status(404).json({ message: "Event not found" });
-
-      const scannerToken = crypto.randomBytes(32).toString("hex");
-      const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "";
-      const ua = req.headers["user-agent"] || "";
-
-      const redeemed = await storage.redeemStaffCode(staffCode.id, staffName, ip, ua, scannerToken);
-
-      res.json({
-        scannerToken: redeemed.scannerToken,
-        eventId: redeemed.eventId,
-        eventTitle: event.title,
-        staffName: redeemed.validatedBy,
-        expiresAt: redeemed.expiresAt,
-      });
-    } catch (error: any) {
-      if (error.message === "Code already redeemed or revoked") {
-        return res.status(409).json({ message: "This code has already been used" });
-      }
-      console.error("Scanner auth error:", error);
-      res.status(500).json({ message: "Failed to authenticate" });
+    const code = typeof req.body?.code === "string" && req.body.code.length === 64 ? req.body.code : null;
+    const staffCode = code ? await storage.getStaffCodeByCode(code).catch(() => undefined) : undefined;
+    if (!staffCode) {
+      if (code === null) return res.status(400).json({ message: "Invalid request", reason: "bad_request" });
+      return res.status(404).json({ message: "That code isn't valid. Check it and try again.", reason: "invalid" });
     }
+    return handleStaffRedeem("event", staffCode.eventId, req, res);
   });
 
   // Verify scanner token is still valid (called on page load by bouncer)
@@ -1295,65 +1152,9 @@ export function registerEventsRoutes(app: Express): void {
     }
   });
 
-  // Event-scoped staff code redemption — bouncer submits code at a specific event URL
-  app.post("/api/events/:eventId/staff-access/validate", authRateLimiter, async (req, res) => {
-    try {
-      const schema = z.object({
-        code: z.string().length(64),
-        staffName: z.string().min(1).max(80),
-      });
-      const parsed = schema.safeParse(req.body);
-      if (!parsed.success) {
-        return res.status(400).json({ message: "Invalid request", errors: parsed.error.errors });
-      }
-      const { code, staffName } = parsed.data;
-      const { eventId } = req.params;
-
-      const staffCode = await storage.getStaffCodeByCode(code);
-      if (!staffCode) {
-        return res.status(404).json({ message: "Invalid code" });
-      }
-      // Ensure code belongs to THIS event — prevents cross-event token reuse
-      if (staffCode.eventId !== eventId) {
-        return res.status(404).json({ message: "Invalid code" });
-      }
-      if (staffCode.status === "revoked") {
-        return res.status(403).json({ message: "This code has been revoked" });
-      }
-      if (staffCode.status === "active") {
-        return res.status(409).json({ message: "This code has already been used by someone else" });
-      }
-      if (new Date() > staffCode.expiresAt) {
-        return res.status(410).json({ message: "This code has expired" });
-      }
-
-      const event = await storage.getEvent(eventId);
-      if (!event) return res.status(404).json({ message: "Event not found" });
-
-      const scannerToken = crypto.randomBytes(32).toString("hex");
-      const ip =
-        (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
-        req.socket.remoteAddress ||
-        "";
-      const ua = req.headers["user-agent"] || "";
-
-      const redeemed = await storage.redeemStaffCode(staffCode.id, staffName, ip, ua, scannerToken);
-
-      res.json({
-        scannerToken: redeemed.scannerToken,
-        eventId: redeemed.eventId,
-        eventTitle: event.title,
-        staffName: redeemed.validatedBy,
-        expiresAt: redeemed.expiresAt,
-      });
-    } catch (error: any) {
-      if (error.message === "Code already redeemed or revoked") {
-        return res.status(409).json({ message: "This code has already been used" });
-      }
-      console.error("Staff access validate error:", error);
-      res.status(500).json({ message: "Failed to authenticate" });
-    }
-  });
+  // Event-scoped staff sign-in: body { staffName, code (64 chars) } OR { staffName, pin (6 digits) }.
+  app.post("/api/events/:eventId/staff-access/validate", authRateLimiter, (req, res) =>
+    handleStaffRedeem("event", req.params.eventId, req, res));
 
   // RSVPs
   app.get("/api/rsvps", requireAuth, async (req, res) => {

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { storage } from "../storage";
 import { requireAuth, requireOrganizer } from "../middleware";
 import { authRateLimiter } from "../security";
+import { handleTicketValidate, handleStaffRedeem } from "../utils/doorAccess.js";
 import { geocodeAddress, sortByProximity } from "../utils/geo";
 import { generateRecurrenceDates, shiftByDelta, type RecurrenceInterval } from "../utils/recurrence.js";
 import { staffCodeExpiry } from "../utils/staffCodeExpiry.js";
@@ -485,59 +486,9 @@ export function registerVenueRoutes(app: Express): void {
     }
   });
 
-  // Venue event-scoped staff code redemption — bouncer submits code at a specific venue event URL
-  app.post("/api/venue-events/:id/staff-access/validate", authRateLimiter, async (req, res) => {
-    try {
-      const schema = z.object({
-        code: z.string().length(64),
-        staffName: z.string().min(1).max(80),
-      });
-      const parsed = schema.safeParse(req.body);
-      if (!parsed.success) {
-        return res.status(400).json({ message: "Invalid request", errors: parsed.error.errors });
-      }
-      const { code, staffName } = parsed.data;
-      const venueEntryNightId = req.params.id;
-
-      const staffCode = await storage.getVenueStaffCodeByCode(code);
-      if (!staffCode) return res.status(404).json({ message: "Invalid code" });
-      if (staffCode.venueEntryNightId !== venueEntryNightId) {
-        return res.status(404).json({ message: "Invalid code" });
-      }
-      if (staffCode.status === "revoked") {
-        return res.status(403).json({ message: "This code has been revoked" });
-      }
-      if (staffCode.status === "active") {
-        return res.status(409).json({ message: "This code has already been used by someone else" });
-      }
-      if (new Date() > staffCode.expiresAt) {
-        return res.status(410).json({ message: "This code has expired" });
-      }
-
-      const entryNight = await storage.getVenueEntryNight(venueEntryNightId);
-      if (!entryNight) return res.status(404).json({ message: "Venue event not found" });
-
-      const scannerToken = crypto.randomBytes(32).toString("hex");
-      const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "";
-      const ua = req.headers["user-agent"] || "";
-
-      const redeemed = await storage.redeemVenueStaffCode(staffCode.id, staffName, ip, ua, scannerToken);
-
-      res.json({
-        scannerToken: redeemed.scannerToken,
-        eventId: redeemed.venueEntryNightId,
-        eventTitle: entryNight.name,
-        staffName: redeemed.validatedBy,
-        expiresAt: redeemed.expiresAt,
-      });
-    } catch (error: any) {
-      if (error.message === "Code already redeemed or revoked") {
-        return res.status(409).json({ message: "This code has already been used" });
-      }
-      console.error("Venue staff access validate error:", error);
-      res.status(500).json({ message: "Failed to authenticate" });
-    }
-  });
+  // Venue event-scoped staff sign-in: body { staffName, code (64 chars) } OR { staffName, pin (6 digits) }.
+  app.post("/api/venue-events/:id/staff-access/validate", authRateLimiter, (req, res) =>
+    handleStaffRedeem("venue", req.params.id, req, res));
 
   // ==================== VENUE TICKET ROUTES ====================
 
@@ -555,97 +506,7 @@ export function registerVenueRoutes(app: Express): void {
   // Venue entry payment routes handled by payment-routes.ts
   // See /api/payments/venue/intent and /api/payments/venue/confirm
 
-  // Validate venue ticket (for check-in) — accepts organizer session or staff scanner token
-  app.post("/api/venue-tickets/validate", async (req, res) => {
-    try {
-      const requestSchema = z.object({
-        validationCode: z.string().min(1),
-        eventId: z.string().min(1), // venueEntryNightId
-      });
-      const parseResult = requestSchema.safeParse(req.body);
-      if (!parseResult.success) {
-        return res.status(400).json({ message: "Invalid request data" });
-      }
-      const { validationCode, eventId: venueEntryNightId } = parseResult.data;
-
-      // Resolve scanner identity: staff token or organizer session
-      let scannerId: string;
-      let venueStaffCodeId: string | null = null;
-
-      const scannerToken = req.headers["x-scanner-token"] as string | undefined;
-
-      if (scannerToken) {
-        const venueStaffCode = await storage.getVenueStaffCodeByScannerToken(scannerToken);
-        if (!venueStaffCode || venueStaffCode.status !== "active") {
-          return res.status(401).json({ message: "Invalid or expired scanner token" });
-        }
-        if (new Date() > venueStaffCode.expiresAt) {
-          return res.status(401).json({ message: "Scanner token has expired" });
-        }
-        if (venueStaffCode.venueEntryNightId !== venueEntryNightId) {
-          return res.status(403).json({ message: "Scanner not authorised for this venue event" });
-        }
-        const entryNight = await storage.getVenueEntryNight(venueStaffCode.venueEntryNightId);
-        const venue = entryNight ? await storage.getVenue(entryNight.venueId) : null;
-        if (!venue) return res.status(404).json({ message: "Venue not found" });
-        scannerId = venue.ownerId;
-        venueStaffCodeId = venueStaffCode.id;
-      } else if (req.isAuthenticated()) {
-        const entryNight = await storage.getVenueEntryNight(venueEntryNightId);
-        if (!entryNight) return res.status(404).json({ message: "Entry night not found" });
-        const venue = await storage.getVenue(entryNight.venueId);
-        if (!venue || venue.ownerId !== req.user!.id) {
-          return res.status(403).json({ message: "You can only validate tickets for your own venues" });
-        }
-        scannerId = req.user!.id;
-      } else {
-        return res.status(401).json({ message: "Authentication required" });
-      }
-
-      const ticket = await storage.getVenueTicketByValidationCode(validationCode);
-      if (!ticket) {
-        return res.status(404).json({ valid: false, message: "Invalid ticket code" });
-      }
-
-      if (ticket.venueEntryNightId !== venueEntryNightId) {
-        return res.status(400).json({ valid: false, message: "This ticket is not for this venue event" });
-      }
-
-      if (ticket.checkedInAt) {
-        const ticketUser = await storage.getUser(ticket.userId);
-        return res.json({
-          valid: false,
-          alreadyCheckedIn: true,
-          message: "Ticket already used",
-          checkedInAt: ticket.checkedInAt,
-          ticket: { ...ticket, user: ticketUser },
-        });
-      }
-
-      const checkedInTicket = await storage.checkInVenueTicket(ticket.id, scannerId);
-      if (!checkedInTicket) {
-        return res.json({
-          valid: false,
-          alreadyCheckedIn: true,
-          message: "Ticket already used",
-          ticket,
-        });
-      }
-
-      if (venueStaffCodeId) {
-        await storage.incrementVenueStaffCodeScanCount(venueStaffCodeId);
-      }
-
-      const ticketUser = await storage.getUser(checkedInTicket.userId);
-      res.json({
-        valid: true,
-        alreadyCheckedIn: false,
-        message: "Ticket validated successfully",
-        ticket: { ...checkedInTicket, user: ticketUser },
-      });
-    } catch (error) {
-      console.error("Validate venue ticket error:", error);
-      res.status(500).json({ message: "Failed to validate ticket" });
-    }
-  });
+  // Validate venue ticket by full validation code or 8-char short code — organizer session or staff
+  // scanner token. Logic shared with events: server/utils/doorAccess.ts.
+  app.post("/api/venue-tickets/validate", (req, res) => handleTicketValidate("venue", req, res));
 }

@@ -1,22 +1,21 @@
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-
-import { format } from "date-fns";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
+import { Loader2, Ticket, WifiOff } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
-import type { Ticket as TicketType, Event } from "@shared/schema";
-import { CalendarIcon, MapPinIcon, TicketIcon, QrCodeIcon, Loader2Icon, Share2Icon } from "@/components/ui/icons";
 import { AutoSetupTimerDialog } from "@/components/safety/AutoSetupTimerDialog";
 import UnifiedShareModal, { type ShareData } from "@/components/UnifiedShareModal";
-
-type TicketWithEvent = TicketType & { event: Event };
+import NextUpCard from "@/components/tickets/NextUpCard";
+import TicketRow from "@/components/tickets/TicketRow";
+import { useWalletTickets } from "@/components/tickets/useWalletTickets";
+import { groupTickets, isPast, type WalletTicket } from "@/components/tickets/ticketModel";
+import type { Ticket as TicketType, Event } from "@shared/schema";
 
 interface Buddy { confirmationStatus: string }
 
@@ -29,66 +28,18 @@ function computeDefaultCheckinExpiry(event: Event): Date {
   return new Date(end.getTime() + 60 * 60_000); // +1h per PRD
 }
 
-function TicketQRCode({ ticketId }: { ticketId: string }) {
-  const [showQR, setShowQR] = useState(false);
-  const { data: qrData, isLoading } = useQuery<{ qrCode: string; holderName: string }>({
-    queryKey: [`/api/tickets/${ticketId}/qr`],
-    enabled: showQR,
-  });
-
-  return (
-    <div className="mt-4">
-      <Button
-        variant="outline"
-        size="default"
-        onClick={() => setShowQR(!showQR)}
-        className="w-full"
-        data-testid={`button-show-qr-${ticketId}`}
-      >
-        <QrCodeIcon className="h-4 w-4 mr-2" />
-        {showQR ? "Hide QR Code" : "Show QR Code"}
-      </Button>
-
-      {showQR && (
-        <div className="mt-4 flex flex-col items-center justify-center p-4 bg-background rounded-md border">
-          {isLoading ? (
-            <Loader2Icon className="h-8 w-8 animate-spin text-primary" />
-          ) : qrData?.qrCode ? (
-            <div className="space-y-2 flex flex-col items-center">
-              {qrData.holderName && (
-                <p className="text-sm font-medium text-center">
-                  Valid for: <span className="text-primary">{qrData.holderName}</span>
-                </p>
-              )}
-              <img
-                src={qrData.qrCode}
-                alt="Ticket QR Code"
-                className="w-64 h-64"
-                data-testid={`img-qr-${ticketId}`}
-              />
-              <p className="text-xs text-center text-muted-foreground">
-                Show this QR code at the event entrance
-              </p>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">Failed to load QR code</p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function TicketWalletPage() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
+  const { data: user } = useAuth();
+  const [tab, setTab] = useState<"upcoming" | "past">("upcoming");
   const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
   const [autoSetupTarget, setAutoSetupTarget] = useState<{ eventId: string; eventName: string; defaultExpiry: Date } | null>(null);
   const [shareTarget, setShareTarget] = useState<ShareData | null>(null);
 
-  const { data: buddiesData } = useQuery<{ buddies: Buddy[] }>({
-    queryKey: ["/api/safety/buddies"],
-  });
+  const { tickets, isLoading, offline } = useWalletTickets();
+
+  const { data: buddiesData } = useQuery<{ buddies: Buddy[] }>({ queryKey: ["/api/safety/buddies"] });
   const hasConfirmedBuddy = (buddiesData?.buddies ?? []).some((b) => b.confirmationStatus === "confirmed");
 
   // Handle the success redirect from event ticket checkout (see
@@ -96,25 +47,21 @@ export default function TicketWalletPage() {
   // which appends session_id and provider — both are required by verify).
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const sessionId = params.get('session_id');
-    const provider = params.get('provider');
+    const sessionId = params.get("session_id");
+    const provider = params.get("provider");
 
-    if (params.get('success') === 'true' && sessionId && provider && !isVerifyingPayment) {
+    if (params.get("success") === "true" && sessionId && provider && !isVerifyingPayment) {
       setIsVerifyingPayment(true);
-      apiRequest('POST', '/api/payments/event/verify', { sessionId, provider })
+      apiRequest("POST", "/api/payments/event/verify", { sessionId, provider })
         .then(async (response) => {
           const body: { ticket: TicketType; event?: Event } = await response.json();
-          // Refetch tickets to show the newly purchased ticket
           queryClient.invalidateQueries({ queryKey: ["/api/tickets"] });
           // staleTime is Infinity, so availability on every event list/modal
           // stays frozen unless invalidated here.
           queryClient.invalidateQueries({
             predicate: (q) => typeof q.queryKey[0] === "string" && q.queryKey[0].startsWith("/api/events"),
           });
-          toast({
-            title: "Ticket purchased!",
-            description: "Your ticket has been added to your wallet.",
-          });
+          toast({ title: "Ticket purchased!", description: "Your ticket has been added to your wallet." });
           if (body.event && hasConfirmedBuddy) {
             setAutoSetupTarget({
               eventId: body.event.id,
@@ -124,159 +71,102 @@ export default function TicketWalletPage() {
           }
         })
         .catch(() => {
-          toast({
-            title: "Verification failed",
-            description: "Unable to verify your purchase. Please contact support.",
-            variant: "destructive",
-          });
+          toast({ title: "Verification failed", description: "Unable to verify your purchase. Please contact support.", variant: "destructive" });
         })
         .finally(() => {
           setIsVerifyingPayment(false);
-          // Clean up URL
-          window.history.replaceState({}, '', '/ticket-wallet');
+          window.history.replaceState({}, "", "/ticket-wallet");
         });
     }
   }, [toast, isVerifyingPayment, hasConfirmedBuddy]);
 
-  const { data: tickets, isLoading } = useQuery<TicketWithEvent[]>({
-    queryKey: ["/api/tickets"],
-  });
+  const { upcoming, past } = useMemo(() => {
+    const now = new Date();
+    const up = tickets.filter((t) => !isPast(t, now));
+    const pa = tickets.filter((t) => isPast(t, now)).sort((a, b) => +b.startsAt - +a.startsAt);
+    return { upcoming: groupTickets(up), past: groupTickets(pa) };
+  }, [tickets]);
 
-  const now = new Date();
-  const upcomingTickets = tickets?.filter(ticket => new Date(ticket.event.eventDate) >= now) || [];
-  const pastTickets = tickets?.filter(ticket => new Date(ticket.event.eventDate) < now) || [];
+  const open = (t: WalletTicket) => navigate(`/ticket-wallet/${t.id}`);
+  const share = (t: WalletTicket) => setShareTarget({ type: t.kind === "event" ? "event" : "venue", id: t.kind === "event" ? t.targetId : t.targetId, title: t.title, imageUrl: t.imageUrl });
+  const [next, ...later] = upcoming;
+  const isSocial = user?.userType === "social";
 
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
       <Navigation />
 
-      <main className="container px-4 py-6 max-w-4xl mx-auto">
-        <h1 className="text-3xl font-serif font-bold mb-6 flex items-center gap-3" data-testid="heading-ticket-wallet">
-          <TicketIcon className="h-7 w-7 text-primary" />
-          My Tickets
-        </h1>
-        {isLoading ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2Icon className="h-8 w-8 animate-spin text-primary" />
+      <main className="mx-auto max-w-xl px-4 pb-8 pt-5">
+        <div className="mb-2 flex items-end gap-3">
+          <div className="flex-1">
+            <h1 className="font-serif text-4xl font-bold leading-none" data-testid="heading-ticket-wallet">Tickets</h1>
+            <p className="mt-1.5 text-sm text-muted-foreground" data-testid="text-wallet-sub">
+              {isLoading ? "Loading…" : `${upcoming.length} upcoming`} · works offline
+            </p>
           </div>
+        </div>
+
+        {offline && (
+          <p className="mb-3 flex items-center gap-2 rounded-xl border bg-card px-3 py-2.5 text-sm text-muted-foreground" data-testid="banner-offline">
+            <WifiOff className="h-4 w-4 flex-none" />No connection. Showing the tickets saved on this phone.
+          </p>
+        )}
+        {isVerifyingPayment && (
+          <p className="mb-3 flex items-center gap-2 rounded-xl border bg-card px-3 py-2.5 text-sm" data-testid="banner-verifying">
+            <Loader2 className="h-4 w-4 flex-none animate-spin" />Confirming your purchase…
+          </p>
+        )}
+
+        <div className="mb-3 flex gap-2" role="group" aria-label="Show tickets">
+          {(["upcoming", "past"] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              aria-pressed={tab === k}
+              onClick={() => setTab(k)}
+              className={`inline-flex min-h-[40px] items-center gap-1.5 rounded-full border px-4 text-sm font-medium transition-[background-color,transform] active:scale-[0.97] ${tab === k ? "border-primary bg-primary text-primary-foreground" : "bg-card hover-elevate"}`}
+              data-testid={`tab-${k}`}
+            >
+              {k === "upcoming" ? "Upcoming" : "Past"}
+              <small className="text-xs opacity-85">{k === "upcoming" ? upcoming.length : past.length}</small>
+            </button>
+          ))}
+        </div>
+
+        {isLoading ? (
+          <div className="space-y-3"><Skeleton className="h-72 w-full rounded-[18px]" /><Skeleton className="h-20 w-full rounded-xl" /></div>
+        ) : tab === "upcoming" ? (
+          upcoming.length === 0 ? (
+            <div className="flex flex-col items-center px-6 py-16 text-center" data-testid="empty-upcoming">
+              <span className="mb-4 grid h-16 w-16 place-items-center rounded-full bg-primary/10"><Ticket className="h-7 w-7 text-primary" /></span>
+              <p className="font-serif text-xl font-bold">No tickets yet</p>
+              <p className="mt-1 text-sm text-muted-foreground">Find something on tonight and your ticket will be waiting here.</p>
+              <Button className="mt-5 h-11" onClick={() => navigate("/search")}>Discover events</Button>
+            </div>
+          ) : (
+            <>
+              <NextUpCard
+                ticket={next.lead}
+                quantity={next.tickets.length}
+                onShow={() => open(next.lead)}
+                onShare={() => share(next.lead)}
+                showSafety={isSocial}
+              />
+              {later.length > 0 && (
+                <>
+                  <h2 className="mb-2 mt-5 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">Coming up</h2>
+                  <div className="border-t">
+                    {later.map((g) => <TicketRow key={g.key} ticket={g.lead} quantity={g.tickets.length} onOpen={() => open(g.lead)} />)}
+                  </div>
+                </>
+              )}
+            </>
+          )
+        ) : past.length === 0 ? (
+          <p className="py-16 text-center text-sm text-muted-foreground" data-testid="empty-past">Your past tickets will show up here.</p>
         ) : (
-          <div className="space-y-6">
-
-        <Tabs defaultValue="upcoming" className="w-full" data-testid="tabs-tickets">
-          <TabsList className="grid w-full grid-cols-2 max-w-md">
-            <TabsTrigger value="upcoming" data-testid="tab-upcoming">
-              Upcoming ({upcomingTickets.length})
-            </TabsTrigger>
-            <TabsTrigger value="past" data-testid="tab-past">
-              Past ({pastTickets.length})
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="upcoming" className="space-y-4 mt-6" data-testid="content-upcoming">
-            {upcomingTickets.length === 0 ? (
-              <Card>
-                <CardContent className="pt-6 text-center text-muted-foreground">
-                  <TicketIcon className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>No upcoming tickets</p>
-                  <p className="text-sm mt-2">Purchase tickets from the Discover page to see them here</p>
-                </CardContent>
-              </Card>
-            ) : (
-              upcomingTickets.map((ticket) => (
-                <Card key={ticket.id} className="hover-elevate" data-testid={`ticket-${ticket.id}`}>
-                  <CardHeader>
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1">
-                        <CardTitle className="text-xl" data-testid={`ticket-title-${ticket.id}`}>
-                          {ticket.event.title}
-                        </CardTitle>
-                        <CardDescription className="mt-2">
-                          <div className="flex items-center gap-2 mt-1">
-                            <CalendarIcon className="h-4 w-4" />
-                            <span data-testid={`ticket-date-${ticket.id}`}>
-                              {format(new Date(ticket.event.eventDate), "EEEE, MMMM d, yyyy 'at' h:mm a")}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2 mt-1">
-                            <MapPinIcon className="h-4 w-4" />
-                            <span data-testid={`ticket-location-${ticket.id}`}>{ticket.event.location}</span>
-                          </div>
-                        </CardDescription>
-                      </div>
-                      <Badge variant="default" data-testid={`ticket-status-${ticket.id}`}>
-                        {ticket.status}
-                      </Badge>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <TicketQRCode ticketId={ticket.id} />
-                    <Button
-                      variant="ghost"
-                      size="default"
-                      className="w-full mt-2"
-                      onClick={() => setShareTarget({
-                        type: "event",
-                        id: ticket.event.id,
-                        title: ticket.event.title,
-                        imageUrl: ticket.event.imageUrl,
-                      })}
-                      data-testid={`button-share-ticket-${ticket.id}`}
-                    >
-                      <Share2Icon className="h-4 w-4 mr-2" />
-                      Share
-                    </Button>
-                  </CardContent>
-                  <CardFooter className="text-sm text-muted-foreground">
-                    Purchased on {format(new Date(ticket.purchaseDate), "MMM d, yyyy")}
-                  </CardFooter>
-                </Card>
-              ))
-            )}
-          </TabsContent>
-
-          <TabsContent value="past" className="space-y-4 mt-6" data-testid="content-past">
-            {pastTickets.length === 0 ? (
-              <Card>
-                <CardContent className="pt-6 text-center text-muted-foreground">
-                  <TicketIcon className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>No past tickets</p>
-                </CardContent>
-              </Card>
-            ) : (
-              pastTickets.map((ticket) => (
-                <Card key={ticket.id} className="opacity-75" data-testid={`ticket-${ticket.id}`}>
-                  <CardHeader>
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1">
-                        <CardTitle className="text-xl" data-testid={`ticket-title-${ticket.id}`}>
-                          {ticket.event.title}
-                        </CardTitle>
-                        <CardDescription className="mt-2">
-                          <div className="flex items-center gap-2 mt-1">
-                            <CalendarIcon className="h-4 w-4" />
-                            <span data-testid={`ticket-date-${ticket.id}`}>
-                              {format(new Date(ticket.event.eventDate), "EEEE, MMMM d, yyyy 'at' h:mm a")}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2 mt-1">
-                            <MapPinIcon className="h-4 w-4" />
-                            <span data-testid={`ticket-location-${ticket.id}`}>{ticket.event.location}</span>
-                          </div>
-                        </CardDescription>
-                      </div>
-                      <Badge variant="secondary" data-testid={`ticket-status-${ticket.id}`}>
-                        Attended
-                      </Badge>
-                    </div>
-                  </CardHeader>
-                  <CardFooter className="text-sm text-muted-foreground">
-                    Purchased on {format(new Date(ticket.purchaseDate), "MMM d, yyyy")}
-                  </CardFooter>
-                </Card>
-              ))
-            )}
-          </TabsContent>
-        </Tabs>
+          <div className="border-t">
+            {past.map((g) => <TicketRow key={g.key} ticket={g.lead} quantity={g.tickets.length} onOpen={() => open(g.lead)} dim />)}
           </div>
         )}
       </main>
@@ -286,20 +176,13 @@ export default function TicketWalletPage() {
       {autoSetupTarget && (
         <AutoSetupTimerDialog
           open={!!autoSetupTarget}
-          onOpenChange={(open) => { if (!open) setAutoSetupTarget(null); }}
+          onOpenChange={(o) => { if (!o) setAutoSetupTarget(null); }}
           eventId={autoSetupTarget.eventId}
           eventName={autoSetupTarget.eventName}
           defaultExpiry={autoSetupTarget.defaultExpiry}
         />
       )}
-
-      {shareTarget && (
-        <UnifiedShareModal
-          open={!!shareTarget}
-          onClose={() => setShareTarget(null)}
-          shareData={shareTarget}
-        />
-      )}
+      {shareTarget && <UnifiedShareModal open={!!shareTarget} onClose={() => setShareTarget(null)} shareData={shareTarget} />}
     </div>
   );
 }

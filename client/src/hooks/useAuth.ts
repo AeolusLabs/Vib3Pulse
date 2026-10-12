@@ -1,5 +1,6 @@
 import { useQuery, UseQueryResult } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
+import { clearWalletCache } from "@/lib/walletCache";
 
 export type AuthUser = {
   id: string;
@@ -56,6 +57,7 @@ export async function logout() {
   });
   
   // Clear all user-specific cached data to prevent cross-user data leakage
+  clearWalletCache();
   queryClient.clear();
   queryClient.setQueryData(["/api/auth/session"], null);
 }

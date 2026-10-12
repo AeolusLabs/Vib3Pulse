@@ -18,6 +18,7 @@ import MyEventsPage from "@/pages/MyEventsPage";
 import ManageEventsPage from "@/pages/ManageEventsPage";
 import OrganizerPayoutsPage from "@/pages/OrganizerPayoutsPage";
 import TicketWalletPage from "@/pages/TicketWalletPage";
+import TicketViewPage from "@/pages/TicketViewPage";
 import EventCheckInPage from "@/pages/EventCheckInPage";
 import MyRsvpsPage from "@/pages/MyRsvpsPage";
 import LoginPage from "@/pages/LoginPage";
@@ -119,6 +120,12 @@ function Router() {
         </AuthenticatedLayout>
       </Route>
       
+      <Route path="/ticket-wallet/:ticketId">
+        <AuthenticatedLayout>
+          <TicketViewPage />
+        </AuthenticatedLayout>
+      </Route>
+
       <Route path="/ticket-wallet">
         <AuthenticatedLayout>
           <TicketWalletPage />

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, integer, boolean, unique, primaryKey, doublePrecision, check, jsonb, numeric } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, integer, boolean, unique, primaryKey, doublePrecision, check, jsonb, numeric, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -1179,8 +1179,12 @@ export const eventStaffAccessCodes = pgTable("event_staff_access_codes", {
   validatedDeviceUa: text("validated_device_ua"),
   redeemedAt: timestamp("redeemed_at"),
   scanCount: integer("scan_count").notNull().default(0),
+  // Typeable 6-digit PIN (the 64-char `code` stays the link/QR secret). Unique per event; legacy rows are null.
+  pin: varchar("pin", { length: 6 }),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
-});
+}, (table) => ({
+  eventPinUnique: uniqueIndex("event_staff_codes_event_pin_uniq").on(table.eventId, table.pin),
+}));
 
 export type EventStaffAccessCode = typeof eventStaffAccessCodes.$inferSelect;
 
@@ -1201,10 +1205,35 @@ export const venueStaffAccessCodes = pgTable("venue_staff_access_codes", {
   validatedDeviceUa: text("validated_device_ua"),
   redeemedAt: timestamp("redeemed_at"),
   scanCount: integer("scan_count").notNull().default(0),
+  pin: varchar("pin", { length: 6 }), // see eventStaffAccessCodes.pin; unique per night
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
-});
+}, (table) => ({
+  nightPinUnique: uniqueIndex("venue_staff_codes_night_pin_uniq").on(table.venueEntryNightId, table.pin),
+}));
 
 export type VenueStaffAccessCode = typeof venueStaffAccessCodes.$inferSelect;
+
+// Door audit log: one row per admit / undo, for the scanner's live log and the organiser's view.
+// eventId holds events.id (kind 'event') or venue_entry_nights.id (kind 'venue'), so no FK.
+// holderName / tierName are snapshots so the log still reads right after a ticket is purged.
+export const checkInLog = pgTable("check_in_log", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  kind: text("kind").notNull(), // 'event' | 'venue'
+  eventId: varchar("event_id").notNull(),
+  ticketId: varchar("ticket_id").notNull(),
+  action: text("action").notNull(), // 'admit' | 'undo'
+  actorType: text("actor_type").notNull(), // 'staff' | 'organizer'
+  staffCodeId: varchar("staff_code_id"),
+  actorName: text("actor_name").notNull(),
+  holderName: text("holder_name").notNull(),
+  tierName: text("tier_name"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+}, (table) => ({
+  eventCreatedIdx: index("check_in_log_event_created_idx").on(table.eventId, table.createdAt.desc()),
+  ticketIdx: index("check_in_log_ticket_idx").on(table.ticketId, table.createdAt.desc()),
+}));
+
+export type CheckInLogRow = typeof checkInLog.$inferSelect;
 
 // Venue analytics for tracking views and clicks
 export const venueAnalytics = pgTable("venue_analytics", {

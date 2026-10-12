@@ -1,16 +1,15 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useRoute, useLocation } from "wouter";
-import { useEffect, useRef, useState } from "react";
-import { Html5Qrcode } from "html5-qrcode";
+import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, ensureCsrfToken } from "@/lib/queryClient";
+import { apiRequest } from "@/lib/queryClient";
+import ScannerScreen from "@/components/scanner/ScannerScreen";
+import StaffDoor from "@/components/scanner/StaffDoor";
 import { useAuth } from "@/hooks/useAuth";
 import { format } from "date-fns";
 import type { VenueTicket, User, VenueEntryNight, Venue, VenueStaffAccessCode } from "@shared/schema";
@@ -21,47 +20,11 @@ import { Link as LinkIcon } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type Mode = "detecting" | "code-entry" | "organizer" | "staff-scanner";
-
-type StaffSession = {
-  scannerToken: string;
-  eventId: string;
-  eventTitle: string;
-  staffName: string;
-  expiresAt: string;
-};
-
-type ScanResultState = {
-  success: boolean;
-  message: string;
-  attendeeName?: string;
-};
+type Mode = "detecting" | "organizer" | "staff";
 
 type VenueTicketWithUser = VenueTicket & { user: User };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function storageKey(venueEntryNightId: string) {
-  return `vib3_scanner_venue_${venueEntryNightId}`;
-}
-
-async function staffValidateVenueTicket(
-  validationCode: string,
-  venueEntryNightId: string,
-  scannerToken: string,
-): Promise<Response> {
-  const csrf = await ensureCsrfToken();
-  return fetch("/api/venue-tickets/validate", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-csrf-token": csrf,
-      "X-Scanner-Token": scannerToken,
-    },
-    credentials: "include",
-    body: JSON.stringify({ validationCode, eventId: venueEntryNightId }),
-  });
-}
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -76,327 +39,6 @@ function DetectingSpinner() {
   );
 }
 
-function CodeEntryForm({
-  venueEntryNightId,
-  onAuthenticated,
-  defaultCode = "",
-}: {
-  venueEntryNightId: string;
-  onAuthenticated: (session: StaffSession) => void;
-  defaultCode?: string;
-}) {
-  const { toast } = useToast();
-  const [staffName, setStaffName] = useState("");
-  const [code, setCode] = useState(defaultCode);
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!/^\d{6}$/.test(code)) {
-      toast({ title: "Invalid code", description: "Enter the 6-digit code from your organiser.", variant: "destructive" });
-      return;
-    }
-    if (!staffName.trim()) {
-      toast({ title: "Name required", description: "Enter your name so the organiser can track your scans.", variant: "destructive" });
-      return;
-    }
-    setLoading(true);
-    try {
-      const csrf = await ensureCsrfToken();
-      const res = await fetch(`/api/venue-events/${venueEntryNightId}/staff-access/validate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-csrf-token": csrf },
-        credentials: "include",
-        body: JSON.stringify({ code, staffName: staffName.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        toast({ title: "Error", description: data.message || "Failed to authenticate", variant: "destructive" });
-        return;
-      }
-      onAuthenticated({
-        scannerToken: data.scannerToken,
-        eventId: data.eventId,
-        eventTitle: data.eventTitle,
-        staffName: data.staffName,
-        expiresAt: data.expiresAt,
-      });
-    } catch {
-      toast({ title: "Network error", description: "Could not reach server.", variant: "destructive" });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-4 pt-2">
-      <div className="space-y-2">
-        <Label htmlFor="staff-name">Your Name</Label>
-        <Input
-          id="staff-name"
-          placeholder="e.g. Maria"
-          value={staffName}
-          onChange={(e) => setStaffName(e.target.value)}
-          autoComplete="name"
-          data-testid="input-staff-name"
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="staff-code">6-Digit Code</Label>
-        <Input
-          id="staff-code"
-          placeholder="123456"
-          value={code}
-          onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-          inputMode="numeric"
-          maxLength={6}
-          data-testid="input-staff-code"
-        />
-      </div>
-      <Button type="submit" className="w-full" disabled={loading} data-testid="button-staff-activate">
-        {loading ? <Loader2Icon className="h-4 w-4 animate-spin mr-2" /> : <ShieldCheckIcon className="h-4 w-4 mr-2" />}
-        Activate Scanner
-      </Button>
-    </form>
-  );
-}
-
-function SelectionView({
-  venueEntryNightId,
-  eventTitle,
-  onAuthenticated,
-  urlCode = "",
-}: {
-  venueEntryNightId: string;
-  eventTitle?: string;
-  onAuthenticated: (session: StaffSession) => void;
-  urlCode?: string;
-}) {
-  const [showCodeEntry, setShowCodeEntry] = useState(!!urlCode);
-  const redirectUrl = `/login?redirect=${encodeURIComponent(`/venue-events/${venueEntryNightId}/check-in`)}`;
-
-  return (
-    <div className="min-h-screen bg-background flex flex-col">
-      <div className="border-b px-4 py-3 flex items-center gap-3">
-        <ShieldCheckIcon className="h-5 w-5 text-primary" />
-        <div>
-          <p className="font-semibold text-sm">Event Check-In</p>
-          {eventTitle && <p className="text-xs text-muted-foreground truncate max-w-[240px]">{eventTitle}</p>}
-        </div>
-      </div>
-
-      <main className="flex-1 flex items-center justify-center p-6">
-        <div className="w-full max-w-sm space-y-4">
-          <div className="text-center mb-6">
-            <h1 className="text-2xl font-serif font-bold">Who are you?</h1>
-            <p className="text-muted-foreground text-sm mt-1">Select your role to continue</p>
-          </div>
-
-          <Card
-            className="cursor-pointer hover:border-primary transition-colors"
-            onClick={() => (window.location.href = redirectUrl)}
-            data-testid="card-organizer"
-          >
-            <CardContent className="flex items-center gap-4 p-5">
-              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                <UserCheckIcon className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <p className="font-medium">I'm the organiser</p>
-                <p className="text-xs text-muted-foreground">Sign in to manage check-ins and staff</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card
-            className={`transition-colors ${showCodeEntry ? "border-primary" : "cursor-pointer hover:border-primary"}`}
-            data-testid="card-staff"
-          >
-            <CardContent className="p-5">
-              <div
-                className={`flex items-center gap-4 ${!showCodeEntry ? "cursor-pointer" : ""}`}
-                onClick={() => !showCodeEntry && setShowCodeEntry(true)}
-              >
-                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                  <ScanLineIcon className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <p className="font-medium">I'm staff / door</p>
-                  <p className="text-xs text-muted-foreground">Enter your 6-digit code to start scanning</p>
-                </div>
-              </div>
-
-              {showCodeEntry && (
-                <CodeEntryForm
-                  venueEntryNightId={venueEntryNightId}
-                  onAuthenticated={onAuthenticated}
-                  defaultCode={urlCode}
-                />
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </main>
-    </div>
-  );
-}
-
-function StaffScannerView({
-  session,
-  onLogout,
-  onRevoked,
-}: {
-  session: StaffSession;
-  onLogout: () => void;
-  onRevoked: () => void;
-}) {
-  const { toast } = useToast();
-  const [isScanning, setIsScanning] = useState(false);
-  const [scanResult, setScanResult] = useState<ScanResultState | null>(null);
-  const [scanCount, setScanCount] = useState(0);
-  const scannerRef = useRef<Html5Qrcode | null>(null);
-
-  const stopScanning = async () => {
-    if (scannerRef.current) {
-      try { await scannerRef.current.stop(); } catch { /* ignore */ }
-      scannerRef.current = null;
-      setIsScanning(false);
-    }
-  };
-
-  const startScanning = async () => {
-    try {
-      const scanner = new Html5Qrcode("venue-staff-qr-reader");
-      scannerRef.current = scanner;
-      await scanner.start(
-        { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 250, height: 250 } },
-        async (decodedText) => {
-          stopScanning();
-          await handleScan(decodedText);
-        },
-        undefined,
-      );
-      setIsScanning(true);
-    } catch {
-      toast({ title: "Camera Error", description: "Unable to access camera. Check permissions.", variant: "destructive" });
-    }
-  };
-
-  const handleScan = async (validationCode: string) => {
-    try {
-      const res = await staffValidateVenueTicket(validationCode, session.eventId, session.scannerToken);
-
-      if (res.status === 401) {
-        toast({ title: "Access revoked", description: "Your scanner access has been revoked by the organiser.", variant: "destructive" });
-        onRevoked();
-        return;
-      }
-
-      const data = await res.json();
-
-      if (data.valid && !data.alreadyCheckedIn) {
-        const name = data.ticket?.user?.displayName || data.ticket?.user?.username || "";
-        setScanResult({ success: true, message: "Valid ticket", attendeeName: name });
-        setScanCount((c) => c + 1);
-        toast({ title: "✓ Admitted", description: name || "Ticket validated" });
-      } else if (data.alreadyCheckedIn) {
-        setScanResult({ success: false, message: "Already used" });
-        toast({ title: "Already Checked In", description: data.message, variant: "destructive" });
-      } else {
-        setScanResult({ success: false, message: data.message || "Invalid ticket" });
-        toast({ title: "Invalid Ticket", description: data.message, variant: "destructive" });
-      }
-    } catch {
-      setScanResult({ success: false, message: "Network error — try again" });
-      toast({ title: "Error", description: "Could not reach server", variant: "destructive" });
-    }
-    setTimeout(() => setScanResult(null), 3000);
-  };
-
-  useEffect(() => () => { stopScanning(); }, []);
-
-  return (
-    <div className="min-h-screen bg-background flex flex-col">
-      <div className="border-b px-4 py-3 flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <ShieldCheckIcon className="h-4 w-4 text-primary flex-shrink-0" />
-            <span className="font-semibold text-sm truncate">{session.eventTitle}</span>
-          </div>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            {session.staffName} · expires {format(new Date(session.expiresAt), "h:mm a")}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <Badge variant="secondary">{scanCount} scanned</Badge>
-          <Button variant="ghost" size="icon" onClick={onLogout} title="Exit scanner" data-testid="button-staff-logout">
-            <LogOutIcon className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
-
-      <main className="flex-1 container px-4 py-6 max-w-lg mx-auto space-y-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <ScanLineIcon className="h-5 w-5" />
-              Scan Tickets
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div
-              id="venue-staff-qr-reader"
-              className={isScanning ? "block rounded-md overflow-hidden" : "hidden"}
-            />
-
-            {!isScanning && (
-              <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-md">
-                <CameraIcon className="h-12 w-12 text-muted-foreground mb-4" />
-                <Button onClick={startScanning} data-testid="button-staff-start-scan">
-                  <CameraIcon className="h-4 w-4 mr-2" />
-                  Start Scanner
-                </Button>
-              </div>
-            )}
-
-            {isScanning && (
-              <Button variant="destructive" onClick={stopScanning} className="w-full" data-testid="button-staff-stop-scan">
-                Stop Scanner
-              </Button>
-            )}
-
-            {scanResult && (
-              <div
-                className={`p-4 rounded-md border flex items-start gap-3 ${
-                  scanResult.success
-                    ? "bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800"
-                    : "bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800"
-                }`}
-                data-testid="staff-scan-result"
-              >
-                {scanResult.success ? (
-                  <CheckCircle2Icon className="h-5 w-5 text-green-600 flex-shrink-0" />
-                ) : (
-                  <XCircleIcon className="h-5 w-5 text-red-600 flex-shrink-0" />
-                )}
-                <div>
-                  <p className={`font-medium ${scanResult.success ? "text-green-900 dark:text-green-100" : "text-red-900 dark:text-red-100"}`}>
-                    {scanResult.message}
-                  </p>
-                  {scanResult.attendeeName && (
-                    <p className="text-sm text-muted-foreground mt-0.5">{scanResult.attendeeName}</p>
-                  )}
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </main>
-    </div>
-  );
-}
-
 function OrganizerView({
   venueEntryNightId,
   onSwitchToStaff,
@@ -406,13 +48,7 @@ function OrganizerView({
 }) {
   const [, navigate] = useLocation();
   const { toast } = useToast();
-  const [isScanning, setIsScanning] = useState(false);
-  const [scanResult, setScanResult] = useState<{
-    success: boolean;
-    message: string;
-    ticket?: VenueTicket & { user?: User };
-  } | null>(null);
-  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const [scannerOpen, setScannerOpen] = useState(false);
 
   const [expandedQRs, setExpandedQRs] = useState<Set<string>>(new Set());
   const [qrDataUrls, setQrDataUrls] = useState<Record<string, string>>({});
@@ -440,7 +76,7 @@ function OrganizerView({
     if (!dataUrl) return;
     const a = document.createElement("a");
     a.href = dataUrl;
-    a.download = `checkin-code-${sc.code}.png`;
+    a.download = `checkin-code-${sc.pin ?? sc.id}.png`;
     a.click();
   };
 
@@ -459,36 +95,6 @@ function OrganizerView({
     enabled: !!venueEntryNightId,
   });
 
-  const validateMutation = useMutation({
-    mutationFn: async (validationCode: string) => {
-      const response = await apiRequest("POST", "/api/venue-tickets/validate", {
-        validationCode,
-        eventId: venueEntryNightId,
-      });
-      return response.json();
-    },
-    onSuccess: (data) => {
-      setScanResult({ success: data.valid && !data.alreadyCheckedIn, message: data.message, ticket: data.ticket });
-      if (data.valid && !data.alreadyCheckedIn) {
-        toast({ title: "✓ Ticket Validated", description: "Check-in successful." });
-        refetchCheckIns();
-      } else {
-        toast({
-          title: data.alreadyCheckedIn ? "Already Checked In" : "Invalid Ticket",
-          description: data.message,
-          variant: "destructive",
-        });
-      }
-      setTimeout(() => setScanResult(null), 3000);
-    },
-    onError: (error: any) => {
-      const message = error.message || "Failed to validate ticket";
-      setScanResult({ success: false, message });
-      toast({ title: "Validation Error", description: message, variant: "destructive" });
-      setTimeout(() => setScanResult(null), 3000);
-    },
-  });
-
   const generateCodeMutation = useMutation({
     mutationFn: async () => {
       const response = await apiRequest("POST", `/api/venue-events/${venueEntryNightId}/staff-codes`, {});
@@ -496,7 +102,7 @@ function OrganizerView({
     },
     onSuccess: () => {
       refetchStaffCodes();
-      toast({ title: "Code generated", description: "Share the 6-digit code with your staff." });
+      toast({ title: "Code generated", description: "Give the 6-digit code to your door staff." });
     },
     onError: () => toast({ title: "Error", description: "Failed to generate code.", variant: "destructive" }),
   });
@@ -513,34 +119,18 @@ function OrganizerView({
     onError: () => toast({ title: "Error", description: "Failed to revoke code.", variant: "destructive" }),
   });
 
-  const startScanning = async () => {
-    try {
-      const scanner = new Html5Qrcode("venue-organizer-qr-reader");
-      scannerRef.current = scanner;
-      await scanner.start(
-        { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 250, height: 250 } },
-        (decodedText) => { stopScanning(); validateMutation.mutate(decodedText); },
-        undefined,
-      );
-      setIsScanning(true);
-    } catch {
-      toast({ title: "Camera Error", description: "Unable to access camera. Please check permissions.", variant: "destructive" });
-    }
-  };
-
-  const stopScanning = async () => {
-    if (scannerRef.current) {
-      try { await scannerRef.current.stop(); } catch { /* ignore */ }
-      scannerRef.current = null;
-      setIsScanning(false);
-    }
-  };
-
-  useEffect(() => () => { stopScanning(); }, []);
-
   const checkedInTickets = checkIns?.filter((t) => t.checkedInAt) || [];
   const totalTickets = checkIns?.length || 0;
+
+  if (scannerOpen) {
+    return (
+      <ScannerScreen
+        identity={{ kind: "venue", eventId: venueEntryNightId }}
+        eventTitle={entryNight?.name ?? "Check-in"}
+        onExit={() => { setScannerOpen(false); refetchCheckIns(); }}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
@@ -574,70 +164,17 @@ function OrganizerView({
           </Badge>
         </div>
 
-        {/* QR Scanner Card */}
+        {/* Door scanner */}
         <Card>
           <CardHeader>
-            <CardTitle>Scan Tickets</CardTitle>
-            <CardDescription>Scan attendee QR codes to validate and check them in</CardDescription>
+            <CardTitle>Scan tickets</CardTitle>
+            <CardDescription>Full-screen scanner: the camera stays on, results clear themselves, and you can type a code if a QR will not scan.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="relative">
-              <div
-                id="venue-organizer-qr-reader"
-                className={`${isScanning ? "block" : "hidden"} w-full rounded-md overflow-hidden`}
-                data-testid="qr-reader"
-              />
-              {!isScanning && (
-                <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-md">
-                  <CameraIcon className="h-12 w-12 text-muted-foreground mb-4" />
-                  <p className="text-sm text-muted-foreground mb-4">Click below to start scanning tickets</p>
-                  <Button onClick={startScanning} disabled={validateMutation.isPending} data-testid="button-start-scan">
-                    <CameraIcon className="h-4 w-4 mr-2" />
-                    Start Scanner
-                  </Button>
-                </div>
-              )}
-            </div>
-
-            {isScanning && (
-              <Button variant="destructive" onClick={stopScanning} className="w-full" data-testid="button-stop-scan">
-                Stop Scanner
-              </Button>
-            )}
-
-            {scanResult && (
-              <div
-                className={`p-4 rounded-md border flex items-start gap-3 ${
-                  scanResult.success
-                    ? "bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800"
-                    : "bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800"
-                }`}
-                data-testid="scan-result"
-              >
-                {scanResult.success ? (
-                  <CheckCircle2Icon className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-                ) : (
-                  <XCircleIcon className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0" />
-                )}
-                <div className="flex-1">
-                  <p className={`font-medium ${scanResult.success ? "text-green-900 dark:text-green-100" : "text-red-900 dark:text-red-100"}`}>
-                    {scanResult.message}
-                  </p>
-                  {scanResult.ticket?.user && (
-                    <p className="text-sm mt-1 text-muted-foreground">
-                      {scanResult.ticket.user.displayName || scanResult.ticket.user.username}
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {validateMutation.isPending && (
-              <div className="flex items-center justify-center p-4">
-                <Loader2Icon className="h-6 w-6 animate-spin text-primary" />
-                <span className="ml-2">Validating ticket…</span>
-              </div>
-            )}
+          <CardContent>
+            <Button onClick={() => setScannerOpen(true)} className="w-full sm:w-auto" data-testid="button-open-scanner">
+              <ScanLineIcon className="h-4 w-4 mr-2" />
+              Open door scanner
+            </Button>
           </CardContent>
         </Card>
 
@@ -698,7 +235,7 @@ function OrganizerView({
                   Staff Access
                 </CardTitle>
                 <CardDescription>
-                  Generate a code per bouncer, share the link below, they open it and enter their code
+                  One code per door staff member: share the link, they open it, enter their name and the 6-digit code
                 </CardDescription>
               </div>
               <Button
@@ -753,14 +290,15 @@ function OrganizerView({
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span
-                            className="font-mono text-xl font-bold tracking-widest sm:tracking-[0.3em] break-all min-w-0 max-w-full cursor-pointer select-all"
+                            className="font-mono text-2xl font-bold tracking-[0.2em] min-w-0 max-w-full cursor-pointer select-all"
                             title="Click to copy code"
                             onClick={() => {
-                              navigator.clipboard.writeText(sc.code);
-                              toast({ title: "Copied!", description: `Code ${sc.code} copied.` });
+                              if (!sc.pin) return;
+                              navigator.clipboard.writeText(sc.pin);
+                              toast({ title: "Copied!", description: `Code ${sc.pin} copied.` });
                             }}
                           >
-                            {sc.code}
+                            {sc.pin ? `${sc.pin.slice(0, 3)} ${sc.pin.slice(3)}` : "Link only"}
                           </span>
                           <Badge
                             variant={
@@ -816,12 +354,12 @@ function OrganizerView({
                       <div className="border-t p-4 flex flex-col items-center gap-3 bg-muted/20">
                         <img
                           src={qrDataUrls[sc.id]}
-                          alt={`QR code for staff code ${sc.code}`}
+                          alt="QR code for staff sign-in"
                           className="w-48 h-48 rounded-sm"
                           data-testid={`img-staff-qr-${sc.id}`}
                         />
                         <p className="text-xs text-center text-muted-foreground max-w-[220px]">
-                          Bouncer scans this QR → opens check-in page → code pre-filled → enters name → starts scanning
+                          Staff scan this QR, enter their name, and start scanning. No code to type.
                         </p>
                         <div className="flex gap-2">
                           <Button
@@ -872,9 +410,9 @@ export default function VenueEventCheckInPage() {
 
   const { data: authUser, isLoading: authLoading } = useAuth();
 
+  // ?code= is the organiser's staff link: staff go straight to the door flow.
   const urlCode = new URLSearchParams(window.location.search).get("code") ?? "";
-  const [mode, setMode] = useState<Mode>(urlCode ? "code-entry" : "detecting");
-  const [staffSession, setStaffSession] = useState<StaffSession | null>(null);
+  const [mode, setMode] = useState<Mode>(urlCode ? "staff" : "detecting");
   const [eventTitle, setEventTitle] = useState<string | undefined>();
 
   useEffect(() => {
@@ -885,13 +423,11 @@ export default function VenueEventCheckInPage() {
       .catch(() => {});
   }, [venueEntryNightId]);
 
+  // The venue owner gets the dashboard; everyone else is door staff.
   useEffect(() => {
-    if (urlCode) return;
-    if (authLoading || !venueEntryNightId) return;
-
+    if (urlCode || authLoading || !venueEntryNightId) return;
     let cancelled = false;
-
-    async function detectMode() {
+    (async () => {
       if (authUser?.userType === "organizer" && authUser?.id) {
         try {
           const res = await fetch(`/api/venue-events/${venueEntryNightId}`, { credentials: "include" });
@@ -905,82 +441,15 @@ export default function VenueEventCheckInPage() {
             }
           }
         } catch {
-          // Network error — do not grant organizer access
+          // Network error: do not grant organiser access.
         }
       }
-
-      if (cancelled) return;
-
-      const raw = localStorage.getItem(storageKey(venueEntryNightId!));
-      if (raw) {
-        try {
-          const parsed: StaffSession = JSON.parse(raw);
-          const notExpired = parsed.expiresAt && new Date() < new Date(parsed.expiresAt);
-          const correctEvent = parsed.eventId === venueEntryNightId;
-
-          if (parsed.scannerToken && correctEvent && notExpired) {
-            const verifyRes = await fetch("/api/scanner/verify", {
-              headers: { "X-Scanner-Token": parsed.scannerToken },
-              credentials: "include",
-            });
-
-            if (!cancelled && verifyRes.ok) {
-              const data = await verifyRes.json();
-              if (data.valid && data.eventId === venueEntryNightId) {
-                setStaffSession(parsed);
-                setMode("staff-scanner");
-                return;
-              }
-            }
-          }
-
-          localStorage.removeItem(storageKey(venueEntryNightId!));
-        } catch {
-          localStorage.removeItem(storageKey(venueEntryNightId!));
-        }
-      }
-
-      if (!cancelled) setMode("code-entry");
-    }
-
-    detectMode();
+      if (!cancelled) setMode("staff");
+    })();
     return () => { cancelled = true; };
   }, [authLoading, authUser, venueEntryNightId, urlCode]);
 
-  const handleStaffAuthenticated = (session: StaffSession) => {
-    localStorage.setItem(storageKey(venueEntryNightId!), JSON.stringify(session));
-    setStaffSession(session);
-    setMode("staff-scanner");
-  };
-
-  const handleStaffLogout = () => {
-    localStorage.removeItem(storageKey(venueEntryNightId!));
-    setStaffSession(null);
-    setMode("code-entry");
-  };
-
   if (mode === "detecting") return <DetectingSpinner />;
-
-  if (mode === "organizer") {
-    return <OrganizerView venueEntryNightId={venueEntryNightId!} onSwitchToStaff={() => setMode("code-entry")} />;
-  }
-
-  if (mode === "staff-scanner" && staffSession) {
-    return (
-      <StaffScannerView
-        session={staffSession}
-        onLogout={handleStaffLogout}
-        onRevoked={handleStaffLogout}
-      />
-    );
-  }
-
-  return (
-    <SelectionView
-      venueEntryNightId={venueEntryNightId!}
-      eventTitle={eventTitle}
-      onAuthenticated={handleStaffAuthenticated}
-      urlCode={urlCode}
-    />
-  );
+  if (mode === "organizer") return <OrganizerView venueEntryNightId={venueEntryNightId!} onSwitchToStaff={() => setMode("staff")} />;
+  return <StaffDoor kind="venue" targetId={venueEntryNightId!} title={eventTitle} urlCode={urlCode} onOrganiser={() => setMode("detecting")} />;
 }

@@ -13,6 +13,7 @@ import { registerMessagesRoutes } from "./routes/messages-routes";
 import { registerVenueRoutes } from "./routes/venue-routes";
 import { registerVenueSavedRoutes } from "./routes/venue-saved-routes";
 import { registerVenueSocialRoutes } from "./routes/venue-social-routes";
+import { registerDoorRoutes } from "./routes/door-routes";
 import { registerEventsRoutes } from "./routes/events-routes";
 import { registerSocialEventGate, registerSocialEventRoutes, registerGuestDataExportBlock } from "./routes/social-events-routes";
 import { startGuestRetentionJob } from "./services/guestPrivacy";
@@ -43,6 +44,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Gate first: social events must 404 on the generic /api/events/:id/* routes below.
   registerGuestDataExportBlock(app);
   registerSocialEventGate(app);
+  // Before the generic events routes so /api/tickets/undo-check-in is never shadowed.
+  registerDoorRoutes(app);
   registerEventsRoutes(app);
   registerSocialEventRoutes(app);
   registerPhoneRoutes(app);
