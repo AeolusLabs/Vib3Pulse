@@ -4,6 +4,8 @@ import type { User, Conversation, ConversationParticipant, ConversationMessage, 
 export type ConversationWithDetails = Conversation & {
   participants: Array<ConversationParticipant & { user: User }>;
   unreadCount: number;
+  /** Direct chat where either person has blocked the other: readable, but nobody can send. */
+  blocked?: boolean;
 };
 
 export type ChatMessage = ConversationMessage & {

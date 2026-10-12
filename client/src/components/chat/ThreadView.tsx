@@ -250,16 +250,22 @@ export default function ThreadView({ conversationId, currentUser, onBack }: Thre
         )}
       </div>
 
-      <Composer
-        participants={conversation.participants}
-        replyingTo={replyingTo}
-        onCancelReply={() => setReplyingTo(null)}
-        onSend={send}
-        sending={sendMutation.isPending}
-        onOpenPoll={() => setPollOpen(true)}
-        onOpenShare={() => setShareOpen(true)}
-        focusKey={conversationId}
-      />
+      {conversation.blocked ? (
+        <div className="border-t px-4 py-3 text-center text-sm text-muted-foreground" data-testid="text-chat-blocked">
+          You can't send messages in this chat. You can still read your history.
+        </div>
+      ) : (
+        <Composer
+          participants={conversation.participants}
+          replyingTo={replyingTo}
+          onCancelReply={() => setReplyingTo(null)}
+          onSend={send}
+          sending={sendMutation.isPending}
+          onOpenPoll={() => setPollOpen(true)}
+          onOpenShare={() => setShareOpen(true)}
+          focusKey={conversationId}
+        />
+      )}
 
       <MessageActionsSheet
         message={actionsFor}

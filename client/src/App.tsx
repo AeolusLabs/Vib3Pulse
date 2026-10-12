@@ -28,6 +28,8 @@ import SearchPage from "@/pages/SearchPage";
 import MessagesPage from "@/pages/MessagesPage";
 import BuddySettingsPage from "@/pages/BuddySettingsPage";
 import BuddyDashboardPage from "@/pages/BuddyDashboardPage";
+import MapPage from "@/pages/MapPage";
+import LookoutPage from "@/pages/LookoutPage";
 import DistressAlertsPage from "@/pages/DistressAlertsPage";
 import AccountSettingsPage from "@/pages/AccountSettingsPage";
 import ManageVenuesPage from "@/pages/ManageVenuesPage";
@@ -180,6 +182,18 @@ function Router() {
       <Route path="/buddy/alerts">
         <AuthenticatedLayout>
           <DistressAlertsPage />
+        </AuthenticatedLayout>
+      </Route>
+
+      <Route path="/map">
+        <AuthenticatedLayout>
+          <MapPage />
+        </AuthenticatedLayout>
+      </Route>
+
+      <Route path="/lookout">
+        <AuthenticatedLayout>
+          <LookoutPage />
         </AuthenticatedLayout>
       </Route>
 

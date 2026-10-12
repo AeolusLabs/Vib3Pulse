@@ -224,10 +224,16 @@ export default function CreateVenueModal({ open, onOpenChange, editingVenue }: C
       if (isEditing) return await apiRequest("PATCH", `/api/venues/${editingVenue.id}`, data);
       return await apiRequest("POST", "/api/venues", data);
     },
-    onSuccess: () => {
+    onSuccess: async (res: Response) => {
       queryClient.invalidateQueries({ queryKey: ["/api/my-venues"] });
       queryClient.invalidateQueries({ queryKey: ["/api/venues"] });
-      toast({ title: isEditing ? "Venue updated successfully" : "Venue created successfully" });
+      // The server geocodes the address; venues it can't place never show on the map.
+      const body = await res.json().catch(() => null);
+      if (body?.mapWarning) {
+        toast({ title: isEditing ? "Venue updated, but not on the map" : "Venue created, but not on the map", description: body.mapWarning });
+      } else {
+        toast({ title: isEditing ? "Venue updated successfully" : "Venue created successfully" });
+      }
       onOpenChange(false);
     },
     onError: (error: any) => {

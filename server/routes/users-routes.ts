@@ -20,6 +20,7 @@ import { z } from "zod";
 import { deliverNotification } from "../notifications";
 import { resolveUserId } from "../utils/users";
 import { fileTypeFromBuffer } from "file-type";
+import { isBlockedEitherWay } from "../utils/blocks";
 
 class MediaValidationError extends Error {
   constructor(message: string) {
@@ -801,6 +802,10 @@ export function registerUsersRoutes(app: Express): void {
       // Can't follow yourself
       if (targetUserId === currentUserId) {
         return res.status(400).json({ message: "You cannot follow yourself" });
+      }
+
+      if (await isBlockedEitherWay(currentUserId, targetUserId)) {
+        return res.status(403).json({ message: "You can't follow this user" });
       }
 
       // Check if already following

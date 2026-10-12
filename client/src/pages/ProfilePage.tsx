@@ -22,6 +22,7 @@ import { format } from "date-fns";
 import type { User, Event, Rsvp, Post } from "@shared/schema";
 import EditProfileDialog from "@/components/EditProfileDialog";
 import FollowersFollowingDialog from "@/components/FollowersFollowingDialog";
+import BlockButton from "@/components/BlockButton";
 import FeedPost from "@/components/FeedPost";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -495,6 +496,7 @@ export default function ProfilePage() {
                   </Button>
                 )
               ) : null}
+              {!isOwnProfile && sessionUser && <BlockButton userId={profile.id} name={displayName} />}
             </div>
           </div>
 

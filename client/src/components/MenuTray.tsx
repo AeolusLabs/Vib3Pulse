@@ -4,7 +4,7 @@ import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { useUnreadMessagesCount } from "@/hooks/useUnreadMessagesCount";
-import { HomeIcon, CompassIcon, MessageCircleIcon, MenuIcon, XIcon, Building2Icon } from "@/components/ui/icons";
+import { HomeIcon, CompassIcon, MessageCircleIcon, MenuIcon, XIcon, Building2Icon, MapPinIcon, EyeIcon } from "@/components/ui/icons";
 
 export default function MenuTray() {
   const [isOpen, setIsOpen] = useState(false);
@@ -61,6 +61,32 @@ export default function MenuTray() {
                   Discover
                 </Button>
               </Link>
+              <Link href="/map">
+                <Button
+                  variant={location === '/map' ? 'default' : 'ghost'}
+                  size="sm"
+                  className="w-full justify-start"
+                  onClick={() => setIsOpen(false)}
+                  data-testid="link-map"
+                >
+                  <MapPinIcon className="h-4 w-4 mr-2" />
+                  Map
+                </Button>
+              </Link>
+              {user?.userType === "social" && (
+                <Link href="/lookout">
+                  <Button
+                    variant={location === '/lookout' ? 'default' : 'ghost'}
+                    size="sm"
+                    className="w-full justify-start"
+                    onClick={() => setIsOpen(false)}
+                    data-testid="link-lookout"
+                  >
+                    <EyeIcon className="h-4 w-4 mr-2" />
+                    Lookout
+                  </Button>
+                </Link>
+              )}
               <Link href="/messages">
                 <Button
                   variant={location.startsWith('/messages') ? 'default' : 'ghost'}

@@ -26,6 +26,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { Switch } from "@/components/ui/switch";
+import BlockedUsersCard from "@/components/BlockedUsersCard";
 import type { User as UserType } from "@shared/schema";
 import { LockIcon, UserIcon, AlertCircleIcon, Loader2Icon, CheckCircleIcon, BellIcon, BellOffIcon, CheckCheckIcon, Trash2Icon } from "@/components/ui/icons";
 
@@ -55,6 +56,18 @@ export default function AccountSettingsPage() {
   const readReceiptsMutation = useMutation({
     mutationFn: async (enabled: boolean) => {
       return await apiRequest("PATCH", "/api/users/me", { readReceiptsEnabled: enabled });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/users/me"] });
+    },
+    onError: () => {
+      toast({ title: "Couldn't update setting", variant: "destructive" });
+    },
+  });
+
+  const attendanceMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      return await apiRequest("PATCH", "/api/users/me", { showAttendanceToFriends: enabled });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/users/me"] });
@@ -401,8 +414,25 @@ export default function AccountSettingsPage() {
                   data-testid="switch-read-receipts"
                 />
               </div>
+              <Separator className="my-4" />
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5 pr-4">
+                  <p className="text-sm font-medium">Show friends the events I'm going to</p>
+                  <p className="text-sm text-muted-foreground">
+                    Friends who follow each other can see on the map when you have a ticket or RSVP for a public event. Turn this off to keep your plans private.
+                  </p>
+                </div>
+                <Switch
+                  checked={userProfile?.showAttendanceToFriends ?? true}
+                  disabled={attendanceMutation.isPending}
+                  onCheckedChange={(checked) => attendanceMutation.mutate(checked)}
+                  data-testid="switch-show-attendance"
+                />
+              </div>
             </CardContent>
           </Card>
+
+          <BlockedUsersCard />
 
           <Card className="border-destructive/30">
             <CardHeader>

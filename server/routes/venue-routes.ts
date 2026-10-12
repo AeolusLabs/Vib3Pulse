@@ -10,6 +10,8 @@ import { generateRecurrenceDates, shiftByDelta, type RecurrenceInterval } from "
 import { staffCodeExpiry } from "../utils/staffCodeExpiry.js";
 import { venueWriteSchema, venueUpdateSchema, venueEntryNightWriteSchema, venueEntryNightUpdateSchema, venueCategories } from "@shared/schema";
 
+const MAP_WARNING = "We couldn't find this address on the map, so the venue won't appear there. Check the street, city and country.";
+
 export function registerVenueRoutes(app: Express): void {
   // ==================== VENUE ROUTES ====================
 
@@ -114,7 +116,7 @@ export function registerVenueRoutes(app: Express): void {
       // Geocode address to capture lat/lng
       let latitude: number | null = null;
       let longitude: number | null = null;
-      const addressParts = [req.body.address, req.body.city].filter(Boolean);
+      const addressParts = [req.body.address, req.body.city, req.body.country].filter(Boolean);
       if (addressParts.length > 0) {
         const coords = await geocodeAddress(addressParts.join(", "));
         if (coords) {
@@ -132,7 +134,8 @@ export function registerVenueRoutes(app: Express): void {
       };
 
       const venue = await storage.createVenue(venueData);
-      res.status(201).json(venue);
+      // Venues without coordinates never appear on the map, so tell the organizer instead of failing silently.
+      res.status(201).json({ ...venue, mapWarning: latitude === null && addressParts.length > 0 ? MAP_WARNING : undefined });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid venue data", errors: error.flatten() });
@@ -165,11 +168,12 @@ export function registerVenueRoutes(app: Express): void {
         venueUpdateSchema.parse(req.body);
 
       // Re-geocode if address or city changed
-      const addressChanged = updates.address !== undefined || updates.city !== undefined;
+      const addressChanged = updates.address !== undefined || updates.city !== undefined || updates.country !== undefined;
       if (addressChanged) {
         const address = updates.address ?? venue.address;
         const city = updates.city ?? venue.city;
-        const addressParts = [address, city].filter(Boolean);
+        const country = (updates.country as string | null | undefined) ?? venue.country;
+        const addressParts = [address, city, country].filter(Boolean);
         if (addressParts.length > 0) {
           const coords = await geocodeAddress(addressParts.join(", "));
           if (coords) {
@@ -180,7 +184,7 @@ export function registerVenueRoutes(app: Express): void {
       }
 
       const updatedVenue = await storage.updateVenue(req.params.id, updates);
-      res.json(updatedVenue);
+      res.json({ ...updatedVenue, mapWarning: addressChanged && updatedVenue.latitude == null ? MAP_WARNING : undefined });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid venue data", errors: error.flatten() });

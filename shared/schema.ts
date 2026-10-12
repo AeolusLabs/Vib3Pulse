@@ -50,6 +50,8 @@ export const users = pgTable("users", {
   // Mutual DM read-receipt visibility, same model as WhatsApp's toggle — off
   // means you neither send nor see "Seen" status with anyone.
   readReceiptsEnabled: boolean("read_receipts_enabled").notNull().default(true),
+  // Lets mutual friends see (on the map) which public events this user has a ticket/RSVP for.
+  showAttendanceToFriends: boolean("show_attendance_to_friends").notNull().default(true),
   // Set only by the OTP flow. phoneNumber above is free text and unverified;
   // verifiedPhone is the normalised E.164 value, unique so one phone = one
   // verified account (also what phone bans key on).
@@ -80,6 +82,7 @@ export const updateUserSchema = insertUserSchema.pick({
   bannerVibe: true,
   bannerColor: true,
   readReceiptsEnabled: true,
+  showAttendanceToFriends: true,
 }).partial();
 
 // Gender options enum
@@ -1050,6 +1053,35 @@ export const savedVenues = pgTable("saved_venues", {
   venueId: varchar("venue_id").notNull().references(() => venues.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 }, (t) => ({ pk: primaryKey({ columns: [t.userId, t.venueId] }) }));
+
+// Live map position. A row exists ONLY while a user is sharing (off by default):
+// no history, rounded to ~100 m before storage, treated as gone after 30 min stale.
+export const userLocations = pgTable("user_locations", {
+  userId: varchar("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  latitude: doublePrecision("latitude").notNull(),
+  longitude: doublePrecision("longitude").notNull(),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
+// Who may see a sharing user's live position: every mutual friend ('friends') or only the
+// mutual friends listed in map_allowed_viewers ('selected'). Kept apart from user_locations so
+// the choice survives stop/start sharing (that row is deleted on stop).
+export const mapSharingPrefs = pgTable("map_sharing_prefs", {
+  userId: varchar("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  audience: text("audience").notNull().default("friends"), // 'friends' | 'selected'
+});
+export const mapAllowedViewers = pgTable("map_allowed_viewers", {
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  viewerId: varchar("viewer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+}, (t) => ({ pk: primaryKey({ columns: [t.userId, t.viewerId] }) }));
+
+// One row per block. Enforced both ways: neither side sees the other on the map, can follow the
+// other, or open a new direct conversation with them. Creating a block also removes follows.
+export const userBlocks = pgTable("user_blocks", {
+  blockerId: varchar("blocker_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  blockedId: varchar("blocked_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+}, (t) => ({ pk: primaryKey({ columns: [t.blockerId, t.blockedId] }) }));
 
 export const venueEntryNights = pgTable("venue_entry_nights", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

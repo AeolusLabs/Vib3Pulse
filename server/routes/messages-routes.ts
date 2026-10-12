@@ -3,11 +3,22 @@ import { storage } from "../storage";
 import { wsManager } from "../websocket";
 import { requireAuth } from "../middleware";
 import { deliverNotification } from "../notifications.js";
+import { isBlockedEitherWay } from "../utils/blocks";
 
 // Discord/WhatsApp-scale group cap for this app's own group chats (separate
 // from the platform's Communities, which cap at 10,000 members). Exported so
 // events-routes.ts's event-group-chat creation enforces the same limit.
 export const MAX_GROUP_MEMBERS = 50;
+
+// A direct chat between two users where either has blocked the other stays open and readable,
+// but neither can send. Group chats are never affected. Direction is deliberately not exposed.
+async function isBlockedDirectChat(conversation: { isGroup: boolean; participants: { userId: string }[] } | undefined | null, userId: string): Promise<boolean> {
+  if (!conversation || conversation.isGroup) return false;
+  const other = conversation.participants.find((p) => p.userId !== userId);
+  return other ? isBlockedEitherWay(userId, other.userId) : false;
+}
+
+const CHAT_BLOCKED = { message: "You can't send messages in this chat.", code: "CHAT_BLOCKED" };
 
 export function registerMessagesRoutes(app: Express): void {
 
@@ -86,6 +97,10 @@ export function registerMessagesRoutes(app: Express): void {
         return res.status(400).json({ message: "Valid user ID required" });
       }
 
+      if (await isBlockedEitherWay(req.user!.id, userId)) {
+        return res.status(403).json({ message: "You can't message this user" });
+      }
+
       const conversation = await storage.getOrCreateDirectConversation(req.user!.id, userId);
       const fullConversation = await storage.getConversationById(conversation.id);
       res.json(fullConversation);
@@ -110,7 +125,7 @@ export function registerMessagesRoutes(app: Express): void {
         return res.status(403).json({ message: "Not a participant" });
       }
 
-      res.json(conversation);
+      res.json({ ...conversation, blocked: await isBlockedDirectChat(conversation, req.user!.id) });
     } catch (error) {
       console.error("Error fetching conversation:", error);
       res.status(500).json({ message: "Failed to fetch conversation" });
@@ -379,6 +394,10 @@ export function registerMessagesRoutes(app: Express): void {
         return res.status(403).json({ message: "Not a participant" });
       }
 
+      if (await isBlockedDirectChat(await storage.getConversationById(req.params.id), req.user!.id)) {
+        return res.status(403).json(CHAT_BLOCKED);
+      }
+
       const { content, messageType = 'text', eventId, venueId, postId, imageUrls, videoUrl, replyToId } = req.body;
 
       // Validate content exists for text messages
@@ -494,6 +513,10 @@ export function registerMessagesRoutes(app: Express): void {
       const isParticipant = await storage.isConversationParticipant(req.params.id, req.user!.id);
       if (!isParticipant) {
         return res.status(403).json({ message: "Not a participant" });
+      }
+
+      if (await isBlockedDirectChat(await storage.getConversationById(req.params.id), req.user!.id)) {
+        return res.status(403).json(CHAT_BLOCKED);
       }
 
       const { question, options, allowMultiple, expiresAt } = req.body;

@@ -10,6 +10,7 @@ import { resolveUserId } from "../utils/users";
 import { ObjectStorageService } from "../objectStorage";
 import { fileTypeFromBuffer } from "file-type";
 import { z } from "zod";
+import { isBlockedEitherWay } from "../utils/blocks";
 
 class MediaValidationError extends Error {
   constructor(message: string) {
@@ -575,6 +576,10 @@ export function registerSocialRoutes(app: Express): void {
 
       const content = typeof req.body.content === 'string' ? req.body.content.trim() : '';
       if (!content) return res.status(400).json({ message: "Content is required" });
+
+      if (await isBlockedEitherWay(userId, story.userId)) {
+        return res.status(403).json({ message: "You can't reply to this story.", code: "CHAT_BLOCKED" });
+      }
 
       // Get or create the direct conversation thread between replier and story owner
       const conversation = await storage.getOrCreateDirectConversation(userId, story.userId);
@@ -1146,6 +1151,10 @@ export function registerSocialRoutes(app: Express): void {
 
       if (followerId === followingId) {
         return res.status(400).json({ message: "Cannot follow yourself" });
+      }
+
+      if (await isBlockedEitherWay(followerId, followingId)) {
+        return res.status(403).json({ message: "You can't follow this user" });
       }
 
       const isAlreadyFollowing = await storage.isFollowing(followerId, followingId);

@@ -1,7 +1,8 @@
 
 import { Link, useLocation } from "wouter";
 import { useUnreadMessagesCount } from "@/hooks/useUnreadMessagesCount";
-import { CompassIcon, LayoutGridIcon, MessageCircleIcon, TicketIcon } from "@/components/ui/icons";
+import { useAuth } from "@/hooks/useAuth";
+import { CompassIcon, EyeIcon, LayoutGridIcon, MapPinIcon, MessageCircleIcon, TicketIcon } from "@/components/ui/icons";
 
 interface BottomNavigationProps {
   onCreateClick?: () => void;
@@ -10,11 +11,17 @@ interface BottomNavigationProps {
 export default function BottomNavigation({ onCreateClick }: BottomNavigationProps) {
   const [location] = useLocation();
   const { data: unreadMessageCount = 0 } = useUnreadMessagesCount();
+  const { data: user } = useAuth();
+  // Safety (Lookout) is a social-account feature; organizers keep Tickets in that slot.
+  const safetyOrTickets = user?.userType === "social"
+    ? { icon: EyeIcon, label: "Lookout", path: "/lookout", testId: "nav-lookout" }
+    : { icon: TicketIcon, label: "Tickets", path: "/ticket-wallet", testId: "nav-tickets" };
 
   const navItems = [
     { icon: LayoutGridIcon, label: "Feed", path: "/feed", testId: "nav-feed" },
     { icon: CompassIcon, label: "Discover", path: "/search", testId: "nav-discover" },
-    { icon: TicketIcon, label: "Tickets", path: "/ticket-wallet", testId: "nav-tickets" },
+    { icon: MapPinIcon, label: "Map", path: "/map", testId: "nav-map" },
+    safetyOrTickets,
     { icon: MessageCircleIcon, label: "Messages", path: "/messages", testId: "nav-messages" },
   ];
 
@@ -22,7 +29,7 @@ export default function BottomNavigation({ onCreateClick }: BottomNavigationProp
     <nav className="fixed bottom-0 left-0 right-0 z-50 bg-background border-t md:hidden">
       <div className="flex items-center justify-around h-16 px-2">
         {navItems.map((item) => {
-          const isActive = location === item.path;
+          const isActive = location === item.path || (item.path === "/lookout" && location.startsWith("/buddy"));
           const Icon = item.icon;
           const showDot = item.label === "Messages" && unreadMessageCount > 0;
 
