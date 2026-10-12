@@ -122,7 +122,11 @@ export default function ThreadView({ conversationId, currentUser, onBack }: Thre
 
   const deleteMutation = useMutation({
     mutationFn: async (messageId: string) => apiRequest("DELETE", `/api/conversations/${conversationId}/messages/${messageId}`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/conversations", conversationId, "messages"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/conversations", conversationId, "messages"] });
+      // The inbox snippet is re-pointed server-side when the latest message is deleted.
+      queryClient.invalidateQueries({ queryKey: ["/api/conversations"], exact: true });
+    },
     onError: () => toast({ title: "Couldn't delete message", variant: "destructive" }),
   });
 

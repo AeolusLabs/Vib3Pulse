@@ -552,6 +552,7 @@ export const conversations = pgTable("conversations", {
   createdById: varchar("created_by_id").references(() => users.id),
   lastMessageAt: timestamp("last_message_at"),
   lastMessagePreview: text("last_message_preview"), // Denormalized snippet — updated on every send to avoid a join at read time
+  lastMessageSenderId: varchar("last_message_sender_id"), // Denormalized with the preview so the inbox can show "Amara: ..." without a join
   // Set only for an organizer-created "event chat" — auto-fills with ticket/RSVP
   // holders as they buy in, and auto-dissolves 7 days after the event (see
   // startEventGroupDissolveJob in server/index.ts).

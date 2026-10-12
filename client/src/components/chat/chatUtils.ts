@@ -82,3 +82,17 @@ export function seenStatus(
   if (!conv.isGroup) return { label: `Seen ${format(new Date(seen[0].lastReadAt as Date), "HH:mm")}` };
   return { label: `Seen by ${seen.length}` };
 }
+
+/**
+ * Who sent the last message, for the inbox preview: "You" for your own, the sender's first name in
+ * groups. Nothing for the other person in a direct chat (the row title already says who it is) or when
+ * the sender has since left the group.
+ */
+export function lastSenderLabel(conv: ConversationWithDetails, meId: string): string | null {
+  const senderId = conv.lastMessageSenderId;
+  if (!senderId || !conv.lastMessagePreview) return null;
+  if (senderId === meId) return "You";
+  if (!conv.isGroup) return null;
+  const sender = conv.participants.find((p) => p.userId === senderId)?.user;
+  return sender ? personName(sender).split(" ")[0] : null;
+}

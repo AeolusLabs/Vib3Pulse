@@ -3,7 +3,7 @@ import { addDays, differenceInCalendarDays, format } from "date-fns";
 import { Users } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import type { Event } from "@shared/schema";
-import { conversationTitle, initialOf, inboxTime, otherParticipant, personName } from "./chatUtils";
+import { conversationTitle, initialOf, inboxTime, lastSenderLabel, otherParticipant, personName } from "./chatUtils";
 import { EVENT_CHAT_CLOSES_AFTER_DAYS, type ConversationWithDetails } from "./types";
 
 interface ConversationRowProps {
@@ -67,6 +67,7 @@ export default function ConversationRow({ conv, meId, active, onOpen }: Conversa
   const { data: event } = useQuery<Event>({ queryKey: ["/api/events", conv.eventId], enabled: !!conv.eventId });
   const other = !conv.isGroup ? otherParticipant(conv, meId)?.user : undefined;
   const closing = event ? eventChatClosing(event.eventDate) : null;
+  const sender = lastSenderLabel(conv, meId);
 
   return (
     <button
@@ -87,7 +88,14 @@ export default function ConversationRow({ conv, meId, active, onOpen }: Conversa
           {other?.userType === "organizer" && <span className="flex-none text-[11px] font-semibold uppercase tracking-wider text-primary">Organiser</span>}
         </span>
         <span className={`block truncate text-[15px] ${unread ? "font-medium text-foreground" : "text-muted-foreground"}`}>
-          {conv.lastMessagePreview ?? (closing ? closing : "Say hello")}
+          {conv.lastMessagePreview ? (
+            <>
+              {sender && <span className={unread ? "text-foreground" : ""}>{sender}: </span>}
+              {conv.lastMessagePreview}
+            </>
+          ) : (
+            closing ?? "Say hello"
+          )}
         </span>
         {conv.eventId && closing && conv.lastMessagePreview && <span className="block truncate text-xs text-muted-foreground">{closing}</span>}
       </span>

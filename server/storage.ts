@@ -5929,25 +5929,30 @@ export class DbStorage implements IStorage {
     return Number((result.rows[0] as { count: string })?.count || 0);
   }
 
+  // The inbox snippet for a message. Kept in one place so a send and a post-delete refresh agree.
+  private conversationPreview(content: string | null | undefined, messageType: string | null | undefined): string {
+    return content?.trim()
+      ? content.length > 60 ? content.substring(0, 60) + '…' : content
+      : messageType === 'poll' ? 'Created a poll'
+      : messageType === 'image' ? 'Sent an image'
+      : messageType === 'video' ? 'Sent a video'
+      : messageType === 'event' ? 'Shared an event'
+      : messageType === 'venue' ? 'Shared a venue'
+      : messageType === 'post' ? 'Shared a post'
+      : messageType === 'story_reply' ? 'Replied to your story'
+      : 'Sent a message';
+  }
+
   // Conversation messages
   async sendConversationMessage(message: InsertConversationMessage): Promise<ConversationMessage> {
     const [result] = await db.insert(conversationMessages).values(message).returning();
 
-    const preview = message.content?.trim()
-      ? message.content.length > 60 ? message.content.substring(0, 60) + '…' : message.content
-      : message.messageType === 'poll' ? 'Created a poll'
-      : message.messageType === 'image' ? 'Sent an image'
-      : message.messageType === 'video' ? 'Sent a video'
-      : message.messageType === 'event' ? 'Shared an event'
-      : message.messageType === 'venue' ? 'Shared a venue'
-      : message.messageType === 'post' ? 'Shared a post'
-      : message.messageType === 'story_reply' ? 'Replied to your story'
-      : 'Sent a message';
+    const preview = this.conversationPreview(message.content, message.messageType);
 
     // Update conversation metadata and increment unread for all other participants in parallel
     await Promise.all([
       db.update(conversations)
-        .set({ lastMessageAt: new Date(), lastMessagePreview: preview })
+        .set({ lastMessageAt: new Date(), lastMessagePreview: preview, lastMessageSenderId: message.senderId })
         .where(eq(conversations.id, message.conversationId)),
       db.update(conversationParticipants)
         .set({ unreadCount: sql`${conversationParticipants.unreadCount} + 1` })
@@ -6067,10 +6072,28 @@ export class DbStorage implements IStorage {
   }
 
   async deleteConversationMessage(messageId: string): Promise<void> {
-    await db
+    const [deleted] = await db
       .update(conversationMessages)
       .set({ isDeleted: true })
-      .where(eq(conversationMessages.id, messageId));
+      .where(eq(conversationMessages.id, messageId))
+      .returning({ conversationId: conversationMessages.conversationId });
+    if (!deleted) return;
+
+    // The inbox snippet is denormalized onto the conversation, so deleting the latest message would
+    // otherwise leave its text visible there to everyone. Re-point it at the latest message that remains.
+    const [latest] = await db
+      .select({ content: conversationMessages.content, messageType: conversationMessages.messageType, senderId: conversationMessages.senderId })
+      .from(conversationMessages)
+      .where(and(eq(conversationMessages.conversationId, deleted.conversationId), eq(conversationMessages.isDeleted, false)))
+      .orderBy(desc(conversationMessages.createdAt))
+      .limit(1);
+    await db
+      .update(conversations)
+      .set({
+        lastMessagePreview: latest ? this.conversationPreview(latest.content, latest.messageType) : null,
+        lastMessageSenderId: latest?.senderId ?? null,
+      })
+      .where(eq(conversations.id, deleted.conversationId));
   }
 
   // Polls
