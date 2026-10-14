@@ -635,6 +635,109 @@ try {
     setVoiceServiceForTests(undefined);
   }
 
+  // ---------------- Live screen: one person at a time streams camera + mic, granted by the host
+  {
+    const { FakeVoice } = await import("../server/rooms/voice/fakeVoice");
+    const { setVoiceServiceForTests } = await import("../server/rooms/voice/voiceService");
+    const { sweepVoice, stopAllLive, shutdownVoice } = await import("../server/rooms/stage");
+    const fake = new FakeVoice();
+    setVoiceServiceForTests(fake);
+    tuning.stage = { rate: 1000, burst: 1000 };
+    const calls = (roomId: string, userId: string) => fake.calls.filter((c) => c.op === "setCanPublish" && c.roomId === roomId && c.userId === userId);
+    const lastLive = (c: Client) => [...c.msgs].reverse().find((m) => m.type === "room:live");
+    const liveNow = async (c: Client, pred: (l: any) => boolean) => { await until(async () => { const l = lastLive(c); return !!l && pred(l); }); const l = lastLive(c); return !!l && pred(l); };
+    const sendLive = (c: Client, action: string, targetId?: string) => { c.drain(); c.send({ type: "room:live", action, ...(targetId ? { targetId } : {}) }); };
+    const sendStage = (c: Client, action: string, targetId?: string) => { c.send({ type: "room:stage", action, ...(targetId ? { targetId } : {}) }); };
+    const notice = async (c: Client, code: string) => !!(await c.waitFor((m) => m.type === "room:notice" && m.code === code));
+
+    const LHost = await mk("lv_host"), LA = await mk("lv_a"), LB = await mk("lv_b"), LC = await mk("lv_c");
+    const LR = await liveRoom(LHost, { title: "live screen" });
+    await rs.setVoiceEnabled(LR.id, true); await rs.setLiveVideo(LR.id, true);
+    const lh = await connect(LHost), la = await connect(LA), lb = await connect(LB), lc = await connect(LC);
+    const lst = await join(lh, LR.id);
+    check("live: room:state carries liveVideo, holder and asks", lst?.room?.liveVideo === true && lst.holder === null && Array.isArray(lst.asks) && lst.asks.length === 0, JSON.stringify([lst?.room?.liveVideo, lst?.holder, lst?.asks]));
+    await join(la, LR.id); await join(lb, LR.id); await join(lc, LR.id);
+    sendStage(lh, "accept", LA); sendStage(lh, "accept", LB);
+    await until(async () => roomHub.stageOf(LR.id).stage.length === 2);
+
+    sendLive(lc, "ask");
+    check("live: asking from off the stage is refused (NOT_ON_STAGE)", await notice(lc, "NOT_ON_STAGE"));
+    sendLive(la, "ask");
+    check("live: an on-stage guest asks, everyone sees the ask", await liveNow(lh, (l) => l.asks.includes(LA) && l.holder === null) && await liveNow(lc, (l) => l.asks.includes(LA)));
+    sendLive(la, "grant", LB);
+    check("live: a guest cannot grant (NOT_ALLOWED)", await notice(la, "NOT_ALLOWED"));
+
+    sendLive(lh, "grant", LA);
+    check("live: the host grants: holder set, ask cleared, room told", await liveNow(lb, (l) => l.holder === LA && !l.asks.includes(LA)));
+    check("live: LiveKit gives the holder the camera", await until(async () => calls(LR.id, LA).some((c) => c.canPublish === true && c.camera === true)));
+    check("live: nobody else got the camera", calls(LR.id, LB).every((c) => !c.camera) && calls(LR.id, LHost).every((c) => !c.camera));
+
+    sendLive(lh, "grant", LB);
+    check("live: a second grant replaces the holder", await liveNow(lc, (l) => l.holder === LB));
+    const lastA = calls(LR.id, LA).at(-1)!, firstB = calls(LR.id, LB).find((c) => c.camera)!;
+    check("live: the old holder loses the camera before the new holder gets it", !!firstB && !lastA.camera && fake.calls.indexOf(lastA) < fake.calls.indexOf(firstB));
+
+    sendLive(lh, "stop");
+    check("live: the host stops the stream: holder cleared, camera removed", await liveNow(la, (l) => l.holder === null) && await until(async () => !calls(LR.id, LB).at(-1)!.camera));
+    sendLive(lh, "grant", LA); await liveNow(lh, (l) => l.holder === LA);
+    sendLive(la, "stop");
+    check("live: the holder may stop their own stream", await liveNow(lh, (l) => l.holder === null));
+
+    sendLive(lh, "grant", LA); await liveNow(lh, (l) => l.holder === LA);
+    lh.drain(); la.send({ type: "room:leave" });
+    check("live: the holder leaving clears the screen", await liveNow(lh, (l) => l.holder === null));
+    await join(la, LR.id); sendStage(lh, "accept", LA); await until(async () => roomHub.stageOf(LR.id).stage.includes(LA));
+
+    sendLive(lh, "grant", LA); await liveNow(lh, (l) => l.holder === LA);
+    lh.send({ type: "room:mod", action: "kick", targetId: LA });
+    check("live: kicking the holder clears the screen and the camera", await liveNow(lh, (l) => l.holder === null) && await until(async () => fake.calls.some((c) => c.op === "remove" && c.userId === LA)));
+    await join(la, LR.id); await rs.setMemberFlag(LR.id, LA, { kicked: false } as any).catch(() => {});
+
+    // late joiner sees the holder, never an age
+    sendLive(lh, "grant", LB); await liveNow(lh, (l) => l.holder === LB);
+    const late = await mk("lv_late"); const lt = await connect(late);
+    const lts = await join(lt, LR.id);
+    check("live: a late joiner's room:state has the holder and no ages", lts?.holder === LB && !/"age"/.test(JSON.stringify(lts)), JSON.stringify(lts)?.slice(0, 200));
+
+    // switching live video off (or voice off) clears everything
+    roomHub.setLiveVideoOn(LR.id, false);
+    await stopAllLive(LR.id);
+    check("live: live video off clears the holder and removes the camera", await liveNow(lh, (l) => l.holder === null) && !calls(LR.id, LB).at(-1)!.camera);
+    sendLive(lb, "ask");
+    check("live: asking while live video is off is refused (LIVE_OFF)", await notice(lb, "LIVE_OFF"));
+    roomHub.setLiveVideoOn(LR.id, true);
+    sendLive(lh, "grant", LB); await liveNow(lh, (l) => l.holder === LB);
+    await shutdownVoice(LR.id);
+    check("live: voice off clears the holder, live video and persists it off", await liveNow(lh, (l) => l.holder === null) && !roomHub.liveVideoOn(LR.id) && (await rs.getRoom(LR.id))?.liveVideo === false);
+
+    // sweep: someone with a camera who is not the holder loses it
+    await rs.setVoiceEnabled(LR.id, true); roomHub.setVoiceOn(LR.id, true); await rs.setLiveVideo(LR.id, true); roomHub.setLiveVideoOn(LR.id, true);
+    fake.participants = [{ identity: LC, canPublish: false, canCamera: true }];
+    fake.calls.length = 0;
+    await sweepVoice(LR.id);
+    check("live: the sweep removes a camera permission from a non-holder", calls(LR.id, LC).some((c) => c.canPublish === false && !c.camera));
+    fake.participants = [];
+
+    // the teen rule: an adult arriving takes the screen from a teen holder
+    const TH = await mk("lv_teenhost", yearsAgo(16)), T1 = await mk("lv_teen1", yearsAgo(15)), AD = await mk("lv_adult", yearsAgo(30));
+    const TR = await liveRoom(TH, { title: "teen live" }); await rs.setVoiceEnabled(TR.id, true); await rs.setLiveVideo(TR.id, true);
+    const th = await connect(TH), t1 = await connect(T1), ad = await connect(AD);
+    await join(th, TR.id); await join(t1, TR.id);
+    sendStage(th, "accept", T1); await until(async () => roomHub.stageOf(TR.id).stage.includes(T1));
+    sendLive(th, "grant", T1);
+    check("live: an all-teen room lets a teen on stage hold the screen", await liveNow(th, (l) => l.holder === T1));
+    await join(ad, TR.id);
+    check("live: an adult arriving clears the teen holder and takes the camera away", await liveNow(th, (l) => l.holder === null) && await until(async () => !calls(TR.id, T1).at(-1)!.camera));
+
+    // live video off for the room: asks and grants are refused
+    const NH = await mk("lv_nolive"), NG = await mk("lv_noliveg"); const NR = await liveRoom(NH, { title: "voice only" }); await rs.setVoiceEnabled(NR.id, true);
+    const nh = await connect(NH), ng = await connect(NG); await join(nh, NR.id); await join(ng, NR.id);
+    sendStage(nh, "accept", NG); await until(async () => roomHub.stageOf(NR.id).stage.includes(NG));
+    sendLive(nh, "grant", NG);
+    check("live: a room without live video refuses a grant (LIVE_OFF)", await notice(nh, "LIVE_OFF"));
+    setVoiceServiceForTests(undefined);
+  }
+
   // ---------------- link screens off: the WebSocket refuses them (clearing is fine)
   {
     roomFeatures.linkScreens = false;

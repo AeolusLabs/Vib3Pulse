@@ -16,13 +16,12 @@ import { events, follows, users, venues, type Room, type User } from "@shared/sc
 import { ageFromDob, minAgeForLimit } from "@shared/age";
 import { resolveScreen } from "@shared/screen";
 import { ROOM_LIMITS, resolveRoomPrivacy, validateRoomInput, validateRoomPrivacy } from "@shared/rooms";
-import { emptyLive } from "@shared/liveScreen";
 import { canHostRoom, canJoinRoom } from "@shared/roomRules";
 import * as rs from "./roomStorage";
 import { canViewRoom, hostSummary, mutualFollow, plainText, publicRoom, sha256 } from "./roomAccess";
 import { TokenBucket } from "./rateLimit";
 import { getVoiceService } from "./voice/voiceService";
-import { afterRoleChange, canPublishNow, shutdownVoice } from "./stage";
+import { afterRoleChange, canPublishNow, shutdownVoice, stopAllLive } from "./stage";
 import { applyMod, endRoom, enforceAgeLimit, expectHost, interactionVerdict, notifyScreen } from "./roomSocket";
 import { roomHub } from "./RoomHub";
 import { roomFeatures } from "./features";
@@ -443,8 +442,8 @@ export function registerRoomRoutes(app: Express): void {
       }
       const room = await rs.setLiveVideo(ctx.room.id, enabled);
       roomHub.setLiveVideoOn(room.id, enabled);
-      if (!enabled) roomHub.setLive(room.id, emptyLive);
       roomHub.broadcast(room.id, { type: "room:livevideo", enabled });
+      if (!enabled) await stopAllLive(room.id);
       res.json({ room: { ...publicRoom(room), host: hostSummary(ctx.host) } });
     } catch (e) {
       console.error("[rooms] live video switch failed:", e);

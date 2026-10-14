@@ -12,7 +12,7 @@ import * as rs from "./roomStorage";
 import { canViewRoom, mutualFollow, plainText, publicRoom } from "./roomAccess";
 import { roomHub, type HubMember } from "./RoomHub";
 import { TokenBucket } from "./rateLimit";
-import { dropFromVoice, handleStage, reconcileVoice, restoreStageOnJoin, sweepAllVoiceRooms } from "./stage";
+import { dropFromVoice, handleLive, handleStage, reconcileVoice, restoreStageOnJoin, sweepAllVoiceRooms } from "./stage";
 import { getVoiceService } from "./voice/voiceService";
 import { roomFeatures } from "./features";
 
@@ -142,7 +142,8 @@ async function sendState(ws: RoomClient, room: Room, you: HubMember) {
       // The list is capped, but the host must always be able to see (and take the mic from) everyone on stage or asking for it.
       const first = roomHub.members(room.id, MEMBER_LIST_CAP);
       const s = roomHub.stageOf(room.id);
-      const wanted = new Set([...s.stage, ...s.hands]);
+      const live = roomHub.liveOf(room.id);
+      const wanted = new Set([...s.stage, ...s.hands, ...live.asks, ...(live.holder ? [live.holder] : [])]);
       const have = new Set(first.map((m) => m.userId));
       return [...first, ...roomHub.members(room.id).filter((m) => wanted.has(m.userId) && !have.has(m.userId))].map(memberPayload);
     })(),
@@ -152,6 +153,7 @@ async function sendState(ws: RoomClient, room: Room, you: HubMember) {
     you: { role: you.role, muted: you.muted },
     voiceEnabled: room.voiceEnabled,
     ...(() => { const s = roomHub.stageOf(room.id); return { stage: s.stage, hands: s.hands }; })(),
+    ...roomHub.liveOf(room.id),
     nowPlaying: room.nowPlaying ?? null,
   });
 }
@@ -203,6 +205,7 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
     me = { userId, role, muted: freshMember?.muted ?? false, joinedAt: Date.now(), send: (m) => fanout(userId, m), info: memberInfo(user), age: ageFromDob(user.dateOfBirth) };
     roomHub.join(roomId, me);
     roomHub.setVoiceOn(roomId, fresh.voiceEnabled);
+    roomHub.setLiveVideoOn(roomId, fresh.voiceEnabled && fresh.liveVideo);
     roomHub.broadcast(roomId, { type: "room:joined", member: memberPayload(me) }, userId);
   }
   // Register the socket in the same synchronous block as the hub insert: a close during the awaits below must find it,
@@ -407,6 +410,12 @@ export async function handleRoomMessage(ws: RoomClient, userId: string, msg: any
       case "room:stage": {
         if (!bucketsFor(userId).stage.take()) return notice(ws, "RATE_LIMITED");
         const r = await handleStage(userId, roomId, msg);
+        if (!r.ok) notice(ws, r.code);
+        return;
+      }
+      case "room:live": {
+        if (!bucketsFor(userId).stage.take()) return notice(ws, "RATE_LIMITED");
+        const r = await handleLive(userId, roomId, msg);
         if (!r.ok) notice(ws, r.code);
         return;
       }

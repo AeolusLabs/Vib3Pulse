@@ -7,6 +7,7 @@
 //  - LiveKit is told BEFORE the database is written, and neither failing may skip the other: a revocation must never be lost
 //    because a database write threw.
 import { applyStage, canBeOnStage, MAX_SPEAKERS, type StageAction, type StageState } from "@shared/stage";
+import { applyLive, dropFromLive, emptyLive, type LiveAction } from "@shared/liveScreen";
 import { roomHub, type HubMember } from "./RoomHub";
 import { getVoiceService } from "./voice/voiceService";
 import * as rs from "./roomStorage";
@@ -36,11 +37,81 @@ export function canPublishNow(roomId: string, userId: string): boolean {
   return speaker && eligible(m, roomId);
 }
 
+/** The one person holding the room's live screen may also publish a camera, as long as they may speak right now. */
+export function canCameraNow(roomId: string, userId: string): boolean {
+  return roomHub.liveVideoOn(roomId) && roomHub.liveOf(roomId).holder === userId && canPublishNow(roomId, userId);
+}
+
 const publishChange = async (roomId: string, userId: string, canPublish: boolean) => {
   const m = roomHub.get(roomId, userId);
   if (m) m.publish = canPublish;
-  await soft("setCanPublish", getVoiceService()?.setCanPublish(roomId, userId, canPublish));
+  await soft("setCanPublish", getVoiceService()?.setCanPublish(roomId, userId, canPublish, canPublish && canCameraNow(roomId, userId)));
 };
+
+const onStage = (m: HubMember, roomId: string) => m.role !== "guest" || roomHub.stageOf(roomId).stage.includes(m.userId);
+
+const broadcastLive = (roomId: string) => {
+  const { holder, asks } = roomHub.liveOf(roomId);
+  roomHub.broadcast(roomId, { type: "room:live", holder, asks });
+};
+
+/**
+ * Keeps the live screen honest after anything changed who is present, on stage or eligible: a holder or asker who is gone,
+ * off the stage, turned ineligible (an adult arrived) or whose room lost live video is dropped, and a dropped holder loses the
+ * camera in LiveKit. Runs inside the room lock, after the stage and members are already updated in memory.
+ */
+async function reconcileLiveLocked(roomId: string): Promise<void> {
+  const cur = roomHub.liveOf(roomId);
+  if (!cur.holder && cur.asks.length === 0) return;
+  const liveOn = roomHub.voiceOn(roomId) && roomHub.liveVideoOn(roomId);
+  const fine = (id: string) => { const m = roomHub.get(roomId, id); return liveOn && !!m && onStage(m, roomId) && eligible(m, roomId); };
+  const next = { holder: cur.holder && fine(cur.holder) ? cur.holder : null, asks: cur.asks.filter(fine) };
+  if (next.holder === cur.holder && next.asks.length === cur.asks.length) return;
+  roomHub.setLive(roomId, next);
+  broadcastLive(roomId);
+  if (cur.holder && !next.holder && roomHub.get(roomId, cur.holder)) await publishChange(roomId, cur.holder, canPublishNow(roomId, cur.holder));
+}
+
+const LIVE_ACTIONS: readonly LiveAction[] = ["ask", "withdraw", "grant", "revoke", "stop"];
+
+/** Handles one `room:live` message. Returns a refusal code for roomSocket to send as a notice. */
+export function handleLive(userId: string, roomId: string, msg: any): Promise<{ ok: true } | { ok: false; code: string }> {
+  return withRoomLock(roomId, async () => {
+    const action = msg?.action as LiveAction;
+    if (!LIVE_ACTIONS.includes(action)) return { ok: false as const, code: "BAD_REQUEST" };
+    const actor = roomHub.get(roomId, userId);
+    if (!actor) return { ok: false as const, code: "NOT_IN_ROOM" };
+    // asking and withdrawing are always about yourself; grant, revoke and stop name their target
+    const targetId = action !== "ask" && action !== "withdraw" && typeof msg.targetId === "string" && msg.targetId ? msg.targetId : userId;
+    const target = roomHub.get(roomId, targetId);
+    const before = roomHub.liveOf(roomId);
+    const r = applyLive(before, action, {
+      actorId: userId, actorRole: actor.role, targetId, targetPresent: !!target,
+      targetOnStage: !!target && onStage(target, roomId), targetEligible: !!target && eligible(target, roomId),
+      liveOn: roomHub.voiceOn(roomId) && roomHub.liveVideoOn(roomId),
+    });
+    if (!r.ok) return { ok: false as const, code: r.code };
+
+    roomHub.setLive(roomId, r.state);
+    broadcastLive(roomId);
+    // The old holder loses the camera before the new one gets it: never two cameras at once.
+    for (const id of [before.holder, r.state.holder]) {
+      if (id && before.holder !== r.state.holder && roomHub.get(roomId, id)) await publishChange(roomId, id, canPublishNow(roomId, id));
+    }
+    return { ok: true as const };
+  });
+}
+
+/** Live video was switched off (or the room lost voice): nobody holds the screen or is waiting for it, and the camera goes. */
+export function stopAllLive(roomId: string): Promise<void> {
+  return withRoomLock(roomId, async () => {
+    const cur = roomHub.liveOf(roomId);
+    if (!cur.holder && cur.asks.length === 0) return;
+    roomHub.setLive(roomId, emptyLive);
+    broadcastLive(roomId);
+    if (cur.holder && roomHub.get(roomId, cur.holder)) await publishChange(roomId, cur.holder, canPublishNow(roomId, cur.holder));
+  });
+}
 
 const broadcastStage = (roomId: string) => {
   const { stage, hands } = roomHub.stageOf(roomId);
@@ -76,6 +147,7 @@ export function handleStage(userId: string, roomId: string, msg: any): Promise<{
     const removed = before.stage.filter((id) => !r.state.stage.includes(id));
     for (const id of added) { await publishChange(roomId, id, true); await soft("setOnStage", rs.setOnStage(roomId, id, true)); }
     for (const id of removed) { await publishChange(roomId, id, false); await soft("setOnStage", rs.setOnStage(roomId, id, false)); }
+    await reconcileLiveLocked(roomId);
     return { ok: true as const };
   });
 }
@@ -94,6 +166,9 @@ export function dropFromVoice(roomId: string, userId: string, keepRight: boolean
       roomHub.setStage(roomId, next);
       broadcastStage(roomId);
     }
+    const live = roomHub.liveOf(roomId);
+    const liveNext = dropFromLive(live, userId);
+    if (liveNext.holder !== live.holder || liveNext.asks.length !== live.asks.length) { roomHub.setLive(roomId, liveNext); broadcastLive(roomId); } // the camera goes with removeParticipant below
     await soft("removeParticipant", getVoiceService()?.removeParticipant(roomId, userId));
     if (!keepRight) await soft("setOnStage", rs.setOnStage(roomId, userId, false));
   });
@@ -129,6 +204,7 @@ export function reconcileVoice(roomId: string): Promise<void> {
     }
     for (const id of demoted) { await publishChange(roomId, id, false); await soft("setOnStage", rs.setOnStage(roomId, id, false)); }
     for (const [id, ok] of toggles) await publishChange(roomId, id, ok);
+    await reconcileLiveLocked(roomId);
   });
 }
 
@@ -159,6 +235,7 @@ export function afterRoleChange(roomId: string, userId: string): Promise<void> {
     }
     if (roomHub.get(roomId, userId)) await publishChange(roomId, userId, canPublishNow(roomId, userId));
     await soft("setOnStage", rs.setOnStage(roomId, userId, false));
+    await reconcileLiveLocked(roomId);
   });
 }
 
@@ -170,12 +247,12 @@ export function sweepVoice(roomId: string): Promise<void> {
   return withRoomLock(roomId, async () => {
     const svc = getVoiceService();
     if (!svc || !roomHub.voiceOn(roomId)) return;
-    let present: Array<{ identity: string; canPublish: boolean }>;
+    let present: Array<{ identity: string; canPublish: boolean; canCamera: boolean }>;
     try { present = await svc.listParticipants(roomId); } catch (e) { log("listParticipants")(e); return; }
     for (const p of present) {
       if (!roomHub.get(roomId, p.identity)) { await soft("removeParticipant", svc.removeParticipant(roomId, p.identity)); continue; }
       const want = canPublishNow(roomId, p.identity);
-      if (p.canPublish !== want) await publishChange(roomId, p.identity, want);
+      if (p.canPublish !== want || p.canCamera !== canCameraNow(roomId, p.identity)) await publishChange(roomId, p.identity, want);
     }
   });
 }
@@ -188,7 +265,12 @@ export async function sweepAllVoiceRooms(): Promise<void> {
 export async function shutdownVoice(roomId: string): Promise<void> {
   roomHub.setStage(roomId, { stage: [], hands: [], invited: [] });
   roomHub.setVoiceOn(roomId, false);
+  roomHub.setLive(roomId, emptyLive);
+  roomHub.setLiveVideoOn(roomId, false);
   broadcastStage(roomId);
+  broadcastLive(roomId);
+  roomHub.broadcast(roomId, { type: "room:livevideo", enabled: false });
   await soft("deleteRoom", getVoiceService()?.deleteRoom(roomId));
   await soft("clearStage", rs.clearStage(roomId));
+  await soft("setLiveVideo", rs.setLiveVideo(roomId, false));
 }
