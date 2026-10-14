@@ -6,8 +6,12 @@ export interface Dev { deviceId: string; label: string }
  * until permission is given) get "Camera 2" style labels, numbered by position among the usable ones.
  */
 export function pickDevices(list: Array<{ kind: string; deviceId: string; label: string }>): { cameras: Dev[]; mics: Dev[] } {
-  const of = (kind: string, word: string): Dev[] =>
-    list.filter((d) => d.kind === kind && d.deviceId).map((d, i) => ({ deviceId: d.deviceId, label: d.label || `${word} ${i + 1}` }));
+  const of = (kind: string, word: string): Dev[] => {
+    const all = list.filter((d) => d.kind === kind);
+    const usable = all.filter((d) => d.deviceId).map((d, i) => ({ deviceId: d.deviceId, label: d.label || `${word} ${i + 1}` }));
+    // Before permission is given the browser lists devices without ids: offer the default one rather than "nothing found".
+    return usable.length > 0 || all.length === 0 ? usable : [{ deviceId: "", label: `Default ${word.toLowerCase()}` }];
+  };
   return { cameras: of("videoinput", "Camera"), mics: of("audioinput", "Microphone") };
 }
 

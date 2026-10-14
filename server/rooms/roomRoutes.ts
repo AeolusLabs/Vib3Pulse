@@ -484,6 +484,8 @@ export function registerRoomRoutes(app: Express): void {
       if (member?.banned) return res.status(403).json({ message: "You can't join this room.", code: "BANNED" });
       const present = roomHub.get(room.id, req.user!.id);
       if (!present) return res.status(403).json({ message: "Join the room first.", code: "NOT_IN_ROOM" });
+      await present.ready; // a joiner who just arrived is still being checked against the teen rule: no token (no video, no audio) until it is done
+      if (roomHub.get(room.id, req.user!.id) !== present) return res.status(403).json({ message: "Join the room first.", code: "NOT_IN_ROOM" });
       const user = await storage.getUser(req.user!.id);
       if (!user) return res.status(404).json({ message: "User not found" });
       const canPublish = canPublishNow(room.id, user.id);

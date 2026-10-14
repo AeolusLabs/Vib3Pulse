@@ -88,6 +88,12 @@ test("pickDevices: cameras and mics only, empty ids dropped, readable fallback l
   assert.deepEqual(r.cameras, [{ deviceId: "c1", label: "FaceTime HD" }, { deviceId: "c2", label: "Camera 2" }]);
   assert.deepEqual(r.mics, [{ deviceId: "m1", label: "Focusrite USB" }, { deviceId: "m2", label: "Microphone 2" }]);
 });
+test("pickDevices: before permission (no ids at all) each kind offers one default entry, so the pickers never say nothing was found", () => {
+  const r = pickDevices([{ kind: "videoinput", deviceId: "", label: "" }, { kind: "audioinput", deviceId: "", label: "" }, { kind: "audiooutput", deviceId: "", label: "" }]);
+  assert.deepEqual(r.cameras, [{ deviceId: "", label: "Default camera" }]);
+  assert.deepEqual(r.mics, [{ deviceId: "", label: "Default microphone" }]);
+  assert.deepEqual(pickDevices([]), { cameras: [], mics: [] });
+});
 test("rememberedDevice: only returns a saved id that is still plugged in; broken storage is null", () => {
   const avail = [{ deviceId: "a", label: "A" }, { deviceId: "b", label: "B" }];
   const store = (v: string | null) => ({ getItem: () => v });
@@ -750,8 +756,12 @@ await (async () => {
     await f.setCanPublish("r", "v", true, true);
     assert.equal("camera" in f.calls[0], false, "ordinary speakers leave no camera flag");
     assert.equal(f.calls[1].camera, true);
-    f.participants = [{ identity: "u", canPublish: true, canCamera: true }];
+    f.participants = [{ identity: "u", canPublish: true, canCamera: true, hasCamera: true }];
     assert.equal((await f.listParticipants("r"))[0].canCamera, true);
+    assert.equal((await f.listParticipants("r"))[0].hasCamera, true);
+    f.failOn = (c) => c.op === "setCanPublish";
+    await assert.rejects(() => f.setCanPublish("r", "z", false));
+    f.failOn = null;
     const hub = new RoomHub();
     assert.deepEqual(hub.liveOf("r"), { holder: null, asks: [] });
     hub.setLive("r", { holder: "u", asks: ["v"] });

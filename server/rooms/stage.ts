@@ -15,7 +15,7 @@ import * as rs from "./roomStorage";
 const ACTIONS: readonly StageAction[] = ["raise", "lower", "invite", "accept", "remove"];
 const log = (what: string) => (e: any) => { console.error(`[voice] ${what} failed:`, e?.message ?? e); };
 /** Awaits a promise and logs instead of throwing: used for the side effects of a change that already happened in memory. */
-const soft = async (what: string, p: Promise<unknown> | undefined) => { try { await p; } catch (e) { log(what)(e); } };
+const soft = async (what: string, p: Promise<unknown> | undefined): Promise<boolean> => { try { await p; return true; } catch (e) { log(what)(e); return false; } };
 
 const locks = new Map<string, Promise<unknown>>();
 function withRoomLock<T>(roomId: string, fn: () => Promise<T>): Promise<T> {
@@ -42,10 +42,10 @@ export function canCameraNow(roomId: string, userId: string): boolean {
   return roomHub.liveVideoOn(roomId) && roomHub.liveOf(roomId).holder === userId && canPublishNow(roomId, userId);
 }
 
-const publishChange = async (roomId: string, userId: string, canPublish: boolean) => {
+const publishChange = async (roomId: string, userId: string, canPublish: boolean): Promise<boolean> => {
   const m = roomHub.get(roomId, userId);
   if (m) m.publish = canPublish;
-  await soft("setCanPublish", getVoiceService()?.setCanPublish(roomId, userId, canPublish, canPublish && canCameraNow(roomId, userId)));
+  return soft("setCanPublish", getVoiceService()?.setCanPublish(roomId, userId, canPublish, canPublish && canCameraNow(roomId, userId)));
 };
 
 const onStage = (m: HubMember, roomId: string) => m.role !== "guest" || roomHub.stageOf(roomId).stage.includes(m.userId);
@@ -96,7 +96,10 @@ export function handleLive(userId: string, roomId: string, msg: any): Promise<{ 
     broadcastLive(roomId);
     // The old holder loses the camera before the new one gets it: never two cameras at once.
     for (const id of [before.holder, r.state.holder]) {
-      if (id && before.holder !== r.state.holder && roomHub.get(roomId, id)) await publishChange(roomId, id, canPublishNow(roomId, id));
+      if (!id || before.holder === r.state.holder || !roomHub.get(roomId, id)) continue;
+      const ok = await publishChange(roomId, id, canPublishNow(roomId, id));
+      // LiveKit refused to take the camera from the old holder: remove them instead, so two cameras are never live at once.
+      if (!ok && id === before.holder) await soft("removeParticipant", getVoiceService()?.removeParticipant(roomId, id));
     }
     return { ok: true as const };
   });
@@ -247,10 +250,12 @@ export function sweepVoice(roomId: string): Promise<void> {
   return withRoomLock(roomId, async () => {
     const svc = getVoiceService();
     if (!svc || !roomHub.voiceOn(roomId)) return;
-    let present: Array<{ identity: string; canPublish: boolean; canCamera: boolean }>;
+    let present: Array<{ identity: string; canPublish: boolean; canCamera: boolean; hasCamera: boolean }>;
     try { present = await svc.listParticipants(roomId); } catch (e) { log("listParticipants")(e); return; }
     for (const p of present) {
       if (!roomHub.get(roomId, p.identity)) { await soft("removeParticipant", svc.removeParticipant(roomId, p.identity)); continue; }
+      // Permissions alone do not stop a track that is already up: a camera nobody may publish is removed along with its owner.
+      if (p.hasCamera && !canCameraNow(roomId, p.identity)) { await soft("removeParticipant", svc.removeParticipant(roomId, p.identity)); continue; }
       const want = canPublishNow(roomId, p.identity);
       if (p.canPublish !== want || p.canCamera !== canCameraNow(roomId, p.identity)) await publishChange(roomId, p.identity, want);
     }

@@ -716,7 +716,24 @@ try {
     fake.calls.length = 0;
     await sweepVoice(LR.id);
     check("live: the sweep removes a camera permission from a non-holder", calls(LR.id, LC).some((c) => c.canPublish === false && !c.camera));
+    fake.participants = [{ identity: LC, canPublish: false, canCamera: false, hasCamera: true }];
+    fake.calls.length = 0;
+    await sweepVoice(LR.id);
+    check("live: the sweep removes someone who is publishing a camera track without holding the screen", fake.calls.some((c) => c.op === "remove" && c.userId === LC));
     fake.participants = [];
+
+    // a failed revoke must not leave two cameras: the old holder is removed from LiveKit instead
+    const FH = await mk("lv_fh"), FA = await mk("lv_fa"), FB = await mk("lv_fb");
+    const FR = await liveRoom(FH, { title: "failed revoke" }); await rs.setVoiceEnabled(FR.id, true); await rs.setLiveVideo(FR.id, true);
+    const fh = await connect(FH), fa = await connect(FA), fb = await connect(FB);
+    await join(fh, FR.id); await join(fa, FR.id); await join(fb, FR.id);
+    sendStage(fh, "accept", FA); sendStage(fh, "accept", FB); await until(async () => roomHub.stageOf(FR.id).stage.length === 2);
+    sendLive(fh, "grant", FA); await liveNow(fh, (l) => l.holder === FA);
+    fake.failOn = (c) => c.op === "setCanPublish" && c.userId === FA && !c.camera;
+    fake.calls.length = 0;
+    sendLive(fh, "grant", FB);
+    check("live: if taking the camera from the old holder fails, they are removed from LiveKit instead", await liveNow(fh, (l) => l.holder === FB) && await until(async () => fake.calls.some((c) => c.op === "remove" && c.userId === FA)));
+    fake.failOn = null;
 
     // the teen rule: an adult arriving takes the screen from a teen holder
     const TH = await mk("lv_teenhost", yearsAgo(16)), T1 = await mk("lv_teen1", yearsAgo(15)), AD = await mk("lv_adult", yearsAgo(30));

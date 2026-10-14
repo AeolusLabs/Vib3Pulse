@@ -37,9 +37,9 @@ export class LiveKitVoice implements VoiceService {
     await this.rooms().removeParticipant(roomNameFor(roomId), userId).catch(ignoreMissing);
   }
 
-  async listParticipants(roomId: string): Promise<Array<{ identity: string; canPublish: boolean; canCamera: boolean }>> {
+  async listParticipants(roomId: string): Promise<Array<{ identity: string; canPublish: boolean; canCamera: boolean; hasCamera: boolean }>> {
     const list = await this.rooms().listParticipants(roomNameFor(roomId)).catch((e) => { ignoreMissing(e); return []; });
-    return list.map((p) => ({ identity: p.identity, canPublish: !!p.permission?.canPublish, canCamera: !!p.permission?.canPublish && !!p.permission?.canPublishSources?.includes(TrackSource.CAMERA) }));
+    return list.map((p) => ({ identity: p.identity, canPublish: !!p.permission?.canPublish, canCamera: !!p.permission?.canPublish && !!p.permission?.canPublishSources?.includes(TrackSource.CAMERA), hasCamera: !!p.tracks?.some((t) => t.source === TrackSource.CAMERA) }));
   }
 
   async deleteRoom(roomId: string): Promise<void> {

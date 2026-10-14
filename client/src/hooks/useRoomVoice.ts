@@ -2,7 +2,7 @@
 // Audio and the microphone only start from a user's tap. The server's permission changes arrive as LiveKit events,
 // so `canPublish` here is always what LiveKit says, never a guess from the stage list.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Room, RoomEvent, Track, TrackEvent, type RemoteTrack } from "livekit-client";
+import { Room, RoomEvent, Track, TrackEvent, type LocalVideoTrack, type RemoteTrack } from "livekit-client";
 import { apiRequest } from "@/lib/queryClient";
 import { voiceStatus, type VoiceStatus } from "@/lib/voiceState";
 
@@ -30,7 +30,7 @@ export interface RoomVoice {
   stopCamera(): Promise<void>;
 }
 
-export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteToken?: string }): RoomVoice {
+export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteToken?: string; /** The holder's camera or microphone went away mid-stream: tell the room to take the screen back. */ onCameraLost?: () => void }): RoomVoice {
   const [unlocked, setUnlocked] = useState(false);
   const [connected, setConnected] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -125,31 +125,49 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
 
   useEffect(() => hangUp, [hangUp]); // leaving the page ends the session
 
+  const micStartedByLive = useRef(false); // Go live turned the microphone on: Stop live turns it off again
+  const ended = useRef<{ track: LocalVideoTrack; handler: () => void } | null>(null);
+  const onCameraLost = useRef(opts.onCameraLost);
+  onCameraLost.current = opts.onCameraLost;
+
   const stopCamera = useCallback(async () => {
     const room = lk.current;
     setCameraOn(false); setLocalVideo(null);
+    if (ended.current) { ended.current.track.off(TrackEvent.Ended, ended.current.handler); ended.current = null; }
     if (!room) return;
-    await room.localParticipant.setCameraEnabled(false).catch(() => {});
+    const lp = room.localParticipant;
+    // Unpublish (not just mute): the next Go live must open the chosen device afresh, and nothing may keep sending behind a "Stop".
+    const cam = lp.getTrackPublication(Track.Source.Camera)?.track;
+    if (cam) await lp.unpublishTrack(cam, true).catch(() => {});
+    if (micStartedByLive.current) { micStartedByLive.current = false; await lp.setMicrophoneEnabled(false).catch(() => {}); setMicOn(false); }
   }, []);
 
   const startCamera = useCallback(async (devices: { cameraId?: string; micId?: string }) => {
-    const room = lk.current;
-    if (!room) return;
     setCameraError(null);
+    if (!lk.current) await unlock(); // the Go live tap also joins the room's media if the person never tapped to hear it
+    const room = lk.current;
+    if (!room) { setCameraError("Couldn't connect to the room's video. Check your connection and try again."); return; }
+    const lp = room.localParticipant;
     try {
       // 720p at 30 frames a second: keeps the room's bandwidth (and our LiveKit bill) predictable.
-      await room.localParticipant.setCameraEnabled(true, { deviceId: devices.cameraId, resolution: { width: 1280, height: 720, frameRate: 30 } });
-      await room.localParticipant.setMicrophoneEnabled(true, devices.micId ? { deviceId: devices.micId } : undefined);
-      const track = room.localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack;
+      await lp.setCameraEnabled(true, { deviceId: devices.cameraId, resolution: { width: 1280, height: 720, frameRate: 30 } });
+      if (devices.cameraId) await room.switchActiveDevice("videoinput", devices.cameraId).catch(() => false);
+      const micWasOn = lp.isMicrophoneEnabled;
+      if (micWasOn) { if (devices.micId) await room.switchActiveDevice("audioinput", devices.micId).catch(() => false); }
+      else await lp.setMicrophoneEnabled(true, devices.micId ? { deviceId: devices.micId } : undefined);
+      micStartedByLive.current = !micWasOn;
+      const track = lp.getTrackPublication(Track.Source.Camera)?.videoTrack;
       if (!track) throw new Error("no camera track");
-      track.on(TrackEvent.Ended, () => { setCameraError("Your camera or microphone was disconnected, so the stream stopped."); void stopCamera(); });
+      const handler = () => { setCameraError("Your camera or microphone was disconnected, so the stream stopped."); void stopCamera(); onCameraLost.current?.(); };
+      track.on(TrackEvent.Ended, handler);
+      ended.current = { track, handler };
       setLocalVideo(track as unknown as ScreenTrack);
       setCameraOn(true); setMicOn(true);
     } catch (e: any) {
-      await room.localParticipant.setCameraEnabled(false).catch(() => {});
+      await lp.setCameraEnabled(false).catch(() => {});
       setCameraError(/denied|permission|NotAllowed/i.test(String(e?.name) + String(e?.message)) ? "Your browser blocked the camera or microphone. Allow it in the address bar and try again." : "Couldn't start your camera. Check it is connected and not used by another app.");
     }
-  }, [stopCamera]);
+  }, [stopCamera, unlock]);
 
   return { status: voiceStatus({ voiceEnabled: opts.enabled, unlocked, connected, failed, canPublish, micOn }), unlock, canPublish, micOn, toggleMic, activeSpeakers: active, error, micError, video, localVideo, cameraOn, cameraError, startCamera, stopCamera };
 }

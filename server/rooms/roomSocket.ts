@@ -215,10 +215,13 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
   set.add(ws);
   if (role === "host") { clearTimeout(endTimers.get(roomId)); endTimers.delete(roomId); }
   if (isNew) {
-    try {
-      await restoreStageOnJoin(roomId, userId, freshMember?.onStage === true);
-      await reconcileVoice(roomId); // an adult arriving takes teen speakers off the stage
-    } catch (e) { console.error("[voice] join reconcile failed:", e instanceof Error ? e.message : e); }
+    me.ready = (async () => {
+      try {
+        await restoreStageOnJoin(roomId, userId, freshMember?.onStage === true);
+        await reconcileVoice(roomId); // an adult arriving takes teen speakers off the stage
+      } catch (e) { console.error("[voice] join reconcile failed:", e instanceof Error ? e.message : e); }
+    })();
+    await me.ready;
   }
   if (ws.readyState !== OPEN) return; // closed while we were busy: handleSocketClose already ran and removed them
   await sendState(ws, fresh, me);

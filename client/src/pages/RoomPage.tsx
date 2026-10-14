@@ -70,7 +70,7 @@ function RoomPageInner({ id }: { id: string }) {
 
   const sock = useRoomSocket(id, { inviteToken: token });
   const { state } = sock;
-  const voice = useRoomVoice(id, { enabled: state.voiceEnabled && state.phase === "live", inviteToken: token });
+  const voice = useRoomVoice(id, { enabled: state.voiceEnabled && state.phase === "live", inviteToken: token, onCameraLost: () => sock.liveAction("stop") });
   const room = detail?.room;
   const live = room?.status === "live";
   const canJoin = detail?.canJoin.ok === true;

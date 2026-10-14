@@ -13,7 +13,8 @@ export interface VoiceService {
   /** Disconnects them from the session. */
   removeParticipant(roomId: string, userId: string): Promise<void>;
   /** Who LiveKit currently has in the room's session, and whether they can publish. Used to sweep out anyone the room should not have. */
-  listParticipants(roomId: string): Promise<Array<{ identity: string; canPublish: boolean; canCamera: boolean }>>;
+  /** `hasCamera`: they are publishing a camera track right now (a permission change alone does not prove it stopped). */
+  listParticipants(roomId: string): Promise<Array<{ identity: string; canPublish: boolean; canCamera: boolean; hasCamera: boolean }>>;
   /** Ends the whole session for everyone. */
   deleteRoom(roomId: string): Promise<void>;
 }

@@ -17,6 +17,8 @@ export interface HubMember {
   age?: number | null;
   /** What LiveKit was last told about their publish permission (unset until they asked for a token). */
   publish?: boolean;
+  /** Settles when the room has finished reconciling this joiner (stage right restored, teen rule applied). A voice token waits for it. */
+  ready?: Promise<void>;
 }
 
 const emptyStage = (): StageState => ({ stage: [], hands: [], invited: [] });

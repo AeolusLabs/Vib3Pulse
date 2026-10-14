@@ -787,6 +787,31 @@ try {
     roomHub.end(room.id); setVoiceServiceForTests(undefined);
   }
 
+  // ============ Live screen: a new joiner's voice token waits until the room has reconciled them ============
+  {
+    const rs = await import("../server/rooms/roomStorage");
+    const { roomHub } = await import("../server/rooms/RoomHub");
+    const { FakeVoice } = await import("../server/rooms/voice/fakeVoice");
+    const { setVoiceServiceForTests } = await import("../server/rooms/voice/voiceService");
+    setVoiceServiceForTests(new FakeVoice());
+    const RH = await mk("rd_host", yearsAgo(30)), RG = await mk("rd_guest", yearsAgo(30));
+    const room = await rs.createRoom(RH, { title: "ready barrier", kind: "party", visibility: "public", ageLimit: "all" } as any);
+    await rs.setStatus(room.id, "live"); await rs.setVoiceEnabled(room.id, true);
+    let release!: () => void;
+    const ready = new Promise<void>((r) => { release = r; });
+    roomHub.join(room.id, { userId: RH, role: "host", muted: false, joinedAt: 1, age: 30, send: () => {} }); await rs.upsertMember(room.id, RH, "host");
+    roomHub.join(room.id, { userId: RG, role: "guest", muted: false, joinedAt: 2, age: 30, send: () => {}, ready }); await rs.upsertMember(room.id, RG, "guest");
+    roomHub.setVoiceOn(room.id, true);
+    let settled = false;
+    const pending = http("POST", `/api/rooms/${room.id}/voice-token`, RG).then((r) => { settled = true; return r; });
+    await new Promise((r) => setTimeout(r, 400));
+    check("voice-token: waits while the joiner's stage/teen reconcile is still running", settled === false);
+    release();
+    const done = await pending;
+    check("voice-token: answers once the reconcile has finished", done.status === 200 && done.json?.canPublish === false, JSON.stringify(done.json)?.slice(0, 120));
+    roomHub.end(room.id); setVoiceServiceForTests(undefined);
+  }
+
   // ============ Part 3a Task 6 (REST side): the teen rule applies to publish rights in tokens ============
   {
     const rs = await import("../server/rooms/roomStorage");
