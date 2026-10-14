@@ -19,3 +19,14 @@ export function speakerIds(members: Array<{ userId: string; role: "host" | "coho
   const onStage = new Set(stage);
   return members.filter((m) => m.role !== "guest" || onStage.has(m.userId)).map((m) => m.userId);
 }
+
+/** Milliseconds until a held screen spot is given up, on the server's clock. null when the holder is present. Never negative. */
+export function awayRemainingMs(awayUntil: number | null, serverOffsetMs: number, clientNowMs: number): number | null {
+  return awayUntil === null ? null : Math.max(0, awayUntil - (clientNowMs + serverOffsetMs));
+}
+
+/** 72000 -> "1:12". Rounds up so the countdown never shows 0:00 while time is left. */
+export function formatMmSs(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}

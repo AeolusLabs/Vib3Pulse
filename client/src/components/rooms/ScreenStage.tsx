@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Loader2Icon } from "@/components/ui/icons";
 import type { ScreenTrack } from "@/hooks/useRoomVoice";
 import { pickDevices, rememberDevice, rememberedDevice, type Dev } from "@/lib/mediaDevices";
+import { formatMmSs } from "@/lib/voiceState";
 
 interface Props {
   /** The track to show: your own preview while you hold the screen, otherwise what the holder sends. */
@@ -24,12 +25,16 @@ interface Props {
   /** Not connected to the room's media yet (the browser wants a tap first): nothing can be shown until they tap. */
   needsTap: boolean;
   onTap: () => void;
+  /** The holder's connection dropped and their spot is being held: viewers see a slate instead of "No one is live". */
+  holderAway: boolean;
+  /** Only for the holder, while their own connection is down: about how long the spot is held (ms), null otherwise. */
+  holderLeftMs: number | null;
 }
 
 type FsVideo = HTMLVideoElement & { webkitEnterFullscreen?: () => void };
 
 /** The room's screen when live video is on: one stage, one person on it, 16:9. Nothing is recorded. */
-export default function ScreenStage({ track, holderName, isHolder, cameraOn, cameraError, onGoLive, onStop, canAsk, askLabel, asked, onAsk, onWithdraw, needsTap, onTap }: Props) {
+export default function ScreenStage({ track, holderName, isHolder, cameraOn, cameraError, onGoLive, onStop, canAsk, askLabel, asked, onAsk, onWithdraw, needsTap, onTap, holderAway, holderLeftMs }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const videoEl = useRef<HTMLVideoElement>(null);
   const [cams, setCams] = useState<Dev[]>([]);
@@ -82,14 +87,24 @@ export default function ScreenStage({ track, holderName, isHolder, cameraOn, cam
         <video ref={videoEl} autoPlay playsInline muted className={`h-full w-full object-contain ${showVideo ? "" : "hidden"}`} data-testid="screen-video" />
         {!showVideo && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-6 text-center" data-testid="live-empty">
-            <p className="font-serif text-2xl font-bold">{isHolder ? "You're up" : "No one is live"}</p>
-            <p className="text-sm text-muted-foreground">{isHolder ? "Pick your camera and microphone, then go live." : holderName ? `${holderName} is getting ready.` : "The host can put someone on the screen."}</p>
+            {holderAway && !isHolder ? (
+              <div role="status" className="flex flex-col items-center gap-1" data-testid="live-away-slate">
+                <Loader2Icon className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden />
+                <p className="font-serif text-2xl font-bold">Back in a moment</p>
+                <p className="text-sm text-muted-foreground">{holderName ?? "The streamer"} lost connection. Their spot is being held.</p>
+              </div>
+            ) : (
+              <>
+                <p className="font-serif text-2xl font-bold">{isHolder ? "You're up" : "No one is live"}</p>
+                <p className="text-sm text-muted-foreground">{isHolder ? "Pick your camera and microphone, then go live." : holderName ? `${holderName} is getting ready.` : "The host can put someone on the screen."}</p>
+              </>
+            )}
             {needsTap && <Button type="button" className="mt-2 min-h-[44px] rounded-full" onClick={onTap} data-testid="button-tap-watch">Tap to hear and watch</Button>}
           </div>
         )}
         {showVideo && (
           <>
-            <span className="absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-background/80 px-2.5 py-1 text-xs font-medium backdrop-blur"><span className="h-1.5 w-1.5 rounded-full bg-red-500" aria-hidden />{isHolder ? "You're live" : holderName ? `${holderName} is live` : "Live"}</span>
+            <span className="absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-background/80 px-2.5 py-1 text-xs font-medium backdrop-blur"><span className="h-1.5 w-1.5 rounded-full bg-red-500" aria-hidden />{holderAway ? "Reconnecting…" : isHolder ? "You're live" : holderName ? `${holderName} is live` : "Live"}</span>
             <Button type="button" variant="secondary" size="sm" className="absolute bottom-3 right-3 min-h-[44px] rounded-full" onClick={fullscreen} data-testid="button-screen-fullscreen">Fullscreen</Button>
           </>
         )}
@@ -97,6 +112,11 @@ export default function ScreenStage({ track, holderName, isHolder, cameraOn, cam
 
       {isHolder && (
         <div className="space-y-3 rounded-2xl border border-border p-3" data-testid="holder-controls">
+          {holderLeftMs !== null && (
+            <p role="status" className="rounded-xl bg-muted px-3 py-2 text-sm" data-testid="holder-reconnecting">
+              Your connection dropped. We're holding your spot for about <span className="font-medium tabular-nums">{formatMmSs(holderLeftMs)}</span>. Your stream carries on by itself when you're back.
+            </p>
+          )}
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="space-y-1 text-sm">
               <span className="text-muted-foreground">Camera</span>

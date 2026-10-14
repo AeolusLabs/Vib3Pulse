@@ -22,6 +22,9 @@ import { useRoomVoice } from "@/hooks/useRoomVoice";
 import VoiceBar from "@/components/rooms/VoiceBar";
 import StagePanel from "@/components/rooms/StagePanel";
 import ScreenStage from "@/components/rooms/ScreenStage";
+import { useNow } from "@/hooks/useNow";
+import { awayRemainingMs } from "@/lib/voiceState";
+import { LIVE_HOLD_MS } from "@shared/liveScreen";
 import { DENIED_MESSAGE, KIND_LABEL, LINK_SCREENS, type PeekMember, NOTICE_MESSAGE, VISIBILITY_LABEL, ageLimitLabel, fetchRooms, formatWhen, hostName, type RoomHostSummary, type RoomView } from "@/lib/roomsApi";
 import type { RoomMemberView } from "@/lib/roomReducer";
 import { AlertTriangleIcon, ArrowLeftIcon } from "@/components/ui/icons";
@@ -118,8 +121,17 @@ function RoomPageInner({ id }: { id: string }) {
 
   // The screen was taken back (host stopped it, an adult arrived, voice went off): switch the camera off here too.
   useEffect(() => {
-    if (voice.cameraOn && state.holder !== me?.id) void voice.stopCamera();
-  }, [voice.cameraOn, state.holder, me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (voice.cameraOn && state.phase === "live" && state.holder !== me?.id) void voice.stopCamera(); // not while reconnecting: the room state is only paused, not changed
+  }, [voice.cameraOn, state.phase, state.holder, me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // While the holder's own connection is down, count down (about) how long their spot is held; viewers get the server's deadline.
+  const iAmHolder = !!me && state.holder === me.id;
+  const offline = iAmHolder && state.phase === "reconnecting";
+  const [offlineSince, setOfflineSince] = useState<number | null>(null);
+  useEffect(() => { setOfflineSince((s) => (offline ? s ?? Date.now() : null)); }, [offline]);
+  const tick = useNow(offline || state.holderAwayUntil !== null);
+  const holderLeftMs = offlineSince === null ? null : Math.max(0, LIVE_HOLD_MS - (tick - offlineSince));
+  const holderAwayLeftMs = awayRemainingMs(state.holderAwayUntil, state.serverOffsetMs, tick);
 
   const leave = () => { sock.leave(); navigate("/rooms"); };
   const back = <Button asChild variant="outline"><Link href="/rooms">Back to Rooms</Link></Button>;
@@ -196,6 +208,7 @@ function RoomPageInner({ id }: { id: string }) {
             onAsk={() => (isCoHostOrHost && me ? sock.liveAction("grant", me.id) : sock.liveAction("ask"))}
             onWithdraw={() => sock.liveAction("withdraw")}
             needsTap={voice.status === "needs-tap"} onTap={() => void voice.unlock()}
+            holderAway={state.holderAwayUntil !== null} holderLeftMs={holderLeftMs}
           />
         )}
 
@@ -227,7 +240,7 @@ function RoomPageInner({ id }: { id: string }) {
                 onStage={(action, target) => sock.stageAction(action, target)}
                 liveVideo={state.liveVideo} holder={state.holder} liveAsks={state.asks} canSwitchLive={role === "host"}
                 onSwitchLive={async (on) => { if (!(await sock.setLiveVideo(on))) setNoticeText(on ? "Live video isn't available for this room." : "Couldn't switch live video off."); }}
-                onLive={(action, target) => sock.liveAction(action, target)} />
+                onLive={(action, target) => sock.liveAction(action, target)} holderAwayLeftMs={holderAwayLeftMs} />
               {isHost && room && <HostControls room={{ ...room, host: detail.host }} onChanged={() => refetch()} />}
               {isHost && <p className="text-center text-xs text-muted-foreground">If you close this page the room ends after 2 minutes.</p>}
             </TabsContent>

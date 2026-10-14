@@ -1,5 +1,8 @@
 // Who may put themselves on a room's screen (live camera + mic), as pure functions so the server, the WebSocket handlers
 // and the client agree. One person holds the screen at a time. The state lives in memory per room, like the stage.
+/** How long a dropped screen holder keeps the screen (2 minutes). The server can override it with ROOM_LIVE_GRACE_MS; the client only uses it for an honest "about" countdown. */
+export const LIVE_HOLD_MS = 120_000;
+
 export type LiveAction = "ask" | "withdraw" | "grant" | "revoke" | "stop";
 export type LiveError = "LIVE_OFF" | "NOT_ON_STAGE" | "NOT_ALLOWED" | "TEEN_RULE" | "NOT_PRESENT" | "NO_CHANGE";
 type Role = "host" | "cohost" | "guest";

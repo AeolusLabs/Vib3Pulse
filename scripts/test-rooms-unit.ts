@@ -10,7 +10,7 @@ import { MAX_SPEAKERS, applyStage, canBeOnStage, type StageState } from "../shar
 import { cueCountdownMs, needsCorrection, sanitizePlaybackInput, targetPositionMs } from "../shared/playback";
 import { getVoiceService, roomNameFor, setVoiceServiceForTests } from "../server/rooms/voice/voiceService";
 import { FakeVoice } from "../server/rooms/voice/fakeVoice";
-import { speakerIds, speakingRings, voiceStatus } from "../client/src/lib/voiceState";
+import { awayRemainingMs, formatMmSs, speakerIds, speakingRings, voiceStatus } from "../client/src/lib/voiceState";
 import { pickDevices, rememberedDevice } from "../client/src/lib/mediaDevices";
 import { applyLive, dropFromLive, emptyLive, type LiveContext, type LiveState } from "../shared/liveScreen";
 import { syncDecision, youtubeEmbedWithApi } from "../client/src/lib/playerAdapters";
@@ -116,6 +116,32 @@ test("reducer: live state arrives with room:state, changes with room:live, and l
   assert.equal(noLive.liveVideo, false); assert.equal(noLive.holder, null);
   const voiceOff = roomReducer(roomReducer(initialRoomState("u"), st({ holder: "h" })), { type: "room:voice", enabled: false });
   assert.equal(voiceOff.liveVideo, false); assert.equal(voiceOff.holder, null);
+});
+
+test("awayRemainingMs: null while present, counts down on the server clock, never negative", () => {
+  assert.equal(awayRemainingMs(null, 0, 1_000), null);
+  assert.equal(awayRemainingMs(11_000, 0, 1_000), 10_000);
+  assert.equal(awayRemainingMs(11_000, 2_000, 1_000), 8_000, "server clock is 2 s ahead of ours");
+  assert.equal(awayRemainingMs(11_000, 0, 20_000), 0);
+});
+test("formatMmSs: minutes and zero-padded seconds, clamped at zero", () => {
+  assert.equal(formatMmSs(72_000), "1:12");
+  assert.equal(formatMmSs(5_000), "0:05");
+  assert.equal(formatMmSs(0), "0:00");
+  assert.equal(formatMmSs(-300), "0:00");
+  assert.equal(formatMmSs(119_999), "2:00");
+});
+test("reducer: the away deadline arrives with room:live and room:state and is cleared when the holder is back or live video is off", () => {
+  const st = (extra: object = {}) => ({ type: "room:state" as const, room: { id: "r", liveVideo: true }, members: [], memberCount: 0, screen: null, you: { role: "guest" as const, muted: false }, ...extra });
+  let a = roomReducer(initialRoomState("u"), st({ holder: "h", asks: [], away: 5_000 }));
+  assert.equal(a.holderAwayUntil, 5_000);
+  a = roomReducer(a, { type: "room:live", holder: "h", asks: [], away: null });
+  assert.equal(a.holderAwayUntil, null);
+  a = roomReducer(a, { type: "room:live", holder: "h", asks: [], away: 9_000 });
+  assert.equal(a.holderAwayUntil, 9_000);
+  a = roomReducer(a, { type: "room:livevideo", enabled: false });
+  assert.equal(a.holderAwayUntil, null);
+  assert.equal(roomReducer(initialRoomState("u"), st({})).holderAwayUntil, null);
 });
 
 // ---------------------------------------------------------------- age

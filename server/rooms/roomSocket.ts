@@ -12,6 +12,7 @@ import * as rs from "./roomStorage";
 import { canViewRoom, mutualFollow, plainText, publicRoom } from "./roomAccess";
 import { roomHub, type HubMember } from "./RoomHub";
 import { TokenBucket } from "./rateLimit";
+import { LIVE_HOLD_MS } from "@shared/liveScreen";
 import { broadcastLive, dropFromVoice, handleLive, handleStage, liveAway, reconcileVoice, registerAwayReleaser, restoreStageOnJoin, sweepAllVoiceRooms } from "./stage";
 import { getVoiceService } from "./voice/voiceService";
 import { roomFeatures } from "./features";
@@ -20,7 +21,7 @@ import { roomFeatures } from "./features";
 export const tuning = {
   graceMs: 120_000,
   // How long a dropped screen holder keeps the screen before it is released (a stream through a bad connection must not end at the first blip).
-  liveGraceMs: Number(process.env.ROOM_LIVE_GRACE_MS) || 120_000,
+  liveGraceMs: Number(process.env.ROOM_LIVE_GRACE_MS) || LIVE_HOLD_MS,
   chat: { rate: 1, burst: 5 },
   react: { rate: 3, burst: 3 },
   interact: { rate: 0.5, burst: 1 }, // 1 per 2 s per target

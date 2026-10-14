@@ -49,6 +49,8 @@ export interface RoomState {
   liveVideo: boolean;
   holder: string | null;
   asks: string[];
+  /** When the holder's held spot is given up (server epoch ms), null while they are present. */
+  holderAwayUntil: number | null;
   /** Synced playback: what is playing, and server clock minus client clock when it last arrived. */
   nowPlaying: NowPlaying | null;
   serverOffsetMs: number;
@@ -61,11 +63,11 @@ const INTERACTION_CAP = 20;
 export const initialRoomState = (selfId: string | null = null): RoomState => ({
   selfId, phase: "idle", room: null, members: [], memberCount: 0, screen: null, you: null,
   chat: [], reactions: [], interactions: [], error: null, notice: null, seq: 0,
-  voiceEnabled: false, stage: [], hands: [], invitedYou: false, liveVideo: false, holder: null, asks: [], nowPlaying: null, serverOffsetMs: 0,
+  voiceEnabled: false, stage: [], hands: [], invitedYou: false, liveVideo: false, holder: null, asks: [], holderAwayUntil: null, nowPlaying: null, serverOffsetMs: 0,
 });
 
 export type RoomServerMessage =
-  | { type: "room:state"; room: { id: string }; members: RoomMemberView[]; memberCount: number; screen: Screen | null; you: { role: MemberRole; muted: boolean }; voiceEnabled?: boolean; stage?: string[]; hands?: string[]; holder?: string | null; asks?: string[]; nowPlaying?: NowPlaying | null; serverNowMs?: number }
+  | { type: "room:state"; room: { id: string }; members: RoomMemberView[]; memberCount: number; screen: Screen | null; you: { role: MemberRole; muted: boolean }; voiceEnabled?: boolean; stage?: string[]; hands?: string[]; holder?: string | null; asks?: string[]; away?: number | null; nowPlaying?: NowPlaying | null; serverNowMs?: number }
   | { type: "room:joined"; member: RoomMemberView }
   | { type: "room:left"; userId: string }
   | { type: "room:chat"; userId: string; text: string; at: number }
@@ -74,7 +76,7 @@ export type RoomServerMessage =
   | { type: "room:screen"; screen: Screen | null; screenVersion?: number }
   | { type: "room:stage"; stage: string[]; hands: string[]; invitedYou?: boolean }
   | { type: "room:voice"; enabled: boolean }
-  | { type: "room:live"; holder: string | null; asks: string[] }
+  | { type: "room:live"; holder: string | null; asks: string[]; away?: number | null }
   | { type: "room:livevideo"; enabled: boolean }
   | { type: "room:playback"; nowPlaying: NowPlaying | null; serverNowMs: number }
   | { type: "room:mod"; action: "mute" | "unmute" | "kick" | "ban" | "role"; targetId: string; role?: MemberRole }
@@ -114,7 +116,7 @@ export function roomReducer(state: RoomState, event: RoomEvent, now: () => numbe
       return {
         ...state, phase: "live", error: null, room: event.room, members: event.members, memberCount: event.memberCount,
         screen: event.screen ?? null, you: event.you,
-        voiceEnabled: event.voiceEnabled === true, stage: event.stage ?? [], hands: event.hands ?? [], invitedYou: false, liveVideo: (event.room as { liveVideo?: boolean }).liveVideo === true, holder: event.holder ?? null, asks: event.asks ?? [], nowPlaying: event.nowPlaying ?? null,
+        voiceEnabled: event.voiceEnabled === true, stage: event.stage ?? [], hands: event.hands ?? [], invitedYou: false, liveVideo: (event.room as { liveVideo?: boolean }).liveVideo === true, holder: event.holder ?? null, asks: event.asks ?? [], holderAwayUntil: event.away ?? null, nowPlaying: event.nowPlaying ?? null,
         // A late joiner has the host's clock from this message, not only from the next heartbeat.
         serverOffsetMs: event.serverNowMs !== undefined ? event.serverNowMs - now() : state.serverOffsetMs,
         chat: sameRoom ? state.chat : [], reactions: sameRoom ? state.reactions : [], interactions: sameRoom ? state.interactions : [],
@@ -150,11 +152,11 @@ export function roomReducer(state: RoomState, event: RoomEvent, now: () => numbe
       return { ...state, stage: event.stage, hands: event.hands, invitedYou: event.invitedYou === true ? true : state.invitedYou && !reached };
     }
     case "room:voice":
-      return event.enabled ? { ...state, voiceEnabled: true } : { ...state, voiceEnabled: false, stage: [], hands: [], invitedYou: false, liveVideo: false, holder: null, asks: [] };
+      return event.enabled ? { ...state, voiceEnabled: true } : { ...state, voiceEnabled: false, stage: [], hands: [], invitedYou: false, liveVideo: false, holder: null, asks: [], holderAwayUntil: null };
     case "room:live":
-      return { ...state, holder: event.holder, asks: event.asks };
+      return { ...state, holder: event.holder, asks: event.asks, holderAwayUntil: event.holder ? event.away ?? null : null };
     case "room:livevideo":
-      return event.enabled ? { ...state, liveVideo: true } : { ...state, liveVideo: false, holder: null, asks: [] };
+      return event.enabled ? { ...state, liveVideo: true } : { ...state, liveVideo: false, holder: null, asks: [], holderAwayUntil: null };
     case "room:playback": {
       const current = (state.room as { screenVersion?: number } | null)?.screenVersion;
       // A message about a screen that has since been replaced (it crossed a screen change on the way) must not resurrect old playback.

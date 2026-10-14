@@ -5,6 +5,7 @@ import HostAvatar from "@/components/rooms/HostAvatar";
 import type { RoomMemberView } from "@/lib/roomReducer";
 import type { StageAction } from "@shared/stage";
 import type { LiveAction } from "@shared/liveScreen";
+import { formatMmSs } from "@/lib/voiceState";
 
 interface Props {
   members: RoomMemberView[];
@@ -22,12 +23,14 @@ interface Props {
   canSwitchLive: boolean;
   onSwitchLive: (enabled: boolean) => void;
   onLive: (action: LiveAction, targetId: string) => void;
+  /** About how long the holder's spot is still held while their connection is down (ms), null while they are present. */
+  holderAwayLeftMs: number | null;
 }
 
 const nameOf = (m?: RoomMemberView) => (m ? m.displayName || m.organizationName || m.username || "Guest" : "Someone");
 
 /** Host and co-host view of the mic: who is asking, who is speaking. You can also give the mic to anyone from the member list. */
-export default function StagePanel({ members, stage, hands, voiceEnabled, canSwitchVoice, onSwitch, onStage, liveVideo, holder, liveAsks, canSwitchLive, onSwitchLive, onLive }: Props) {
+export default function StagePanel({ members, stage, hands, voiceEnabled, canSwitchVoice, onSwitch, onStage, liveVideo, holder, liveAsks, canSwitchLive, onSwitchLive, onLive, holderAwayLeftMs }: Props) {
   const byId = new Map(members.map((m) => [m.userId, m]));
   const speakers = stage.map((id) => byId.get(id)).filter(Boolean) as RoomMemberView[];
   const asking = hands.map((id) => byId.get(id)).filter(Boolean) as RoomMemberView[];
@@ -85,7 +88,7 @@ export default function StagePanel({ members, stage, hands, voiceEnabled, canSwi
                   <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">On the screen</h4>
                   {onScreen ? (
                     <div className="flex items-center gap-2" data-testid="live-holder">
-                      <HostAvatar person={onScreen} className="h-8 w-8" /><span className="min-w-0 flex-1 truncate text-sm">{nameOf(onScreen)}</span>
+                      <HostAvatar person={onScreen} className="h-8 w-8" /><span className="min-w-0 flex-1 truncate text-sm">{nameOf(onScreen)}{holderAwayLeftMs !== null && <span className="ml-2 text-xs text-muted-foreground" data-testid="holder-away-left">Reconnecting, {formatMmSs(holderAwayLeftMs)} left</span>}</span>
                       <Button size="sm" variant="outline" className="min-h-[44px]" onClick={() => onLive("revoke", onScreen.userId)} data-testid="button-stop-holder">Stop</Button>
                     </div>
                   ) : <p className="py-1 text-sm text-muted-foreground">No one yet.</p>}
