@@ -4,6 +4,7 @@ import { Loader2Icon } from "@/components/ui/icons";
 import type { ScreenTrack } from "@/hooks/useRoomVoice";
 import { pickDevices, rememberDevice, rememberedDevice, type Dev } from "@/lib/mediaDevices";
 import { formatMmSs } from "@/lib/voiceState";
+import type { VideoProfile } from "@/lib/bandwidth";
 
 interface Props {
   /** The track to show: your own preview while you hold the screen, otherwise what the holder sends. */
@@ -14,7 +15,7 @@ interface Props {
   cameraOn: boolean;
   cameraError: string | null;
   /** Call from a click: starts your camera and microphone with the chosen devices. */
-  onGoLive: (devices: { cameraId?: string; micId?: string }) => Promise<void>;
+  onGoLive: (devices: { cameraId?: string; micId?: string }) => Promise<unknown>;
   onStop: () => void;
   /** Someone on stage who may ask (or, for the host and co-hosts, take) the screen. */
   canAsk: boolean;
@@ -29,12 +30,22 @@ interface Props {
   holderAway: boolean;
   /** Only for the holder, while their own connection is down: about how long the spot is held (ms), null otherwise. */
   holderLeftMs: number | null;
+  /** Weak connections. Holder: picture quality, and dropping the picture while keeping the sound. Viewer: sound only to save data. */
+  quality: VideoProfile | "auto";
+  onQuality: (q: VideoProfile | "auto") => void;
+  videoPaused: boolean;
+  onPauseVideo: () => void;
+  onResumeVideo: () => void;
+  audioOnly: boolean;
+  onAudioOnly: (on: boolean) => void;
+  /** Own connection has been poor for a while: offer the sound-only option. */
+  weakLink: boolean;
 }
 
 type FsVideo = HTMLVideoElement & { webkitEnterFullscreen?: () => void };
 
 /** The room's screen when live video is on: one stage, one person on it, 16:9. Nothing is recorded. */
-export default function ScreenStage({ track, holderName, isHolder, cameraOn, cameraError, onGoLive, onStop, canAsk, askLabel, asked, onAsk, onWithdraw, needsTap, onTap, holderAway, holderLeftMs }: Props) {
+export default function ScreenStage({ track, holderName, isHolder, cameraOn, cameraError, onGoLive, onStop, canAsk, askLabel, asked, onAsk, onWithdraw, needsTap, onTap, holderAway, holderLeftMs, quality, onQuality, videoPaused, onPauseVideo, onResumeVideo, audioOnly, onAudioOnly, weakLink }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const videoEl = useRef<HTMLVideoElement>(null);
   const [cams, setCams] = useState<Dev[]>([]);
@@ -96,7 +107,12 @@ export default function ScreenStage({ track, holderName, isHolder, cameraOn, cam
             ) : (
               <>
                 <p className="font-serif text-2xl font-bold">{isHolder ? "You're up" : "No one is live"}</p>
-                <p className="text-sm text-muted-foreground">{isHolder ? "Pick your camera and microphone, then go live." : holderName ? `${holderName} is getting ready.` : "The host can put someone on the screen."}</p>
+                <p className="text-sm text-muted-foreground">
+                  {isHolder ? "Pick your camera and microphone, then go live."
+                    : holderName && audioOnly ? `Sound only: you can hear ${holderName}. Tap Watch video to see the picture.`
+                    : holderName ? `${holderName} has the screen. No picture right now.`
+                    : "The host can put someone on the screen."}
+                </p>
               </>
             )}
             {needsTap && <Button type="button" className="mt-2 min-h-[44px] rounded-full" onClick={onTap} data-testid="button-tap-watch">Tap to hear and watch</Button>}
@@ -117,7 +133,25 @@ export default function ScreenStage({ track, holderName, isHolder, cameraOn, cam
               Your connection dropped. We're holding your spot for about <span className="font-medium tabular-nums">{formatMmSs(holderLeftMs)}</span>. Your stream carries on by itself when you're back.
             </p>
           )}
-          <div className="grid gap-3 sm:grid-cols-2">
+          {videoPaused && (
+            <p role="status" className="rounded-xl bg-muted px-3 py-2 text-sm" data-testid="video-paused">Your picture is off to save your connection. Your sound is still live.</p>
+          )}
+          {weakLink && cameraOn && !videoPaused && (
+            <div role="status" className="space-y-2 rounded-xl bg-muted px-3 py-2 text-sm" data-testid="weak-link-holder">
+              <p>Your connection is weak. Pause the picture and keep the sound?</p>
+              <Button size="sm" variant="outline" className="min-h-[44px] rounded-full" onClick={onPauseVideo} data-testid="button-pause-picture">Pause picture, keep sound</Button>
+            </div>
+          )}
+          <div className="grid gap-3 sm:grid-cols-3">
+            <label className="space-y-1 text-sm">
+              <span className="text-muted-foreground">Quality</span>
+              <select value={quality} onChange={(e) => onQuality(e.target.value as VideoProfile | "auto")} disabled={cameraOn || starting} className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 text-base" data-testid="select-quality">
+                <option value="auto">Auto</option>
+                <option value="saver">Data saver (360p)</option>
+                <option value="balanced">Balanced (540p)</option>
+                <option value="standard">High (720p)</option>
+              </select>
+            </label>
             <label className="space-y-1 text-sm">
               <span className="text-muted-foreground">Camera</span>
               <select value={camId} onChange={(e) => setCamId(e.target.value)} disabled={cameraOn || starting} className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 text-base" data-testid="select-camera">
@@ -135,11 +169,23 @@ export default function ScreenStage({ track, holderName, isHolder, cameraOn, cam
           </div>
           {cameraError && <p role="alert" className="text-sm text-destructive" data-testid="camera-error">{cameraError}</p>}
           <div className="flex flex-wrap gap-2">
-            {cameraOn
+            {videoPaused && <Button className="min-h-[44px] rounded-full" onClick={onResumeVideo} data-testid="button-resume-picture">Turn picture back on</Button>}
+            {(cameraOn || videoPaused)
               ? <Button className="min-h-[44px] rounded-full" variant="destructive" onClick={onStop} data-testid="button-stop-live">Stop live</Button>
               : <Button className="min-h-[44px] rounded-full" onClick={() => void goLive()} disabled={starting} data-testid="button-go-live">{starting ? <><Loader2Icon className="mr-2 h-4 w-4 animate-spin" aria-hidden />Starting…</> : "Go live"}</Button>}
-            {!cameraOn && <Button className="min-h-[44px] rounded-full" variant="ghost" onClick={onStop} data-testid="button-give-up-screen">Hand back the screen</Button>}
+            {!cameraOn && !videoPaused && <Button className="min-h-[44px] rounded-full" variant="ghost" onClick={onStop} data-testid="button-give-up-screen">Hand back the screen</Button>}
           </div>
+        </div>
+      )}
+
+      {!isHolder && (
+        <div className="flex flex-wrap items-center gap-2">
+          {weakLink && !audioOnly && (
+            <p role="status" className="w-full rounded-xl bg-muted px-3 py-2 text-sm" data-testid="weak-link-viewer">Your connection is weak. Switch to sound only to keep listening smoothly?</p>
+          )}
+          <Button type="button" size="sm" variant={audioOnly ? "default" : "outline"} className="min-h-[44px] rounded-full" aria-pressed={audioOnly} onClick={() => onAudioOnly(!audioOnly)} data-testid="button-audio-only">
+            {audioOnly ? "Watch video" : "Sound only (saves data)"}
+          </Button>
         </div>
       )}
 

@@ -24,6 +24,7 @@ import StagePanel from "@/components/rooms/StagePanel";
 import ScreenStage from "@/components/rooms/ScreenStage";
 import { useNow } from "@/hooks/useNow";
 import { awayRemainingMs } from "@/lib/voiceState";
+import { pickStartProfile, weakLinkAdvice, type VideoProfile } from "@/lib/bandwidth";
 import { LIVE_HOLD_MS } from "@shared/liveScreen";
 import { DENIED_MESSAGE, KIND_LABEL, LINK_SCREENS, type PeekMember, NOTICE_MESSAGE, VISIBILITY_LABEL, ageLimitLabel, fetchRooms, formatWhen, hostName, type RoomHostSummary, type RoomView } from "@/lib/roomsApi";
 import type { RoomMemberView } from "@/lib/roomReducer";
@@ -73,7 +74,8 @@ function RoomPageInner({ id }: { id: string }) {
 
   const sock = useRoomSocket(id, { inviteToken: token });
   const { state } = sock;
-  const voice = useRoomVoice(id, { enabled: state.voiceEnabled && state.phase === "live", inviteToken: token, onCameraLost: () => sock.liveAction("stop") });
+  // "reconnecting" counts as live: a blip in the app connection must not hang up the media (that ended the stream by our own hand).
+  const voice = useRoomVoice(id, { enabled: state.voiceEnabled && (state.phase === "live" || state.phase === "reconnecting"), inviteToken: token, onCameraLost: () => sock.liveAction("stop") });
   const room = detail?.room;
   const live = room?.status === "live";
   const canJoin = detail?.canJoin.ok === true;
@@ -121,17 +123,21 @@ function RoomPageInner({ id }: { id: string }) {
 
   // The screen was taken back (host stopped it, an adult arrived, voice went off): switch the camera off here too.
   useEffect(() => {
-    if (voice.cameraOn && state.phase === "live" && state.holder !== me?.id) void voice.stopCamera(); // not while reconnecting: the room state is only paused, not changed
-  }, [voice.cameraOn, state.phase, state.holder, me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    if ((voice.cameraOn || voice.videoPaused) && state.phase === "live" && state.holder !== me?.id) void voice.stopCamera(); // not while reconnecting: the room state is only paused, not changed
+  }, [voice.cameraOn, voice.videoPaused, state.phase, state.holder, me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // While the holder's own connection is down, count down (about) how long their spot is held; viewers get the server's deadline.
   const iAmHolder = !!me && state.holder === me.id;
-  const offline = iAmHolder && state.phase === "reconnecting";
+  const offline = iAmHolder && (state.phase === "reconnecting" || voice.reconnecting);
   const [offlineSince, setOfflineSince] = useState<number | null>(null);
   useEffect(() => { setOfflineSince((s) => (offline ? s ?? Date.now() : null)); }, [offline]);
   const tick = useNow(offline || state.holderAwayUntil !== null);
   const holderLeftMs = offlineSince === null ? null : Math.max(0, LIVE_HOLD_MS - (tick - offlineSince));
   const holderAwayLeftMs = awayRemainingMs(state.holderAwayUntil, state.serverOffsetMs, tick);
+
+  const [quality, setQuality] = useState<VideoProfile | "auto">("auto");
+  const linkTick = useNow(voice.linkPoorSince !== null);
+  const weakLink = weakLinkAdvice(voice.linkQuality, voice.linkPoorSince === null ? 0 : linkTick - voice.linkPoorSince) === "suggest-audio-only";
 
   const leave = () => { sock.leave(); navigate("/rooms"); };
   const back = <Button asChild variant="outline"><Link href="/rooms">Back to Rooms</Link></Button>;
@@ -202,13 +208,16 @@ function RoomPageInner({ id }: { id: string }) {
             holderName={state.holder ? nameOf(state.holder) : null}
             isHolder={isHolder}
             cameraOn={voice.cameraOn} cameraError={voice.cameraError}
-            onGoLive={voice.startCamera}
+            onGoLive={(d) => voice.startCamera({ ...d, profile: quality === "auto" ? pickStartProfile((navigator as unknown as { connection?: import("@/lib/bandwidth").ConnInfo }).connection) : quality })}
             onStop={() => { void voice.stopCamera(); sock.liveAction("stop"); }}
             canAsk={canAskLive} askLabel={isCoHostOrHost ? "Go live" : "Ask to go live"} asked={!!me && state.asks.includes(me.id)}
             onAsk={() => (isCoHostOrHost && me ? sock.liveAction("grant", me.id) : sock.liveAction("ask"))}
             onWithdraw={() => sock.liveAction("withdraw")}
             needsTap={voice.status === "needs-tap"} onTap={() => void voice.unlock()}
             holderAway={state.holderAwayUntil !== null} holderLeftMs={holderLeftMs}
+            quality={quality} onQuality={setQuality}
+            videoPaused={voice.videoPaused} onPauseVideo={() => void voice.pauseVideo()} onResumeVideo={() => void voice.resumeVideo()}
+            audioOnly={voice.audioOnly} onAudioOnly={voice.setAudioOnly} weakLink={weakLink}
           />
         )}
 

@@ -12,6 +12,7 @@ import { getVoiceService, roomNameFor, setVoiceServiceForTests } from "../server
 import { FakeVoice } from "../server/rooms/voice/fakeVoice";
 import { awayRemainingMs, formatMmSs, speakerIds, speakingRings, voiceStatus } from "../client/src/lib/voiceState";
 import { pickDevices, rememberedDevice } from "../client/src/lib/mediaDevices";
+import { pickStartProfile, profileSettings, viewerStartsAudioOnly, weakLinkAdvice } from "../client/src/lib/bandwidth";
 import { applyLive, dropFromLive, emptyLive, type LiveContext, type LiveState } from "../shared/liveScreen";
 import { syncDecision, youtubeEmbedWithApi } from "../client/src/lib/playerAdapters";
 import { ageFromDob, ageBand, meetsAgeLimit, minAgeForLimit, sameBand, AGE_LIMITS, MIN_PLATFORM_AGE } from "../shared/age";
@@ -142,6 +143,39 @@ test("reducer: the away deadline arrives with room:live and room:state and is cl
   a = roomReducer(a, { type: "room:livevideo", enabled: false });
   assert.equal(a.holderAwayUntil, null);
   assert.equal(roomReducer(initialRoomState("u"), st({})).holderAwayUntil, null);
+});
+
+// ---------------------------------------------------------------- weak connections
+test("profileSettings: our caps for each quality, smaller means fewer bytes", () => {
+  assert.deepEqual(profileSettings("saver"), { width: 640, height: 360, frameRate: 15, maxBitrate: 350_000 });
+  assert.deepEqual(profileSettings("balanced"), { width: 960, height: 540, frameRate: 24, maxBitrate: 800_000 });
+  assert.deepEqual(profileSettings("standard"), { width: 1280, height: 720, frameRate: 30, maxBitrate: 1_500_000 });
+});
+test("pickStartProfile: slow or data-saving connections start on saver, fast on standard, unknown on balanced", () => {
+  assert.equal(pickStartProfile(undefined), "balanced", "Safari/Firefox give no information");
+  assert.equal(pickStartProfile({}), "balanced");
+  assert.equal(pickStartProfile({ saveData: true, effectiveType: "4g", downlink: 20 }), "saver");
+  for (const t of ["slow-2g", "2g", "3g"]) assert.equal(pickStartProfile({ effectiveType: t, downlink: 50 }), "saver", t);
+  assert.equal(pickStartProfile({ effectiveType: "4g", downlink: 1.4 }), "saver");
+  assert.equal(pickStartProfile({ effectiveType: "4g", downlink: 1.5 }), "balanced");
+  assert.equal(pickStartProfile({ effectiveType: "4g", downlink: 4.9 }), "balanced");
+  assert.equal(pickStartProfile({ effectiveType: "4g", downlink: 5 }), "standard");
+  assert.equal(pickStartProfile({ effectiveType: "4g" }), "balanced", "no downlink figure: not enough to call it fast");
+});
+test("viewerStartsAudioOnly: only on data saver or 2g", () => {
+  assert.equal(viewerStartsAudioOnly(undefined), false);
+  assert.equal(viewerStartsAudioOnly({ saveData: true }), true);
+  assert.equal(viewerStartsAudioOnly({ effectiveType: "2g" }), true);
+  assert.equal(viewerStartsAudioOnly({ effectiveType: "slow-2g" }), true);
+  assert.equal(viewerStartsAudioOnly({ effectiveType: "3g" }), false);
+  assert.equal(viewerStartsAudioOnly({ effectiveType: "4g", downlink: 0.2 }), false);
+});
+test("weakLinkAdvice: suggests audio only after 8 s of a poor or lost link, never on a good one", () => {
+  assert.equal(weakLinkAdvice("poor", 7_999), "none");
+  assert.equal(weakLinkAdvice("poor", 8_000), "suggest-audio-only");
+  assert.equal(weakLinkAdvice("lost", 8_000), "suggest-audio-only");
+  assert.equal(weakLinkAdvice("lost", 100), "none");
+  for (const q of ["excellent", "good", "unknown"] as const) assert.equal(weakLinkAdvice(q, 60_000), "none", q);
 });
 
 // ---------------------------------------------------------------- age

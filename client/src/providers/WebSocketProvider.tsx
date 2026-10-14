@@ -39,6 +39,7 @@ function handleMessage(data: unknown) {
 export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   const wsRef = useRef<WebSocket | null>(null);
   const retryDelayRef = useRef(1000);
+  const rejectedRef = useRef(false); // the server refused the session (not logged in): coming back online must not retry
   const unmountedRef = useRef(false);
   const handlersRef = useRef(new Set<WsHandler>());
   // True once the server has authenticated this socket (it answers {type:"connected"}). Anything sent before that is dropped
@@ -75,6 +76,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 
       ws.onopen = () => {
         retryDelayRef.current = 1000;
+        rejectedRef.current = false;
       };
 
       ws.onmessage = (event) => {
@@ -95,10 +97,11 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         if (event.code === 4001) {
           // Server rejected the session — back off 5 min before retrying
           retryDelayRef.current = 5 * 60 * 1000;
+          rejectedRef.current = true;
         }
-        // Exponential backoff capped at 30 s
+        // Exponential backoff capped at 8 s: on a weak connection that comes and goes, a live room must be rejoined within seconds, not half a minute
         const delay = retryDelayRef.current;
-        retryDelayRef.current = Math.min(delay * 2, 30_000);
+        retryDelayRef.current = Math.min(delay * 2, 8_000);
         timerRef.current = setTimeout(connect, delay);
       };
     }
@@ -106,7 +109,18 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     connectRef.current = connect;
     connect();
 
+    // The phone says it has a network again (Wi-Fi back, signal back): try now instead of waiting out the back-off.
+    const onOnline = () => {
+      const ws = wsRef.current;
+      if (unmountedRef.current || rejectedRef.current || (ws && ws.readyState <= WebSocket.OPEN)) return;
+      if (timerRef.current) clearTimeout(timerRef.current);
+      retryDelayRef.current = 1000;
+      connect();
+    };
+    window.addEventListener("online", onOnline);
+
     return () => {
+      window.removeEventListener("online", onOnline);
       unmountedRef.current = true;
       if (timerRef.current) clearTimeout(timerRef.current);
       wsRef.current?.close();
