@@ -5,6 +5,7 @@ import { useWebSocketContext } from "@/providers/WebSocketProvider";
 import { useAuth } from "@/hooks/useAuth";
 import { initialRoomState, roomReducer, type RoomPhase, type RoomState } from "@/lib/roomReducer";
 import type { StageAction } from "@shared/stage";
+import type { LiveAction } from "@shared/liveScreen";
 import type { PlaybackState } from "@shared/playback";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -71,11 +72,15 @@ export function useRoomSocket(roomId: string, opts: { inviteToken?: string } = {
     mod: (action: ModAction, targetId: string) => ws?.send({ type: "room:mod", action, targetId }) ?? false,
     /** raise / lower / invite / accept / remove. `targetId` defaults to yourself on the server. */
     stageAction: (action: StageAction, targetId?: string) => ws?.send({ type: "room:stage", action, ...(targetId ? { targetId } : {}) }) ?? false,
+    /** ask / withdraw (yourself), grant / revoke / stop (host or co-host name a target; the holder may stop themselves). */
+    liveAction: (action: LiveAction, targetId?: string) => ws?.send({ type: "room:live", action, ...(targetId ? { targetId } : {}) }) ?? false,
     /** Host or co-host: report a play / pause / seek / end, or `cue` (everyone presses play in `inMs`). */
     sendPlayback: (p: { state: PlaybackState; positionMs: number; inMs?: number }) =>
       ws?.send({ type: "room:playback", ...p, screenVersion: (state.room as { screenVersion?: number } | null)?.screenVersion ?? 0 }) ?? false,
     /** Host: switch live voice on or off for the room. Resolves false if it was refused. */
     setVoice: async (enabled: boolean) => { try { await apiRequest("PUT", `/api/rooms/${roomId}/voice`, { enabled }); return true; } catch { return false; } },
+    /** Host: switch live camera + mic streaming on or off. Resolves false if it was refused. */
+    setLiveVideo: async (enabled: boolean) => { try { await apiRequest("PUT", `/api/rooms/${roomId}/live-video`, { enabled }); return true; } catch { return false; } },
     dismissInvite: () => dispatch({ type: "client:dismissInvite" }),
   };
 }

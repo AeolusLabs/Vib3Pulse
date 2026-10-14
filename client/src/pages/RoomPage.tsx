@@ -21,6 +21,7 @@ import { useRoomSocket } from "@/hooks/useRoomSocket";
 import { useRoomVoice } from "@/hooks/useRoomVoice";
 import VoiceBar from "@/components/rooms/VoiceBar";
 import StagePanel from "@/components/rooms/StagePanel";
+import ScreenStage from "@/components/rooms/ScreenStage";
 import { DENIED_MESSAGE, KIND_LABEL, LINK_SCREENS, type PeekMember, NOTICE_MESSAGE, VISIBILITY_LABEL, ageLimitLabel, fetchRooms, formatWhen, hostName, type RoomHostSummary, type RoomView } from "@/lib/roomsApi";
 import type { RoomMemberView } from "@/lib/roomReducer";
 import { AlertTriangleIcon, ArrowLeftIcon } from "@/components/ui/icons";
@@ -115,6 +116,11 @@ function RoomPageInner({ id }: { id: string }) {
   const canControlScreen = role === "host" || role === "cohost";
   const muted = state.you?.muted ?? false;
 
+  // The screen was taken back (host stopped it, an adult arrived, voice went off): switch the camera off here too.
+  useEffect(() => {
+    if (voice.cameraOn && state.holder !== me?.id) void voice.stopCamera();
+  }, [voice.cameraOn, state.holder, me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const leave = () => { sock.leave(); navigate("/rooms"); };
   const back = <Button asChild variant="outline"><Link href="/rooms">Back to Rooms</Link></Button>;
 
@@ -147,6 +153,9 @@ function RoomPageInner({ id }: { id: string }) {
   } else {
     const isCoHostOrHost = role === "host" || role === "cohost";
     const tabTrigger = "min-h-[44px] flex-1 rounded-full";
+    const onStageNow = role !== "guest" || (!!me && state.stage.includes(me.id));
+    const isHolder = !!me && state.holder === me.id;
+    const canAskLive = state.liveVideo && onStageNow && !isHolder && state.phase === "live";
     content = (
       <div className="space-y-4">
         {state.phase === "reconnecting" && (
@@ -175,6 +184,20 @@ function RoomPageInner({ id }: { id: string }) {
           </div>
         )}
 
+        {state.liveVideo && !LINK_SCREENS && (
+          <ScreenStage
+            track={isHolder ? voice.localVideo : voice.video}
+            holderName={state.holder ? nameOf(state.holder) : null}
+            isHolder={isHolder}
+            cameraOn={voice.cameraOn} cameraError={voice.cameraError}
+            onGoLive={voice.startCamera}
+            onStop={() => { void voice.stopCamera(); sock.liveAction("stop"); }}
+            canAsk={canAskLive} askLabel={isCoHostOrHost ? "Go live" : "Ask to go live"} asked={!!me && state.asks.includes(me.id)}
+            onAsk={() => (isCoHostOrHost && me ? sock.liveAction("grant", me.id) : sock.liveAction("ask"))}
+            onWithdraw={() => sock.liveAction("withdraw")}
+          />
+        )}
+
         <RoomScene members={state.members} memberCount={state.memberCount} selfId={me?.id ?? null} reactions={state.reactions} interactions={state.interactions} hidden={hidden} stage={state.voiceEnabled ? state.stage : []} speaking={voice.activeSpeakers} onAvatarTap={pick} />
 
         <VoiceBar voice={voice} hasHand={!!me && state.hands.includes(me.id)} canAskToSpeak={role === "guest"} onRaise={() => sock.stageAction("raise")} onLower={() => sock.stageAction("lower")} />
@@ -200,7 +223,10 @@ function RoomPageInner({ id }: { id: string }) {
             <TabsContent value="controls" className="mt-3 space-y-4">
               <StagePanel members={state.members} stage={state.stage} hands={state.hands} voiceEnabled={state.voiceEnabled} canSwitchVoice={role === "host"}
                 onSwitch={async (on) => { if (!(await sock.setVoice(on))) setNoticeText(on ? "Voice isn't available right now." : "Couldn't switch voice off."); }}
-                onStage={(action, target) => sock.stageAction(action, target)} />
+                onStage={(action, target) => sock.stageAction(action, target)}
+                liveVideo={state.liveVideo} holder={state.holder} liveAsks={state.asks} canSwitchLive={role === "host"}
+                onSwitchLive={async (on) => { if (!(await sock.setLiveVideo(on))) setNoticeText(on ? "Live video isn't available for this room." : "Couldn't switch live video off."); }}
+                onLive={(action, target) => sock.liveAction(action, target)} />
               {isHost && room && <HostControls room={{ ...room, host: detail.host }} onChanged={() => refetch()} />}
               {isHost && <p className="text-center text-xs text-muted-foreground">If you close this page the room ends after 2 minutes.</p>}
             </TabsContent>

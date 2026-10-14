@@ -45,6 +45,7 @@ export interface RoomView {
   eventId: string | null;
   venueId: string | null;
   noDirectInteractions: boolean;
+  liveVideo?: boolean;
   memberCount?: number;
   peek?: PeekMember[];
   host: RoomHostSummary | null;

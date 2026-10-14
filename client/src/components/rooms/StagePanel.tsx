@@ -4,6 +4,7 @@ import { Switch } from "@/components/ui/switch";
 import HostAvatar from "@/components/rooms/HostAvatar";
 import type { RoomMemberView } from "@/lib/roomReducer";
 import type { StageAction } from "@shared/stage";
+import type { LiveAction } from "@shared/liveScreen";
 
 interface Props {
   members: RoomMemberView[];
@@ -14,15 +15,24 @@ interface Props {
   canSwitchVoice: boolean;
   onSwitch: (enabled: boolean) => void;
   onStage: (action: StageAction, targetId: string) => void;
+  /** Live screen: the room has live video on, who holds the screen, who asked, and the host-only switch. */
+  liveVideo: boolean;
+  holder: string | null;
+  liveAsks: string[];
+  canSwitchLive: boolean;
+  onSwitchLive: (enabled: boolean) => void;
+  onLive: (action: LiveAction, targetId: string) => void;
 }
 
 const nameOf = (m?: RoomMemberView) => (m ? m.displayName || m.organizationName || m.username || "Guest" : "Someone");
 
 /** Host and co-host view of the mic: who is asking, who is speaking. You can also give the mic to anyone from the member list. */
-export default function StagePanel({ members, stage, hands, voiceEnabled, canSwitchVoice, onSwitch, onStage }: Props) {
+export default function StagePanel({ members, stage, hands, voiceEnabled, canSwitchVoice, onSwitch, onStage, liveVideo, holder, liveAsks, canSwitchLive, onSwitchLive, onLive }: Props) {
   const byId = new Map(members.map((m) => [m.userId, m]));
   const speakers = stage.map((id) => byId.get(id)).filter(Boolean) as RoomMemberView[];
   const asking = hands.map((id) => byId.get(id)).filter(Boolean) as RoomMemberView[];
+  const askingLive = liveAsks.map((id) => byId.get(id)).filter(Boolean) as RoomMemberView[];
+  const onScreen = holder ? byId.get(holder) : undefined;
   return (
     <section aria-label="Stage" className="space-y-3 rounded-2xl border p-3" data-testid="stage-panel">
       <div className="flex items-center justify-between gap-4">
@@ -59,6 +69,41 @@ export default function StagePanel({ members, stage, hands, voiceEnabled, canSwi
                   </li>
                 ))}
               </ul>
+            )}
+          </div>
+          <div className="space-y-2 border-t pt-3" data-testid="live-panel">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h3 className="text-sm font-semibold">Live video</h3>
+                <p className="text-xs text-muted-foreground">{liveVideo ? "One person at a time can stream their camera and mic to the screen." : "Switch on to let someone stream to the room."}</p>
+              </div>
+              {canSwitchLive && <><Label htmlFor="live-switch" className="sr-only">Live video</Label><Switch id="live-switch" checked={liveVideo} onCheckedChange={onSwitchLive} data-testid="switch-live-video" /></>}
+            </div>
+            {liveVideo && (
+              <>
+                <div>
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">On the screen</h4>
+                  {onScreen ? (
+                    <div className="flex items-center gap-2" data-testid="live-holder">
+                      <HostAvatar person={onScreen} className="h-8 w-8" /><span className="min-w-0 flex-1 truncate text-sm">{nameOf(onScreen)}</span>
+                      <Button size="sm" variant="outline" className="min-h-[44px]" onClick={() => onLive("revoke", onScreen.userId)} data-testid="button-stop-holder">Stop</Button>
+                    </div>
+                  ) : <p className="py-1 text-sm text-muted-foreground">No one yet.</p>}
+                </div>
+                <div>
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Asking to go live ({askingLive.length})</h4>
+                  {askingLive.length === 0 ? <p className="py-1 text-sm text-muted-foreground">Nobody right now. Only people on the mic can ask.</p> : (
+                    <ul className="space-y-1">
+                      {askingLive.map((m) => (
+                        <li key={m.userId} className="flex items-center gap-2" data-testid={`live-ask-${m.userId}`}>
+                          <HostAvatar person={m} className="h-8 w-8" /><span className="min-w-0 flex-1 truncate text-sm">{nameOf(m)}</span>
+                          <Button size="sm" className="min-h-[44px]" onClick={() => onLive("grant", m.userId)} data-testid={`button-grant-live-${m.userId}`}>Put on screen</Button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </>
             )}
           </div>
         </>

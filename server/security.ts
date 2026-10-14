@@ -358,7 +358,7 @@ export const securityHeaders = (req: Request, res: Response, next: NextFunction)
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-  res.setHeader("Permissions-Policy", "geolocation=(self), microphone=(self), camera=()");
+  res.setHeader("Permissions-Policy", "geolocation=(self), microphone=(self), camera=(self)");
 
   // Per-request nonce — use res.locals.cspNonce to stamp any legitimate inline <script>
   const nonce = crypto.randomBytes(16).toString("base64");

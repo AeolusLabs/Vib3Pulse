@@ -11,6 +11,7 @@ import { cueCountdownMs, needsCorrection, sanitizePlaybackInput, targetPositionM
 import { getVoiceService, roomNameFor, setVoiceServiceForTests } from "../server/rooms/voice/voiceService";
 import { FakeVoice } from "../server/rooms/voice/fakeVoice";
 import { speakerIds, speakingRings, voiceStatus } from "../client/src/lib/voiceState";
+import { pickDevices, rememberedDevice } from "../client/src/lib/mediaDevices";
 import { applyLive, dropFromLive, emptyLive, type LiveContext, type LiveState } from "../shared/liveScreen";
 import { syncDecision, youtubeEmbedWithApi } from "../client/src/lib/playerAdapters";
 import { ageFromDob, ageBand, meetsAgeLimit, minAgeForLimit, sameBand, AGE_LIMITS, MIN_PLATFORM_AGE } from "../shared/age";
@@ -76,6 +77,39 @@ test("live: withdraw removes your own ask", () => {
 test("live: dropFromLive removes that user's hold and ask only", () => {
   assert.deepEqual(dropFromLive({ holder: "a", asks: ["a", "b"] }, "a"), { holder: null, asks: ["b"] });
   assert.deepEqual(dropFromLive({ holder: "a", asks: ["b"] }, "b"), { holder: "a", asks: [] });
+});
+
+// ---------------------------------------------------------------- live screen client helpers
+test("pickDevices: cameras and mics only, empty ids dropped, readable fallback labels", () => {
+  const r = pickDevices([
+    { kind: "videoinput", deviceId: "c1", label: "FaceTime HD" }, { kind: "videoinput", deviceId: "", label: "ghost" }, { kind: "videoinput", deviceId: "c2", label: "" },
+    { kind: "audioinput", deviceId: "m1", label: "Focusrite USB" }, { kind: "audioinput", deviceId: "m2", label: "" }, { kind: "audiooutput", deviceId: "o1", label: "Speakers" },
+  ]);
+  assert.deepEqual(r.cameras, [{ deviceId: "c1", label: "FaceTime HD" }, { deviceId: "c2", label: "Camera 2" }]);
+  assert.deepEqual(r.mics, [{ deviceId: "m1", label: "Focusrite USB" }, { deviceId: "m2", label: "Microphone 2" }]);
+});
+test("rememberedDevice: only returns a saved id that is still plugged in; broken storage is null", () => {
+  const avail = [{ deviceId: "a", label: "A" }, { deviceId: "b", label: "B" }];
+  const store = (v: string | null) => ({ getItem: () => v });
+  assert.equal(rememberedDevice("camera", avail, store("b")), "b");
+  assert.equal(rememberedDevice("camera", avail, store("gone")), null);
+  assert.equal(rememberedDevice("mic", avail, store(null)), null);
+  assert.equal(rememberedDevice("mic", avail, { getItem: () => { throw new Error("blocked"); } }), null);
+});
+test("reducer: live state arrives with room:state, changes with room:live, and live video off clears it", () => {
+  const st = (extra: object = {}) => ({ type: "room:state" as const, room: { id: "r", liveVideo: true }, members: [], memberCount: 0, screen: null, you: { role: "guest" as const, muted: false }, ...extra });
+  let s0 = roomReducer(initialRoomState("u"), st({ holder: "h", asks: ["a"] }));
+  assert.equal(s0.liveVideo, true); assert.equal(s0.holder, "h"); assert.deepEqual(s0.asks, ["a"]);
+  s0 = roomReducer(s0, { type: "room:live", holder: "b", asks: [] });
+  assert.equal(s0.holder, "b"); assert.deepEqual(s0.asks, []);
+  s0 = roomReducer(s0, { type: "room:livevideo", enabled: false });
+  assert.equal(s0.liveVideo, false); assert.equal(s0.holder, null); assert.deepEqual(s0.asks, []);
+  s0 = roomReducer(s0, { type: "room:livevideo", enabled: true });
+  assert.equal(s0.liveVideo, true);
+  const noLive = roomReducer(initialRoomState("u"), st({ room: { id: "r" } }));
+  assert.equal(noLive.liveVideo, false); assert.equal(noLive.holder, null);
+  const voiceOff = roomReducer(roomReducer(initialRoomState("u"), st({ holder: "h" })), { type: "room:voice", enabled: false });
+  assert.equal(voiceOff.liveVideo, false); assert.equal(voiceOff.holder, null);
 });
 
 // ---------------------------------------------------------------- age

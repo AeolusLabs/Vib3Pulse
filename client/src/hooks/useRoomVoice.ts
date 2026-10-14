@@ -2,9 +2,12 @@
 // Audio and the microphone only start from a user's tap. The server's permission changes arrive as LiveKit events,
 // so `canPublish` here is always what LiveKit says, never a guess from the stage list.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Room, RoomEvent, Track, type RemoteTrack } from "livekit-client";
+import { Room, RoomEvent, Track, TrackEvent, type RemoteTrack } from "livekit-client";
 import { apiRequest } from "@/lib/queryClient";
 import { voiceStatus, type VoiceStatus } from "@/lib/voiceState";
+
+/** What the screen needs from a video track: attach it to a <video>, detach it again. */
+export interface ScreenTrack { attach(el: HTMLVideoElement): unknown; detach(el: HTMLVideoElement): unknown }
 
 export interface RoomVoice {
   status: VoiceStatus;
@@ -17,6 +20,14 @@ export interface RoomVoice {
   activeSpeakers: string[];
   error: string | null;
   micError: string | null;
+  /** The live screen: the holder's video as everyone else receives it, and your own preview while you are the holder. */
+  video: ScreenTrack | null;
+  localVideo: ScreenTrack | null;
+  cameraOn: boolean;
+  cameraError: string | null;
+  /** Call from a click: starts your camera and microphone (the holder only; the server has already allowed it). */
+  startCamera(devices: { cameraId?: string; micId?: string }): Promise<void>;
+  stopCamera(): Promise<void>;
 }
 
 export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteToken?: string }): RoomVoice {
@@ -28,6 +39,10 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
   const [active, setActive] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [micError, setMicError] = useState<string | null>(null);
+  const [video, setVideo] = useState<ScreenTrack | null>(null);
+  const [localVideo, setLocalVideo] = useState<ScreenTrack | null>(null);
+  const [cameraOn, setCameraOn] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const lk = useRef<Room | null>(null);
   const sink = useRef<HTMLDivElement | null>(null);
   const connecting = useRef(false);
@@ -40,6 +55,7 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
     sink.current?.remove();
     sink.current = null;
     setConnected(false); setCanPublish(false); setMicOn(false); setActive([]);
+    setVideo(null); setLocalVideo(null); setCameraOn(false);
   }, []);
 
   const connect = useCallback(async () => {
@@ -56,13 +72,21 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
       box.style.display = "none";
       document.body.appendChild(box);
       sink.current = box;
-      room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack) => { if (track.kind === Track.Kind.Audio) box.appendChild(track.attach()); });
-      room.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => { track.detach().forEach((el) => el.remove()); });
+      room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack) => {
+        if (track.kind === Track.Kind.Audio) box.appendChild(track.attach());
+        else if (track.kind === Track.Kind.Video) setVideo(track as unknown as ScreenTrack);
+      });
+      room.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
+        if (track.kind === Track.Kind.Video) { setVideo((v) => (v === (track as unknown as ScreenTrack) ? null : v)); return; } // <video> elements belong to the screen
+        track.detach().forEach((el) => el.remove());
+      });
       room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => setActive(speakers.map((s) => s.identity)));
       room.on(RoomEvent.ParticipantPermissionsChanged, (_prev, p) => {
         if (p === room.localParticipant) { setCanPublish(!!p.permissions?.canPublish); if (!p.permissions?.canPublish) setMicOn(false); }
       });
-      room.on(RoomEvent.LocalTrackUnpublished, () => setMicOn(false)); // permission removed: LiveKit drops the track
+      room.on(RoomEvent.LocalTrackUnpublished, (pub) => { // permission removed: LiveKit drops the track
+        if (pub.source === Track.Source.Camera) { setCameraOn(false); setLocalVideo(null); } else setMicOn(false);
+      });
       room.on(RoomEvent.Disconnected, () => { if (lk.current === room) { lk.current = null; setConnected(false); setMicOn(false); setFailed(true); setError("Audio disconnected. Tap to reconnect."); } }); // LiveKit gave up reconnecting
       await room.connect(url, token);
       if (gen !== generation.current) { room.disconnect(); box.remove(); return; } // hung up while connecting: do not leave audio running
@@ -101,5 +125,31 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
 
   useEffect(() => hangUp, [hangUp]); // leaving the page ends the session
 
-  return { status: voiceStatus({ voiceEnabled: opts.enabled, unlocked, connected, failed, canPublish, micOn }), unlock, canPublish, micOn, toggleMic, activeSpeakers: active, error, micError };
+  const stopCamera = useCallback(async () => {
+    const room = lk.current;
+    setCameraOn(false); setLocalVideo(null);
+    if (!room) return;
+    await room.localParticipant.setCameraEnabled(false).catch(() => {});
+  }, []);
+
+  const startCamera = useCallback(async (devices: { cameraId?: string; micId?: string }) => {
+    const room = lk.current;
+    if (!room) return;
+    setCameraError(null);
+    try {
+      // 720p at 30 frames a second: keeps the room's bandwidth (and our LiveKit bill) predictable.
+      await room.localParticipant.setCameraEnabled(true, { deviceId: devices.cameraId, resolution: { width: 1280, height: 720, frameRate: 30 } });
+      await room.localParticipant.setMicrophoneEnabled(true, devices.micId ? { deviceId: devices.micId } : undefined);
+      const track = room.localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack;
+      if (!track) throw new Error("no camera track");
+      track.on(TrackEvent.Ended, () => { setCameraError("Your camera or microphone was disconnected, so the stream stopped."); void stopCamera(); });
+      setLocalVideo(track as unknown as ScreenTrack);
+      setCameraOn(true); setMicOn(true);
+    } catch (e: any) {
+      await room.localParticipant.setCameraEnabled(false).catch(() => {});
+      setCameraError(/denied|permission|NotAllowed/i.test(String(e?.name) + String(e?.message)) ? "Your browser blocked the camera or microphone. Allow it in the address bar and try again." : "Couldn't start your camera. Check it is connected and not used by another app.");
+    }
+  }, [stopCamera]);
+
+  return { status: voiceStatus({ voiceEnabled: opts.enabled, unlocked, connected, failed, canPublish, micOn }), unlock, canPublish, micOn, toggleMic, activeSpeakers: active, error, micError, video, localVideo, cameraOn, cameraError, startCamera, stopCamera };
 }

@@ -665,7 +665,7 @@ try {
     securityHeaders({} as any, { setHeader: (k: string, v: string) => { h4[k] = v; }, locals: {} } as any, () => {});
     check("...and without LiveKit configured no extra host is allowed", !/livekit/.test(h4["Content-Security-Policy"]));
     if (lkEnv !== undefined) process.env.LIVEKIT_URL = lkEnv;
-    check("Permissions-Policy lets this site use the microphone but not the camera", /microphone=\(self\)/.test(headers["Permissions-Policy"]) && /camera=\(\)/.test(headers["Permissions-Policy"]), headers["Permissions-Policy"]);
+    check("Permissions-Policy lets this site use the microphone and the camera (live screen)", /microphone=\(self\)/.test(headers["Permissions-Policy"]) && /camera=\(self\)/.test(headers["Permissions-Policy"]), headers["Permissions-Policy"]);
   }
 
   // ============ Part 3a Task 3: voice + playback columns and storage ============

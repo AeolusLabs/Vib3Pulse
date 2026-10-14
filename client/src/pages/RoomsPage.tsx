@@ -48,6 +48,7 @@ export function RoomCard({ room }: { room: RoomView }) {
           <div className="flex flex-wrap items-center gap-1.5">
             <span className={tag} data-testid={`badge-age-${room.id}`}>{ageLimitLabel(room.ageLimit)}</span>
             <span className={tag}>{KIND_LABEL[room.kind]}</span>
+            {room.liveVideo && <span className={tag} data-testid={`badge-live-video-${room.id}`}>Live video</span>}
             {room.visibility !== "public" && <span className={tag}>{VISIBILITY_LABEL[room.visibility]}</span>}
             {!live && room.scheduledFor && <span className={`${tag} inline-flex items-center gap-1`}><ClockIcon className="h-3 w-3" aria-hidden />{formatWhen(room.scheduledFor)}</span>}
             {(room.eventId || room.venueId) && <span className={`${tag} inline-flex items-center gap-1`}><CalendarIcon className="h-3 w-3" aria-hidden />{room.eventId ? "Event" : "Venue"}</span>}
