@@ -14,7 +14,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { ageBand, AGE_LIMITS, minAgeForLimit, type AgeLimit } from "@shared/age";
 import { resolveScreen } from "@shared/screen";
 import { ROOM_KINDS, ROOM_LIMITS, ROOM_VISIBILITY, validateRoomInput, type RoomKind, type RoomVisibility } from "@shared/rooms";
-import { KIND_LABEL, PROVIDER_LABEL, VISIBILITY_LABEL, ageLimitLabel } from "@/lib/roomsApi";
+import { KIND_LABEL, LINK_SCREENS, PROVIDER_LABEL, VISIBILITY_LABEL, ageLimitLabel } from "@/lib/roomsApi";
 import { CopyIcon, Loader2Icon } from "@/components/ui/icons";
 
 const VISIBILITY_HELP: Record<RoomVisibility, string> = {
@@ -71,7 +71,7 @@ export default function CreateRoomDialog({ open, onOpenChange, defaultEventId, d
         title, description: description || undefined, kind, visibility, ageLimit,
         eventId: linkType === "event" ? linkId : undefined, venueId: linkType === "venue" ? linkId : undefined,
         scheduledFor: when === "later" && scheduledFor ? new Date(scheduledFor).toISOString() : undefined,
-        noDirectInteractions: !directInteractions, screenUrl: screenUrl.trim() || undefined, capacity: Number(capacity),
+        noDirectInteractions: !directInteractions, screenUrl: LINK_SCREENS ? screenUrl.trim() || undefined : undefined, capacity: Number(capacity),
       };
       const v = validateRoomInput(input);
       if (!v.ok) throw new Error(({ title: "Give the room a title.", capacity: `Capacity must be between 2 and ${ROOM_LIMITS.capacityMax}.`, scheduledFor: "Pick a time in the future, within 90 days.", screenUrl: "That screen link can't be used." } as Record<string, string>)[v.field] ?? `Check the ${v.field} field.`);
@@ -197,12 +197,12 @@ export default function CreateRoomDialog({ open, onOpenChange, defaultEventId, d
               </div>
             )}
 
-            <div className="space-y-2">
+            {LINK_SCREENS && <div className="space-y-2">
               <Label htmlFor="room-screen">Screen link (optional)</Label>
               <Input id="room-screen" value={screenUrl} onChange={(e) => setScreenUrl(e.target.value)} placeholder="Paste a YouTube, Vimeo, Spotify, Apple Music or SoundCloud link" inputMode="url" data-testid="input-room-screen" />
               {screenPreview && <p className={`text-xs ${screenPreview.ok ? "text-muted-foreground" : "text-destructive"}`} role="status" data-testid="text-screen-preview">{screenPreview.text}</p>}
               <p className="text-xs text-muted-foreground">Everyone plays it from the provider with their own account. Nothing is recorded or relayed.</p>
-            </div>
+            </div>}
 
             <div className="flex items-start justify-between gap-4 rounded-lg border p-3">
               <div>

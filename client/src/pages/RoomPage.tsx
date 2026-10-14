@@ -8,7 +8,9 @@ import RoomScene from "@/components/rooms/RoomScene";
 import { RoomChat, ReactionBar } from "@/components/rooms/RoomChat";
 import HostControls from "@/components/rooms/HostControls";
 import AvatarActionsSheet from "@/components/rooms/AvatarActionsSheet";
-import MemberListSheet from "@/components/rooms/MemberListSheet";
+import MemberList from "@/components/rooms/MemberList";
+import RoomLobby from "@/components/rooms/RoomLobby";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import HostAvatar from "@/components/rooms/HostAvatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,15 +21,16 @@ import { useRoomSocket } from "@/hooks/useRoomSocket";
 import { useRoomVoice } from "@/hooks/useRoomVoice";
 import VoiceBar from "@/components/rooms/VoiceBar";
 import StagePanel from "@/components/rooms/StagePanel";
-import { DENIED_MESSAGE, KIND_LABEL, NOTICE_MESSAGE, VISIBILITY_LABEL, ageLimitLabel, fetchRooms, formatWhen, hostName, type RoomHostSummary, type RoomView } from "@/lib/roomsApi";
+import { DENIED_MESSAGE, KIND_LABEL, LINK_SCREENS, type PeekMember, NOTICE_MESSAGE, VISIBILITY_LABEL, ageLimitLabel, fetchRooms, formatWhen, hostName, type RoomHostSummary, type RoomView } from "@/lib/roomsApi";
 import type { RoomMemberView } from "@/lib/roomReducer";
-import { AlertTriangleIcon, ArrowLeftIcon, UsersIcon } from "@/components/ui/icons";
+import { AlertTriangleIcon, ArrowLeftIcon } from "@/components/ui/icons";
 
 interface RoomDetail {
   room: Omit<RoomView, "host" | "memberCount">;
   host: RoomHostSummary | null;
   canJoin: { ok: true } | { ok: false; code: string };
   memberCount: number;
+  peek?: PeekMember[];
   you: { role: "host" | "cohost" | "guest" } | null;
 }
 
@@ -71,16 +74,22 @@ function RoomPageInner({ id }: { id: string }) {
   const live = room?.status === "live";
   const canJoin = detail?.canJoin.ok === true;
 
-  // Join as soon as we know the room is live and the door lets us in.
+  // The host (and anyone already a member, e.g. after a reload) goes straight in; everyone else sees the lobby and taps Join.
+  const [joinTapped, setJoinTapped] = useState(false);
+  const goesStraightIn = !!detail && (detail.room.hostId === me?.id || !!detail.you);
   useEffect(() => {
-    if (live && canJoin && state.phase === "idle") sock.join();
-  }, [live, canJoin, state.phase]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (live && canJoin && state.phase === "idle" && (goesStraightIn || joinTapped)) sock.join();
+  }, [live, canJoin, state.phase, goesStraightIn, joinTapped]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Tapping Join was the gesture that lets the browser play sound: start room audio as soon as the room has voice, no second tap.
+  useEffect(() => {
+    if (joinTapped && state.phase === "live" && state.voiceEnabled && voice.status === "needs-tap") void voice.unlock();
+  }, [joinTapped, state.phase, state.voiceEnabled, voice.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [hidden, setHidden] = useState<Set<string>>(new Set()); // people the viewer muted for themselves
   const toggleHidden = (uid: string) => setHidden((s) => { const n = new Set(s); n.has(uid) ? n.delete(uid) : n.add(uid); return n; });
   const [picked, setPicked] = useState<RoomMemberView | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [listOpen, setListOpen] = useState(false);
+  const [tab, setTab] = useState("chat");
   const pick = (m: RoomMemberView) => { setPicked(m); setSheetOpen(true); };
 
   const { data: myLive } = useQuery<RoomView[]>({ queryKey: ["/api/rooms", "live"], queryFn: () => fetchRooms("live"), staleTime: 15_000, enabled: !!me });
@@ -131,7 +140,13 @@ function RoomPageInner({ id }: { id: string }) {
         {isHost && <HostControls room={{ ...room, host: detail.host }} onChanged={() => refetch()} />}
       </div>
     );
+  } else if (state.phase === "idle" || state.phase === "connecting") {
+    content = (
+      <RoomLobby room={room} host={detail.host} peek={detail.peek ?? []} memberCount={detail.memberCount} joining={joinTapped || goesStraightIn} onJoin={() => setJoinTapped(true)} />
+    );
   } else {
+    const isCoHostOrHost = role === "host" || role === "cohost";
+    const tabTrigger = "min-h-[44px] flex-1 rounded-full";
     content = (
       <div className="space-y-4">
         {state.phase === "reconnecting" && (
@@ -139,35 +154,30 @@ function RoomPageInner({ id }: { id: string }) {
             <AlertTriangleIcon className="h-4 w-4 shrink-0" aria-hidden /> Reconnecting… the room will pick up where you left off.
           </div>
         )}
-        {state.phase === "connecting" && <Skeleton className="h-6 w-48" />}
 
-        <RoomScreen
-          screen={state.room ? state.screen : room.screen}
-          canControl={canControlScreen}
-          onChange={(url) => sock.setScreen(url)}
-          nowPlaying={state.nowPlaying} serverOffsetMs={state.serverOffsetMs} sendPlayback={sock.sendPlayback} leadsPlayback={role === "host"}
-          strip={<div className="space-y-2"><RoomChat compact chat={state.chat} nameOf={nameOf} onSend={sock.chat} muted={muted} hidden={hidden} notice={noticeText} /><ReactionBar onReact={sock.react} /></div>}
-        />
+        {LINK_SCREENS && (
+          <RoomScreen
+            screen={state.room ? state.screen : room.screen}
+            canControl={canControlScreen}
+            onChange={(url) => sock.setScreen(url)}
+            nowPlaying={state.nowPlaying} serverOffsetMs={state.serverOffsetMs} sendPlayback={sock.sendPlayback} leadsPlayback={role === "host"}
+            strip={<div className="space-y-2"><RoomChat compact chat={state.chat} nameOf={nameOf} onSend={sock.chat} muted={muted} hidden={hidden} notice={noticeText} /><ReactionBar onReact={sock.react} /></div>}
+          />
+        )}
 
         {state.invitedYou && (
           <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/40 bg-primary/5 p-3" data-testid="invite-to-speak">
             <p className="text-sm font-medium">The host invited you to speak.</p>
             <div className="flex gap-2">
-              <Button className="min-h-[44px]" onClick={() => sock.stageAction("accept")} data-testid="button-accept-mic">Accept</Button>
-              <Button variant="outline" className="min-h-[44px]" onClick={() => { sock.stageAction("lower"); sock.dismissInvite(); }} data-testid="button-decline-mic">Decline</Button>
+              <Button className="min-h-[44px] rounded-full" onClick={() => sock.stageAction("accept")} data-testid="button-accept-mic">Accept</Button>
+              <Button variant="outline" className="min-h-[44px] rounded-full" onClick={() => { sock.stageAction("lower"); sock.dismissInvite(); }} data-testid="button-decline-mic">Decline</Button>
             </div>
           </div>
         )}
 
-        <VoiceBar voice={voice} hasHand={!!me && state.hands.includes(me.id)} canAskToSpeak={role === "guest"} onRaise={() => sock.stageAction("raise")} onLower={() => sock.stageAction("lower")} />
-
         <RoomScene members={state.members} memberCount={state.memberCount} selfId={me?.id ?? null} reactions={state.reactions} interactions={state.interactions} hidden={hidden} stage={state.voiceEnabled ? state.stage : []} speaking={voice.activeSpeakers} onAvatarTap={pick} />
 
-        {(role === "host" || role === "cohost") && (
-          <StagePanel members={state.members} stage={state.stage} hands={state.hands} voiceEnabled={state.voiceEnabled} canSwitchVoice={role === "host"}
-            onSwitch={async (on) => { if (!(await sock.setVoice(on))) setNoticeText(on ? "Voice isn't available right now." : "Couldn't switch voice off."); }}
-            onStage={(action, target) => sock.stageAction(action, target)} />
-        )}
+        <VoiceBar voice={voice} hasHand={!!me && state.hands.includes(me.id)} canAskToSpeak={role === "guest"} onRaise={() => sock.stageAction("raise")} onLower={() => sock.stageAction("lower")} />
 
         <div role="status" aria-live="polite" className="min-h-[1.25rem] text-center text-sm text-muted-foreground" data-testid="room-status-line">
           {incoming ? `${nameOf(incoming.fromId)} ${incoming.kind === "wave" ? "waved at you 👋" : `sent you ${incoming.emoji}`}` : noticeText}
@@ -175,10 +185,27 @@ function RoomPageInner({ id }: { id: string }) {
 
         <ReactionBar onReact={sock.react} className="justify-center" />
 
-        <RoomChat chat={state.chat} nameOf={nameOf} onSend={sock.chat} muted={muted} hidden={hidden} />
-
-        {isHost && room && <HostControls room={{ ...room, host: detail.host }} onChanged={() => refetch()} />}
-        {isHost && <p className="text-center text-xs text-muted-foreground">If you close this page the room ends after 2 minutes.</p>}
+        <Tabs value={tab} onValueChange={setTab}>
+          <TabsList className={`grid h-auto w-full rounded-full p-1 ${isCoHostOrHost ? "grid-cols-3" : "grid-cols-2"}`} aria-label="Room sections">
+            <TabsTrigger value="chat" className={tabTrigger} data-testid="tab-room-chat">Chat</TabsTrigger>
+            <TabsTrigger value="people" className={tabTrigger} data-testid="tab-room-people">People ({state.memberCount || detail.memberCount})</TabsTrigger>
+            {isCoHostOrHost && <TabsTrigger value="controls" className={tabTrigger} data-testid="tab-room-controls">Controls</TabsTrigger>}
+          </TabsList>
+          {/* Chat stays mounted so a half-typed message survives a trip to another tab. */}
+          <TabsContent value="chat" forceMount className="mt-3 data-[state=inactive]:hidden"><RoomChat chat={state.chat} nameOf={nameOf} onSend={sock.chat} muted={muted} hidden={hidden} /></TabsContent>
+          <TabsContent value="people" className="mt-3">
+            <MemberList members={state.members} memberCount={state.memberCount} selfId={me?.id ?? null} hidden={hidden} onPick={pick} />
+          </TabsContent>
+          {isCoHostOrHost && (
+            <TabsContent value="controls" className="mt-3 space-y-4">
+              <StagePanel members={state.members} stage={state.stage} hands={state.hands} voiceEnabled={state.voiceEnabled} canSwitchVoice={role === "host"}
+                onSwitch={async (on) => { if (!(await sock.setVoice(on))) setNoticeText(on ? "Voice isn't available right now." : "Couldn't switch voice off."); }}
+                onStage={(action, target) => sock.stageAction(action, target)} />
+              {isHost && room && <HostControls room={{ ...room, host: detail.host }} onChanged={() => refetch()} />}
+              {isHost && <p className="text-center text-xs text-muted-foreground">If you close this page the room ends after 2 minutes.</p>}
+            </TabsContent>
+          )}
+        </Tabs>
       </div>
     );
   }
@@ -203,11 +230,8 @@ function RoomPageInner({ id }: { id: string }) {
               </div>
               {room!.description && <p className="mt-1 text-sm">{room!.description}</p>}
             </div>
-            {room!.status === "live" && canJoin && state.phase !== "denied" && state.phase !== "ended" && (
-              <div className="flex shrink-0 flex-col gap-1">
-                <Button variant="outline" size="sm" className="min-h-[44px]" onClick={() => setListOpen(true)} data-testid="button-members"><UsersIcon className="mr-1.5 h-4 w-4" />{state.memberCount || detail!.memberCount}</Button>
-                <Button variant="ghost" size="sm" className="min-h-[44px]" onClick={leave} data-testid="button-leave-room">Leave</Button>
-              </div>
+            {room!.status === "live" && canJoin && state.phase === "live" && (
+              <Button variant="ghost" size="sm" className="min-h-[44px] shrink-0 rounded-full" onClick={leave} data-testid="button-leave-room">Leave</Button>
             )}
           </header>
         )}
@@ -215,7 +239,6 @@ function RoomPageInner({ id }: { id: string }) {
       </main>
       <BottomNavigation />
 
-      <MemberListSheet open={listOpen} onOpenChange={setListOpen} members={state.members} memberCount={state.memberCount} selfId={me?.id ?? null} hidden={hidden} onPick={(m) => { setListOpen(false); pick(m); }} />
       <AvatarActionsSheet
         open={sheetOpen} onOpenChange={setSheetOpen} roomId={id} target={picked}
         you={{ userId: me?.id ?? null, role }} myRoomId={myRoomId}

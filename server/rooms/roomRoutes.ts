@@ -24,6 +24,7 @@ import { getVoiceService } from "./voice/voiceService";
 import { afterRoleChange, canPublishNow, shutdownVoice } from "./stage";
 import { applyMod, endRoom, enforceAgeLimit, expectHost, interactionVerdict, notifyScreen } from "./roomSocket";
 import { roomHub } from "./RoomHub";
+import { roomFeatures } from "./features";
 
 const MAX_SCHEDULED = 10;
 const MAX_LIVE = 1;
@@ -36,6 +37,10 @@ const HOST_MESSAGES = {
   TEEN_PUBLIC: "Public rooms are for adults. Try a friends-only or invite-only room.",
   ACCOUNT_TOO_NEW: "Your account is too new to host a public room. Try a friends-only or invite-only room.",
 } as const;
+
+/** Who is in a live room, for the cards and the lobby: role plus the same public profile bits the scene shows. Never an age. */
+const peekOf = (roomId: string, n: number) =>
+  roomHub.members(roomId, n).map((m) => ({ userId: m.userId, role: m.role, ...m.info }));
 
 const newInviteToken = () => crypto.randomBytes(24).toString("hex");
 
@@ -109,6 +114,7 @@ export function registerRoomRoutes(app: Express): void {
       if (!hc.ok) return res.status(403).json({ message: HOST_MESSAGES[hc.code], code: hc.code });
 
       let screen = null;
+      if (v.value.screenUrl && !roomFeatures.linkScreens) return res.status(400).json({ message: "Link screens are switched off for now.", field: "screenUrl", reason: "disabled" });
       if (v.value.screenUrl) {
         const r = resolveScreen(v.value.screenUrl);
         if (!r.ok) return res.status(400).json({ message: "That screen link can't be used.", field: "screenUrl", reason: r.reason });
@@ -145,7 +151,7 @@ export function registerRoomRoutes(app: Express): void {
       const hostIds = Array.from(new Set(list.map((r) => r.hostId)));
       const hosts = hostIds.length ? await db.select().from(users).where(inArray(users.id, hostIds)) : [];
       const byId = new Map(hosts.map((h) => [h.id, hostSummary(h)]));
-      const rooms = list.map((r) => ({ ...publicRoom(r), host: byId.get(r.hostId) ?? null, memberCount: roomHub.count(r.id) }));
+      const rooms = list.map((r) => ({ ...publicRoom(r), host: byId.get(r.hostId) ?? null, memberCount: roomHub.count(r.id), peek: peekOf(r.id, 5) }));
       rooms.sort((a, b) => (a.status === b.status && a.status === "live" ? b.memberCount - a.memberCount : 0)); // busiest live rooms first (stable otherwise)
       res.json({ rooms });
     } catch (e) {
@@ -164,7 +170,7 @@ export function registerRoomRoutes(app: Express): void {
       const gate = canJoinRoom({ age: ageFromDob(viewer?.dateOfBirth) }, room as any);
       const canJoin = member?.banned ? { ok: false, code: "BANNED" } : gate;
       res.json({
-        room: publicRoom(room), host: host ? hostSummary(host) : null, canJoin, memberCount: roomHub.count(room.id),
+        room: publicRoom(room), host: host ? hostSummary(host) : null, canJoin, memberCount: roomHub.count(room.id), peek: peekOf(room.id, 8),
         you: isHost(room, req.user!.id) ? { role: "host" } : member && !member.banned ? { role: member.role } : null,
       });
     } catch (e) {
@@ -211,6 +217,7 @@ export function registerRoomRoutes(app: Express): void {
       }
       if ("screenUrl" in b) {
         if (b.screenUrl === null || b.screenUrl === "") patch.screen = null;
+        else if (!roomFeatures.linkScreens) return res.status(400).json({ message: "Link screens are switched off for now.", field: "screenUrl", reason: "disabled" });
         else {
           const r = resolveScreen(String(b.screenUrl));
           if (!r.ok) return res.status(400).json({ message: "That screen link can't be used.", field: "screenUrl", reason: r.reason });

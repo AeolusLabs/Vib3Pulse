@@ -17,6 +17,8 @@ const { storage } = await import("../server/storage");
 const { wsManager } = await import("../server/websocket");
 const rs = await import("../server/rooms/roomStorage");
 const { roomHub } = await import("../server/rooms/RoomHub");
+const { roomFeatures } = await import("../server/rooms/features");
+roomFeatures.linkScreens = true; // dormant in production (default off), still tested; one block below pins the default
 const { tuning, rehydrateLiveRooms, expectHost } = await import("../server/rooms/roomSocket");
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
@@ -631,6 +633,18 @@ try {
     check("the last person leaving is removed from LiveKit", await until(async () => logOf("remove", LR.id, LH).length >= 1));
 
     setVoiceServiceForTests(undefined);
+  }
+
+  // ---------------- link screens off: the WebSocket refuses them (clearing is fine)
+  {
+    roomFeatures.linkScreens = false;
+    const OH = await mk("lo_host"); const OR = await liveRoom(OH, { title: "links off" });
+    const oc = await connect(OH); await join(oc, OR.id);
+    oc.drain(); oc.send({ type: "room:screen", screen: "https://youtu.be/dQw4w9WgXcQ" });
+    check("room:screen with a link is refused (FEATURE_OFF) while the feature is off", !!(await oc.waitFor((m) => m.type === "room:notice" && m.code === "FEATURE_OFF")) && (await rs.getRoom(OR.id))?.screen === null);
+    oc.drain(); oc.send({ type: "room:playback", state: "playing", positionMs: 5, screenVersion: 0 });
+    check("room:playback is refused too (FEATURE_OFF)", !!(await oc.waitFor((m) => m.type === "room:notice" && m.code === "FEATURE_OFF")));
+    roomFeatures.linkScreens = true;
   }
 
   // ---------------- server restart: live room with no hub state and no host ends after grace

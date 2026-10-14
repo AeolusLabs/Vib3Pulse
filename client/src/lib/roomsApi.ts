@@ -14,6 +14,20 @@ export interface RoomHostSummary {
   isOfficial: boolean | null;
 }
 
+/** Who is in a live room, as the list and lobby see it: public profile bits and a role, never an age. */
+export interface PeekMember {
+  userId: string;
+  role: "host" | "cohost" | "guest";
+  username: string | null;
+  displayName: string | null;
+  organizationName?: string | null;
+  avatarUrl: string | null;
+  avatar: unknown;
+}
+
+/** Link screens (YouTube, Vimeo, music links) are switched off for now; live streaming replaces them. Mirrors server/rooms/features.ts. */
+export const LINK_SCREENS = false;
+
 export interface RoomView {
   id: string;
   hostId: string;
@@ -32,6 +46,7 @@ export interface RoomView {
   venueId: string | null;
   noDirectInteractions: boolean;
   memberCount?: number;
+  peek?: PeekMember[];
   host: RoomHostSummary | null;
 }
 

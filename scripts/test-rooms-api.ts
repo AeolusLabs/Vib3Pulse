@@ -19,6 +19,8 @@ const { redactSensitiveFields } = await import("../server/security");
 const { registerUsersRoutes } = await import("../server/routes/users-routes");
 const { userToSessionUser, toPublicUser } = await import("../server/auth");
 const { registerRoomRoutes } = await import("../server/rooms/roomRoutes");
+const { roomFeatures } = await import("../server/rooms/features");
+roomFeatures.linkScreens = true; // the link-screen code is dormant in production (default off) but stays under test; one block below pins the default
 const { registerMessagesRoutes } = await import("../server/routes/messages-routes");
 
 await storage.ensureLoginAttemptsTable();
@@ -805,6 +807,37 @@ try {
     const ban = await http("POST", `/api/rooms/${room.id}/members/${ABS}/ban`, H, {});
     check("banning someone who is not present: removed from LiveKit and the stage right is gone", ban.status === 200 && log("remove", ABS).length >= 1 && !(await rs.listOnStage(room.id)).includes(ABS));
     roomHub.end(room.id); setVoiceServiceForTests(undefined);
+  }
+
+  // ============ Link screens are switched off (live streaming replaces them); lobby preview of who is in a room ============
+  {
+    const { roomHub } = await import("../server/rooms/RoomHub");
+    const rsx = await import("../server/rooms/roomStorage");
+    check("the link-screen feature defaults to off in production", (await import("../server/rooms/features")).DEFAULT_ROOM_FEATURES.linkScreens === false);
+    roomFeatures.linkScreens = false;
+    const H = await mk("off_host", yearsAgo(30)), G = await mk("off_guest", yearsAgo(30));
+    const mkBody = (over: object = {}) => ({ title: "no links", kind: "party", visibility: "public", ageLimit: "all", ...over });
+    const withLink = await http("POST", "/api/rooms", H, mkBody({ screenUrl: "https://youtu.be/dQw4w9WgXcQ" }));
+    check("create with a screen link is refused while the feature is off (400, field screenUrl)", withLink.status === 400 && withLink.json?.field === "screenUrl" && withLink.json?.reason === "disabled", JSON.stringify(withLink.json));
+    const ok = await http("POST", "/api/rooms", H, mkBody());
+    check("create without a link still works", ok.status === 201);
+    const patch = await http("PATCH", `/api/rooms/${ok.json.room.id}`, H, { screenUrl: "https://vimeo.com/76979871" });
+    check("setting a screen link by PATCH is refused too", patch.status === 400 && patch.json?.field === "screenUrl");
+    check("clearing a screen is still allowed", (await http("PATCH", `/api/rooms/${ok.json.room.id}`, H, { screenUrl: null })).status === 200);
+    roomFeatures.linkScreens = true;
+
+    // who is in the room, for the cards and the lobby (no ages, no emails)
+    const room = await rsx.createRoom(H, { title: "peek", kind: "party", visibility: "public", ageLimit: "all" } as any);
+    await rsx.setStatus(room.id, "live");
+    roomHub.join(room.id, { userId: H, role: "host", muted: false, joinedAt: 1, age: 30, send: () => {}, info: { username: "off_host", displayName: "Host", avatar: null, avatarUrl: null } });
+    roomHub.join(room.id, { userId: G, role: "guest", muted: false, joinedAt: 2, age: 15, send: () => {}, info: { username: "off_guest", displayName: "Guest", avatar: null, avatarUrl: null } });
+    const list = await http("GET", "/api/rooms?scope=live", G);
+    const card = list.json.rooms.find((r: any) => r.id === room.id);
+    check("room list items carry a peek of who is in the room (role + public profile bits only)", card?.peek?.length === 2 && card.peek[0].role === "host" && card.peek[0].username === "off_host", JSON.stringify(card?.peek));
+    check("...and the peek never carries an age, email or birthdate", !/"age"|email|dateOfBirth|passwordHash/.test(JSON.stringify(list.json)), JSON.stringify(list.json).slice(0, 200));
+    const one = await http("GET", `/api/rooms/${room.id}`, G);
+    check("GET room carries the peek for the lobby", one.json?.peek?.length === 2 && one.json.memberCount === 2);
+    roomHub.end(room.id);
   }
 } catch (e: any) {
   failed++; console.log(`FAIL uncaught: ${e.stack || e}`);

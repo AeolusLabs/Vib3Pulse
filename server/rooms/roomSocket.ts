@@ -14,6 +14,7 @@ import { roomHub, type HubMember } from "./RoomHub";
 import { TokenBucket } from "./rateLimit";
 import { dropFromVoice, handleStage, reconcileVoice, restoreStageOnJoin, sweepAllVoiceRooms } from "./stage";
 import { getVoiceService } from "./voice/voiceService";
+import { roomFeatures } from "./features";
 
 /** Injectable so tests can shorten the host grace period; rates are the documented limits. */
 export const tuning = {
@@ -340,6 +341,7 @@ async function doScreen(ws: RoomClient, userId: string, roomId: string, msg: any
   const me = roomHub.get(roomId, userId);
   if (!me || (me.role !== "host" && me.role !== "cohost")) return notice(ws, "FORBIDDEN");
   const input = typeof msg.screen === "string" ? msg.screen : typeof msg.screen?.url === "string" ? msg.screen.url : null;
+  if (msg.screen !== null && !roomFeatures.linkScreens) return notice(ws, "FEATURE_OFF");
   if (msg.screen === null) {
     const cleared = await rs.updateRoom(roomId, { screen: null });
     return notifyScreen(roomId, null, cleared.screenVersion);
@@ -352,6 +354,7 @@ async function doScreen(ws: RoomClient, userId: string, roomId: string, msg: any
 
 // ---------------------------------------------------------------- playback sync
 async function doPlayback(ws: RoomClient, userId: string, roomId: string, msg: any) {
+  if (!roomFeatures.linkScreens) return notice(ws, "FEATURE_OFF");
   const me = roomHub.get(roomId, userId);
   if (!me || (me.role !== "host" && me.role !== "cohost")) return notice(ws, "FORBIDDEN");
   if (!bucketsFor(userId).playback.take()) return notice(ws, "RATE_LIMITED");
