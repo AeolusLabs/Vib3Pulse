@@ -358,9 +358,13 @@ export default function EditProfileDialog({ user }: EditProfileDialogProps) {
                           {...field}
                           value={field.value || ""}
                           type="date"
+                          disabled={!!user.dateOfBirth}
                           data-testid="input-dateOfBirth"
                         />
                       </FormControl>
+                      {user.dateOfBirth && (
+                        <FormDescription>Your birthdate is locked. Contact support to correct it.</FormDescription>
+                      )}
                       <FormMessage />
                     </FormItem>
                   )}

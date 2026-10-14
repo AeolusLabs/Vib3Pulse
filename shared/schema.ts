@@ -3,6 +3,9 @@ import { pgTable, text, varchar, timestamp, integer, boolean, unique, primaryKey
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import type { AvatarConfig } from "./avatar";
+import type { RoomPrivacy } from "./rooms";
+import type { Screen } from "./screen";
+import type { NowPlaying } from "./playback";
 import { validateBuildingConfig, type BuildingConfig } from "./building";
 
 // Request-side schema for a venue/event building: strict (names the failing field in the zod issue path),
@@ -39,6 +42,8 @@ export const users = pgTable("users", {
   avatarUrl: text("avatar_url"),
   // Customizable 2D avatar (config only, validated by sanitizeAvatarConfig in shared/avatar.ts). Null = not created yet.
   avatar: jsonb("avatar").$type<AvatarConfig | null>(),
+  // Per-user room privacy (see shared/rooms.ts resolveRoomPrivacy). Null = defaults.
+  roomPrivacy: jsonb("room_privacy").$type<RoomPrivacy | null>(),
   // The real photo, parked while the avatar is the picture (avatarUrl then points at /api/avatar-img/...). See shared/avatar.ts.
   profilePhotoUrl: text("profile_photo_url"),
   bannerMode: text("banner_mode"),
@@ -79,7 +84,7 @@ export const users = pgTable("users", {
 });
 
 // avatar is typed loosely here on purpose: the PATCH route runs it through sanitizeAvatarConfig before storing.
-export const insertUserSchema = createInsertSchema(users, { avatar: z.custom<AvatarConfig>().nullable().optional() }).omit({
+export const insertUserSchema = createInsertSchema(users, { avatar: z.custom<AvatarConfig>().nullable().optional(), roomPrivacy: z.custom<RoomPrivacy>().nullable().optional() }).omit({
   id: true,
   createdAt: true,
 });
@@ -1106,6 +1111,47 @@ export const userBlocks = pgTable("user_blocks", {
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 }, (t) => ({ pk: primaryKey({ columns: [t.blockerId, t.blockedId] }) }));
 
+// Virtual rooms (alpha). Durable state only; live presence is in memory (server/rooms/RoomHub.ts).
+export const rooms = pgTable("rooms", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  hostId: varchar("host_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  description: text("description"),
+  kind: text("kind").notNull().default("party"),             // party | listening | talk | event
+  visibility: text("visibility").notNull().default("public"), // public | friends | invite
+  eventId: varchar("event_id").references(() => events.id, { onDelete: "set null" }),
+  venueId: varchar("venue_id").references(() => venues.id, { onDelete: "set null" }),
+  inviteTokenHash: text("invite_token_hash"),
+  scheduledFor: timestamp("scheduled_for"),
+  startedAt: timestamp("started_at"),
+  endedAt: timestamp("ended_at"),
+  status: text("status").notNull().default("scheduled"),      // scheduled | live | ended
+  ageLimit: text("age_limit").notNull().default("all"),       // all | 13+ | 16+ | 18+ | 21+
+  capacity: integer("capacity").notNull().default(50),
+  noDirectInteractions: boolean("no_direct_interactions").notNull().default(false),
+  screen: jsonb("screen").$type<Screen | null>(),
+  moderationStatus: text("moderation_status").notNull().default("approved"),
+  // Part 3a: live voice (LiveKit) and synced playback.
+  voiceEnabled: boolean("voice_enabled").notNull().default(false),
+  maxSpeakers: integer("max_speakers").notNull().default(6),
+  screenVersion: integer("screen_version").notNull().default(0), // bumped whenever the screen changes
+  nowPlaying: jsonb("now_playing").$type<NowPlaying | null>(),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+export type Room = typeof rooms.$inferSelect;
+
+export const roomMembers = pgTable("room_members", {
+  roomId: varchar("room_id").notNull().references(() => rooms.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  role: text("role").notNull().default("guest"),              // host | cohost | guest
+  joinedAt: timestamp("joined_at").notNull().default(sql`now()`),
+  leftAt: timestamp("left_at"),
+  muted: boolean("muted").notNull().default(false),
+  banned: boolean("banned").notNull().default(false),
+  onStage: boolean("on_stage").notNull().default(false), // a guest given the mic; kept so a reconnect restores it
+}, (t) => ({ pk: primaryKey({ columns: [t.roomId, t.userId] }) }));
+export type RoomMember = typeof roomMembers.$inferSelect;
+
 export const venueEntryNights = pgTable("venue_entry_nights", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   venueId: varchar("venue_id").notNull().references(() => venues.id, { onDelete: "cascade" }),
@@ -1487,6 +1533,7 @@ export const notificationTypes = [
   "appeal_resolved",
   "rsvp_approved",
   "rsvp_removed",
+  "room_live",
 ] as const;
 export type NotificationType = typeof notificationTypes[number];
 

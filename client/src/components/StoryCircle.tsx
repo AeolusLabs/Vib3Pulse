@@ -66,7 +66,7 @@ export default function StoryCircle({
         )}
       </div>
       <span className="text-xs text-center line-clamp-1 max-w-[70px] group-hover:text-primary transition-colors">
-        {isOwn ? "Your Story" : username}
+        {isOwn ? "Your Vib3" : username}
       </span>
     </button>
   );

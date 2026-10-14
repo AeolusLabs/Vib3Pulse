@@ -1,0 +1,194 @@
+// Voice and stage logic for rooms part 3a. No sockets in here: roomSocket.ts maps results to notices, and every function
+// that changes who may speak also tells LiveKit (through VoiceService), so the server stays the authority.
+//
+// Discipline, learned the hard way in review:
+//  - Everything that changes a room's stage runs under a per-room lock, so concurrent actions cannot interleave their awaits.
+//  - The in-memory stage is updated (and broadcast) BEFORE any slow side effect.
+//  - LiveKit is told BEFORE the database is written, and neither failing may skip the other: a revocation must never be lost
+//    because a database write threw.
+import { applyStage, canBeOnStage, MAX_SPEAKERS, type StageAction, type StageState } from "@shared/stage";
+import { roomHub, type HubMember } from "./RoomHub";
+import { getVoiceService } from "./voice/voiceService";
+import * as rs from "./roomStorage";
+
+const ACTIONS: readonly StageAction[] = ["raise", "lower", "invite", "accept", "remove"];
+const log = (what: string) => (e: any) => { console.error(`[voice] ${what} failed:`, e?.message ?? e); };
+/** Awaits a promise and logs instead of throwing: used for the side effects of a change that already happened in memory. */
+const soft = async (what: string, p: Promise<unknown> | undefined) => { try { await p; } catch (e) { log(what)(e); } };
+
+const locks = new Map<string, Promise<unknown>>();
+function withRoomLock<T>(roomId: string, fn: () => Promise<T>): Promise<T> {
+  const run = (locks.get(roomId) ?? Promise.resolve()).then(fn);
+  const tail = run.catch(() => {});
+  locks.set(roomId, tail);
+  void tail.then(() => { if (locks.get(roomId) === tail) locks.delete(roomId); });
+  return run;
+}
+
+const eligible = (m: HubMember, roomId: string) => canBeOnStage({ age: m.age ?? null }, { bands: roomHub.bandsIn(roomId) }).ok;
+const without = (list: string[], id: string) => list.filter((x) => x !== id);
+
+/** Host, co-hosts and guests on stage may publish, as long as the teen rule allows them to speak right now. */
+export function canPublishNow(roomId: string, userId: string): boolean {
+  const m = roomHub.get(roomId, userId);
+  if (!m) return false;
+  const speaker = m.role === "host" || m.role === "cohost" || roomHub.stageOf(roomId).stage.includes(userId);
+  return speaker && eligible(m, roomId);
+}
+
+const publishChange = async (roomId: string, userId: string, canPublish: boolean) => {
+  const m = roomHub.get(roomId, userId);
+  if (m) m.publish = canPublish;
+  await soft("setCanPublish", getVoiceService()?.setCanPublish(roomId, userId, canPublish));
+};
+
+const broadcastStage = (roomId: string) => {
+  const { stage, hands } = roomHub.stageOf(roomId);
+  roomHub.broadcast(roomId, { type: "room:stage", stage, hands });
+};
+
+/** Handles one `room:stage` message. Returns a refusal code for roomSocket to send as a notice. */
+export function handleStage(userId: string, roomId: string, msg: any): Promise<{ ok: true } | { ok: false; code: string }> {
+  return withRoomLock(roomId, async () => {
+    const action = msg?.action as StageAction;
+    if (!ACTIONS.includes(action)) return { ok: false as const, code: "BAD_REQUEST" };
+    if (!roomHub.voiceOn(roomId)) return { ok: false as const, code: "VOICE_OFF" };
+    const actor = roomHub.get(roomId, userId);
+    if (!actor) return { ok: false as const, code: "NOT_IN_ROOM" };
+    const targetId = typeof msg.targetId === "string" && msg.targetId ? msg.targetId : userId;
+    const target = roomHub.get(roomId, targetId);
+
+    const before = roomHub.stageOf(roomId);
+    const r = applyStage(before, action, {
+      actorId: userId, actorRole: actor.role, targetId, targetRole: target?.role ?? "guest",
+      targetPresent: !!target, targetEligible: target ? eligible(target, roomId) : false,
+      implicitSpeakers: roomHub.members(roomId).filter((m) => m.role === "host" || m.role === "cohost").length, maxSpeakers: MAX_SPEAKERS,
+    });
+    if (!r.ok) return { ok: false as const, code: r.code };
+
+    roomHub.setStage(roomId, r.state);
+    broadcastStage(roomId);
+    if (action === "invite" && target) {
+      const s = roomHub.stageOf(roomId);
+      target.send({ type: "room:stage", stage: s.stage, hands: s.hands, invitedYou: true });
+    }
+    const added = r.state.stage.filter((id) => !before.stage.includes(id));
+    const removed = before.stage.filter((id) => !r.state.stage.includes(id));
+    for (const id of added) { await publishChange(roomId, id, true); await soft("setOnStage", rs.setOnStage(roomId, id, true)); }
+    for (const id of removed) { await publishChange(roomId, id, false); await soft("setOnStage", rs.setOnStage(roomId, id, false)); }
+    return { ok: true as const };
+  });
+}
+
+/**
+ * Someone left the voice picture. `keepRight` is for a plain disconnect: the stage right stays in the database so a
+ * reconnect restores it; a kick, ban, age-out or removal clears it. Either way they are removed from the LiveKit session.
+ * Call this BEFORE they leave the hub (the room's voice flag disappears with its last member).
+ */
+export function dropFromVoice(roomId: string, userId: string, keepRight: boolean): Promise<void> {
+  return withRoomLock(roomId, async () => {
+    if (!roomHub.voiceOn(roomId)) return;
+    const s = roomHub.stageOf(roomId);
+    const next: StageState = { stage: without(s.stage, userId), hands: without(s.hands, userId), invited: without(s.invited, userId) };
+    if (next.stage.length !== s.stage.length || next.hands.length !== s.hands.length || next.invited.length !== s.invited.length) {
+      roomHub.setStage(roomId, next);
+      broadcastStage(roomId);
+    }
+    await soft("removeParticipant", getVoiceService()?.removeParticipant(roomId, userId));
+    if (!keepRight) await soft("setOnStage", rs.setOnStage(roomId, userId, false));
+  });
+}
+
+/**
+ * Re-checks the teen rule after anyone joins or leaves. A teen guest who may no longer speak (an adult arrived) loses the
+ * stage and any raised hand; a teen host or co-host keeps the role but their publish permission follows the rule.
+ */
+export function reconcileVoice(roomId: string): Promise<void> {
+  return withRoomLock(roomId, async () => {
+    if (!roomHub.voiceOn(roomId)) return;
+    const s = roomHub.stageOf(roomId);
+    const next: StageState = { stage: [...s.stage], hands: [...s.hands], invited: [...s.invited] };
+    const demoted: string[] = [];
+    const toggles: Array<[string, boolean]> = [];
+    for (const m of roomHub.members(roomId)) {
+      const ok = eligible(m, roomId);
+      if (m.role === "guest") {
+        if (ok) continue;
+        const had = next.stage.includes(m.userId);
+        if (!had && !next.hands.includes(m.userId) && !next.invited.includes(m.userId)) continue;
+        next.stage = without(next.stage, m.userId); next.hands = without(next.hands, m.userId); next.invited = without(next.invited, m.userId);
+        if (had) demoted.push(m.userId);
+      } else if (m.publish !== undefined && m.publish !== ok) {
+        toggles.push([m.userId, ok]);
+      }
+    }
+    // memory first, then the slow part
+    if (next.stage.length !== s.stage.length || next.hands.length !== s.hands.length || next.invited.length !== s.invited.length) {
+      roomHub.setStage(roomId, next);
+      broadcastStage(roomId);
+    }
+    for (const id of demoted) { await publishChange(roomId, id, false); await soft("setOnStage", rs.setOnStage(roomId, id, false)); }
+    for (const [id, ok] of toggles) await publishChange(roomId, id, ok);
+  });
+}
+
+/** A stage guest who reconnects gets the stage back if the teen rule still allows it AND there is a seat. Hands are never restored. */
+export function restoreStageOnJoin(roomId: string, userId: string, wasOnStage: boolean): Promise<void> {
+  return withRoomLock(roomId, async () => {
+    if (!wasOnStage || !roomHub.voiceOn(roomId)) return;
+    const m = roomHub.get(roomId, userId);
+    if (!m || m.role !== "guest") return;
+    const s = roomHub.stageOf(roomId);
+    if (s.stage.includes(userId)) return;
+    const implicit = roomHub.members(roomId).filter((x) => x.role === "host" || x.role === "cohost").length;
+    if (!eligible(m, roomId) || implicit + s.stage.length >= MAX_SPEAKERS) { await soft("setOnStage", rs.setOnStage(roomId, userId, false)); return; } // no seat any more
+    roomHub.setStage(roomId, { ...s, stage: [...s.stage, userId] });
+    broadcastStage(roomId);
+  });
+}
+
+/** The host changed someone's role: a co-host is an implicit speaker, a guest only speaks from the stage. LiveKit must follow at once. */
+export function afterRoleChange(roomId: string, userId: string): Promise<void> {
+  return withRoomLock(roomId, async () => {
+    if (!roomHub.voiceOn(roomId)) return;
+    const s = roomHub.stageOf(roomId);
+    const next: StageState = { stage: without(s.stage, userId), hands: without(s.hands, userId), invited: without(s.invited, userId) };
+    if (next.stage.length !== s.stage.length || next.hands.length !== s.hands.length || next.invited.length !== s.invited.length) {
+      roomHub.setStage(roomId, next);
+      broadcastStage(roomId);
+    }
+    if (roomHub.get(roomId, userId)) await publishChange(roomId, userId, canPublishNow(roomId, userId));
+    await soft("setOnStage", rs.setOnStage(roomId, userId, false));
+  });
+}
+
+/**
+ * LiveKit and the room can disagree (a removed person rejoins with a token that has not expired, a permission change raced a
+ * connect). The room is the authority: anyone LiveKit has who is not in the room is removed, and publish rights are corrected.
+ */
+export function sweepVoice(roomId: string): Promise<void> {
+  return withRoomLock(roomId, async () => {
+    const svc = getVoiceService();
+    if (!svc || !roomHub.voiceOn(roomId)) return;
+    let present: Array<{ identity: string; canPublish: boolean }>;
+    try { present = await svc.listParticipants(roomId); } catch (e) { log("listParticipants")(e); return; }
+    for (const p of present) {
+      if (!roomHub.get(roomId, p.identity)) { await soft("removeParticipant", svc.removeParticipant(roomId, p.identity)); continue; }
+      const want = canPublishNow(roomId, p.identity);
+      if (p.canPublish !== want) await publishChange(roomId, p.identity, want);
+    }
+  });
+}
+
+export async function sweepAllVoiceRooms(): Promise<void> {
+  for (const roomId of roomHub.voiceRooms()) await sweepVoice(roomId).catch(log("sweep"));
+}
+
+/** Voice was switched off (or the room ended): nobody is on stage any more and the LiveKit session is closed. */
+export async function shutdownVoice(roomId: string): Promise<void> {
+  roomHub.setStage(roomId, { stage: [], hands: [], invited: [] });
+  roomHub.setVoiceOn(roomId, false);
+  broadcastStage(roomId);
+  await soft("deleteRoom", getVoiceService()?.deleteRoom(roomId));
+  await soft("clearStage", rs.clearStage(roomId));
+}

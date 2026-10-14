@@ -168,6 +168,16 @@ export const avatarLimiter = rateLimit({
   keyGenerator: (req) => (req.user as any)?.id ?? ipKeyGenerator(req.ip ?? ""),
 });
 
+// Room create/edit/start/end/report and room privacy: per user, generous for a host iterating on a room.
+export const roomLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 300,
+  message: { message: "You're doing that too fast. Please try again in a bit.", code: "RATE_LIMITED" },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req.user as any)?.id ?? ipKeyGenerator(req.ip ?? ""),
+});
+
 // Public (no-account) invite endpoints: per-IP, generous enough for a household
 // on one network, tight enough to stop guest-spam / token guessing.
 export const inviteRsvpLimiter = rateLimit({
@@ -323,13 +333,32 @@ export function validateAndSanitizeObject<T extends Record<string, any>>(
   return result;
 }
 
+export const ROOM_EMBED_HOSTS = [
+  "https://www.youtube-nocookie.com",
+  "https://player.vimeo.com",
+  "https://open.spotify.com",
+  "https://embed.music.apple.com",
+  "https://w.soundcloud.com",
+] as const;
+
+/** Player API scripts the room screen loads on demand (YouTube IFrame API, Vimeo Player). */
+export const ROOM_SCRIPT_HOSTS = ["https://www.youtube.com", "https://s.ytimg.com", "https://player.vimeo.com"] as const;
+
+/** The https origin of the configured LiveKit host (its client makes https calls next to the websocket), or null. */
+function livekitHttpsOrigin(): string | null {
+  try {
+    const u = new URL(process.env.LIVEKIT_URL ?? "");
+    return u.protocol === "wss:" || u.protocol === "https:" ? `https://${u.host}` : null;
+  } catch { return null; }
+}
+
 export const securityHeaders = (req: Request, res: Response, next: NextFunction) => {
   const isProduction = process.env.NODE_ENV === "production";
 
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-  res.setHeader("Permissions-Policy", "geolocation=(self), microphone=(), camera=()");
+  res.setHeader("Permissions-Policy", "geolocation=(self), microphone=(self), camera=()");
 
   // Per-request nonce — use res.locals.cspNonce to stamp any legitimate inline <script>
   const nonce = crypto.randomBytes(16).toString("base64");
@@ -339,8 +368,8 @@ export const securityHeaders = (req: Request, res: Response, next: NextFunction)
   // In development Vite HMR injects inline scripts, so unsafe-inline/unsafe-eval are
   // kept only in that environment.
   const scriptSrc = isProduction
-    ? `script-src 'self' 'nonce-${nonce}' https://js.stripe.com https://js.paystack.co`
-    : `script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com https://js.paystack.co`;
+    ? `script-src 'self' 'nonce-${nonce}' https://js.stripe.com https://js.paystack.co ${ROOM_SCRIPT_HOSTS.join(" ")}`
+    : `script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com https://js.paystack.co ${ROOM_SCRIPT_HOSTS.join(" ")}`;
 
   const cspDirectives = [
     "default-src 'self'",
@@ -350,9 +379,10 @@ export const securityHeaders = (req: Request, res: Response, next: NextFunction)
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: blob: https: http:",
-    "worker-src 'self'",
-    "connect-src 'self' https://api.stripe.com https://api.paystack.co https://fonts.googleapis.com https://fonts.gstatic.com wss: ws:",
-    "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://js.paystack.co https://checkout.paystack.com",
+    "worker-src 'self' blob:",
+    `connect-src 'self' https://api.stripe.com https://api.paystack.co https://fonts.googleapis.com https://fonts.gstatic.com wss: ws:${livekitHttpsOrigin() ? ` ${livekitHttpsOrigin()}` : ""}`,
+    // Room screens: exactly the embed hosts shared/screen.ts can produce, nothing broader.
+    `frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://js.paystack.co https://checkout.paystack.com ${ROOM_EMBED_HOSTS.join(" ")}`,
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",

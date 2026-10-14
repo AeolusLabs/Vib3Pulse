@@ -6,7 +6,7 @@ import { clothing } from "./clothing";
 import { blush, brows, ears, eyes, facialHair, faceShape, mouth, neck, nose } from "./face";
 import { extras } from "./extras";
 
-export type AvatarMode = "full" | "bust" | "head" | "face" | "outfit" | "lower";
+export type AvatarMode = "full" | "bust" | "head" | "face" | "outfit" | "lower" | "portrait";
 
 const VIEWBOX: Record<AvatarMode, string> = {
   full: "10 -8 180 288", // starts above y=0: the mohawk tip reaches y=-2
@@ -15,6 +15,7 @@ const VIEWBOX: Record<AvatarMode, string> = {
   face: "50 36 100 108",
   outfit: "20 110 160 150", // shoulders and torso, for outfit pickers
   lower: "50 56 100 118", // nose to full-beard tip, for facial-hair pickers
+  portrait: "32.5 22 135 135", // square head and shoulders: the same crop as the profile picture, for rooms and lists
 };
 
 /**

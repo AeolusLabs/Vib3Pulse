@@ -1,5 +1,8 @@
 import type { Express } from "express";
-import { storage } from "../storage";
+import { storage, db } from "../storage";
+import { and, eq } from "drizzle-orm";
+import { conversations } from "@shared/schema";
+import { AGE_GAP_MESSAGES, ageGapBetween, directThreadExists, enforceAgeGap } from "../utils/ageGate";
 import { wsManager } from "../websocket";
 import { requireAuth } from "../middleware";
 import { deliverNotification } from "../notifications.js";
@@ -64,6 +67,9 @@ export function registerMessagesRoutes(app: Express): void {
 
       // Ensure creator is included in participants
       const allParticipants = Array.from(new Set([req.user!.id, ...participantIds]));
+      for (const other of allParticipants) {
+        if (other !== req.user!.id && !(await enforceAgeGap(res, req.user!.id, other))) return; // answered 403
+      }
 
       if (allParticipants.length > MAX_GROUP_MEMBERS) {
         return res.status(400).json({ message: `Groups are limited to ${MAX_GROUP_MEMBERS} members` });
@@ -101,12 +107,31 @@ export function registerMessagesRoutes(app: Express): void {
         return res.status(403).json({ message: "You can't message this user" });
       }
 
+      // Adult <-> under-18: both must have allowed it in their privacy settings (off by default), and the person starting
+      // the chat acknowledges a warning first. Existing conversations and unknown ages are untouched.
+      if (!(await directThreadExists(req.user!.id, userId)) &&
+          !(await enforceAgeGap(res, req.user!.id, userId, { needAck: true, acknowledged: req.body?.acknowledgeAgeGap === true }))) return;
+
       const conversation = await storage.getOrCreateDirectConversation(req.user!.id, userId);
       const fullConversation = await storage.getConversationById(conversation.id);
       res.json(fullConversation);
     } catch (error) {
       console.error("Error creating direct conversation:", error);
       res.status(500).json({ message: "Failed to create conversation" });
+    }
+  });
+
+  // A notice for the thread header when the other person is in a different age group (adult vs under-18), for either side.
+  app.get("/api/conversations/:id/age-notice", requireAuth, async (req, res) => {
+    try {
+      const conversation = await storage.getConversationById(req.params.id);
+      if (!conversation || !conversation.participants.some((p) => p.userId === req.user!.id)) return res.status(404).json({ message: "Conversation not found" });
+      const others = conversation.participants.filter((p) => p.userId !== req.user!.id);
+      if (conversation.isGroup || others.length !== 1) return res.json({ notice: null });
+      const g = await ageGapBetween(req.user!.id, others[0].userId);
+      res.json({ notice: g.gap ? { otherIs: g.otherIs, message: AGE_GAP_MESSAGES.notice(g.otherIs) } : null });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to load notice" });
     }
   });
 
@@ -227,6 +252,7 @@ export function registerMessagesRoutes(app: Express): void {
         return res.status(400).json({ message: `Groups are limited to ${MAX_GROUP_MEMBERS} members` });
       }
 
+      if (!(await enforceAgeGap(res, req.user!.id, userId))) return;
       const participant = await storage.addConversationParticipant(req.params.id, userId, userRole);
       res.status(201).json(participant);
     } catch (error) {

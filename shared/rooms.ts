@@ -1,0 +1,128 @@
+// Room types, per-user room privacy and input validation. Pure; shared by server, WebSocket handlers and client.
+import { AGE_LIMITS, type AgeLimit } from "./age";
+
+export const ROOM_KINDS = ["party", "listening", "talk", "event"] as const;
+export const ROOM_VISIBILITY = ["public", "friends", "invite"] as const;
+export type RoomKind = (typeof ROOM_KINDS)[number];
+export type RoomVisibility = (typeof ROOM_VISIBILITY)[number];
+
+export const ROOM_REACTIONS: readonly string[] = ["❤️", "🔥", "👏", "😂", "🎉", "🙌", "😍", "🎶"];
+
+// Free rooms hold at most 50 people. Paid rooms (part 5) will hold 100 to 150: capacityMaxPaid is recorded here, unused until then.
+export const ROOM_LIMITS = { capacityDefault: 50, capacityMax: 50, capacityMaxPaid: 150, title: 80, description: 500, chat: 300 } as const;
+const MAX_SCHEDULE_DAYS = 90;
+const MAX_URL = 2048;
+
+// ---------------------------------------------------------------- privacy
+export const INTERACTION_MODES = ["everyone", "mutuals", "none"] as const;
+export type InteractionMode = (typeof INTERACTION_MODES)[number];
+
+export interface RoomPrivacy {
+  v: 1;
+  interactions: InteractionMode;
+  appearInLists: boolean;
+  allowInvites: boolean;
+  /**
+   * Direct messages between an adult and an under-18 (either way). OFF by default for everyone: with it off, nobody in the
+   * other age group can start a conversation with you, and you can't start one with them. Both people must turn it on.
+   */
+  allowCrossAgeDm: boolean;
+}
+
+export const DEFAULT_ROOM_PRIVACY: RoomPrivacy = { v: 1, interactions: "mutuals", appearInLists: true, allowInvites: true, allowCrossAgeDm: false };
+
+const isObj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
+
+/** Reads a stored/legacy value tolerantly: each bad or missing field falls back to its default. */
+export function resolveRoomPrivacy(stored: unknown): RoomPrivacy {
+  if (!isObj(stored)) return { ...DEFAULT_ROOM_PRIVACY };
+  const d = DEFAULT_ROOM_PRIVACY;
+  return {
+    v: 1,
+    interactions: (INTERACTION_MODES as readonly unknown[]).includes(stored.interactions) ? (stored.interactions as InteractionMode) : d.interactions,
+    appearInLists: typeof stored.appearInLists === "boolean" ? stored.appearInLists : d.appearInLists,
+    allowInvites: typeof stored.allowInvites === "boolean" ? stored.allowInvites : d.allowInvites,
+    allowCrossAgeDm: typeof stored.allowCrossAgeDm === "boolean" ? stored.allowCrossAgeDm : d.allowCrossAgeDm,
+  };
+}
+
+export type Validated<T> = { ok: true; value: T } | { ok: false; field: string };
+
+/** Strict: for writes. Unknown keys and wrong types are rejected, naming the field. */
+export function validateRoomPrivacy(input: unknown): Validated<RoomPrivacy> {
+  if (!isObj(input)) return { ok: false, field: "body" };
+  for (const k of Object.keys(input)) if (!["v", "interactions", "appearInLists", "allowInvites", "allowCrossAgeDm"].includes(k)) return { ok: false, field: k };
+  if (input.v !== undefined && input.v !== 1) return { ok: false, field: "v" };
+  if (!(INTERACTION_MODES as readonly unknown[]).includes(input.interactions)) return { ok: false, field: "interactions" };
+  if (typeof input.appearInLists !== "boolean") return { ok: false, field: "appearInLists" };
+  if (typeof input.allowInvites !== "boolean") return { ok: false, field: "allowInvites" };
+  if (input.allowCrossAgeDm !== undefined && typeof input.allowCrossAgeDm !== "boolean") return { ok: false, field: "allowCrossAgeDm" };
+  return { ok: true, value: { v: 1, interactions: input.interactions as InteractionMode, appearInLists: input.appearInLists, allowInvites: input.allowInvites, allowCrossAgeDm: input.allowCrossAgeDm === true } };
+}
+
+// ---------------------------------------------------------------- room input
+export interface RoomInput {
+  title: string;
+  description?: string;
+  kind: RoomKind;
+  visibility: RoomVisibility;
+  ageLimit: AgeLimit;
+  eventId?: string;
+  venueId?: string;
+  scheduledFor?: string;
+  noDirectInteractions?: boolean;
+  screenUrl?: string;
+  capacity?: number;
+}
+
+const optId = (v: unknown) => v === undefined || v === null || v === "" ? undefined : typeof v === "string" && v.length <= 64 ? v : null;
+
+export function validateRoomInput(input: unknown, now = new Date()): Validated<RoomInput & { capacity: number; noDirectInteractions: boolean }> {
+  if (!isObj(input)) return { ok: false, field: "body" };
+  const fail = (field: string) => ({ ok: false as const, field });
+
+  const title = typeof input.title === "string" ? input.title.trim() : "";
+  if (title.length < 1 || title.length > ROOM_LIMITS.title) return fail("title");
+
+  let description: string | undefined;
+  if (input.description !== undefined && input.description !== null) {
+    if (typeof input.description !== "string" || input.description.length > ROOM_LIMITS.description) return fail("description");
+    description = input.description.trim() || undefined;
+  }
+
+  if (!(ROOM_KINDS as readonly unknown[]).includes(input.kind)) return fail("kind");
+  if (!(ROOM_VISIBILITY as readonly unknown[]).includes(input.visibility)) return fail("visibility");
+  const ageLimit = input.ageLimit === undefined ? "all" : input.ageLimit;
+  if (!(AGE_LIMITS as readonly unknown[]).includes(ageLimit)) return fail("ageLimit");
+
+  const capacity = input.capacity === undefined || input.capacity === null ? ROOM_LIMITS.capacityDefault : input.capacity;
+  if (typeof capacity !== "number" || !Number.isInteger(capacity) || capacity < 2 || capacity > ROOM_LIMITS.capacityMax) return fail("capacity");
+
+  const eventId = optId(input.eventId), venueId = optId(input.venueId);
+  if (eventId === null) return fail("eventId");
+  if (venueId === null) return fail("venueId");
+  if (eventId && venueId) return fail("venueId");
+
+  if (input.noDirectInteractions !== undefined && typeof input.noDirectInteractions !== "boolean") return fail("noDirectInteractions");
+
+  let screenUrl: string | undefined;
+  if (input.screenUrl !== undefined && input.screenUrl !== null && input.screenUrl !== "") {
+    if (typeof input.screenUrl !== "string" || input.screenUrl.length > MAX_URL) return fail("screenUrl");
+    screenUrl = input.screenUrl;
+  }
+
+  let scheduledFor: string | undefined;
+  if (input.scheduledFor !== undefined && input.scheduledFor !== null && input.scheduledFor !== "") {
+    const t = typeof input.scheduledFor === "string" ? Date.parse(input.scheduledFor) : NaN;
+    if (Number.isNaN(t) || t < now.getTime() || t > now.getTime() + MAX_SCHEDULE_DAYS * 86400000) return fail("scheduledFor");
+    scheduledFor = new Date(t).toISOString();
+  }
+
+  return {
+    ok: true,
+    value: {
+      title, description, kind: input.kind as RoomKind, visibility: input.visibility as RoomVisibility, ageLimit: ageLimit as AgeLimit,
+      eventId, venueId, scheduledFor, noDirectInteractions: input.noDirectInteractions === true, screenUrl, capacity,
+    },
+  };
+}

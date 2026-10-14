@@ -3,6 +3,7 @@ import { Server } from "http";
 import cookie from "cookie";
 import session from "express-session";
 import { storage } from "./storage";
+import { handleRoomMessage, handleSocketClose, rehydrateLiveRooms, startVoiceSweep } from "./rooms/roomSocket";
 
 interface AuthenticatedWebSocket extends WebSocket {
   userId?: string;
@@ -25,7 +26,9 @@ class WebSocketManager {
       try {
         // Parse cookies and get session
         const cookies = cookie.parse(req.headers.cookie || "");
-        const rawSid = cookies["connect.sid"];
+        // The main session cookie is "vibepulse.sid" (server/index.ts). This used to read "connect.sid", which no browser
+        // had, so every socket was rejected with 4001 and nothing real-time worked. connect.sid stays as a fallback.
+        const rawSid = cookies["vibepulse.sid"] ?? cookies["connect.sid"];
         const sessionId = rawSid ? decodeURIComponent(rawSid).split("s:")[1]?.split(".")[0] : undefined;
 
         if (!sessionId) {
@@ -47,6 +50,12 @@ class WebSocketManager {
         }
 
         const userId = sessionData.passport.user;
+        // Same rule as HTTP auth (passport.deserializeUser): deleted or suspended accounts get no socket.
+        const account = await storage.getUser(userId);
+        if (!account || account.deletedAt || (await storage.getActiveSuspension(userId))) {
+          ws.close(4001, "Unauthorized");
+          return;
+        }
         ws.userId = userId;
         ws.isAlive = true;
 
@@ -80,6 +89,8 @@ class WebSocketManager {
             
             if (message.type === "ping") {
               ws.send(JSON.stringify({ type: "pong" }));
+            } else if (typeof message.type === "string" && message.type.startsWith("room:")) {
+              await handleRoomMessage(ws, userId, message);
             }
           } catch (error) {
             console.error("Error handling WebSocket message:", error);
@@ -88,6 +99,7 @@ class WebSocketManager {
 
         // Handle disconnection
         ws.on("close", () => {
+          handleSocketClose(userId, ws).catch((e) => console.error("[rooms] socket close failed:", e));
           if (ws.userId) {
             const userSockets = this.clients.get(ws.userId);
             if (userSockets) {
@@ -126,6 +138,10 @@ class WebSocketManager {
     this.wss.on("close", () => {
       clearInterval(heartbeatInterval);
     });
+
+    // Rooms that were live before a restart have no presence now; end them unless their host comes back.
+    rehydrateLiveRooms().catch((e) => console.error("[rooms] rehydrate failed:", e));
+    startVoiceSweep();
 
     console.log("WebSocket server initialized on /ws");
   }

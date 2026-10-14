@@ -1,7 +1,15 @@
-import { createContext, useContext, useEffect, useRef } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef } from "react";
 import { queryClient } from "@/lib/queryClient";
+import { useAuth } from "@/hooks/useAuth";
 
-const WebSocketContext = createContext<null>(null);
+export type WsHandler = (msg: any) => void;
+/** `send` is false when the socket is not open. `subscribe` gets every parsed server message plus {type:"ws:open"} / {type:"ws:close"}. */
+export interface WebSocketApi {
+  send(msg: object): boolean;
+  subscribe(handler: WsHandler): () => void;
+}
+
+const WebSocketContext = createContext<WebSocketApi | null>(null);
 
 function buildWsUrl() {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -32,8 +40,31 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   const wsRef = useRef<WebSocket | null>(null);
   const retryDelayRef = useRef(1000);
   const unmountedRef = useRef(false);
+  const handlersRef = useRef(new Set<WsHandler>());
+  // True once the server has authenticated this socket (it answers {type:"connected"}). Anything sent before that is dropped
+  // by the server, which only starts listening after its async session lookup.
+  const readyRef = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectRef = useRef<() => void>(() => {});
+  const { data: me } = useAuth();
+  const userId = me?.id ?? null;
+
+  const api = useMemo<WebSocketApi>(() => ({
+    send(msg) {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN || !readyRef.current) return false;
+      ws.send(JSON.stringify(msg));
+      return true;
+    },
+    subscribe(handler) {
+      handlersRef.current.add(handler);
+      return () => { handlersRef.current.delete(handler); };
+    },
+  }), []);
 
   useEffect(() => {
+    const emit = (msg: unknown) => handlersRef.current.forEach((h) => { try { h(msg); } catch { /* a bad subscriber must not break the socket */ } });
+
     unmountedRef.current = false;
 
     function connect() {
@@ -48,14 +79,19 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 
       ws.onmessage = (event) => {
         try {
-          handleMessage(JSON.parse(event.data));
+          const data = JSON.parse(event.data);
+          handleMessage(data);
+          if (data?.type === "connected") { readyRef.current = true; emit({ type: "ws:open" }); return; }
+          emit(data);
         } catch {
           // ignore malformed frames
         }
       };
 
       ws.onclose = (event) => {
+        readyRef.current = false;
         if (unmountedRef.current) return;
+        emit({ type: "ws:close" });
         if (event.code === 4001) {
           // Server rejected the session — back off 5 min before retrying
           retryDelayRef.current = 5 * 60 * 1000;
@@ -63,20 +99,37 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         // Exponential backoff capped at 30 s
         const delay = retryDelayRef.current;
         retryDelayRef.current = Math.min(delay * 2, 30_000);
-        setTimeout(connect, delay);
+        timerRef.current = setTimeout(connect, delay);
       };
     }
 
+    connectRef.current = connect;
     connect();
 
     return () => {
       unmountedRef.current = true;
+      if (timerRef.current) clearTimeout(timerRef.current);
       wsRef.current?.close();
     };
   }, []);
 
+  // The socket is opened at app start, before anyone has logged in, and the server rejects it (4001) with a 5 minute
+  // back-off. Rooms are live, so connect right away when someone logs in; close the socket when they log out.
+  useEffect(() => {
+    const ws = wsRef.current;
+    if (userId) {
+      if (ws && ws.readyState === WebSocket.OPEN) return;
+      if (timerRef.current) clearTimeout(timerRef.current);
+      if (ws) { ws.onclose = null; ws.close(); }
+      retryDelayRef.current = 1000;
+      connectRef.current();
+    } else if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.close();
+    }
+  }, [userId]);
+
   return (
-    <WebSocketContext.Provider value={null}>
+    <WebSocketContext.Provider value={api}>
       {children}
     </WebSocketContext.Provider>
   );

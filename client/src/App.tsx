@@ -32,6 +32,8 @@ import BuddyDashboardPage from "@/pages/BuddyDashboardPage";
 import MapPage from "@/pages/MapPage";
 import LookoutPage from "@/pages/LookoutPage";
 import AvatarEditorPage from "@/pages/AvatarEditorPage";
+import RoomsPage from "@/pages/RoomsPage";
+import RoomPage from "@/pages/RoomPage";
 import DistressAlertsPage from "@/pages/DistressAlertsPage";
 import AccountSettingsPage from "@/pages/AccountSettingsPage";
 import ManageVenuesPage from "@/pages/ManageVenuesPage";
@@ -202,6 +204,18 @@ function Router() {
       <Route path="/lookout">
         <AuthenticatedLayout>
           <LookoutPage />
+        </AuthenticatedLayout>
+      </Route>
+
+      <Route path="/rooms/:id">
+        <AuthenticatedLayout>
+          <RoomPage />
+        </AuthenticatedLayout>
+      </Route>
+
+      <Route path="/rooms">
+        <AuthenticatedLayout>
+          <RoomsPage />
         </AuthenticatedLayout>
       </Route>
 

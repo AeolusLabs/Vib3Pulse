@@ -180,14 +180,6 @@ export async function getFeaturableHostIds(hostIds: string[]): Promise<Set<strin
 }
 
 // ---------------------------------------------------------------- age gate
-export function ageFromDob(dob: string | null | undefined, now = new Date()): number | null {
-  if (!dob || !/^\d{4}-\d{2}-\d{2}/.test(dob)) return null;
-  const d = new Date(dob.slice(0, 10) + "T00:00:00Z");
-  if (Number.isNaN(d.getTime())) return null;
-  let age = now.getUTCFullYear() - d.getUTCFullYear();
-  const m = now.getUTCMonth() - d.getUTCMonth();
-  if (m < 0 || (m === 0 && now.getUTCDate() < d.getUTCDate())) age--;
-  return age;
-}
+export { ageFromDob } from "@shared/age";
 
 export const minAgeFor = (restriction: string): number => (restriction === "21+" ? 21 : restriction === "18+" ? 18 : 0);

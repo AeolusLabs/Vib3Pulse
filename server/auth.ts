@@ -79,7 +79,8 @@ const SENSITIVE_USER_FIELDS = [
 
 // Hidden from every public user object (feeds, organiser blocks, admin lists) but, unlike the fields above,
 // NOT stripped by key name from all responses: safety buddies legitimately return a "phoneNumber" to their owner.
-const PUBLIC_HIDDEN_USER_FIELDS = ["phoneNumber"] as const;
+// roomPrivacy: another user's room settings are theirs; the owner reads them from GET /api/users/me/room-privacy.
+const PUBLIC_HIDDEN_USER_FIELDS = ["phoneNumber", "roomPrivacy"] as const;
 
 export type PublicUser = Omit<User, typeof SENSITIVE_USER_FIELDS[number] | typeof PUBLIC_HIDDEN_USER_FIELDS[number]>;
 
@@ -92,6 +93,7 @@ export function toPublicUser(user: User): PublicUser {
     emailVerificationExpires,
     verifiedPhone,
     phoneNumber,
+    roomPrivacy,
     ...safe
   } = user;
   return safe;
@@ -115,6 +117,7 @@ export const SENSITIVE_RESPONSE_KEYS = new Set<string>([
   // name) after their own access checks, so a generic endpoint can never leak them.
   "exactAddress",
   "inviteToken",
+  "inviteTokenHash",
   "guestTokenHash",
   "guestName",
 ]);

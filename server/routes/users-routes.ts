@@ -17,6 +17,7 @@ import {
 } from "../security";
 import { hashPassword, comparePassword, userToSessionUser, toPublicUser } from "../auth";
 import { insertUserSchema, genderOptions } from "@shared/schema";
+import { ageFromDob, MIN_PLATFORM_AGE } from "@shared/age";
 import { validateAvatarConfig, avatarSaveUpdates, photoSetUpdates, photoDeleteUpdates, isAvatarImageUrl, type AvatarConfig } from "@shared/avatar";
 import { avatarPictureSvg } from "@shared/avatar-render/render";
 import { z } from "zod";
@@ -41,12 +42,20 @@ const passwordSchema = z.string()
 // Signup accepts ONLY what the signup form collects. This used to be insertUserSchema minus the password hash,
 // i.e. every other column: a crafted request could set isVerified, isOfficial, freePromotionCredits, verifiedPhone...
 // Anything outside the list is silently dropped (not rejected, so a stray extra field can't break a real signup).
+const MIN_AGE_MESSAGE = `You must be at least ${MIN_PLATFORM_AGE} to use Vib3Pulse`;
+const minAgeOk = (dob: string) => { const age = ageFromDob(dob); return age !== null && age >= MIN_PLATFORM_AGE && age < 120; };
+
 const signupSchema = insertUserSchema
   .pick({
     email: true, username: true, userType: true, displayName: true, dateOfBirth: true, gender: true, bio: true,
     interests: true, organizationName: true, contactEmail: true, socialMediaLinks: true, canManageVenues: true,
   })
-  .extend({ password: passwordSchema });
+  .extend({
+    password: passwordSchema,
+    dateOfBirth: insertUserSchema.shape.dateOfBirth.refine(
+      (v) => v == null || v === "" || minAgeOk(v), { message: MIN_AGE_MESSAGE },
+    ),
+  });
 
 // Mirrors SignupPage.tsx's step-2/step-3 schemas so an account provisioned via
 // Google (which skips that form entirely) is held to the same requirements —
@@ -56,7 +65,7 @@ const completeProfileSchema = z.discriminatedUnion("userType", [
   z.object({
     userType: z.literal("social"),
     displayName: z.string().min(1, "Display name is required"),
-    dateOfBirth: z.string().min(1, "Date of birth is required"),
+    dateOfBirth: z.string().min(1, "Date of birth is required").refine(minAgeOk, { message: MIN_AGE_MESSAGE }),
     gender: z.enum(genderOptions, { required_error: "Please select your gender" }),
     bio: z.string().max(500).optional(),
     interests: z.array(z.string()).min(1, "Please select at least one interest"),
@@ -75,6 +84,16 @@ const deleteAccountSchema = z.object({
   confirmation: z.literal("DELETE", { errorMap: () => ({ message: 'Type "DELETE" to confirm.' }) }),
   password: z.string().optional(),
 });
+
+/**
+ * What another person may see of a user row on the public profile endpoints: never the exact birthdate (a whole age is
+ * shown instead), email, phone or room settings. The owner still gets their own row.
+ */
+function viewOfUser<T extends { id: string; dateOfBirth?: string | null }>(user: T, viewerId?: string) {
+  if (viewerId && user.id === viewerId) return user;
+  const { dateOfBirth, email, phoneNumber, verifiedPhone, roomPrivacy, ...rest } = user as any;
+  return { ...rest, age: ageFromDob(dateOfBirth) } as Omit<T, "dateOfBirth"> & { age: number | null };
+}
 
 export function registerUsersRoutes(app: Express): void {
 
@@ -158,7 +177,8 @@ export function registerUsersRoutes(app: Express): void {
         res.json({ user: userToSessionUser(user) });
       });
     } catch (error) {
-      res.status(400).json({ message: "Invalid user data" });
+      const tooYoung = error instanceof z.ZodError && error.errors.some((e) => e.message === MIN_AGE_MESSAGE);
+      res.status(400).json({ message: tooYoung ? MIN_AGE_MESSAGE : "Invalid user data" });
     }
   });
 
@@ -367,7 +387,7 @@ export function registerUsersRoutes(app: Express): void {
       const updates: Record<string, unknown> = { userType: data.userType, onboardingComplete: true, bio: data.bio };
       if (data.userType === "social") {
         updates.displayName = sanitizeTextOnly(data.displayName);
-        updates.dateOfBirth = data.dateOfBirth;
+        if (!user.dateOfBirth) updates.dateOfBirth = data.dateOfBirth; // already set (e.g. through the profile edit)? it stays locked
         updates.gender = data.gender;
         updates.interests = data.interests;
       } else {
@@ -643,6 +663,15 @@ export function registerUsersRoutes(app: Express): void {
         }
       }
 
+      // Birthdate is locked once set (it gates room/age rules); only the admin correction route changes it.
+      // First-time set is still allowed, and must meet the platform minimum age.
+      if (!updates.dateOfBirth) delete updates.dateOfBirth; // the edit form always sends the field ("" when nothing is stored): no change
+      if (updates.dateOfBirth !== undefined) {
+        const cur = await storage.getUser(userId);
+        if (cur?.dateOfBirth) delete updates.dateOfBirth;
+        else if (!minAgeOk(updates.dateOfBirth ?? "")) return res.status(400).json({ message: MIN_AGE_MESSAGE });
+      }
+
       // Nothing left to change (e.g. only an ignored avatar image url was sent): answer with the current profile.
       if (Object.keys(updates).length === 0) {
         const cur = await storage.getUser(userId);
@@ -825,7 +854,7 @@ export function registerUsersRoutes(app: Express): void {
       if (!profile) {
         return res.status(404).json({ message: "User not found" });
       }
-      res.json(profile);
+      res.json({ ...profile, user: viewOfUser(profile.user as any, req.user?.id) });
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch user profile" });
     }
@@ -851,7 +880,7 @@ export function registerUsersRoutes(app: Express): void {
       }
 
       // Don't send password hash to client
-      const { passwordHash, ...userWithoutPassword } = user;
+      const { passwordHash, ...userWithoutPassword } = viewOfUser(user as any, req.user?.id) as any;
 
       // Get user's events or RSVPs based on user type
       if (user.userType === "organizer") {

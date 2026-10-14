@@ -20,7 +20,7 @@ import { useEffect, useRef } from "react";
 import { useAuth, logout } from "@/hooks/useAuth";
 import { useNightMode } from "@/hooks/useNightMode";
 import { useToast } from "@/hooks/use-toast";
-import { SearchIcon, UserIcon, CalendarIcon, LogOutIcon, TicketIcon, ShieldIcon, AlertTriangleIcon, Building2Icon, SettingsIcon, BarChart3Icon } from "@/components/ui/icons";
+import { SearchIcon, UserIcon, CalendarIcon, LogOutIcon, TicketIcon, ShieldIcon, AlertTriangleIcon, Building2Icon, SettingsIcon, BarChart3Icon, UsersIcon } from "@/components/ui/icons";
 
 interface NavigationProps {
   onSearch?: (query: string) => void;
@@ -123,6 +123,14 @@ export default function Navigation({ onSearch }: NavigationProps) {
                     <Link href="/avatar">
                       <UserIcon className="mr-2 h-4 w-4" />
                       Avatar
+                    </Link>
+                  </DropdownMenuItem>
+                )}
+                {user && (
+                  <DropdownMenuItem asChild data-testid="menu-rooms">
+                    <Link href="/rooms">
+                      <UsersIcon className="mr-2 h-4 w-4" />
+                      Rooms
                     </Link>
                   </DropdownMenuItem>
                 )}

@@ -27,6 +27,7 @@ import SimilarEvents from "@/components/event-details/SimilarEvents";
 import TicketPicker, { nextSalesDeadline, tierStatus, type PickerTier, type Quote } from "@/components/event-details/TicketPicker";
 import { daysLeftLabel } from "@shared/ticketSales";
 import { trackEventClick, trackEventView } from "@/lib/eventTracking";
+import LinkedRoomBanner from "@/components/rooms/LinkedRoomBanner";
 
 interface EventDetailsModalProps {
   event: Event;
@@ -486,6 +487,8 @@ export default function EventDetailsModal({ event, onClose }: EventDetailsModalP
                 </DialogTitle>
                 <DialogDescription className="sr-only">{event.description?.slice(0, 120)}</DialogDescription>
               </DialogHeader>
+
+              <LinkedRoomBanner eventId={event.id} />
 
               {hasTicket && !isCancelled && (
                 <div {...rise(1)} className={`${rise(1).className} flex items-center justify-between gap-3 rounded-xl bg-primary/10 p-3.5`}>

@@ -4,7 +4,7 @@ export default function StoryCircleExample() {
   return (
     <div className="flex gap-4 p-6 bg-background">
       <StoryCircle
-        username="Your Story"
+        username="Your Vib3"
         isOwn={true}
         onClick={() => console.log('Create story')}
       />

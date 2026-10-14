@@ -1,4 +1,7 @@
+import { useState } from "react";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
+import YourVibeSheet from "@/components/YourVibeSheet";
+import CreateRoomDialog from "@/components/rooms/CreateRoomDialog";
 import StoryCircle from "./StoryCircle";
 import { StoryCircleSkeleton } from "@/components/ui/skeleton-layouts";
 
@@ -20,14 +23,17 @@ interface StoriesBarProps {
 }
 
 export default function StoriesBar({ stories, isLoading, onStoryClick, onCreateStory }: StoriesBarProps) {
+  const [choosing, setChoosing] = useState(false);
+  const [creatingRoom, setCreatingRoom] = useState(false);
   return (
+    <>
     <div className="bg-background border-b">
       <ScrollArea className="w-full">
         <div className="flex gap-4 p-4 max-w-[1200px] mx-auto">
           <StoryCircle
-            username="Your Story"
+            username="Your Vib3"
             isOwn={true}
-            onClick={onCreateStory}
+            onClick={() => setChoosing(true)}
           />
           {isLoading
             ? [0, 1, 2, 3].map((i) => <StoryCircleSkeleton key={i} index={i} />)
@@ -48,5 +54,8 @@ export default function StoriesBar({ stories, isLoading, onStoryClick, onCreateS
         <ScrollBar orientation="horizontal" />
       </ScrollArea>
     </div>
+    <YourVibeSheet open={choosing} onOpenChange={setChoosing} onStory={() => onCreateStory?.()} onRoom={() => setCreatingRoom(true)} />
+    <CreateRoomDialog open={creatingRoom} onOpenChange={setCreatingRoom} />
+    </>
   );
 }

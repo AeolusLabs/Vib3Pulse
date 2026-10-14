@@ -1,3 +1,4 @@
+import { useDirectMessage, DmHandled } from "@/hooks/useDirectMessage";
 import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -39,17 +40,22 @@ export default function NewMessageSheet({ open, onOpenChange, onCreated }: NewMe
     onCreated(conversationId);
   };
 
+  const dm = useDirectMessage();
   const directMutation = useMutation({
-    mutationFn: async (userId: string) => (await apiRequest("POST", "/api/conversations/direct", { userId })).json(),
+    mutationFn: async (userId: string) => {
+      const c = await dm.start(userId); // warns across age groups; explains refusals itself
+      if (!c) throw new DmHandled();
+      return c;
+    },
     onSuccess: (c) => done(c.id),
-    onError: () => toast({ title: "Couldn't start chat", variant: "destructive" }),
+    onError: (e) => { if (!(e instanceof DmHandled)) toast({ title: "Couldn't start chat", variant: "destructive" }); },
   });
 
   const groupMutation = useMutation({
     mutationFn: async (data: { name: string; participantIds: string[] }) =>
       (await apiRequest("POST", "/api/conversations/group", data)).json(),
     onSuccess: (c) => done(c.id),
-    onError: () => toast({ title: "Couldn't create group", variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Couldn't create group", description: e?.message, variant: "destructive" }),
   });
 
   // The creator counts toward the server-side cap, so picks + 1 <= MAX_GROUP_MEMBERS.
@@ -69,6 +75,7 @@ export default function NewMessageSheet({ open, onOpenChange, onCreated }: NewMe
 
   return (
     <ChatSheet open={open} onOpenChange={onOpenChange} title="New message">
+      {dm.dialog}
       <div className="px-4 pb-3">
         <Segmented
           value={mode}
