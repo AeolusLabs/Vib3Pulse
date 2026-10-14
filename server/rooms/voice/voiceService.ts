@@ -5,8 +5,9 @@ export { roomNameFor } from "./livekitVoice";
 
 export interface VoiceService {
   readonly url: string;
+  /** `camera`: the current holder of the live screen may also publish the camera, so a performer who reconnects can go straight back on air. */
   /** A 10 minute token to join the room's LiveKit session. Everyone can subscribe; only `canPublish` people can speak. */
-  mintToken(a: { roomId: string; userId: string; displayName: string; canPublish: boolean }): Promise<string>;
+  mintToken(a: { roomId: string; userId: string; displayName: string; canPublish: boolean; camera?: boolean }): Promise<string>;
   /** `camera` adds the camera source on top of the microphone: only ever for the person holding the room's live screen. */
   /** Takes effect immediately for someone already connected (no waiting for their token to expire). */
   setCanPublish(roomId: string, userId: string, canPublish: boolean, camera?: boolean): Promise<void>;

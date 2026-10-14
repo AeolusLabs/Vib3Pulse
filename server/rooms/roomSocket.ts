@@ -12,13 +12,15 @@ import * as rs from "./roomStorage";
 import { canViewRoom, mutualFollow, plainText, publicRoom } from "./roomAccess";
 import { roomHub, type HubMember } from "./RoomHub";
 import { TokenBucket } from "./rateLimit";
-import { dropFromVoice, handleLive, handleStage, reconcileVoice, restoreStageOnJoin, sweepAllVoiceRooms } from "./stage";
+import { broadcastLive, dropFromVoice, handleLive, handleStage, liveAway, reconcileVoice, registerAwayReleaser, restoreStageOnJoin, sweepAllVoiceRooms } from "./stage";
 import { getVoiceService } from "./voice/voiceService";
 import { roomFeatures } from "./features";
 
 /** Injectable so tests can shorten the host grace period; rates are the documented limits. */
 export const tuning = {
   graceMs: 120_000,
+  // How long a dropped screen holder keeps the screen before it is released (a stream through a bad connection must not end at the first blip).
+  liveGraceMs: Number(process.env.ROOM_LIVE_GRACE_MS) || 120_000,
   chat: { rate: 1, burst: 5 },
   react: { rate: 3, burst: 3 },
   interact: { rate: 0.5, burst: 1 }, // 1 per 2 s per target
@@ -42,6 +44,8 @@ const buckets = new Map<string, Buckets>();
 const kicked = new Map<string, number>(); // `${roomId}:${userId}` -> until (ms)
 const joinLocks = new Map<string, Promise<void>>(); // one join at a time per user
 const endTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const awayTimers = new Map<string, ReturnType<typeof setTimeout>>(); // `${roomId}:${userId}` of a holder whose connection dropped
+const clearAway = (roomId: string, userId: string) => { const k = `${roomId}:${userId}`; clearTimeout(awayTimers.get(k)); awayTimers.delete(k); };
 
 const wire = (msg: object) => JSON.stringify(msg);
 function fanout(userId: string, msg: object) {
@@ -80,6 +84,7 @@ export async function endRoom(roomId: string): Promise<void> {
   clearTimeout(endTimers.get(roomId));
   endTimers.delete(roomId);
   Array.from(kicked.keys()).forEach((k) => { if (k.startsWith(`${roomId}:`)) kicked.delete(k); });
+  Array.from(awayTimers.keys()).forEach((k) => { if (k.startsWith(`${roomId}:`)) { clearTimeout(awayTimers.get(k)); awayTimers.delete(k); } });
   const room = await rs.getRoom(roomId);
   if (room && room.status !== "ended") await rs.setStatus(roomId, "ended");
   if (room?.voiceEnabled || roomHub.voiceOn(roomId)) {
@@ -110,6 +115,7 @@ export async function rehydrateLiveRooms(): Promise<void> {
 
 // ---------------------------------------------------------------- leave
 async function leaveRoom(userId: string, roomId: string) {
+  clearAway(roomId, userId);
   await dropFromVoice(roomId, userId, true); // leaving keeps the stage right for a reconnect; must run while the room's voice flag still exists
   const m = roomHub.leave(roomId, userId);
   joinedSockets.delete(userId);
@@ -127,9 +133,28 @@ export async function handleSocketClose(userId: string, ws: RoomClient): Promise
   Array.from(set).forEach((x) => { if (x.readyState !== OPEN) set.delete(x); }); // sockets that died mid-join
   if (set.size > 0) return; // another tab of theirs is still in the room
   const roomId = roomHub.roomOf(userId);
-  if (roomId) await leaveRoom(userId, roomId);
-  else joinedSockets.delete(userId);
+  if (!roomId) { joinedSockets.delete(userId); return; }
+  // The person on the live screen keeps their spot while their connection comes back (a performer must not lose the stream to a blip).
+  const me = roomHub.get(roomId, userId);
+  if (me && roomHub.liveVideoOn(roomId) && roomHub.liveOf(roomId).holder === userId) {
+    me.away = { until: Date.now() + tuning.liveGraceMs };
+    broadcastLive(roomId);
+    clearAway(roomId, userId);
+    const t = setTimeout(() => { releaseAwayMember(roomId, userId).catch((e) => console.error("[rooms] away release failed:", e)); }, tuning.liveGraceMs);
+    t.unref?.();
+    awayTimers.set(`${roomId}:${userId}`, t);
+    return;
+  }
+  await leaveRoom(userId, roomId);
 }
+
+/** The hold ran out, or the screen was taken from someone who is away: they leave exactly as if they had disconnected. */
+async function releaseAwayMember(roomId: string, userId: string): Promise<void> {
+  clearAway(roomId, userId);
+  if (!roomHub.get(roomId, userId)?.away) return; // they came back first
+  await leaveRoom(userId, roomId);
+}
+registerAwayReleaser(releaseAwayMember);
 
 // ---------------------------------------------------------------- join
 const JOIN_AGE_CODES = { AGE_UNKNOWN: "AGE_UNKNOWN", AGE_LIMIT: "AGE_LIMIT" } as const;
@@ -154,6 +179,7 @@ async function sendState(ws: RoomClient, room: Room, you: HubMember) {
     voiceEnabled: room.voiceEnabled,
     ...(() => { const s = roomHub.stageOf(room.id); return { stage: s.stage, hands: s.hands }; })(),
     ...roomHub.liveOf(room.id),
+    away: liveAway(room.id),
     nowPlaying: room.nowPlaying ?? null,
   });
 }
@@ -213,6 +239,11 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
   let set = joinedSockets.get(userId);
   if (!set) { set = new Set(); joinedSockets.set(userId, set); }
   set.add(ws);
+  if (me.away) { // the holder is back inside the hold window: the stream carries on
+    delete me.away;
+    clearAway(roomId, userId);
+    broadcastLive(roomId);
+  }
   if (role === "host") { clearTimeout(endTimers.get(roomId)); endTimers.delete(roomId); }
   if (isNew) {
     me.ready = (async () => {

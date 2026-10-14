@@ -23,9 +23,9 @@ export class LiveKitVoice implements VoiceService {
     return (this.client ??= new RoomServiceClient(this.url.replace(/^wss:/, "https:").replace(/^ws:/, "http:"), this.apiKey, this.apiSecret));
   }
 
-  async mintToken(a: { roomId: string; userId: string; displayName: string; canPublish: boolean }): Promise<string> {
+  async mintToken(a: { roomId: string; userId: string; displayName: string; canPublish: boolean; camera?: boolean }): Promise<string> {
     const t = new AccessToken(this.apiKey, this.apiSecret, { identity: a.userId, name: a.displayName, ttl: TOKEN_TTL_SECONDS });
-    t.addGrant({ roomJoin: true, room: roomNameFor(a.roomId), canSubscribe: true, canPublish: a.canPublish, canPublishData: false, canPublishSources: MIC_ONLY });
+    t.addGrant({ roomJoin: true, room: roomNameFor(a.roomId), canSubscribe: true, canPublish: a.canPublish, canPublishData: false, canPublishSources: a.canPublish && a.camera ? MIC_AND_CAMERA : MIC_ONLY });
     return t.toJwt();
   }
 

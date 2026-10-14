@@ -744,8 +744,12 @@ await (async () => {
     await withEnv(DUMMY, async () => {
       const claims = b64json((await getVoiceService()!.mintToken({ roomId: "r", userId: "u", displayName: "N", canPublish: true })).split(".")[1]);
       assert.deepEqual(claims.video.canPublishSources, ["microphone"], "microphone only: no camera, no screen share");
+      const cam = b64json((await getVoiceService()!.mintToken({ roomId: "r", userId: "u", displayName: "N", canPublish: true, camera: true })).split(".")[1]);
+      assert.deepEqual(cam.video.canPublishSources, ["microphone", "camera"], "the screen holder's token may also publish the camera, never screen share");
+      const noPub = b64json((await getVoiceService()!.mintToken({ roomId: "r", userId: "u", displayName: "N", canPublish: false, camera: true })).split(".")[1]);
+      assert.deepEqual(noPub.video.canPublishSources, ["microphone"], "no publish right, no camera");
     });
-    passed++; console.log("PASS voice: tokens grant the microphone only");
+    passed++; console.log("PASS voice: tokens grant the microphone only (camera only for the holder)");
   } catch (e: any) { failed++; console.log(`FAIL voice: tokens grant the microphone only  ${String(e.message).split(String.fromCharCode(10))[0]}`); }
 })();
 

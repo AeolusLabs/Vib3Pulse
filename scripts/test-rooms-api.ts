@@ -812,6 +812,29 @@ try {
     roomHub.end(room.id); setVoiceServiceForTests(undefined);
   }
 
+  // ============ Live screen reconnect: only the current holder's token may carry the camera ============
+  {
+    const rs = await import("../server/rooms/roomStorage");
+    const { roomHub } = await import("../server/rooms/RoomHub");
+    const { FakeVoice } = await import("../server/rooms/voice/fakeVoice");
+    const { setVoiceServiceForTests } = await import("../server/rooms/voice/voiceService");
+    setVoiceServiceForTests(new FakeVoice());
+    const dec = (t: string) => JSON.parse(Buffer.from(t.split(".")[1], "base64url").toString("utf8"));
+    const CH = await mk("ct_host", yearsAgo(30)), CG = await mk("ct_guest", yearsAgo(30));
+    const room = await rs.createRoom(CH, { title: "camera token", kind: "party", visibility: "public", ageLimit: "all" } as any);
+    await rs.setStatus(room.id, "live"); await rs.setVoiceEnabled(room.id, true); await rs.setLiveVideo(room.id, true);
+    roomHub.join(room.id, { userId: CH, role: "host", muted: false, joinedAt: 1, age: 30, send: () => {} }); await rs.upsertMember(room.id, CH, "host");
+    roomHub.join(room.id, { userId: CG, role: "guest", muted: false, joinedAt: 2, age: 30, send: () => {} }); await rs.upsertMember(room.id, CG, "guest");
+    roomHub.setVoiceOn(room.id, true); roomHub.setLiveVideoOn(room.id, true);
+    const before = await http("POST", `/api/rooms/${room.id}/voice-token`, CH);
+    check("voice-token: nobody holds the screen yet -> no camera in the token", dec(before.json.token).camera === false);
+    roomHub.setLive(room.id, { holder: CH, asks: [] });
+    const holder = await http("POST", `/api/rooms/${room.id}/voice-token`, CH);
+    const other = await http("POST", `/api/rooms/${room.id}/voice-token`, CG);
+    check("voice-token: the current holder's token may carry the camera, nobody else's", dec(holder.json.token).camera === true && dec(other.json.token).camera === false, JSON.stringify([dec(holder.json.token).camera, dec(other.json.token).camera]));
+    roomHub.end(room.id); setVoiceServiceForTests(undefined);
+  }
+
   // ============ Part 3a Task 6 (REST side): the teen rule applies to publish rights in tokens ============
   {
     const rs = await import("../server/rooms/roomStorage");

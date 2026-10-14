@@ -755,6 +755,71 @@ try {
     setVoiceServiceForTests(undefined);
   }
 
+  // ---------------- Live screen: a dropped holder keeps the screen for the hold window
+  {
+    const { FakeVoice } = await import("../server/rooms/voice/fakeVoice");
+    const { setVoiceServiceForTests } = await import("../server/rooms/voice/voiceService");
+    const { endRoom } = await import("../server/rooms/roomSocket");
+    const fake = new FakeVoice();
+    setVoiceServiceForTests(fake);
+    tuning.stage = { rate: 1000, burst: 1000 };
+    const savedGrace = tuning.liveGraceMs;
+    tuning.liveGraceMs = 4000; // a join is several round trips to the scratch DB: the window must outlast one
+    const lastLive = (c: Client) => [...c.msgs].reverse().find((m) => m.type === "room:live");
+    const liveNow = async (c: Client, pred: (l: any) => boolean) => { await until(async () => { const l = lastLive(c); return !!l && pred(l); }); const l = lastLive(c); return !!l && pred(l); };
+    const sendLive = (c: Client, action: string, targetId?: string) => { c.drain(); c.send({ type: "room:live", action, ...(targetId ? { targetId } : {}) }); };
+    const sendStage = (c: Client, action: string, targetId?: string) => { c.send({ type: "room:stage", action, ...(targetId ? { targetId } : {}) }); };
+    const removed = (u: string) => fake.calls.filter((c) => c.op === "remove" && c.userId === u).length;
+
+    const AH = await mk("ah_host"), AA = await mk("ah_a"), AB = await mk("ah_b");
+    const AR = await liveRoom(AH, { title: "away hold" }); await rs.setVoiceEnabled(AR.id, true); await rs.setLiveVideo(AR.id, true);
+    const ah = await connect(AH); let aa = await connect(AA), ab = await connect(AB);
+    await join(ah, AR.id); await join(aa, AR.id); await join(ab, AR.id);
+    sendStage(ah, "accept", AA); sendStage(ah, "accept", AB); await until(async () => roomHub.stageOf(AR.id).stage.length === 2);
+    sendLive(ah, "grant", AA); await liveNow(ah, (l) => l.holder === AA);
+
+    // the holder's connection drops: the spot is held, nobody is told they left, LiveKit is not touched
+    ah.drain(); aa.close();
+    check("hold: the room is told the holder is away, with when the hold ends", await liveNow(ah, (l) => l.holder === AA && typeof l.away === "number" && l.away > Date.now() - 1000));
+    check("hold: the holder is not removed (no room:left, no LiveKit removal)", await ah.none((m) => m.type === "room:left" && m.userId === AA, 300) && removed(AA) === 0 && roomHub.get(AR.id, AA) !== undefined);
+
+    // they come back inside the window: nothing was lost
+    aa = await connect(AA);
+    const back = await join(aa, AR.id);
+    const resumed = await liveNow(ah, (l) => l.holder === AA && l.away === null);
+    check("hold: coming back within the window resumes: still the holder, away cleared, member listed once", resumed && back?.holder === AA && back?.away === null && back.members.filter((m: any) => m.userId === AA).length === 1, JSON.stringify({ resumed, type: back?.type, holder: back?.holder, away: back?.away, n: back?.members?.filter((m: any) => m.userId === AA).length, last: lastLive(ah) }));
+    await sleep(4400);
+    check("hold: the old timer does not fire after a resume", roomHub.get(AR.id, AA) !== undefined && roomHub.liveOf(AR.id).holder === AA);
+
+    // they do not come back: after the window everything is released like a normal leave
+    ah.drain(); aa.close();
+    check("hold: after the window the screen is released, the member leaves, LiveKit removes them", await liveNow(ah, (l) => l.holder === null) && !!(await ah.waitFor((m) => m.type === "room:left" && m.userId === AA, 9000)) && await until(async () => removed(AA) >= 1) && roomHub.get(AR.id, AA) === undefined);
+
+    // the host takes the screen back while the holder is away: released at once, no ghost, no second leave
+    aa = await connect(AA); await join(aa, AR.id); sendStage(ah, "accept", AA); await until(async () => roomHub.stageOf(AR.id).stage.includes(AA));
+    sendLive(ah, "grant", AA); await liveNow(ah, (l) => l.holder === AA);
+    ah.drain(); aa.close(); await liveNow(ah, (l) => typeof l.away === "number");
+    sendLive(ah, "revoke", AA);
+    check("hold: a host revoke during the hold releases the member at once", await liveNow(ah, (l) => l.holder === null) && !!(await ah.waitFor((m) => m.type === "room:left" && m.userId === AA, 600)));
+    await sleep(4400);
+    check("hold: ...and no second room:left when the old timer would have fired", ah.all((m) => m.type === "room:left" && m.userId === AA).length === 1);
+
+    // someone who does not hold the screen still leaves at once
+    ah.drain(); ab.close();
+    check("hold: a dropped non-holder leaves immediately (no hold)", !!(await ah.waitFor((m) => m.type === "room:left" && m.userId === AB, 1500)));
+
+    // the room ending while a holder is away leaves no timer behind
+    const ec = await connect(AA); await join(ec, AR.id); sendStage(ah, "accept", AA); await until(async () => roomHub.stageOf(AR.id).stage.includes(AA));
+    sendLive(ah, "grant", AA); await liveNow(ah, (l) => l.holder === AA);
+    ec.close(); await sleep(150);
+    await endRoom(AR.id);
+    await sleep(4400);
+    check("hold: ending the room while the holder is away is clean", roomHub.liveOf(AR.id).holder === null && roomHub.get(AR.id, AA) === undefined);
+
+    tuning.liveGraceMs = savedGrace;
+    setVoiceServiceForTests(undefined);
+  }
+
   // ---------------- link screens off: the WebSocket refuses them (clearing is fine)
   {
     roomFeatures.linkScreens = false;

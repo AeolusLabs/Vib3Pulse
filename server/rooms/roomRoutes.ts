@@ -21,7 +21,7 @@ import * as rs from "./roomStorage";
 import { canViewRoom, hostSummary, mutualFollow, plainText, publicRoom, sha256 } from "./roomAccess";
 import { TokenBucket } from "./rateLimit";
 import { getVoiceService } from "./voice/voiceService";
-import { afterRoleChange, canPublishNow, shutdownVoice, stopAllLive } from "./stage";
+import { afterRoleChange, canCameraNow, canPublishNow, shutdownVoice, stopAllLive } from "./stage";
 import { applyMod, endRoom, enforceAgeLimit, expectHost, interactionVerdict, notifyScreen } from "./roomSocket";
 import { roomHub } from "./RoomHub";
 import { roomFeatures } from "./features";
@@ -490,7 +490,7 @@ export function registerRoomRoutes(app: Express): void {
       if (!user) return res.status(404).json({ message: "User not found" });
       const canPublish = canPublishNow(room.id, user.id);
       present.publish = canPublish;
-      const token = await voice.mintToken({ roomId: room.id, userId: user.id, displayName: user.displayName || user.organizationName || user.username, canPublish });
+      const token = await voice.mintToken({ roomId: room.id, userId: user.id, displayName: user.displayName || user.organizationName || user.username, canPublish, camera: canCameraNow(room.id, user.id) });
       res.json({ url: voice.url, token, canPublish, expiresInSec: 60 });
     } catch (e) {
       console.error("[rooms] voice token failed:", e);

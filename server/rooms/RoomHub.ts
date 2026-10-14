@@ -19,6 +19,8 @@ export interface HubMember {
   publish?: boolean;
   /** Settles when the room has finished reconciling this joiner (stage right restored, teen rule applied). A voice token waits for it. */
   ready?: Promise<void>;
+  /** The screen holder's connection dropped: their spot is held until `until` (epoch ms). Only ever set on the current holder. */
+  away?: { until: number };
 }
 
 const emptyStage = (): StageState => ({ stage: [], hands: [], invited: [] });

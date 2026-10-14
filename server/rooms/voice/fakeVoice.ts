@@ -11,8 +11,8 @@ export class FakeVoice implements VoiceService {
   /** Test hook: make matching calls throw, like a LiveKit outage. */
   failOn: ((c: VoiceCall) => boolean) | null = null;
 
-  async mintToken(a: { roomId: string; userId: string; displayName: string; canPublish: boolean }): Promise<string> {
-    this.calls.push({ op: "mint", roomId: a.roomId, userId: a.userId, canPublish: a.canPublish });
+  async mintToken(a: { roomId: string; userId: string; displayName: string; canPublish: boolean; camera?: boolean }): Promise<string> {
+    this.calls.push({ op: "mint", roomId: a.roomId, userId: a.userId, canPublish: a.canPublish, ...(a.camera ? { camera: true } : {}) });
     return `fake.${Buffer.from(JSON.stringify(a)).toString("base64url")}.sig`;
   }
   async setCanPublish(roomId: string, userId: string, canPublish: boolean, camera = false) {

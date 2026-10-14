@@ -50,9 +50,23 @@ const publishChange = async (roomId: string, userId: string, canPublish: boolean
 
 const onStage = (m: HubMember, roomId: string) => m.role !== "guest" || roomHub.stageOf(roomId).stage.includes(m.userId);
 
-const broadcastLive = (roomId: string) => {
+/** When the holder's spot stops being held (epoch ms), or null while they are present (or nobody holds the screen). */
+export const liveAway = (roomId: string): number | null => {
+  const holder = roomHub.liveOf(roomId).holder;
+  return (holder && roomHub.get(roomId, holder)?.away?.until) || null;
+};
+
+export const broadcastLive = (roomId: string) => {
   const { holder, asks } = roomHub.liveOf(roomId);
-  roomHub.broadcast(roomId, { type: "room:live", holder, asks });
+  roomHub.broadcast(roomId, { type: "room:live", holder, asks, away: liveAway(roomId) });
+};
+
+// roomSocket owns sockets and timers; when the screen is taken from a holder who is away (host stop, teen rule ...) it must also
+// let that member go, since nothing is left to hold. Registered by roomSocket to avoid an import cycle.
+let awayReleaser: ((roomId: string, userId: string) => Promise<void>) | null = null;
+export const registerAwayReleaser = (fn: (roomId: string, userId: string) => Promise<void>) => { awayReleaser = fn; };
+const releaseIfAway = (roomId: string, userId: string | null) => {
+  if (userId && roomHub.get(roomId, userId)?.away) void awayReleaser?.(roomId, userId).catch(log("releaseAway"));
 };
 
 /**
@@ -70,6 +84,7 @@ async function reconcileLiveLocked(roomId: string): Promise<void> {
   roomHub.setLive(roomId, next);
   broadcastLive(roomId);
   if (cur.holder && !next.holder && roomHub.get(roomId, cur.holder)) await publishChange(roomId, cur.holder, canPublishNow(roomId, cur.holder));
+  if (cur.holder && !next.holder) releaseIfAway(roomId, cur.holder);
 }
 
 const LIVE_ACTIONS: readonly LiveAction[] = ["ask", "withdraw", "grant", "revoke", "stop"];
@@ -94,6 +109,7 @@ export function handleLive(userId: string, roomId: string, msg: any): Promise<{ 
 
     roomHub.setLive(roomId, r.state);
     broadcastLive(roomId);
+    if (before.holder && before.holder !== r.state.holder) releaseIfAway(roomId, before.holder);
     // The old holder loses the camera before the new one gets it: never two cameras at once.
     for (const id of [before.holder, r.state.holder]) {
       if (!id || before.holder === r.state.holder || !roomHub.get(roomId, id)) continue;
@@ -113,6 +129,7 @@ export function stopAllLive(roomId: string): Promise<void> {
     roomHub.setLive(roomId, emptyLive);
     broadcastLive(roomId);
     if (cur.holder && roomHub.get(roomId, cur.holder)) await publishChange(roomId, cur.holder, canPublishNow(roomId, cur.holder));
+    releaseIfAway(roomId, cur.holder);
   });
 }
 
