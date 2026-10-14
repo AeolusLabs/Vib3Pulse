@@ -11,6 +11,7 @@ import { cueCountdownMs, needsCorrection, sanitizePlaybackInput, targetPositionM
 import { getVoiceService, roomNameFor, setVoiceServiceForTests } from "../server/rooms/voice/voiceService";
 import { FakeVoice } from "../server/rooms/voice/fakeVoice";
 import { speakerIds, speakingRings, voiceStatus } from "../client/src/lib/voiceState";
+import { applyLive, dropFromLive, emptyLive, type LiveContext, type LiveState } from "../shared/liveScreen";
 import { syncDecision, youtubeEmbedWithApi } from "../client/src/lib/playerAdapters";
 import { ageFromDob, ageBand, meetsAgeLimit, minAgeForLimit, sameBand, AGE_LIMITS, MIN_PLATFORM_AGE } from "../shared/age";
 
@@ -19,6 +20,63 @@ const test = (name: string, fn: () => void) => {
   try { fn(); passed++; console.log(`PASS ${name}`); }
   catch (e: any) { failed++; console.log(`FAIL ${name}  ${e.message.split("\n")[0]}`); }
 };
+
+// ---------------------------------------------------------------- live screen rules
+const lctx = (o: Partial<LiveContext> = {}): LiveContext => ({ actorId: "a", actorRole: "guest", targetId: "a", targetPresent: true, targetOnStage: true, targetEligible: true, liveOn: true, ...o });
+const host = (o: Partial<LiveContext> = {}) => lctx({ actorId: "h", actorRole: "host", targetId: "g", ...o });
+const okLive = (r: ReturnType<typeof applyLive>): LiveState => { assert.equal(r.ok, true, JSON.stringify(r)); return (r as { ok: true; state: LiveState }).state; };
+const codeLive = (r: ReturnType<typeof applyLive>) => { assert.equal(r.ok, false); return (r as { ok: false; code: string }).code; };
+test("live: an on-stage person may ask; the ask is recorded once", () => {
+  const s = okLive(applyLive(emptyLive, "ask", lctx()));
+  assert.deepEqual(s, { holder: null, asks: ["a"] });
+  assert.equal(codeLive(applyLive(s, "ask", lctx())), "NO_CHANGE");
+});
+test("live: asking needs live video on, the stage and teen eligibility", () => {
+  assert.equal(codeLive(applyLive(emptyLive, "ask", lctx({ liveOn: false }))), "LIVE_OFF");
+  assert.equal(codeLive(applyLive(emptyLive, "ask", lctx({ targetOnStage: false }))), "NOT_ON_STAGE");
+  assert.equal(codeLive(applyLive(emptyLive, "ask", lctx({ targetEligible: false }))), "TEEN_RULE");
+});
+test("live: the holder cannot ask again", () => {
+  assert.equal(codeLive(applyLive({ holder: "a", asks: [] }, "ask", lctx())), "NO_CHANGE");
+});
+test("live: only the host or a co-host grants; a grant clears the ask", () => {
+  assert.equal(codeLive(applyLive(emptyLive, "grant", lctx({ targetId: "g" }))), "NOT_ALLOWED");
+  const s = okLive(applyLive({ holder: null, asks: ["g", "x"] }, "grant", host()));
+  assert.deepEqual(s, { holder: "g", asks: ["x"] });
+  assert.equal(okLive(applyLive(emptyLive, "grant", lctx({ actorRole: "cohost", targetId: "g" }))).holder, "g");
+});
+test("live: the host may put themselves on the screen", () => {
+  assert.equal(okLive(applyLive(emptyLive, "grant", host({ targetId: "h" }))).holder, "h");
+});
+test("live: a grant replaces the current holder", () => {
+  assert.equal(okLive(applyLive({ holder: "old", asks: [] }, "grant", host())).holder, "g");
+});
+test("live: grant refusals (absent, off stage, teen rule, already holder, live off)", () => {
+  assert.equal(codeLive(applyLive(emptyLive, "grant", host({ targetPresent: false }))), "NOT_PRESENT");
+  assert.equal(codeLive(applyLive(emptyLive, "grant", host({ targetOnStage: false }))), "NOT_ON_STAGE");
+  assert.equal(codeLive(applyLive(emptyLive, "grant", host({ targetEligible: false }))), "TEEN_RULE");
+  assert.equal(codeLive(applyLive({ holder: "g", asks: [] }, "grant", host())), "NO_CHANGE");
+  assert.equal(codeLive(applyLive(emptyLive, "grant", host({ liveOn: false }))), "LIVE_OFF");
+});
+test("live: revoke is for the host or co-host and needs that person to be the holder", () => {
+  assert.equal(okLive(applyLive({ holder: "g", asks: [] }, "revoke", host())).holder, null);
+  assert.equal(codeLive(applyLive({ holder: "g", asks: [] }, "revoke", lctx({ targetId: "g" }))), "NOT_ALLOWED");
+  assert.equal(codeLive(applyLive({ holder: "z", asks: [] }, "revoke", host())), "NO_CHANGE");
+});
+test("live: stop by the holder, or by a moderator on whoever holds it", () => {
+  assert.equal(okLive(applyLive({ holder: "a", asks: [] }, "stop", lctx())).holder, null);
+  assert.equal(okLive(applyLive({ holder: "g", asks: [] }, "stop", host())).holder, null);
+  assert.equal(codeLive(applyLive({ holder: "g", asks: [] }, "stop", lctx())), "NOT_ALLOWED");
+  assert.equal(codeLive(applyLive(emptyLive, "stop", host())), "NO_CHANGE");
+});
+test("live: withdraw removes your own ask", () => {
+  assert.deepEqual(okLive(applyLive({ holder: null, asks: ["a", "x"] }, "withdraw", lctx())).asks, ["x"]);
+  assert.equal(codeLive(applyLive(emptyLive, "withdraw", lctx())), "NO_CHANGE");
+});
+test("live: dropFromLive removes that user's hold and ask only", () => {
+  assert.deepEqual(dropFromLive({ holder: "a", asks: ["a", "b"] }, "a"), { holder: null, asks: ["b"] });
+  assert.deepEqual(dropFromLive({ holder: "a", asks: ["b"] }, "b"), { holder: "a", asks: [] });
+});
 
 // ---------------------------------------------------------------- age
 test("ageFromDob: birthday today / day before / invalid / null", () => {
