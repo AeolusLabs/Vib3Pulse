@@ -808,6 +808,29 @@ try {
     ah.drain(); ab.close();
     check("hold: a dropped non-holder leaves immediately (no hold)", !!(await ah.waitFor((m) => m.type === "room:left" && m.userId === AB, 1500)));
 
+    // voice switched off while the holder is away: nothing is left to hold, so the member is released at once (no ghost seat)
+    {
+      const { shutdownVoice } = await import("../server/rooms/stage");
+      const vc = await connect(AA); await join(vc, AR.id); sendStage(ah, "accept", AA); await until(async () => roomHub.stageOf(AR.id).stage.includes(AA));
+      sendLive(ah, "grant", AA); await liveNow(ah, (l) => l.holder === AA);
+      ah.drain(); vc.close(); await liveNow(ah, (l) => typeof l.away === "number");
+      await shutdownVoice(AR.id);
+      check("hold: voice switched off while the holder is away releases the member at once", !!(await ah.waitFor((m) => m.type === "room:left" && m.userId === AA, 3000)) && roomHub.get(AR.id, AA) === undefined);
+      await rs.setVoiceEnabled(AR.id, true); roomHub.setVoiceOn(AR.id, true); await rs.setLiveVideo(AR.id, true); roomHub.setLiveVideoOn(AR.id, true);
+    }
+
+    // a returning holder is never removed by a release that was already queued
+    {
+      const rc = await connect(AA); await join(rc, AR.id); sendStage(ah, "accept", AA); await until(async () => roomHub.stageOf(AR.id).stage.includes(AA));
+      sendLive(ah, "grant", AA); await liveNow(ah, (l) => l.holder === AA);
+      ah.drain(); rc.close(); await liveNow(ah, (l) => typeof l.away === "number");
+      const back2 = await connect(AA); const st = await join(back2, AR.id);       // they are back
+      sendLive(ah, "revoke", AA);                                                 // the host takes the screen after they returned
+      await sleep(600);
+      const noLeft = await ah.none((m) => m.type === "room:left" && m.userId === AA, 100);
+      check("hold: a holder who came back is still in the room after a later revoke (not released as if away)", st?.holder === AA && noLeft && roomHub.get(AR.id, AA) !== undefined && roomHub.get(AR.id, AA)?.away === undefined);
+    }
+
     // the room ending while a holder is away leaves no timer behind
     const ec = await connect(AA); await join(ec, AR.id); sendStage(ah, "accept", AA); await until(async () => roomHub.stageOf(AR.id).stage.includes(AA));
     sendLive(ah, "grant", AA); await liveNow(ah, (l) => l.holder === AA);

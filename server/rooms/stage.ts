@@ -285,6 +285,7 @@ export async function sweepAllVoiceRooms(): Promise<void> {
 
 /** Voice was switched off (or the room ended): nobody is on stage any more and the LiveKit session is closed. */
 export async function shutdownVoice(roomId: string): Promise<void> {
+  const holder = roomHub.liveOf(roomId).holder;
   roomHub.setStage(roomId, { stage: [], hands: [], invited: [] });
   roomHub.setVoiceOn(roomId, false);
   roomHub.setLive(roomId, emptyLive);
@@ -292,6 +293,7 @@ export async function shutdownVoice(roomId: string): Promise<void> {
   broadcastStage(roomId);
   broadcastLive(roomId);
   roomHub.broadcast(roomId, { type: "room:livevideo", enabled: false });
+  releaseIfAway(roomId, holder); // a holder whose connection was down has nothing left to hold: let them go now, not in two minutes
   await soft("deleteRoom", getVoiceService()?.deleteRoom(roomId));
   await soft("clearStage", rs.clearStage(roomId));
   await soft("setLiveVideo", rs.setLiveVideo(roomId, false));

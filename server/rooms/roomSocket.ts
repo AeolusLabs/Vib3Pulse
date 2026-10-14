@@ -149,11 +149,23 @@ export async function handleSocketClose(userId: string, ws: RoomClient): Promise
   await leaveRoom(userId, roomId);
 }
 
-/** The hold ran out, or the screen was taken from someone who is away: they leave exactly as if they had disconnected. */
+/**
+ * The hold ran out, or the screen was taken from someone who is away: they leave exactly as if they had disconnected.
+ * Runs on the same per-user chain as joins, and looks again once it has its turn: a holder who came back in the meantime
+ * (and has a socket again) must never be removed by a release that was queued before they returned.
+ */
 async function releaseAwayMember(roomId: string, userId: string): Promise<void> {
   clearAway(roomId, userId);
-  if (!roomHub.get(roomId, userId)?.away) return; // they came back first
-  await leaveRoom(userId, roomId);
+  const prev = joinLocks.get(userId) ?? Promise.resolve();
+  const run = prev.then(async () => {
+    const me = roomHub.get(roomId, userId);
+    if (!me?.away) return;                                  // they came back first
+    if ((joinedSockets.get(userId)?.size ?? 0) > 0) return; // a socket of theirs is attached again
+    await leaveRoom(userId, roomId);
+  });
+  const tail = run.then(() => undefined, () => undefined);
+  joinLocks.set(userId, tail);
+  try { await run; } finally { if (joinLocks.get(userId) === tail) joinLocks.delete(userId); }
 }
 registerAwayReleaser(releaseAwayMember);
 
@@ -267,6 +279,7 @@ export type ModAction = "mute" | "unmute" | "kick" | "ban";
 async function evict(roomId: string, targetId: string) {
   const tm = roomHub.get(roomId, targetId);
   if (!tm) return;
+  clearAway(roomId, targetId); // a kicked or banned holder who was away has no hold left to run out
   await dropFromVoice(roomId, targetId, false); // removed: out of LiveKit and the stage right is gone (before the voice flag can vanish with the last member)
   roomHub.leave(roomId, targetId);
   joinedSockets.delete(targetId);

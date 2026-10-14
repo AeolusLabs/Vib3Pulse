@@ -16,13 +16,15 @@ const holdReconnectPolicy: ReconnectPolicy = {
 // livekit-client is large: it is only downloaded the first time someone actually starts room audio or video, so everyone else
 // (and everyone on a slow connection who is just browsing) never pays for it.
 let lkModule: Promise<typeof import("livekit-client")> | null = null;
-const loadLk = () => (lkModule ??= import("livekit-client"));
+const loadLk = () => (lkModule ??= import("livekit-client").catch((e) => { lkModule = null; throw e; })); // a failed download must be retryable on the next tap
 const connInfo = (): ConnInfo | undefined => (typeof navigator !== "undefined" ? (navigator as unknown as { connection?: ConnInfo }).connection : undefined);
 const AUDIO_ONLY_KEY = "vp.room.audioOnly";
 const readAudioOnly = (): boolean => {
   try { const v = localStorage.getItem(AUDIO_ONLY_KEY); if (v !== null) return v === "1"; } catch { /* storage blocked */ }
   return viewerStartsAudioOnly(connInfo());
 };
+// LiveKit disconnected us on purpose (we left, we were removed, another tab joined, the room is gone): do not try to get back on air.
+const NO_RESUME = new Set(["CLIENT_INITIATED", "DUPLICATE_IDENTITY", "PARTICIPANT_REMOVED", "ROOM_DELETED", "USER_REJECTED", "ROOM_CLOSED"]);
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** What the screen needs from a video track: attach it to a <video>, detach it again. */
@@ -50,6 +52,8 @@ export interface RoomVoice {
   startCamera(devices: CameraDevices): Promise<boolean>;
   stopCamera(): Promise<void>;
   /** The holder dropped the picture on a weak link but is still on air with sound; `resumeVideo` puts the picture back. */
+  /** This person is meant to be on air (they went live and have not stopped): true through a drop and the automatic comeback. */
+  onAir: boolean;
   videoPaused: boolean;
   pauseVideo(): Promise<void>;
   resumeVideo(): Promise<void>;
@@ -78,6 +82,7 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
   const [videoPaused, setVideoPaused] = useState(false);
+  const [onAir, setOnAir] = useState(false);
   const [audioOnly, setAudioOnlyState] = useState<boolean>(readAudioOnly);
   const [linkQuality, setLinkQuality] = useState<LinkQuality>("unknown");
   const [linkPoorSince, setLinkPoorSince] = useState<number | null>(null);
@@ -87,10 +92,11 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
   const sink = useRef<HTMLDivElement | null>(null);
   const connecting = useRef(false);
   const intendedLive = useRef<{ devices: CameraDevices } | null>(null); // set while this person is on air; only a deliberate stop clears it
+  const setIntent = (v: { devices: CameraDevices } | null) => { intendedLive.current = v; setOnAir(v !== null); };
   const resumeRef = useRef<() => Promise<void>>(async () => {});
   const generation = useRef(0); // bumped whenever we hang up: an async connect that finds it changed must undo itself
 
-  const hangUp = useCallback(() => {
+  const teardown = useCallback(() => {
     generation.current++;
     lk.current?.disconnect();
     lk.current = null;
@@ -99,6 +105,9 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
     setConnected(false); setCanPublish(false); setMicOn(false); setActive([]);
     setVideo(null); setLocalVideo(null); setCameraOn(false); setVideoPaused(false); setLinkQuality("unknown"); setLinkPoorSince(null);
   }, []);
+
+  // Leaving the session for good (voice switched off, leaving the page): nothing may try to bring the camera back later.
+  const hangUp = useCallback(() => { intendedLive.current = null; setOnAir(false); teardown(); }, [teardown]);
 
   const connect = useCallback(async () => {
     if (lk.current || connecting.current) return;
@@ -109,7 +118,7 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
       const res = await apiRequest("POST", `/api/rooms/${roomId}/voice-token${opts.inviteToken ? `?token=${encodeURIComponent(opts.inviteToken)}` : ""}`);
       const { url, token, canPublish: allowed } = await res.json() as { url: string; token: string; canPublish: boolean };
       if (gen !== generation.current) return; // left the page / voice switched off while the token was on its way
-      const { Room, RoomEvent, Track } = await loadLk();
+      const { Room, RoomEvent, Track, DisconnectReason } = await loadLk();
       if (gen !== generation.current) return;
       const room = new Room({ adaptiveStream: true, dynacast: true, reconnectPolicy: holdReconnectPolicy });
       // Viewer data saver: never keep a video subscription while "audio only" is on.
@@ -145,9 +154,12 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
       room.on(RoomEvent.LocalTrackPublished, (pub) => { // a full rejoin republishes the camera by itself: follow it
         if (pub.source === Track.Source.Camera && pub.videoTrack) { setLocalVideo(pub.videoTrack as unknown as ScreenTrack); setCameraOn(true); }
       });
-      room.on(RoomEvent.Disconnected, () => { // LiveKit gave up reconnecting
+      room.on(RoomEvent.Disconnected, (reason) => { // LiveKit gave up reconnecting, or ended our session on purpose
         if (lk.current !== room) return;
         lk.current = null; setConnected(false); setMicOn(false); setCameraOn(false); setLocalVideo(null);
+        box.remove(); if (sink.current === box) sink.current = null; // each drop used to leave an empty hidden element behind
+        const why = reason === undefined ? "" : DisconnectReason[reason] ?? "";
+        if (NO_RESUME.has(why)) { setIntent(null); setVideoPaused(false); setFailed(true); setError("You were disconnected from the room's audio. Tap to reconnect."); return; }
         if (intendedLive.current) { void resumeRef.current(); return; } // on air: keep trying with fresh tokens, do not wait for a tap
         setFailed(true); setError("Audio disconnected. Tap to reconnect.");
       });
@@ -162,11 +174,11 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
     } catch (e: any) {
       setFailed(true);
       setError("Couldn't connect to the audio service. Check your connection and try again.");
-      hangUp();
+      teardown(); // not hangUp: a failed attempt during an automatic comeback must keep the intent to try again
     } finally {
       connecting.current = false;
     }
-  }, [roomId, opts.inviteToken, hangUp]);
+  }, [roomId, opts.inviteToken, teardown]);
 
   const unlock = useCallback(async () => { setUnlocked(true); await connect(); }, [connect]);
 
@@ -184,6 +196,7 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
 
   // Voice switched off by the host: leave the session. Switched back on after a tap earlier: rejoin without another tap.
   useEffect(() => {
+    if (opts.enabled) void loadLk().catch(() => {}); // fetch it now so the first tap on a weak link only has to connect
     if (!opts.enabled) { hangUp(); return; }
     if (unlocked && !lk.current) void connect();
   }, [opts.enabled, unlocked, connect, hangUp]);
@@ -212,7 +225,7 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
   }, []);
 
   const stopCamera = useCallback(async () => {
-    intendedLive.current = null; // a deliberate stop (or the screen was taken back): do not try to resume
+    setIntent(null); // a deliberate stop (or the screen was taken back): do not try to resume
     setVideoPaused(false);
     await unpublishCamera();
     const room = lk.current;
@@ -243,7 +256,7 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
       ended.current = { track, handler };
       setLocalVideo(track as unknown as ScreenTrack);
       setCameraOn(true); setMicOn(true); setVideoPaused(false);
-      intendedLive.current = { devices };
+      setIntent({ devices });
       return true;
     } catch (e: any) {
       await lp.setCameraEnabled(false).catch(() => {});
@@ -293,9 +306,9 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
       resuming.current = false;
       setReconnecting(false);
     }
-    if (intendedLive.current && !lk.current) { intendedLive.current = null; setFailed(true); setError("We couldn't reconnect in time. Tap to get back on air."); }
+    if (intendedLive.current && !lk.current) { setIntent(null); setFailed(true); setError("We couldn't reconnect in time. Tap to reconnect, then press Go live again."); }
   }, [connect, startCamera]);
   resumeRef.current = resumeLive;
 
-  return { status: voiceStatus({ voiceEnabled: opts.enabled, unlocked, connected, failed, canPublish, micOn }), unlock, canPublish, micOn, toggleMic, activeSpeakers: active, error, micError, video, localVideo, cameraOn, cameraError, reconnecting, startCamera, stopCamera, videoPaused, pauseVideo, resumeVideo, audioOnly, setAudioOnly, linkQuality, linkPoorSince };
+  return { status: voiceStatus({ voiceEnabled: opts.enabled, unlocked, connected, failed, canPublish, micOn }), unlock, canPublish, micOn, toggleMic, activeSpeakers: active, error, micError, video, localVideo, cameraOn, cameraError, reconnecting, startCamera, stopCamera, onAir, videoPaused, pauseVideo, resumeVideo, audioOnly, setAudioOnly, linkQuality, linkPoorSince };
 }

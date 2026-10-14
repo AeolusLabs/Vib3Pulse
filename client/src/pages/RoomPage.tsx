@@ -123,8 +123,8 @@ function RoomPageInner({ id }: { id: string }) {
 
   // The screen was taken back (host stopped it, an adult arrived, voice went off): switch the camera off here too.
   useEffect(() => {
-    if ((voice.cameraOn || voice.videoPaused) && state.phase === "live" && state.holder !== me?.id) void voice.stopCamera(); // not while reconnecting: the room state is only paused, not changed
-  }, [voice.cameraOn, voice.videoPaused, state.phase, state.holder, me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    if ((voice.onAir || voice.cameraOn || voice.videoPaused) && state.phase === "live" && state.holder !== me?.id) void voice.stopCamera(); // not while reconnecting: the room state is only paused, not changed
+  }, [voice.onAir, voice.cameraOn, voice.videoPaused, state.phase, state.holder, me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // While the holder's own connection is down, count down (about) how long their spot is held; viewers get the server's deadline.
   const iAmHolder = !!me && state.holder === me.id;
