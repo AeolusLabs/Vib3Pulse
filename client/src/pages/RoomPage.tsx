@@ -195,6 +195,7 @@ function RoomPageInner({ id }: { id: string }) {
             canAsk={canAskLive} askLabel={isCoHostOrHost ? "Go live" : "Ask to go live"} asked={!!me && state.asks.includes(me.id)}
             onAsk={() => (isCoHostOrHost && me ? sock.liveAction("grant", me.id) : sock.liveAction("ask"))}
             onWithdraw={() => sock.liveAction("withdraw")}
+            needsTap={voice.status === "needs-tap"} onTap={() => void voice.unlock()}
           />
         )}
 

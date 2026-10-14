@@ -21,12 +21,15 @@ interface Props {
   asked: boolean;
   onAsk: () => void;
   onWithdraw: () => void;
+  /** Not connected to the room's media yet (the browser wants a tap first): nothing can be shown until they tap. */
+  needsTap: boolean;
+  onTap: () => void;
 }
 
 type FsVideo = HTMLVideoElement & { webkitEnterFullscreen?: () => void };
 
 /** The room's screen when live video is on: one stage, one person on it, 16:9. Nothing is recorded. */
-export default function ScreenStage({ track, holderName, isHolder, cameraOn, cameraError, onGoLive, onStop, canAsk, askLabel, asked, onAsk, onWithdraw }: Props) {
+export default function ScreenStage({ track, holderName, isHolder, cameraOn, cameraError, onGoLive, onStop, canAsk, askLabel, asked, onAsk, onWithdraw, needsTap, onTap }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const videoEl = useRef<HTMLVideoElement>(null);
   const [cams, setCams] = useState<Dev[]>([]);
@@ -81,6 +84,7 @@ export default function ScreenStage({ track, holderName, isHolder, cameraOn, cam
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-6 text-center" data-testid="live-empty">
             <p className="font-serif text-2xl font-bold">{isHolder ? "You're up" : "No one is live"}</p>
             <p className="text-sm text-muted-foreground">{isHolder ? "Pick your camera and microphone, then go live." : holderName ? `${holderName} is getting ready.` : "The host can put someone on the screen."}</p>
+            {needsTap && <Button type="button" className="mt-2 min-h-[44px] rounded-full" onClick={onTap} data-testid="button-tap-watch">Tap to hear and watch</Button>}
           </div>
         )}
         {showVideo && (
