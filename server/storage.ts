@@ -342,6 +342,7 @@ CREATE TABLE IF NOT EXISTS room_members (
   // Rooms part 3a (same statements as migrations/add_rooms_voice.sql; additive + idempotent)
   await pool.query(`
     ALTER TABLE rooms ADD COLUMN IF NOT EXISTS voice_enabled boolean NOT NULL DEFAULT false;
+    ALTER TABLE rooms ADD COLUMN IF NOT EXISTS live_video boolean NOT NULL DEFAULT false;
     ALTER TABLE rooms ADD COLUMN IF NOT EXISTS max_speakers integer NOT NULL DEFAULT 6;
     ALTER TABLE rooms ADD COLUMN IF NOT EXISTS screen_version integer NOT NULL DEFAULT 0;
     ALTER TABLE rooms ADD COLUMN IF NOT EXISTS now_playing jsonb;

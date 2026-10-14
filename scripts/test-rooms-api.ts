@@ -753,6 +753,40 @@ try {
     roomHub.end(room.id); setVoiceServiceForTests(undefined);
   }
 
+  // ============ Live screen Task 2: the host switches live video on and off ============
+  {
+    const rs = await import("../server/rooms/roomStorage");
+    const { roomHub } = await import("../server/rooms/RoomHub");
+    const { FakeVoice } = await import("../server/rooms/voice/fakeVoice");
+    const { setVoiceServiceForTests } = await import("../server/rooms/voice/voiceService");
+    const fake = new FakeVoice();
+    const LH = await mk("lv_host", yearsAgo(30)), LG = await mk("lv_guest", yearsAgo(30));
+    const room = await rs.createRoom(LH, { title: "live video room", kind: "party", visibility: "public", ageLimit: "all" } as any);
+    await rs.setStatus(room.id, "live");
+    const told: any[] = [];
+    roomHub.join(room.id, { userId: LH, role: "host", muted: false, joinedAt: 1, age: 30, send: () => {} }); await rs.upsertMember(room.id, LH, "host");
+    roomHub.join(room.id, { userId: LG, role: "guest", muted: false, joinedAt: 2, age: 30, send: (m) => told.push(m) }); await rs.upsertMember(room.id, LG, "guest");
+    const put = (as: string | null, body: unknown) => http("PUT", `/api/rooms/${room.id}/live-video`, as, body);
+    setVoiceServiceForTests(fake);
+    check("live video: voice not on yet -> 409 VOICE_OFF", (await put(LH, { enabled: true })).status === 409 && (await put(LH, { enabled: true })).json?.code === "VOICE_OFF");
+    await rs.setVoiceEnabled(room.id, true); roomHub.setVoiceOn(room.id, true);
+    check("live video: a guest cannot switch it (403), a bad body is 400, unauthenticated is 401", (await put(LG, { enabled: true })).status === 403 && (await put(LH, { enabled: "yes" })).status === 400 && (await put(null, { enabled: true })).status === 401);
+    setVoiceServiceForTests(null);
+    check("live video: no LiveKit configured -> 503 LIVE_UNAVAILABLE and nothing changes", (await put(LH, { enabled: true })).status === 503 && (await rs.getRoom(room.id))?.liveVideo === false);
+    setVoiceServiceForTests(fake);
+    await rs.updateRoom(room.id, { capacity: 51 });
+    const big = await put(LH, { enabled: true });
+    check("live video: a room above the viewer cap -> 400 too_large", big.status === 400 && big.json?.field === "liveVideo" && big.json?.reason === "too_large", JSON.stringify(big.json));
+    await rs.updateRoom(room.id, { capacity: 50 });
+    told.length = 0;
+    const on = await put(LH, { enabled: true });
+    check("live video on: persisted, the room says so, the room is told", on.status === 200 && on.json?.room?.liveVideo === true && (await rs.getRoom(room.id))?.liveVideo === true && roomHub.liveVideoOn(room.id) && told.some((m) => m.type === "room:livevideo" && m.enabled === true), JSON.stringify(on.json)?.slice(0, 160));
+    check("live video: GET room carries the flag", (await http("GET", `/api/rooms/${room.id}`, LG)).json?.room?.liveVideo === true);
+    const off = await put(LH, { enabled: false });
+    check("live video off: persisted and the room is told", off.status === 200 && (await rs.getRoom(room.id))?.liveVideo === false && !roomHub.liveVideoOn(room.id) && told.some((m) => m.type === "room:livevideo" && m.enabled === false));
+    roomHub.end(room.id); setVoiceServiceForTests(undefined);
+  }
+
   // ============ Part 3a Task 6 (REST side): the teen rule applies to publish rights in tokens ============
   {
     const rs = await import("../server/rooms/roomStorage");

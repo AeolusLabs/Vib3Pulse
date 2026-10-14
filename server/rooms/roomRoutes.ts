@@ -15,7 +15,8 @@ import { getConfig } from "../services/moderationConfig";
 import { events, follows, users, venues, type Room, type User } from "@shared/schema";
 import { ageFromDob, minAgeForLimit } from "@shared/age";
 import { resolveScreen } from "@shared/screen";
-import { resolveRoomPrivacy, validateRoomInput, validateRoomPrivacy } from "@shared/rooms";
+import { ROOM_LIMITS, resolveRoomPrivacy, validateRoomInput, validateRoomPrivacy } from "@shared/rooms";
+import { emptyLive } from "@shared/liveScreen";
 import { canHostRoom, canJoinRoom } from "@shared/roomRules";
 import * as rs from "./roomStorage";
 import { canViewRoom, hostSummary, mutualFollow, plainText, publicRoom, sha256 } from "./roomAccess";
@@ -426,6 +427,31 @@ export function registerRoomRoutes(app: Express): void {
   // ------------------------------------------------------------ voice (LiveKit)
   // The host switches voice on for a live room; everyone in the room then asks for a token. Who may speak is decided here
   // (host, co-hosts, guests on stage): LiveKit only enforces what the token and permission updates say.
+  // The host switches live camera + mic streaming on or off. It rides on voice (same LiveKit session), and only rooms small
+  // enough for everyone to receive video may have it.
+  app.put("/api/rooms/:id/live-video", requireAuth, roomLimiter, async (req, res) => {
+    try {
+      const ctx = await loadHostRoom(req, res);
+      if (!ctx) return;
+      const enabled = req.body?.enabled;
+      if (typeof enabled !== "boolean") return res.status(400).json({ message: "enabled must be true or false", field: "enabled" });
+      if (ctx.room.status !== "live") return res.status(409).json({ message: "Live video is for live rooms.", code: "ROOM_NOT_LIVE" });
+      if (enabled) {
+        if (!ctx.room.voiceEnabled) return res.status(409).json({ message: "Turn voice on first.", code: "VOICE_OFF" });
+        if (!getVoiceService()) return res.status(503).json({ message: "Live video isn't available right now.", code: "LIVE_UNAVAILABLE" });
+        if (ctx.room.capacity > ROOM_LIMITS.liveVideoMax) return res.status(400).json({ message: `Live video works in rooms of up to ${ROOM_LIMITS.liveVideoMax} people.`, field: "liveVideo", reason: "too_large" });
+      }
+      const room = await rs.setLiveVideo(ctx.room.id, enabled);
+      roomHub.setLiveVideoOn(room.id, enabled);
+      if (!enabled) roomHub.setLive(room.id, emptyLive);
+      roomHub.broadcast(room.id, { type: "room:livevideo", enabled });
+      res.json({ room: { ...publicRoom(room), host: hostSummary(ctx.host) } });
+    } catch (e) {
+      console.error("[rooms] live video switch failed:", e);
+      res.status(500).json({ message: "Failed to change live video" });
+    }
+  });
+
   app.put("/api/rooms/:id/voice", requireAuth, roomLimiter, async (req, res) => {
     try {
       const ctx = await loadHostRoom(req, res);

@@ -52,6 +52,11 @@ export async function setVoiceEnabled(roomId: string, enabled: boolean): Promise
   return row;
 }
 
+export async function setLiveVideo(roomId: string, enabled: boolean): Promise<Room> {
+  const [row] = await db.update(rooms).set({ liveVideo: enabled }).where(eq(rooms.id, roomId)).returning();
+  return row;
+}
+
 export async function setNowPlaying(roomId: string, np: NowPlaying | null): Promise<Room> {
   const [row] = await db.update(rooms).set({ nowPlaying: np }).where(eq(rooms.id, roomId)).returning();
   return row;

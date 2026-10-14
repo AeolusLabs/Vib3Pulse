@@ -2,6 +2,7 @@
 // re-sending room:join after a reconnect or restart. Keep this interface small so a Redis-backed hub can replace it.
 import { ageBand, type AgeBand } from "@shared/age";
 import type { StageState } from "@shared/stage";
+import type { LiveState } from "@shared/liveScreen";
 import type { MemberRole } from "./roomStorage";
 
 export interface HubMember {
@@ -30,6 +31,8 @@ export class RoomHub {
   private chat = new Map<string, ChatLine[]>();
   private stages = new Map<string, StageState>();
   private voice = new Map<string, boolean>();
+  private lives = new Map<string, LiveState>();
+  private liveVideo = new Map<string, boolean>();
 
   /** One room per user: joining another leaves the first. Returns the room that was left, if any. */
   join(roomId: string, m: HubMember): string | null {
@@ -49,7 +52,7 @@ export class RoomHub {
     if (!room || !m) return undefined;
     room.delete(userId);
     if (this.byUser.get(userId) === roomId) this.byUser.delete(userId);
-    if (room.size === 0) { this.rooms.delete(roomId); this.chat.delete(roomId); this.stages.delete(roomId); this.voice.delete(roomId); }
+    if (room.size === 0) { this.rooms.delete(roomId); this.chat.delete(roomId); this.stages.delete(roomId); this.voice.delete(roomId); this.lives.delete(roomId); this.liveVideo.delete(roomId); }
     return m;
   }
 
@@ -88,6 +91,8 @@ export class RoomHub {
     this.chat.delete(roomId);
     this.stages.delete(roomId);
     this.voice.delete(roomId);
+    this.lives.delete(roomId);
+    this.liveVideo.delete(roomId);
     return gone;
   }
 
@@ -105,6 +110,21 @@ export class RoomHub {
     if (s.stage.length || s.hands.length || s.invited.length) this.stages.set(roomId, { stage: [...s.stage], hands: [...s.hands], invited: [...s.invited] });
     else this.stages.delete(roomId);
   }
+
+  /** Who holds the room's live screen and who has asked to (memory only, like the stage). */
+  liveOf(roomId: string): LiveState {
+    const s = this.lives.get(roomId);
+    return s ? { holder: s.holder, asks: [...s.asks] } : { holder: null, asks: [] };
+  }
+
+  setLive(roomId: string, s: LiveState): void {
+    if (s.holder || s.asks.length) this.lives.set(roomId, { holder: s.holder, asks: [...s.asks] });
+    else this.lives.delete(roomId);
+  }
+
+  /** Whether live video is on for the room (mirrors rooms.live_video). */
+  liveVideoOn(roomId: string): boolean { return this.liveVideo.get(roomId) === true; }
+  setLiveVideoOn(roomId: string, on: boolean): void { if (on) this.liveVideo.set(roomId, true); else this.liveVideo.delete(roomId); }
 
   /** Rooms with voice on that have someone in them (for the periodic sweep against LiveKit). */
   voiceRooms(): string[] {

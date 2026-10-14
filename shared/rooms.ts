@@ -9,7 +9,7 @@ export type RoomVisibility = (typeof ROOM_VISIBILITY)[number];
 export const ROOM_REACTIONS: readonly string[] = ["❤️", "🔥", "👏", "😂", "🎉", "🙌", "😍", "🎶"];
 
 // Free rooms hold at most 50 people. Paid rooms (part 5) will hold 100 to 150: capacityMaxPaid is recorded here, unused until then.
-export const ROOM_LIMITS = { capacityDefault: 50, capacityMax: 50, capacityMaxPaid: 150, title: 80, description: 500, chat: 300 } as const;
+export const ROOM_LIMITS = { capacityDefault: 50, capacityMax: 50, capacityMaxPaid: 150, liveVideoMax: 50, title: 80, description: 500, chat: 300 } as const;
 const MAX_SCHEDULE_DAYS = 90;
 const MAX_URL = 2048;
 

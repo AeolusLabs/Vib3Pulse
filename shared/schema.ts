@@ -1133,6 +1133,7 @@ export const rooms = pgTable("rooms", {
   moderationStatus: text("moderation_status").notNull().default("approved"),
   // Part 3a: live voice (LiveKit) and synced playback.
   voiceEnabled: boolean("voice_enabled").notNull().default(false),
+  liveVideo: boolean("live_video").notNull().default(false),
   maxSpeakers: integer("max_speakers").notNull().default(6),
   screenVersion: integer("screen_version").notNull().default(0), // bumped whenever the screen changes
   nowPlaying: jsonb("now_playing").$type<NowPlaying | null>(),

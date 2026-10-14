@@ -220,7 +220,7 @@ test("validateRoomPrivacy: strict, names the field", () => {
   bad({ ...good, admin: true }, "admin");
   bad({ interactions: "none", appearInLists: true }, "allowInvites");
   assert.ok(ROOM_REACTIONS.length === 8 && new Set(ROOM_REACTIONS).size === 8);
-  assert.deepEqual(ROOM_LIMITS, { capacityDefault: 50, capacityMax: 50, capacityMaxPaid: 150, title: 80, description: 500, chat: 300 });
+  assert.deepEqual(ROOM_LIMITS, { capacityDefault: 50, capacityMax: 50, capacityMaxPaid: 150, liveVideoMax: 50, title: 80, description: 500, chat: 300 });
 });
 
 test("validateRoomInput: valid + defaults", () => {
@@ -707,6 +707,25 @@ await (async () => {
     });
     passed++; console.log("PASS voice: tokens grant the microphone only");
   } catch (e: any) { failed++; console.log(`FAIL voice: tokens grant the microphone only  ${String(e.message).split(String.fromCharCode(10))[0]}`); }
+})();
+
+await (async () => {
+  try {
+    const f = new FakeVoice();
+    await f.setCanPublish("r", "u", true);
+    await f.setCanPublish("r", "v", true, true);
+    assert.equal("camera" in f.calls[0], false, "ordinary speakers leave no camera flag");
+    assert.equal(f.calls[1].camera, true);
+    f.participants = [{ identity: "u", canPublish: true, canCamera: true }];
+    assert.equal((await f.listParticipants("r"))[0].canCamera, true);
+    const hub = new RoomHub();
+    assert.deepEqual(hub.liveOf("r"), { holder: null, asks: [] });
+    hub.setLive("r", { holder: "u", asks: ["v"] });
+    assert.deepEqual(hub.liveOf("r"), { holder: "u", asks: ["v"] });
+    hub.setLive("r", emptyLive);
+    assert.deepEqual(hub.liveOf("r"), { holder: null, asks: [] });
+    passed++; console.log("PASS live: FakeVoice records camera permission; hub keeps live state");
+  } catch (e: any) { failed++; console.log(`FAIL live: FakeVoice/hub  ${String(e.message).split(String.fromCharCode(10))[0]}`); }
 })();
 
 console.log(`\n${passed} passed, ${failed} failed`);
