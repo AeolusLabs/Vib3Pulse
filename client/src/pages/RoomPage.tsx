@@ -23,7 +23,7 @@ import VoiceBar from "@/components/rooms/VoiceBar";
 import StagePanel from "@/components/rooms/StagePanel";
 import ScreenStage from "@/components/rooms/ScreenStage";
 import { useNow } from "@/hooks/useNow";
-import { awayRemainingMs } from "@/lib/voiceState";
+import { awayRemainingMs, downSince, shouldShowHold } from "@/lib/voiceState";
 import { pickStartProfile, weakLinkAdvice, type VideoProfile } from "@/lib/bandwidth";
 import { LIVE_HOLD_MS } from "@shared/liveScreen";
 import { DENIED_MESSAGE, KIND_LABEL, LINK_SCREENS, type PeekMember, NOTICE_MESSAGE, VISIBILITY_LABEL, ageLimitLabel, fetchRooms, formatWhen, hostName, type RoomHostSummary, type RoomView } from "@/lib/roomsApi";
@@ -127,12 +127,17 @@ function RoomPageInner({ id }: { id: string }) {
   }, [voice.onAir, voice.cameraOn, voice.videoPaused, state.phase, state.holder, me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // While the holder's own connection is down, count down (about) how long their spot is held; viewers get the server's deadline.
+  // LiveKit's signal blips also flip `voice.reconnecting` for well under a second: the countdown only shows for a real drop, and it
+  // counts from when the drop began, so it neither flashes nor restarts.
   const iAmHolder = !!me && state.holder === me.id;
   const offline = iAmHolder && (state.phase === "reconnecting" || voice.reconnecting);
   const [offlineSince, setOfflineSince] = useState<number | null>(null);
-  useEffect(() => { setOfflineSince((s) => (offline ? s ?? Date.now() : null)); }, [offline]);
+  useEffect(() => { setOfflineSince((s) => downSince(s, offline, Date.now())); }, [offline]);
+  const [mediaDownSince, setMediaDownSince] = useState<number | null>(null);
+  useEffect(() => { setMediaDownSince((s) => downSince(s, voice.reconnecting, Date.now())); }, [voice.reconnecting]);
   const tick = useNow(offline || state.holderAwayUntil !== null);
-  const holderLeftMs = offlineSince === null ? null : Math.max(0, LIVE_HOLD_MS - (tick - offlineSince));
+  const showHold = shouldShowHold({ isHolder: iAmHolder, socketReconnecting: state.phase === "reconnecting", mediaDownSince, now: tick });
+  const holderLeftMs = !showHold || offlineSince === null ? null : Math.max(0, LIVE_HOLD_MS - (tick - offlineSince));
   const holderAwayLeftMs = awayRemainingMs(state.holderAwayUntil, state.serverOffsetMs, tick);
 
   const [quality, setQuality] = useState<VideoProfile | "auto">("auto");
@@ -174,6 +179,8 @@ function RoomPageInner({ id }: { id: string }) {
     const onStageNow = role !== "guest" || (!!me && state.stage.includes(me.id));
     const isHolder = !!me && state.holder === me.id;
     const canAskLive = state.liveVideo && onStageNow && !isHolder && state.phase === "live";
+    // Chat + reactions over a fullscreen screen (only rendered while it is fullscreen).
+    const strip = <div className="space-y-2"><RoomChat compact chat={state.chat} nameOf={nameOf} onSend={sock.chat} muted={muted} hidden={hidden} notice={noticeText} /><ReactionBar onReact={sock.react} /></div>;
     content = (
       <div className="space-y-4">
         {state.phase === "reconnecting" && (
@@ -188,7 +195,7 @@ function RoomPageInner({ id }: { id: string }) {
             canControl={canControlScreen}
             onChange={(url) => sock.setScreen(url)}
             nowPlaying={state.nowPlaying} serverOffsetMs={state.serverOffsetMs} sendPlayback={sock.sendPlayback} leadsPlayback={role === "host"}
-            strip={<div className="space-y-2"><RoomChat compact chat={state.chat} nameOf={nameOf} onSend={sock.chat} muted={muted} hidden={hidden} notice={noticeText} /><ReactionBar onReact={sock.react} /></div>}
+            strip={strip}
           />
         )}
 
@@ -218,6 +225,7 @@ function RoomPageInner({ id }: { id: string }) {
             quality={quality} onQuality={setQuality}
             videoPaused={voice.videoPaused} onPauseVideo={() => void voice.pauseVideo()} onResumeVideo={() => void voice.resumeVideo()}
             audioOnly={voice.audioOnly} onAudioOnly={voice.setAudioOnly} weakLink={weakLink}
+            comingBack={voice.comingBack} strip={strip}
           />
         )}
 
@@ -251,7 +259,7 @@ function RoomPageInner({ id }: { id: string }) {
                 onSwitchLive={async (on) => { if (!(await sock.setLiveVideo(on))) setNoticeText(on ? "Live video isn't available for this room." : "Couldn't switch live video off."); }}
                 onLive={(action, target) => sock.liveAction(action, target)} holderAwayLeftMs={holderAwayLeftMs} />
               {isHost && room && <HostControls room={{ ...room, host: detail.host }} onChanged={() => refetch()} />}
-              {isHost && <p className="text-center text-xs text-muted-foreground">If you close this page the room ends after 2 minutes.</p>}
+              {isHost && <p className="text-center text-xs text-muted-foreground">If you close this page the room ends shortly after.</p>}
             </TabsContent>
           )}
         </Tabs>

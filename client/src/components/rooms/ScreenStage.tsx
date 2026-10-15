@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
-import { Loader2Icon } from "@/components/ui/icons";
+import { Switch } from "@/components/ui/switch";
+import { Loader2Icon, MinimizeIcon, XIcon } from "@/components/ui/icons";
 import type { ScreenTrack } from "@/hooks/useRoomVoice";
 import { pickDevices, rememberDevice, rememberedDevice, type Dev } from "@/lib/mediaDevices";
 import { formatMmSs } from "@/lib/voiceState";
@@ -15,7 +16,7 @@ interface Props {
   cameraOn: boolean;
   cameraError: string | null;
   /** Call from a click: starts your camera and microphone with the chosen devices. */
-  onGoLive: (devices: { cameraId?: string; micId?: string }) => Promise<unknown>;
+  onGoLive: (devices: { cameraId?: string; micId?: string; musicMode?: boolean }) => Promise<unknown>;
   onStop: () => void;
   /** Someone on stage who may ask (or, for the host and co-hosts, take) the screen. */
   canAsk: boolean;
@@ -40,12 +41,18 @@ interface Props {
   onAudioOnly: (on: boolean) => void;
   /** Own connection has been poor for a while: offer the sound-only option. */
   weakLink: boolean;
+  /** The holder's automatic comeback after a drop is running: Go live waits for it. */
+  comingBack: boolean;
+  /** Chat + reactions shown over the bottom of the stage while it is fullscreen. */
+  strip?: ReactNode;
 }
 
 type FsVideo = HTMLVideoElement & { webkitEnterFullscreen?: () => void };
+type FsElement = HTMLElement & { webkitRequestFullscreen?: () => Promise<void> | void };
+const fsElement = () => (document.fullscreenElement ?? (document as any).webkitFullscreenElement) as Element | null | undefined;
 
 /** The room's screen when live video is on: one stage, one person on it, 16:9. Nothing is recorded. */
-export default function ScreenStage({ track, holderName, isHolder, cameraOn, cameraError, onGoLive, onStop, canAsk, askLabel, asked, onAsk, onWithdraw, needsTap, onTap, holderAway, holderLeftMs, quality, onQuality, videoPaused, onPauseVideo, onResumeVideo, audioOnly, onAudioOnly, weakLink }: Props) {
+export default function ScreenStage({ track, holderName, isHolder, cameraOn, cameraError, onGoLive, onStop, canAsk, askLabel, asked, onAsk, onWithdraw, needsTap, onTap, holderAway, holderLeftMs, quality, onQuality, videoPaused, onPauseVideo, onResumeVideo, audioOnly, onAudioOnly, weakLink, comingBack, strip }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const videoEl = useRef<HTMLVideoElement>(null);
   const [cams, setCams] = useState<Dev[]>([]);
@@ -53,6 +60,13 @@ export default function ScreenStage({ track, holderName, isHolder, cameraOn, cam
   const [camId, setCamId] = useState("");
   const [micId, setMicId] = useState("");
   const [starting, setStarting] = useState(false);
+  const [musicMode, setMusicMode] = useState(false);
+  const musicHelpId = useId();
+  const [isFull, setIsFull] = useState(false); // the stage box is fullscreen (not iPhone's video-only fullscreen, which has no room for chat)
+  const [stripOpen, setStripOpen] = useState(true);
+  const fsButton = useRef<HTMLButtonElement>(null);
+  const exitButton = useRef<HTMLButtonElement>(null);
+  const wasFull = useRef(false);
 
   // The <video> belongs to this component; the track is attached to it and detached again, never the other way round.
   useEffect(() => {
@@ -81,21 +95,40 @@ export default function ScreenStage({ track, holderName, isHolder, cameraOn, cam
   const goLive = async () => {
     setStarting(true);
     rememberDevice("camera", camId); rememberDevice("mic", micId);
-    await onGoLive({ cameraId: camId || undefined, micId: micId || undefined });
+    await onGoLive({ cameraId: camId || undefined, micId: micId || undefined, musicMode });
     setStarting(false);
   };
 
+  useEffect(() => {
+    const onChangeFs = () => setIsFull(!!fsElement() && fsElement() === box.current);
+    document.addEventListener("fullscreenchange", onChangeFs);
+    document.addEventListener("webkitfullscreenchange", onChangeFs);
+    return () => { document.removeEventListener("fullscreenchange", onChangeFs); document.removeEventListener("webkitfullscreenchange", onChangeFs); };
+  }, []);
+
+  // The Fullscreen button disappears when fullscreen opens: move focus to Exit, and give it back on the way out.
+  useEffect(() => {
+    if (isFull) exitButton.current?.focus();
+    else if (wasFull.current) fsButton.current?.focus();
+    wasFull.current = isFull;
+  }, [isFull]);
+
   const fullscreen = () => {
-    const el = box.current;
+    const el = box.current as FsElement | null;
     if (el?.requestFullscreen) void el.requestFullscreen().catch(() => {});
+    else if (el?.webkitRequestFullscreen) void Promise.resolve(el.webkitRequestFullscreen()).catch(() => {});
     else (videoEl.current as FsVideo | null)?.webkitEnterFullscreen?.(); // iPhone Safari only fullscreens the video itself
   };
+  const exitFullscreen = () => { if (fsElement()) void Promise.resolve(document.exitFullscreen?.() ?? (document as any).webkitExitFullscreen?.()).catch(() => {}); };
+
+  const locked = cameraOn || starting || comingBack;
+  const videoName = isHolder ? "Your live video" : holderName ? `Live video from ${holderName}` : "Live video";
 
   const showVideo = !!track;
   return (
     <section aria-label="Live screen" className="space-y-3" data-testid="screen-stage">
-      <div ref={box} className="relative aspect-video w-full overflow-hidden rounded-2xl border border-border bg-muted">
-        <video ref={videoEl} autoPlay playsInline muted className={`h-full w-full object-contain ${showVideo ? "" : "hidden"}`} data-testid="screen-video" />
+      <div ref={box} className="relative aspect-video w-full overflow-hidden rounded-2xl border border-border bg-muted data-[fullscreen=true]:rounded-none data-[fullscreen=true]:border-0" data-fullscreen={isFull ? "true" : "false"}>
+        <video ref={videoEl} autoPlay playsInline muted aria-label={videoName} className={`h-full w-full object-contain ${showVideo ? "" : "hidden"}`} data-testid="screen-video" />
         {!showVideo && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-6 text-center" data-testid="live-empty">
             {holderAway && !isHolder ? (
@@ -120,8 +153,21 @@ export default function ScreenStage({ track, holderName, isHolder, cameraOn, cam
         )}
         {showVideo && (
           <>
-            <span className="absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-background/80 px-2.5 py-1 text-xs font-medium backdrop-blur"><span className="h-1.5 w-1.5 rounded-full bg-red-500" aria-hidden />{holderAway ? "Reconnecting…" : isHolder ? "You're live" : holderName ? `${holderName} is live` : "Live"}</span>
-            <Button type="button" variant="secondary" size="sm" className="absolute bottom-3 right-3 min-h-[44px] rounded-full" onClick={fullscreen} data-testid="button-screen-fullscreen">Fullscreen</Button>
+            <span role="status" className="absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-background/80 px-2.5 py-1 text-xs font-medium backdrop-blur" data-testid="live-badge"><span className="h-1.5 w-1.5 rounded-full bg-red-500" aria-hidden />{holderAway ? "Reconnecting…" : isHolder ? "You're live" : holderName ? `${holderName} is live` : "Live"}</span>
+            {!isFull && <Button type="button" ref={fsButton} variant="secondary" size="sm" className="absolute bottom-3 right-3 min-h-[44px] rounded-full" onClick={fullscreen} data-testid="button-screen-fullscreen">Fullscreen</Button>}
+          </>
+        )}
+        {isFull && (
+          <>
+            <Button type="button" ref={exitButton} size="icon" variant="secondary" onClick={exitFullscreen} className="absolute right-3 top-3 z-20 h-11 w-11 rounded-full" aria-label="Exit fullscreen" data-testid="button-screen-exit"><MinimizeIcon className="h-5 w-5" aria-hidden /></Button>
+            {strip && (
+              <div className="absolute inset-x-0 bottom-0 z-20 max-h-[45%] overflow-y-auto bg-background/85 p-2 backdrop-blur" data-testid="stage-strip">
+                <Button type="button" size="sm" variant="ghost" className="mb-1 min-h-[44px] rounded-full" onClick={() => setStripOpen((o) => !o)} aria-expanded={stripOpen} data-testid="button-stage-strip">
+                  {stripOpen ? <><XIcon className="mr-1 h-3.5 w-3.5" aria-hidden />Hide chat</> : "Show chat"}
+                </Button>
+                {stripOpen && strip}
+              </div>
+            )}
           </>
         )}
       </div>
@@ -129,9 +175,11 @@ export default function ScreenStage({ track, holderName, isHolder, cameraOn, cam
       {isHolder && (
         <div className="space-y-3 rounded-2xl border border-border p-3" data-testid="holder-controls">
           {holderLeftMs !== null && (
-            <p role="status" className="rounded-xl bg-muted px-3 py-2 text-sm" data-testid="holder-reconnecting">
-              Your connection dropped. We're holding your spot for about <span className="font-medium tabular-nums">{formatMmSs(holderLeftMs)}</span>. Your stream carries on by itself when you're back.
-            </p>
+            <div className="space-y-1 rounded-xl bg-muted px-3 py-2 text-sm" data-testid="holder-reconnecting">
+              {/* Announced once; the ticking time sits outside the status so it is not read out every second. */}
+              <p role="status">Your connection dropped. We're holding your spot. Your stream carries on by itself when you're back.</p>
+              <p className="text-muted-foreground">Time left: <span className="font-medium tabular-nums text-foreground" aria-live="off">{formatMmSs(holderLeftMs)}</span></p>
+            </div>
           )}
           {videoPaused && (
             <p role="status" className="rounded-xl bg-muted px-3 py-2 text-sm" data-testid="video-paused">Your picture is off to save your connection. Your sound is still live.</p>
@@ -145,7 +193,7 @@ export default function ScreenStage({ track, holderName, isHolder, cameraOn, cam
           <div className="grid gap-3 sm:grid-cols-3">
             <label className="space-y-1 text-sm">
               <span className="text-muted-foreground">Quality</span>
-              <select value={quality} onChange={(e) => onQuality(e.target.value as VideoProfile | "auto")} disabled={cameraOn || starting} className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 text-base" data-testid="select-quality">
+              <select value={quality} onChange={(e) => onQuality(e.target.value as VideoProfile | "auto")} disabled={locked} className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 text-base" data-testid="select-quality">
                 <option value="auto">Auto</option>
                 <option value="saver">Data saver (360p)</option>
                 <option value="balanced">Balanced (540p)</option>
@@ -154,25 +202,32 @@ export default function ScreenStage({ track, holderName, isHolder, cameraOn, cam
             </label>
             <label className="space-y-1 text-sm">
               <span className="text-muted-foreground">Camera</span>
-              <select value={camId} onChange={(e) => setCamId(e.target.value)} disabled={cameraOn || starting} className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 text-base" data-testid="select-camera">
+              <select value={camId} onChange={(e) => setCamId(e.target.value)} disabled={locked} className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 text-base" data-testid="select-camera">
                 {cams.length === 0 && <option value="">No camera found</option>}
                 {cams.map((d) => <option key={d.deviceId} value={d.deviceId}>{d.label}</option>)}
               </select>
             </label>
             <label className="space-y-1 text-sm">
               <span className="text-muted-foreground">Microphone</span>
-              <select value={micId} onChange={(e) => setMicId(e.target.value)} disabled={cameraOn || starting} className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 text-base" data-testid="select-mic">
+              <select value={micId} onChange={(e) => setMicId(e.target.value)} disabled={locked} className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 text-base" data-testid="select-mic">
                 {mics.length === 0 && <option value="">No microphone found</option>}
                 {mics.map((d) => <option key={d.deviceId} value={d.deviceId}>{d.label}</option>)}
               </select>
             </label>
           </div>
+          <div>
+            <label className="flex min-h-[44px] w-fit cursor-pointer items-center gap-3 text-sm">
+              <Switch checked={musicMode} onCheckedChange={setMusicMode} disabled={locked} aria-describedby={musicHelpId} data-testid="switch-music-mode" />
+              <span>Music mode</span>
+            </label>
+            <p id={musicHelpId} className="text-xs text-muted-foreground">Use headphones, or the room may hear itself.</p>
+          </div>
           {cameraError && <p role="alert" className="text-sm text-destructive" data-testid="camera-error">{cameraError}</p>}
           <div className="flex flex-wrap gap-2">
-            {videoPaused && <Button className="min-h-[44px] rounded-full" onClick={onResumeVideo} data-testid="button-resume-picture">Turn picture back on</Button>}
+            {videoPaused && <Button className="min-h-[44px] rounded-full" onClick={onResumeVideo} disabled={comingBack} data-testid="button-resume-picture">Turn picture back on</Button>}
             {(cameraOn || videoPaused)
               ? <Button className="min-h-[44px] rounded-full" variant="destructive" onClick={onStop} data-testid="button-stop-live">Stop live</Button>
-              : <Button className="min-h-[44px] rounded-full" onClick={() => void goLive()} disabled={starting} data-testid="button-go-live">{starting ? <><Loader2Icon className="mr-2 h-4 w-4 animate-spin" aria-hidden />Starting…</> : "Go live"}</Button>}
+              : <Button className="min-h-[44px] rounded-full" onClick={() => void goLive()} disabled={starting || comingBack} data-testid="button-go-live">{comingBack ? <><Loader2Icon className="mr-2 h-4 w-4 animate-spin" aria-hidden />Reconnecting…</> : starting ? <><Loader2Icon className="mr-2 h-4 w-4 animate-spin" aria-hidden />Starting…</> : "Go live"}</Button>}
             {!cameraOn && !videoPaused && <Button className="min-h-[44px] rounded-full" variant="ghost" onClick={onStop} data-testid="button-give-up-screen">Hand back the screen</Button>}
           </div>
         </div>

@@ -5,8 +5,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { LocalVideoTrack, ReconnectPolicy, RemoteTrack, Room, RemoteTrackPublication } from "livekit-client";
 import { LIVE_HOLD_MS } from "@shared/liveScreen";
 import { apiRequest } from "@/lib/queryClient";
-import { voiceStatus, type VoiceStatus } from "@/lib/voiceState";
-import { pickStartProfile, profileSettings, viewerStartsAudioOnly, type ConnInfo, type LinkQuality, type VideoProfile } from "@/lib/bandwidth";
+import { shouldRetryStart, startErrorKind, voiceStatus, type StartErrorKind, type VoiceStatus } from "@/lib/voiceState";
+import { cameraSimulcast, micCapture, pickStartProfile, profileSettings, viewerStartsAudioOnly, type ConnInfo, type LinkQuality, type VideoProfile } from "@/lib/bandwidth";
 
 // Keep trying to get back for as long as the server holds the performer's spot, backing off from 1 s to 8 s: a weak connection that
 // comes and goes must not end the stream. After that LiveKit gives up and the room releases the screen anyway.
@@ -26,6 +26,11 @@ const readAudioOnly = (): boolean => {
 // LiveKit disconnected us on purpose (we left, we were removed, another tab joined, the room is gone): do not try to get back on air.
 const NO_RESUME = new Set(["CLIENT_INITIATED", "DUPLICATE_IDENTITY", "PARTICIPANT_REMOVED", "ROOM_DELETED", "USER_REJECTED", "ROOM_CLOSED"]);
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const START_ERROR: Record<StartErrorKind, string> = {
+  "not-allowed-yet": "The screen isn't ready for you yet. Wait a moment and press Go live again.",
+  blocked: "Your browser blocked the camera or microphone. Allow it in the address bar and try again.",
+  other: "Couldn't start your camera. Check it is connected and not used by another app.",
+};
 
 /** What the screen needs from a video track: attach it to a <video>, detach it again. */
 export interface ScreenTrack { attach(el: HTMLVideoElement): unknown; detach(el: HTMLVideoElement): unknown }
@@ -48,6 +53,8 @@ export interface RoomVoice {
   cameraError: string | null;
   /** The media connection dropped and is being re-established (your stream resumes by itself when it is back). */
   reconnecting: boolean;
+  /** The automatic comeback after a drop is running: nothing else may start the camera meanwhile. */
+  comingBack: boolean;
   /** Call from a click: starts your camera and microphone (the holder only; the server has already allowed it). */
   startCamera(devices: CameraDevices): Promise<boolean>;
   stopCamera(): Promise<void>;
@@ -65,7 +72,7 @@ export interface RoomVoice {
   linkPoorSince: number | null;
 }
 
-export interface CameraDevices { cameraId?: string; micId?: string; profile?: VideoProfile }
+export interface CameraDevices { cameraId?: string; micId?: string; profile?: VideoProfile; /** No echo cancellation, noise suppression or auto gain on the mic. */ musicMode?: boolean }
 
 export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteToken?: string; /** The holder's camera or microphone went away mid-stream: tell the room to take the screen back. */ onCameraLost?: () => void }): RoomVoice {
   const [unlocked, setUnlocked] = useState(false);
@@ -81,6 +88,7 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
   const [cameraOn, setCameraOn] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
+  const [comingBack, setComingBack] = useState(false);
   const [videoPaused, setVideoPaused] = useState(false);
   const [onAir, setOnAir] = useState(false);
   const [audioOnly, setAudioOnlyState] = useState<boolean>(readAudioOnly);
@@ -103,7 +111,8 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
     sink.current?.remove();
     sink.current = null;
     setConnected(false); setCanPublish(false); setMicOn(false); setActive([]);
-    setVideo(null); setLocalVideo(null); setCameraOn(false); setVideoPaused(false); setLinkQuality("unknown"); setLinkPoorSince(null);
+    setVideo(null); setLocalVideo(null); setCameraOn(false); setLinkQuality("unknown"); setLinkPoorSince(null);
+    if (!intendedLive.current) setVideoPaused(false); // still on air (a failed attempt during the comeback): keep "picture paused"
   }, []);
 
   // Leaving the session for good (voice switched off, leaving the page): nothing may try to bring the camera back later.
@@ -208,6 +217,8 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
   const videoPausedRef = useRef(false);
   videoPausedRef.current = videoPaused;
   const micStartedByLive = useRef(false); // Go live turned the microphone on: Stop live turns it off again
+  const stops = useRef(0); // counts deliberate stops: a Go live retry still waiting must not start after one
+  const liveMusic = useRef(false); // the live microphone runs in music mode: a mic that stays on after Stop live gets its voice processing back
   const ended = useRef<{ track: LocalVideoTrack; handler: () => void } | null>(null);
   const onCameraLost = useRef(opts.onCameraLost);
   onCameraLost.current = opts.onCameraLost;
@@ -226,10 +237,18 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
 
   const stopCamera = useCallback(async () => {
     setIntent(null); // a deliberate stop (or the screen was taken back): do not try to resume
+    stops.current++;
     setVideoPaused(false);
     await unpublishCamera();
     const room = lk.current;
+    const music = liveMusic.current;
+    liveMusic.current = false;
     if (room && micStartedByLive.current) { micStartedByLive.current = false; await room.localParticipant.setMicrophoneEnabled(false).catch(() => {}); setMicOn(false); }
+    else if (room && music) { // the mic was on before Go live and stays on: speech needs echo cancellation again
+      const { Track } = await loadLk();
+      const mic = room.localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack;
+      await mic?.restartTrack(micCapture(mic.mediaStreamTrack.getSettings().deviceId, false)).catch(() => {});
+    }
   }, [unpublishCamera]);
 
   const startCamera = useCallback(async (devices: CameraDevices): Promise<boolean> => {
@@ -238,30 +257,45 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
     const room = lk.current;
     if (!room) { setCameraError("Couldn't connect to the room's video. Check your connection and try again."); return false; }
     const lp = room.localParticipant;
-    try {
-      const { Track, TrackEvent, AudioPresets } = await loadLk();
-      const q = profileSettings(devices.profile ?? pickStartProfile(connInfo()));
-      // Capped resolution, frame rate and bitrate keep data use predictable, and simulcast lets LiveKit send weaker viewers a smaller copy.
-      await lp.setCameraEnabled(true, { deviceId: devices.cameraId, resolution: { width: q.width, height: q.height, frameRate: q.frameRate } }, { videoEncoding: { maxBitrate: q.maxBitrate, maxFramerate: q.frameRate }, simulcast: true });
-      if (devices.cameraId) await room.switchActiveDevice("videoinput", devices.cameraId).catch(() => false);
-      const micWasOn = lp.isMicrophoneEnabled;
-      if (micWasOn) { if (devices.micId) await room.switchActiveDevice("audioinput", devices.micId).catch(() => false); }
-      // Sound comes first: Opus at 48 kbps with redundancy and silence suppression, which also copes with packet loss.
-      else await lp.setMicrophoneEnabled(true, devices.micId ? { deviceId: devices.micId } : undefined, { audioPreset: AudioPresets.music, dtx: true, red: true });
-      micStartedByLive.current = !micWasOn;
-      const track = lp.getTrackPublication(Track.Source.Camera)?.videoTrack;
-      if (!track) throw new Error("no camera track");
-      const handler = () => { setCameraError("Your camera or microphone was disconnected, so the stream stopped."); void stopCamera(); onCameraLost.current?.(); };
-      track.on(TrackEvent.Ended, handler);
-      ended.current = { track, handler };
-      setLocalVideo(track as unknown as ScreenTrack);
-      setCameraOn(true); setMicOn(true); setVideoPaused(false);
-      setIntent({ devices });
-      return true;
-    } catch (e: any) {
-      await lp.setCameraEnabled(false).catch(() => {});
-      setCameraError(/denied|permission|NotAllowed/i.test(String(e?.name) + String(e?.message)) ? "Your browser blocked the camera or microphone. Allow it in the address bar and try again." : "Couldn't start your camera. Check it is connected and not used by another app.");
-      return false;
+    const stopsAtStart = stops.current;
+    const fresh = !intendedLive.current; // a comeback (after a drop or a paused picture) keeps what Go live found about the microphone
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const { Track, TrackEvent, AudioPresets } = await loadLk();
+        const profile = devices.profile ?? pickStartProfile(connInfo());
+        const q = profileSettings(profile);
+        // Capped resolution, frame rate and bitrate keep data use predictable, and simulcast lets LiveKit send weaker viewers a smaller copy.
+        await lp.setCameraEnabled(true, { deviceId: devices.cameraId, resolution: { width: q.width, height: q.height, frameRate: q.frameRate } }, { videoEncoding: { maxBitrate: q.maxBitrate, maxFramerate: q.frameRate }, simulcast: cameraSimulcast(profile) });
+        if (devices.cameraId) await room.switchActiveDevice("videoinput", devices.cameraId).catch(() => false);
+        const micWasOn = lp.isMicrophoneEnabled;
+        const capture = micCapture(devices.micId, !!devices.musicMode);
+        if (micWasOn) {
+          // Capture options only apply when a microphone is opened: in music mode reopen the running one with them.
+          if (devices.musicMode && (fresh || !liveMusic.current)) await lp.getTrackPublication(Track.Source.Microphone)?.audioTrack?.restartTrack(capture);
+          else if (devices.micId) await room.switchActiveDevice("audioinput", devices.micId).catch(() => false);
+        }
+        // Sound comes first: Opus at 48 kbps with redundancy and silence suppression, which also copes with packet loss.
+        else await lp.setMicrophoneEnabled(true, capture, { audioPreset: AudioPresets.music, dtx: true, red: true });
+        if (fresh) micStartedByLive.current = !micWasOn;
+        liveMusic.current = !!devices.musicMode;
+        const track = lp.getTrackPublication(Track.Source.Camera)?.videoTrack;
+        if (!track) throw new Error("no camera track");
+        const handler = () => { setCameraError("Your camera or microphone was disconnected, so the stream stopped."); void stopCamera(); onCameraLost.current?.(); };
+        if (ended.current) ended.current.track.off(TrackEvent.Ended, ended.current.handler); // never leave an older listener behind
+        track.on(TrackEvent.Ended, handler);
+        ended.current = { track, handler };
+        setLocalVideo(track as unknown as ScreenTrack);
+        setCameraOn(true); setMicOn(true); setVideoPaused(false);
+        setIntent({ devices });
+        return true;
+      } catch (e: unknown) {
+        await lp.setCameraEnabled(false).catch(() => {});
+        const kind = startErrorKind(e);
+        // Right after the host hands over the screen, LiveKit's camera permission can still be on its way: wait and try once more.
+        if (shouldRetryStart(kind, attempt)) { await wait(1500); if (lk.current === room && stops.current === stopsAtStart) continue; return false; }
+        setCameraError(START_ERROR[kind]);
+        return false;
+      }
     }
   }, [stopCamera, unlock]);
 
@@ -289,7 +323,7 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
   const resumeLive = useCallback(async () => {
     if (resuming.current) return;
     resuming.current = true;
-    setReconnecting(true);
+    setReconnecting(true); setComingBack(true);
     const since = Date.now();
     try {
       for (let i = 0; intendedLive.current && Date.now() - since < LIVE_HOLD_MS; i++) {
@@ -298,17 +332,22 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
         await connect();
         const devices = intendedLive.current?.devices;
         if (lk.current && devices) {
-          if (videoPausedRef.current) { await lk.current.localParticipant.setMicrophoneEnabled(true).catch(() => {}); setMicOn(true); break; } // sound only: do not bring the picture back
+          if (videoPausedRef.current) { // sound only: do not bring the picture back
+            const { AudioPresets } = await loadLk();
+            await lk.current.localParticipant.setMicrophoneEnabled(true, micCapture(devices.micId, !!devices.musicMode), { audioPreset: AudioPresets.music, dtx: true, red: true }).catch(() => {});
+            liveMusic.current = !!devices.musicMode;
+            setMicOn(true); break;
+          }
           if (await startCamera(devices)) break;
         } else if (lk.current) break;
       }
     } finally {
       resuming.current = false;
-      setReconnecting(false);
+      setReconnecting(false); setComingBack(false);
     }
-    if (intendedLive.current && !lk.current) { setIntent(null); setFailed(true); setError("We couldn't reconnect in time. Tap to reconnect, then press Go live again."); }
+    if (intendedLive.current && !lk.current) { setIntent(null); setVideoPaused(false); setFailed(true); setError("We couldn't reconnect in time. Tap to reconnect, then press Go live again."); }
   }, [connect, startCamera]);
   resumeRef.current = resumeLive;
 
-  return { status: voiceStatus({ voiceEnabled: opts.enabled, unlocked, connected, failed, canPublish, micOn }), unlock, canPublish, micOn, toggleMic, activeSpeakers: active, error, micError, video, localVideo, cameraOn, cameraError, reconnecting, startCamera, stopCamera, onAir, videoPaused, pauseVideo, resumeVideo, audioOnly, setAudioOnly, linkQuality, linkPoorSince };
+  return { status: voiceStatus({ voiceEnabled: opts.enabled, unlocked, connected, failed, canPublish, micOn }), unlock, canPublish, micOn, toggleMic, activeSpeakers: active, error, micError, video, localVideo, cameraOn, cameraError, reconnecting, comingBack, startCamera, stopCamera, onAir, videoPaused, pauseVideo, resumeVideo, audioOnly, setAudioOnly, linkQuality, linkPoorSince };
 }

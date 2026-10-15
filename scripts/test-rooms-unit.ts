@@ -10,9 +10,10 @@ import { MAX_SPEAKERS, applyStage, canBeOnStage, type StageState } from "../shar
 import { cueCountdownMs, needsCorrection, sanitizePlaybackInput, targetPositionMs } from "../shared/playback";
 import { getVoiceService, roomNameFor, setVoiceServiceForTests } from "../server/rooms/voice/voiceService";
 import { FakeVoice } from "../server/rooms/voice/fakeVoice";
-import { awayRemainingMs, formatMmSs, speakerIds, speakingRings, voiceStatus } from "../client/src/lib/voiceState";
+import { awayRemainingMs, downSince, formatMmSs, shouldRetryStart, shouldShowHold, speakerIds, speakingRings, startErrorKind, voiceStatus } from "../client/src/lib/voiceState";
 import { pickDevices, rememberedDevice } from "../client/src/lib/mediaDevices";
-import { pickStartProfile, profileSettings, viewerStartsAudioOnly, weakLinkAdvice } from "../client/src/lib/bandwidth";
+import { cameraSimulcast, micCapture, pickStartProfile, profileSettings, viewerStartsAudioOnly, weakLinkAdvice } from "../client/src/lib/bandwidth";
+import { jittered } from "../client/src/lib/backoff";
 import { applyLive, dropFromLive, emptyLive, type LiveContext, type LiveState } from "../shared/liveScreen";
 import { syncDecision, youtubeEmbedWithApi } from "../client/src/lib/playerAdapters";
 import { ageFromDob, ageBand, meetsAgeLimit, minAgeForLimit, sameBand, AGE_LIMITS, MIN_PLATFORM_AGE } from "../shared/age";
@@ -176,6 +177,52 @@ test("weakLinkAdvice: suggests audio only after 8 s of a poor or lost link, neve
   assert.equal(weakLinkAdvice("lost", 8_000), "suggest-audio-only");
   assert.equal(weakLinkAdvice("lost", 100), "none");
   for (const q of ["excellent", "good", "unknown"] as const) assert.equal(weakLinkAdvice(q, 60_000), "none", q);
+});
+test("micCapture: music mode switches off echo cancellation, noise suppression and auto gain; otherwise all on", () => {
+  assert.deepEqual(micCapture(undefined, false), { echoCancellation: true, noiseSuppression: true, autoGainControl: true });
+  assert.deepEqual(micCapture("m1", false), { deviceId: "m1", echoCancellation: true, noiseSuppression: true, autoGainControl: true });
+  assert.deepEqual(micCapture("m1", true), { deviceId: "m1", echoCancellation: false, noiseSuppression: false, autoGainControl: false });
+  assert.equal("deviceId" in micCapture("", true), false, "an empty id means the default microphone");
+});
+test("cameraSimulcast: data saver sends one 360p layer, the others simulcast", () => {
+  assert.equal(cameraSimulcast("saver"), false);
+  assert.equal(cameraSimulcast("balanced"), true);
+  assert.equal(cameraSimulcast("standard"), true);
+});
+test("startErrorKind: LiveKit's publish refusal is 'not allowed yet'; a browser denial is 'blocked'", () => {
+  assert.equal(startErrorKind({ name: "PublishTrackError", message: "failed to publish track, insufficient permissions" }), "not-allowed-yet");
+  assert.equal(startErrorKind(new Error("failed to publish track, insufficient permissions")), "not-allowed-yet");
+  assert.equal(startErrorKind({ name: "NotAllowedError", message: "Permission denied" }), "blocked");
+  assert.equal(startErrorKind({ name: "NotReadableError", message: "Could not start video source" }), "other");
+  assert.equal(startErrorKind(null), "other");
+  assert.equal(startErrorKind("weird"), "other");
+});
+test("shouldRetryStart: one retry, only while the screen permission may still be on its way", () => {
+  assert.equal(shouldRetryStart("not-allowed-yet", 0), true);
+  assert.equal(shouldRetryStart("not-allowed-yet", 1), false);
+  assert.equal(shouldRetryStart("blocked", 0), false, "the browser said no: waiting will not change it");
+  assert.equal(shouldRetryStart("other", 0), false);
+});
+test("shouldShowHold: the holder's countdown waits out short media blips, never for viewers", () => {
+  const now = 100_000;
+  assert.equal(shouldShowHold({ isHolder: true, socketReconnecting: true, mediaDownSince: null, now }), true);
+  assert.equal(shouldShowHold({ isHolder: true, socketReconnecting: false, mediaDownSince: now - 2_999, now }), false);
+  assert.equal(shouldShowHold({ isHolder: true, socketReconnecting: false, mediaDownSince: now - 3_000, now }), true);
+  assert.equal(shouldShowHold({ isHolder: true, socketReconnecting: false, mediaDownSince: null, now }), false);
+  assert.equal(shouldShowHold({ isHolder: false, socketReconnecting: true, mediaDownSince: now - 60_000, now }), false);
+});
+test("downSince: keeps the first moment of a drop, clears when it is over", () => {
+  assert.equal(downSince(null, true, 5), 5);
+  assert.equal(downSince(5, true, 9), 5, "a later render must not restart the countdown");
+  assert.equal(downSince(5, false, 9), null);
+  assert.equal(downSince(null, false, 9), null);
+});
+test("jittered: +-30% around the delay, whole milliseconds", () => {
+  assert.equal(jittered(1000, 0), 700);
+  assert.equal(jittered(1000, 0.5), 1000);
+  assert.equal(jittered(1000, 0.999999), 1300);
+  assert.equal(jittered(8000, 1), 10_400);
+  assert.ok(Number.isInteger(jittered(1234, 0.37)));
 });
 
 // ---------------------------------------------------------------- age

@@ -36,3 +36,16 @@ export type LinkQuality = "excellent" | "good" | "poor" | "lost" | "unknown";
 export function weakLinkAdvice(quality: LinkQuality, poorForMs: number): "none" | "suggest-audio-only" {
   return (quality === "poor" || quality === "lost") && poorForMs >= 8_000 ? "suggest-audio-only" : "none";
 }
+/**
+ * Microphone capture for going live. Voice processing (echo cancellation, noise suppression, auto gain) is made for speech and
+ * flattens music, so music mode switches it off; without echo cancellation the room's sound can come back through the speakers.
+ */
+export function micCapture(micId: string | undefined, music: boolean): { deviceId?: string; echoCancellation: boolean; noiseSuppression: boolean; autoGainControl: boolean } {
+  const on = !music;
+  return { ...(micId ? { deviceId: micId } : {}), echoCancellation: on, noiseSuppression: on, autoGainControl: on };
+}
+
+/** Data saver sends a single 360p layer: simulcast's extra smaller copies add roughly a third more upload. */
+export function cameraSimulcast(p: VideoProfile): boolean {
+  return p !== "saver";
+}

@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef } from "react";
 import { queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
+import { jittered } from "@/lib/backoff";
 
 export type WsHandler = (msg: any) => void;
 /** `send` is false when the socket is not open. `subscribe` gets every parsed server message plus {type:"ws:open"} / {type:"ws:close"}. */
@@ -91,6 +92,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       };
 
       ws.onclose = (event) => {
+        if (wsRef.current !== ws) return; // an old socket closing late: a newer one is already in charge, so no second reconnect
         readyRef.current = false;
         if (unmountedRef.current) return;
         emit({ type: "ws:close" });
@@ -99,10 +101,11 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
           retryDelayRef.current = 5 * 60 * 1000;
           rejectedRef.current = true;
         }
-        // Exponential backoff capped at 8 s: on a weak connection that comes and goes, a live room must be rejoined within seconds, not half a minute
+        // Exponential backoff capped at 8 s: on a weak connection that comes and goes, a live room must be rejoined within seconds, not half a minute.
+        // Spread by +-30% (still at most 8 s) so every tab does not come back in the same instant after a server restart; the 5 minute wait stays as it is.
         const delay = retryDelayRef.current;
         retryDelayRef.current = Math.min(delay * 2, 8_000);
-        timerRef.current = setTimeout(connect, delay);
+        timerRef.current = setTimeout(connect, event.code === 4001 ? delay : Math.min(jittered(delay, Math.random()), 8_000));
       };
     }
 
@@ -112,7 +115,8 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     // The phone says it has a network again (Wi-Fi back, signal back): try now instead of waiting out the back-off.
     const onOnline = () => {
       const ws = wsRef.current;
-      if (unmountedRef.current || rejectedRef.current || (ws && ws.readyState <= WebSocket.OPEN)) return;
+      // Only with no socket at all, or one fully closed: a CLOSING one still fires onclose, which schedules its own retry.
+      if (unmountedRef.current || rejectedRef.current || (ws && ws.readyState !== WebSocket.CLOSED)) return;
       if (timerRef.current) clearTimeout(timerRef.current);
       retryDelayRef.current = 1000;
       connect();

@@ -30,3 +30,33 @@ export function formatMmSs(ms: number): string {
   const total = Math.max(0, Math.ceil(ms / 1000));
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }
+/**
+ * Why Go live failed. "not-allowed-yet": LiveKit refused to publish because the camera permission the host just granted has not
+ * reached us yet (it can arrive about a second after the grant). "blocked": the browser or the person said no to the camera or mic.
+ */
+export type StartErrorKind = "not-allowed-yet" | "blocked" | "other";
+export function startErrorKind(e: unknown): StartErrorKind {
+  const err = (typeof e === "object" && e !== null ? e : {}) as { name?: unknown; message?: unknown };
+  const text = `${String(err.name ?? "")} ${String(err.message ?? "")}`;
+  if (/insufficient permissions/i.test(text)) return "not-allowed-yet";
+  return /denied|permission|NotAllowed/i.test(text) ? "blocked" : "other";
+}
+
+/** Try Go live once more (after a short wait) only when the permission may still be on its way. A browser "no" will not change by waiting. */
+export function shouldRetryStart(kind: StartErrorKind, attempt: number): boolean {
+  return kind === "not-allowed-yet" && attempt === 0;
+}
+
+/**
+ * Show the holder "your spot is being held" only for a real drop: the app connection is down, or the media connection has been
+ * down for 3 s. LiveKit's signal blips last well under a second and must not flash the countdown.
+ */
+export function shouldShowHold(i: { isHolder: boolean; socketReconnecting: boolean; mediaDownSince: number | null; now: number }): boolean {
+  if (!i.isHolder) return false;
+  return i.socketReconnecting || (i.mediaDownSince !== null && i.now - i.mediaDownSince >= 3_000);
+}
+
+/** When a drop started: kept while it lasts (so a countdown does not restart), null once it is over. */
+export function downSince(prev: number | null, down: boolean, now: number): number | null {
+  return down ? prev ?? now : null;
+}
