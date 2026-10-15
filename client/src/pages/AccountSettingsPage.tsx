@@ -27,6 +27,7 @@ import { useToast } from "@/hooks/use-toast";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { Switch } from "@/components/ui/switch";
 import BlockedUsersCard from "@/components/BlockedUsersCard";
+import RoomPrivacyCard from "@/components/RoomPrivacyCard";
 import type { User as UserType } from "@shared/schema";
 import { LockIcon, UserIcon, AlertCircleIcon, Loader2Icon, CheckCircleIcon, BellIcon, BellOffIcon, CheckCheckIcon, Trash2Icon } from "@/components/ui/icons";
 
@@ -431,6 +432,8 @@ export default function AccountSettingsPage() {
               </div>
             </CardContent>
           </Card>
+
+          <RoomPrivacyCard />
 
           <BlockedUsersCard />
 

@@ -332,3 +332,15 @@
 .vp-pin svg { display: block; }
 /* Map pins: many on screen at once, so no idle animation. */
 .vp-pin .avatar-breathe, .vp-pin .avatar-blink, .vp-pin-art .avatar-breathe, .vp-pin-art .avatar-blink { animation: none; }
+
+/* Rooms: a reaction or wave floats up over the avatar that sent it. With reduced motion it simply sits there until it expires. */
+.room-float { transform: translate(-50%, -4px); filter: drop-shadow(0 1px 1px rgba(0,0,0,.25)); }
+@media (prefers-reduced-motion: no-preference) {
+  .room-float { animation: room-float 3.6s ease-out forwards; }
+}
+@keyframes room-float {
+  0% { opacity: 0; transform: translate(-50%, 8px) scale(.6); }
+  12% { opacity: 1; transform: translate(-50%, -4px) scale(1.1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -44px) scale(1); }
+}

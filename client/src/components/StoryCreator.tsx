@@ -889,7 +889,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                 {/* text block */}
                 <motion.div variants={reducedMotion ? {} : pickItemVariants} className="text-center space-y-2.5">
                   <h2 className="text-white text-[1.6rem] font-bold tracking-tight leading-tight">
-                    Add to Your Story
+                    Add to Your Vib3
                   </h2>
                   <p className="text-white/40 text-sm leading-relaxed">
                     Pick a photo or video from your gallery
@@ -1492,7 +1492,7 @@ export default function StoryCreator({ open, onClose }: StoryCreatorProps) {
                       ) : videoDuration > STORY_SEGMENT_SECONDS ? (
                         <><SendIcon className="h-4 w-4" />{Math.ceil(videoDuration / STORY_SEGMENT_SECONDS)} Stories</>
                       ) : (
-                        <><SendIcon className="h-4 w-4" />Your Story</>
+                        <><SendIcon className="h-4 w-4" />Your Vib3</>
                       )}
                     </button>
                   </div>

@@ -613,6 +613,52 @@ export function setupAdminRoutes(app: Express) {
     }
   });
 
+  // Correct a user's (otherwise locked) birthdate. Audited; reason required.
+  app.put("/api/admin/users/:id/date-of-birth", requireRole("super_admin", "admin", "user_support"), async (req: Request, res: Response) => {
+    try {
+      const body = z.object({ dateOfBirth: z.string(), reason: z.string() }).parse(req.body);
+      const { correctDateOfBirth } = await import("./services/dobCorrection");
+      const r = await correctDateOfBirth({ adminId: req.session.adminId!, userId: req.params.id, ...body, ip: req.ip });
+      if (!r.ok) return res.status(r.status).json({ message: r.message });
+      res.json(r.user);
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "dateOfBirth and reason are required" });
+      res.status(500).json({ message: "Failed to correct date of birth" });
+    }
+  });
+
+  // ---- Rooms (alpha): reported rooms, end any room, change a room's age limit. All audited, reason required.
+  app.get("/api/admin/rooms/reported", requireRole("super_admin", "content_moderator"), async (_req: Request, res: Response) => {
+    try {
+      const { listReportedRooms } = await import("./rooms/roomAdmin");
+      res.json({ rooms: await listReportedRooms() });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to load reported rooms" });
+    }
+  });
+
+  app.post("/api/admin/rooms/:id/end", requireRole("super_admin", "content_moderator"), async (req: Request, res: Response) => {
+    try {
+      const { adminEndRoom } = await import("./rooms/roomAdmin");
+      const r = await adminEndRoom({ adminId: req.session.adminId!, roomId: req.params.id, reason: String(req.body?.reason ?? ""), ip: req.ip });
+      if (!r.ok) return res.status(r.status).json({ message: r.message });
+      res.json({ room: r.room });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to end room" });
+    }
+  });
+
+  app.patch("/api/admin/rooms/:id/age-limit", requireRole("super_admin", "content_moderator"), async (req: Request, res: Response) => {
+    try {
+      const { adminSetRoomAgeLimit } = await import("./rooms/roomAdmin");
+      const r = await adminSetRoomAgeLimit({ adminId: req.session.adminId!, roomId: req.params.id, ageLimit: req.body?.ageLimit, reason: String(req.body?.reason ?? ""), ip: req.ip });
+      if (!r.ok) return res.status(r.status).json({ message: r.message });
+      res.json({ room: r.room });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to change age limit" });
+    }
+  });
+
   // Suspend user
   app.post("/api/admin/users/:id/suspend", requireRole("super_admin", "admin", "user_support"), async (req: Request, res: Response) => {
     try {

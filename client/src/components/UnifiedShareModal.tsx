@@ -1,3 +1,4 @@
+import { useDirectMessage, DmHandled } from "@/hooks/useDirectMessage";
 import { useState, useMemo, useCallback } from "react";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
@@ -205,6 +206,8 @@ export default function UnifiedShareModal({
     }
   };
 
+  const dm = useDirectMessage();
+
   const handleSend = async () => {
     if (selected.size === 0 || isSending) return;
     setIsSending(true);
@@ -222,10 +225,8 @@ export default function UnifiedShareModal({
         if (contact.kind === "conversation") {
           convId = contact.conv.id;
         } else {
-          const resp = await apiRequest("POST", "/api/conversations/direct", {
-            userId: contact.user.id,
-          });
-          const newConv = await resp.json();
+          const newConv = await dm.start(contact.user.id); // age-group warning / restrictions handled inside
+          if (!newConv) continue;
           convId = newConv.id;
         }
 
@@ -266,6 +267,7 @@ export default function UnifiedShareModal({
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>
+      {dm.dialog}
       <DialogContent
         className="sm:max-w-md p-0 overflow-hidden gap-0"
         data-testid="modal-unified-share"

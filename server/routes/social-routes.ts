@@ -1,3 +1,4 @@
+import { directThreadExists, enforceAgeGap } from "../utils/ageGate";
 import type { Express } from "express";
 import express from "express";
 import crypto from "crypto";
@@ -580,6 +581,8 @@ export function registerSocialRoutes(app: Express): void {
       if (await isBlockedEitherWay(userId, story.userId)) {
         return res.status(403).json({ message: "You can't reply to this story.", code: "CHAT_BLOCKED" });
       }
+
+      if (!(await directThreadExists(userId, story.userId)) && !(await enforceAgeGap(res, userId, story.userId))) return;
 
       // Get or create the direct conversation thread between replier and story owner
       const conversation = await storage.getOrCreateDirectConversation(userId, story.userId);

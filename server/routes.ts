@@ -16,6 +16,7 @@ import { registerMessagesRoutes } from "./routes/messages-routes";
 import { registerVenueRoutes } from "./routes/venue-routes";
 import { registerVenueSavedRoutes } from "./routes/venue-saved-routes";
 import { registerMapRoutes } from "./routes/map-routes";
+import { registerRoomRoutes } from "./rooms/roomRoutes";
 import { registerBlockRoutes } from "./routes/block-routes";
 import { registerVenueSocialRoutes } from "./routes/venue-social-routes";
 import { registerDoorRoutes } from "./routes/door-routes";
@@ -46,6 +47,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerVenueRoutes(app);
   registerVenueSavedRoutes(app);
   registerMapRoutes(app);
+  registerRoomRoutes(app);
   registerBlockRoutes(app);
   registerVenueSocialRoutes(app);
   // Gate first: social events must 404 on the generic /api/events/:id/* routes below.

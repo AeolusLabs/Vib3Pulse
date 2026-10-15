@@ -14,6 +14,7 @@ import MessageBubble from "./MessageBubble";
 import MessageActionsSheet from "./MessageActionsSheet";
 import Composer, { type ComposerPayload } from "./Composer";
 import GroupInfoSheet from "./GroupInfoSheet";
+import AgeGapNotice from "./AgeGapNotice";
 import SharePickerSheet from "./SharePickerSheet";
 import { eventChatClosing } from "./ConversationRow";
 import { buildThread, initialOf, otherParticipant, personName, seenStatus } from "./chatUtils";
@@ -207,6 +208,7 @@ export default function ThreadView({ conversationId, currentUser, onBack }: Thre
           </div>
         )}
       </header>
+      <AgeGapNotice conversationId={conversationId} />
 
       <div
         ref={scroller}

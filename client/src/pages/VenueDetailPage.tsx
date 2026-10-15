@@ -1,3 +1,5 @@
+import { useDirectMessage, DmHandled } from "@/hooks/useDirectMessage";
+import LinkedRoomBanner from "@/components/rooms/LinkedRoomBanner";
 import { useState } from "react";
 import { useParams, Link, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -164,13 +166,15 @@ export default function VenueDetailPage() {
     onError: (e: any) => toast({ title: e.message || "Couldn't update follow", variant: "destructive" }),
   });
 
+  const dm = useDirectMessage();
   const messageMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/conversations/direct", { userId: ownerId });
-      return res.json();
+      const c = await dm.start(ownerId!);
+      if (!c) throw new DmHandled();
+      return c;
     },
     onSuccess: (conversation: { id: string }) => navigate(`/messages/${conversation.id}`),
-    onError: (e: any) => toast({ title: e.message || "Couldn't open the chat", variant: "destructive" }),
+    onError: (e: any) => { if (!(e instanceof DmHandled)) toast({ title: e.message || "Couldn't open the chat", variant: "destructive" }); },
   });
 
   const createPaymentMutation = useMutation({
@@ -267,6 +271,7 @@ export default function VenueDetailPage() {
 
   return (
     <div className={`min-h-screen bg-background md:pb-0 ${nextNight ? "pb-40" : "pb-20"}`}>
+      {dm.dialog}
       <Navigation />
 
       <VenueHero venue={venue} photos={photos} onOpenGallery={openGallery} />
@@ -285,6 +290,9 @@ export default function VenueDetailPage() {
                 ratingCount={venueRatingStats?.totalRatings ?? 0}
                 distanceLabel={distanceLabel}
               />
+            </div>
+            <div className="order-2 lg:order-none empty:hidden">
+              <LinkedRoomBanner venueId={venue.id} />
             </div>
             <div className="order-2 lg:order-none">
               <VenueActions venue={venue} onShare={() => setShareOpen(true)} />

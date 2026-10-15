@@ -3,6 +3,7 @@ import { useLocation, Link, Redirect } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { ageFromDob, MIN_PLATFORM_AGE } from "@shared/age";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -30,7 +31,10 @@ const roleSchema = z.object({
 
 const socialSchema = z.object({
   displayName: z.string().min(1, "Display name is required"),
-  dateOfBirth: z.string().min(1, "Date of birth is required"),
+  dateOfBirth: z.string().min(1, "Date of birth is required").refine((v) => {
+    const age = ageFromDob(v);
+    return age !== null && age >= MIN_PLATFORM_AGE && age < 120;
+  }, `You must be at least ${MIN_PLATFORM_AGE} to use Vib3Pulse`),
   gender: z.enum(GENDER_OPTIONS, { required_error: "Please select your gender" }),
   bio: z.string().max(500).optional(),
   interests: z.array(z.string()).min(1, "Please select at least one interest"),

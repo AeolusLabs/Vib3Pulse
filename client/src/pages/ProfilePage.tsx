@@ -54,6 +54,8 @@ type ArchivedStory = {
 type ProfileResponse = Omit<User, "password"> & {
   events?: Event[];
   rsvps?: Array<Rsvp & { event: Event }>;
+  /** Whole years; sent instead of the birthdate when you look at someone else's profile. */
+  age?: number | null;
 };
 
 type PostWithUser = Post & {
@@ -530,10 +532,10 @@ export default function ProfilePage() {
 
           {/* Metadata row */}
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground mb-3">
-            {isSocialUser && profile.dateOfBirth && (
+            {isSocialUser && (profile.age ?? profile.dateOfBirth) != null && (
               <span className="flex items-center gap-1">
                 <Cake className="h-4 w-4" />
-                {differenceInYears(new Date(), new Date(profile.dateOfBirth))} years old
+                {profile.age ?? differenceInYears(new Date(), new Date(profile.dateOfBirth!))} years old
               </span>
             )}
             {profile.location && (
