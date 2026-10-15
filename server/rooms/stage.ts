@@ -96,8 +96,11 @@ export function handleLive(userId: string, roomId: string, msg: any): Promise<{ 
     if (!LIVE_ACTIONS.includes(action)) return { ok: false as const, code: "BAD_REQUEST" };
     const actor = roomHub.get(roomId, userId);
     if (!actor) return { ok: false as const, code: "NOT_IN_ROOM" };
-    // asking and withdrawing are always about yourself; grant, revoke and stop name their target
-    const targetId = action !== "ask" && action !== "withdraw" && typeof msg.targetId === "string" && msg.targetId ? msg.targetId : userId;
+    // asking and withdrawing are always about yourself; grant, revoke and stop name their target (or default to yourself when
+    // they leave it out). A target that is there but is not an id is refused: it must never be read as "yourself".
+    const named = action !== "ask" && action !== "withdraw" && msg.targetId !== undefined;
+    if (named && !(typeof msg.targetId === "string" && msg.targetId.length > 0 && msg.targetId.length <= 64)) return { ok: false as const, code: "BAD_REQUEST" };
+    const targetId: string = named ? msg.targetId : userId;
     const target = roomHub.get(roomId, targetId);
     const before = roomHub.liveOf(roomId);
     const r = applyLive(before, action, {

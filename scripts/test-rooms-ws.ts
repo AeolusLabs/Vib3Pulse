@@ -752,6 +752,59 @@ try {
     sendStage(nh, "accept", NG); await until(async () => roomHub.stageOf(NR.id).stage.includes(NG));
     sendLive(nh, "grant", NG);
     check("live: a room without live video refuses a grant (LIVE_OFF)", await notice(nh, "LIVE_OFF"));
+
+    // grant, revoke and stop name a real target: junk is refused, never read as "yourself"; ask and withdraw ignore it
+    const VH = await mk("lv_vh"), VA = await mk("lv_va"), VB = await mk("lv_vb");
+    const VR = await liveRoom(VH, { title: "live validation" }); await rs.setVoiceEnabled(VR.id, true); await rs.setLiveVideo(VR.id, true);
+    const vh = await connect(VH), va = await connect(VA), vb = await connect(VB);
+    await join(vh, VR.id); await join(va, VR.id); await join(vb, VR.id);
+    sendStage(vh, "accept", VA); sendStage(vh, "accept", VB); await until(async () => roomHub.stageOf(VR.id).stage.length === 2);
+    const rawLive = (c: Client, o: object) => { c.drain(); c.send({ type: "room:live", ...o }); };
+    for (const bad of [123, "", "x".repeat(65), null, { id: VA }]) {
+      rawLive(vh, { action: "grant", targetId: bad });
+      check(`live: grant with targetId ${JSON.stringify(bad).slice(0, 12)} is BAD_REQUEST and grants nobody`, await notice(vh, "BAD_REQUEST") && roomHub.liveOf(VR.id).holder === null, JSON.stringify(roomHub.liveOf(VR.id)));
+    }
+    sendLive(vh, "grant", VA); await liveNow(vh, (l) => l.holder === VA);
+    rawLive(vh, { action: "revoke", targetId: 123 });
+    check("live: revoke with a non-string targetId is BAD_REQUEST", await notice(vh, "BAD_REQUEST") && roomHub.liveOf(VR.id).holder === VA);
+    rawLive(vh, { action: "stop", targetId: 123 });
+    check("live: stop with a non-string targetId is BAD_REQUEST and the stream carries on", await notice(vh, "BAD_REQUEST") && roomHub.liveOf(VR.id).holder === VA);
+    rawLive(vb, { action: "ask", targetId: 123 });
+    check("live: ask ignores targetId (it is always about yourself)", await liveNow(vh, (l) => l.asks.includes(VB)));
+    rawLive(vb, { action: "withdraw", targetId: 123 });
+    check("live: withdraw ignores targetId too", await liveNow(vh, (l) => !l.asks.includes(VB)));
+
+    // the sweep gives the camera back to the real holder if LiveKit lost it
+    fake.participants = [{ identity: VA, canPublish: true, canCamera: false }, { identity: VH, canPublish: true, canCamera: false }];
+    fake.calls.length = 0;
+    await sweepVoice(VR.id);
+    check("live: the sweep gives the holder the camera back when LiveKit shows them without it", calls(VR.id, VA).some((c) => c.canPublish === true && c.camera === true) && calls(VR.id, VH).length === 0, JSON.stringify(fake.calls));
+    fake.participants = [];
+
+    // a holder taken off the stage loses the screen and the camera
+    fake.calls.length = 0;
+    sendStage(vh, "remove", VA);
+    check("live: removing the holder from the stage clears the screen", await liveNow(vh, (l) => l.holder === null) && roomHub.liveOf(VR.id).holder === null);
+    check("...and LiveKit takes their camera and mic", await until(async () => { const l = calls(VR.id, VA).at(-1); return !!l && l.canPublish === false && !l.camera; }) && calls(VR.id, VA).every((c) => !c.camera), JSON.stringify(calls(VR.id, VA)));
+    roomHub.end(VR.id);
+
+    // a joiner's room row can be older than the host's switch: it must never turn live video (or voice) back on for the room
+    const XH = await mk("lv_xh"), XA = await mk("lv_xa"), XB = await mk("lv_xb"), XC = await mk("lv_xc");
+    const XR = await liveRoom(XH, { title: "stale join" }); await rs.setVoiceEnabled(XR.id, true); await rs.setLiveVideo(XR.id, true);
+    const xh = await connect(XH), xa = await connect(XA), xb = await connect(XB), xc = await connect(XC);
+    await join(xh, XR.id); await join(xa, XR.id);
+    sendStage(xh, "accept", XA); await until(async () => roomHub.stageOf(XR.id).stage.includes(XA));
+    // The host switched live video off; the next joiner's read does not see that write yet (the database still says on here).
+    roomHub.setLiveVideoOn(XR.id, false);
+    const xbs = await join(xb, XR.id);
+    check("stale join: a joiner who read the room before live video went off does not switch it back on", xbs?.type === "room:state" && !roomHub.liveVideoOn(XR.id) && xbs.room?.liveVideo === false, JSON.stringify([roomHub.liveVideoOn(XR.id), xbs?.room?.liveVideo]));
+    fake.calls.length = 0;
+    sendLive(xh, "grant", XA);
+    check("stale join: ...so a grant over the raw socket is refused (LIVE_OFF) and nobody gets a camera", await notice(xh, "LIVE_OFF") && roomHub.liveOf(XR.id).holder === null && calls(XR.id, XA).every((c) => !c.camera));
+    roomHub.setVoiceOn(XR.id, false); // the same for voice
+    const xcs = await join(xc, XR.id);
+    check("stale join: ...and the same for voice", xcs?.type === "room:state" && !roomHub.voiceOn(XR.id) && xcs.voiceEnabled === false, JSON.stringify([roomHub.voiceOn(XR.id), xcs?.voiceEnabled]));
+    roomHub.end(XR.id);
     setVoiceServiceForTests(undefined);
   }
 

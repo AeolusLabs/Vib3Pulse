@@ -243,8 +243,12 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
     if (role === "guest" && roomHub.count(roomId) >= fresh.capacity) return refuse(ws, "ROOM_FULL");
     me = { userId, role, muted: freshMember?.muted ?? false, joinedAt: Date.now(), send: (m) => fanout(userId, m), info: memberInfo(user), age: ageFromDob(user.dateOfBirth) };
     roomHub.join(roomId, me);
-    roomHub.setVoiceOn(roomId, fresh.voiceEnabled);
-    roomHub.setLiveVideoOn(roomId, fresh.voiceEnabled && fresh.liveVideo);
+    // Only the first person in sets the room's flags from the database. Once anyone is in, the voice / live-video routes keep
+    // them current, and this joiner's row may predate a switch-off: writing it would turn voice or the camera back on.
+    if (roomHub.count(roomId) === 1) {
+      roomHub.setVoiceOn(roomId, fresh.voiceEnabled);
+      roomHub.setLiveVideoOn(roomId, fresh.voiceEnabled && fresh.liveVideo);
+    }
     roomHub.broadcast(roomId, { type: "room:joined", member: memberPayload(me) }, userId);
   }
   // Register the socket in the same synchronous block as the hub insert: a close during the awaits below must find it,
@@ -268,7 +272,8 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
     await me.ready;
   }
   if (ws.readyState !== OPEN) return; // closed while we were busy: handleSocketClose already ran and removed them
-  await sendState(ws, fresh, me);
+  // The joiner is told the room's flags as the hub has them, not as their (possibly older) row had them.
+  await sendState(ws, { ...fresh, voiceEnabled: roomHub.voiceOn(roomId), liveVideo: roomHub.liveVideoOn(roomId) }, me);
   await rs.upsertMember(roomId, userId, role).catch((e) => console.error("[rooms] upsertMember failed:", e));
 }
 

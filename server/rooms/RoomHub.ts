@@ -126,18 +126,21 @@ export class RoomHub {
     else this.lives.delete(roomId);
   }
 
-  /** Whether live video is on for the room (mirrors rooms.live_video). */
+  /** Whether live video is on for the room (mirrors rooms.live_video). Like voice, only kept while someone is in the room. */
   liveVideoOn(roomId: string): boolean { return this.liveVideo.get(roomId) === true; }
-  setLiveVideoOn(roomId: string, on: boolean): void { if (on) this.liveVideo.set(roomId, true); else this.liveVideo.delete(roomId); }
+  setLiveVideoOn(roomId: string, on: boolean): void { if (on && this.count(roomId) > 0) this.liveVideo.set(roomId, true); else this.liveVideo.delete(roomId); }
 
   /** Rooms with voice on that have someone in them (for the periodic sweep against LiveKit). */
   voiceRooms(): string[] {
     return Array.from(this.voice.keys()).filter((id) => this.count(id) > 0);
   }
 
-  /** Whether voice is on for the room (mirrors rooms.voice_enabled so hot paths need no query). */
+  /**
+   * Whether voice is on for the room (mirrors rooms.voice_enabled so hot paths need no query). Only kept while someone is in
+   * the room: nothing would ever clear an entry for an empty room, and its first joiner reads the flag from the database anyway.
+   */
   voiceOn(roomId: string): boolean { return this.voice.get(roomId) === true; }
-  setVoiceOn(roomId: string, on: boolean): void { if (on) this.voice.set(roomId, true); else this.voice.delete(roomId); }
+  setVoiceOn(roomId: string, on: boolean): void { if (on && this.count(roomId) > 0) this.voice.set(roomId, true); else this.voice.delete(roomId); }
 
   recordChat(roomId: string, line: ChatLine): void {
     const ring = this.chat.get(roomId) ?? [];

@@ -47,14 +47,24 @@ export async function updateRoom(id: string, patch: RoomPatch): Promise<Room> {
   return row;
 }
 
+/** Live video rides on voice: switching voice off switches live video off in the same write, so the two cannot disagree. */
 export async function setVoiceEnabled(roomId: string, enabled: boolean): Promise<Room> {
-  const [row] = await db.update(rooms).set({ voiceEnabled: enabled }).where(eq(rooms.id, roomId)).returning();
+  const [row] = await db.update(rooms).set(enabled ? { voiceEnabled: true } : { voiceEnabled: false, liveVideo: false }).where(eq(rooms.id, roomId)).returning();
   return row;
 }
 
 export async function setLiveVideo(roomId: string, enabled: boolean): Promise<Room> {
   const [row] = await db.update(rooms).set({ liveVideo: enabled }).where(eq(rooms.id, roomId)).returning();
   return row;
+}
+
+/**
+ * Switches live video on only while voice is on, checked in the write itself: a voice-off that commits first (even after the
+ * caller read voice as on) makes this a no-op. Returns null when voice is off.
+ */
+export async function enableLiveVideo(roomId: string): Promise<Room | null> {
+  const [row] = await db.update(rooms).set({ liveVideo: true }).where(and(eq(rooms.id, roomId), eq(rooms.voiceEnabled, true))).returning();
+  return row ?? null;
 }
 
 export async function setNowPlaying(roomId: string, np: NowPlaying | null): Promise<Room> {

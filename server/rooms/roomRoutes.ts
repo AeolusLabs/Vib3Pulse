@@ -440,9 +440,12 @@ export function registerRoomRoutes(app: Express): void {
         if (!getVoiceService()) return res.status(503).json({ message: "Live video isn't available right now.", code: "LIVE_UNAVAILABLE" });
         if (ctx.room.capacity > ROOM_LIMITS.liveVideoMax) return res.status(400).json({ message: `Live video works in rooms of up to ${ROOM_LIMITS.liveVideoMax} people.`, field: "liveVideo", reason: "too_large" });
       }
-      const room = await rs.setLiveVideo(ctx.room.id, enabled);
-      roomHub.setLiveVideoOn(room.id, enabled);
-      roomHub.broadcast(room.id, { type: "room:livevideo", enabled });
+      const room = enabled ? await rs.enableLiveVideo(ctx.room.id) : await rs.setLiveVideo(ctx.room.id, false);
+      if (!room) return res.status(409).json({ message: "Turn voice on first.", code: "VOICE_OFF" }); // voice went off since we looked
+      // Voice may have gone off after our write (its route has then already cleared the flag): never switch it back on behind that.
+      const on = enabled && roomHub.voiceOn(room.id);
+      roomHub.setLiveVideoOn(room.id, on);
+      roomHub.broadcast(room.id, { type: "room:livevideo", enabled: on });
       if (!enabled) await stopAllLive(room.id);
       res.json({ room: { ...publicRoom(room), host: hostSummary(ctx.host) } });
     } catch (e) {
@@ -459,7 +462,7 @@ export function registerRoomRoutes(app: Express): void {
       if (typeof enabled !== "boolean") return res.status(400).json({ message: "enabled must be true or false", field: "enabled" });
       if (ctx.room.status !== "live") return res.status(409).json({ message: "Voice is for live rooms.", code: "ROOM_NOT_LIVE" });
       if (enabled && !getVoiceService()) return res.status(503).json({ message: "Voice isn't available right now.", code: "VOICE_UNAVAILABLE" });
-      const room = await rs.setVoiceEnabled(ctx.room.id, enabled);
+      const room = await rs.setVoiceEnabled(ctx.room.id, enabled); // off also persists live video off, in the same write
       roomHub.setVoiceOn(room.id, enabled);
       if (!enabled) await shutdownVoice(room.id);
       roomHub.broadcast(room.id, { type: "room:voice", enabled });

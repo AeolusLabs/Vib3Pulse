@@ -787,6 +787,69 @@ try {
     roomHub.end(room.id); setVoiceServiceForTests(undefined);
   }
 
+  // ============ Live screen: voice off and live video on cannot leave live video on behind voice ============
+  {
+    const rs = await import("../server/rooms/roomStorage");
+    const { roomHub } = await import("../server/rooms/RoomHub");
+    const { FakeVoice } = await import("../server/rooms/voice/fakeVoice");
+    const { setVoiceServiceForTests } = await import("../server/rooms/voice/voiceService");
+    setVoiceServiceForTests(new FakeVoice());
+    const XH = await mk("lx_host", yearsAgo(30));
+    const room = await rs.createRoom(XH, { title: "voice vs live", kind: "party", visibility: "public", ageLimit: "all" } as any);
+    await rs.setStatus(room.id, "live"); await rs.upsertMember(room.id, XH, "host");
+    const voice = (enabled: boolean) => http("PUT", `/api/rooms/${room.id}/voice`, XH, { enabled });
+    const live = (enabled: boolean) => http("PUT", `/api/rooms/${room.id}/live-video`, XH, { enabled });
+
+    // nobody is in the room yet: the switches are persisted, but no in-memory flag is left behind for an empty room
+    const von = await voice(true), lon = await live(true);
+    check("switching voice and live video on for a room nobody is in: persisted, no in-memory flag left behind", von.status === 200 && lon.status === 200 && (await rs.getRoom(room.id))?.liveVideo === true && !roomHub.voiceOn(room.id) && !roomHub.liveVideoOn(room.id) && roomHub.count(room.id) === 0, JSON.stringify([von.status, lon.status, roomHub.voiceOn(room.id), roomHub.liveVideoOn(room.id)]));
+
+    const voff = await voice(false);
+    check("voice off: the route's own write turns live video off too (not only a best-effort side effect)", voff.status === 200 && voff.json?.room?.voiceEnabled === false && voff.json?.room?.liveVideo === false, JSON.stringify(voff.json?.room && [voff.json.room.voiceEnabled, voff.json.room.liveVideo]));
+
+    // live video on races voice off: the voice-off write is in flight (row locked, not committed) when the live-video write runs
+    await voice(true);
+    const tx = await pool.connect();
+    let raced: { status: number; json: any } = { status: 0, json: null };
+    try {
+      await tx.query("begin");
+      await tx.query("update rooms set voice_enabled = false, live_video = false where id = $1", [room.id]);
+      const pending = live(true);
+      const t0 = Date.now(); // wait until the live-video write is blocked on the row (the route already read voice as on)
+      while (Date.now() - t0 < 10_000 && !(await q(`select 1 from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'`)).length) await new Promise((r) => setTimeout(r, 50));
+      await tx.query("commit");
+      raced = await pending;
+    } finally { tx.release(); }
+    const after = await rs.getRoom(room.id);
+    check("live video on racing voice off: refused (409 VOICE_OFF), the database never ends with live video on and voice off", raced.status === 409 && raced.json?.code === "VOICE_OFF" && after?.voiceEnabled === false && after?.liveVideo === false, JSON.stringify([raced.status, raced.json?.code, after?.voiceEnabled, after?.liveVideo]));
+    await voice(true);
+    check("...and switching voice back on does not bring live video back unasked", (await rs.getRoom(room.id))?.liveVideo === false);
+    setVoiceServiceForTests(undefined);
+  }
+
+  // ============ Live screen: a co-host holding the screen who is demoted to guest loses it and the camera ============
+  {
+    const rs = await import("../server/rooms/roomStorage");
+    const { roomHub } = await import("../server/rooms/RoomHub");
+    const { FakeVoice } = await import("../server/rooms/voice/fakeVoice");
+    const { setVoiceServiceForTests } = await import("../server/rooms/voice/voiceService");
+    const fake = new FakeVoice(); setVoiceServiceForTests(fake);
+    const DH = await mk("ld_host", yearsAgo(30)), DC = await mk("ld_co", yearsAgo(30));
+    const room = await rs.createRoom(DH, { title: "demote holder", kind: "party", visibility: "public", ageLimit: "all" } as any);
+    await rs.setStatus(room.id, "live"); await rs.setVoiceEnabled(room.id, true); await rs.setLiveVideo(room.id, true);
+    const told: any[] = [];
+    roomHub.join(room.id, { userId: DH, role: "host", muted: false, joinedAt: 1, age: 30, send: (m) => told.push(m), publish: true }); await rs.upsertMember(room.id, DH, "host");
+    roomHub.join(room.id, { userId: DC, role: "cohost", muted: false, joinedAt: 2, age: 30, send: () => {}, publish: true }); await rs.upsertMember(room.id, DC, "cohost");
+    roomHub.setVoiceOn(room.id, true); roomHub.setLiveVideoOn(room.id, true);
+    roomHub.setLive(room.id, { holder: DC, asks: [] });
+    fake.calls.length = 0;
+    const r = await http("PUT", `/api/rooms/${room.id}/members/${DC}/role`, DH, { role: "guest" });
+    const mine = fake.calls.filter((c) => c.op === "setCanPublish" && c.userId === DC);
+    check("demoting a co-host who holds the screen: the screen is cleared and the room told", r.status === 200 && roomHub.liveOf(room.id).holder === null && told.some((m) => m.type === "room:live" && m.holder === null), JSON.stringify(roomHub.liveOf(room.id)));
+    check("...and LiveKit takes their camera and mic", mine.length >= 1 && mine.at(-1)!.canPublish === false && mine.every((c) => !c.camera), JSON.stringify(mine));
+    roomHub.end(room.id); setVoiceServiceForTests(undefined);
+  }
+
   // ============ Live screen: a new joiner's voice token waits until the room has reconciled them ============
   {
     const rs = await import("../server/rooms/roomStorage");
