@@ -81,6 +81,7 @@ const mk = async (name: string) => (await q(
 const A = await mk("av_a");
 const B = await mk("av_b");
 const Cc = await mk("av_c"); // friend with no avatar
+const extra: string[] = []; // users created by later sections, removed at the end
 const stored = async (id: string) => (await q(`select avatar from users where id=$1`, [id]))[0].avatar;
 const KEYS = ["v", "type", "skin", "hair", "hairColor", "expression", "facial", "outfit", "outfitColor", "eyewear", "headwear", "hoops"].sort();
 const male = { v: 1, type: "male", skin: 5, hair: "mohawk", hairColor: 0, expression: "grin", facial: "beard", outfit: "bomber", outfitColor: 2, eyewear: "none", headwear: "none", hoops: false };
@@ -150,6 +151,38 @@ try {
   check("map: friend with avatar carries it", fB?.avatar?.hair === "dreads" && fB?.avatar?.facial === "full", JSON.stringify(fB));
   check("map: friend without avatar has avatar null and keeps photo url", fC && fC.avatar === null && fC.avatarUrl === "https://example.test/c.png", JSON.stringify(fC));
   check("map: no sensitive fields on friends", !JSON.stringify(r.json?.friends ?? []).match(/passwordHash|"email"|verifiedPhone/));
+
+  // 8b. map: /api/map/friends = every friend sharing with me, however far away (the strip and the search need it)
+  {
+    const D = await mk("av_d"), E = await mk("av_e"), F = await mk("av_f"), G = await mk("av_g"), H = await mk("av_h");
+    extra.push(D, E, F, G, H);
+    for (const u of [D, E, G, H]) for (const [x, y] of [[A, u], [u, A]]) await q(`insert into follows (follower_id, following_id) values ($1,$2) on conflict do nothing`, [x, y]);
+    await q(`insert into follows (follower_id, following_id) values ($1,$2) on conflict do nothing`, [F, A]); // F follows A only: not mutual
+    // B moves to Lagos: far outside the 5 km box
+    await http("PUT", "/api/map/location", B, { latitude: 6.5244, longitude: 3.3792 });
+    for (const u of [D, E, F, G]) await http("PUT", "/api/map/location", u, { latitude: 51.5, longitude: -0.12 });
+    await q(`insert into map_sharing_prefs (user_id, audience) values ($1, 'selected') on conflict (user_id) do update set audience = 'selected'`, [D]); // ghost to A: selected audience without A
+    await q(`insert into user_blocks (blocker_id, blocked_id) values ($1,$2)`, [A, E]);
+    await q(`update user_locations set updated_at = now() - interval '2 hours' where user_id = $1`, [G]); // stale
+    // H never shared at all
+    const near = await http("GET", "/api/map/nearby?lat=51.5&lng=-0.12&radiusKm=5", A);
+    check("map friends: the far friend is NOT in the 5 km nearby list (why the new endpoint exists)", !near.json?.friends?.some((f: any) => f.id === B));
+    const fr = await http("GET", "/api/map/friends", A);
+    const ids: string[] = (fr.json?.friends ?? []).map((f: any) => f.id);
+    check("map friends: 200", fr.status === 200, JSON.stringify(fr.json)?.slice(0, 200));
+    check("map friends: includes the friend 4 000 km away and the nearby one", ids.includes(B) && ids.includes(Cc), JSON.stringify(ids));
+    check("map friends: excludes ghost (selected audience without me), blocked, non-mutual, stale and never-shared", [D, E, F, G, H].every((u) => !ids.includes(u)), JSON.stringify(ids));
+    const fb = fr.json?.friends?.find((f: any) => f.id === B);
+    check("map friends: carries avatar, coordinates and updatedAt for the strip", !!fb && typeof fb.latitude === "number" && Math.abs(fb.latitude - 6.524) < 0.01 && !!fb.updatedAt && "avatar" in fb && "avatarUrl" in fb, JSON.stringify(fb));
+    check("map friends: no email, date of birth or password fields", !/passwordHash|"email"|dateOfBirth|verifiedPhone|"age"/.test(JSON.stringify(fr.json)));
+    check("map friends: newest position first", fr.json?.friends?.length >= 2 && Date.parse(fr.json.friends[0].updatedAt) >= Date.parse(fr.json.friends[1].updatedAt), JSON.stringify(fr.json?.friends?.map((f: any) => f.updatedAt)));
+    check("map friends: needs a login (401)", (await http("GET", "/api/map/friends", null)).status === 401);
+    // a friend who stops sharing disappears
+    const stop = await http("DELETE", "/api/map/location", B);
+    const fr2 = await http("GET", "/api/map/friends", A);
+    check("map friends: a friend who stopped sharing is gone", stop.status === 200 && !(fr2.json?.friends ?? []).some((f: any) => f.id === B), JSON.stringify([stop.status, fr2.json?.friends?.length]));
+    await http("PUT", "/api/map/location", B, { latitude: 51.5, longitude: -0.12 }); // restore for later sections
+  }
 
   // 9. avatar as profile picture: avatarUrl swap
   const col = async (id: string, c: string) => (await q(`select ${c} as v from users where id=$1`, [id]))[0].v;
@@ -230,7 +263,7 @@ try {
   check("account deletion clears avatar, avatarUrl and parked photo", del.avatar === null && del.avatar_url === null && del.profile_photo_url === null, JSON.stringify(del));
   check("deleted user's image route 404s", (await raw(`/api/avatar-img/${B}.svg`)).status === 404);
 } finally {
-  await q(`delete from users where id = any($1)`, [[A, B, Cc]]).catch(() => {});
+  await q(`delete from users where id = any($1)`, [[A, B, Cc, ...extra]]).catch(() => {});
   server.close();
   await pool.end();
 }
