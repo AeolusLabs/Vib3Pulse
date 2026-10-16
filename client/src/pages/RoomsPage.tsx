@@ -35,7 +35,7 @@ export function RoomCard({ room }: { room: RoomView }) {
       <article className="overflow-hidden rounded-2xl border border-border bg-card transition-all duration-200 group-hover:-translate-y-[3px] group-hover:border-violet-500/30 group-active:translate-y-0">
         <div className="relative flex h-28 items-center justify-center bg-gradient-to-br from-primary/20 to-primary/5">
           <div className="flex -space-x-3" aria-hidden>
-            {faces.map((p) => <HostAvatar key={p.userId} person={p} className="h-14 w-14 rounded-full ring-2 ring-background" mode="head" />)}
+            {faces.map((p) => <HostAvatar key={p.userId} person={p} className="h-14 w-14 rounded-full ring-2 ring-background" />)}
           </div>
           {live && <span className="absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-background/80 backdrop-blur px-2.5 py-1 text-xs font-medium"><span className="h-1.5 w-1.5 rounded-full bg-red-500" aria-hidden />Live</span>}
           {live && <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full bg-background/80 backdrop-blur px-2.5 py-1 text-xs"><UsersIcon className="h-3.5 w-3.5" aria-hidden /><span data-testid={`count-${room.id}`}>{room.memberCount ?? 0}</span><span className="sr-only"> in the room</span></span>}

@@ -13,7 +13,8 @@ interface Props {
 export default function HostAvatar({ person, className = "h-10 w-10", mode = "portrait" }: Props) {
   const name = person.displayName || person.organizationName || person.username || "?";
   if (person.avatar && sanitizeAvatarConfig(person.avatar)) {
-    return <AvatarArt config={person.avatar} mode={mode} className={`${className} shrink-0`} decorative />;
+    // overflow-hidden: the art is clipped to whatever shape the caller gives it (a circle), instead of spilling out of it
+    return <AvatarArt config={person.avatar} mode={mode} className={`${className} shrink-0 overflow-hidden`} decorative />;
   }
   return (
     <Avatar className={className}>

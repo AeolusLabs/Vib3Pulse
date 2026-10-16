@@ -13,6 +13,7 @@ import HostAvatar from "@/components/rooms/HostAvatar";
 import { useAuth } from "@/hooks/useAuth";
 import { baseOrder, styleUrl, tileFatal, tileHealth, tileVerdict as judgeTiles, tileWatchdog, type TileHealth, type TileVerdict } from "@/lib/mapTiles";
 import { filterFriends, firstName, meMarkerKind, sortFriendsForStrip } from "@/lib/mapFriends";
+import { dragHeight, settleSnap, sheetHeights, stepSnap, tapSnap } from "@/lib/sheetSnap";
 import { buildingSvg } from "@shared/avatar-render/building";
 import { resolveBuilding, type BuildingConfig } from "@shared/building";
 import type { AvatarConfig } from "@shared/avatar";
@@ -149,6 +150,18 @@ export default function MapPage() {
 
   const { data: authUser } = useAuth();
   const [tileVerdict, setTileVerdict] = useState<TileVerdict>("ok");
+  // The bottom sheet rests at three heights (0 collapsed, 1 half, 2 expanded) and can be dragged between them.
+  const [snap, setSnap] = useState(1);
+  const [dragH, setDragH] = useState<number | null>(null);
+  const [stripH, setStripH] = useState(96);
+  const stripRef = useRef<HTMLDivElement>(null);
+  const [desktop, setDesktop] = useState(() => window.matchMedia("(min-width: 768px)").matches);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const on = () => setDesktop(mq.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
   const [center, setCenter] = useState<[number, number] | null>(null);
   const [located, setLocated] = useState(true);
   const [filter, setFilter] = useState<Filter>("all");
@@ -177,6 +190,38 @@ export default function MapPage() {
     return () => { window.removeEventListener("resize", calc); ro.disconnect(); };
   }, []);
   useEffect(() => { mapRef.current?.invalidateSize(); }, [height]);
+
+  useEffect(() => { // collapsed = exactly the handle plus the friends strip, whatever size the strip is
+    const el = stripRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setStripH(el.offsetHeight));
+    setStripH(el.offsetHeight);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [panel]);
+  const heights = useMemo(() => sheetHeights(height ?? 600, stripH), [height, stripH]);
+  const drag = useRef<{ y: number; h: number; lastY: number; lastT: number; v: number; moved: boolean } | null>(null);
+  const onHandleDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = { y: e.clientY, h: heights[snap], lastY: e.clientY, lastT: performance.now(), v: 0, moved: false };
+  };
+  const onHandleMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const d = drag.current;
+    if (!d) return;
+    const now = performance.now();
+    const dy = e.clientY - d.y;
+    if (Math.abs(dy) > 6) d.moved = true;
+    if (now > d.lastT) d.v = 0.5 * ((d.lastY - e.clientY) / (now - d.lastT)) + 0.5 * d.v; // up is positive, smoothed over the last moves
+    d.lastY = e.clientY; d.lastT = now;
+    if (d.moved) setDragH(dragHeight(heights, d.h, dy));
+  };
+  const onHandleUp = () => {
+    const d = drag.current;
+    drag.current = null;
+    if (!d) return;
+    setSnap(d.moved ? settleSnap(heights, dragH ?? heights[snap], d.v) : tapSnap(snap));
+    setDragH(null);
+  };
 
   const locate = (cb?: (p: [number, number]) => void) => {
     if (!navigator.geolocation) { setLocated(false); setCenter((c) => c ?? FALLBACK_CENTER); return; }
@@ -427,6 +472,7 @@ export default function MapPage() {
     if (friendsData && selected?.type === "friend" && !allFriends.some((f) => f.id === selected.item.id)) setSelected(null);
   }, [friendsData, allFriends, selected]);
   const stripFriends = useMemo(() => sortFriendsForStrip(allFriends, located ? center : null), [allFriends, center, located]);
+  useEffect(() => { if (selected) setSnap((v) => Math.max(v, 1)); }, [selected]);
   const focus = (s: Selected, lat: number, lng: number) => { setSelected(s); mapRef.current?.flyTo([lat, lng], Math.max(mapRef.current.getZoom(), 15), { duration: 0.6 }); };
 
   const chips: { id: Filter; label: string }[] = [
@@ -607,9 +653,26 @@ export default function MapPage() {
         )}
 
         {!panel && (
-          <div className="absolute inset-x-0 bottom-0 z-10 rounded-t-3xl border-t bg-card px-4 pb-4 pt-2 shadow-[0_-16px_40px_rgba(0,0,0,.35)] md:left-auto md:right-4 md:bottom-4 md:w-96 md:rounded-3xl md:border">
-            <div className="mx-auto mb-2 h-1 w-9 rounded-full bg-foreground/20 md:hidden" />
+          <div
+            className="absolute inset-x-0 bottom-0 z-10 flex flex-col overflow-hidden rounded-t-3xl border-t bg-card shadow-[0_-16px_40px_rgba(0,0,0,.35)] md:left-auto md:right-4 md:bottom-4 md:max-h-[70%] md:w-96 md:rounded-3xl md:border"
+            style={desktop ? undefined : { height: dragH ?? heights[snap], transition: dragH === null ? "height 220ms cubic-bezier(.2,.8,.2,1)" : "none" }}
+            data-testid="map-sheet" data-snap={snap}
+          >
+            <button
+              type="button"
+              onPointerDown={onHandleDown} onPointerMove={onHandleMove} onPointerUp={onHandleUp} onPointerCancel={onHandleUp}
+              onClick={(e) => { if (e.detail === 0) setSnap(tapSnap(snap)); }} // a keyboard or screen-reader activation (a pointer tap is handled on release)
+              onKeyDown={(e) => { if (e.key === "ArrowUp") { e.preventDefault(); setSnap(stepSnap(snap, 1, 2)); } else if (e.key === "ArrowDown") { e.preventDefault(); setSnap(stepSnap(snap, -1, 2)); } }}
+              aria-label={snap === 0 ? "Show the list" : "Collapse the list"}
+              aria-expanded={snap > 0}
+              className="flex h-8 w-full shrink-0 touch-none items-center justify-center md:hidden"
+              data-testid="map-sheet-handle"
+            >
+              <span className="h-1 w-9 rounded-full bg-foreground/25" />
+            </button>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4 md:pt-3">
             <FriendsStrip
+              innerRef={stripRef}
               friends={stripFriends}
               me={authUser ?? undefined}
               selectedId={selected?.type === "friend" ? selected.item.id : null}
@@ -636,6 +699,7 @@ export default function MapPage() {
                 ))}
               </div>
             )}
+            </div>
           </div>
         )}
       </main>
@@ -645,7 +709,8 @@ export default function MapPage() {
 }
 
 /** Friends who share their position with me, as round avatars: tap one to fly the map to them, wherever they are. */
-function FriendsStrip({ friends, me, selectedId, onPick, onMe }: {
+function FriendsStrip({ friends, me, selectedId, onPick, onMe, innerRef }: {
+  innerRef?: React.Ref<HTMLDivElement>;
   friends: MapFriend[];
   me: { avatar?: unknown; avatarUrl?: string | null; displayName?: string | null; organizationName?: string | null; username?: string | null } | undefined;
   selectedId: string | null;
@@ -653,18 +718,18 @@ function FriendsStrip({ friends, me, selectedId, onPick, onMe }: {
   onMe: () => void;
 }) {
   return (
-    <div className="mb-3" data-testid="map-friends-strip">
+    <div ref={innerRef} className="mb-3" data-testid="map-friends-strip">
       <ul className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none]" aria-label="Friends sharing their location with you">
         <li className="shrink-0">
           <button onClick={onMe} className="flex min-h-[44px] w-16 flex-col items-center gap-1 rounded-xl py-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" aria-label="Centre the map on me" data-testid="map-strip-me">
-            <HostAvatar person={me ?? {}} className="h-12 w-12 rounded-full ring-2 ring-border" mode="head" />
+            <HostAvatar person={me ?? {}} className="h-12 w-12 rounded-full bg-primary/10 ring-2 ring-border" />
             <span className="w-full truncate text-center text-[0.7rem] text-muted-foreground">You</span>
           </button>
         </li>
         {friends.map((f) => (
           <li key={f.id} className="shrink-0">
             <button onClick={() => onPick(f)} className="flex min-h-[44px] w-16 flex-col items-center gap-1 rounded-xl py-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" aria-label={`Show ${friendName(f)} on the map`} aria-current={selectedId === f.id ? "true" : undefined} data-testid={`map-strip-${f.id}`}>
-              <HostAvatar person={f} className={`h-12 w-12 rounded-full ring-2 ${selectedId === f.id ? "ring-primary" : "ring-border"}`} mode="head" />
+              <HostAvatar person={f} className={`h-12 w-12 rounded-full bg-primary/10 ring-2 ${selectedId === f.id ? "ring-primary" : "ring-border"}`} />
               <span className="w-full truncate text-center text-[0.7rem]">{firstName(friendName(f))}</span>
             </button>
           </li>
@@ -685,7 +750,7 @@ function subOf(s: NonNullable<Selected>) {
 }
 function Thumb({ sel }: { sel: NonNullable<Selected> }) {
   const base = "grid h-11 w-11 shrink-0 place-items-center overflow-hidden";
-  if (sel.type === "friend") return <HostAvatar person={sel.item} className="h-11 w-11 shrink-0 rounded-full" mode="head" />;
+  if (sel.type === "friend") return <HostAvatar person={sel.item} className="h-11 w-11 shrink-0 rounded-full bg-primary/10" />;
   const img = sel.item.imageUrl;
   return (
     <span className={`${base} rounded-xl ${sel.type === "event" ? "bg-gradient-to-br from-violet-900/40 to-card text-primary" : "border bg-muted"}`}>
