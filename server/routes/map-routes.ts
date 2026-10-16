@@ -12,12 +12,13 @@ const MAX_RADIUS_KM = 25;
 // 3 decimal places ≈ 111 m. Only the rounded value is ever stored or returned.
 const round100m = (n: number) => Math.round(n * 1000) / 1000;
 
-// Mutual follows, minus anyone blocked in either direction.
+// Mutual follows, minus anyone blocked in either direction and deleted accounts.
 async function friendIdsOf(meId: string): Promise<string[]> {
   const [mutual, blocked] = await Promise.all([
     db.select({ id: follows.followingId }).from(follows).where(and(
       eq(follows.followerId, meId),
       sql`EXISTS (SELECT 1 FROM follows f2 WHERE f2.follower_id = ${follows.followingId} AND f2.following_id = ${meId})`,
+      sql`EXISTS (SELECT 1 FROM users u WHERE u.id = ${follows.followingId} AND u.deleted_at IS NULL)`, // a deleted account is nobody's friend
     )),
     blockedWith(meId),
   ]);
@@ -38,7 +39,7 @@ export function registerMapRoutes(app: Express): void {
     .innerJoin(users, eq(users.id, userLocations.userId))
     .leftJoin(mapSharingPrefs, eq(mapSharingPrefs.userId, userLocations.userId))
     .where(and(
-      inArray(userLocations.userId, friendIds), fresh(), within,
+      inArray(userLocations.userId, friendIds), isNull(users.deletedAt), fresh(), within,
       or(
         isNull(mapSharingPrefs.audience),
         eq(mapSharingPrefs.audience, "friends"),

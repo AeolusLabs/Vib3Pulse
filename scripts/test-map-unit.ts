@@ -1,7 +1,7 @@
 // Map unit checks (no database):   npx tsx scripts/test-map-unit.ts
 import assert from "node:assert/strict";
-import { baseOrder, DEFAULT_STYLES, styleUrl, tileHealth, tileVerdict } from "../client/src/lib/mapTiles";
-import { filterFriends, meMarkerKind, sortFriendsForStrip, type StripFriend } from "../client/src/lib/mapFriends";
+import { baseOrder, DEFAULT_STYLES, styleUrl, tileFatal, tileHealth, tileVerdict, tileWatchdog } from "../client/src/lib/mapTiles";
+import { filterFriends, firstName, meMarkerKind, sortFriendsForStrip, type StripFriend } from "../client/src/lib/mapFriends";
 
 let passed = 0, failed = 0;
 const test = (name: string, fn: () => void) => {
@@ -23,6 +23,19 @@ test("tileVerdict: ok while things load, struggling when errors dominate, failed
   assert.equal(tileVerdict(feed(["load", "error", "error", "error", "error", "error"])), "struggling", "errors at least 2:1 after 6 events, but something did load");
   assert.equal(tileVerdict(feed(["load", "load", "error", "error", "error", "error", "error", "error"])), "struggling");
   assert.equal(tileVerdict(feed(["load", "load", "load", "error", "error", "error"])), "ok", "1:1 is fine");
+});
+test("tileFatal: a failure of the whole source (its style file) counts as a failed source at once, but never undoes tiles that did load", () => {
+  assert.equal(tileVerdict(tileFatal({ errors: 0, loads: 0 })), "failed");
+  assert.equal(tileVerdict(tileFatal({ errors: 2, loads: 0 })), "failed");
+  assert.deepEqual(tileFatal({ errors: 9, loads: 4 }), { errors: 9, loads: 4 }, "already past the threshold: unchanged");
+});
+test("tileWatchdog: a source that sends nothing at all is called slow at 15 s and failed at 45 s; one that delivered anything never trips it", () => {
+  assert.equal(tileWatchdog({ errors: 0, loads: 0 }, 14_999), null);
+  assert.equal(tileWatchdog({ errors: 0, loads: 0 }, 15_000), "struggling");
+  assert.equal(tileWatchdog({ errors: 0, loads: 0 }, 44_999), "struggling");
+  assert.equal(tileWatchdog({ errors: 0, loads: 0 }, 45_000), "failed");
+  assert.equal(tileWatchdog({ errors: 3, loads: 0 }, 60_000), "failed", "errors but no tile at all");
+  assert.equal(tileWatchdog({ errors: 0, loads: 1 }, 120_000), null, "something loaded");
 });
 test("baseOrder: vector first when WebGL exists, raster only otherwise", () => {
   assert.deepEqual(baseOrder(true), ["vector", "raster"]);
@@ -62,6 +75,15 @@ test("filterFriends: case-insensitive over display name and username, trims, emp
   assert.deepEqual(filterFriends(list, "").map((f) => f.id), ["1", "2", "3"]);
   assert.deepEqual(filterFriends(list, "   ").map((f) => f.id), ["1", "2", "3"]);
   assert.deepEqual(filterFriends(list, "zzz"), []);
+});
+
+test("firstName: first word of the label, trimmed; never empty", () => {
+  assert.equal(firstName("Ada Obi"), "Ada");
+  assert.equal(firstName("  Ada   Obi "), "Ada", "leading and repeated spaces");
+  assert.equal(firstName("Chidi"), "Chidi");
+  assert.equal(firstName(""), "?");
+  assert.equal(firstName("   "), "?");
+  assert.equal(firstName("‏أحمد علي"), "‏أحمد", "right-to-left names keep their first word");
 });
 
 // ---------------------------------------------------------------- own marker

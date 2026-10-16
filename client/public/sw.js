@@ -1,5 +1,6 @@
-const CACHE_NAME = "vibepulse-v2";
-const API_CACHE = "vibepulse-api-v2";
+// v3: the activate step deletes every older cache, which also clears map tiles and /api/map responses stored by earlier versions.
+const CACHE_NAME = "vibepulse-v3";
+const API_CACHE = "vibepulse-api-v3";
 const API_MAX_AGE_MS = 5 * 60 * 1000;
 const NETWORK_TIMEOUT_MS = 10000;
 
@@ -123,10 +124,17 @@ self.addEventListener("fetch", (event) => {
   if (
     url.pathname.startsWith("/api/auth") ||
     url.pathname.startsWith("/api/stripe") ||
-    url.pathname.startsWith("/api/webhooks")
+    url.pathname.startsWith("/api/webhooks") ||
+    // Live locations of friends: never kept here. A cached copy could show one person's friends to the next person on a shared phone,
+    // or a friend who has since stopped sharing.
+    url.pathname.startsWith("/api/map/")
   ) {
     return;
   }
+
+  // Map tiles, styles and fonts come from OpenFreeMap (and OpenStreetMap as a fallback): the browser's own HTTP cache already keeps them
+  // for the day they are valid. Storing them here too would grow without limit and download every revisited area twice.
+  if (url.origin === "https://tiles.openfreemap.org" || url.origin === "https://tile.openstreetmap.org") return;
 
   if (url.pathname.startsWith("/api/")) {
     event.respondWith(networkFirstWithTimeout(event.request));

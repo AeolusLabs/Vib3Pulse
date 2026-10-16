@@ -17,6 +17,19 @@ export function tileVerdict(s: TileHealth): TileVerdict {
   return "ok";
 }
 
+/** The whole source failed (for a vector map: its style file would not load, so no tile is even asked for): judged failed at once. */
+export const tileFatal = (s: TileHealth): TileHealth => ({ ...s, errors: Math.max(s.errors, 6) });
+
+/**
+ * A source that neither delivers nor errors (a connection that just hangs) must not leave a silent grey map. With no tile at all,
+ * call it slow after 15 s and failed after 45 s; once anything has loaded the normal verdict takes over.
+ */
+export function tileWatchdog(s: TileHealth, elapsedMs: number): "struggling" | "failed" | null {
+  if (s.loads > 0) return null;
+  if (elapsedMs >= 45_000) return "failed";
+  return elapsedMs >= 15_000 ? "struggling" : null;
+}
+
 /** Vector first (smaller downloads, real dark style) when the phone can draw it; otherwise the picture tiles only. */
 export const baseOrder = (webgl: boolean): BaseKind[] => (webgl ? ["vector", "raster"] : ["raster"]);
 

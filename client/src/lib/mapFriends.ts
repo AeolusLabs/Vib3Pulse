@@ -14,6 +14,9 @@ export interface StripFriend {
 
 export const friendLabel = (f: Pick<StripFriend, "displayName" | "username">) => f.displayName || f.username;
 
+/** The first word of a name for the strip label: trimmed, never empty. */
+export const firstName = (label: string): string => label.trim().split(/\s+/)[0] || "?";
+
 function distanceKm(a: [number, number], lat: number, lng: number) {
   const r = Math.PI / 180;
   const dLat = (lat - a[0]) * r, dLng = (lng - a[1]) * r;

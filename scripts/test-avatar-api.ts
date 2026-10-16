@@ -184,6 +184,30 @@ try {
     await http("PUT", "/api/map/location", B, { latitude: 51.5, longitude: -0.12 }); // restore for later sections
   }
 
+  // 8c. map: deleted accounts, the audience list, a friend who blocked me, and the same rules on /api/map/nearby
+  {
+    const [D2, E2, F2, G2] = extra; // ghost, blocked-by-me, non-mutual, stale (from 8b)
+    const I = await mk("av_i"), J = await mk("av_j"), K = await mk("av_k"), Lb = await mk("av_l");
+    extra.push(I, J, K, Lb);
+    for (const u of [I, J, K, Lb]) for (const [x, y] of [[A, u], [u, A]]) await q(`insert into follows (follower_id, following_id) values ($1,$2) on conflict do nothing`, [x, y]);
+    for (const u of [I, J, K, Lb]) await http("PUT", "/api/map/location", u, { latitude: 51.5, longitude: -0.12 });
+    await q(`update users set deleted_at = now() where id = $1`, [I]);   // deleted: its position row is still there, the map must still not serve it
+    await storage.softDeleteUser(J);                                    // account deletion must remove the person's live position itself
+    await q(`insert into map_sharing_prefs (user_id, audience) values ($1, 'selected') on conflict (user_id) do update set audience = 'selected'`, [K]);
+    await q(`insert into map_allowed_viewers (user_id, viewer_id) values ($1,$2) on conflict do nothing`, [K, A]); // K chose me from the list
+    await q(`insert into user_blocks (blocker_id, blocked_id) values ($1,$2)`, [Lb, A]);                          // Lb blocked me (the other direction)
+    const fr = await http("GET", "/api/map/friends", A);
+    const ids: string[] = (fr.json?.friends ?? []).map((f: any) => f.id);
+    check("map friends: a friend whose 'selected' audience includes me IS shown", ids.includes(K), JSON.stringify(ids));
+    check("map friends: a deleted account is not shown (even while its position row is still there)", !ids.includes(I), JSON.stringify(ids));
+    check("map friends: deleting an account removes its live position", (await q(`select 1 from user_locations where user_id = $1`, [J])).length === 0 && !ids.includes(J));
+    check("map friends: a friend who blocked me is not shown", !ids.includes(Lb));
+    const near2 = await http("GET", "/api/map/nearby?lat=51.5&lng=-0.12&radiusKm=5", A);
+    const nids: string[] = (near2.json?.friends ?? []).map((f: any) => f.id);
+    check("map nearby: same rules (ghost, blocked, non-mutual, stale, deleted, blocked-me all excluded)", [D2, E2, F2, G2, I, J, Lb].every((u) => !nids.includes(u)), JSON.stringify(nids));
+    check("map nearby: the friend who chose me from their list is included", nids.includes(K));
+  }
+
   // 9. avatar as profile picture: avatarUrl swap
   const col = async (id: string, c: string) => (await q(`select ${c} as v from users where id=$1`, [id]))[0].v;
   await q(`update users set avatar_url = '/api/media/photo-A', profile_photo_url = null, avatar = null where id = $1`, [A]);

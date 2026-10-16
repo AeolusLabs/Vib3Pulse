@@ -660,6 +660,7 @@ try {
     securityHeaders({} as any, { setHeader: (k: string, v: string) => { h3[k] = v; }, locals: {} } as any, () => {});
     const connect = (h3["Content-Security-Policy"].match(/connect-src ([^;]+)/)?.[1] ?? "").split(" ");
     check("CSP connect-src allows https calls to the configured LiveKit host", connect.includes("https://vib3pulse-test.livekit.cloud"), connect.join(" "));
+    check("CSP connect-src lets the map fetch OpenFreeMap vector tiles (and nothing broader than that host)", connect.includes("https://tiles.openfreemap.org") && !connect.includes("https:"), connect.join(" "));
     delete process.env.LIVEKIT_URL;
     const h4: Record<string, string> = {};
     securityHeaders({} as any, { setHeader: (k: string, v: string) => { h4[k] = v; }, locals: {} } as any, () => {});

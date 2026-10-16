@@ -380,7 +380,8 @@ export const securityHeaders = (req: Request, res: Response, next: NextFunction)
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: blob: https: http:",
     "worker-src 'self' blob:",
-    `connect-src 'self' https://api.stripe.com https://api.paystack.co https://fonts.googleapis.com https://fonts.gstatic.com wss: ws:${livekitHttpsOrigin() ? ` ${livekitHttpsOrigin()}` : ""}`,
+    // The map: OpenFreeMap serves style, TileJSON, sprites, glyphs and tiles from this one host. A VITE_MAP_STYLE_* override pointing elsewhere needs its host added here.
+    `connect-src 'self' https://api.stripe.com https://api.paystack.co https://fonts.googleapis.com https://fonts.gstatic.com https://tiles.openfreemap.org wss: ws:${livekitHttpsOrigin() ? ` ${livekitHttpsOrigin()}` : ""}`,
     // Room screens: exactly the embed hosts shared/screen.ts can produce, nothing broader.
     `frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://js.paystack.co https://checkout.paystack.com ${ROOM_EMBED_HOSTS.join(" ")}`,
     "object-src 'none'",
