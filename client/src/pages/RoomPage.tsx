@@ -278,7 +278,7 @@ function RoomPageInner({ id }: { id: string }) {
             <div className="min-w-0 flex-1">
               <h1 className="truncate font-serif text-2xl font-bold leading-tight" data-testid="text-room-title">{room!.title}</h1>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                <HostAvatar person={detail!.host ?? {}} className="h-6 w-6" mode="head" />
+                <HostAvatar person={detail!.host ?? {}} className="h-6 w-6 rounded-full" />
                 <span className="truncate">{hostName(detail!.host)}</span>
                 <span aria-hidden>·</span><span>{KIND_LABEL[room!.kind]}</span>
                 <Badge variant="outline" data-testid="badge-room-age">{ageLimitLabel(room!.ageLimit)}</Badge>

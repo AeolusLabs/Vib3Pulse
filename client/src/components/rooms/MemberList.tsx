@@ -24,7 +24,7 @@ export default function MemberList({ members, memberCount, selfId, onPick, hidde
         {ordered.map((m) => (
           <li key={m.userId}>
             <Button variant="ghost" className="flex min-h-[48px] w-full items-center justify-start gap-3 rounded-xl px-2" onClick={() => onPick(m)} data-testid={`member-row-${m.userId}`}>
-              <HostAvatar person={m} className="h-9 w-9" mode="head" />
+              <HostAvatar person={m} className="h-9 w-9 rounded-full" />
               <span className="min-w-0 flex-1 truncate text-left text-sm">{nameOf(m)}{m.userId === selfId ? " (you)" : ""}{hidden.has(m.userId) ? " · muted by you" : ""}</span>
               {roleLabel(m.role) && <span className="text-xs text-muted-foreground">{roleLabel(m.role)}</span>}
               {m.muted && <span className="text-xs text-muted-foreground">Muted</span>}

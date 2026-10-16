@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { baseOrder, DEFAULT_STYLES, styleUrl, tileFatal, tileHealth, tileVerdict, tileWatchdog } from "../client/src/lib/mapTiles";
 import { filterFriends, firstName, meMarkerKind, sortFriendsForStrip, type StripFriend } from "../client/src/lib/mapFriends";
+import { dragHeight, settleSnap, sheetHeights, stepSnap, tapSnap } from "../client/src/lib/sheetSnap";
 
 let passed = 0, failed = 0;
 const test = (name: string, fn: () => void) => {
@@ -97,6 +98,48 @@ test("meMarkerKind: avatar when valid, else photo, else dot; a non-object avatar
   assert.equal(meMarkerKind({}), "dot");
   assert.equal(meMarkerKind(undefined), "dot");
   assert.equal(meMarkerKind({ avatarUrl: "  " }), "dot", "blank photo url");
+});
+
+// ---------------------------------------------------------------- bottom sheet (collapse / expand)
+test("sheetHeights: collapsed < half < expanded for every map height, expanded leaves the search bar visible", () => {
+  for (const h of [320, 400, 568, 700, 900]) {
+    const [peek, half, full] = sheetHeights(h, 110);
+    assert.ok(peek < half && half < full, `${h}: ${peek} ${half} ${full}`);
+    assert.ok(full <= Math.max(h - 130, peek + 120), `${h}: expanded ${full} must leave room for the search bar`);
+    assert.ok(peek >= 100, "collapsed always shows the handle and the strip");
+  }
+  assert.ok(sheetHeights(700, 150)[0] > sheetHeights(700, 90)[0], "collapsed follows the height of the strip");
+});
+test("dragHeight: follows the finger (up grows the sheet), clamped to collapsed and expanded", () => {
+  const h = [140, 330, 600];
+  assert.equal(dragHeight(h, 330, 100), 230, "dragging down 100 px shrinks it");
+  assert.equal(dragHeight(h, 330, -100), 430, "dragging up 100 px grows it");
+  assert.equal(dragHeight(h, 330, 900), 140);
+  assert.equal(dragHeight(h, 330, -900), 600);
+});
+test("settleSnap: a slow drag goes to the nearest position; a quick flick carries on in its direction", () => {
+  const h = [140, 330, 600];
+  assert.equal(settleSnap(h, 200, 0), 0, "nearer to collapsed");
+  assert.equal(settleSnap(h, 300, 0), 1);
+  assert.equal(settleSnap(h, 520, 0), 2);
+  assert.equal(settleSnap(h, 330, 0), 1, "released where it is");
+  assert.equal(settleSnap(h, 330, 1.2), 2, "flicked up from half: expanded");
+  assert.equal(settleSnap(h, 330, -1.2), 0, "flicked down from half: collapsed");
+  assert.equal(settleSnap(h, 160, 1.5), 1, "a flick up from nearly collapsed lands at half");
+  assert.equal(settleSnap(h, 590, -0.9), 1, "a flick down from expanded: half");
+  assert.equal(settleSnap(h, 330, 0.05), 1, "a tiny speed does not change the answer");
+});
+test("tapSnap: tapping the handle collapses an open sheet and opens a collapsed one", () => {
+  assert.equal(tapSnap(0), 1);
+  assert.equal(tapSnap(1), 0);
+  assert.equal(tapSnap(2), 0);
+});
+test("stepSnap (keyboard): arrows move one position, never out of range", () => {
+  assert.equal(stepSnap(0, 1, 2), 1);
+  assert.equal(stepSnap(1, 1, 2), 2);
+  assert.equal(stepSnap(2, 1, 2), 2);
+  assert.equal(stepSnap(1, -1, 2), 0);
+  assert.equal(stepSnap(0, -1, 2), 0);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

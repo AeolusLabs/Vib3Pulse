@@ -22,7 +22,7 @@ export default function RoomLobby({ room, host, peek, memberCount, joining, onJo
     <section className="space-y-5 rounded-2xl border border-border bg-gradient-to-br from-primary/20 to-primary/5 p-6 text-center sm:p-8" aria-label="Before you join" data-testid="room-lobby">
       <div className="flex justify-center -space-x-3" aria-hidden>
         {(peek.length ? peek : host ? [{ userId: host.id, role: "host", ...host } as PeekMember] : []).slice(0, 5).map((p) => (
-          <HostAvatar key={p.userId} person={p} className="h-14 w-14 rounded-full ring-2 ring-background" mode="head" />
+          <HostAvatar key={p.userId} person={p} className="h-14 w-14 rounded-full ring-2 ring-background" />
         ))}
       </div>
       <div className="space-y-1">
