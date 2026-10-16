@@ -1547,6 +1547,10 @@ export class DbStorage implements IStorage {
       socialMediaLinks: [],
       interests: [],
     } as any).where(eq(users.id, userId));
+    // Their live map position and sharing choices go with the account (a soft delete never fires the foreign-key cascades).
+    await db.execute(sql`DELETE FROM user_locations WHERE user_id = ${userId}`);
+    await db.execute(sql`DELETE FROM map_allowed_viewers WHERE user_id = ${userId} OR viewer_id = ${userId}`);
+    await db.execute(sql`DELETE FROM map_sharing_prefs WHERE user_id = ${userId}`);
   }
 
   async getEvents(): Promise<(Event & { minPrice: number; maxPrice: number; ticketsRemaining: number })[]> {

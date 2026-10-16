@@ -9,6 +9,10 @@ import { formatMoney } from "@/lib/currency";
 import { Button } from "@/components/ui/button";
 import Navigation from "@/components/Navigation";
 import { avatarPinSvg } from "@shared/avatar-render/render";
+import HostAvatar from "@/components/rooms/HostAvatar";
+import { useAuth } from "@/hooks/useAuth";
+import { baseOrder, styleUrl, tileFatal, tileHealth, tileVerdict as judgeTiles, tileWatchdog, type TileHealth, type TileVerdict } from "@/lib/mapTiles";
+import { filterFriends, firstName, meMarkerKind, sortFriendsForStrip } from "@/lib/mapFriends";
 import { buildingSvg } from "@shared/avatar-render/building";
 import { resolveBuilding, type BuildingConfig } from "@shared/building";
 import type { AvatarConfig } from "@shared/avatar";
@@ -29,14 +33,24 @@ type Selected = { type: "friend"; item: MapFriend } | { type: "event"; item: Map
 const FALLBACK_CENTER: [number, number] = [51.5072, -0.1276];
 const RADIUS_KM = 5;
 const HEARTBEAT_MS = 60_000;
-// Tile source. Defaults to OpenStreetMap's own tiles (no key; fine at light volume, no dark style, so dark
-// mode darkens them with a CSS filter). Set VITE_MAP_TILES_URL (+ optional _DARK_URL / _ATTRIBUTION) at build
-// time to use a keyed provider such as MapTiler or Mapbox. Don't use CARTO's free tiles: without a paid key
-// they come back with an "API KEY REQUIRED" watermark.
+// Base map. Primary: OpenFreeMap vector tiles (free, commercial use allowed, no key) drawn by MapLibre inside this Leaflet map.
+// Fallback: picture tiles, used when the phone cannot draw vector maps or the vector source keeps failing (see lib/mapTiles.ts).
+// Build-time overrides: VITE_MAP_STYLE_LIGHT / VITE_MAP_STYLE_DARK (vector style URLs), VITE_MAP_TILES_URL (+ _DARK_URL / _ATTRIBUTION)
+// for the picture-tile fallback. Don't use CARTO's free tiles: without a paid key they come back with an "API KEY REQUIRED" watermark,
+// and OpenStreetMap's own servers are for light use only (their policy forbids a production app depending on them), so the fallback is a last resort.
 const env = import.meta.env as Record<string, string | undefined>;
 const TILE_URL = env.VITE_MAP_TILES_URL || "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 const TILE_DARK_URL = env.VITE_MAP_TILES_DARK_URL;
 const TILE_ATTRIBUTION = env.VITE_MAP_TILES_ATTRIBUTION || '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+const VECTOR_ATTRIBUTION = '<a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
+// MapLibre 6 needs WebGL2 (a phone with only WebGL1 would download the code and then fail), so probe for exactly that, and release the probe.
+function hasWebGL() {
+  try {
+    const gl = document.createElement("canvas").getContext("webgl2");
+    gl?.getExtension("WEBGL_lose_context")?.loseContext();
+    return !!gl;
+  } catch { return false; }
+}
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 const isDark = () => document.documentElement.classList.contains("dark");
@@ -93,11 +107,20 @@ function venueIcon(v: MapVenue, selected: boolean) {
     html: `<div title="${esc(v.name)}" style="transform:translate(-50%,-80%);width:${selected ? 68 : 56}px;filter:${glow}">${svg}</div>`,
   });
 }
-const meIcon = L.divIcon({
-  className: "vp-pin",
-  iconSize: [0, 0],
-  html: `<div style="transform:translate(-50%,-50%);width:16px;height:16px;border-radius:50%;background:#9B6FEF;border:3px solid #090909;box-shadow:0 0 0 7px rgba(124,70,214,.2),0 0 0 1px #9B6FEF"></div>`,
-});
+const plainDot = '<div style="transform:translate(-50%,-50%);width:16px;height:16px;border-radius:50%;background:#9B6FEF;border:3px solid #090909;box-shadow:0 0 0 7px rgba(124,70,214,.2),0 0 0 1px #9B6FEF"></div>';
+/** The person's own marker: their avatar pin (like their friends see them), else their photo, else the plain dot. A small "You" tag tells it apart. */
+function meIconFor(user: { avatar?: unknown; avatarUrl?: string | null } | undefined) {
+  const kind = meMarkerKind(user);
+  const tag = '<span style="position:absolute;left:50%;top:-14px;transform:translateX(-50%);background:#7C46D6;color:#fff;font:600 10px Jost,sans-serif;padding:1px 7px;border-radius:999px;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.4)">You</span>';
+  const glow = "drop-shadow(0 0 6px #9B6FEF) drop-shadow(0 3px 3px rgba(0,0,0,.45))";
+  if (kind === "avatar") {
+    return L.divIcon({ className: "vp-pin", iconSize: [0, 0], html: `<div style="position:relative;transform:translate(-50%,-100%);width:46px;filter:${glow}">${tag}${avatarPinSvg(user?.avatar)}</div>` });
+  }
+  if (kind === "photo") {
+    return L.divIcon({ className: "vp-pin", iconSize: [0, 0], html: `<div style="position:relative;transform:translate(-50%,-50%);width:42px;height:42px;border-radius:50%;border:3px solid #9B6FEF;box-shadow:0 0 0 5px rgba(124,70,214,.25),0 3px 8px rgba(0,0,0,.45);background:#5b3aa8">${tag}<img src="${esc(user!.avatarUrl!)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%"/></div>` });
+  }
+  return L.divIcon({ className: "vp-pin", iconSize: [0, 0], html: plainDot });
+}
 
 function eventWhen(e: MapEvent) {
   const d = new Date(e.eventDate);
@@ -120,10 +143,12 @@ export default function MapPage() {
   const { toast } = useToast();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
-  const tileRef = useRef<L.TileLayer | null>(null);
+  const retryTiles = useRef<() => void>(() => {});
   const layerRef = useRef<L.LayerGroup | null>(null);
   const meRef = useRef<L.Marker | null>(null);
 
+  const { data: authUser } = useAuth();
+  const [tileVerdict, setTileVerdict] = useState<TileVerdict>("ok");
   const [center, setCenter] = useState<[number, number] | null>(null);
   const [located, setLocated] = useState(true);
   const [filter, setFilter] = useState<Filter>("all");
@@ -168,6 +193,9 @@ export default function MapPage() {
   const qLng = center ? center[1].toFixed(2) : null;
   const nearbyUrl = `/api/map/nearby?lat=${qLat}&lng=${qLng}&radiusKm=${RADIUS_KM}`;
   const { data } = useQuery<Nearby>({ queryKey: [nearbyUrl], enabled: !!center, refetchInterval: 60_000 });
+  // Every friend sharing with me (not only the 5 km box): feeds the pins, the strip and the friend search.
+  const { data: friendsData } = useQuery<{ friends: MapFriend[] }>({ queryKey: ["/api/map/friends"], refetchInterval: 60_000 });
+  const allFriends = friendsData?.friends ?? data?.friends ?? [];
   const { data: me } = useQuery<{ sharing: boolean }>({ queryKey: ["/api/map/me"] });
   const sharing = !!me?.sharing;
 
@@ -212,20 +240,139 @@ export default function MapPage() {
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
     const map = L.map(containerRef.current, { center: FALLBACK_CENTER, zoom: 14, zoomControl: false, attributionControl: true });
-    const url = () => (isDark() && TILE_DARK_URL) || TILE_URL;
-    // Without a real dark style, darken the light tiles (see .vp-dark .vp-tiles in index.css).
-    const applyTheme = () => {
-      containerRef.current?.classList.toggle("vp-dark", isDark() && !TILE_DARK_URL);
-      tileRef.current?.setUrl(url());
-    };
-    tileRef.current = L.tileLayer(url(), { maxZoom: 19, attribution: TILE_ATTRIBUTION, className: "vp-tiles" }).addTo(map);
-    applyTheme();
     layerRef.current = L.layerGroup().addTo(map);
     map.on("click", () => setSelected(null));
     mapRef.current = map;
+
+    // The base map: vector first (smaller downloads, a real dark style), picture tiles as the backup. Failures are counted; when the
+    // source clearly is not delivering, the next one is tried, and the person is told instead of being left with a silent grey map.
+    let disposed = false;
+    const order = baseOrder(hasWebGL());
+    let idx = 0;
+    let health: TileHealth = { errors: 0, loads: 0 };
+    let base: L.Layer | null = null;
+    let glMap: { setStyle: (s: string) => unknown } | null = null;
+    let tiles: L.TileLayer | null = null;
+    const styleEnv = { light: env.VITE_MAP_STYLE_LIGHT, dark: env.VITE_MAP_STYLE_DARK };
+    const rasterUrl = () => (isDark() && TILE_DARK_URL) || TILE_URL;
+
+    let watchdog: ReturnType<typeof setInterval> | null = null;
+    let downloadTimer: ReturnType<typeof setTimeout> | null = null;
+    let mountGen = 0;            // every mount gets a number: a late callback from an older mount must not touch the current one
+    let chunkFailed = false;     // the map code itself would not download: Try again must reload the page to get a fresh copy
+    let lastStyle = "";
+    let verdictNow: TileVerdict = "ok";
+    const unmountBase = () => {
+      mountGen++;
+      if (watchdog) { clearInterval(watchdog); watchdog = null; }
+      if (downloadTimer) { clearTimeout(downloadTimer); downloadTimer = null; }
+      if (base) map.removeLayer(base);
+      map.attributionControl.removeAttribution(VECTOR_ATTRIBUTION);
+      base = null; glMap = null; tiles = null;
+    };
+    const show = (v: TileVerdict) => { verdictNow = v; setTileVerdict(v); };
+    const settle = (verdict: TileVerdict) => {
+      if (verdict === "failed" && idx + 1 < order.length) { idx++; mountBase(); return; } // the warning stays up through the swap
+      show(verdict);
+    };
+    const record = (event: "error" | "load" | "fatal") => {
+      if (disposed) return;
+      health = event === "fatal" ? tileFatal(health) : tileHealth(health, event);
+      settle(judgeTiles(health));
+      if (health.loads > 0 && watchdog) { clearInterval(watchdog); watchdog = null; } // delivering: no more watching needed
+    };
+    const mountBase = () => {
+      if (disposed) return;
+      unmountBase();
+      const gen = mountGen;
+      health = { errors: 0, loads: 0 };
+      const kind = order[idx];
+      containerRef.current?.classList.toggle("vp-dark", kind === "raster" && isDark() && !TILE_DARK_URL);
+      // A source that neither delivers nor errors would leave a silent grey map: watch the clock too. Time only counts while the page
+      // is visible (a backgrounded tab does not draw), and for the vector map it starts once its code has downloaded.
+      let waited = 0;
+      const startWatchdog = () => {
+        watchdog = setInterval(() => {
+          if (document.hidden) return;
+          waited += 3000;
+          const w = tileWatchdog(health, waited);
+          if (w) settle(w);
+        }, 3000);
+      };
+      if (kind === "raster") {
+        startWatchdog();
+        const layer = L.tileLayer(rasterUrl(), { maxZoom: 19, attribution: TILE_ATTRIBUTION, className: "vp-tiles" });
+        layer.on("tileerror", () => record("error"));
+        layer.on("tileload", () => record("load"));
+        layer.addTo(map);
+        base = layer; tiles = layer;
+        return;
+      }
+      // MapLibre and its Leaflet bridge are big: downloaded only when the map opens.
+      // The code download gets its own, longer budget: on a very slow connection it can take minutes and must not count as "tiles failing".
+      downloadTimer = setTimeout(() => { if (gen === mountGen) { chunkFailed = false; record("fatal"); } }, 120_000);
+      // MapLibre 6 parses tiles in a web worker that must be registered by URL (without it the style loads but nothing ever draws).
+      void Promise.all([import("maplibre-gl"), import("@maplibre/maplibre-gl-leaflet"), import("maplibre-gl/dist/maplibre-gl.css"), import("maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url")]).catch((e) => {
+        if (gen === mountGen) chunkFailed = true;
+        throw e;
+      }).then(([maplibre, bridge, , worker]) => {
+        if (disposed || gen !== mountGen || order[idx] !== "vector") return;
+        if (downloadTimer) { clearTimeout(downloadTimer); downloadTimer = null; }
+        maplibre.setWorkerUrl(worker.default);
+        // attributionControl off: the bridge would add the style's own attribution text (from a remote file) to Leaflet's control; ours below is the required one.
+        const layer = bridge.maplibreGL({ style: styleUrl(isDark(), styleEnv), attributionControl: false });
+        try {
+          layer.addTo(map);
+        } catch {
+          // The device cannot draw it after all: take the half-added layer out without letting its own cleanup throw, then use the backup.
+          (layer as unknown as { onRemove: () => void }).onRemove = () => {};
+          try { map.removeLayer(layer); } catch { /* already gone */ }
+          record("fatal");
+          return;
+        }
+        map.attributionControl.addAttribution(VECTOR_ATTRIBUTION);
+        startWatchdog();
+        const gl = layer.getMaplibreMap();
+        if (import.meta.env.DEV) (window as unknown as { __vpGl?: unknown }).__vpGl = gl; // development only: lets the browser tests inspect the vector map
+        // Before the style has loaded, an error with no tile attached means the style itself would not load: nothing can ever draw from
+        // it, so the source has failed. After that, a stray non-tile error (a missing icon, one font range) is just one more error.
+        let styleReady = false;
+        gl.on("style.load", () => { styleReady = true; });
+        gl.on("error", (e) => { if (gen === mountGen) record((e as unknown as { tile?: unknown }).tile || styleReady ? "error" : "fatal"); });
+        gl.on("data", (e: { dataType?: string; tile?: unknown }) => { if (gen === mountGen && e.dataType === "source" && e.tile) record("load"); });
+        lastStyle = styleUrl(isDark(), styleEnv);
+        base = layer; glMap = gl;
+      }).catch(() => {
+        // The code itself would not download (offline, blocked, or a new version was deployed under this tab): a failed source.
+        if (disposed || gen !== mountGen) return;
+        if (downloadTimer) { clearTimeout(downloadTimer); downloadTimer = null; }
+        record("fatal");
+      });
+    };
+    mountBase();
+    retryTiles.current = () => {
+      if (chunkFailed) { window.location.reload(); return; } // a fresh copy of the page also gets the current code files
+      idx = 0; show("ok"); mountBase();
+    };
+    // The phone says it has a network again: if the map had given up on the vector source (or is struggling), try the best source again.
+    const onOnline = () => { if (!disposed && !chunkFailed && (idx > 0 || verdictNow !== "ok")) { idx = 0; show("ok"); mountBase(); } };
+    window.addEventListener("online", onOnline);
+
+    const applyTheme = () => {
+      if (glMap) { const next = styleUrl(isDark(), styleEnv); if (next !== lastStyle) { lastStyle = next; glMap.setStyle(next); } } // not on unrelated class changes
+      else if (tiles) { containerRef.current?.classList.toggle("vp-dark", isDark() && !TILE_DARK_URL); tiles.setUrl(rasterUrl()); }
+    };
     const obs = new MutationObserver(applyTheme);
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
-    return () => { obs.disconnect(); map.remove(); mapRef.current = null; };
+    return () => {
+      disposed = true; mountGen++;
+      window.removeEventListener("online", onOnline);
+      if (watchdog) clearInterval(watchdog);
+      if (downloadTimer) clearTimeout(downloadTimer);
+      obs.disconnect();
+      try { map.remove(); } catch { /* a base layer that failed halfway must not take the whole app down with it */ }
+      mapRef.current = null;
+    };
   }, []);
 
   // First fix: jump there. Later fixes only move the "me" dot.
@@ -235,19 +382,21 @@ export default function MapPage() {
     if (!map || !center) return;
     if (!centeredRef.current) { map.setView(center, 14); centeredRef.current = true; }
     if (located) {
-      if (!meRef.current) meRef.current = L.marker(center, { icon: meIcon, interactive: false, zIndexOffset: -100 }).addTo(map);
+      if (!meRef.current) meRef.current = L.marker(center, { icon: meIconFor(authUser ?? undefined), interactive: false, zIndexOffset: -100 }).addTo(map);
       else meRef.current.setLatLng(center);
     }
   }, [center, located]);
+  // The user's avatar can load after the first position, or change: keep the marker in step.
+  useEffect(() => { meRef.current?.setIcon(meIconFor(authUser ?? undefined)); }, [authUser?.avatar, authUser?.avatarUrl]);
 
   const tonightCutoff = useMemo(() => Date.now() + 12 * 3_600_000, [data]);
   const shown = useMemo(() => {
-    const friends = filter === "all" || filter === "friends" ? data?.friends ?? [] : [];
+    const friends = filter === "all" || filter === "friends" ? allFriends : [];
     const events = filter === "all" ? data?.events ?? []
       : filter === "tonight" ? (data?.events ?? []).filter((e) => new Date(e.eventDate).getTime() <= tonightCutoff) : [];
     const venues = filter === "all" || filter === "venues" ? data?.venues ?? [] : [];
     return { friends, events, venues };
-  }, [data, filter, tonightCutoff]);
+  }, [data, allFriends, filter, tonightCutoff]);
 
   useEffect(() => {
     const layer = layerRef.current;
@@ -269,24 +418,28 @@ export default function MapPage() {
     return [
       ...shown.events.map((e) => ({ sel: { type: "event", item: e } as Selected, lat: e.latitude, lng: e.longitude, d: km(c, e.latitude, e.longitude) })),
       ...shown.venues.map((v) => ({ sel: { type: "venue", item: v } as Selected, lat: v.latitude, lng: v.longitude, d: km(c, v.latitude, v.longitude) })),
-      ...shown.friends.map((f) => ({ sel: { type: "friend", item: f } as Selected, lat: f.latitude, lng: f.longitude, d: km(c, f.latitude, f.longitude) })),
+      ...shown.friends.map((f) => ({ sel: { type: "friend", item: f } as Selected, lat: f.latitude, lng: f.longitude, d: km(c, f.latitude, f.longitude) })).filter((x) => x.d <= RADIUS_KM),
     ].sort((a, b) => a.d - b.d).slice(0, 3);
   }, [shown, center]);
 
+  // A selected friend who has stopped sharing is no longer on the map: close their card instead of leaving a stale "out now".
+  useEffect(() => {
+    if (friendsData && selected?.type === "friend" && !allFriends.some((f) => f.id === selected.item.id)) setSelected(null);
+  }, [friendsData, allFriends, selected]);
+  const stripFriends = useMemo(() => sortFriendsForStrip(allFriends, located ? center : null), [allFriends, center, located]);
   const focus = (s: Selected, lat: number, lng: number) => { setSelected(s); mapRef.current?.flyTo([lat, lng], Math.max(mapRef.current.getZoom(), 15), { duration: 0.6 }); };
 
   const chips: { id: Filter; label: string }[] = [
     { id: "all", label: "All" }, { id: "friends", label: "Friends" }, { id: "tonight", label: "Tonight" }, { id: "venues", label: "Venues" },
   ];
-  const nothingNearby = !!data && !shown.friends.length && !shown.events.length && !shown.venues.length;
+  const nothingNearby = !!data && !shown.friends.some((f) => km(center ?? FALLBACK_CENTER, f.latitude, f.longitude) <= RADIUS_KM) && !shown.events.length && !shown.venues.length;
 
   // Search covers everything with coordinates (not just the loaded 5 km) plus friends on the map now.
   const results = useMemo(() => {
     if (debouncedQ.length < 2) return [];
     const needle = debouncedQ.toLowerCase();
     const out: { sel: NonNullable<Selected>; lat: number; lng: number }[] = [];
-    (data?.friends ?? []).filter((f) => friendName(f).toLowerCase().includes(needle) || f.username.toLowerCase().includes(needle))
-      .forEach((f) => out.push({ sel: { type: "friend", item: f }, lat: f.latitude, lng: f.longitude }));
+    filterFriends(allFriends, needle).slice(0, 4).forEach((f) => out.push({ sel: { type: "friend", item: f }, lat: f.latitude, lng: f.longitude }));
     (found?.events ?? []).filter((e) => e.latitude != null && e.longitude != null).slice(0, 6).forEach((e) => {
       const item: MapEvent = { id: e.id, title: e.title, eventDate: e.eventDate, eventEndDate: e.eventEndDate ?? null, latitude: e.latitude, longitude: e.longitude, imageUrl: e.imageUrl ?? null, location: e.location, category: e.category, ticketPrice: e.ticketPrice, currency: e.currency };
       out.push({ sel: { type: "event", item }, lat: e.latitude, lng: e.longitude });
@@ -296,7 +449,7 @@ export default function MapPage() {
       out.push({ sel: { type: "venue", item }, lat: v.latitude, lng: v.longitude });
     });
     return out.slice(0, 8);
-  }, [debouncedQ, data, found]);
+  }, [debouncedQ, allFriends, found]);
 
   return (
     <div className="bg-background">
@@ -430,8 +583,14 @@ export default function MapPage() {
           )}
 
           {!located && (
-            <div className="pointer-events-auto self-start rounded-xl border bg-card/95 px-3 py-2 text-xs text-muted-foreground backdrop-blur">
+            <div className="pointer-events-auto ml-12 self-start rounded-xl border bg-card/95 px-3 py-2 text-xs text-muted-foreground backdrop-blur">
               Location is off, so this is a default view. Allow location to see what's near you.
+            </div>
+          )}
+          {tileVerdict !== "ok" && (
+            <div role="status" className="pointer-events-auto ml-12 flex flex-wrap items-center gap-x-3 gap-y-1 self-start rounded-xl border bg-card/95 px-3 py-2 text-xs text-muted-foreground backdrop-blur" data-testid="map-tiles-banner">
+              <span>{tileVerdict === "failed" ? "The map picture isn't loading on this connection. Your friends and events still show below." : "The map picture is loading slowly on this connection."}</span>
+              <button onClick={() => { retryTiles.current(); }} className="min-h-[44px] font-semibold text-foreground underline" data-testid="button-map-tiles-retry">Try again</button>
             </div>
           )}
         </div>
@@ -450,6 +609,13 @@ export default function MapPage() {
         {!panel && (
           <div className="absolute inset-x-0 bottom-0 z-10 rounded-t-3xl border-t bg-card px-4 pb-4 pt-2 shadow-[0_-16px_40px_rgba(0,0,0,.35)] md:left-auto md:right-4 md:bottom-4 md:w-96 md:rounded-3xl md:border">
             <div className="mx-auto mb-2 h-1 w-9 rounded-full bg-foreground/20 md:hidden" />
+            <FriendsStrip
+              friends={stripFriends}
+              me={authUser ?? undefined}
+              selectedId={selected?.type === "friend" ? selected.item.id : null}
+              onPick={(f) => focus({ type: "friend", item: f }, f.latitude, f.longitude)}
+              onMe={() => locate((p) => mapRef.current?.flyTo(p, 15, { duration: 0.6 }))}
+            />
             {selected ? (
               <SelectedCard selected={selected} onClose={() => setSelected(null)} />
             ) : (
@@ -478,6 +644,37 @@ export default function MapPage() {
   );
 }
 
+/** Friends who share their position with me, as round avatars: tap one to fly the map to them, wherever they are. */
+function FriendsStrip({ friends, me, selectedId, onPick, onMe }: {
+  friends: MapFriend[];
+  me: { avatar?: unknown; avatarUrl?: string | null; displayName?: string | null; organizationName?: string | null; username?: string | null } | undefined;
+  selectedId: string | null;
+  onPick: (f: MapFriend) => void;
+  onMe: () => void;
+}) {
+  return (
+    <div className="mb-3" data-testid="map-friends-strip">
+      <ul className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none]" aria-label="Friends sharing their location with you">
+        <li className="shrink-0">
+          <button onClick={onMe} className="flex min-h-[44px] w-16 flex-col items-center gap-1 rounded-xl py-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" aria-label="Centre the map on me" data-testid="map-strip-me">
+            <HostAvatar person={me ?? {}} className="h-12 w-12 rounded-full ring-2 ring-border" mode="head" />
+            <span className="w-full truncate text-center text-[0.7rem] text-muted-foreground">You</span>
+          </button>
+        </li>
+        {friends.map((f) => (
+          <li key={f.id} className="shrink-0">
+            <button onClick={() => onPick(f)} className="flex min-h-[44px] w-16 flex-col items-center gap-1 rounded-xl py-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" aria-label={`Show ${friendName(f)} on the map`} aria-current={selectedId === f.id ? "true" : undefined} data-testid={`map-strip-${f.id}`}>
+              <HostAvatar person={f} className={`h-12 w-12 rounded-full ring-2 ${selectedId === f.id ? "ring-primary" : "ring-border"}`} mode="head" />
+              <span className="w-full truncate text-center text-[0.7rem]">{firstName(friendName(f))}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {friends.length === 0 && <p className="text-xs text-muted-foreground" data-testid="map-strip-empty">Friends who share their location with you will show up here.</p>}
+    </div>
+  );
+}
+
 function titleOf(s: NonNullable<Selected>) {
   return s.type === "friend" ? friendName(s.item) : s.type === "event" ? s.item.title : s.item.name;
 }
@@ -488,9 +685,7 @@ function subOf(s: NonNullable<Selected>) {
 }
 function Thumb({ sel }: { sel: NonNullable<Selected> }) {
   const base = "grid h-11 w-11 shrink-0 place-items-center overflow-hidden";
-  if (sel.type === "friend") {
-    return <span className={`${base} rounded-full border-2 border-primary bg-primary/30 text-sm font-semibold`}>{sel.item.avatarUrl ? <img src={sel.item.avatarUrl} alt="" className="h-full w-full object-cover" /> : friendName(sel.item).charAt(0).toUpperCase()}</span>;
-  }
+  if (sel.type === "friend") return <HostAvatar person={sel.item} className="h-11 w-11 shrink-0 rounded-full" mode="head" />;
   const img = sel.item.imageUrl;
   return (
     <span className={`${base} rounded-xl ${sel.type === "event" ? "bg-gradient-to-br from-violet-900/40 to-card text-primary" : "border bg-muted"}`}>

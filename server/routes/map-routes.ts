@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
-import { and, eq, gte, lte, lt, gt, or, isNull, isNotNull, sql, inArray } from "drizzle-orm";
+import { and, eq, gte, lte, lt, gt, or, isNull, isNotNull, sql, inArray, type SQL } from "drizzle-orm";
 import { db } from "../storage";
 import { requireAuth } from "../middleware";
 import { blockedWith } from "../utils/blocks";
@@ -12,12 +12,13 @@ const MAX_RADIUS_KM = 25;
 // 3 decimal places ≈ 111 m. Only the rounded value is ever stored or returned.
 const round100m = (n: number) => Math.round(n * 1000) / 1000;
 
-// Mutual follows, minus anyone blocked in either direction.
+// Mutual follows, minus anyone blocked in either direction and deleted accounts.
 async function friendIdsOf(meId: string): Promise<string[]> {
   const [mutual, blocked] = await Promise.all([
     db.select({ id: follows.followingId }).from(follows).where(and(
       eq(follows.followerId, meId),
       sql`EXISTS (SELECT 1 FROM follows f2 WHERE f2.follower_id = ${follows.followingId} AND f2.following_id = ${meId})`,
+      sql`EXISTS (SELECT 1 FROM users u WHERE u.id = ${follows.followingId} AND u.deleted_at IS NULL)`, // a deleted account is nobody's friend
     )),
     blockedWith(meId),
   ]);
@@ -27,6 +28,24 @@ async function friendIdsOf(meId: string): Promise<string[]> {
 export function registerMapRoutes(app: Express): void {
   const staleCutoff = sql`now() - interval '${sql.raw(String(STALE_MINUTES))} minutes'`;
   const fresh = () => sql`${userLocations.updatedAt} > ${staleCutoff}`;
+
+  // The one definition of "a friend who is sharing their position with me right now": mutual follows (not blocked), a position
+  // fresher than 30 minutes, and their audience setting (everyone, or selected with me on the list). The nearby map adds a
+  // bounding box; the friends strip and friend search do not (a friend in another city is still a friend on the map).
+  const friendsSharingWithMe = (meId: string, friendIds: string[], within?: SQL) => friendIds.length ? db.select({
+    id: users.id, username: users.username, displayName: users.displayName, avatarUrl: users.avatarUrl, avatar: users.avatar,
+    latitude: userLocations.latitude, longitude: userLocations.longitude, updatedAt: userLocations.updatedAt,
+  }).from(userLocations)
+    .innerJoin(users, eq(users.id, userLocations.userId))
+    .leftJoin(mapSharingPrefs, eq(mapSharingPrefs.userId, userLocations.userId))
+    .where(and(
+      inArray(userLocations.userId, friendIds), isNull(users.deletedAt), fresh(), within,
+      or(
+        isNull(mapSharingPrefs.audience),
+        eq(mapSharingPrefs.audience, "friends"),
+        sql`EXISTS (SELECT 1 FROM ${mapAllowedViewers} v WHERE v.user_id = ${userLocations.userId} AND v.viewer_id = ${meId})`,
+      ),
+    )) : Promise.resolve([] as never[]);
 
   // Is the current user sharing right now?
   app.get("/api/map/me", requireAuth, async (req, res) => {
@@ -118,6 +137,19 @@ export function registerMapRoutes(app: Express): void {
     }
   });
 
+  // Every friend sharing with me right now, however far away: feeds the friends strip and friend search on the map.
+  app.get("/api/map/friends", requireAuth, async (req, res) => {
+    try {
+      const meId = req.user!.id;
+      const friends = await friendsSharingWithMe(meId, await friendIdsOf(meId));
+      friends.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+      res.json({ friends: friends.slice(0, 200) });
+    } catch (error) {
+      console.error("Map friends error:", error);
+      res.status(500).json({ message: "Failed to load friends" });
+    }
+  });
+
   // Friends sharing with me now + public upcoming events (with friends going) + venues in a bounding box.
   app.get("/api/map/nearby", requireAuth, async (req, res) => {
     try {
@@ -141,21 +173,7 @@ export function registerMapRoutes(app: Express): void {
       const friendIds = await friendIdsOf(meId);
 
       const [friends, nearEvents, nearVenues] = await Promise.all([
-        friendIds.length ? db.select({
-          id: users.id, username: users.username, displayName: users.displayName, avatarUrl: users.avatarUrl, avatar: users.avatar,
-          latitude: userLocations.latitude, longitude: userLocations.longitude, updatedAt: userLocations.updatedAt,
-        }).from(userLocations)
-          .innerJoin(users, eq(users.id, userLocations.userId))
-          .leftJoin(mapSharingPrefs, eq(mapSharingPrefs.userId, userLocations.userId))
-          .where(and(
-            inArray(userLocations.userId, friendIds), fresh(), box(userLocations.latitude, userLocations.longitude),
-            // Everyone-mode, or selected-mode with me on the list.
-            or(
-              isNull(mapSharingPrefs.audience),
-              eq(mapSharingPrefs.audience, "friends"),
-              sql`EXISTS (SELECT 1 FROM ${mapAllowedViewers} v WHERE v.user_id = ${userLocations.userId} AND v.viewer_id = ${meId})`,
-            ),
-          )) : Promise.resolve([]),
+        friendsSharingWithMe(meId, friendIds, box(userLocations.latitude, userLocations.longitude)),
 
         db.select({
           id: events.id, title: events.title, eventDate: events.eventDate, eventEndDate: events.eventEndDate,
