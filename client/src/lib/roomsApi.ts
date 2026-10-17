@@ -1,7 +1,8 @@
 // Types and small helpers shared by the rooms pages. Rules (age, interactions, screen parsing) come from @shared.
 import type { AgeLimit } from "@shared/age";
 import type { Screen } from "@shared/screen";
-import type { RoomKind, RoomVisibility } from "@shared/rooms";
+import type { RoomKind, RoomVisibility, ROOM_LIMITS } from "@shared/rooms";
+import { useQuery } from "@tanstack/react-query";
 
 export interface RoomHostSummary {
   id: string;
@@ -107,3 +108,21 @@ export const NOTICE_MESSAGE: Record<string, string> = {
   BAD_STATE: "That isn't possible right now.",
   BAD_REQUEST: "That didn't work.",
 };
+
+/** Public switches and limits from GET /api/rooms/config. */
+export interface RoomsConfig {
+  features: { anonymousJoin: boolean; paidRooms: boolean; spray: boolean };
+  limits: typeof ROOM_LIMITS;
+  currency: "NGN";
+  region: "NG";
+}
+
+export async function fetchRoomsConfig(): Promise<RoomsConfig> {
+  const res = await fetch("/api/rooms/config", { credentials: "include" });
+  if (!res.ok) throw new Error("Couldn't load rooms settings");
+  return (await res.json()) as RoomsConfig;
+}
+
+export function useRoomsConfig() {
+  return useQuery({ queryKey: ["/api/rooms/config"], queryFn: fetchRoomsConfig, staleTime: 5 * 60 * 1000 });
+}
