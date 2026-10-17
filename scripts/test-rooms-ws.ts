@@ -162,10 +162,13 @@ try {
   g1.send({ type: "room:interact", targetId: G2, kind: "wave" });
   check("wave between mutual adults: whole room sees it", !!(await g2.waitFor((m) => m.type === "room:interact" && m.fromId === G1 && m.kind === "wave")) && !!(await h.waitFor((m) => m.type === "room:interact" && m.kind === "wave")));
   await sleep(2100); g2.drain(); h.drain();
+  // Both sent back to back: the server takes the rate-limit token on receipt, before any DB work, so the second
+  // always lands inside the 2s window. Sending it after awaiting delivery made this depend on DB latency (flaky).
+  g1.drain();
   g1.send({ type: "room:interact", targetId: G2, kind: "reaction", emoji: "❤️" });
-  check("private reaction: only the target gets it", !!(await g2.waitFor((m) => m.type === "room:interact" && m.kind === "reaction")) && await h.none((m) => m.type === "room:interact"));
-  g1.drain(); g1.send({ type: "room:interact", targetId: G2, kind: "reaction", emoji: "🔥" });
-  check("interaction rate limit (1 per 2s per target)", !!(await g1.waitFor((m) => m.type === "room:notice" && m.code === "RATE_LIMITED")));
+  g1.send({ type: "room:interact", targetId: G2, kind: "reaction", emoji: "🔥" });
+  check("private reaction: only the target gets it", !!(await g2.waitFor((m) => m.type === "room:interact" && m.kind === "reaction" && m.emoji === "❤️")) && await h.none((m) => m.type === "room:interact"));
+  check("interaction rate limit (1 per 2s per target)", !!(await g1.waitFor((m) => m.type === "room:notice" && m.code === "RATE_LIMITED")) && g2.all((m) => m.type === "room:interact" && m.emoji === "🔥").length === 0);
   g3.drain(); g3.send({ type: "room:interact", targetId: G1, kind: "wave" });
   check("non-mutual with default privacy: PRIVACY", (await g3.waitFor((m) => m.type === "room:notice"))?.code === "PRIVACY");
   await q(`update users set room_privacy=$2 where id=$1`, [G2, JSON.stringify({ v: 1, interactions: "none", appearInLists: true, allowInvites: true })]);

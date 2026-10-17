@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
-import { existsSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import pg from "pg";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -25,6 +25,13 @@ const run = (cmd, args, env) => new Promise((resolve) => {
 });
 const admin = async (sql) => { const c = new pg.Client({ connectionString: adminUrl }); await c.connect(); try { await c.query(sql); } finally { await c.end(); } };
 
+// Every scripts/test-rooms-<kind>*.ts runs, so parallel work adds a new file instead of editing a shared one.
+// The original file for each kind sorts first.
+const testFiles = (kind) => readdirSync(join(root, "scripts"))
+  .filter((f) => new RegExp(`^test-rooms-${kind}(-.+)?\\.ts$`).test(f))
+  .sort((a, b) => (a === `test-rooms-${kind}.ts` ? -1 : b === `test-rooms-${kind}.ts` ? 1 : a.localeCompare(b)))
+  .map((f) => `scripts/${f}`);
+
 const only = process.argv.find((a) => a.startsWith("--only="))?.slice(7);
 const dbName = `vib3_rooms_test_${crypto.randomBytes(4).toString("hex")}`;
 const url = withDb(adminUrl, dbName);
@@ -33,7 +40,7 @@ let created = false;
 try {
   console.log("unit (no database):");
   if (!only || only === "unit") {
-    for (const f of ["scripts/test-rooms-unit.ts"]) {
+    for (const f of testFiles("unit")) {
       const u = await run("npx", ["tsx", f], {});
       console.log(u.out.trim().split("\n").filter((l) => !/DEP0190|trace-deprecation/.test(l)).map((l) => `  ${l}`).join("\n"));
       if (u.code !== 0) ok = false;
@@ -45,7 +52,7 @@ try {
     const push = await run("npx", ["drizzle-kit", "push", "--force"], { DATABASE_URL: url });
     if (push.code !== 0) throw new Error(`drizzle-kit push failed:\n${push.out.slice(-600)}`);
     console.log("done");
-    for (const f of ["scripts/test-rooms-api.ts", "scripts/test-rooms-ws.ts"].filter((f) => existsSync(join(root, f)))) {
+    for (const f of [...testFiles("api"), ...testFiles("ws")]) {
       const r = await run("npx", ["tsx", f], { DATABASE_URL: url, SESSION_SECRET: "test", DISABLE_GEOCODING: "1", RESEND_API_KEY: "re_dummy_not_real" });
       console.log(`  -- ${f}`);
       console.log(r.out.trim().split("\n").filter((l) => !/DEP0190|trace-deprecation/.test(l)).map((l) => `  ${l}`).join("\n"));
