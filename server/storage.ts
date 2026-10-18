@@ -348,6 +348,11 @@ CREATE TABLE IF NOT EXISTS room_members (
     ALTER TABLE rooms ADD COLUMN IF NOT EXISTS now_playing jsonb;
     ALTER TABLE room_members ADD COLUMN IF NOT EXISTS on_stage boolean NOT NULL DEFAULT false;
   `);
+  // Age verification seam (same statements as migrations/add_age_verification.sql; additive + idempotent)
+  await pool.query(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS age_verified_at timestamp;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS age_verified_method text;
+  `);
   await pool.query(`
     ALTER TABLE venues ADD COLUMN IF NOT EXISTS building JSONB
   `);
@@ -698,6 +703,7 @@ export interface IStorage {
   createUserFromGoogle(data: { email: string; googleId: string; displayName: string; avatarUrl?: string }): Promise<User>;
   linkGoogleId(userId: string, googleId: string): Promise<void>;
   updateUser(id: string, updates: Partial<InsertUser>): Promise<User>;
+  setAgeVerification(userId: string, v: { verified: boolean; method?: "admin" | "provider" }): Promise<User | undefined>;
   updateUserPassword(userId: string, hashedPassword: string): Promise<void>;
   updateUsername(userId: string, newUsername: string): Promise<User>;
   setPasswordResetToken(userId: string, token: string, expires: Date): Promise<void>;
@@ -1454,6 +1460,14 @@ export class DbStorage implements IStorage {
       updatesWithTimestamp.genderEditedAt = new Date();
     }
     const result = await db.update(users).set(updatesWithTimestamp).where(eq(users.id, id)).returning();
+    return result[0];
+  }
+
+  async setAgeVerification(userId: string, v: { verified: boolean; method?: "admin" | "provider" }): Promise<User | undefined> {
+    const set = v.verified
+      ? { ageVerifiedAt: new Date(), ageVerifiedMethod: v.method ?? "admin" }
+      : { ageVerifiedAt: null, ageVerifiedMethod: null };
+    const result = await db.update(users).set(set).where(eq(users.id, userId)).returning();
     return result[0];
   }
 

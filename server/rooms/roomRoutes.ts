@@ -569,6 +569,17 @@ export function registerRoomRoutes(app: Express): void {
     }
   });
 
+  // Own ID-verification status only (the AgeVerification shape; never the birthdate).
+  app.get("/api/users/me/age-verification", requireAuth, async (req, res) => {
+    try {
+      const { ageVerifier } = await import("../identity/ageVerification");
+      res.json(await ageVerifier.status(req.user!.id));
+    } catch (e) {
+      console.error("[rooms] age-verification read failed:", e);
+      res.status(500).json({ message: "Failed to load age verification" });
+    }
+  });
+
   app.put("/api/users/me/room-privacy", requireAuth, roomLimiter, async (req, res) => {
     try {
       const v = validateRoomPrivacy(req.body);

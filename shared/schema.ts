@@ -80,6 +80,9 @@ export const users = pgTable("users", {
   // verified account (also what phone bans key on).
   verifiedPhone: text("verified_phone").unique(),
   phoneVerifiedAt: timestamp("phone_verified_at"),
+  // ID verification (see shared/ageVerification.ts). Only an admin or a provider sets these; cleared when the birthdate is corrected.
+  ageVerifiedAt: timestamp("age_verified_at"),
+  ageVerifiedMethod: text("age_verified_method"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 

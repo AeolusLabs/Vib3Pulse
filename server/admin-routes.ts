@@ -52,6 +52,24 @@ async function logActivity(adminId: string, action: string, targetType?: string,
   }
 }
 
+export function registerAgeVerificationAdminRoute(app: Express) {
+  app.post("/api/admin/users/:id/age-verification", requireRole("super_admin", "admin", "user_support"), async (req: Request, res: Response) => {
+    try {
+      const { verified } = z.object({ verified: z.boolean() }).parse(req.body);
+      const { ageVerifier } = await import("./identity/ageVerification");
+      const user = await storage.getUser(req.params.id);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      await storage.setAgeVerification(user.id, { verified, method: "admin" });
+      await logActivity(req.session.adminId!, verified ? "user.age_verified" : "user.age_verification_cleared", "user", user.id,
+        verified ? "Marked ID-verified by admin" : "Cleared ID verification", req.ip);
+      res.json(await ageVerifier.status(user.id));
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "verified (true or false) is required" });
+      res.status(500).json({ message: "Failed to update age verification" });
+    }
+  });
+}
+
 export function setupAdminRoutes(app: Express) {
   // Create admin session store with separate table
   const adminPool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -626,6 +644,9 @@ export function setupAdminRoutes(app: Express) {
       res.status(500).json({ message: "Failed to correct date of birth" });
     }
   });
+
+  // Mark (or unmark) a user as ID-verified. Admin roles only; a user can never call this, even on themself.
+  registerAgeVerificationAdminRoute(app);
 
   // ---- Rooms (alpha): reported rooms, end any room, change a room's age limit. All audited, reason required.
   app.get("/api/admin/rooms/reported", requireRole("super_admin", "content_moderator"), async (_req: Request, res: Response) => {

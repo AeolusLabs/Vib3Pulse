@@ -16,7 +16,8 @@ export async function correctDateOfBirth(a: {
   }
   const user = await storage.getUser(a.userId);
   if (!user) return { ok: false, status: 404, message: "User not found" };
-  const updated = await storage.updateUser(a.userId, { dateOfBirth: a.dateOfBirth.slice(0, 10) } as any);
+  // Same UPDATE clears ID verification: it vouched for the old birthdate, not the corrected one.
+  const updated = await storage.updateUser(a.userId, { dateOfBirth: a.dateOfBirth.slice(0, 10), ageVerifiedAt: null, ageVerifiedMethod: null } as any);
   await storage.logAdminActivity({
     adminId: a.adminId, action: "user.dob_corrected", targetType: "user", targetId: a.userId,
     details: `DOB ${user.dateOfBirth ?? "none"} -> ${a.dateOfBirth.slice(0, 10)}: ${reason}`, reason, ipAddress: a.ip,
