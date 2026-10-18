@@ -361,8 +361,10 @@ try {
   // ---------------- leave during an in-flight join; deleted accounts get no socket
   const lvU = await mk("w_leave"); const lvHost = await mk("w_lvh"); const lvRoom = await liveRoom(lvHost, { title: "leave race" });
   const lvc = await connect(lvU); lvc.send({ type: "room:join", roomId: lvRoom.id }); lvc.send({ type: "room:leave" });
-  await sleep(3000);
-  check("room:leave sent right after room:join leaves no ghost", roomHub.get(lvRoom.id, lvU) === undefined && roomHub.roomOf(lvU) === null);
+  // The server's leave waits for the in-flight join to finish (about 15 queries, 3 s or more on a remote DB), so a fixed sleep
+  // looked at the room mid-join. Wait until the join has reached the client, then until the leave has taken effect.
+  await lvc.waitFor((m) => m.type === "room:state" || m.type === "room:error", 20000);
+  check("room:leave sent right after room:join leaves no ghost", await until(async () => roomHub.get(lvRoom.id, lvU) === undefined && roomHub.roomOf(lvU) === null, 20000));
   const delU = await mk("w_deleted"); await q(`update users set deleted_at = now() where id=$1`, [delU]);
   const closed = await new Promise<number | null>((resolve) => { const w = new WebSocket(url, { headers: { cookie: `vibepulse.sid=s%3A${delU}.sig` } }); w.on("close", (c) => resolve(c)); w.on("error", () => resolve(null)); setTimeout(() => resolve(-1), 5000); });
   check("a deleted account's socket is closed (4001)", closed === 4001, String(closed));
