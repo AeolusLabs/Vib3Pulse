@@ -1,5 +1,6 @@
 import { useDirectMessage, DmHandled } from "@/hooks/useDirectMessage";
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import RoomSheetContent from "@/components/rooms/shell/RoomSheetContent";
@@ -7,7 +8,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import HostAvatar from "@/components/rooms/HostAvatar";
-import ProfilePeekSheet from "@/components/rooms/ProfilePeekSheet";
+import { leavesRoomHint, profilePath, showViewProfile } from "@/lib/profilePath";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { ROOM_REACTIONS } from "@shared/rooms";
@@ -15,7 +16,7 @@ import type { RoomMemberView } from "@/lib/roomReducer";
 import type { ModAction } from "@/hooks/useRoomSocket";
 import { BanIcon, FlagIcon, MessageCircleIcon, SendIcon, UserIcon, UserXIcon, VolumeXIcon } from "@/components/ui/icons";
 
-export interface AvailableActions { interact: boolean; dm: boolean; invite: boolean }
+export interface AvailableActions { interact: boolean; dm: boolean; invite: boolean; /** False when either of you has blocked the other. */ profile: boolean }
 
 interface Props {
   open: boolean;
@@ -33,7 +34,7 @@ interface Props {
   voiceOn?: boolean;
   stage?: string[];
   onStage?: (action: "accept" | "remove", targetId: string) => void;
-  /** Whether the "View profile" row shows. True for everyone in this phase; anonymous guests will be false later. */
+  /** Caller override: false hides the "View profile" row whatever the server says. Defaults to true. */
   canViewProfile?: boolean;
   /** Opened from another sheet (People): where focus goes when this closes. Null keeps Radix's default (the avatar tapped). */
   returnFocusTo?: () => HTMLElement | null;
@@ -48,7 +49,7 @@ const nameOf = (m: RoomMemberView) => m.displayName || m.organizationName || m.u
  */
 export default function AvatarActionsSheet({ open, onOpenChange, roomId, target, you, myRoomId, onInteract, onMod, locallyMuted, onToggleLocalMute, voiceOn, stage = [], onStage, canViewProfile = true, returnFocusTo }: Props) {
   const { toast } = useToast();
-  const [peeking, setPeeking] = useState(false);
+  const [, navigate] = useLocation();
   const [picking, setPicking] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [reason, setReason] = useState(REPORT_REASONS[0]);
@@ -59,7 +60,7 @@ export default function AvatarActionsSheet({ open, onOpenChange, roomId, target,
     queryKey: ["room-actions", roomId, target?.userId],
     queryFn: async () => {
       const r = await fetch(`/api/rooms/${roomId}/members/${target!.userId}/actions`, { credentials: "include" });
-      if (!r.ok) return { actions: { interact: false, dm: false, invite: false } };
+      if (!r.ok) return { actions: { interact: false, dm: false, invite: false, profile: false } };
       return r.json();
     },
     enabled: open && !!target && !self,
@@ -68,7 +69,7 @@ export default function AvatarActionsSheet({ open, onOpenChange, roomId, target,
   });
   const a = actions?.actions;
 
-  const close = () => { setPeeking(false); setPicking(false); setReporting(false); onOpenChange(false); };
+  const close = () => { setPicking(false); setReporting(false); onOpenChange(false); };
 
   const dm = useDirectMessage();
   const message = useMutation({
@@ -103,8 +104,8 @@ export default function AvatarActionsSheet({ open, onOpenChange, roomId, target,
   return (
     <>
       {dm.dialog}
-      <Sheet open={open && !peeking} onOpenChange={(o) => { if (!o) close(); else onOpenChange(true); }}>
-        <RoomSheetContent side="bottom" className="max-h-[85vh] overflow-y-auto rounded-t-2xl" returnFocusTo={peeking ? undefined : returnFocusTo} data-testid="avatar-actions-sheet">
+      <Sheet open={open} onOpenChange={(o) => { if (!o) close(); else onOpenChange(true); }}>
+        <RoomSheetContent side="bottom" className="max-h-[85vh] overflow-y-auto rounded-t-2xl" returnFocusTo={returnFocusTo} data-testid="avatar-actions-sheet">
           <SheetHeader className="flex-row items-center gap-3 space-y-0 pr-10 text-left">
             <HostAvatar person={target} className="h-14 w-14" />
             <div className="min-w-0">
@@ -114,8 +115,11 @@ export default function AvatarActionsSheet({ open, onOpenChange, roomId, target,
           </SheetHeader>
 
           <div className="mt-3 space-y-1">
-            {canViewProfile && (
-              <Button variant="ghost" className={rowCls} onClick={() => setPeeking(true)} data-testid="action-profile"><UserIcon className="h-4 w-4" />{self ? "View my profile" : "View profile"}</Button>
+            {showViewProfile({ self, canViewProfile, profileAllowed: a?.profile }) && (
+              <Button variant="ghost" className={`${rowCls} h-auto flex-wrap py-1.5`} onClick={() => { const path = profilePath(target); close(); navigate(path); }} data-testid="action-profile">
+                <UserIcon className="h-4 w-4" />{self ? "View my profile" : "View profile"}
+                <span className="ml-auto max-w-[60%] text-right text-xs font-normal text-muted-foreground" data-testid="action-profile-hint">{leavesRoomHint(you?.role === "host")}</span>
+              </Button>
             )}
 
             {!self && a?.interact && (
@@ -165,8 +169,6 @@ export default function AvatarActionsSheet({ open, onOpenChange, roomId, target,
           </div>
         </RoomSheetContent>
       </Sheet>
-
-      <ProfilePeekSheet open={peeking} onOpenChange={setPeeking} member={target} canViewProfile={canViewProfile} />
 
       <AlertDialog open={confirm !== null} onOpenChange={(o) => { if (!o) setConfirm(null); }}>
         <AlertDialogContent>
