@@ -1,5 +1,6 @@
 // Live room presence, in memory. Durable state (rooms, bans, mutes) is in Postgres; clients rebuild presence by
 // re-sending room:join after a reconnect or restart. Keep this interface small so a Redis-backed hub can replace it.
+import type { ChatReply } from "@shared/rooms";
 import { ageBand, type AgeBand } from "@shared/age";
 import type { StageState } from "@shared/stage";
 import type { LiveState } from "@shared/liveScreen";
@@ -25,7 +26,7 @@ export interface HubMember {
 
 const emptyStage = (): StageState => ({ stage: [], hands: [], invited: [] });
 
-export interface ChatLine { userId: string; text: string; at: number }
+export interface ChatLine { userId: string; text: string; at: number; replyTo?: ChatReply; quotable?: false }
 
 const CHAT_RING = 50;
 
@@ -147,6 +148,15 @@ export class RoomHub {
     ring.push(line);
     if (ring.length > CHAT_RING) ring.shift();
     this.chat.set(roomId, ring);
+  }
+
+  /**
+   * Kick or ban: their existing lines stay in the ring (reports attach them as evidence) but can no longer be quoted,
+   * so nobody can keep re-broadcasting their words. Lines they send after returning are quotable again; unban does not
+   * restore the old ones.
+   */
+  markUnquotable(roomId: string, userId: string): void {
+    for (const l of this.chat.get(roomId) ?? []) if (l.userId === userId) l.quotable = false;
   }
 
   /** The last 50 lines, kept only so a report can attach them. Never persisted otherwise. */

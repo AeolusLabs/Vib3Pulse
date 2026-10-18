@@ -4,6 +4,7 @@ import { useCallback, useEffect, useReducer, useRef } from "react";
 import { useWebSocketContext } from "@/providers/WebSocketProvider";
 import { useAuth } from "@/hooks/useAuth";
 import { initialRoomState, roomReducer, type RoomPhase, type RoomState } from "@/lib/roomReducer";
+import type { ChatReply } from "@shared/rooms";
 import type { StageAction } from "@shared/stage";
 import type { LiveAction } from "@shared/liveScreen";
 import type { PlaybackState } from "@shared/playback";
@@ -65,7 +66,7 @@ export function useRoomSocket(roomId: string, opts: { inviteToken?: string } = {
 
   return {
     state, status, join, leave,
-    chat: (text: string) => ws?.send({ type: "room:chat", text }) ?? false,
+    chat: (text: string, replyTo?: ChatReply) => ws?.send({ type: "room:chat", text, ...(replyTo ? { replyTo } : {}) }) ?? false,
     react: (emoji: string) => ws?.send({ type: "room:react", emoji }) ?? false,
     interact: (targetId: string, kind: "wave" | "reaction", emoji?: string) => ws?.send({ type: "room:interact", targetId, kind, ...(emoji ? { emoji } : {}) }) ?? false,
     setScreen: (screen: string | null) => ws?.send({ type: "room:screen", screen }) ?? false,

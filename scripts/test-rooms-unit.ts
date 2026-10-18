@@ -367,7 +367,7 @@ test("validateRoomPrivacy: strict, names the field", () => {
   bad({ ...good, admin: true }, "admin");
   bad({ interactions: "none", appearInLists: true }, "allowInvites");
   assert.ok(ROOM_REACTIONS.length === 8 && new Set(ROOM_REACTIONS).size === 8);
-  assert.deepEqual(ROOM_LIMITS, { capacityDefault: 50, capacityMax: 50, capacityMaxPaid: 150, liveVideoMax: 50, title: 80, description: 500, chat: 300 });
+  assert.deepEqual(ROOM_LIMITS, { capacityDefault: 50, capacityMax: 50, capacityMaxPaid: 150, liveVideoMax: 50, title: 80, description: 500, chat: 300, replyText: 120 });
 });
 
 test("validateRoomInput: valid + defaults", () => {
