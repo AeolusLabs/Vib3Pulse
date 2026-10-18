@@ -114,7 +114,28 @@ export function expectHost(roomId: string) { scheduleEnd(roomId); }
 
 /** After a restart nobody is in the hub: any live room whose host does not reconnect in time is ended. */
 export async function rehydrateLiveRooms(): Promise<void> {
-  for (const room of await rs.listLiveRooms()) if (!roomHub.get(room.id, room.hostId)) scheduleEnd(room.id);
+  const live = await rs.listLiveRooms();
+  for (const room of live) if (!roomHub.get(room.id, room.hostId)) scheduleEnd(room.id);
+  await sweepMinorsVoiceAtBoot(live).catch((e) => console.error("[voice] boot sweep failed:", e?.message ?? e));
+}
+
+/**
+ * LiveKit sessions outlive a restart, and the regular sweep only covers rooms with someone in the hub. At boot, every live
+ * minors' room with voice on drops any LiveKit participant who is not a teen (adults never speak there; unknown age never
+ * speaks). Teens are left connected; everyone rejoins the hub through the gated room:join as usual.
+ */
+export async function sweepMinorsVoiceAtBoot(live: Room[]): Promise<void> {
+  const svc = getVoiceService();
+  if (!svc) return;
+  for (const room of live) {
+    if (!room.minorsRoom || !room.voiceEnabled) continue;
+    let present: Array<{ identity: string }>;
+    try { present = await svc.listParticipants(room.id); } catch (e) { console.error("[voice] listParticipants failed:", e instanceof Error ? e.message : e); continue; }
+    for (const p of present) {
+      const age = ageFromDob((await storage.getUser(p.identity))?.dateOfBirth);
+      if (age === null || age >= 18) await svc.removeParticipant(room.id, p.identity).catch((e) => console.error("[voice] removeParticipant failed:", e?.message ?? e));
+    }
+  }
 }
 
 // ---------------------------------------------------------------- leave
@@ -278,6 +299,16 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
     broadcastLive(roomId);
   }
   if (role === "host") { clearTimeout(endTimers.get(roomId)); endTimers.delete(roomId); }
+  if (isNew && !fresh.minorsRoom && roomHub.isMinorsRoom(roomId) && userId !== fresh.hostId) {
+    // The room became a minors' room after our fresh read (a host corrected to under 18): the gate runs once more, now, and
+    // the join is undone if it fails. Not removeFromMinorsRoom: that waits for this very join's lock.
+    const inv = await getInviteState(roomId, userId);
+    if (!minorsGate({ minorsRoom: true, hostId: fresh.hostId }, userId, freshAge, inv).ok) {
+      me.send(minorsError("MINORS_ROOM"));
+      await evict(roomId, userId);
+      return;
+    }
+  }
   if (isNew) {
     me.ready = (async () => {
       try {
@@ -433,6 +464,24 @@ export async function enforceMinorsRoomFor(userId: string): Promise<void> {
 }
 
 /**
+ * Every admin birthdate correction ends here. In order: the person's live age in the hub is refreshed (the stage rule reads
+ * it), a host now under 18 has their open rooms made minors' rooms, the room they are in is reconciled at once (mic, camera,
+ * stage and live screen follow the new age: an adult host of a minors' room loses them, a host corrected to a teen gets them
+ * back), and a member who may no longer be in a minors' room is taken out.
+ */
+export async function applyDobCorrection(userId: string): Promise<void> {
+  await (joinLocks.get(userId) ?? Promise.resolve()); // a join in flight finishes first (it re-reads the birthdate itself)
+  const user = await storage.getUser(userId);
+  if (!user) return;
+  const age = ageFromDob(user.dateOfBirth);
+  const roomId = roomHub.roomOf(userId);
+  const changed = roomId ? roomHub.refreshAge(roomId, userId, age) : false;
+  if (age !== null && age < 18) await enforceMinorsHost(userId);
+  if (roomId && changed) await reconcileVoice(roomId).catch((e) => console.error("[voice] reconcile failed:", e?.message ?? e));
+  await enforceMinorsRoomFor(userId);
+}
+
+/**
  * A host's birthdate was corrected to under 18: every room of theirs that has not ended becomes a minors' room (one way,
  * never cleared), and in each live one anyone who may no longer be there (adults without an acknowledged invite, unknown
  * age) is taken out with the warning. Returns the ids of the rooms that were flagged.
@@ -441,6 +490,8 @@ export async function enforceMinorsHost(hostId: string): Promise<string[]> {
   const flagged = await markHostRoomsMinors(hostId);
   for (const r of flagged) {
     if (r.status !== "live") continue;
+    // Marked (even if empty) and the members snapshotted in the same synchronous step: anyone inserted before this is in the
+    // snapshot and gated below; anyone inserted after it is caught by the re-check at the hub insert in joinOnce.
     roomHub.markMinorsRoom(r.id); // the stage rule switches now: teens may speak, adults may not
     for (const m of roomHub.members(r.id)) {
       if (m.userId === hostId) continue;

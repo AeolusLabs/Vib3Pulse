@@ -131,7 +131,22 @@ export class RoomHub {
 
   /** Minors' room flag for the stage rule (hot path, no query). Set from the room row on every join; one way, like the column. */
   isMinorsRoom(roomId: string): boolean { return this.minors.has(roomId); }
-  markMinorsRoom(roomId: string): void { if (this.count(roomId) > 0) this.minors.add(roomId); }
+  /**
+   * Marked even while the room is empty, so a join that read the room before it became a minors' room is still caught at
+   * its hub insert (joinOnce re-checks when the hub knows more than its row did). Cleared when the room empties or ends.
+   */
+  markMinorsRoom(roomId: string): void { this.minors.add(roomId); }
+
+  /**
+   * The one place a live member's age changes after they joined (an admin birthdate correction). The stage rule reads
+   * HubMember.age, so the caller must reconcile the room's voice right after. Returns true if the age changed.
+   */
+  refreshAge(roomId: string, userId: string, age: number | null): boolean {
+    const m = this.get(roomId, userId);
+    if (!m || m.age === age) return false;
+    m.age = age;
+    return true;
+  }
 
   /** Whether live video is on for the room (mirrors rooms.live_video). Like voice, only kept while someone is in the room. */
   liveVideoOn(roomId: string): boolean { return this.liveVideo.get(roomId) === true; }

@@ -24,9 +24,6 @@ export async function correctDateOfBirth(a: {
   });
   // Rooms: someone corrected from under 18 to an adult while inside a minors' room is taken out unless the host invited
   // them; a host corrected to under 18 has every open room made a minors' room, and uninvited adults are taken out.
-  await import("../rooms/roomSocket").then(async (m) => {
-    if (age < 18) await m.enforceMinorsHost(a.userId);
-    await m.enforceMinorsRoomFor(a.userId);
-  }).catch((e) => console.error("[rooms] minors' room re-check failed:", e));
+  await import("../rooms/roomSocket").then((m) => m.applyDobCorrection(a.userId)).catch((e) => console.error("[rooms] minors' room re-check failed:", e));
   return { ok: true, user: toPublicUser(updated) };
 }
