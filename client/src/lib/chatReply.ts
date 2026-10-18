@@ -1,3 +1,4 @@
+import { CHAT_QUOTE_WINDOW } from "@shared/rooms";
 /** Pure helpers for swipe-to-reply in the chat log. */
 
 /** Drag distance in px at which a swipe counts as a reply. */
@@ -35,4 +36,9 @@ export function swipeDecision(i: { active: boolean; dx: number; dy: number; poin
 export function quoteView(reply: { userId: string; text: string }, hidden: ReadonlySet<string> | undefined, nameOf: (userId: string) => string): { name: string; text: string } {
   if (hidden?.has(reply.userId)) return { name: "Someone", text: "" };
   return { name: quoteLabel(reply.userId, nameOf), text: reply.text };
+}
+
+/** Whether the line at `index` of a chat of `length` lines is still in the server's quote window (the newest 50). */
+export function canQuote(index: number, length: number): boolean {
+  return index >= 0 && index < length && length - index <= CHAT_QUOTE_WINDOW;
 }

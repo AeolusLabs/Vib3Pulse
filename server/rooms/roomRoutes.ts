@@ -515,10 +515,12 @@ export function registerRoomRoutes(app: Express): void {
   // ------------------------------------------------------------ report
   // The last 50 chat lines live only in memory; a report is the one thing that makes them durable (as text on the report).
   function chatExcerpt(roomId: string): string {
+    // Author and quoted person are named the same way: their username while they are in the room, else their full id
+    // (an 8-character prefix could not be looked up by a moderator).
+    const nameOf = (userId: string) => (roomHub.get(roomId, userId)?.info?.username as string | undefined) ?? userId;
     const lines = roomHub.recentChat(roomId).map((l) => {
-      const who = (roomHub.get(roomId, l.userId)?.info?.username as string | undefined) ?? l.userId.slice(0, 8);
-      const q = l.replyTo ? ` (replying to ${l.replyTo.userId.slice(0, 8)}: ${l.replyTo.text})` : "";
-      return `${new Date(l.at).toISOString().slice(11, 19)} ${who}: ${l.text}${q}`;
+      const q = l.replyTo ? ` (replying to ${nameOf(l.replyTo.userId)}: ${l.replyTo.text})` : "";
+      return `${new Date(l.at).toISOString().slice(11, 19)} ${nameOf(l.userId)}: ${l.text}${q}`;
     });
     return lines.length ? `\n\n--- last chat lines ---\n${lines.join("\n")}`.slice(0, 8000) : "";
   }

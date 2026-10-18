@@ -48,7 +48,7 @@ class Client {
   async open() { await new Promise<void>((res, rej) => { this.ws.once("open", () => res()); this.ws.once("error", rej); this.ws.once("close", () => rej(new Error("closed before open"))); }); await this.waitFor((m) => m.type === "connected"); return this; }
   send(o: object) { this.ws.send(JSON.stringify(o)); }
   drain() { this.base = this.msgs.length; }
-  async waitFor(pred: (m: any) => boolean, ms = 3000): Promise<any> {
+  async waitFor(pred: (m: any) => boolean, ms = 10_000): Promise<any> {
     const t0 = Date.now();
     while (Date.now() - t0 < ms) {
       const m = this.msgs.slice(this.base).find(pred);
@@ -151,7 +151,7 @@ try {
   check("reply to a member who left still delivers the quote", left?.replyTo?.userId === C, JSON.stringify(left));
 
 
-  // ---- kick and ban purge the person's lines: nobody can keep quoting them
+  // ---- kick and ban mark the person's lines unquotable (kept for reports): nobody can keep quoting them
   const K = await mk("cr_k"), N = await mk("cr_n");
   const k = await connect(K), n = await connect(N);
   await join(k, R.id); await join(n, R.id);

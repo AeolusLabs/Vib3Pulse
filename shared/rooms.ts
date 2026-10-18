@@ -128,6 +128,9 @@ export function validateRoomInput(input: unknown, now = new Date()): Validated<R
 }
 
 // ---------------------------------------------------------------- chat replies
+/** How many recent chat lines the server keeps per room (for reports and reply quotes). Older lines can't be quoted. */
+export const CHAT_QUOTE_WINDOW = 50;
+
 /** The quoted part of a reply. Always addressed by `userId`, never by a name. */
 export interface ChatReply { userId: string; text: string }
 
