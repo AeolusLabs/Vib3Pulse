@@ -393,6 +393,25 @@ try {
   finally { (storage as any).getUser = realGetUserB; }
   check("a failure after the start write answers 500 and the room is not left live (ended, fail closed)", s5.status === 500 && (await statusOf(S5)) === "ended" && (await rs.countLiveRoomsByHost(HS2)) === 0, JSON.stringify(s5));
 
+  // ---- Round 7: /start flags a teen host's unflagged scheduled room BEFORE it goes live; an adult host's room is untouched; a grace timer exists
+  const HT3 = await mk("flagstart", yearsAgo(16)), HA3 = await mk("flagstart_adult", yearsAgo(30));
+  const schedAt = new Date(Date.now() + 3600e3).toISOString();
+  const U1 = (await rs.createRoom(HT3, { title: "unflagged teen room", kind: "party", visibility: "friends", ageLimit: "all", scheduledFor: schedAt } as any)).id as string; // a correction job that failed left it unflagged
+  const U2 = (await rs.createRoom(HA3, { title: "adult normal room", kind: "party", visibility: "friends", ageLimit: "all", scheduledFor: schedAt } as any)).id as string;
+  check("round 7 setup: both rooms start unflagged", (await rs.getRoom(U1))!.minorsRoom === false && (await rs.getRoom(U2))!.minorsRoom === false);
+  const realGraceMs = tuning.graceMs;
+  tuning.graceMs = 300; // nobody connects: a grace timer that exists ends the room quickly
+  try {
+    const u1 = await http("POST", `/api/rooms/${U1}/start`, HT3);
+    check("teen host's unflagged scheduled room: starts, and is flagged as a minors' room (answer and database)", u1.status === 200 && u1.json?.room?.minorsRoom === true && (await rs.getRoom(U1))!.minorsRoom === true, JSON.stringify(u1));
+    const u2 = await http("POST", `/api/rooms/${U2}/start`, HA3);
+    check("an adult host's normal room is unaffected (live, not flagged)", u2.status === 200 && u2.json?.room?.minorsRoom === false && (await rs.getRoom(U2))!.minorsRoom === false, JSON.stringify(u2));
+    await sleepA(1500);
+    check("the grace timer exists right after the start: with nobody connecting, both rooms end", (await statusOf(U1)) === "ended" && (await statusOf(U2)) === "ended");
+  } finally {
+    tuning.graceMs = realGraceMs;
+  }
+
   // ---- an admin birthdate correction that makes a guest an adult takes them out of the minors' room
   const { correctDateOfBirth } = await import("../server/services/dobCorrection");
   const admin = (await q(`insert into admin_users (username, email, password_hash, display_name, role) values ($1,$2,$3,'A','super_admin') returning id`,

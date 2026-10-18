@@ -265,7 +265,11 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
   // The invite is always read: the room may become a minors' room (host corrected to under 18) while we wait.
   const [fresh, freshMember, freshInvite, freshUser] = await Promise.all([
     rs.getRoom(roomId), rs.getMember(roomId, userId), getInviteState(roomId, userId), storage.getUser(userId),
-  ]);
+  ]).catch(async (e) => {
+    // The host's own lookup failed: nothing can be trusted about this room's flag. Fail closed: close it (neutral notice).
+    if (userId === room.hostId) await endForHostReview(roomId).catch((e2) => console.error("[rooms] closing a room after a host lookup failure failed:", e2));
+    throw e;
+  });
   const freshAge = ageFromDob(freshUser?.dateOfBirth);
   if (ws.readyState !== OPEN) return; // the socket died while we were checking: do not create a ghost
   if (!fresh || fresh.status === "ended") return refuse(ws, "ROOM_ENDED");
@@ -274,6 +278,33 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
   if ((kicked.get(`${roomId}:${userId}`) ?? 0) > Date.now()) return refuse(ws, "KICKED");
   if (!freshUser || freshUser.deletedAt) return refuse(ws, "NOT_FOUND");
   if (!canJoinRoom({ age: freshAge }, fresh as any).ok) return refuse(ws, freshAge === null ? "AGE_UNKNOWN" : "AGE_LIMIT"); // limit raised meanwhile
+  // Host-age invariant, checked at the door whatever the correction job did or failed to do (it can fail, and it cannot see a
+  // room whose host is disconnected): a minors' room never has an adult host, and a teen host's room is always a minors' room.
+  // Fail closed: any problem closes the room with the neutral notice.
+  if (userId === fresh.hostId) {
+    try {
+      const hostIsTeen = freshAge !== null && freshAge < 18;
+      if (fresh.minorsRoom && !hostIsTeen) {
+        await endForHostReview(roomId);
+        return refuse(ws, "ROOM_ENDED");
+      }
+      if (hostIsTeen && !fresh.minorsRoom) {
+        // Flag it (database and hub) and take out every adult without an acknowledged invite. The warning is right here: the
+        // room genuinely is a teen host's.
+        const problems: DobStepFailure[] = [];
+        const flagged = await enforceMinorsHost(userId, problems);
+        if (problems.length || !flagged.includes(roomId)) {
+          await endForHostReview(roomId);
+          return refuse(ws, "ROOM_ENDED");
+        }
+        fresh.minorsRoom = true;
+      }
+    } catch (e) {
+      console.error(`[rooms] host-age check failed (user ${userId}, room ${roomId}):`, e);
+      await endForHostReview(roomId).catch((e2) => console.error("[rooms] closing the room failed:", e2));
+      return refuse(ws, "ROOM_ENDED");
+    }
+  }
   // The hub flag is set (synchronously) by a host correction right after its UPDATE commits, and is never cleared while the
   // room lives, so a row read that predates the correction cannot let an uninvited adult in. No await from here to the insert.
   const mg = minorsGate({ minorsRoom: fresh.minorsRoom || roomHub.isMinorsRoom(roomId), hostId: fresh.hostId }, userId, freshAge, freshInvite);
