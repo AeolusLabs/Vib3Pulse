@@ -1,15 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { useLocation } from "wouter";
 import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import RoomSheetContent from "@/components/rooms/shell/RoomSheetContent";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import HostAvatar from "@/components/rooms/HostAvatar";
 import type { RoomMemberView } from "@/lib/roomReducer";
-import { profilePath, shouldFetchProfile, fillMissing } from "@/lib/profilePath";
+import { openInNewTab, peekIdentifier, profilePath, shouldFetchProfile, fillMissing } from "@/lib/profilePath";
 import { ExternalLinkIcon } from "@/components/ui/icons";
-
-export { profilePath };
 
 interface Props {
   open: boolean;
@@ -27,9 +24,8 @@ const nameOf = (m: { displayName?: string | null; organizationName?: string | nu
 
 /** A quick look at someone's public profile without leaving the room. */
 export default function ProfilePeekSheet({ open, onOpenChange, member, canViewProfile = true }: Props) {
-  const [, navigate] = useLocation();
   const allowed = shouldFetchProfile(member, canViewProfile);
-  const identifier = member && allowed ? (member.username?.trim() || member.userId) : null;
+  const identifier = member && allowed ? peekIdentifier(member) : null;
   const enabled = open && allowed && !!identifier;
 
   const user = useQuery<PeekUser>({
@@ -89,10 +85,10 @@ export default function ProfilePeekSheet({ open, onOpenChange, member, canViewPr
         </div>
 
         <div className="mt-5 space-y-2">
-          <Button className="min-h-[44px] w-full" onClick={() => { onOpenChange(false); navigate(profilePath(member)); }} data-testid="button-open-full-profile">
+          <Button className="min-h-[44px] w-full" onClick={() => openInNewTab(profilePath(member))} data-testid="button-open-full-profile">
             <ExternalLinkIcon className="mr-2 h-4 w-4" />Open full profile
           </Button>
-          <p className="text-center text-xs text-muted-foreground">This leaves the room.</p>
+          <p className="text-center text-xs text-muted-foreground">Opens in a new tab. You stay in the room.</p>
         </div>
       </RoomSheetContent>
     </Sheet>
