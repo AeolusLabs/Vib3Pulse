@@ -101,12 +101,12 @@ export function frameSlots(layout: "stack" | "rail", immersive: boolean): Record
 
 /**
  * What a tap on the dock's mic does. Audio that is waiting for a tap (or failed) is unlocked by the tap itself, since it is a
- * user gesture. While connecting it only explains. With the mic it toggles; a guest without it raises or lowers a hand.
+ * user gesture. Any other not-ready status (connecting, just switched on) only explains. With the mic it toggles; a guest without it raises or lowers a hand.
  */
 export function micTapAction(s: { status: string; canPublish: boolean; canAsk: boolean }): "unlock" | "wait" | "toggle-mic" | "hand" | null {
   if (s.status === "needs-tap" || s.status === "error") return "unlock";
-  if (s.status === "connecting") return "wait";
-  if (s.status !== "listening" && s.status !== "speaking") return null;
+  // Connecting, or voice just switched on and not started yet: keep the button and explain.
+  if (s.status !== "listening" && s.status !== "speaking") return "wait";
   if (s.canPublish) return "toggle-mic";
   return s.canAsk ? "hand" : null;
 }
@@ -120,4 +120,21 @@ export function isImeEnter(e: { key: string; isComposing?: boolean; keyCode?: nu
 export function reportErrorToast(message: string | undefined): { title: string; description?: string } {
   if (message && /already reported/i.test(message)) return { title: "You already reported this room." };
   return { title: "Couldn't send report", description: message };
+}
+
+/** What the page says when the unlock tap didn't get the room's audio going. */
+export const UNLOCK_FAILED = "Audio couldn't connect. Tap the mic to try again.";
+
+export interface UnlockPending { /** Voice status when the tap happened. */ start: string; /** The status has moved since the tap. */ seen: boolean }
+
+/**
+ * Follow an unlock tap to its real outcome. `voice.unlock()` resolves even when connecting failed (the hook catches its own
+ * errors), so the page feeds every new voice status here instead of trusting the promise. A status equal to the one at tap
+ * time is ignored until it has moved once (retrying from "error" starts at "error"). Up is success; error or off is failure.
+ */
+export function unlockStep(p: UnlockPending, status: string): { outcome: "pending" | "ok" | "failed"; pending: UnlockPending | null } {
+  if (status === "listening" || status === "speaking") return { outcome: "ok", pending: null };
+  if (!p.seen && status === p.start) return { outcome: "pending", pending: p };
+  if (status === "error" || status === "off") return { outcome: "failed", pending: null };
+  return { outcome: "pending", pending: { ...p, seen: true } };
 }

@@ -31,7 +31,7 @@ import { useNow } from "@/hooks/useNow";
 import { awayRemainingMs, downSince, shouldShowHold } from "@/lib/voiceState";
 import { pickStartProfile, weakLinkAdvice, type VideoProfile } from "@/lib/bandwidth";
 import { layoutFor } from "@/lib/roomLayout";
-import { camLockReason, micTapAction, shareRoomUrl } from "@/lib/roomShell";
+import { UNLOCK_FAILED, camLockReason, micTapAction, shareRoomUrl, unlockStep, type UnlockPending } from "@/lib/roomShell";
 import { LIVE_HOLD_MS } from "@shared/liveScreen";
 import { DENIED_MESSAGE, KIND_LABEL, LINK_SCREENS, type PeekMember, NOTICE_MESSAGE, VISIBILITY_LABEL, ageLimitLabel, fetchRooms, formatWhen, hostName, type RoomHostSummary, type RoomView } from "@/lib/roomsApi";
 import type { ChatItem, RoomMemberView } from "@/lib/roomReducer";
@@ -194,6 +194,24 @@ function RoomPageInner({ id }: { id: string }) {
   const canControlScreen = role === "host" || role === "cohost";
   const muted = state.you?.muted ?? false;
 
+  // The dock mic unlocks room audio with the tap itself (a user gesture). voice.unlock() resolves even when connecting failed,
+  // so follow the voice status to the real outcome: only then say "Room audio on" and raise a guest's hand, or say it failed.
+  const [unlockPending, setUnlockPending] = useState<(UnlockPending & { raise: boolean }) | null>(null);
+  const unlockFromDock = () => {
+    setUnlockPending({ start: voice.status, seen: false, raise: role === "guest" && !voice.canPublish });
+    void voice.unlock();
+  };
+  useEffect(() => {
+    if (!unlockPending) return;
+    const r = unlockStep(unlockPending, voice.status);
+    if (r.outcome === "pending") { if (r.pending !== unlockPending && r.pending) setUnlockPending({ ...r.pending, raise: unlockPending.raise }); return; }
+    setUnlockPending(null);
+    if (r.outcome === "failed") { toast({ title: UNLOCK_FAILED }); return; }
+    const handUp = !!me && state.hands.includes(me.id);
+    if (unlockPending.raise && !voice.canPublish && !handUp) { sock.stageAction("raise"); toast({ title: "Room audio on. Hand raised, the host can bring you on the mic." }); }
+    else toast({ title: "Room audio on." });
+  }, [voice.status, unlockPending]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // The screen was taken back (host stopped it, an adult arrived, voice went off): switch the camera off here too.
   useEffect(() => {
     if ((voice.onAir || voice.cameraOn || voice.videoPaused) && state.phase === "live" && state.holder !== me?.id) void voice.stopCamera(); // not while reconnecting: the room state is only paused, not changed
@@ -327,7 +345,7 @@ function RoomPageInner({ id }: { id: string }) {
           onLower: () => sock.stageAction("lower"),
           // A mic tap while audio waits for a tap (or failed) unlocks it; while connecting it only explains.
           needsUnlock: micAction === "unlock",
-          onUnlock: () => voice.unlock(),
+          onUnlock: unlockFromDock,
           muteLocked: micAction === "wait" ? "Audio is still connecting." : undefined,
           mic: voiceUp && voice.canPublish ? { on: voice.micOn, onToggle: () => void voice.toggleMic() } : undefined,
         }}

@@ -16,11 +16,11 @@ export interface DockVoice {
   /** You already have the mic (host, co-host, guest on stage): the button mutes and unmutes it instead of raising a hand. */
   mic?: { on: boolean; onToggle(): void };
   /**
-   * Room audio is waiting for a tap (or failed). A mic tap is a user gesture, so it calls `onUnlock` (voice.unlock) and then
-   * carries on: a guest's hand goes up once audio is on. Takes precedence over `muteLocked`.
+   * Room audio is waiting for a tap (or failed). A mic tap is a user gesture, so it calls `onUnlock` synchronously. The dock
+   * says nothing itself: the page reports the real outcome (see `unlockStep`). Takes precedence over `muteLocked`.
    */
   needsUnlock?: boolean;
-  onUnlock?: () => Promise<unknown> | void;
+  onUnlock?: () => void;
 }
 
 export interface DockCam {
@@ -106,14 +106,10 @@ export default function RoomDock({ muted, reply, replyName, onCancelReply, onSen
     if (!mic && !canAsk && !muteLocked && !unlock) return null;
     const pressed = !unlock && (mic ? mic.on : hasHand);
     const label = unlock ? "Turn on room audio" : muteLocked ? "Microphone" : mic ? (mic.on ? "Mute mic" : "Turn on mic") : hasHand ? "Lower hand" : "Ask to speak";
-    const onClick = async () => {
-      if (unlock) {
-        // The tap is the gesture the browser wants before it plays sound. Then carry on: a guest asks for the mic.
-        try { await onUnlock!(); } catch { return locked("Audio couldn't connect. Tap the mic to try again."); }
-        if (canAsk && !hasHand) { voice.onRaise(); toast({ title: "Room audio on. Hand raised, the host can bring you on the mic." }); }
-        else toast({ title: "Room audio on." });
-        return;
-      }
+    const onClick = () => {
+      // The tap is the gesture the browser wants before it plays sound, so unlock synchronously here. The page follows the
+      // voice status to the real outcome and only then says "Room audio on" (and raises a guest's hand), or that it failed.
+      if (unlock) { onUnlock!(); return; }
       if (muteLocked) return locked(muteLocked);
       if (mic) return mic.onToggle();
       if (hasHand) { voice.onLower(); toast({ title: "Hand lowered" }); }

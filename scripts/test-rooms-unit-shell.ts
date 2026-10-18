@@ -1,7 +1,7 @@
 // Rooms shell unit checks (no database, no DOM):   npx tsx scripts/test-rooms-unit-shell.ts   (or npm run test:rooms)
 import assert from "node:assert/strict";
 import { RAIL_MIN_WIDTH, defaultVideoView, layoutFor } from "../client/src/lib/roomLayout";
-import { DOCK_REACTIONS, camLockReason, frameSlots, isImeEnter, micTapAction, orderPeople, reportErrorToast, roomSafetyRules, shareRoomUrl } from "../client/src/lib/roomShell";
+import { DOCK_REACTIONS, UNLOCK_FAILED, camLockReason, unlockStep, frameSlots, isImeEnter, micTapAction, orderPeople, reportErrorToast, roomSafetyRules, shareRoomUrl } from "../client/src/lib/roomShell";
 import { ROOM_REACTIONS } from "../shared/rooms";
 
 let passed = 0, failed = 0;
@@ -123,7 +123,9 @@ test("dock: mic tap while audio is locked behind a tap or failed unlocks it (a u
   assert.equal(micTapAction({ status: "speaking", canPublish: true, canAsk: false }), "toggle-mic");
   assert.equal(micTapAction({ status: "listening", canPublish: false, canAsk: true }), "hand");
   assert.equal(micTapAction({ status: "listening", canPublish: false, canAsk: false }), null);
-  assert.equal(micTapAction({ status: "off", canPublish: false, canAsk: false }), null);
+  // Any other not-ready status (voice just switched on, not yet connected) keeps the button and explains.
+  assert.equal(micTapAction({ status: "off", canPublish: false, canAsk: true }), "wait");
+  assert.equal(micTapAction({ status: "idle", canPublish: false, canAsk: false }), "wait");
 });
 test("dock: Enter while an IME is composing never sends", () => {
   assert.equal(isImeEnter({ key: "Enter", isComposing: true, keyCode: 13 }), true);
@@ -134,6 +136,31 @@ test("dock: Enter while an IME is composing never sends", () => {
 test("report: a repeat report gets a friendly line, anything else keeps the server's message", () => {
   assert.deepEqual(reportErrorToast("You've already reported this"), { title: "You already reported this room." });
   assert.deepEqual(reportErrorToast("Room not found"), { title: "Couldn't send report", description: "Room not found" });
+});
+
+// ---------------------------------------------------------------- fix round 2: the unlock tap reports its real outcome
+// voice.unlock() resolves even when connecting failed, so the page follows the voice status after the tap instead.
+test("unlock: success only once audio is actually up; the hand goes up only then", () => {
+  let p = { start: "needs-tap", seen: false };
+  let r = unlockStep(p, "needs-tap"); assert.equal(r.outcome, "pending"); p = r.pending!;
+  r = unlockStep(p, "connecting"); assert.equal(r.outcome, "pending"); assert.equal(r.pending!.seen, true); p = r.pending!;
+  r = unlockStep(p, "listening"); assert.equal(r.outcome, "ok"); assert.equal(r.pending, null);
+  assert.equal(unlockStep({ start: "needs-tap", seen: false }, "speaking").outcome, "ok");
+});
+test("unlock: a failed connect is a failure, never 'Room audio on'", () => {
+  let r = unlockStep({ start: "needs-tap", seen: false }, "connecting");
+  r = unlockStep(r.pending!, "error");
+  assert.equal(r.outcome, "failed"); assert.equal(r.pending, null);
+  assert.match(UNLOCK_FAILED, /couldn't connect/); assert.match(UNLOCK_FAILED, /Tap the mic to try again/);
+});
+test("unlock: retrying from an error ignores the stale error until the status moves", () => {
+  const p = { start: "error", seen: false };
+  assert.equal(unlockStep(p, "error").outcome, "pending"); // same render as the tap: connect() hasn't run yet
+  assert.equal(unlockStep(unlockStep(p, "connecting").pending!, "error").outcome, "failed");
+  assert.equal(unlockStep(unlockStep(p, "connecting").pending!, "listening").outcome, "ok");
+});
+test("unlock: voice switched off while connecting is a failure", () => {
+  assert.equal(unlockStep({ start: "needs-tap", seen: false }, "off").outcome, "failed");
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
