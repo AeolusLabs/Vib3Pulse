@@ -1,6 +1,7 @@
 // Pure state machine for the room page. No React, no sockets: server messages and a few local events in, state out.
 // Terminal phases (ended, denied) ignore everything except an explicit reset/connecting, so a late message
 // after "the host ended the room" can never resurrect the room.
+import { validateChatReply, type ChatReply } from "@shared/rooms";
 import type { Screen } from "@shared/screen";
 import type { NowPlaying } from "@shared/playback";
 
@@ -19,7 +20,7 @@ export interface RoomMemberView {
   avatar?: unknown;
 }
 
-export interface ChatItem { id: string; userId: string; text: string; at: number }
+export interface ChatItem { id: string; userId: string; text: string; at: number; replyTo?: ChatReply }
 export interface ReactionItem { id: string; userId: string; emoji: string; at: number }
 export interface InteractionItem { id: string; fromId: string; targetId: string; kind: "wave" | "reaction"; emoji?: string; at: number }
 
@@ -70,7 +71,7 @@ export type RoomServerMessage =
   | { type: "room:state"; room: { id: string }; members: RoomMemberView[]; memberCount: number; screen: Screen | null; you: { role: MemberRole; muted: boolean }; voiceEnabled?: boolean; stage?: string[]; hands?: string[]; holder?: string | null; asks?: string[]; away?: number | null; nowPlaying?: NowPlaying | null; serverNowMs?: number }
   | { type: "room:joined"; member: RoomMemberView }
   | { type: "room:left"; userId: string }
-  | { type: "room:chat"; userId: string; text: string; at: number }
+  | { type: "room:chat"; userId: string; text: string; at: number; replyTo?: ChatReply }
   | { type: "room:react"; userId: string; emoji: string; at?: number }
   | { type: "room:interact"; fromId: string; targetId: string; kind: "wave" | "reaction"; emoji?: string }
   | { type: "room:screen"; screen: Screen | null; screenVersion?: number }
@@ -134,7 +135,8 @@ export function roomReducer(state: RoomState, event: RoomEvent, now: () => numbe
       // The list is capped by the server, so the leaver may not be in it; the count still drops.
       return { ...state, members: state.members.filter((m) => m.userId !== event.userId), memberCount: Math.max(0, state.memberCount - 1) };
     case "room:chat": {
-      const item: ChatItem = { id: `c${state.seq}`, userId: event.userId, text: event.text, at: event.at };
+      const replyTo = validateChatReply(event.replyTo) ?? undefined;
+      const item: ChatItem = { id: `c${state.seq}`, userId: event.userId, text: event.text, at: event.at, ...(replyTo ? { replyTo } : {}) };
       return { ...state, seq: state.seq + 1, chat: cap([...state.chat, item], CHAT_CAP) };
     }
     case "room:react": {

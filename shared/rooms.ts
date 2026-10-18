@@ -9,7 +9,7 @@ export type RoomVisibility = (typeof ROOM_VISIBILITY)[number];
 export const ROOM_REACTIONS: readonly string[] = ["❤️", "🔥", "👏", "😂", "🎉", "🙌", "😍", "🎶"];
 
 // Free rooms hold at most 50 people. Paid rooms (part 5) will hold 100 to 150: capacityMaxPaid is recorded here, unused until then.
-export const ROOM_LIMITS = { capacityDefault: 50, capacityMax: 50, capacityMaxPaid: 150, liveVideoMax: 50, title: 80, description: 500, chat: 300 } as const;
+export const ROOM_LIMITS = { capacityDefault: 50, capacityMax: 50, capacityMaxPaid: 150, liveVideoMax: 50, title: 80, description: 500, chat: 300, replyText: 120 } as const;
 const MAX_SCHEDULE_DAYS = 90;
 const MAX_URL = 2048;
 
@@ -125,4 +125,40 @@ export function validateRoomInput(input: unknown, now = new Date()): Validated<R
       eventId, venueId, scheduledFor, noDirectInteractions: input.noDirectInteractions === true, screenUrl, capacity,
     },
   };
+}
+
+// ---------------------------------------------------------------- chat replies
+/** The quoted part of a reply. Always addressed by `userId`, never by a name. */
+export interface ChatReply { userId: string; text: string }
+
+/**
+ * Shape check for a client-sent reply quote: exactly `{ userId, text }`, userId a string of 1 to 64 chars, text a string.
+ * Text is trimmed and cut to ROOM_LIMITS.replyText; an empty result, a wrong type or any extra key gives null.
+ * The server still checks the quote against its own record of the chat before forwarding it.
+ */
+export function validateChatReply(x: unknown): ChatReply | null {
+  if (!x || typeof x !== "object" || Array.isArray(x)) return null;
+  const keys = Object.keys(x);
+  if (keys.length !== 2 || !keys.includes("userId") || !keys.includes("text")) return null;
+  const { userId, text } = x as Record<string, unknown>;
+  if (typeof userId !== "string" || userId.length < 1 || userId.length > 64 || typeof text !== "string") return null;
+  const t = Array.from(text.trim()).slice(0, ROOM_LIMITS.replyText).join("").trim();
+  if (!t) return null;
+  return { userId, text: t };
+}
+
+/**
+ * Server-side gate for a reply quote. The client only says which line it means; the quoted text is taken from the
+ * server's own record (newest matching line by that author), so nobody can put words in another member's mouth.
+ * Returns null when no such line is in `recent` (never said, too old, or deleted), and the message then goes out without a quote.
+ */
+export function resolveChatReply(recent: ReadonlyArray<{ userId: string; text: string }>, reply: ChatReply | null): ChatReply | null {
+  if (!reply) return null;
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const line = recent[i];
+    if (line.userId !== reply.userId) continue;
+    const stored = validateChatReply({ userId: line.userId, text: line.text });
+    if (stored && stored.text === reply.text) return stored;
+  }
+  return null;
 }

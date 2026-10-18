@@ -5,7 +5,7 @@ import { isBlockedEitherWay } from "../utils/blocks";
 import { ageFromDob } from "@shared/age";
 import { resolveScreen } from "@shared/screen";
 import { sanitizePlaybackInput, type NowPlaying } from "@shared/playback";
-import { ROOM_LIMITS, ROOM_REACTIONS, resolveRoomPrivacy } from "@shared/rooms";
+import { ROOM_LIMITS, ROOM_REACTIONS, resolveRoomPrivacy, resolveChatReply, validateChatReply } from "@shared/rooms";
 import { canInteract, canJoinRoom } from "@shared/roomRules";
 import type { Room, User } from "@shared/schema";
 import * as rs from "./roomStorage";
@@ -446,7 +446,9 @@ export async function handleRoomMessage(ws: RoomClient, userId: string, msg: any
         if (!bucketsFor(userId).chat.take()) return notice(ws, "RATE_LIMITED");
         const text = plainText(raw);
         if (!text) return;
-        const line = { userId, text, at: Date.now() };
+        // The quote is only ever taken from the server's own record of the chat, never from client text or names.
+        const replyTo = resolveChatReply(roomHub.recentChat(roomId), validateChatReply(msg.replyTo));
+        const line = { userId, text, at: Date.now(), ...(replyTo ? { replyTo } : {}) };
         roomHub.recordChat(roomId, line);
         roomHub.broadcast(roomId, { type: "room:chat", ...line });
         return;

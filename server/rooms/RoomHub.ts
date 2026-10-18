@@ -1,5 +1,6 @@
 // Live room presence, in memory. Durable state (rooms, bans, mutes) is in Postgres; clients rebuild presence by
 // re-sending room:join after a reconnect or restart. Keep this interface small so a Redis-backed hub can replace it.
+import type { ChatReply } from "@shared/rooms";
 import { ageBand, type AgeBand } from "@shared/age";
 import type { StageState } from "@shared/stage";
 import type { LiveState } from "@shared/liveScreen";
@@ -25,7 +26,7 @@ export interface HubMember {
 
 const emptyStage = (): StageState => ({ stage: [], hands: [], invited: [] });
 
-export interface ChatLine { userId: string; text: string; at: number }
+export interface ChatLine { userId: string; text: string; at: number; replyTo?: ChatReply }
 
 const CHAT_RING = 50;
 

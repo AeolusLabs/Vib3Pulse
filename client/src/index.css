@@ -305,6 +305,22 @@
     display: none;
   }
 
+  /* Quiet scrollbar: thin, and only visible while the reader is scrolling (see useIdleScrollbar) or on hover with a mouse */
+  .scroll-fade {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.55) transparent;
+    transition: scrollbar-color 500ms;
+  }
+  .scroll-fade[data-scrolling="false"] {
+    scrollbar-color: transparent transparent;
+    transition: scrollbar-color 500ms;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .scroll-fade:hover {
+      scrollbar-color: hsl(var(--muted-foreground) / 0.55) transparent;
+    }
+  }
+
   /* Reduced motion */
   @media (prefers-reduced-motion: reduce) {
     * {
