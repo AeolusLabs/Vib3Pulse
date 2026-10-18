@@ -31,7 +31,7 @@ export function hostSummary(u: User) {
 
 /** A room row as the API shows it: never the invite hash. */
 export function publicRoom(room: Room) {
-  const { inviteTokenHash, ...rest } = room;
+  const { inviteTokenHash, reminderNotifiedAt, ...rest } = room;
   return rest;
 }
 

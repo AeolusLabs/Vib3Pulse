@@ -1142,9 +1142,21 @@ export const rooms = pgTable("rooms", {
   nowPlaying: jsonb("now_playing").$type<NowPlaying | null>(),
   // Phase 2: true when the host was under 18 at creation. Set only by the server, never changed afterwards.
   minorsRoom: boolean("minors_room").notNull().default(false),
+  // Phase 3.7: claimed (set) once by the reminder job so two server instances cannot both send the 15-minute reminders.
+  reminderNotifiedAt: timestamp("reminder_notified_at"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 export type Room = typeof rooms.$inferSelect;
+
+// "Remind me" for a scheduled room. Also created by migrations/add_room_reminders.sql and ensureSchema.
+export const roomReminders = pgTable("room_reminders", {
+  roomId: varchar("room_id").notNull().references(() => rooms.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  notifiedAt: timestamp("notified_at"),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.roomId, t.userId] }),
+}));
 
 // A minors' room host's personal invite to one adult. Never a link: a link could be forwarded. The adult must also
 // acknowledge the warning (time kept for any later investigation). Revoked rows are kept, with the revoke time.
@@ -1557,6 +1569,7 @@ export const notificationTypes = [
   "rsvp_approved",
   "rsvp_removed",
   "room_live",
+  "room_starting",
 ] as const;
 export type NotificationType = typeof notificationTypes[number];
 

@@ -359,6 +359,18 @@ CREATE TABLE IF NOT EXISTS room_members (
     const { MINORS_ROOMS_SCHEMA_SQL } = await import("./rooms/minorsRoomsMigration");
     await pool.query(MINORS_ROOMS_SCHEMA_SQL);
   }
+  // Room reminders (same statements as migrations/add_room_reminders.sql; additive + idempotent)
+  await pool.query(`
+    ALTER TABLE rooms ADD COLUMN IF NOT EXISTS reminder_notified_at timestamp;
+    CREATE TABLE IF NOT EXISTS room_reminders (
+      room_id varchar NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+      user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at timestamp NOT NULL DEFAULT now(),
+      notified_at timestamp,
+      PRIMARY KEY (room_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS room_reminders_user_idx ON room_reminders (user_id);
+  `);
   await pool.query(`
     ALTER TABLE venues ADD COLUMN IF NOT EXISTS building JSONB
   `);

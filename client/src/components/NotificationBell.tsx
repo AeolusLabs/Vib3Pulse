@@ -74,6 +74,9 @@ function getTypeIcon(type: string, className = "h-3 w-3") {
       return <AlertTriangleIcon className={`${className} text-rose-400`} />;
     case "buddy_request":
       return <ShieldIcon className={`${className} text-primary`} />;
+    case "room_live":
+    case "room_starting":
+      return <BellIcon className={`${className} text-primary`} />;
     case "buddy_alert_resolved":
       return <CheckCircleIcon className={`${className} text-emerald-400`} />;
     default:

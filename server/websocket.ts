@@ -3,6 +3,7 @@ import { Server } from "http";
 import cookie from "cookie";
 import session from "express-session";
 import { storage } from "./storage";
+import { startReminderJob } from "./rooms/reminders";
 import { handleRoomMessage, handleSocketClose, rehydrateLiveRooms, startVoiceSweep } from "./rooms/roomSocket";
 
 interface AuthenticatedWebSocket extends WebSocket {
@@ -141,6 +142,7 @@ class WebSocketManager {
 
     // Rooms that were live before a restart have no presence now; end them unless their host comes back.
     rehydrateLiveRooms().catch((e) => console.error("[rooms] rehydrate failed:", e));
+    startReminderJob();
     startVoiceSweep();
 
     console.log("WebSocket server initialized on /ws");
