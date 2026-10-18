@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import RoomSheetContent from "@/components/rooms/shell/RoomSheetContent";
 import { Loader2Icon, MaximizeIcon, MinimizeIcon, XIcon } from "@/components/ui/icons";
 import type { ScreenTrack } from "@/hooks/useRoomVoice";
 import { pickDevices, rememberDevice, rememberedDevice, type Dev } from "@/lib/mediaDevices";
@@ -329,8 +330,8 @@ export default function ScreenStage({ track, holderName, isHolder, cameraOn, cam
 
       {immersive && (
         <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-          <SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto rounded-t-3xl pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))]" data-testid="live-controls-sheet">
-            <SheetHeader>
+          <RoomSheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto rounded-t-3xl pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))]" data-testid="live-controls-sheet">
+            <SheetHeader className="pr-10 text-left">
               <SheetTitle>{isHolder ? "Your live video" : "Video quality"}</SheetTitle>
               <SheetDescription>{isHolder ? "Quality, camera and microphone. Nothing is recorded." : "Applies on this device only. Sound only keeps the audio and saves data."}</SheetDescription>
             </SheetHeader>
@@ -338,7 +339,7 @@ export default function ScreenStage({ track, holderName, isHolder, cameraOn, cam
               {isHolder ? holderForm : <div className="flex flex-wrap items-center gap-2">{audioOnlyButton}</div>}
               {showVideo && askButton}
             </div>
-          </SheetContent>
+          </RoomSheetContent>
         </Sheet>
       )}
 

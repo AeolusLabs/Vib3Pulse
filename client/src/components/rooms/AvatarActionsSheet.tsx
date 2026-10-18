@@ -1,7 +1,8 @@
 import { useDirectMessage, DmHandled } from "@/hooks/useDirectMessage";
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import RoomSheetContent from "@/components/rooms/shell/RoomSheetContent";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -34,6 +35,8 @@ interface Props {
   onStage?: (action: "accept" | "remove", targetId: string) => void;
   /** Whether the "View profile" row shows. True for everyone in this phase; anonymous guests will be false later. */
   canViewProfile?: boolean;
+  /** Opened from another sheet (People): where focus goes when this closes. Null keeps Radix's default (the avatar tapped). */
+  returnFocusTo?: () => HTMLElement | null;
 }
 
 const REPORT_REASONS = ["Harassment or abuse", "Hate", "Sexual content", "Spam", "Seems underage", "Something else"];
@@ -43,7 +46,7 @@ const nameOf = (m: RoomMemberView) => m.displayName || m.organizationName || m.u
  * What you can do to someone in the room. The list of social actions comes from the server (it knows ages, follows and
  * privacy settings; the client doesn't and shouldn't), and the server re-checks every action again when it is used.
  */
-export default function AvatarActionsSheet({ open, onOpenChange, roomId, target, you, myRoomId, onInteract, onMod, locallyMuted, onToggleLocalMute, voiceOn, stage = [], onStage, canViewProfile = true }: Props) {
+export default function AvatarActionsSheet({ open, onOpenChange, roomId, target, you, myRoomId, onInteract, onMod, locallyMuted, onToggleLocalMute, voiceOn, stage = [], onStage, canViewProfile = true, returnFocusTo }: Props) {
   const { toast } = useToast();
   const [peeking, setPeeking] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -101,8 +104,8 @@ export default function AvatarActionsSheet({ open, onOpenChange, roomId, target,
     <>
       {dm.dialog}
       <Sheet open={open && !peeking} onOpenChange={(o) => { if (!o) close(); else onOpenChange(true); }}>
-        <SheetContent side="bottom" className="max-h-[85vh] overflow-y-auto rounded-t-2xl" data-testid="avatar-actions-sheet">
-          <SheetHeader className="flex-row items-center gap-3 space-y-0 text-left">
+        <RoomSheetContent side="bottom" className="max-h-[85vh] overflow-y-auto rounded-t-2xl" returnFocusTo={peeking ? undefined : returnFocusTo} data-testid="avatar-actions-sheet">
+          <SheetHeader className="flex-row items-center gap-3 space-y-0 pr-10 text-left">
             <HostAvatar person={target} className="h-14 w-14" />
             <div className="min-w-0">
               <SheetTitle className="truncate">{nameOf(target)}{self ? " (you)" : ""}</SheetTitle>
@@ -160,7 +163,7 @@ export default function AvatarActionsSheet({ open, onOpenChange, roomId, target,
               </div>
             )}
           </div>
-        </SheetContent>
+        </RoomSheetContent>
       </Sheet>
 
       <ProfilePeekSheet open={peeking} onOpenChange={setPeeking} member={target} canViewProfile={canViewProfile} />

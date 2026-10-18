@@ -1,4 +1,5 @@
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import RoomSheetContent from "@/components/rooms/shell/RoomSheetContent";
 import HostAvatar from "@/components/rooms/HostAvatar";
 import { orderPeople } from "@/lib/roomShell";
 import type { RoomMemberView } from "@/lib/roomReducer";
@@ -28,8 +29,8 @@ export default function PeopleSheet({ open, onOpenChange, members, memberCount, 
   const total = Math.max(memberCount, members.length);
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className="max-h-[84dvh] overflow-y-auto rounded-t-3xl pb-[calc(20px+env(safe-area-inset-bottom,0px))] sm:mx-auto sm:max-w-lg" data-testid="people-sheet">
-        <SheetHeader className="text-left">
+      <RoomSheetContent side="bottom" className="max-h-[84dvh] overflow-y-auto rounded-t-3xl pb-[calc(20px+env(safe-area-inset-bottom,0px))] sm:mx-auto sm:max-w-lg" data-testid="people-sheet">
+        <SheetHeader className="pr-10 text-left">
           <SheetTitle className="font-sans text-lg font-semibold">In the room, {total}</SheetTitle>
           <SheetDescription>Pick someone to see what you can do.</SheetDescription>
         </SheetHeader>
@@ -53,7 +54,7 @@ export default function PeopleSheet({ open, onOpenChange, members, memberCount, 
           })}
         </ul>
         {memberCount > members.length && <p className="mt-2 px-2 text-xs text-muted-foreground">+{memberCount - members.length} more</p>}
-      </SheetContent>
+      </RoomSheetContent>
     </Sheet>
   );
 }

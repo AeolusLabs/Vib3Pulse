@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import RoomSheetContent from "@/components/rooms/shell/RoomSheetContent";
 import { CheckIcon, EyeIcon, FlagIcon, LogOutIcon, SettingsIcon, Share2Icon, ShieldIcon, XIcon } from "@/components/ui/icons";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -44,8 +45,8 @@ export default function RoomMoreSheet({ open, onOpenChange, roomId, isHost, canS
   const ic = "h-5 w-5";
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className={SHEET} data-testid="room-more-sheet" data-room-id={roomId}>
-        <SheetHeader className="text-left">
+      <RoomSheetContent side="bottom" className={SHEET} data-testid="room-more-sheet" data-room-id={roomId}>
+        <SheetHeader className="pr-10 text-left">
           <SheetTitle className="font-sans text-lg font-semibold">Room options</SheetTitle>
           <SheetDescription>{subtitle ?? "What you can do here"}</SheetDescription>
         </SheetHeader>
@@ -56,7 +57,7 @@ export default function RoomMoreSheet({ open, onOpenChange, roomId, isHost, canS
           {!isHost && <Row icon={<FlagIcon className={ic} />} label="Report this room" onClick={then(onReport)} warn testid="more-report" />}
           <Row icon={<LogOutIcon className={ic} />} label={isHost ? "Leave (the room ends shortly after)" : "Leave quietly"} onClick={then(onLeave)} testid="more-leave" />
         </div>
-      </SheetContent>
+      </RoomSheetContent>
     </Sheet>
   );
 }
@@ -68,11 +69,11 @@ const TONE: Record<SafetyTone, { cls: string; icon: ReactNode }> = {
 };
 
 /** Plain rules for this room, adapted to its age limit. */
-export function RoomSafetySheet({ open, onOpenChange, ageLimit, ageLabel, anonymousAllowed = false }: { open: boolean; onOpenChange(o: boolean): void; ageLimit: string; ageLabel: string; anonymousAllowed?: boolean }) {
+export function RoomSafetySheet({ open, onOpenChange, ageLimit, ageLabel, anonymousAllowed = false, returnFocusTo }: { open: boolean; onOpenChange(o: boolean): void; ageLimit: string; ageLabel: string; anonymousAllowed?: boolean; /** Opened from Room options: focus goes back to the button that opened that. */ returnFocusTo?: () => HTMLElement | null }) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className={SHEET} data-testid="room-safety-sheet">
-        <SheetHeader className="text-left">
+      <RoomSheetContent side="bottom" className={SHEET} returnFocusTo={returnFocusTo} data-testid="room-safety-sheet">
+        <SheetHeader className="pr-10 text-left">
           <SheetTitle className="font-sans text-lg font-semibold">Room safety</SheetTitle>
           <SheetDescription>{ageLabel} room</SheetDescription>
         </SheetHeader>
@@ -84,7 +85,7 @@ export function RoomSafetySheet({ open, onOpenChange, ageLimit, ageLabel, anonym
           ))}
         </ul>
         <button type="button" onClick={() => onOpenChange(false)} className={`mt-4 min-h-[48px] w-full rounded-2xl bg-primary px-4 font-semibold text-primary-foreground ${FOCUS}`} data-testid="button-safety-done">Got it</button>
-      </SheetContent>
+      </RoomSheetContent>
     </Sheet>
   );
 }
@@ -92,7 +93,7 @@ export function RoomSafetySheet({ open, onOpenChange, ageLimit, ageLabel, anonym
 export const ROOM_REPORT_REASONS = ["Harassment or abuse", "Hate", "Sexual content", "Seems underage", "Spam", "Something else"] as const;
 
 /** One tap per reason. The server attaches the last chat lines, so nothing else is asked for. */
-export function RoomReportSheet({ open, onOpenChange, roomId, inviteToken }: { open: boolean; onOpenChange(o: boolean): void; roomId: string; inviteToken?: string }) {
+export function RoomReportSheet({ open, onOpenChange, roomId, inviteToken, returnFocusTo }: { open: boolean; onOpenChange(o: boolean): void; roomId: string; inviteToken?: string; returnFocusTo?: () => HTMLElement | null }) {
   const { toast } = useToast();
   const send = useMutation({
     mutationFn: (reason: string) => apiRequest("POST", `/api/rooms/${roomId}/report${inviteToken ? `?token=${encodeURIComponent(inviteToken)}` : ""}`, { reason, type: "room" }),
@@ -106,8 +107,8 @@ export function RoomReportSheet({ open, onOpenChange, roomId, inviteToken }: { o
   });
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className={SHEET} data-testid="room-report-sheet">
-        <SheetHeader className="text-left">
+      <RoomSheetContent side="bottom" className={SHEET} returnFocusTo={returnFocusTo} data-testid="room-report-sheet">
+        <SheetHeader className="pr-10 text-left">
           <SheetTitle className="font-sans text-lg font-semibold">Report this room</SheetTitle>
           <SheetDescription>What's wrong? Our team gets the last few chat lines with your report.</SheetDescription>
         </SheetHeader>
@@ -116,7 +117,7 @@ export function RoomReportSheet({ open, onOpenChange, roomId, inviteToken }: { o
             <button key={r} type="button" disabled={send.isPending} onClick={() => send.mutate(r)} className={`min-h-[48px] w-full rounded-2xl border bg-muted px-3.5 text-left font-medium disabled:opacity-60 [@media(hover:hover)_and_(pointer:fine)]:hover:border-primary ${FOCUS}`} data-testid={`report-reason-${r.split(" ")[0].toLowerCase()}`}>{r}</button>
           ))}
         </div>
-      </SheetContent>
+      </RoomSheetContent>
     </Sheet>
   );
 }

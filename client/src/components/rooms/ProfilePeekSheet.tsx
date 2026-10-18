@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import RoomSheetContent from "@/components/rooms/shell/RoomSheetContent";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import HostAvatar from "@/components/rooms/HostAvatar";
@@ -59,8 +60,8 @@ export default function ProfilePeekSheet({ open, onOpenChange, member, canViewPr
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className="max-h-[85vh] overflow-y-auto rounded-t-2xl" data-testid="profile-peek-sheet">
-        <SheetHeader className="flex-row items-center gap-3 space-y-0 text-left">
+      <RoomSheetContent side="bottom" className="max-h-[85vh] overflow-y-auto rounded-t-2xl" data-testid="profile-peek-sheet">
+        <SheetHeader className="flex-row items-center gap-3 space-y-0 pr-10 text-left">
           <HostAvatar person={shown} className="h-16 w-16" />
           <div className="min-w-0">
             <SheetTitle className="truncate">{nameOf(shown)}</SheetTitle>
@@ -93,7 +94,7 @@ export default function ProfilePeekSheet({ open, onOpenChange, member, canViewPr
           </Button>
           <p className="text-center text-xs text-muted-foreground">This leaves the room.</p>
         </div>
-      </SheetContent>
+      </RoomSheetContent>
     </Sheet>
   );
 }
