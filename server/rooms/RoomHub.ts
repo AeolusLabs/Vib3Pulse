@@ -26,7 +26,7 @@ export interface HubMember {
 
 const emptyStage = (): StageState => ({ stage: [], hands: [], invited: [] });
 
-export interface ChatLine { userId: string; text: string; at: number; replyTo?: ChatReply }
+export interface ChatLine { userId: string; text: string; at: number; replyTo?: ChatReply; quotable?: false }
 
 const CHAT_RING = 50;
 
@@ -34,7 +34,6 @@ export class RoomHub {
   private rooms = new Map<string, Map<string, HubMember>>(); // Map keeps insertion (join) order
   private byUser = new Map<string, string>();
   private chat = new Map<string, ChatLine[]>();
-  private chatBanned = new Map<string, Set<string>>(); // banned in this room: their words can no longer be quoted
   private stages = new Map<string, StageState>();
   private voice = new Map<string, boolean>();
   private lives = new Map<string, LiveState>();
@@ -58,7 +57,7 @@ export class RoomHub {
     if (!room || !m) return undefined;
     room.delete(userId);
     if (this.byUser.get(userId) === roomId) this.byUser.delete(userId);
-    if (room.size === 0) { this.rooms.delete(roomId); this.chat.delete(roomId); this.chatBanned.delete(roomId); this.stages.delete(roomId); this.voice.delete(roomId); this.lives.delete(roomId); this.liveVideo.delete(roomId); }
+    if (room.size === 0) { this.rooms.delete(roomId); this.chat.delete(roomId); this.stages.delete(roomId); this.voice.delete(roomId); this.lives.delete(roomId); this.liveVideo.delete(roomId); }
     return m;
   }
 
@@ -95,7 +94,6 @@ export class RoomHub {
     for (const m of gone) if (this.byUser.get(m.userId) === roomId) this.byUser.delete(m.userId);
     this.rooms.delete(roomId);
     this.chat.delete(roomId);
-    this.chatBanned.delete(roomId);
     this.stages.delete(roomId);
     this.voice.delete(roomId);
     this.lives.delete(roomId);
@@ -152,19 +150,14 @@ export class RoomHub {
     this.chat.set(roomId, ring);
   }
 
-  /** Removes a user's lines from the ring (kick or ban) so nobody can keep re-quoting what they said. */
-  purgeChat(roomId: string, userId: string): void {
-    const ring = this.chat.get(roomId);
-    if (ring) this.chat.set(roomId, ring.filter((l) => l.userId !== userId));
+  /**
+   * Kick or ban: their existing lines stay in the ring (reports attach them as evidence) but can no longer be quoted,
+   * so nobody can keep re-broadcasting their words. Lines they send after returning are quotable again; unban does not
+   * restore the old ones.
+   */
+  markUnquotable(roomId: string, userId: string): void {
+    for (const l of this.chat.get(roomId) ?? []) if (l.userId === userId) l.quotable = false;
   }
-
-  /** Marks a user as banned (or not) in this room for quote checks. Lives as long as the room's chat does. */
-  setChatBanned(roomId: string, userId: string, banned: boolean): void {
-    const set = this.chatBanned.get(roomId) ?? new Set<string>();
-    if (banned) set.add(userId); else set.delete(userId);
-    this.chatBanned.set(roomId, set);
-  }
-  isChatBanned(roomId: string, userId: string): boolean { return this.chatBanned.get(roomId)?.has(userId) === true; }
 
   /** The last 50 lines, kept only so a report can attach them. Never persisted otherwise. */
   recentChat(roomId: string): ChatLine[] {

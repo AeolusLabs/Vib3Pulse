@@ -70,19 +70,20 @@ t("quoteView: hidden author collapses to Someone with no text", () => {
   assert.deepEqual(quoteView({ userId: "b", text: "hello" }, new Set(["x"]), nameOf), { name: "Bea", text: "hello" });
   assert.deepEqual(quoteView({ userId: "b", text: "hello" }, undefined, nameOf), { name: "Bea", text: "hello" });
 });
-t("resolveChatReply refuses a banned author", () => {
-  const recent = [{ userId: "b", text: "earlier" }];
-  assert.equal(resolveChatReply(recent, { userId: "b", text: "earlier" }, (id) => id === "b"), null);
-  assert.ok(resolveChatReply(recent, { userId: "b", text: "earlier" }, () => false));
+t("resolveChatReply skips lines flagged unquotable, still finds a later quotable one", () => {
+  const recent: any[] = [{ userId: "b", text: "earlier", quotable: false }];
+  assert.equal(resolveChatReply(recent, { userId: "b", text: "earlier" }), null);
+  recent.push({ userId: "b", text: "earlier" });
+  assert.ok(resolveChatReply(recent, { userId: "b", text: "earlier" }));
 });
-t("hub purgeChat removes only that user's lines; ban flag is per room", () => {
+t("hub markUnquotable keeps the lines, flags only that user's, later lines are quotable", () => {
   const hub = new RoomHub();
   hub.recordChat("r", { userId: "a", text: "1", at: 1 }); hub.recordChat("r", { userId: "b", text: "2", at: 2 });
-  hub.purgeChat("r", "a");
-  assert.deepEqual(hub.recentChat("r").map((l) => l.userId), ["b"]);
-  hub.setChatBanned("r", "a", true);
-  assert.equal(hub.isChatBanned("r", "a"), true); assert.equal(hub.isChatBanned("r2", "a"), false);
-  hub.setChatBanned("r", "a", false); assert.equal(hub.isChatBanned("r", "a"), false);
+  hub.markUnquotable("r", "a");
+  const ring = hub.recentChat("r");
+  assert.equal(ring.length, 2); assert.equal(ring[0].quotable, false); assert.equal(ring[1].quotable, undefined);
+  hub.recordChat("r", { userId: "a", text: "3", at: 3 });
+  assert.equal(hub.recentChat("r")[2].quotable, undefined);
 });
 
 t("reducer stores replyTo on the ChatItem", () => {

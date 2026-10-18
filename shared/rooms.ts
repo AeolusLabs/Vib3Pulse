@@ -150,14 +150,14 @@ export function validateChatReply(x: unknown): ChatReply | null {
 /**
  * Server-side gate for a reply quote. The client only says which line it means; the quoted text is taken from the
  * server's own record (newest matching line by that author), so nobody can put words in another member's mouth.
- * `isBlocked` (an author banned from the room) refuses the quote outright.
+ * Lines flagged `quotable: false` (author kicked or banned) are skipped.
  * Returns null when no such line is in `recent` (never said, too old, or deleted), and the message then goes out without a quote.
  */
-export function resolveChatReply(recent: ReadonlyArray<{ userId: string; text: string }>, reply: ChatReply | null, isBlocked?: (userId: string) => boolean): ChatReply | null {
-  if (!reply || isBlocked?.(reply.userId)) return null;
+export function resolveChatReply(recent: ReadonlyArray<{ userId: string; text: string; quotable?: false }>, reply: ChatReply | null): ChatReply | null {
+  if (!reply) return null;
   for (let i = recent.length - 1; i >= 0; i--) {
     const line = recent[i];
-    if (line.userId !== reply.userId) continue;
+    if (line.userId !== reply.userId || line.quotable === false) continue;
     const stored = validateChatReply({ userId: line.userId, text: line.text });
     if (stored && stored.text === reply.text) return stored;
   }

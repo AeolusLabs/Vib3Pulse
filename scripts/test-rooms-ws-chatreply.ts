@@ -159,7 +159,7 @@ try {
   await chatOf(a, "kicked words");
   h.send({ type: "room:mod", action: "kick", targetId: K });
   await until(async () => roomHub.roomOf(K) === null);
-  check("kick purges the person's lines from the ring", !roomHub.recentChat(R.id).some((l) => l.userId === K));
+  check("kick keeps the person's lines in the ring (reports still attach them), flagged unquotable", roomHub.recentChat(R.id).some((l) => l.userId === K && l.text === "kicked words" && l.quotable === false));
   b.drain();
   a.send({ type: "room:chat", text: "quote-kicked", replyTo: { userId: K, text: "kicked words" } });
   const qk = await chatOf(b, "quote-kicked");
@@ -168,10 +168,15 @@ try {
   await chatOf(a, "banned words");
   h.send({ type: "room:mod", action: "ban", targetId: N });
   await until(async () => roomHub.roomOf(N) === null);
-  check("ban purges the person's lines and flags them", !roomHub.recentChat(R.id).some((l) => l.userId === N) && roomHub.isChatBanned(R.id, N));
+  check("ban keeps the person's lines in the ring, flagged unquotable", roomHub.recentChat(R.id).some((l) => l.userId === N && l.text === "banned words" && l.quotable === false));
   a.send({ type: "room:chat", text: "quote-banned", replyTo: { userId: N, text: "banned words" } });
   const qn = await chatOf(b, "quote-banned");
   check("quote of a banned member degrades to a plain message", !!qn && qn.replyTo === undefined, JSON.stringify(qn));
+
+  // The report excerpt is built from recentChat, so the kicked/banned lines are still in what a report would attach; a present author is still quotable.
+  a.send({ type: "room:chat", text: "quote-present", replyTo: { userId: B, text: "earlier" } });
+  const qp2 = await chatOf(b, "quote-present");
+  check("a reply quoting a still-present author still works after kicks and bans", qp2?.replyTo?.userId === B, JSON.stringify(qp2));
 
   // ---- muted, rate limited, oversize id, hostile shapes
   const M = await mk("cr_m"); const mu = await connect(M); await join(mu, R.id);

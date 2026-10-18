@@ -404,7 +404,6 @@ export function registerRoomRoutes(app: Express): void {
       const targetId = await modTarget(req, res, ctx);
       if (!targetId) return;
       await rs.setMemberFlag(ctx.room.id, targetId, { banned: false });
-      roomHub.setChatBanned(ctx.room.id, targetId, false);
       res.json({ ok: true });
     } catch (e) {
       console.error("[rooms] unban failed:", e);

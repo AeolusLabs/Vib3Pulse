@@ -302,9 +302,8 @@ export async function applyMod(roomId: string, action: ModAction, targetId: stri
     roomHub.broadcast(roomId, { type: "room:mod", action, targetId });
     return;
   }
-  if (action === "ban" || action === "kick") roomHub.purgeChat(roomId, targetId); // their words stop circulating, quotes included
+  if (action === "ban" || action === "kick") roomHub.markUnquotable(roomId, targetId); // lines stay for reports, but cannot be quoted
   if (action === "ban") {
-    roomHub.setChatBanned(roomId, targetId, true);
     await rs.setMemberFlag(roomId, targetId, { banned: true });
     await rs.setOnStage(roomId, targetId, false);
     // Even if they are not in the room right now: a token they still hold must not get them back into the audio.
@@ -449,7 +448,7 @@ export async function handleRoomMessage(ws: RoomClient, userId: string, msg: any
         const text = plainText(raw);
         if (!text) return;
         // The quote is only ever taken from the server's own record of the chat, never from client text or names.
-        const replyTo = resolveChatReply(roomHub.recentChat(roomId), validateChatReply(msg.replyTo), (id) => roomHub.isChatBanned(roomId, id));
+        const replyTo = resolveChatReply(roomHub.recentChat(roomId), validateChatReply(msg.replyTo));
         const line = { userId, text, at: Date.now(), ...(replyTo ? { replyTo } : {}) };
         roomHub.recordChat(roomId, line);
         roomHub.broadcast(roomId, { type: "room:chat", ...line });
