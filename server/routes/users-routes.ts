@@ -24,7 +24,7 @@ import { z } from "zod";
 import { deliverNotification } from "../notifications";
 import { resolveUserId } from "../utils/users";
 import { fileTypeFromBuffer } from "file-type";
-import { isBlockedEitherWay } from "../utils/blocks";
+import { isBlockedEitherWay, profileBlocked } from "../utils/blocks";
 
 class MediaValidationError extends Error {
   constructor(message: string) {
@@ -846,7 +846,7 @@ export function registerUsersRoutes(app: Express): void {
         user = await storage.getUserByUsername(identifier);
       }
 
-      if (!user) {
+      if (!user || await profileBlocked(req.user?.id, user.id)) {
         return res.status(404).json({ message: "User not found" });
       }
 
@@ -876,7 +876,7 @@ export function registerUsersRoutes(app: Express): void {
         user = await storage.getUserByUsername(identifier);
       }
 
-      if (!user) {
+      if (!user || await profileBlocked(req.user?.id, user.id)) {
         return res.status(404).json({ message: "User not found" });
       }
 
@@ -977,7 +977,7 @@ export function registerUsersRoutes(app: Express): void {
     try {
       const userId = await resolveUserId(req.params.identifier);
 
-      if (!userId) {
+      if (!userId || await profileBlocked(req.user?.id, userId)) {
         return res.status(404).json({ message: "User not found" });
       }
 
@@ -1007,7 +1007,7 @@ export function registerUsersRoutes(app: Express): void {
     try {
       const userId = await resolveUserId(req.params.identifier);
 
-      if (!userId) {
+      if (!userId || await profileBlocked(req.user?.id, userId)) {
         return res.status(404).json({ message: "User not found" });
       }
 
@@ -1032,7 +1032,7 @@ export function registerUsersRoutes(app: Express): void {
     try {
       const userId = await resolveUserId(req.params.identifier);
 
-      if (!userId) {
+      if (!userId || await profileBlocked(req.user?.id, userId)) {
         return res.status(404).json({ message: "User not found" });
       }
 
@@ -1049,7 +1049,7 @@ export function registerUsersRoutes(app: Express): void {
     try {
       const userId = await resolveUserId(req.params.identifier);
 
-      if (!userId) {
+      if (!userId || await profileBlocked(req.user?.id, userId)) {
         return res.status(404).json({ message: "User not found" });
       }
 

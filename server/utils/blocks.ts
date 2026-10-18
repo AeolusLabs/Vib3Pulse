@@ -17,3 +17,15 @@ export async function isBlockedEitherWay(a: string, b: string): Promise<boolean>
     )).limit(1);
   return !!row;
 }
+
+/**
+ * The one profile-visibility rule. A signed-in viewer may not read a profile when either side has blocked the other, and the
+ * routes then answer exactly as for a user who does not exist (same 404 and body) for those viewers. This is not a full
+ * invisibility guarantee: signed-out visitors can still read public profiles, and the follow route answers a blocked pair
+ * with 403 rather than 404. Signed-out viewers and the user themself are never blocked here. The blocker who wants to undo it does not need the profile:
+ * unblocking goes by id through GET /api/blocks (the Account settings list) and DELETE /api/blocks/:userId.
+ */
+export async function profileBlocked(viewerId: string | undefined | null, targetId: string): Promise<boolean> {
+  if (!viewerId || viewerId === targetId) return false;
+  return isBlockedEitherWay(viewerId, targetId);
+}

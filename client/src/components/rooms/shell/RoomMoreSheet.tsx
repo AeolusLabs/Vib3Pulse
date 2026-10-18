@@ -69,7 +69,7 @@ const TONE: Record<SafetyTone, { cls: string; icon: ReactNode }> = {
 };
 
 /** Plain rules for this room, adapted to its age limit. */
-export function RoomSafetySheet({ open, onOpenChange, ageLimit, ageLabel, anonymousAllowed = false, returnFocusTo }: { open: boolean; onOpenChange(o: boolean): void; ageLimit: string; ageLabel: string; anonymousAllowed?: boolean; /** Opened from Room options: focus goes back to the button that opened that. */ returnFocusTo?: () => HTMLElement | null }) {
+export function RoomSafetySheet({ open, onOpenChange, ageLimit, ageLabel, returnFocusTo }: { open: boolean; onOpenChange(o: boolean): void; ageLimit: string; ageLabel: string; /** Opened from Room options: focus goes back to the button that opened that. */ returnFocusTo?: () => HTMLElement | null }) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <RoomSheetContent side="bottom" className={SHEET} returnFocusTo={returnFocusTo} data-testid="room-safety-sheet">
@@ -78,7 +78,7 @@ export function RoomSafetySheet({ open, onOpenChange, ageLimit, ageLabel, anonym
           <SheetDescription>{ageLabel} room</SheetDescription>
         </SheetHeader>
         <ul className="mt-3 grid gap-2.5 text-[14.5px]">
-          {roomSafetyRules(ageLimit, { anonymousAllowed }).map((r) => (
+          {roomSafetyRules(ageLimit).map((r) => (
             <li key={r.text} className={`grid grid-cols-[20px_minmax(0,1fr)] gap-2.5 ${TONE[r.tone].cls}`}>
               <span aria-hidden>{TONE[r.tone].icon}</span><span className="text-foreground">{r.text}</span>
             </li>

@@ -8,7 +8,7 @@ import { storage, db } from "../storage";
 import { requireAuth } from "../middleware";
 import { roomLimiter } from "../security";
 import { toPublicUser, userToSessionUser } from "../auth";
-import { blockedWith, isBlockedEitherWay } from "../utils/blocks";
+import { blockedWith, isBlockedEitherWay, profileBlocked } from "../utils/blocks";
 import { ageGapBetween } from "../utils/ageGate";
 import { deliverNotification } from "../notifications";
 import { getConfig } from "../services/moderationConfig";
@@ -164,7 +164,7 @@ export function registerRoomRoutes(app: Express): void {
   // Public switches and limits for any signed-in user. Only these fields: never secrets or provider keys.
   app.get("/api/rooms/config", requireAuth, (_req, res) => {
     res.json({
-      features: { anonymousJoin: roomFeatures.anonymousJoin, paidRooms: roomFeatures.paidRooms, spray: roomFeatures.spray },
+      features: { paidRooms: roomFeatures.paidRooms, spray: roomFeatures.spray },
       limits: ROOM_LIMITS,
       currency: "NGN",
       region: "NG",
@@ -307,19 +307,23 @@ export function registerRoomRoutes(app: Express): void {
       const room = await rs.getRoom(req.params.id);
       if (!room || !(await canViewRoom(room, req.user!.id))) return res.status(404).json({ message: "Room not found" });
       const targetId = req.params.userId;
-      const none = { actions: { interact: false, dm: false, invite: false } };
+      // Anyone who is not in the room (or is yourself) gets one fixed answer, so this endpoint cannot be used to probe blocks on arbitrary users.
+      const none = { actions: { interact: false, dm: false, invite: false, profile: true } };
       if (targetId === req.user!.id || (targetId !== room.hostId && !roomHub.get(room.id, targetId))) return res.json(none);
+      // profile: only for someone present in the room. View profile is offered unless either of you has blocked the other.
+      const profile = !(await profileBlocked(req.user!.id, targetId));
+      const noneHere = { actions: { interact: false, dm: false, invite: false, profile } };
       const v = await interactionVerdict(room, req.user!.id, targetId);
       // Messages across age groups are a separate, consent-based rule (both people must have allowed it), not the room rule.
       const gap = await ageGapBetween(req.user!.id, targetId);
       const crossAgeDm = !v.ok && gap.gap && gap.blockedBy === null && !room.noDirectInteractions && !(await isBlockedEitherWay(req.user!.id, targetId));
-      if (!v.ok && !crossAgeDm) return res.json(none);
-      if (!v.ok) return res.json({ actions: { interact: false, dm: true, invite: false } });
+      if (!v.ok && !crossAgeDm) return res.json(noneHere);
+      if (!v.ok) return res.json({ actions: { interact: false, dm: true, invite: false, profile } });
       const target = v.target;
       const mine = await liveRoomOf(req.user!.id);
       const invite = !!mine && mine.id !== room.id && resolveRoomPrivacy(target.roomPrivacy).allowInvites
         && canJoinRoom({ age: ageFromDob(target.dateOfBirth) }, mine as any).ok;
-      res.json({ actions: { interact: true, dm: true, invite } });
+      res.json({ actions: { interact: true, dm: true, invite, profile } });
     } catch (e) {
       console.error("[rooms] actions failed:", e);
       res.status(500).json({ message: "Failed to load actions" });

@@ -1,4 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,7 @@ export function useUnblock() {
 // other on the map; the confirm step says so because it can't be undone by re-following alone.
 export default function BlockButton({ userId, name }: { userId: string; name: string }) {
   const { toast } = useToast();
+  const [, navigate] = useLocation();
   const { data } = useBlockedUsers();
   const unblock = useUnblock();
   const isBlocked = !!data?.blocked.some((b) => b.id === userId);
@@ -46,8 +48,10 @@ export default function BlockButton({ userId, name }: { userId: string; name: st
   const block = useMutation({
     mutationFn: () => apiRequest("PUT", `/api/blocks/${userId}`),
     onSuccess: () => {
+      // Their profile is hidden from you now, so leave it before the page refetches into "not found".
+      if (window.history.length > 1) window.history.back(); else navigate("/");
       queryClient.invalidateQueries();
-      toast({ title: `Blocked ${name}` });
+      toast({ title: `Blocked ${name}`, description: "You can unblock any time in Account settings." });
     },
     onError: () => toast({ title: "Couldn't block this user", variant: "destructive" }),
   });

@@ -5,7 +5,7 @@ import { isBlockedEitherWay } from "../utils/blocks";
 import { ageFromDob } from "@shared/age";
 import { resolveScreen } from "@shared/screen";
 import { sanitizePlaybackInput, type NowPlaying } from "@shared/playback";
-import { ROOM_LIMITS, ROOM_REACTIONS, resolveRoomPrivacy, resolveChatReply, validateChatReply } from "@shared/rooms";
+import { HOST_LEAVE_GRACE_MS, ROOM_LIMITS, ROOM_REACTIONS, resolveRoomPrivacy, resolveChatReply, validateChatReply } from "@shared/rooms";
 import { canInteract, canJoinRoom } from "@shared/roomRules";
 import type { Room, User } from "@shared/schema";
 import * as rs from "./roomStorage";
@@ -20,7 +20,7 @@ import { MEMBER_LIST_CAP, selectStateMembers, wantedMemberIds } from "./memberLi
 
 /** Injectable so tests can shorten the host grace period; rates are the documented limits. */
 export const tuning = {
-  graceMs: 120_000,
+  graceMs: HOST_LEAVE_GRACE_MS,
   // How long a dropped screen holder keeps the screen before it is released (a stream through a bad connection must not end at the first blip).
   liveGraceMs: Number(process.env.ROOM_LIVE_GRACE_MS) || LIVE_HOLD_MS,
   chat: { rate: 1, burst: 5 },
