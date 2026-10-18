@@ -7,11 +7,13 @@ import type { Screen } from "@shared/screen";
 import type { NowPlaying } from "@shared/playback";
 import { ageFromDob } from "@shared/age";
 import { blockedWith } from "../utils/blocks";
+import { ackedRoomIdsFor } from "./minorsRoom";
 
 export type RoomStatus = "scheduled" | "live" | "ended";
 export type MemberRole = "host" | "cohost" | "guest";
 
-export type CreateRoomInput = RoomInput & { screen?: Screen | null; inviteTokenHash?: string };
+/** minorsRoom is decided by the route from the host's age, never taken from client input. */
+export type CreateRoomInput = RoomInput & { screen?: Screen | null; inviteTokenHash?: string; minorsRoom?: boolean };
 
 export async function createRoom(hostId: string, input: CreateRoomInput): Promise<Room> {
   const [row] = await db.insert(rooms).values({
@@ -28,6 +30,7 @@ export async function createRoom(hostId: string, input: CreateRoomInput): Promis
     capacity: input.capacity ?? 50,
     screen: input.screen ?? null,
     inviteTokenHash: input.inviteTokenHash ?? null,
+    minorsRoom: input.minorsRoom === true,
   }).returning();
   return row;
 }
@@ -102,6 +105,8 @@ export interface ListRoomsOpts {
  *    (appearInLists=false) only followers of H see it.
  *  - friends: only mutual followers.
  *  - scope "friends": the above, restricted to mutual followers' rooms.
+ *  - minors' room (host was under 18 at creation): a viewer who is not a teen (adult or unknown age) sees it only with an
+ *    active, acknowledged personal invite, whatever else is true (an adult mutual friend of a teen host sees nothing).
  * Sorted live first (newest start), then upcoming (soonest first). The route may re-sort live rooms by member count.
  */
 export async function listRooms(opts: ListRoomsOpts): Promise<Room[]> {
@@ -110,11 +115,15 @@ export async function listRooms(opts: ListRoomsOpts): Promise<Room[]> {
   const linked = !!(opts.eventId || opts.venueId);
   const statuses: RoomStatus[] = linked || scope === "friends" ? ["live", "scheduled"] : scope === "live" ? ["live"] : ["scheduled"];
 
-  const [blocked, outgoing, incoming] = await Promise.all([
+  const [blocked, outgoing, incoming, viewerRow, acked] = await Promise.all([
     blockedWith(viewerId),
     db.select({ id: follows.followingId }).from(follows).where(eq(follows.followerId, viewerId)),
     db.select({ id: follows.followerId }).from(follows).where(eq(follows.followingId, viewerId)),
+    db.select({ dob: users.dateOfBirth }).from(users).where(eq(users.id, viewerId)).limit(1),
+    ackedRoomIdsFor(viewerId),
   ]);
+  const viewerAge = ageFromDob(viewerRow[0]?.dob);
+  const viewerIsTeen = viewerAge !== null && viewerAge < 18;
   const following = new Set(outgoing.map((r) => r.id));
   const followers = new Set(incoming.map((r) => r.id));
   const mutual = (id: string) => following.has(id) && followers.has(id);
@@ -146,6 +155,7 @@ export async function listRooms(opts: ListRoomsOpts): Promise<Room[]> {
     const host = room.hostId;
     if (host === viewerId) return scope !== "friends";
     if (blocked.has(host)) return false;
+    if (room.minorsRoom && !viewerIsTeen && !acked.has(room.id)) return false;
     if (scope === "friends" && !mutual(host)) return false;
     if (room.visibility === "friends") return mutual(host);
     if (room.visibility !== "public") return false;

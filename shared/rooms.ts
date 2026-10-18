@@ -13,6 +13,17 @@ export const ROOM_LIMITS = { capacityDefault: 50, capacityMax: 50, capacityMaxPa
 const MAX_SCHEDULE_DAYS = 90;
 const MAX_URL = 2048;
 
+// ---------------------------------------------------------------- minors' rooms
+/**
+ * A room whose host was under 18 when it was created. Adults (18 and over) need a personal invite from the host and must
+ * acknowledge this warning before they can enter. Single source of the wording: every denial path shows exactly this.
+ */
+export const MINORS_ROOM_WARNING =
+  "This room is for under 18s. Adults can only come in if the host has invited them. Any inappropriate behaviour or indecent act will lead to your account being suspended, an investigation being opened, and possible legal action.";
+/** MINORS_ROOM: an adult with no personal invite. MINORS_ROOM_ACK: invited, but the warning is not yet acknowledged. */
+export const MINORS_ROOM_CODES = ["MINORS_ROOM", "MINORS_ROOM_ACK"] as const;
+export type MinorsRoomCode = (typeof MINORS_ROOM_CODES)[number];
+
 // ---------------------------------------------------------------- privacy
 export const INTERACTION_MODES = ["everyone", "mutuals", "none"] as const;
 export type InteractionMode = (typeof INTERACTION_MODES)[number];

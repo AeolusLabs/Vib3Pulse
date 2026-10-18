@@ -28,6 +28,29 @@ export function canInteract(
   return OK;
 }
 
+/** A room created by a host of this age is a minors' room (17 and under). Unknown age cannot host at all. */
+export function isMinorsRoomHost(age: number | null): boolean {
+  return age !== null && age < 18;
+}
+
+/**
+ * The minors' room door: teens, and rooms that are not minors' rooms, are always ok. Adults need a personal invite AND to
+ * have acknowledged the warning. Unknown age is always refused here as a fail-safe (the server answers AGE_UNKNOWN first).
+ * The host is exempt; the server checks that before calling this.
+ */
+export function canAdultEnterMinorsRoom(
+  user: { age: number | null },
+  room: { minorsRoom: boolean },
+  invite: { invited: boolean; acknowledged: boolean },
+): Check<"MINORS_ROOM" | "MINORS_ROOM_ACK"> {
+  if (!room.minorsRoom) return OK;
+  if (user.age === null) return no("MINORS_ROOM"); // fail-safe: nobody of unknown age is ever let in, invite or not
+  if (user.age < 18) return OK;
+  if (!invite.invited) return no("MINORS_ROOM");
+  if (!invite.acknowledged) return no("MINORS_ROOM_ACK");
+  return OK;
+}
+
 export function canHostRoom(
   host: { age: number | null; accountAgeDays: number },
   input: { visibility: RoomVisibility; ageLimit: AgeLimit },

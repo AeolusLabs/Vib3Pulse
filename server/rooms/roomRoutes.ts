@@ -16,13 +16,14 @@ import { events, follows, users, venues, type Room, type User } from "@shared/sc
 import { ageFromDob, minAgeForLimit } from "@shared/age";
 import { resolveScreen } from "@shared/screen";
 import { ROOM_LIMITS, resolveRoomPrivacy, validateRoomInput, validateRoomPrivacy } from "@shared/rooms";
-import { canHostRoom, canJoinRoom } from "@shared/roomRules";
+import { canHostRoom, canJoinRoom, isMinorsRoomHost } from "@shared/roomRules";
 import * as rs from "./roomStorage";
-import { canViewRoom, hostSummary, mutualFollow, plainText, publicRoom, sha256 } from "./roomAccess";
+import { canViewRoom, hostSummary, mutualFollow, plainText, publicRoom, sha256, viewRoom } from "./roomAccess";
+import * as mr from "./minorsRoom";
 import { TokenBucket } from "./rateLimit";
 import { getVoiceService } from "./voice/voiceService";
 import { afterRoleChange, canCameraNow, canPublishNow, shutdownVoice, stopAllLive } from "./stage";
-import { applyMod, endRoom, enforceAgeLimit, expectHost, interactionVerdict, notifyScreen } from "./roomSocket";
+import { applyMod, endRoom, enforceAgeLimit, expectHost, interactionVerdict, notifyScreen, removeFromMinorsRoom } from "./roomSocket";
 import { roomHub } from "./RoomHub";
 import { roomFeatures } from "./features";
 
@@ -43,6 +44,7 @@ const peekOf = (roomId: string, n: number) =>
   roomHub.members(roomId, n).map((m) => ({ userId: m.userId, role: m.role, ...m.info }));
 
 const newInviteToken = () => crypto.randomBytes(24).toString("hex");
+const isTeen = (age: number | null) => age !== null && age < 18;
 
 export function isHost(room: Room, userId: string) {
   return room.hostId === userId;
@@ -63,6 +65,11 @@ async function notifyFollowers(room: Room, host: User): Promise<void> {
   if (!rows.length) return;
   const blocked = await blockedWith(host.id);
   let audience = rows.filter((r) => !blocked.has(r.id) && canJoinRoom({ age: ageFromDob(r.dob) }, room as any).ok);
+  if (room.minorsRoom) {
+    // A minors' room is only announced to teens, and to adults who already hold an acknowledged personal invite.
+    const acked = await mr.ackedInviteesOf(room.id);
+    audience = audience.filter((r) => isTeen(ageFromDob(r.dob)) || acked.has(r.id));
+  }
   if (room.visibility === "friends") {
     const back = new Set((await db.select({ id: follows.followingId }).from(follows).where(eq(follows.followerId, host.id))).map((r) => r.id));
     audience = audience.filter((r) => back.has(r.id));
@@ -132,6 +139,8 @@ export function registerRoomRoutes(app: Express): void {
         description: v.value.description ? plainText(v.value.description) : undefined,
         screen,
         inviteTokenHash: inviteToken ? sha256(inviteToken) : undefined,
+        // Decided here from the host's age today, never from the request body; never changes afterwards.
+        minorsRoom: isMinorsRoomHost(ageFromDob(host.dateOfBirth)),
       });
       // Not named "inviteToken": the global response redaction strips that key from every body on purpose.
       res.status(201).json({ room: { ...publicRoom(room), host: hostSummary(host) }, ...(inviteToken ? { inviteLink: `/rooms/${room.id}?token=${inviteToken}` } : {}) });
@@ -176,7 +185,13 @@ export function registerRoomRoutes(app: Express): void {
     try {
       const room = await rs.getRoom(req.params.id);
       const token = typeof req.query.token === "string" ? req.query.token : undefined;
-      if (!room || !(await canViewRoom(room, req.user!.id, token))) return res.status(404).json({ message: "Room not found" });
+      const view = room ? await viewRoom(room, req.user!.id, token) : ({ ok: false, code: "NOT_FOUND" } as const);
+      if (!room || (!view.ok && view.code === "NOT_FOUND")) return res.status(404).json({ message: "Room not found" });
+      // Minors' room, not let in: the reason and the warning only. No title, host, members or counts.
+      if (!view.ok && view.code === "AGE_UNKNOWN") {
+        return res.status(403).json({ code: "AGE_UNKNOWN", message: "Add your date of birth in your profile to join rooms.", canJoin: { ok: false, code: "AGE_UNKNOWN" } });
+      }
+      if (!view.ok) return res.status(403).json(mr.minorsDenialBody(view.code as "MINORS_ROOM" | "MINORS_ROOM_ACK"));
       const [viewer, host, member] = await Promise.all([storage.getUser(req.user!.id), storage.getUser(room.hostId), rs.getMember(room.id, req.user!.id)]);
       const gate = canJoinRoom({ age: ageFromDob(viewer?.dateOfBirth) }, room as any);
       const canJoin = member?.banned ? { ok: false, code: "BANNED" } : gate;
@@ -317,8 +332,10 @@ export function registerRoomRoutes(app: Express): void {
       if (!v.ok) return res.json({ actions: { interact: false, dm: true, invite: false } });
       const target = v.target;
       const mine = await liveRoomOf(req.user!.id);
+      // A minors' room is never offered to an adult this way: adults need the personal invite (and it says nothing of the room).
       const invite = !!mine && mine.id !== room.id && resolveRoomPrivacy(target.roomPrivacy).allowInvites
-        && canJoinRoom({ age: ageFromDob(target.dateOfBirth) }, mine as any).ok;
+        && canJoinRoom({ age: ageFromDob(target.dateOfBirth) }, mine as any).ok
+        && (!mine.minorsRoom || isTeen(ageFromDob(target.dateOfBirth)));
       res.json({ actions: { interact: true, dm: true, invite } });
     } catch (e) {
       console.error("[rooms] actions failed:", e);
@@ -339,6 +356,8 @@ export function registerRoomRoutes(app: Express): void {
       const v = await interactionVerdict({ noDirectInteractions: false }, host.id, targetId);
       if (!v.ok || !resolveRoomPrivacy(v.target.roomPrivacy).allowInvites) return refuse();
       if (!canJoinRoom({ age: ageFromDob(v.target.dateOfBirth) }, room as any).ok) return refuse();
+      // This invite names the room. Adults get into a minors' room only through the personal adult invite, which does not.
+      if (room.minorsRoom && !isTeen(ageFromDob(v.target.dateOfBirth))) return refuse();
       if (room.visibility === "friends" && !(await mutualFollow(host.id, targetId))) return refuse();
       const key = `${host.id}:${targetId}`;
       let b = inviteBuckets.get(key);
@@ -352,6 +371,117 @@ export function registerRoomRoutes(app: Express): void {
     } catch (e) {
       console.error("[rooms] invite failed:", e);
       res.status(500).json({ message: "Failed to send invite" });
+    }
+  });
+
+  // ------------------------------------------------------------ minors' rooms: personal adult invites
+  // A room whose host was under 18 at creation admits adults only with one of these, acknowledged by the adult. Never a link.
+  const adultInviteBuckets = new Map<string, TokenBucket>(); // per host: invites created or renewed
+  const adultNotifyBuckets = new Map<string, TokenBucket>(); // per host and adult: at most one notification a minute
+  const takeFrom = (m: Map<string, TokenBucket>, key: string, rate: number, burst: number) => {
+    let b = m.get(key);
+    if (!b) { if (m.size > 5000) m.clear(); b = new TokenBucket(rate, burst); m.set(key, b); }
+    return b.take();
+  };
+  const notFoundRoom = { ok: false, code: "NOT_FOUND" } as const;
+
+  // Registered before /adult-invites/:userId so "acknowledge" is never read as a user id.
+  app.post("/api/rooms/:id/adult-invites/acknowledge", requireAuth, roomLimiter, async (req, res) => {
+    try {
+      const uid = req.user!.id;
+      const room = await rs.getRoom(req.params.id);
+      const view = room ? await viewRoom(room, uid) : notFoundRoom;
+      if (!room || (!view.ok && view.code === "NOT_FOUND")) return res.status(404).json({ message: "Room not found" });
+      if (room.status === "ended") return res.status(409).json({ message: "This room has ended.", code: "ROOM_ENDED" });
+      if (view.ok) {
+        if (!room.minorsRoom || room.hostId === uid || !(await mr.getInviteState(room.id, uid)).invited) {
+          return res.status(409).json({ message: "Nothing to acknowledge.", code: "NOT_NEEDED" });
+        }
+        return res.json({ ok: true, acknowledged: true }); // already acknowledged: the first time is kept
+      }
+      if (view.code === "AGE_UNKNOWN") {
+        return res.status(403).json({ code: "AGE_UNKNOWN", message: "Add your date of birth in your profile to join rooms.", canJoin: { ok: false, code: "AGE_UNKNOWN" } });
+      }
+      if (view.code === "MINORS_ROOM") return res.status(403).json(mr.minorsDenialBody("MINORS_ROOM"));
+      // MINORS_ROOM_ACK: invited, not yet acknowledged. The request body is ignored: the act of calling is the acknowledgement.
+      const at = await mr.acknowledgeInvite(room.id, uid);
+      if (!at) return res.status(403).json(mr.minorsDenialBody("MINORS_ROOM")); // revoked in the meantime
+      res.json({ ok: true, acknowledged: true });
+    } catch (e) {
+      console.error("[rooms] adult invite acknowledge failed:", e);
+      res.status(500).json({ message: "Failed to save" });
+    }
+  });
+
+  app.get("/api/rooms/:id/adult-invites", requireAuth, async (req, res) => {
+    try {
+      const ctx = await loadHostRoom(req, res);
+      if (!ctx) return;
+      const rows = ctx.room.minorsRoom ? await mr.listActiveInvites(ctx.room.id) : [];
+      // Public profile bits only (hostSummary goes through toPublicUser); never an age or a birthdate.
+      res.json({ invites: rows.map((r) => ({ user: hostSummary(r.user), invitedAt: r.createdAt, acknowledged: r.acknowledgedAt !== null })) });
+    } catch (e) {
+      console.error("[rooms] adult invite list failed:", e);
+      res.status(500).json({ message: "Failed to load invites" });
+    }
+  });
+
+  app.post("/api/rooms/:id/adult-invites/:userId", requireAuth, roomLimiter, async (req, res) => {
+    try {
+      const ctx = await loadHostRoom(req, res);
+      if (!ctx) return;
+      const { room, host } = ctx;
+      if (!room.minorsRoom) return res.status(409).json({ message: "Only rooms for under 18s need adult invites.", code: "NOT_MINORS_ROOM" });
+      if (room.status === "ended") return res.status(409).json({ message: "This room has ended.", code: "ROOM_ENDED" });
+      const targetId = req.params.userId;
+      // One answer for every refusal: the host never learns whether the person is blocked, banned, suspended, a teen or unknown.
+      const refuse = () => res.status(403).json({ message: "You can't invite this person.", code: "NOT_ALLOWED" });
+      if (targetId === host.id || targetId.length > 64) return refuse();
+      const [target, blocked, member, suspended] = await Promise.all([
+        storage.getUser(targetId), isBlockedEitherWay(host.id, targetId), rs.getMember(room.id, targetId), storage.getActiveSuspension(targetId),
+      ]);
+      if (!target || target.deletedAt || blocked || member?.banned || suspended) return refuse();
+      const age = ageFromDob(target.dateOfBirth);
+      if (age === null || age < 18) return refuse(); // teens need no invite; unknown age enters nothing
+      if (!resolveRoomPrivacy(target.roomPrivacy).allowInvites) return refuse();
+      if (!canJoinRoom({ age }, room as any).ok) return refuse();
+      if (!takeFrom(adultInviteBuckets, host.id, 1 / 30, 10)) return res.status(429).json({ message: "Too many invites. Try again in a minute.", code: "RATE_LIMITED" });
+      const state = await mr.upsertInvite(room.id, targetId, host.id);
+      if (takeFrom(adultNotifyBuckets, `${host.id}:${targetId}`, 1 / 60, 1)) {
+        // Never the room title: until they have read and acknowledged the warning they may not see anything about the room.
+        await deliverNotification({
+          userId: targetId, type: "room_live", title: `${host.displayName || host.organizationName || host.username} invited you to a room`,
+          message: "Open it to read a safety notice before you join.", link: `/rooms/${room.id}`, relatedUserId: host.id, relatedEntityId: room.id,
+        }).catch((e) => console.error("[rooms] adult invite notify failed:", e));
+      }
+      res.json({ ok: true, invite: { userId: targetId, acknowledged: state.acknowledged } });
+    } catch (e) {
+      console.error("[rooms] adult invite failed:", e);
+      res.status(500).json({ message: "Failed to send invite" });
+    }
+  });
+
+  app.delete("/api/rooms/:id/adult-invites/:userId", requireAuth, roomLimiter, async (req, res) => {
+    try {
+      const ctx = await loadHostRoom(req, res);
+      if (!ctx) return;
+      const { room, host } = ctx;
+      const targetId = req.params.userId;
+      if (targetId === host.id || targetId.length > 64) return res.status(403).json({ message: "You can't do that to this person." });
+      const revoked = await mr.revokeInvite(room.id, targetId);
+      if (room.minorsRoom) {
+        const target = await storage.getUser(targetId);
+        if (!target || !isTeen(ageFromDob(target.dateOfBirth))) {
+          // The co-host role came with the invite: it goes with it, so a later re-invite does not bring it back.
+          const m = await rs.getMember(room.id, targetId);
+          if (m?.role === "cohost") await rs.setMemberRole(room.id, targetId, "guest");
+          await removeFromMinorsRoom(room.id, targetId); // waits for any join of theirs in flight, then removes them with the warning
+        }
+      }
+      res.json({ ok: true, revoked });
+    } catch (e) {
+      console.error("[rooms] adult invite revoke failed:", e);
+      res.status(500).json({ message: "Failed to revoke invite" });
     }
   });
 
@@ -422,6 +552,13 @@ export function registerRoomRoutes(app: Express): void {
       if (targetId === ctx.room.hostId) return res.status(400).json({ message: "The host's role can't be changed.", field: "role" });
       const m = await rs.getMember(ctx.room.id, targetId);
       if (!m || m.banned) return res.status(404).json({ message: "That person hasn't joined this room." });
+      if (role === "cohost" && ctx.room.minorsRoom) {
+        // An adult co-host in a minors' room needs the same acknowledged personal invite as any adult guest.
+        const [tu, inv] = await Promise.all([storage.getUser(targetId), mr.getInviteState(ctx.room.id, targetId)]);
+        if (!tu || !mr.minorsGate(ctx.room, targetId, ageFromDob(tu.dateOfBirth), inv).ok) {
+          return res.status(403).json({ message: "Adults need your personal invite first.", code: "NOT_ALLOWED" });
+        }
+      }
       await rs.setMemberRole(ctx.room.id, targetId, role);
       const live = roomHub.get(ctx.room.id, targetId);
       if (live) live.role = role;
