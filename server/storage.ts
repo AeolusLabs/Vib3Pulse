@@ -1553,6 +1553,8 @@ export class DbStorage implements IStorage {
       profilePhotoUrl: null,
       bio: null,
       dateOfBirth: null,
+      ageVerifiedAt: null,
+      ageVerifiedMethod: null,
       gender: null,
       phoneNumber: null,
       contactEmail: null,

@@ -19,6 +19,7 @@ const { redactSensitiveFields } = await import("../server/security");
 const { userToSessionUser } = await import("../server/auth");
 const { registerRoomRoutes } = await import("../server/rooms/roomRoutes");
 const { registerAgeVerificationAdminRoute } = await import("../server/admin-routes");
+const { registerUsersRoutes } = await import("../server/routes/users-routes");
 const { correctDateOfBirth } = await import("../server/services/dobCorrection");
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
@@ -44,10 +45,12 @@ app.use(async (req: any, _res, next) => {
   const adminId = req.header("x-test-admin");
   req.session = adminId ? { adminId, destroy: (cb: any) => cb?.() } : { destroy: (cb: any) => cb?.() };
   req.isAuthenticated = () => !!req.user;
+  req.login = (_u: unknown, cb: (e?: unknown) => void) => cb(); // real one regenerates the session; the response still waits for it
   next();
 });
 app.use(redactSensitiveFields);
 registerRoomRoutes(app);
+registerUsersRoutes(app);
 registerAgeVerificationAdminRoute(app);
 const server = app.listen(0);
 const base = `http://127.0.0.1:${(server.address() as any).port}`;
@@ -125,6 +128,49 @@ try {
   check("after the DOB is corrected the flag is cleared", cleared.json?.verified === false && cleared.json.band === null && cleared.json.method === null, JSON.stringify(cleared));
   const row = (await q(`select age_verified_at, age_verified_method from users where id=$1`, [user]))[0];
   check("both columns are null in the database", row.age_verified_at === null && row.age_verified_method === null, JSON.stringify(row));
+
+  // --- a user must never be able to pick the birthdate that sits behind a verification
+  const noDob = await mk("av_nodob", null);
+  const refuse = await http("POST", `/api/admin/users/${noDob}/age-verification`, { admin }, { verified: true });
+  check("admin cannot verify a user with no birthdate (409)", refuse.status === 409, JSON.stringify(refuse));
+  check("...and nothing was stored", (await q(`select age_verified_at from users where id=$1`, [noDob]))[0].age_verified_at === null);
+  const clearNoDob = await http("POST", `/api/admin/users/${noDob}/age-verification`, { admin }, { verified: false });
+  check("clearing (verified:false) on a no-birthdate user is still allowed", clearNoDob.status === 200, JSON.stringify(clearNoDob));
+
+  // Force the bad state directly (verified, no birthdate), then let the user set one through each path.
+  const forceVerified = (id: string) => q(`update users set age_verified_at=now(), age_verified_method='admin', date_of_birth=null where id=$1`, [id]);
+  const state = async (id: string) => (await q(`select age_verified_at, age_verified_method, date_of_birth from users where id=$1`, [id]))[0];
+
+  const viaEdit = await mk("av_edit", null); await forceVerified(viaEdit);
+  const e = await http("PATCH", "/api/users/me", { user: viaEdit }, { dateOfBirth: yearsAgo(30) });
+  const es = await state(viaEdit);
+  check("PATCH /api/users/me first-time DOB: saved and verification cleared", e.status === 200 && es.date_of_birth === yearsAgo(30) && es.age_verified_at === null && es.age_verified_method === null, JSON.stringify({ e, es }));
+
+  const viaComplete = await mk("av_cp", null); await forceVerified(viaComplete);
+  await q(`update users set onboarding_complete=false where id=$1`, [viaComplete]);
+  const c = await http("PATCH", "/api/auth/complete-profile", { user: viaComplete }, { userType: "social", displayName: "CP", dateOfBirth: yearsAgo(30), gender: "Male", interests: ["music"] });
+  const cs = await state(viaComplete);
+  check("PATCH /api/auth/complete-profile first-time DOB: saved and verification cleared", c.status === 200 && cs.date_of_birth === yearsAgo(30) && cs.age_verified_at === null && cs.age_verified_method === null, JSON.stringify({ c, cs }));
+
+  const locked = await mk("av_locked", yearsAgo(30));
+  await http("POST", `/api/admin/users/${locked}/age-verification`, { admin }, { verified: true });
+  await http("PATCH", "/api/users/me", { user: locked }, { dateOfBirth: yearsAgo(40), bio: "hi" });
+  check("an already-set (locked) birthdate edit is ignored and verification stays", (await state(locked)).age_verified_at !== null && (await state(locked)).date_of_birth === yearsAgo(30));
+
+  // --- other people never see the two columns
+  const pub = await http("GET", `/api/users/${locked}`, { user: other });
+  const keys = JSON.stringify(pub.json ?? {});
+  check("another user's view of a verified user has neither age-verification key", pub.status === 200 && !/ageVerified/.test(keys), keys.slice(0, 200));
+  const prof = await http("GET", `/api/users/${locked}/profile`, { user: other });
+  check("...nor the /profile view", !/ageVerified/.test(JSON.stringify(prof.json ?? {})), JSON.stringify(prof.json ?? {}).slice(0, 200));
+  const { toPublicUser } = await import("../server/auth");
+  const raw = await storage.getUser(locked);
+  check("toPublicUser omits both columns", !!raw && !("ageVerifiedAt" in toPublicUser(raw)) && !("ageVerifiedMethod" in toPublicUser(raw)));
+
+  // --- deleting the account clears them
+  await storage.softDeleteUser(locked);
+  const del = await state(locked);
+  check("softDeleteUser clears verification", del.age_verified_at === null && del.age_verified_method === null, JSON.stringify(del));
 } catch (e: any) {
   failed++; console.log(`FAIL uncaught: ${e.stack || e}`);
 } finally {

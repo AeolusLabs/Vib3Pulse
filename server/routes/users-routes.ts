@@ -91,7 +91,7 @@ const deleteAccountSchema = z.object({
  */
 function viewOfUser<T extends { id: string; dateOfBirth?: string | null }>(user: T, viewerId?: string) {
   if (viewerId && user.id === viewerId) return user;
-  const { dateOfBirth, email, phoneNumber, verifiedPhone, roomPrivacy, ...rest } = user as any;
+  const { dateOfBirth, email, phoneNumber, verifiedPhone, roomPrivacy, ageVerifiedAt, ageVerifiedMethod, ...rest } = user as any;
   return { ...rest, age: ageFromDob(dateOfBirth) } as Omit<T, "dateOfBirth"> & { age: number | null };
 }
 
@@ -387,7 +387,7 @@ export function registerUsersRoutes(app: Express): void {
       const updates: Record<string, unknown> = { userType: data.userType, onboardingComplete: true, bio: data.bio };
       if (data.userType === "social") {
         updates.displayName = sanitizeTextOnly(data.displayName);
-        if (!user.dateOfBirth) updates.dateOfBirth = data.dateOfBirth; // already set (e.g. through the profile edit)? it stays locked
+        if (!user.dateOfBirth) Object.assign(updates, { dateOfBirth: data.dateOfBirth, ageVerifiedAt: null, ageVerifiedMethod: null }); // a self-typed birthdate is never ID-verified; already set (e.g. through the profile edit)? it stays locked
         updates.gender = data.gender;
         updates.interests = data.interests;
       } else {
@@ -670,6 +670,7 @@ export function registerUsersRoutes(app: Express): void {
         const cur = await storage.getUser(userId);
         if (cur?.dateOfBirth) delete updates.dateOfBirth;
         else if (!minAgeOk(updates.dateOfBirth ?? "")) return res.status(400).json({ message: MIN_AGE_MESSAGE });
+        else { Object.assign(updates, { ageVerifiedAt: null, ageVerifiedMethod: null }); } // a self-typed birthdate is never ID-verified
       }
 
       // Nothing left to change (e.g. only an ignored avatar image url was sent): answer with the current profile.

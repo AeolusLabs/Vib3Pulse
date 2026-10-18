@@ -79,8 +79,9 @@ const SENSITIVE_USER_FIELDS = [
 
 // Hidden from every public user object (feeds, organiser blocks, admin lists) but, unlike the fields above,
 // NOT stripped by key name from all responses: safety buddies legitimately return a "phoneNumber" to their owner.
+// ageVerifiedAt/Method: the owner reads them from GET /api/users/me/age-verification.
 // roomPrivacy: another user's room settings are theirs; the owner reads them from GET /api/users/me/room-privacy.
-const PUBLIC_HIDDEN_USER_FIELDS = ["phoneNumber", "roomPrivacy"] as const;
+const PUBLIC_HIDDEN_USER_FIELDS = ["phoneNumber", "roomPrivacy", "ageVerifiedAt", "ageVerifiedMethod"] as const;
 
 export type PublicUser = Omit<User, typeof SENSITIVE_USER_FIELDS[number] | typeof PUBLIC_HIDDEN_USER_FIELDS[number]>;
 
@@ -94,6 +95,8 @@ export function toPublicUser(user: User): PublicUser {
     verifiedPhone,
     phoneNumber,
     roomPrivacy,
+    ageVerifiedAt,
+    ageVerifiedMethod,
     ...safe
   } = user;
   return safe;

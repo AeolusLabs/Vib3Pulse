@@ -59,6 +59,7 @@ export function registerAgeVerificationAdminRoute(app: Express) {
       const { ageVerifier } = await import("./identity/ageVerification");
       const user = await storage.getUser(req.params.id);
       if (!user) return res.status(404).json({ message: "User not found" });
+      if (verified && !user.dateOfBirth) return res.status(409).json({ message: "This user has no date of birth on file. Verification must vouch for a stored birthdate." });
       await storage.setAgeVerification(user.id, { verified, method: "admin" });
       await logActivity(req.session.adminId!, verified ? "user.age_verified" : "user.age_verification_cleared", "user", user.id,
         verified ? "Marked ID-verified by admin" : "Cleared ID verification", req.ip);
