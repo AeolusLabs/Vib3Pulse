@@ -1,3 +1,4 @@
+import { useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
@@ -5,7 +6,9 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Link2Icon, Loader2Icon, PlayIcon } from "@/components/ui/icons";
+import { Link2Icon, Loader2Icon, PlayIcon, UserPlusIcon } from "@/components/ui/icons";
+import AdultInviteSheet from "@/components/rooms/AdultInviteSheet";
+import { INVITE_SHEET_TITLE, showAdultInvite } from "@/lib/minorsRoomUi";
 import type { RoomView } from "@/lib/roomsApi";
 
 interface Props {
@@ -16,6 +19,8 @@ interface Props {
 
 export default function HostControls({ room, onChanged }: Props) {
   const { toast } = useToast();
+  const [adultsOpen, setAdultsOpen] = useState(false);
+  const adultsBtn = useRef<HTMLButtonElement>(null);
   const done = () => { queryClient.invalidateQueries({ queryKey: ["/api/rooms"] }); onChanged(); };
   const fail = (title: string) => (e: any) => toast({ title, description: e?.message, variant: "destructive" });
 
@@ -50,6 +55,9 @@ export default function HostControls({ room, onChanged }: Props) {
         ) : (
           <Button variant="outline" className="min-h-[44px]" onClick={() => copy(`${window.location.origin}/rooms/${room.id}`, "Room link")} data-testid="button-copy-room-link"><Link2Icon className="mr-2 h-4 w-4" />Copy room link</Button>
         )}
+        {showAdultInvite({ isHost: true, minorsRoom: room.minorsRoom }) && room.status !== "ended" && (
+          <Button ref={adultsBtn} variant="outline" className="min-h-[44px]" onClick={() => setAdultsOpen(true)} data-testid="button-invite-adult"><UserPlusIcon className="mr-2 h-4 w-4" aria-hidden />{INVITE_SHEET_TITLE}</Button>
+        )}
         {room.status !== "ended" && (
           <AlertDialog>
             <AlertDialogTrigger asChild><Button variant="destructive" className="min-h-[44px]" data-testid="button-end-room">{room.status === "live" ? "End room" : "Cancel room"}</Button></AlertDialogTrigger>
@@ -72,6 +80,7 @@ export default function HostControls({ room, onChanged }: Props) {
           <Switch id="host-direct" checked={!room.noDirectInteractions} disabled={direct.isPending} onCheckedChange={(v) => direct.mutate(v)} data-testid="switch-host-direct" />
         </div>
       )}
+      {room.minorsRoom === true && <AdultInviteSheet open={adultsOpen} onOpenChange={setAdultsOpen} roomId={room.id} returnFocusTo={() => adultsBtn.current} />}
     </section>
   );
 }
