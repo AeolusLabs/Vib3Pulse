@@ -1,6 +1,7 @@
 // Pure money math. All amounts are integer kobo. Formulas: spec section 5.
-// Note: the owner's 500 naira minimum real charge is enforced at the charge boundary (phase 5),
-// not here. The n20 and n50 tiers sit below it on purpose; breakdown() does not check a minimum.
+// Note: the owner's 500 naira minimum real charge (50,000 kobo) is enforced at the charge boundary (phase 5),
+// not here. The n20 (2,000), n50 (5,000) and n100 (10,000 kobo) tiers sit below it on purpose; only bundle,
+// bag and rain meet it. breakdown() does not check a minimum.
 
 export const UNIT_LABEL = "V3C";
 

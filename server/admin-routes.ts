@@ -55,17 +55,27 @@ async function logActivity(adminId: string, action: string, targetType?: string,
 export function registerAgeVerificationAdminRoute(app: Express) {
   app.post("/api/admin/users/:id/age-verification", requireRole("super_admin", "admin", "user_support"), async (req: Request, res: Response) => {
     try {
-      const { verified } = z.object({ verified: z.boolean() }).parse(req.body);
+      const { verified, reason } = z.object({ verified: z.boolean(), reason: z.string().trim().min(3).max(300) }).parse(req.body);
       const { ageVerifier } = await import("./identity/ageVerification");
       const user = await storage.getUser(req.params.id);
       if (!user) return res.status(404).json({ message: "User not found" });
       if (verified && !user.dateOfBirth) return res.status(409).json({ message: "This user has no date of birth on file. Verification must vouch for a stored birthdate." });
+      const prev = await ageVerifier.status(user.id);
       await storage.setAgeVerification(user.id, { verified, method: "admin" });
-      await logActivity(req.session.adminId!, verified ? "user.age_verified" : "user.age_verification_cleared", "user", user.id,
-        verified ? "Marked ID-verified by admin" : "Cleared ID verification", req.ip);
+      const prevText = prev.verified ? `verified (${prev.method ?? "unknown"})` : "not verified";
+      const newText = verified ? "verified (admin)" : "not verified";
+      await storage.logAdminActivity({
+        adminId: req.session.adminId!,
+        action: verified ? "user.age_verified" : "user.age_verification_cleared",
+        targetType: "user",
+        targetId: user.id,
+        details: `${verified ? "Marked ID-verified by admin" : "Cleared ID verification"}: ${prevText} -> ${newText}. Reason: ${reason}`,
+        reason,
+        ipAddress: req.ip,
+      }).catch((error) => console.error("Failed to log admin activity:", error));
       res.json(await ageVerifier.status(user.id));
     } catch (error) {
-      if (error instanceof z.ZodError) return res.status(400).json({ message: "verified (true or false) is required" });
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "verified (true or false) and a reason (3 to 300 characters) are required" });
       res.status(500).json({ message: "Failed to update age verification" });
     }
   });

@@ -92,22 +92,22 @@ try {
   const before = await http("GET", "/api/users/me/age-verification", { user });
   check("GET before verification: verified false, band null", before.status === 200 && JSON.stringify(before.json) === JSON.stringify({ verified: false, band: null, at: null, method: null }), JSON.stringify(before));
 
-  const self = await http("POST", `/api/admin/users/${user}/age-verification`, { user }, { verified: true });
+  const self = await http("POST", `/api/admin/users/${user}/age-verification`, { user }, { verified: true, reason: "test reason" });
   check("a normal user cannot set it on themself (401/403)", self.status === 401 || self.status === 403, JSON.stringify(self));
-  const selfAdminHeader = await http("POST", `/api/admin/users/${user}/age-verification`, { user, admin: user }, { verified: true });
+  const selfAdminHeader = await http("POST", `/api/admin/users/${user}/age-verification`, { user, admin: user }, { verified: true, reason: "test reason" });
   check("a normal user id presented as an admin id is refused (no admin row)", selfAdminHeader.status === 401 || selfAdminHeader.status === 403, JSON.stringify(selfAdminHeader));
-  const noAuth = await http("POST", `/api/admin/users/${user}/age-verification`, {}, { verified: true });
+  const noAuth = await http("POST", `/api/admin/users/${user}/age-verification`, {}, { verified: true, reason: "test reason" });
   check("unauthenticated POST is 401", noAuth.status === 401, JSON.stringify(noAuth));
-  const wrongRole = await http("POST", `/api/admin/users/${user}/age-verification`, { admin: moderator }, { verified: true });
+  const wrongRole = await http("POST", `/api/admin/users/${user}/age-verification`, { admin: moderator }, { verified: true, reason: "test reason" });
   check("an admin without a permitted role gets 403", wrongRole.status === 403, JSON.stringify(wrongRole));
   check("none of those refusals changed anything", (await q(`select age_verified_at from users where id=$1`, [user]))[0].age_verified_at === null);
 
-  const bad = await http("POST", `/api/admin/users/${user}/age-verification`, { admin }, { verified: "yes" });
+  const bad = await http("POST", `/api/admin/users/${user}/age-verification`, { admin }, { verified: "yes", reason: "test reason" });
   check("non-boolean body is 400", bad.status === 400, JSON.stringify(bad));
-  const missing = await http("POST", `/api/admin/users/00000000-0000-0000-0000-000000000000/age-verification`, { admin }, { verified: true });
+  const missing = await http("POST", `/api/admin/users/00000000-0000-0000-0000-000000000000/age-verification`, { admin }, { verified: true, reason: "test reason" });
   check("unknown user is 404", missing.status === 404, JSON.stringify(missing));
 
-  const set = await http("POST", `/api/admin/users/${user}/age-verification`, { admin }, { verified: true });
+  const set = await http("POST", `/api/admin/users/${user}/age-verification`, { admin }, { verified: true, reason: "test reason" });
   check("admin sets it: 200 with the AgeVerification shape", set.status === 200 && set.json?.verified === true && set.json.band === "adult" && set.json.method === "admin" && typeof set.json.at === "string", JSON.stringify(set));
   const after = await http("GET", "/api/users/me/age-verification", { user });
   check("user GET now returns verified true, band adult", after.status === 200 && after.json?.verified === true && after.json.band === "adult" && after.json.method === "admin", JSON.stringify(after));
@@ -115,10 +115,16 @@ try {
   const otherView = await http("GET", "/api/users/me/age-verification", { user: other });
   check("another user is unaffected", otherView.json?.verified === false, JSON.stringify(otherView));
   check("audit log written for the admin", (await q(`select 1 from admin_activity_logs where admin_id=$1 and action='user.age_verified' and target_id=$2`, [admin, user])).length === 1);
+  const au = (await q(`select reason, details from admin_activity_logs where admin_id=$1 and action='user.age_verified' and target_id=$2`, [admin, user]))[0];
+  check("audit entry has the reason and previous -> new state", au?.reason === "test reason" && /not verified -> verified \(admin\)/.test(au.details) && au.details.includes("test reason"), JSON.stringify(au));
+  for (const [label, body] of [["missing", { verified: true }], ["empty", { verified: true, reason: "" }], ["too short", { verified: true, reason: "ab" }], ["too long", { verified: true, reason: "x".repeat(301) }], ["whitespace", { verified: true, reason: "    " }]] as const) {
+    const r = await http("POST", `/api/admin/users/${other}/age-verification`, { admin }, body);
+    check(`reason ${label}: 400 and nothing changed`, r.status === 400 && (await q(`select age_verified_at from users where id=$1`, [other]))[0].age_verified_at === null, JSON.stringify(r));
+  }
 
-  const supportClear = await http("POST", `/api/admin/users/${user}/age-verification`, { admin: support }, { verified: false });
+  const supportClear = await http("POST", `/api/admin/users/${user}/age-verification`, { admin: support }, { verified: false, reason: "test reason" });
   check("user_support can clear it", supportClear.status === 200 && supportClear.json?.verified === false, JSON.stringify(supportClear));
-  await http("POST", `/api/admin/users/${user}/age-verification`, { admin: support }, { verified: true });
+  await http("POST", `/api/admin/users/${user}/age-verification`, { admin: support }, { verified: true, reason: "test reason" });
   check("user_support can set it again", (await http("GET", "/api/users/me/age-verification", { user })).json?.verified === true);
 
   // DOB correction clears it (the service behind PUT /api/admin/users/:id/date-of-birth)
@@ -131,10 +137,10 @@ try {
 
   // --- a user must never be able to pick the birthdate that sits behind a verification
   const noDob = await mk("av_nodob", null);
-  const refuse = await http("POST", `/api/admin/users/${noDob}/age-verification`, { admin }, { verified: true });
+  const refuse = await http("POST", `/api/admin/users/${noDob}/age-verification`, { admin }, { verified: true, reason: "test reason" });
   check("admin cannot verify a user with no birthdate (409)", refuse.status === 409, JSON.stringify(refuse));
   check("...and nothing was stored", (await q(`select age_verified_at from users where id=$1`, [noDob]))[0].age_verified_at === null);
-  const clearNoDob = await http("POST", `/api/admin/users/${noDob}/age-verification`, { admin }, { verified: false });
+  const clearNoDob = await http("POST", `/api/admin/users/${noDob}/age-verification`, { admin }, { verified: false, reason: "test reason" });
   check("clearing (verified:false) on a no-birthdate user is still allowed", clearNoDob.status === 200, JSON.stringify(clearNoDob));
 
   // Force the bad state directly (verified, no birthdate), then let the user set one through each path.
@@ -153,7 +159,7 @@ try {
   check("PATCH /api/auth/complete-profile first-time DOB: saved and verification cleared", c.status === 200 && cs.date_of_birth === yearsAgo(30) && cs.age_verified_at === null && cs.age_verified_method === null, JSON.stringify({ c, cs }));
 
   const locked = await mk("av_locked", yearsAgo(30));
-  await http("POST", `/api/admin/users/${locked}/age-verification`, { admin }, { verified: true });
+  await http("POST", `/api/admin/users/${locked}/age-verification`, { admin }, { verified: true, reason: "test reason" });
   await http("PATCH", "/api/users/me", { user: locked }, { dateOfBirth: yearsAgo(40), bio: "hi" });
   check("an already-set (locked) birthdate edit is ignored and verification stays", (await state(locked)).age_verified_at !== null && (await state(locked)).date_of_birth === yearsAgo(30));
 
