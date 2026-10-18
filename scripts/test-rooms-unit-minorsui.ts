@@ -33,7 +33,7 @@ test("a 403 keeps only the code of a minors' room refusal, nothing else from the
   assert.deepEqual(parseRoomDenial(403, { code: "MINORS_ROOM_ACK" }), { minorsDenied: "MINORS_ROOM_ACK" });
 });
 test("other answers are not minors denials", () => {
-  assert.equal(parseRoomDenial(403, { code: "AGE_UNKNOWN" }), null);
+  assert.equal(isMinorsDenied(parseRoomDenial(403, { code: "AGE_UNKNOWN" })), false); // age-unknown is its own plain denial, never the warning
   assert.equal(parseRoomDenial(404, { code: "MINORS_ROOM" }), null);
   assert.equal(parseRoomDenial(200, { code: "MINORS_ROOM" }), null);
   assert.equal(parseRoomDenial(403, null), null);
