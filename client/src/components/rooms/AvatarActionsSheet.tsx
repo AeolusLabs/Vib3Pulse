@@ -6,6 +6,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import HostAvatar from "@/components/rooms/HostAvatar";
+import ProfilePeekSheet from "@/components/rooms/ProfilePeekSheet";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { ROOM_REACTIONS } from "@shared/rooms";
@@ -31,6 +32,8 @@ interface Props {
   voiceOn?: boolean;
   stage?: string[];
   onStage?: (action: "accept" | "remove", targetId: string) => void;
+  /** Whether the "View profile" row shows. True for everyone in this phase; anonymous guests will be false later. */
+  canViewProfile?: boolean;
 }
 
 const REPORT_REASONS = ["Harassment or abuse", "Hate", "Sexual content", "Spam", "Seems underage", "Something else"];
@@ -40,8 +43,9 @@ const nameOf = (m: RoomMemberView) => m.displayName || m.organizationName || m.u
  * What you can do to someone in the room. The list of social actions comes from the server (it knows ages, follows and
  * privacy settings; the client doesn't and shouldn't), and the server re-checks every action again when it is used.
  */
-export default function AvatarActionsSheet({ open, onOpenChange, roomId, target, you, myRoomId, onInteract, onMod, locallyMuted, onToggleLocalMute, voiceOn, stage = [], onStage }: Props) {
+export default function AvatarActionsSheet({ open, onOpenChange, roomId, target, you, myRoomId, onInteract, onMod, locallyMuted, onToggleLocalMute, voiceOn, stage = [], onStage, canViewProfile = true }: Props) {
   const { toast } = useToast();
+  const [peeking, setPeeking] = useState(false);
   const [picking, setPicking] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [reason, setReason] = useState(REPORT_REASONS[0]);
@@ -61,7 +65,7 @@ export default function AvatarActionsSheet({ open, onOpenChange, roomId, target,
   });
   const a = actions?.actions;
 
-  const close = () => { setPicking(false); setReporting(false); onOpenChange(false); };
+  const close = () => { setPeeking(false); setPicking(false); setReporting(false); onOpenChange(false); };
 
   const dm = useDirectMessage();
   const message = useMutation({
@@ -96,7 +100,7 @@ export default function AvatarActionsSheet({ open, onOpenChange, roomId, target,
   return (
     <>
       {dm.dialog}
-      <Sheet open={open} onOpenChange={(o) => { if (!o) close(); else onOpenChange(true); }}>
+      <Sheet open={open && !peeking} onOpenChange={(o) => { if (!o) close(); else onOpenChange(true); }}>
         <SheetContent side="bottom" className="max-h-[85vh] overflow-y-auto rounded-t-2xl" data-testid="avatar-actions-sheet">
           <SheetHeader className="flex-row items-center gap-3 space-y-0 text-left">
             <HostAvatar person={target} className="h-14 w-14" />
@@ -107,8 +111,8 @@ export default function AvatarActionsSheet({ open, onOpenChange, roomId, target,
           </SheetHeader>
 
           <div className="mt-3 space-y-1">
-            {target.username && (
-              <Button asChild variant="ghost" className={rowCls}><a href={`/profile/${target.username}`} target="_blank" rel="noopener noreferrer" data-testid="action-profile"><UserIcon className="h-4 w-4" />View profile (new tab)</a></Button>
+            {canViewProfile && (
+              <Button variant="ghost" className={rowCls} onClick={() => setPeeking(true)} data-testid="action-profile"><UserIcon className="h-4 w-4" />{self ? "View my profile" : "View profile"}</Button>
             )}
 
             {!self && a?.interact && (
@@ -158,6 +162,8 @@ export default function AvatarActionsSheet({ open, onOpenChange, roomId, target,
           </div>
         </SheetContent>
       </Sheet>
+
+      <ProfilePeekSheet open={peeking} onOpenChange={setPeeking} member={target} canViewProfile={canViewProfile} />
 
       <AlertDialog open={confirm !== null} onOpenChange={(o) => { if (!o) setConfirm(null); }}>
         <AlertDialogContent>
