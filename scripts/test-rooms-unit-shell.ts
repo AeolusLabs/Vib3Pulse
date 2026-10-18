@@ -1,7 +1,7 @@
 // Rooms shell unit checks (no database, no DOM):   npx tsx scripts/test-rooms-unit-shell.ts   (or npm run test:rooms)
 import assert from "node:assert/strict";
 import { RAIL_MIN_WIDTH, defaultVideoView, layoutFor } from "../client/src/lib/roomLayout";
-import { DOCK_REACTIONS, UNLOCK_FAILED, camLockReason, unlockStep, frameSlots, isImeEnter, micTapAction, orderPeople, reportErrorToast, roomSafetyRules, shareRoomUrl } from "../client/src/lib/roomShell";
+import { DOCK_REACTIONS, UNLOCK_FAILED, UNLOCK_TIMEOUT_MS, camLockReason, unlockStep, unlockWaitMs, type UnlockPending, frameSlots, isImeEnter, micTapAction, orderPeople, reportErrorToast, roomSafetyRules, shareRoomUrl } from "../client/src/lib/roomShell";
 import { ROOM_REACTIONS } from "../shared/rooms";
 
 let passed = 0, failed = 0;
@@ -140,27 +140,67 @@ test("report: a repeat report gets a friendly line, anything else keeps the serv
 
 // ---------------------------------------------------------------- fix round 2: the unlock tap reports its real outcome
 // voice.unlock() resolves even when connecting failed, so the page follows the voice status after the tap instead.
+const P = (start: string, o: Partial<UnlockPending> = {}): UnlockPending => ({ start, seen: false, at: 1_000, raise: false, ...o });
 test("unlock: success only once audio is actually up; the hand goes up only then", () => {
-  let p = { start: "needs-tap", seen: false };
-  let r = unlockStep(p, "needs-tap"); assert.equal(r.outcome, "pending"); p = r.pending!;
-  r = unlockStep(p, "connecting"); assert.equal(r.outcome, "pending"); assert.equal(r.pending!.seen, true); p = r.pending!;
-  r = unlockStep(p, "listening"); assert.equal(r.outcome, "ok"); assert.equal(r.pending, null);
-  assert.equal(unlockStep({ start: "needs-tap", seen: false }, "speaking").outcome, "ok");
+  let p = P("needs-tap");
+  let r = unlockStep(p, "needs-tap", 1_000); assert.equal(r.outcome, "pending"); p = r.pending!;
+  r = unlockStep(p, "connecting", 1_100); assert.equal(r.outcome, "pending"); assert.equal(r.pending!.seen, true); p = r.pending!;
+  r = unlockStep(p, "listening", 1_200); assert.equal(r.outcome, "ok"); assert.equal(r.pending, null);
+  assert.equal(unlockStep(P("needs-tap"), "speaking", 1_000).outcome, "ok");
 });
 test("unlock: a failed connect is a failure, never 'Room audio on'", () => {
-  let r = unlockStep({ start: "needs-tap", seen: false }, "connecting");
-  r = unlockStep(r.pending!, "error");
+  let r = unlockStep(P("needs-tap"), "connecting", 1_000);
+  r = unlockStep(r.pending!, "error", 1_000);
   assert.equal(r.outcome, "failed"); assert.equal(r.pending, null);
   assert.match(UNLOCK_FAILED, /couldn't connect/); assert.match(UNLOCK_FAILED, /Tap the mic to try again/);
 });
 test("unlock: retrying from an error ignores the stale error until the status moves", () => {
-  const p = { start: "error", seen: false };
-  assert.equal(unlockStep(p, "error").outcome, "pending"); // same render as the tap: connect() hasn't run yet
-  assert.equal(unlockStep(unlockStep(p, "connecting").pending!, "error").outcome, "failed");
-  assert.equal(unlockStep(unlockStep(p, "connecting").pending!, "listening").outcome, "ok");
+  const p = P("error");
+  assert.equal(unlockStep(p, "error", 1_000).outcome, "pending"); // same render as the tap: connect() hasn't run yet
+  assert.equal(unlockStep(unlockStep(p, "connecting", 1_000).pending!, "error", 1_000).outcome, "failed");
+  assert.equal(unlockStep(unlockStep(p, "connecting", 1_000).pending!, "listening", 1_000).outcome, "ok");
 });
 test("unlock: voice switched off while connecting is a failure", () => {
-  assert.equal(unlockStep({ start: "needs-tap", seen: false }, "off").outcome, "failed");
+  assert.equal(unlockStep(P("needs-tap"), "off", 1_000).outcome, "failed");
+});
+// Round 3: the page's effect depends on the pending object, so a fresh object for an unchanged state looped forever.
+test("unlock: nothing changed returns the very same pending object (identity)", () => {
+  const seen = P("needs-tap", { seen: true });
+  assert.equal(unlockStep(seen, "connecting", 2_000).pending, seen);
+  const unseen = P("needs-tap");
+  assert.equal(unlockStep(unseen, "needs-tap", 2_000).pending, unseen);
+});
+test("unlock: the returned pending is a fixed point for every non-terminal status", () => {
+  for (const status of ["needs-tap", "connecting", "idle", "reconnecting"]) {
+    for (const start of ["needs-tap", "error", "connecting"]) {
+      const r1 = unlockStep(P(start), status, 2_000);
+      assert.equal(r1.outcome, "pending", `${start} -> ${status}`);
+      const r2 = unlockStep(r1.pending!, status, 2_000);
+      assert.equal(r2.pending, r1.pending, `${start} -> ${status} is not a fixed point`);
+    }
+  }
+});
+test("unlock: the page's effect settles after at most one state change while connecting", () => {
+  // Same rule as RoomPage: setState only when the returned pending is a different object; every setState re-runs the effect.
+  let p: UnlockPending | null = P("needs-tap");
+  let changes = 0;
+  for (let run = 0; run < 50 && p; run++) {
+    const r = unlockStep(p, "connecting", 2_000);
+    if (r.outcome !== "pending" || r.pending === p) break; // no setState, no re-render: the effect stops
+    changes++; p = r.pending;
+  }
+  assert.ok(changes <= 1, `effect changed state ${changes} times`);
+});
+test("unlock: a status that never settles ends the wait with the failure after 15 s", () => {
+  assert.equal(UNLOCK_TIMEOUT_MS, 15_000);
+  const p = P("needs-tap", { seen: true, at: 10_000 });
+  assert.equal(unlockStep(p, "connecting", 10_000 + 14_999).outcome, "pending");
+  const r = unlockStep(p, "connecting", 10_000 + 15_000);
+  assert.equal(r.outcome, "failed"); assert.equal(r.pending, null);
+  assert.equal(unlockStep(P("needs-tap", { at: 0 }), "needs-tap", 15_000).outcome, "failed"); // never even started
+  assert.equal(unlockStep(p, "listening", 99_999).outcome, "ok"); // up always wins
+  assert.equal(unlockWaitMs(p, 12_000), 13_000);
+  assert.equal(unlockWaitMs(p, 30_000), 0);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

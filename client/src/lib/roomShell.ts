@@ -125,16 +125,38 @@ export function reportErrorToast(message: string | undefined): { title: string; 
 /** What the page says when the unlock tap didn't get the room's audio going. */
 export const UNLOCK_FAILED = "Audio couldn't connect. Tap the mic to try again.";
 
-export interface UnlockPending { /** Voice status when the tap happened. */ start: string; /** The status has moved since the tap. */ seen: boolean }
+/** How long a tap waits for room audio to come up before it says it failed. */
+export const UNLOCK_TIMEOUT_MS = 15_000;
+
+export interface UnlockPending {
+  /** Voice status when the tap happened. */
+  start: string;
+  /** The status has moved since the tap. */
+  seen: boolean;
+  /** When the tap happened (ms, same clock as `now`). */
+  at: number;
+  /** Raise the guest's hand once audio is on. */
+  raise: boolean;
+}
 
 /**
  * Follow an unlock tap to its real outcome. `voice.unlock()` resolves even when connecting failed (the hook catches its own
- * errors), so the page feeds every new voice status here instead of trusting the promise. A status equal to the one at tap
- * time is ignored until it has moved once (retrying from "error" starts at "error"). Up is success; error or off is failure.
+ * errors), so the page feeds every new voice status here instead of trusting the promise.
+ * - Up (listening, speaking) is success, always.
+ * - A status equal to the one at tap time is ignored until it has moved once (retrying from "error" starts at "error").
+ * - Error or off is failure; so is still waiting after UNLOCK_TIMEOUT_MS.
+ * - Otherwise still pending. When nothing changed it returns the SAME `p` object: the page re-runs its effect on every new
+ *   pending object, so a fresh copy for an unchanged state would loop forever.
  */
-export function unlockStep(p: UnlockPending, status: string): { outcome: "pending" | "ok" | "failed"; pending: UnlockPending | null } {
+export function unlockStep(p: UnlockPending, status: string, now: number): { outcome: "pending" | "ok" | "failed"; pending: UnlockPending | null } {
   if (status === "listening" || status === "speaking") return { outcome: "ok", pending: null };
+  if (now - p.at >= UNLOCK_TIMEOUT_MS) return { outcome: "failed", pending: null };
   if (!p.seen && status === p.start) return { outcome: "pending", pending: p };
   if (status === "error" || status === "off") return { outcome: "failed", pending: null };
-  return { outcome: "pending", pending: { ...p, seen: true } };
+  return { outcome: "pending", pending: p.seen ? p : { ...p, seen: true } };
+}
+
+/** Milliseconds left before a pending unlock times out (0 when it already has). The page sets one timer for this. */
+export function unlockWaitMs(p: UnlockPending, now: number): number {
+  return Math.max(0, p.at + UNLOCK_TIMEOUT_MS - now);
 }
