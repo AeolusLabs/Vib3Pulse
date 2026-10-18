@@ -269,6 +269,20 @@ try {
   const later = await http("POST", "/api/rooms", T, { title: "now adult", kind: "party", visibility: "friends" });
   check("...and their next new room is a normal room", later.status === 201 && later.json?.room?.minorsRoom === false, JSON.stringify(later.json));
 
+  // ---- an admin birthdate correction that makes a guest an adult takes them out of the minors' room
+  const { correctDateOfBirth } = await import("../server/services/dobCorrection");
+  const admin = (await q(`insert into admin_users (username, email, password_hash, display_name, role) values ($1,$2,$3,'A','super_admin') returning id`,
+    [`mrA_adm${stamp}`, `mrA_adm${stamp}@t.dev`, hash]))[0].id as string;
+  const T3 = await mk("teen3", yearsAgo(16));
+  const gotT3: any[] = [];
+  roomHub.join(R, { userId: T3, role: "guest", muted: false, joinedAt: Date.now(), send: (m) => gotT3.push(m) });
+  const fix = await correctDateOfBirth({ adminId: admin, userId: T3, dateOfBirth: yearsAgo(25), reason: "test correction" });
+  check("DOB correction to an adult: the person is taken out of the minors' room, with the warning", fix.ok && !roomHub.get(R, T3) && gotT3.some((m) => m.type === "room:error" && m.code === "MINORS_ROOM" && m.warning === MINORS_ROOM_WARNING), JSON.stringify({ fix: fix.ok, gotT3 }));
+  const T4 = await mk("teen4", yearsAgo(15));
+  roomHub.join(R, { userId: T4, role: "guest", muted: false, joinedAt: Date.now(), send: () => {} });
+  await correctDateOfBirth({ adminId: admin, userId: T4, dateOfBirth: yearsAgo(16), reason: "test correction" });
+  check("...a correction that keeps them a teen leaves them in", !!roomHub.get(R, T4));
+
   check("no response in this file leaked the warning to a teen", t2Get.text.indexOf("legal action") === -1 && t2Tok.text.indexOf("legal action") === -1);
 } catch (e: any) {
   failed++; console.log(`FAIL uncaught: ${e.stack || e}`);
