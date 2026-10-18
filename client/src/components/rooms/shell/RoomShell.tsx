@@ -33,6 +33,7 @@ import { layoutFor, type VideoView } from "@/lib/roomLayout";
 import { TRAY_EMOJIS, camLockReason, micTapAction, shareRoomUrl } from "@/lib/roomShell";
 import { qualityLabel, railAction } from "@/lib/videoViewState";
 import { authorPick, replyFromItem, returnFocusTestId, shellImmersive, statusLine, stripNotice, topBarSubtitle, videoIsLive } from "@/lib/roomIntegration";
+import { ADULT_LISTEN_LINE } from "@/lib/minorsRoomUi";
 import { KIND_LABEL, LINK_SCREENS, NOTICE_MESSAGE, VISIBILITY_LABEL, ageLimitLabel, hostName, type RoomHostSummary, type RoomView } from "@/lib/roomsApi";
 import type { ChatReply } from "@shared/rooms";
 import { LIVE_HOLD_MS } from "@shared/liveScreen";
@@ -65,6 +66,8 @@ export interface RoomShellProps {
   onLeave(): void;
   /** The last refetch of the room details failed. The room carries on with the details it has; a small line says so. */
   detailsError?: boolean;
+  /** An adult in a room for under 18s: they listen and chat. No mic, hand, or camera offers, and a short line says why. */
+  listenOnly?: boolean;
   /** Dev fixture only: open in this video view instead of the width's default. */
   startView?: VideoView;
 }
@@ -86,7 +89,7 @@ const byTestId = (id: string | null) => (id ? document.querySelector<HTMLElement
  * immersive). Crossing 1024 px or switching views only changes classes, so the picture, the camera choice, the composer
  * draft and the chat scroll survive. People are always addressed by RoomMemberView.userId, never by username.
  */
-export default function RoomShell({ id, token, room, host, fallbackCount, isHost, role, meId, state, sock, voice, myRoomId, nav, hostControls, onLeave, startView, detailsError = false }: RoomShellProps) {
+export default function RoomShell({ id, token, room, host, fallbackCount, isHost, role, meId, state, sock, voice, myRoomId, nav, hostControls, onLeave, startView, detailsError = false, listenOnly = false }: RoomShellProps) {
   const { toast } = useToast();
 
   const [hidden, setHidden] = useState<Set<string>>(new Set()); // people the viewer muted for themselves
@@ -216,7 +219,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
   const isCoHostOrHost = role === "host" || role === "cohost";
   const onStageNow = role !== "guest" || (!!meId && state.stage.includes(meId));
   const isHolder = iAmHolder;
-  const canAskLive = state.liveVideo && onStageNow && !isHolder && state.phase === "live";
+  const canAskLive = !listenOnly && state.liveVideo && onStageNow && !isHolder && state.phase === "live";
   const asked = !!meId && state.asks.includes(meId);
   const askLabel = isCoHostOrHost ? "Go live" : "Ask to go live";
   const ageLabel = ageLimitLabel(room.ageLimit);
@@ -251,6 +254,9 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
             </div>
           </div>
         )}
+        {listenOnly && (
+          <p role="status" className="rounded-xl border bg-muted px-3 py-2 text-sm text-muted-foreground" data-testid="banner-listen-only">{ADULT_LISTEN_LINE}</p>
+        )}
         {state.phase === "reconnecting" && (
           <div role="status" className="flex items-center gap-2 rounded-xl border bg-muted px-3 py-2 text-sm text-foreground" data-testid="banner-reconnecting">
             <AlertTriangleIcon className="h-4 w-4 shrink-0" aria-hidden /> Reconnecting… the room will pick up where you left off.
@@ -260,7 +266,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
           <p role="status" className="rounded-xl border bg-muted px-3 py-2 text-sm text-muted-foreground" data-testid="banner-details-error">Couldn't refresh the room details. You're still in the room.</p>
         )}
         {/* The dock owns the mic otherwise; this only shows while audio needs a tap, is connecting, failed, or the mic errored. */}
-        {voiceNeedsAttention && <VoiceBar voice={voice} hasHand={!!meId && state.hands.includes(meId)} canAskToSpeak={role === "guest"} onRaise={() => sock.stageAction("raise")} onLower={() => sock.stageAction("lower")} />}
+        {voiceNeedsAttention && <VoiceBar voice={voice} hasHand={!!meId && state.hands.includes(meId)} canAskToSpeak={role === "guest" && !listenOnly} onRaise={() => sock.stageAction("raise")} onLower={() => sock.stageAction("lower")} />}
       </div>
       {LINK_SCREENS && (
         <RoomScreen
@@ -316,17 +322,17 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
       onToggleTray={() => setTrayOpen((o) => !o)}
       voice={{
         hasHand: !!meId && state.hands.includes(meId),
-        canAsk: state.voiceEnabled && role === "guest" && !voice.canPublish,
+        canAsk: !listenOnly && state.voiceEnabled && role === "guest" && !voice.canPublish,
         onRaise: () => sock.stageAction("raise"),
         onLower: () => sock.stageAction("lower"),
         // A mic tap while audio waits for a tap (or failed) unlocks it; while connecting it only explains.
         needsUnlock: micAction === "unlock",
         onUnlock: unlockFromDock,
-        muteLocked: micAction === "wait" ? "Audio is still connecting." : undefined,
-        mic: voiceUp && voice.canPublish ? { on: voice.micOn, onToggle: () => void voice.toggleMic() } : undefined,
+        muteLocked: !listenOnly && micAction === "wait" ? "Audio is still connecting." : undefined,
+        mic: !listenOnly && voiceUp && voice.canPublish ? { on: voice.micOn, onToggle: () => void voice.toggleMic() } : undefined,
       }}
       cam={{
-        visible: state.liveVideo,
+        visible: state.liveVideo && !listenOnly,
         pressed: (isHolder && voice.cameraOn) || asked,
         lockedReason: camLockReason({ liveVideo: state.liveVideo, phaseLive: state.phase === "live", onStage: onStageNow, isHolder, cameraOn: voice.cameraOn }),
         label: isHolder ? "Stop live video" : asked ? "Withdraw your request to go live" : isCoHostOrHost ? "Go live on camera" : "Ask to go live",
