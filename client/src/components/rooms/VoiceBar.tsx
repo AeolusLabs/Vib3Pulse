@@ -23,14 +23,14 @@ export default function VoiceBar({ voice, hasHand, canAskToSpeak, onRaise, onLow
       {status === "connecting" && <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status"><Loader2Icon className="h-4 w-4 animate-spin" aria-hidden />Connecting audio…</p>}
       {status === "error" && (
         <div className="flex items-center justify-between gap-3" role="alert">
-          <p className="flex items-center gap-2 text-sm"><AlertTriangleIcon className="h-4 w-4 text-amber-600" aria-hidden />{voice.error ?? "Audio couldn't connect."}</p>
+          <p className="flex items-center gap-2 text-sm"><AlertTriangleIcon className="h-4 w-4 text-destructive" aria-hidden />{voice.error ?? "Audio couldn't connect."}</p>
           <Button variant="outline" size="sm" className="min-h-[44px]" onClick={() => void voice.unlock()}>Try again</Button>
         </div>
       )}
       {(status === "listening" || status === "speaking") && (
         <div className="flex flex-wrap items-center gap-2">
           <p className="mr-auto flex items-center gap-2 text-sm" role="status" data-testid="voice-status">
-            {status === "speaking" ? <><Volume2Icon className="h-4 w-4 text-green-600" aria-hidden />You're speaking</> : <><Volume2Icon className="h-4 w-4 text-muted-foreground" aria-hidden />Listening</>}
+            {status === "speaking" ? <><Volume2Icon className="h-4 w-4 text-primary" aria-hidden />You're speaking</> : <><Volume2Icon className="h-4 w-4 text-muted-foreground" aria-hidden />Listening</>}
           </p>
           {voice.canPublish && (
             <Button variant={voice.micOn ? "default" : "outline"} className="min-h-[44px]" aria-pressed={voice.micOn} onClick={() => void voice.toggleMic()} data-testid="button-mic">

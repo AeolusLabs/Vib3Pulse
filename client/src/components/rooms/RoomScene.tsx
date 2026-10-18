@@ -36,12 +36,12 @@ function Figure({ m, selfId, size, emoji, onTap, onMic, talking }: { m: RoomMemb
         data-testid={`avatar-${m.userId}`}
       >
         <span className="relative">
-          <span className={talking ? "block rounded-full ring-4 ring-green-500 ring-offset-2 ring-offset-background" : "block"} data-testid={talking ? `speaking-${m.userId}` : undefined}><HostAvatar person={m} className={box} /></span>
+          <span className={talking ? "block rounded-full ring-4 ring-primary ring-offset-2 ring-offset-background" : "block"} data-testid={talking ? `speaking-${m.userId}` : undefined}><HostAvatar person={m} className={box} /></span>
           {emoji.map((e, i) => <span key={`${e}${i}`} className="room-float pointer-events-none absolute -top-2 left-1/2 text-2xl" aria-hidden>{e}</span>)}
           {m.muted && <MicOffMark />}
         </span>
         <span className={`mt-1 w-full truncate text-center text-[11px] leading-tight ${you ? "font-semibold text-primary" : "text-foreground"}`}>{you ? "You" : nameOf(m)}</span>
-        {onMic && m.role === "guest" && <span className="text-[10px] font-medium text-green-700 dark:text-green-400" data-testid={`onmic-${m.userId}`}>On the mic</span>}
+        {onMic && m.role === "guest" && <span className="text-[10px] font-medium text-primary" data-testid={`onmic-${m.userId}`}>On the mic</span>}
       </button>
     </li>
   );
