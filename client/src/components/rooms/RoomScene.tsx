@@ -1,5 +1,6 @@
 import HostAvatar from "@/components/rooms/HostAvatar";
 import { MicOffMark } from "@/components/rooms/MicOffMark";
+import SpeakerStrip from "@/components/rooms/shell/SpeakerStrip";
 import type { InteractionItem, ReactionItem, RoomMemberView } from "@/lib/roomReducer";
 
 interface Props {
@@ -15,6 +16,8 @@ interface Props {
   /** Ids LiveKit reports as speaking right now. */
   speaking?: string[];
   onAvatarTap: (member: RoomMemberView) => void;
+  /** "scene" (default): the stage row over the dance floor. "strip": one row of speakers under a live picture. */
+  variant?: "scene" | "strip";
 }
 
 const nameOf = (m: RoomMemberView) => m.displayName || m.organizationName || m.username || "Guest";
@@ -48,7 +51,8 @@ function Figure({ m, selfId, size, emoji, onTap, onMic, talking }: { m: RoomMemb
  * A 2D club: the stage row (host and co-hosts) over the floor (everyone else). Positions are assigned, not
  * dragged. Every avatar is a real button, and the member list sheet offers the same actions without the scene.
  */
-export default function RoomScene({ members, memberCount, selfId, reactions, interactions, hidden, stage = [], speaking = [], onAvatarTap }: Props) {
+export default function RoomScene({ members, memberCount, selfId, reactions, interactions, hidden, stage = [], speaking = [], onAvatarTap, variant = "scene" }: Props) {
+  if (variant === "strip") return <SpeakerStrip members={members} stage={stage} speaking={speaking} selfId={selfId} onPick={onAvatarTap} />;
   const emojiFor = (userId: string) => [
     ...(hidden?.has(userId) ? [] : reactions.filter((r) => r.userId === userId).slice(-2).map((r) => r.emoji)),
     ...(hidden?.has(userId) ? [] : interactions.filter((i) => i.kind === "wave" && i.fromId === userId).slice(-1).map(() => "👋")),
