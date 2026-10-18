@@ -5,6 +5,7 @@ import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import HostControls from "@/components/rooms/HostControls";
 import RoomLobby from "@/components/rooms/RoomLobby";
+import { NotStartedPanel, RoomCodePanel } from "@/components/rooms/RoomStatePanels";
 import HostAvatar from "@/components/rooms/HostAvatar";
 import MinorsRoomWarning from "@/components/rooms/MinorsRoomWarning";
 import RoomShell from "@/components/rooms/shell/RoomShell";
@@ -16,7 +17,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { useRoomSocket } from "@/hooks/useRoomSocket";
 import { useRoomVoice } from "@/hooks/useRoomVoice";
 import { showsShell } from "@/lib/roomIntegration";
-import { AGE_LIMIT_EVICTED_COPY, DENIED_MESSAGE, HOST_REVIEW_COPY, KIND_LABEL, type PeekMember, VISIBILITY_LABEL, ageLimitLabel, fetchRooms, formatWhen, hostName, type RoomHostSummary, type RoomView } from "@/lib/roomsApi";
+import { AGE_LIMIT_EVICTED_COPY, DENIED_MESSAGE, HOST_REVIEW_COPY, KIND_LABEL, type PeekMember, VISIBILITY_LABEL, ageLimitLabel, fetchRooms, hostName, type RoomHostSummary, type RoomView } from "@/lib/roomsApi";
+import { kickRemainingMs, stateForCode } from "@/lib/roomStates";
 import { ArrowLeftIcon } from "@/components/ui/icons";
 import { isAgeUnknownDenied, isMinorsDenied, isRoomDenial, listenOnlyHere, minorsCodeFor, parseRoomDenial, showListenLine, type RoomDenial } from "@/lib/minorsRoomUi";
 import type { AdultInvite } from "@/lib/minorsRoomApi";
@@ -161,24 +163,28 @@ function RoomPageInner({ id }: { id: string }) {
   } else if (room.status === "ended" || state.phase === "ended") {
     content = state.notice?.code === "HOST_REVIEW"
       ? <Panel title="This room has closed" body={HOST_REVIEW_COPY} action={back} />
-      : <Panel title="The host ended the room" body="Thanks for joining." action={back} />;
-  } else if (!detail.canJoin.ok) {
+      : <RoomCodePanel code="ROOM_ENDED" room={room} onRetry={() => { void refetch(); }} />;
+  } else if (!detail.canJoin.ok && !(detail.canJoin.code === "ROOM_NOT_LIVE" && room.status === "scheduled")) {
     const code = detail.canJoin.code;
-    content = <Panel title={code === "AGE_LIMIT" ? "This room has an age limit" : "You can't join this room"} body={DENIED_MESSAGE[code] ?? "You can't join this room."} action={back} />;
+    content = stateForCode(code)
+      ? <RoomCodePanel code={code} kickRemainingMs={kickRemainingMs(detail.canJoin, Date.now())} room={room} onRetry={() => { void refetch(); }} />
+      : <Panel title={code === "AGE_LIMIT" ? "This room has an age limit" : "You can't join this room"} body={DENIED_MESSAGE[code] ?? "You can't join this room."} action={back} />;
+  } else if (state.phase === "denied" && stateForCode(state.error)) {
+    content = <RoomCodePanel code={state.error!} room={room} onRetry={() => { sock.leave(); void refetch(); }} />;
   } else if (state.phase === "denied") {
     const code = state.error ?? "NOT_FOUND";
     content = <Panel title={code === "AGE_LIMIT" ? "This room has an age limit" : code === "KICKED" ? "You were removed" : "You can't join this room"} body={code === "AGE_LIMIT" && state.room ? AGE_LIMIT_EVICTED_COPY : DENIED_MESSAGE[code] ?? "You can't join this room."} action={back} />;
   } else if (room.status === "scheduled") {
     content = (
       <div className="space-y-4">
-        <Panel title="This room hasn't started" body={room.scheduledFor ? `Planned for ${formatWhen(room.scheduledFor)}.` : "The host will start it soon."} action={isHost ? undefined : back} />
+        <NotStartedPanel room={room} hostName={hostName(detail.host)} canRemind={!isHost} />
         {isHost && <HostControls room={{ ...room, host: detail.host }} onChanged={() => refetch()} isHost={isHost} revokedInvites={revokedInvites} onRevokedInvitesChange={setRevokedInvites} />}
       </div>
     );
   } else {
     // idle or connecting: the lobby (the room shell takes over once the socket is live).
     content = (
-      <RoomLobby room={room} host={detail.host} peek={detail.peek ?? []} memberCount={detail.memberCount} joining={joinTapped || goesStraightIn} onJoin={() => setJoinTapped(true)} />
+      <RoomLobby room={room} host={detail.host} peek={detail.peek ?? []} memberCount={detail.memberCount} joining={joinTapped || goesStraightIn} invitedLanding={!goesStraightIn} onJoin={() => setJoinTapped(true)} />
     );
   }
 

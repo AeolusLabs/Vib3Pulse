@@ -3,12 +3,14 @@
 // sheets read are answered in the page. The app around it (auth, notifications) still makes its usual requests.
 // Query: ?scene=voice|live|immersive|weak|dropped &theme=dark|light &as=guest|holder|host &sound=1 (sound only)
 // &tap=1 (audio waits for a tap) &invite=1 (invited to speak) &flood=300 (chat lines over ten seconds).
+// ?state=notstarted|full|kicked|banned|ended|locked shows the before/after room screens (no network except the Remind me tap, answered here).
 // &minors=refuse|ack|invites|listen|teennote shows the minors' room screens (listen is the room shell seen as an adult).
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import RoomShell, { type RoomShellSocket } from "@/components/rooms/shell/RoomShell";
 import MinorsRoomWarning from "@/components/rooms/MinorsRoomWarning";
 import AdultInviteSheet from "@/components/rooms/AdultInviteSheet";
 import TeenHostNote from "@/components/rooms/TeenHostNote";
+import { NotStartedPanel, RoomCodePanel } from "@/components/rooms/RoomStatePanels";
 import type { AdultInvite } from "@/lib/minorsRoomApi";
 import type { RoomVoice, ScreenTrack } from "@/hooks/useRoomVoice";
 import { roomReducer, type RoomState } from "@/lib/roomReducer";
@@ -90,8 +92,44 @@ function MinorsFixture({ scene, theme }: { scene: "refuse" | "ack" | "invites" |
   );
 }
 
+const STATE_SCENES = ["notstarted", "full", "kicked", "banned", "ended", "locked"] as const;
+
+/** The room state screens (not started, full, removed, banned, ended, locked) on their own, with no network. */
+function StateFixture({ scene, theme }: { scene: (typeof STATE_SCENES)[number]; theme: "dark" | "light" }) {
+  useFixtureFetch();
+  useEffect(() => {
+    const real = window.fetch;
+    window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes("/api/csrf-token")) return Promise.resolve(new Response(JSON.stringify({ csrfToken: "fixture" }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      if (/\/api\/rooms\/fixture-room\/reminder/.test(url)) return Promise.resolve(new Response(JSON.stringify({ reminder: init?.method !== "DELETE" }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      return real(input, init);
+    }) as typeof window.fetch;
+    return () => { window.fetch = real; };
+  }, []);
+  useEffect(() => {
+    const root = document.documentElement;
+    const was = root.classList.contains("dark");
+    root.classList.toggle("dark", theme === "dark");
+    return () => { root.classList.toggle("dark", was); };
+  }, [theme]);
+  const soon = new Date(Date.now() + (2 * 86400 + 3 * 3600) * 1000).toISOString();
+  const start = new Date(Date.now() - 43 * 60000).toISOString();
+  return (
+    <div className="min-h-screen bg-background font-sans text-foreground" data-testid="room-fixture" data-scene={scene}>
+      <main className="mx-auto max-w-2xl space-y-4 px-4 py-4">
+        {scene === "notstarted"
+          ? <NotStartedPanel room={{ id: FIXTURE_ROOM.id, title: "Open mic: poetry night", visibility: "public", scheduledFor: soon }} hostName="Kemi" />
+          : <RoomCodePanel code={{ full: "ROOM_FULL", kicked: "KICKED", banned: "BANNED", ended: "ROOM_ENDED", locked: "ROOM_LOCKED" }[scene]} kickRemainingMs={scene === "kicked" ? 9 * 60000 : null} room={scene === "ended" ? { startedAt: start, endedAt: new Date().toISOString(), peakCount: 43 } : null} onRetry={() => {}} />}
+      </main>
+    </div>
+  );
+}
+
 export default function RoomFixture() {
   const opts = useMemo(() => parseFixtureQuery(window.location.search), []);
+  const stateScene = useMemo(() => new URLSearchParams(window.location.search).get("state"), []);
+  if (stateScene && (STATE_SCENES as readonly string[]).includes(stateScene)) return <StateFixture scene={stateScene as (typeof STATE_SCENES)[number]} theme={opts.theme} />;
   if (opts.minors && opts.minors !== "listen") return <MinorsFixture scene={opts.minors} theme={opts.theme} />;
   return <ShellFixture opts={opts} />;
 }

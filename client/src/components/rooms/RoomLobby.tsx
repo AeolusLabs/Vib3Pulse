@@ -1,3 +1,4 @@
+import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import HostAvatar from "@/components/rooms/HostAvatar";
 import { Loader2Icon, UsersIcon } from "@/components/ui/icons";
@@ -10,14 +11,18 @@ interface Props {
   memberCount: number;
   joining: boolean;
   onJoin: () => void;
+  /** False for the host and people already inside: they were not invited by anyone. */
+  invitedLanding?: boolean;
 }
 
 const nameOfPeek = (p: PeekMember) => p.displayName || p.organizationName || p.username || "Guest";
 
 /** The doorway: who is inside, the age limit, what to expect. Tapping Join is also the tap that lets the browser play room audio. */
-export default function RoomLobby({ room, host, peek, memberCount, joining, onJoin }: Props) {
+export default function RoomLobby({ room, host, peek, memberCount, joining, onJoin, invitedLanding = true }: Props) {
   const names = peek.slice(0, 3).map(nameOfPeek);
   const more = Math.max(0, memberCount - names.length);
+  // Invite-only: a private room is only ever shown to someone allowed in, so the host summary the server sent is safe to name.
+  const invited = room.visibility === "invite" && !!host && invitedLanding;
   return (
     <section className="space-y-5 rounded-2xl border border-border bg-gradient-to-br from-primary/20 to-primary/5 p-6 text-center sm:p-8" aria-label="Before you join" data-testid="room-lobby">
       <div className="flex justify-center -space-x-3" aria-hidden>
@@ -26,9 +31,9 @@ export default function RoomLobby({ room, host, peek, memberCount, joining, onJo
         ))}
       </div>
       <div className="space-y-1">
-        <h2 className="font-serif text-3xl font-bold tracking-tight">Ready to join?</h2>
+        <h2 className="font-serif text-3xl font-bold tracking-tight">{invited ? `${hostName(host)} invited you` : "Ready to join?"}</h2>
         <p className="text-sm text-muted-foreground" data-testid="lobby-who">
-          {memberCount === 0
+          {invited && memberCount === 0 ? `${room.title} is a private room.` : memberCount === 0
             ? `${hostName(host)} is getting set up.`
             : `${names.join(", ")}${more > 0 ? ` and ${more} more` : ""} ${memberCount === 1 && names.length === 1 ? "is" : "are"} in the room.`}
         </p>
@@ -46,6 +51,7 @@ export default function RoomLobby({ room, host, peek, memberCount, joining, onJo
       <Button size="lg" className="h-12 min-w-[10rem] rounded-full" onClick={onJoin} disabled={joining} data-testid="button-join-room">
         {joining ? <><Loader2Icon className="mr-2 h-4 w-4 animate-spin" aria-hidden />Joining…</> : "Join room"}
       </Button>
+      {invited && <div><Button asChild variant="ghost" className="min-h-[44px]"><Link href="/rooms">Not now</Link></Button></div>}
     </section>
   );
 }
