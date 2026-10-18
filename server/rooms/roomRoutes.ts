@@ -275,7 +275,18 @@ export function registerRoomRoutes(app: Express): void {
       if ((await rs.countLiveRoomsByHost(host.id)) >= MAX_LIVE) {
         return res.status(429).json({ message: "You already have a live room. End it before starting another.", code: "LIVE_LIMIT" });
       }
-      const live = await rs.setStatus(room.id, "live");
+      // Checked in the write: a room that was ended since we read it (for example by a birthdate correction) stays ended.
+      const live = await rs.startScheduledRoom(room.id);
+      if (!live) return res.status(409).json({ message: "This room can't be started now.", code: "BAD_STATE" });
+      if (live.minorsRoom) {
+        // The host's age may have been corrected after the first read. Look again now that the room is live: an adult host
+        // never keeps a live minors' room, whatever the order of events was.
+        const fresh = await storage.getUser(host.id);
+        if (!fresh || !isTeen(ageFromDob(fresh.dateOfBirth))) {
+          await endRoom(room.id);
+          return res.status(403).json({ ...HOST_NOT_MINOR, message: "This room was set up for under 18s, so it can't be started now. Create a new room instead." });
+        }
+      }
       await rs.upsertMember(room.id, host.id, "host");
       expectHost(room.id); // the host has the grace period to connect to the room, or it ends
       await notifyFollowers(live, host).catch((e) => console.error("[rooms] notify failed:", e));

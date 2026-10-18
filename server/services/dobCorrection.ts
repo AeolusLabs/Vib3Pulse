@@ -3,7 +3,7 @@ import { storage } from "../storage";
 import { toPublicUser } from "../auth";
 
 /** roomsFailed: the birthdate WAS saved, but applying it to the person's rooms threw (logged); the admin must be told. */
-type Result = { ok: true; user: ReturnType<typeof toPublicUser>; roomsFailed?: true } | { ok: false; status: 400 | 404; message: string };
+type Result = { ok: true; user: ReturnType<typeof toPublicUser>; roomsFailed?: true; failedRoomIds?: string[] } | { ok: false; status: 400 | 404; message: string };
 
 /** The only way a stored birthdate changes after signup. Admin-initiated, reasoned, audited. */
 export async function correctDateOfBirth(a: {
@@ -28,8 +28,9 @@ export async function correctDateOfBirth(a: {
   try {
     await (await import("../rooms/roomSocket")).applyDobCorrection(a.userId);
   } catch (e) {
-    console.error("[rooms] applying a birthdate correction to rooms failed:", e);
-    return { ok: true, user: toPublicUser(updated), roomsFailed: true };
+    console.error(`[rooms] applying a birthdate correction to rooms failed (user ${a.userId}):`, e);
+    const failedRoomIds = Array.isArray((e as any)?.failedRoomIds) ? ((e as any).failedRoomIds as string[]) : [];
+    return { ok: true, user: toPublicUser(updated), roomsFailed: true, failedRoomIds };
   }
   return { ok: true, user: toPublicUser(updated) };
 }
