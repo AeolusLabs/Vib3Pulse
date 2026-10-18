@@ -222,6 +222,11 @@ export async function markAllLeft(roomId: string): Promise<void> {
   await db.update(roomMembers).set({ leftAt: new Date() }).where(and(eq(roomMembers.roomId, roomId), isNull(roomMembers.leftAt)));
 }
 
+/** A host's rooms that have not ended (live and scheduled). */
+export async function listOpenRoomsByHost(hostId: string): Promise<Room[]> {
+  return db.select().from(rooms).where(and(eq(rooms.hostId, hostId), ne(rooms.status, "ended")));
+}
+
 export async function listLiveRooms(): Promise<Room[]> {
   return db.select().from(rooms).where(eq(rooms.status, "live"));
 }

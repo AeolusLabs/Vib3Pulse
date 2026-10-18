@@ -49,6 +49,7 @@ app.use(redactSensitiveFields);
 registerRoomRoutes(app);
 const fakeStore = { get: (sid: string, cb: (e: any, s: any) => void) => cb(null, { passport: { user: sid } }) };
 const server = http.createServer(app);
+setVoiceServiceForTests(null); // never the real LiveKit, even at this server's boot (rehydrate + boot voice sweep)
 wsManager.initialize(server, fakeStore);
 await new Promise<void>((r) => server.listen(0, r));
 const port = (server.address() as any).port;
@@ -354,7 +355,8 @@ try {
 
   // ---- an adult already on the stage when a room becomes a minors' room (host corrected to a teen) is taken off it
   const NH = await mk("st_normhost"), NA = await mk("st_normadult"), NT = await mk("st_normteen", yearsAgo(15));
-  const NR = await rs.createRoom(NH, { title: "normal first", kind: "party", visibility: "public", ageLimit: "all" } as any);
+  await mutual(NH, NA); await mutual(NH, NT);
+  const NR = await rs.createRoom(NH, { title: "normal first", kind: "party", visibility: "friends", ageLimit: "all" } as any);
   await rs.setStatus(NR.id, "live"); await rs.setVoiceEnabled(NR.id, true);
   const nh = await connect(NH), na = await connect(NA), nt = await connect(NT);
   await join(nh, NR.id); await join(na, NR.id); await join(nt, NR.id);
@@ -376,35 +378,62 @@ try {
   nt.send({ type: "room:stage", action: "raise" });
   check("...while the teen can now raise a hand with the adult present", await stageNow(nh, (s) => s.hands.includes(NT)));
 
-  // ---- N1: a birthdate correction refreshes the live age at once (the stage rule reads it), without any rejoin
+  // ---- N1: a correction refreshes the live age at once (no rejoin): a normal-room adult speaker corrected to 16
+  const H6 = await mk("n1_normhost"), A6 = await mk("n1_normadult"), A7 = await mk("n1_normadult2");
+  for (const x of [A6, A7]) await mutual(H6, x);
+  const R6 = await rs.createRoom(H6, { title: "n1 normal 2", kind: "party", visibility: "friends", ageLimit: "all" } as any);
+  await rs.setStatus(R6.id, "live"); await rs.setVoiceEnabled(R6.id, true);
+  const h6 = await connect(H6), a6 = await connect(A6), a7 = await connect(A7);
+  await join(h6, R6.id); await join(a6, R6.id); await join(a7, R6.id);
+  h6.send({ type: "room:stage", action: "accept", targetId: A6 });
+  h6.send({ type: "room:stage", action: "accept", targetId: A7 });
+  check("N1 normal setup: two adults on stage", await stageNow(h6, (s) => s.stage.includes(A6) && s.stage.includes(A7)));
+  const beforeN1n = fake.calls.length;
+  await correctDateOfBirth({ adminId: fixAdmin, userId: A6, dateOfBirth: yearsAgo(45), reason: "test correction" });
+  check("N1 normal room: adult corrected to another adult age keeps the stage, no permission change, room not flagged",
+    roomHub.stageOf(R6.id).stage.includes(A6) && canPublishNow(R6.id, A6) && !fake.calls.slice(beforeN1n).some((c) => c.op === "setCanPublish" && c.canPublish === false) && (await rs.getRoom(R6.id))!.minorsRoom === false);
+  await correctDateOfBirth({ adminId: fixAdmin, userId: A7, dateOfBirth: yearsAgo(16), reason: "test correction" });
+  check("N1 normal room: a speaker corrected to 16 with adults present comes off the stage at once (live age refreshed)", await stageNow(h6, (s) => !s.stage.includes(A7)) && !canPublishNow(R6.id, A7) && roomHub.get(R6.id, A7)?.age === 16);
+
+  // ---- (a) a teen host corrected to an adult loses every minors' room: live ended, scheduled cancelled, normal rooms kept
   const H3 = await mk("n1_host", yearsAgo(16)), G3 = await mk("n1_teen", yearsAgo(15)), G4 = await mk("n1_teen2", yearsAgo(14));
   for (const x of [G3, G4]) await mutual(H3, x);
   const m3 = await rest("POST", "/api/rooms", H3, { title: "n1 room", kind: "party", visibility: "friends" });
   const MR3 = m3.json.room.id as string;
+  const ms3 = await rest("POST", "/api/rooms", H3, { title: "n1 later", kind: "party", visibility: "invite", scheduledFor: new Date(Date.now() + 3600e3).toISOString() });
+  const MS3 = ms3.json.room.id as string;
+  const NN3 = (await rs.createRoom(H3, { title: "n1 normal", kind: "party", visibility: "friends", ageLimit: "all" } as any)).id; // a room that is not a minors' room
+  check("(a) setup: two minors' rooms and one normal room", m3.json.room.minorsRoom === true && ms3.json.room.minorsRoom === true && !(await rs.getRoom(NN3))!.minorsRoom);
   await rest("POST", `/api/rooms/${MR3}/start`, H3);
   await rs.setVoiceEnabled(MR3, true); await rs.setLiveVideo(MR3, true);
   const h3 = await connect(H3), g3 = await connect(G3), g4 = await connect(G4);
   await join(h3, MR3); await join(g3, MR3); await join(g4, MR3);
-  await rest("POST", `/api/rooms/${MR3}/voice-token`, H3); // the host is connected to LiveKit (publish known)
+  await rest("POST", `/api/rooms/${MR3}/voice-token`, H3);
   h3.send({ type: "room:stage", action: "accept", targetId: G3 });
   h3.send({ type: "room:stage", action: "accept", targetId: G4 });
-  check("N1 setup: two teens on stage", await stageNow(h3, (s) => s.stage.includes(G3) && s.stage.includes(G4)));
+  check("(a) setup: two teens on stage", await stageNow(h3, (s) => s.stage.includes(G3) && s.stage.includes(G4)));
   h3.send({ type: "room:live", action: "grant", targetId: H3 });
-  check("N1 setup: the teen host holds the mic and the live screen", await liveNow(h3, (l) => l.holder === H3) && canPublishNow(MR3, H3) && canCameraNow(MR3, H3));
-  const beforeN1 = fake.calls.length;
+  check("(a) setup: the teen host holds the mic and the live screen", await liveNow(h3, (l) => l.holder === H3) && canPublishNow(MR3, H3) && canCameraNow(MR3, H3));
+  // a teen guest on stage corrected to an adult: taken out (no invite); the room carries on
+  await correctDateOfBirth({ adminId: fixAdmin, userId: G4, dateOfBirth: yearsAgo(30), reason: "test correction" });
+  check("a teen speaker corrected to an adult is taken out of the minors' room", !roomHub.get(MR3, G4) && !roomHub.stageOf(MR3).stage.includes(G4) && (await rs.getRoom(MR3))!.status === "live");
+  g3.drain();
   await correctDateOfBirth({ adminId: fixAdmin, userId: H3, dateOfBirth: yearsAgo(25), reason: "test correction" });
-  check("N1: host corrected to 25 mid-room: they lose mic and camera at once (no rejoin)", !canPublishNow(MR3, H3) && !canCameraNow(MR3, H3));
-  check("...LiveKit publish is switched off for them", fake.calls.slice(beforeN1).some((c) => c.op === "setCanPublish" && c.userId === H3 && c.canPublish === false), JSON.stringify(fake.calls.slice(beforeN1)));
-  check("...they lose the live screen", roomHub.liveOf(MR3).holder !== H3 && await liveNow(g3, (l) => l.holder !== H3));
-  check("...they stay host (role and room), and the teens keep speaking", roomHub.get(MR3, H3)?.role === "host" && canPublishNow(MR3, G3) && roomHub.stageOf(MR3).stage.includes(G3));
-  check("...the room stays a minors' room", (await rs.getRoom(MR3))!.minorsRoom === true);
-  const beforeN1b = fake.calls.length;
-  await correctDateOfBirth({ adminId: fixAdmin, userId: H3, dateOfBirth: yearsAgo(16), reason: "test correction back" });
-  check("N1 reverse: corrected back to 16, the host gets the mic back at once", canPublishNow(MR3, H3) && fake.calls.slice(beforeN1b).some((c) => c.op === "setCanPublish" && c.userId === H3 && c.canPublish === true), JSON.stringify(fake.calls.slice(beforeN1b)));
+  check("(a) host corrected to 25: the live minors' room is ended", (await rs.getRoom(MR3))!.status === "ended" && roomHub.count(MR3) === 0);
+  check("...the guests are told in plain words, then that the room ended", !!(await g3.waitFor((m) => m.type === "room:notice" && m.code === "HOST_REVIEW" && /account is being reviewed/.test(m.message))) && !!(await g3.waitFor((m) => m.type === "room:ended")));
+  check("...the scheduled minors' room is cancelled", (await rs.getRoom(MS3))!.status === "ended");
+  check("...their normal room is untouched", (await rs.getRoom(NN3))!.status === "scheduled");
+  const restart = await rest("POST", `/api/rooms/${MS3}/start`, H3);
+  check("...and the cancelled room cannot be started", restart.status === 409, JSON.stringify(restart));
+  await correctDateOfBirth({ adminId: fixAdmin, userId: H3, dateOfBirth: yearsAgo(25), reason: "test correction again" });
+  check("...a repeat correction is a no-op (idempotent)", (await rs.getRoom(NN3))!.status === "scheduled" && (await rs.getRoom(MR3))!.status === "ended");
 
-  // adult-posing host of a normal room corrected to a teen: the room becomes a minors' room and they keep speaking
+  // ---- adult-posing host of a normal room corrected to a teen: the room becomes a minors' room and they keep speaking
   const H5 = await mk("n1_adulthost"), G5 = await mk("n1_teen5", yearsAgo(15));
-  const R5 = await rs.createRoom(H5, { title: "n1 normal", kind: "party", visibility: "public", ageLimit: "all" } as any);
+  await mutual(H5, G5);
+  const R5 = await rs.createRoom(H5, { title: "n1 normal", kind: "party", visibility: "friends", ageLimit: "all" } as any);
+  const R5pub = await rs.createRoom(H5, { title: "n1 public", kind: "party", visibility: "public", ageLimit: "all", scheduledFor: new Date(Date.now() + 3600e3).toISOString() } as any);
+  const R5adult = await rs.createRoom(H5, { title: "n1 18+", kind: "party", visibility: "friends", ageLimit: "18+", scheduledFor: new Date(Date.now() + 3600e3).toISOString() } as any);
   await rs.setStatus(R5.id, "live"); await rs.setVoiceEnabled(R5.id, true);
   const h5 = await connect(H5), g5 = await connect(G5);
   await join(h5, R5.id); await join(g5, R5.id);
@@ -412,29 +441,14 @@ try {
   check("N1 reverse setup: the adult host of a normal room can publish", canPublishNow(R5.id, H5));
   await correctDateOfBirth({ adminId: fixAdmin, userId: H5, dateOfBirth: yearsAgo(15), reason: "test correction" });
   check("N1 reverse: host corrected to 15: the room is a minors' room and the host (now a teen) still speaks", (await rs.getRoom(R5.id))!.minorsRoom === true && canPublishNow(R5.id, H5));
+  check("...rooms a 15-year-old could not host are cancelled (a public room, an 18+ room)", (await rs.getRoom(R5pub.id))!.status === "ended" && (await rs.getRoom(R5adult.id))!.status === "ended");
   g5.send({ type: "room:stage", action: "raise" });
   check("...and the teen guest may now raise a hand", await stageNow(h5, (s) => s.hands.includes(G5)));
 
-  // a teen guest on stage in a minors' room corrected to an adult: taken out (no invite)
-  await correctDateOfBirth({ adminId: fixAdmin, userId: G4, dateOfBirth: yearsAgo(30), reason: "test correction" });
-  check("N1: a teen speaker corrected to an adult is taken out of the minors' room", !roomHub.get(MR3, G4) && !roomHub.stageOf(MR3).stage.includes(G4));
-
-  // normal rooms: a correction that keeps someone an adult changes nothing
-  const H6 = await mk("n1_normhost"), A6 = await mk("n1_normadult");
-  const R6 = await rs.createRoom(H6, { title: "n1 normal 2", kind: "party", visibility: "public", ageLimit: "all" } as any);
-  await rs.setStatus(R6.id, "live"); await rs.setVoiceEnabled(R6.id, true);
-  const h6 = await connect(H6), a6 = await connect(A6);
-  await join(h6, R6.id); await join(a6, R6.id);
-  h6.send({ type: "room:stage", action: "accept", targetId: A6 });
-  check("N1 normal setup: adult on stage", await stageNow(h6, (s) => s.stage.includes(A6)));
-  const beforeN1n = fake.calls.length;
-  await correctDateOfBirth({ adminId: fixAdmin, userId: A6, dateOfBirth: yearsAgo(45), reason: "test correction" });
-  check("N1 normal room: adult corrected to another adult age keeps the stage, no permission change, room not flagged",
-    roomHub.stageOf(R6.id).stage.includes(A6) && canPublishNow(R6.id, A6) && !fake.calls.slice(beforeN1n).some((c) => c.op === "setCanPublish" && c.canPublish === false) && (await rs.getRoom(R6.id))!.minorsRoom === false);
-
   // ---- N2: a join held between its fresh read and the hub insert while the (empty) room becomes a minors' room
   const H7 = await mk("n2_host"), X7 = await mk("n2_adult");
-  const R7 = await rs.createRoom(H7, { title: "n2 room", kind: "party", visibility: "public", ageLimit: "all" } as any);
+  await mutual(H7, X7);
+  const R7 = await rs.createRoom(H7, { title: "n2 room", kind: "party", visibility: "friends", ageLimit: "all" } as any);
   await rs.setStatus(R7.id, "live"); expectHost(R7.id); // nobody in it
   const x7 = await connect(X7);
   const realGetUser = storage.getUser.bind(storage);
@@ -453,27 +467,63 @@ try {
     check("N2: the empty room is now a minors' room in the database", (await rs.getRoom(R7.id))!.minorsRoom === true);
     release7();
     const x7First = await x7.waitFor((m) => (m.type === "room:state" && m.room?.id === R7.id) || m.type === "room:error");
-    check("N2: the adult is refused at the hub insert (MINORS_ROOM + warning), never a room:state", isMinorsError(x7First, "MINORS_ROOM"), JSON.stringify(x7First));
-    check("N2: and is not in the room", await until(() => !roomHub.get(R7.id, X7)) && !roomHub.get(R7.id, X7));
+    check("N2: the adult is refused before the hub insert (MINORS_ROOM + warning), never a room:state", isMinorsError(x7First, "MINORS_ROOM"), JSON.stringify(x7First));
+    check("N2: and is not in the room", !roomHub.get(R7.id, X7));
   } finally {
     (storage as any).getUser = realGetUser;
     release7();
   }
 
+  // ---- leftover race: as N2, but a teen joins and leaves the empty room while the adult's join is held
+  const H8 = await mk("n3_host"), X8 = await mk("n3_adult"), T8 = await mk("n3_teen", yearsAgo(15));
+  await mutual(H8, X8); await mutual(H8, T8);
+  const R8 = await rs.createRoom(H8, { title: "n3 room", kind: "party", visibility: "friends", ageLimit: "all" } as any);
+  await rs.setStatus(R8.id, "live"); expectHost(R8.id);
+  const x8 = await connect(X8), t8 = await connect(T8);
+  let calls8 = 0, held8 = false, release8!: () => void;
+  const gate8 = new Promise<void>((r) => { release8 = r; });
+  (storage as any).getUser = async (id: string) => {
+    if (id === X8 && ++calls8 === 2) { held8 = true; await gate8; }
+    return realGetUser(id);
+  };
+  try {
+    x8.drain();
+    x8.send({ type: "room:join", roomId: R8.id });
+    check("leftover race: the adult's join is held at its fresh re-read", await until(() => held8));
+    await sleep(1000);
+    await correctDateOfBirth({ adminId: fixAdmin, userId: H8, dateOfBirth: yearsAgo(15), reason: "test correction" });
+    check("leftover race: a teen joins the now minors' room", (await join(t8, R8.id))?.type === "room:state");
+    t8.send({ type: "room:leave" });
+    check("...and leaves, emptying it", await until(() => roomHub.count(R8.id) === 0));
+    release8();
+    const x8First = await x8.waitFor((m) => (m.type === "room:state" && m.room?.id === R8.id) || m.type === "room:error");
+    check("leftover race: the adult is still refused (MINORS_ROOM + warning)", isMinorsError(x8First, "MINORS_ROOM"), JSON.stringify(x8First));
+    check("leftover race: and is not in the room", !roomHub.get(R8.id, X8));
+  } finally {
+    (storage as any).getUser = realGetUser;
+    release8();
+  }
+
   // ---- restart gap: at boot, LiveKit participants in a live minors' room who are not teens are removed
   const { sweepMinorsVoiceAtBoot } = await import("../server/rooms/roomSocket");
-  const bootRoom = await rs.getRoom(MR3);
-  fake.participants = [{ identity: H3, canPublish: true }, { identity: G3, canPublish: true }, { identity: A6, canPublish: true }, { identity: X7, canPublish: false }];
+  const bootRoom = (await rs.getRoom(SR))!;
+  const throwingRoom = { ...bootRoom, id: "boot-throws" } as any;
+  fake.participants = [{ identity: TH, canPublish: true }, { identity: S1, canPublish: true }, { identity: A6, canPublish: true }, { identity: X7, canPublish: false }];
+  const origList = fake.listParticipants.bind(fake), origRemove = fake.removeParticipant.bind(fake);
+  fake.listParticipants = async (roomId: string) => { if (roomId === "boot-throws") throw new Error("fake outage"); return origList(roomId); };
+  fake.removeParticipant = async (roomId: string, userId: string) => { if (userId === A6) throw new Error("fake outage"); return origRemove(roomId, userId); };
   const beforeBoot = fake.calls.length;
-  await sweepMinorsVoiceAtBoot([bootRoom!, (await rs.getRoom(R6.id))!]);
-  const bootRemoved = fake.calls.slice(beforeBoot).filter((c) => c.op === "remove").map((c) => `${c.roomId === MR3 ? "minors" : "normal"}:${c.userId}`);
-  check("boot sweep: adults removed from the minors' room's LiveKit session, teens kept, normal rooms untouched",
-    bootRemoved.includes(`minors:${A6}`) && bootRemoved.includes(`minors:${X7}`) && !bootRemoved.includes(`minors:${H3}`) && !bootRemoved.includes(`minors:${G3}`) && !bootRemoved.some((x) => x.startsWith("normal:")), JSON.stringify(bootRemoved));
+  await sweepMinorsVoiceAtBoot([throwingRoom, bootRoom, (await rs.getRoom(R6.id))!]);
+  const bootRemoved = fake.calls.slice(beforeBoot).filter((c) => c.op === "remove").map((c) => `${c.roomId === SR ? "minors" : "normal"}:${c.userId}`);
+  check("boot sweep: a room that throws and a participant that throws do not stop the rest (the other adult is removed)",
+    bootRemoved.includes(`minors:${X7}`), JSON.stringify(bootRemoved));
+  check("boot sweep: teens kept, normal rooms untouched", !bootRemoved.includes(`minors:${TH}`) && !bootRemoved.includes(`minors:${S1}`) && !bootRemoved.some((x) => x.startsWith("normal:")), JSON.stringify(bootRemoved));
+  fake.listParticipants = origList; fake.removeParticipant = origRemove;
   fake.participants = [];
-  setVoiceServiceForTests(undefined);
+  setVoiceServiceForTests(null);
 
   // ---- nothing a teen received in this file carried the warning
-  check("the warning was never sent to a teen", ![t2, s1, s2, sth, th, nt, g3, g5].some((cl) => cl.msgs.some((m) => m.warning !== undefined || JSON.stringify(m).includes("legal action"))));
+  check("the warning was never sent to a teen", ![t2, s1, s2, sth, th, nt, g3, g5, t8].some((cl) => cl.msgs.some((m) => m.warning !== undefined || JSON.stringify(m).includes("legal action"))));
 } catch (e: any) {
   failed++; console.log(`FAIL uncaught: ${e.stack || e}`);
 } finally {

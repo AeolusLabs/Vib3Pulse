@@ -58,7 +58,7 @@ export class RoomHub {
     if (!room || !m) return undefined;
     room.delete(userId);
     if (this.byUser.get(userId) === roomId) this.byUser.delete(userId);
-    if (room.size === 0) { this.rooms.delete(roomId); this.chat.delete(roomId); this.stages.delete(roomId); this.voice.delete(roomId); this.lives.delete(roomId); this.liveVideo.delete(roomId); this.minors.delete(roomId); }
+    if (room.size === 0) { this.rooms.delete(roomId); this.chat.delete(roomId); this.stages.delete(roomId); this.voice.delete(roomId); this.lives.delete(roomId); this.liveVideo.delete(roomId); }
     return m;
   }
 
@@ -132,8 +132,9 @@ export class RoomHub {
   /** Minors' room flag for the stage rule (hot path, no query). Set from the room row on every join; one way, like the column. */
   isMinorsRoom(roomId: string): boolean { return this.minors.has(roomId); }
   /**
-   * Marked even while the room is empty, so a join that read the room before it became a minors' room is still caught at
-   * its hub insert (joinOnce re-checks when the hub knows more than its row did). Cleared when the room empties or ends.
+   * Marked even while the room is empty, and NOT cleared when it empties (only when the room ends), like the column it
+   * mirrors: a join whose row read predates the flag is still caught right before its hub insert, even if other people came
+   * and went in between.
    */
   markMinorsRoom(roomId: string): void { this.minors.add(roomId); }
 

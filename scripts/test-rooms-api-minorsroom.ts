@@ -268,6 +268,23 @@ try {
   check("...the host themself is never blocked", (await http("GET", `/api/rooms/${R}`, T)).status === 200);
   const later = await http("POST", "/api/rooms", T, { title: "now adult", kind: "party", visibility: "friends" });
   check("...and their next new room is a normal room", later.status === 201 && later.json?.room?.minorsRoom === false, JSON.stringify(later.json));
+  // (b)/(c) a host who is 18 now (no correction: they simply turned 18) may finish the live room, nothing more
+  const C18 = await mk("after18", yearsAgo(30)); await mutual(T, C18);
+  const inv18 = await http("POST", `/api/rooms/${R}/adult-invites/${C18}`, T);
+  check("(c) a host who turned 18 cannot invite adults (403 HOST_NOT_MINOR)", inv18.status === 403 && inv18.json?.code === "HOST_NOT_MINOR" && (await q(`select 1 from room_adult_invites where room_id=$1 and user_id=$2`, [R, C18])).length === 0, JSON.stringify(inv18));
+  const ack18 = await http("POST", `/api/rooms/${R}/adult-invites/acknowledge`, B); // B holds a renewed, unacknowledged invite
+  check("(c) an older invite can no longer be acknowledged once the host is 18 (403 MINORS_ROOM + warning)", ack18.status === 403 && ack18.json?.code === "MINORS_ROOM" && ack18.json?.warning === MINORS_ROOM_WARNING, JSON.stringify(ack18));
+  await rs.upsertMember(R, C18, "guest");
+  const co18 = await http("PUT", `/api/rooms/${R}/members/${C18}/role`, T, { role: "cohost" });
+  check("(c) a host who turned 18 cannot make an adult co-host", co18.status === 403, JSON.stringify(co18));
+  const st18 = await http("POST", `/api/rooms/${RI}/start`, T);
+  check("(b) a host who turned 18 cannot start their scheduled minors' room (403 HOST_NOT_MINOR)", st18.status === 403 && st18.json?.code === "HOST_NOT_MINOR" && (await rs.getRoom(RI))!.status === "scheduled", JSON.stringify(st18));
+  const H18 = await mk("sched18", yearsAgo(17));
+  const sc18 = await http("POST", "/api/rooms", H18, { title: "later", kind: "party", visibility: "friends", scheduledFor: new Date(Date.now() + 3600e3).toISOString() });
+  await q(`update users set date_of_birth=$1 where id=$2`, [yearsAgo(18), H18]); // they turn 18 before the room starts (no live room of theirs)
+  const sc18s = await http("POST", `/api/rooms/${sc18.json?.room?.id}/start`, H18);
+  check("(b) a host with no live room who turned 18 cannot start their scheduled minors' room", sc18.json?.room?.minorsRoom === true && sc18s.status === 403 && sc18s.json?.code === "HOST_NOT_MINOR" && (await rs.getRoom(sc18.json.room.id))!.status === "scheduled", JSON.stringify(sc18s));
+  check("...but the live minors' room carries on (they may finish it)", (await rs.getRoom(R))!.status === "live" && (await http("GET", `/api/rooms/${R}`, T)).status === 200);
 
   // ---- an admin birthdate correction that makes a guest an adult takes them out of the minors' room
   const { correctDateOfBirth } = await import("../server/services/dobCorrection");
@@ -331,6 +348,7 @@ try {
   check("audit: first_acknowledged_at is kept after ban/revoke (acknowledged_at too, on the revoked row)", fa?.first_acknowledged_at instanceof Date, JSON.stringify(fa));
   const bRow = (await q(`select acknowledged_at, first_acknowledged_at from room_adult_invites where room_id=$1 and user_id=$2`, [R, B]))[0];
   check("audit: B's re-invite reset acknowledged_at but kept first_acknowledged_at from the first acknowledgement", bRow.acknowledged_at === null && bRow.first_acknowledged_at?.getTime() === ackRow.acknowledged_at.getTime(), JSON.stringify(bRow));
+  await q(`update users set date_of_birth=$1 where id=$2`, [yearsAgo(16), T]); // host back under 18 so the invite can be acknowledged
   await http("POST", `/api/rooms/${R}/adult-invites/acknowledge`, B);
   const bRow2 = (await q(`select acknowledged_at, first_acknowledged_at from room_adult_invites where room_id=$1 and user_id=$2`, [R, B]))[0];
   check("audit: acknowledging the renewed invite sets a new acknowledged_at and leaves first_acknowledged_at", bRow2.acknowledged_at instanceof Date && bRow2.acknowledged_at.getTime() > bRow2.first_acknowledged_at.getTime() && bRow2.first_acknowledged_at.getTime() === ackRow.acknowledged_at.getTime(), JSON.stringify(bRow2));
@@ -342,6 +360,28 @@ try {
   await q(`delete from rooms where id=$1`, [tr.id]); await q(`delete from users where id=$1`, [tmpHost]);
   const kept = await q(`select invited_by from room_adult_invites where room_id=$1 and user_id=$2`, [tr2.id, tmpAdult]);
   check("audit: deleting the inviting account keeps the invite row, invited_by becomes null", kept.length === 1 && kept[0].invited_by === null, JSON.stringify(kept));
+
+  // ---- a member corrected below the room's age limit leaves it at once
+  const AH3 = await mk("lim_host", yearsAgo(30)), L16 = await mk("lim_teen", yearsAgo(16));
+  const LR16 = await rs.createRoom(AH3, { title: "16 plus", kind: "party", visibility: "public", ageLimit: "16+" } as any); await rs.setStatus(LR16.id, "live");
+  const gotL: any[] = [];
+  roomHub.join(LR16.id, { userId: AH3, role: "host", muted: false, joinedAt: Date.now(), send: () => {} });
+  roomHub.join(LR16.id, { userId: L16, role: "guest", muted: false, joinedAt: Date.now(), send: (m) => gotL.push(m) });
+  await rs.upsertMember(LR16.id, L16, "cohost");
+  await correctDateOfBirth({ adminId: admin, userId: L16, dateOfBirth: yearsAgo(15), reason: "test correction" });
+  check("member corrected to 15 is removed from a 16+ room, told AGE_LIMIT", !roomHub.get(LR16.id, L16) && gotL.some((m) => m.type === "room:error" && m.code === "AGE_LIMIT"), JSON.stringify(gotL));
+  check("...and their co-host role is dropped", (await rs.getMember(LR16.id, L16))?.role === "guest");
+  check("...the room carries on", (await rs.getRoom(LR16.id))!.status === "live" && !!roomHub.get(LR16.id, AH3));
+
+  // ---- the admin is told when applying the correction to rooms fails (the birthdate itself is saved)
+  const FAILU = await mk("fail_user", yearsAgo(30));
+  const realGet = storage.getUser.bind(storage);
+  let nFail = 0;
+  (storage as any).getUser = async (id: string) => { if (id === FAILU && ++nFail === 2) throw new Error("fake failure"); return realGet(id); }; // 1st read: the correction itself; 2nd: the rooms step
+  let failRes: any;
+  try { failRes = await correctDateOfBirth({ adminId: admin, userId: FAILU, dateOfBirth: yearsAgo(31), reason: "test correction" }); }
+  finally { (storage as any).getUser = realGet; }
+  check("a failure applying the correction to rooms is reported (roomsFailed), with the birthdate saved", failRes?.ok === true && failRes.roomsFailed === true && (await q(`select date_of_birth from users where id=$1`, [FAILU]))[0].date_of_birth === yearsAgo(31), JSON.stringify(failRes));
 
   check("no response in this file leaked the warning to a teen", t2Get.text.indexOf("legal action") === -1 && t2Tok.text.indexOf("legal action") === -1);
 } catch (e: any) {

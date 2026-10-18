@@ -45,6 +45,8 @@ const peekOf = (roomId: string, n: number) =>
 
 const newInviteToken = () => crypto.randomBytes(24).toString("hex");
 const isTeen = (age: number | null) => age !== null && age < 18;
+/** A minors' room whose host is 18 or over now: they may finish a live room, but never start one or bring in adults. */
+const HOST_NOT_MINOR = { code: "HOST_NOT_MINOR" } as const;
 
 export function isHost(room: Room, userId: string) {
   return room.hostId === userId;
@@ -267,6 +269,9 @@ export function registerRoomRoutes(app: Express): void {
       if (!ctx) return;
       const { room, host } = ctx;
       if (room.status !== "scheduled") return res.status(409).json({ message: room.status === "live" ? "This room is already live." : "This room has ended.", code: "BAD_STATE" });
+      if (room.minorsRoom && !isTeen(ageFromDob(host.dateOfBirth))) {
+        return res.status(403).json({ ...HOST_NOT_MINOR, message: "This room was set up for under 18s, so it can't be started now. Create a new room instead." });
+      }
       if ((await rs.countLiveRoomsByHost(host.id)) >= MAX_LIVE) {
         return res.status(429).json({ message: "You already have a live room. End it before starting another.", code: "LIVE_LIMIT" });
       }
@@ -404,6 +409,8 @@ export function registerRoomRoutes(app: Express): void {
       }
       if (view.code === "MINORS_ROOM") return res.status(403).json(mr.minorsDenialBody("MINORS_ROOM"));
       // MINORS_ROOM_ACK: invited, not yet acknowledged. The request body is ignored: the act of calling is the acknowledgement.
+      // An invite from a host who is 18 or over now no longer opens the room (adults already inside may stay until it ends).
+      if (!isTeen(ageFromDob((await storage.getUser(room.hostId))?.dateOfBirth))) return res.status(403).json(mr.minorsDenialBody("MINORS_ROOM"));
       const at = await mr.acknowledgeInvite(room.id, uid);
       if (!at) return res.status(403).json(mr.minorsDenialBody("MINORS_ROOM")); // revoked in the meantime
       res.json({ ok: true, acknowledged: true });
@@ -433,6 +440,7 @@ export function registerRoomRoutes(app: Express): void {
       const { room, host } = ctx;
       if (!room.minorsRoom) return res.status(409).json({ message: "Only rooms for under 18s need adult invites.", code: "NOT_MINORS_ROOM" });
       if (room.status === "ended") return res.status(409).json({ message: "This room has ended.", code: "ROOM_ENDED" });
+      if (!isTeen(ageFromDob(host.dateOfBirth))) return res.status(403).json({ ...HOST_NOT_MINOR, message: "Only hosts under 18 can invite adults to this room." });
       const targetId = req.params.userId;
       // One answer for every refusal: the host never learns whether the person is blocked, banned, suspended, a teen or unknown.
       const refuse = () => res.status(403).json({ message: "You can't invite this person.", code: "NOT_ALLOWED" });
@@ -553,10 +561,14 @@ export function registerRoomRoutes(app: Express): void {
       const m = await rs.getMember(ctx.room.id, targetId);
       if (!m || m.banned) return res.status(404).json({ message: "That person hasn't joined this room." });
       if (role === "cohost" && ctx.room.minorsRoom) {
-        // An adult co-host in a minors' room needs the same acknowledged personal invite as any adult guest.
-        const [tu, inv] = await Promise.all([storage.getUser(targetId), mr.getInviteState(ctx.room.id, targetId)]);
+        // An adult co-host in a minors' room needs the same acknowledged personal invite as any adult guest, and a host who
+        // is 18 or over now cannot make any adult a co-host.
+        const [tu, inv, hostU] = await Promise.all([storage.getUser(targetId), mr.getInviteState(ctx.room.id, targetId), storage.getUser(ctx.room.hostId)]);
         if (!tu || !mr.minorsGate(ctx.room, targetId, ageFromDob(tu.dateOfBirth), inv).ok) {
           return res.status(403).json({ message: "Adults need your personal invite first.", code: "NOT_ALLOWED" });
+        }
+        if (!isTeen(ageFromDob(tu.dateOfBirth)) && !isTeen(ageFromDob(hostU?.dateOfBirth))) {
+          return res.status(403).json({ ...HOST_NOT_MINOR, message: "Only hosts under 18 can make an adult a co-host in this room." });
         }
       }
       await rs.setMemberRole(ctx.room.id, targetId, role);

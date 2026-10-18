@@ -6,7 +6,7 @@ import { ageFromDob } from "@shared/age";
 import { resolveScreen } from "@shared/screen";
 import { sanitizePlaybackInput, type NowPlaying } from "@shared/playback";
 import { MINORS_ROOM_WARNING, ROOM_LIMITS, ROOM_REACTIONS, resolveRoomPrivacy, resolveChatReply, validateChatReply, type MinorsRoomCode } from "@shared/rooms";
-import { canInteract, canJoinRoom } from "@shared/roomRules";
+import { canHostRoom, canInteract, canJoinRoom } from "@shared/roomRules";
 import type { Room, User } from "@shared/schema";
 import * as rs from "./roomStorage";
 import { mutualFollow, plainText, publicRoom, viewRoom } from "./roomAccess";
@@ -127,14 +127,18 @@ export async function rehydrateLiveRooms(): Promise<void> {
 export async function sweepMinorsVoiceAtBoot(live: Room[]): Promise<void> {
   const svc = getVoiceService();
   if (!svc) return;
+  const err = (what: string) => (e: unknown) => console.error(`[voice] boot sweep ${what} failed:`, e instanceof Error ? e.message : e);
   for (const room of live) {
-    if (!room.minorsRoom || !room.voiceEnabled) continue;
-    let present: Array<{ identity: string }>;
-    try { present = await svc.listParticipants(room.id); } catch (e) { console.error("[voice] listParticipants failed:", e instanceof Error ? e.message : e); continue; }
-    for (const p of present) {
-      const age = ageFromDob((await storage.getUser(p.identity))?.dateOfBirth);
-      if (age === null || age >= 18) await svc.removeParticipant(room.id, p.identity).catch((e) => console.error("[voice] removeParticipant failed:", e?.message ?? e));
-    }
+    try {
+      if (!room.minorsRoom || !room.voiceEnabled) continue;
+      const present = await svc.listParticipants(room.id);
+      for (const p of present) {
+        try {
+          const age = ageFromDob((await storage.getUser(p.identity))?.dateOfBirth);
+          if (age === null || age >= 18) await svc.removeParticipant(room.id, p.identity);
+        } catch (e) { err("participant")(e); } // one participant failing never stops the others
+      }
+    } catch (e) { err("room")(e); } // nor one room the rest
   }
 }
 
@@ -258,8 +262,9 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
   // capacity check and the hub insert with no await between them, so concurrent joins cannot overshoot.
   // The minors' room invite is re-read too: a revoke that landed during the awaits above must keep them out.
   // The user is re-read as well: an admin birthdate correction during the awaits must decide with the new age.
+  // The invite is always read: the room may become a minors' room (host corrected to under 18) while we wait.
   const [fresh, freshMember, freshInvite, freshUser] = await Promise.all([
-    rs.getRoom(roomId), rs.getMember(roomId, userId), room.minorsRoom ? getInviteState(roomId, userId) : Promise.resolve(NO_INVITE), storage.getUser(userId),
+    rs.getRoom(roomId), rs.getMember(roomId, userId), getInviteState(roomId, userId), storage.getUser(userId),
   ]);
   const freshAge = ageFromDob(freshUser?.dateOfBirth);
   if (ws.readyState !== OPEN) return; // the socket died while we were checking: do not create a ghost
@@ -269,8 +274,10 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
   if ((kicked.get(`${roomId}:${userId}`) ?? 0) > Date.now()) return refuse(ws, "KICKED");
   if (!freshUser || freshUser.deletedAt) return refuse(ws, "NOT_FOUND");
   if (!canJoinRoom({ age: freshAge }, fresh as any).ok) return refuse(ws, freshAge === null ? "AGE_UNKNOWN" : "AGE_LIMIT"); // limit raised meanwhile
-  const mg = minorsGate(fresh, userId, freshAge, freshInvite);
-  if (!mg.ok) return direct(ws, minorsError(mg.code)); // no await from here to the hub insert
+  // The hub flag is set (synchronously) by a host correction right after its UPDATE commits, and is never cleared while the
+  // room lives, so a row read that predates the correction cannot let an uninvited adult in. No await from here to the insert.
+  const mg = minorsGate({ minorsRoom: fresh.minorsRoom || roomHub.isMinorsRoom(roomId), hostId: fresh.hostId }, userId, freshAge, freshInvite);
+  if (!mg.ok) return direct(ws, minorsError(mg.code));
 
   const role = userId === fresh.hostId ? "host" : freshMember?.role === "cohost" ? "cohost" : "guest";
   let me = roomHub.get(roomId, userId);
@@ -299,16 +306,6 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
     broadcastLive(roomId);
   }
   if (role === "host") { clearTimeout(endTimers.get(roomId)); endTimers.delete(roomId); }
-  if (isNew && !fresh.minorsRoom && roomHub.isMinorsRoom(roomId) && userId !== fresh.hostId) {
-    // The room became a minors' room after our fresh read (a host corrected to under 18): the gate runs once more, now, and
-    // the join is undone if it fails. Not removeFromMinorsRoom: that waits for this very join's lock.
-    const inv = await getInviteState(roomId, userId);
-    if (!minorsGate({ minorsRoom: true, hostId: fresh.hostId }, userId, freshAge, inv).ok) {
-      me.send(minorsError("MINORS_ROOM"));
-      await evict(roomId, userId);
-      return;
-    }
-  }
   if (isNew) {
     me.ready = (async () => {
       try {
@@ -442,6 +439,7 @@ export async function enforceAgeLimit(roomId: string): Promise<void> {
  */
 export async function removeFromMinorsRoom(roomId: string, userId: string): Promise<void> {
   await (joinLocks.get(userId) ?? Promise.resolve());
+  await dropCohostRole(roomId, userId);
   const tm = roomHub.get(roomId, userId);
   if (!tm) {
     // Not in the room: a voice token they may still hold must not get them back into the audio.
@@ -476,9 +474,58 @@ export async function applyDobCorrection(userId: string): Promise<void> {
   const age = ageFromDob(user.dateOfBirth);
   const roomId = roomHub.roomOf(userId);
   const changed = roomId ? roomHub.refreshAge(roomId, userId, age) : false;
+
+  // Rooms they host. An adult (18+) loses every minors' room they host; anyone loses a room they may no longer host.
+  await endRoomsHostCannotKeep(user, age);
   if (age !== null && age < 18) await enforceMinorsHost(userId);
-  if (roomId && changed) await reconcileVoice(roomId).catch((e) => console.error("[voice] reconcile failed:", e?.message ?? e));
+
+  // The room they are in.
+  if (roomId && changed) await reconcileVoice(roomId);
+  const room = roomId ? await rs.getRoom(roomId) : null;
+  if (room && room.status === "live" && room.hostId !== userId && roomHub.get(room.id, userId) && !canJoinRoom({ age }, room as any).ok) {
+    await removeForAgeLimit(room.id, userId); // corrected below the room's age limit
+  }
   await enforceMinorsRoomFor(userId);
+}
+
+/** Message to everyone in a room that is closed because its host's account is under review. Plain, no accusation. */
+export const HOST_REVIEW_MESSAGE = "This room has closed because the host's account is being reviewed.";
+
+/**
+ * After a birthdate correction: ends (live) or cancels (scheduled) every room of this host that they may no longer host.
+ *  - an adult (18 or over) never keeps a minors' room;
+ *  - nobody keeps a room they could not create at their corrected age (age limit above them; a teen and a public room).
+ * Their other rooms are left alone. One way and idempotent (ended rooms are skipped).
+ */
+async function endRoomsHostCannotKeep(host: User, age: number | null): Promise<void> {
+  const open = (await rs.listOpenRoomsByHost(host.id));
+  for (const room of open) {
+    const adultInMinorsRoom = room.minorsRoom && (age === null || age >= 18);
+    const hc = canHostRoom({ age, accountAgeDays: Number.MAX_SAFE_INTEGER }, { visibility: room.visibility as any, ageLimit: room.ageLimit as any }, { minAccountAgeDays: 0 });
+    const cannotHost = !hc.ok && (hc.code === "HOST_BELOW_LIMIT" || hc.code === "TEEN_PUBLIC" || hc.code === "AGE_UNKNOWN");
+    if (!adultInMinorsRoom && !cannotHost) continue;
+    if (room.status === "live") {
+      roomHub.broadcast(room.id, { type: "room:notice", code: "HOST_REVIEW", message: HOST_REVIEW_MESSAGE });
+      await endRoom(room.id);
+    } else {
+      await rs.setStatus(room.id, "ended"); // a scheduled room is cancelled: it can never be started
+    }
+  }
+}
+
+/** A member corrected below the room's age limit leaves it now, told why (same code as a raised limit). */
+async function removeForAgeLimit(roomId: string, userId: string): Promise<void> {
+  await dropCohostRole(roomId, userId);
+  const tm = roomHub.get(roomId, userId);
+  if (!tm) return;
+  tm.send({ type: "room:error", code: "AGE_LIMIT" });
+  await evict(roomId, userId);
+}
+
+/** Someone removed by a safety rule does not keep a co-host role for a later return (same as the invite-revoke route). */
+async function dropCohostRole(roomId: string, userId: string): Promise<void> {
+  const m = await rs.getMember(roomId, userId);
+  if (m?.role === "cohost") await rs.setMemberRole(roomId, userId, "guest");
 }
 
 /**
