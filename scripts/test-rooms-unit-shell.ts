@@ -68,23 +68,15 @@ test("safety: rooms open to under 18s name their minimum age", () => {
   assert.match(roomSafetyRules("16+")[0].text, /16 and over/);
 });
 test("safety: a teens only room blocks adults", () => assert.match(roomSafetyRules("teen")[0].text, /under 18.*Adults are blocked/));
-test("safety: anonymous lines only when the room allows anonymous guests", () => {
-  assert.doesNotMatch(texts(roomSafetyRules("13+")), /nonymous/);
-  const anon = roomSafetyRules("13+", { anonymousAllowed: true });
-  assert.match(texts(anon), /Anonymous guests can read, chat and react/);
-  assert.ok(anon.some((x) => x.tone === "no"));
-  assert.ok(anon.some((x) => x.tone === "eye"));
-  assert.match(anon[0].text, /Adults are not allowed to join anonymously/);
-  assert.doesNotMatch(roomSafetyRules("18+", { anonymousAllowed: true })[0].text, /join anonymously/);
+test("safety: no anonymous-guest wording anywhere (anonymous join was scrapped)", () => {
+  for (const l of ["all", "13+", "16+", "18+", "21+", "teen"] as const) assert.doesNotMatch(texts(roomSafetyRules(l)), /nonymous/);
 });
 test("safety: always says how to report; copy has no em dashes and never says cash", () => {
   for (const l of ["all", "13+", "16+", "18+", "21+", "teen"] as const) {
-    for (const anon of [false, true]) {
-      const t = texts(roomSafetyRules(l, { anonymousAllowed: anon }));
-      assert.match(t, /Report/);
-      assert.doesNotMatch(t, /—/);
-      assert.doesNotMatch(t, /cash/i);
-    }
+    const t = texts(roomSafetyRules(l));
+    assert.match(t, /Report/);
+    assert.doesNotMatch(t, /—/);
+    assert.doesNotMatch(t, /cash/i);
   }
 });
 

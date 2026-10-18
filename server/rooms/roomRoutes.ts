@@ -164,7 +164,7 @@ export function registerRoomRoutes(app: Express): void {
   // Public switches and limits for any signed-in user. Only these fields: never secrets or provider keys.
   app.get("/api/rooms/config", requireAuth, (_req, res) => {
     res.json({
-      features: { anonymousJoin: roomFeatures.anonymousJoin, paidRooms: roomFeatures.paidRooms, spray: roomFeatures.spray },
+      features: { paidRooms: roomFeatures.paidRooms, spray: roomFeatures.spray },
       limits: ROOM_LIMITS,
       currency: "NGN",
       region: "NG",

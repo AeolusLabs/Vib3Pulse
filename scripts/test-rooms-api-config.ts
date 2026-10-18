@@ -12,7 +12,7 @@ if (!/test/i.test(dbName)) {
   process.exit(2);
 }
 // The runner loads .env; a ROOMS_* value there must not decide the default-flags-off assertion.
-for (const k of ["ROOMS_ANONYMOUS_JOIN", "ROOMS_PAID", "ROOMS_SPRAY"]) delete process.env[k];
+for (const k of ["ROOMS_PAID", "ROOMS_SPRAY"]) delete process.env[k];
 process.env.DISABLE_GEOCODING = "1";
 process.env.RESEND_API_KEY ||= "re_dummy_not_real";
 
@@ -73,10 +73,10 @@ try {
   const r = await http("GET", "/api/rooms/config", adult);
   check("config: signed-in adult gets 200", r.status === 200, JSON.stringify(r));
   check("config: exact body shape with default flags off", JSON.stringify(r.json) === JSON.stringify({
-    features: { anonymousJoin: false, paidRooms: false, spray: false }, limits: ROOM_LIMITS, currency: "NGN", region: "NG",
+    features: { paidRooms: false, spray: false }, limits: ROOM_LIMITS, currency: "NGN", region: "NG",
   }), JSON.stringify(r.json));
   check("config: limits.capacityMax is 50", r.json?.limits?.capacityMax === 50);
-  check("config: only the three public flags are exposed (no linkScreens)", Object.keys(r.json?.features ?? {}).sort().join() === "anonymousJoin,paidRooms,spray");
+  check("config: only the two public flags are exposed (no linkScreens, no anonymousJoin)", Object.keys(r.json?.features ?? {}).sort().join() === "paidRooms,spray");
   check("config: no key matching /secret|key|token/i anywhere in the response", !allKeys(r.json).some((k) => /secret|key|token/i.test(k)), allKeys(r.json).join());
   check("config: no secret-looking text in the body", !/paystack|sk_(live|test)|secret/i.test(JSON.stringify(r.json)));
 
@@ -92,10 +92,10 @@ try {
   check("registered before /:id: other ids still reach the room route (404 Room not found)", room.status === 404 && room.json?.message === "Room not found", JSON.stringify(room));
 
   const saved = { ...roomFeatures };
-  roomFeatures.paidRooms = true; roomFeatures.spray = true; roomFeatures.anonymousJoin = true;
+  roomFeatures.paidRooms = true; roomFeatures.spray = true;
   const on = await http("GET", "/api/rooms/config", adult);
   Object.assign(roomFeatures, saved);
-  check("config: reflects the live flag values", on.json?.features?.paidRooms === true && on.json.features.spray === true && on.json.features.anonymousJoin === true, JSON.stringify(on.json));
+  check("config: reflects the live flag values", on.json?.features?.paidRooms === true && on.json.features.spray === true, JSON.stringify(on.json));
 } catch (e: any) {
   failed++; console.log(`FAIL uncaught: ${e.stack || e}`);
 } finally {

@@ -111,7 +111,7 @@ export const NOTICE_MESSAGE: Record<string, string> = {
 
 /** Public switches and limits from GET /api/rooms/config. */
 export interface RoomsConfig {
-  features: { anonymousJoin: boolean; paidRooms: boolean; spray: boolean };
+  features: { paidRooms: boolean; spray: boolean };
   limits: typeof ROOM_LIMITS;
   currency: "NGN";
   region: "NG";

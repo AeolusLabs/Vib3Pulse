@@ -30,24 +30,15 @@ export type SafetyTone = "ok" | "no" | "eye";
 export interface SafetyRule { tone: SafetyTone; text: string }
 
 /**
- * The Room safety sheet, adapted from the design pack's ruleList() to the room's age limit. The anonymous-guest lines only
- * appear once a room can allow anonymous guests (phase 2); before that they would describe a feature that doesn't exist.
+ * The Room safety sheet, adapted from the design pack's ruleList() to the room's age limit.
  * The server enforces every one of these; this is only how they are explained.
  */
-export function roomSafetyRules(ageLimit: string, opts: { anonymousAllowed?: boolean } = {}): SafetyRule[] {
-  const anon = !!opts.anonymousAllowed;
+export function roomSafetyRules(ageLimit: string): SafetyRule[] {
   let who: string;
   if (ageLimit === "teen") who = "Only people under 18 can be in this room. Adults are blocked, checked on their account.";
   else if (ageLimit === "18+" || ageLimit === "21+") who = `Only adults ${ageLimit === "21+" ? "21 and over " : ""}can be in this room. Under 18s are blocked.`;
-  else who = `People ${ageLimit === "16+" ? 16 : 13} and over can join.${anon ? " Adults are not allowed to join anonymously here." : ""}`;
+  else who = `People ${ageLimit === "16+" ? 16 : 13} and over can join.`;
   const rules: SafetyRule[] = [{ tone: "ok", text: who }];
-  if (anon) {
-    rules.push(
-      { tone: "ok", text: "Anonymous guests can read, chat and react." },
-      { tone: "no", text: "Anonymous guests can't wave, send private messages, use the mic or the camera." },
-      { tone: "eye", text: "Hosts and moderators can still see who an anonymous guest is. Reports and bans follow the account." },
-    );
-  }
   rules.push({ tone: "eye", text: "Report anyone from their actions, or the whole room from Room options. Our team reads every report." });
   return rules;
 }

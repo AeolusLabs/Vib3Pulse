@@ -26,21 +26,21 @@ test("parseFlag: undefined and empty fall back to the default", () => {
 });
 test("loadRoomFeatures: defaults are all off with an empty env", () => {
   const f = loadRoomFeatures({});
-  assert.deepEqual(f, { linkScreens: false, anonymousJoin: false, paidRooms: false, spray: false });
-  assert.equal(DEFAULT_ROOM_FEATURES.anonymousJoin, false);
+  assert.deepEqual(f, { linkScreens: false, paidRooms: false, spray: false });
+  assert.equal((DEFAULT_ROOM_FEATURES as any).anonymousJoin, undefined);
   assert.equal(DEFAULT_ROOM_FEATURES.paidRooms, false);
   assert.equal(DEFAULT_ROOM_FEATURES.spray, false);
 });
-test("loadRoomFeatures: reads ROOMS_ANONYMOUS_JOIN, ROOMS_PAID, ROOMS_SPRAY", () => {
+test("loadRoomFeatures: reads ROOMS_PAID, ROOMS_SPRAY (and ignores the removed ROOMS_ANONYMOUS_JOIN)", () => {
   const f = loadRoomFeatures({ ROOMS_ANONYMOUS_JOIN: "1", ROOMS_PAID: "true", ROOMS_SPRAY: "1" });
-  assert.equal(f.anonymousJoin, true);
+  assert.equal((f as any).anonymousJoin, undefined);
   assert.equal(f.paidRooms, true);
   assert.equal(f.spray, true);
   assert.equal(f.linkScreens, false);
 });
 test("loadRoomFeatures: garbage values are off", () => {
-  const f = loadRoomFeatures({ ROOMS_ANONYMOUS_JOIN: "yes", ROOMS_PAID: " 1 ", ROOMS_SPRAY: "false" });
-  assert.deepEqual(f, { linkScreens: false, anonymousJoin: false, paidRooms: false, spray: false });
+  const f = loadRoomFeatures({ ROOMS_PAID: " 1 ", ROOMS_SPRAY: "false" });
+  assert.deepEqual(f, { linkScreens: false, paidRooms: false, spray: false });
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
