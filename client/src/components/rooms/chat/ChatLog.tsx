@@ -10,8 +10,8 @@ import type { ChatItem } from "@/lib/roomReducer";
  * - `nameOf`: display name for a userId; return "" for someone who left and the quote shows "Someone".
  * - `selfId`: the viewer's userId, or null. Own lines get no Wave action.
  * - `hidden`: userIds the viewer muted locally; their lines are not rendered.
- * - `immersive`: the log sits over the picture. Rows get a dark translucent panel, and aria-live goes "off"
- *   because the dock's log is the one that announces.
+ * - `immersive`: the log sits over the picture. Rows get a dark translucent panel (the scrim that keeps the text readable).
+ *   It stays a polite live region: the room page renders one chat log in every view, so it is the one that announces.
  * - `onReply` / `onHeart`: the viewer chose that line (swipe right 56 px or more, or the action row).
  * - `onWave` / `onPickAuthor`: addressed by userId, never by name.
  * The component fills its parent (`h-full`); the parent decides the height.
@@ -224,7 +224,7 @@ export function ChatLog({ chat, nameOf, selfId, hidden, immersive = false, onRep
       <div
         ref={listRef}
         role="log"
-        aria-live={immersive ? "off" : "polite"}
+        aria-live="polite"
         aria-label="Room chat"
         data-scrolling="false"
         onScroll={onScroll}

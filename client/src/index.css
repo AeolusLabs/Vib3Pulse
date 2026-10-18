@@ -354,6 +354,10 @@
 @media (prefers-reduced-motion: no-preference) {
   .room-float { animation: room-float 3.6s ease-out forwards; }
 }
+/* Reduced motion: no floating emoji at all (a still emoji parked over an avatar reads as a glitch). */
+@media (prefers-reduced-motion: reduce) {
+  .room-float { display: none; }
+}
 @keyframes room-float {
   0% { opacity: 0; transform: translate(-50%, 8px) scale(.6); }
   12% { opacity: 1; transform: translate(-50%, -4px) scale(1.1); }

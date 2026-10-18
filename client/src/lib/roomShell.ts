@@ -80,7 +80,7 @@ export function frameSlots(layout: "stack" | "rail", immersive: boolean): Record
   if (immersive) {
     return {
       root: "relative h-full min-h-0 overflow-hidden bg-black text-white",
-      top: "absolute inset-x-0 top-0 z-[5] min-w-0 bg-gradient-to-b from-black/70 to-transparent px-2 pb-5 pt-3",
+      top: "absolute inset-x-0 top-0 z-[5] min-w-0 bg-gradient-to-b from-black/70 to-transparent px-2 pb-5 pt-[max(0.75rem,env(safe-area-inset-top,0px))]",
       zone: "absolute inset-0 z-0",
       // Chat floats over the lower picture, clear of the right-hand rail (task 1.5).
       chat: "absolute bottom-[76px] left-0 right-16 z-[4] flex h-[30%] min-h-0 flex-col",
@@ -92,7 +92,7 @@ export function frameSlots(layout: "stack" | "rail", immersive: boolean): Record
   }
   return {
     root: "relative grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden bg-background text-foreground",
-    top: "min-w-0 px-2 pb-2 pt-3",
+    top: "min-w-0 px-2 pb-2 pt-[max(0.75rem,env(safe-area-inset-top,0px))]",
     // Capped so chat is always on screen at 390 x 800; the scene scrolls inside its own box when the room is busy.
     zone: "max-h-[38dvh] min-h-0 min-w-0 overflow-y-auto px-3",
     chat: "mt-1.5 flex min-h-0 flex-col",
