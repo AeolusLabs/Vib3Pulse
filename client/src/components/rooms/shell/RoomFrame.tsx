@@ -20,6 +20,8 @@ export interface RoomFrameProps {
   chromeHidden?: boolean;
   /** Focus reached hidden chrome (keyboard): show it again for real. */
   onReveal?: () => void;
+  /** Live video in the compact stack: the zone may grow to hold the picture, its controls and the speaker strip. */
+  live?: boolean;
 }
 
 /**
@@ -27,9 +29,9 @@ export interface RoomFrameProps {
  * The element tree is the same in every layout and view (only classes change, see `frameSlots`): rotating a tablet across
  * 1024 px or switching to immersive must never unmount the picture, the composer draft or the chat scroll position.
  */
-export default function RoomFrame({ layout, immersive, top, zone, pin, chat, dock, floating, chromeHidden = false, onReveal }: RoomFrameProps) {
+export default function RoomFrame({ layout, immersive, top, zone, pin, chat, dock, floating, chromeHidden = false, onReveal, live = false }: RoomFrameProps) {
   const imm = immersive && layout === "stack";
-  const c = frameSlots(layout, imm);
+  const c = frameSlots(layout, imm, { live });
   const hide = imm && chromeHidden;
   const chrome = chromeClasses(imm, hide);
   const reveal = hide ? onReveal : undefined;

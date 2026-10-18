@@ -360,7 +360,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
       ageLabel={ageLabel}
       hostName={hostName(host)}
       isLive={room.status === "live"}
-      subtitle={topBarSubtitle({ immersive, holderName, count, away: state.holderAwayUntil !== null })}
+      subtitle={topBarSubtitle({ immersive, holderName, count, away: state.holderAwayUntil !== null || holderLeftMs !== null, self: isHolder })}
       count={count}
       immersive={immersive}
       onBack={onLeave}
@@ -380,6 +380,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
           immersive={immersive}
           chromeHidden={video.chromeHidden}
           onReveal={video.showChrome}
+          live={state.liveVideo}
           top={top}
           zone={zone}
           chat={<ChatLog chat={state.chat} nameOf={nameOf} selfId={meId} hidden={hidden} immersive={immersive} onReply={onReply} onHeart={onHeart} onWave={onWave} onPickAuthor={onPickAuthor} />}

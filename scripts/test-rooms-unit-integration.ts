@@ -12,6 +12,7 @@ import { REACT_GATE, reactGate } from "../client/src/lib/hype";
 import { NOTICE_MESSAGE } from "../client/src/lib/roomsApi";
 import { FIXTURE_IDS, fixtureLiveState, fixtureStartView, parseFixtureQuery } from "../client/src/lib/roomFixtures";
 import { cn } from "../client/src/lib/utils";
+import { frameSlots } from "../client/src/lib/roomShell";
 import { ROOM_LIMITS, resolveChatReply } from "../shared/rooms";
 
 let passed = 0, failed = 0;
@@ -50,6 +51,12 @@ test("views: rotating a tablet across 1024 resets the choice to that width's def
   assert.deepEqual(resizeStep(chose, 768, 820), chose); // same side: the choice stays
   assert.deepEqual(resizeStep(chose, 768, 1180), { view: "compact", userChose: false });
   assert.deepEqual(resizeStep({ view: "compact", userChose: false }, 1180, 768), { view: "immersive", userChose: false });
+});
+
+test("views: compact live video on a phone gives the zone room for picture, controls and speakers; voice keeps 38dvh", () => {
+  assert.match(frameSlots("stack", false, { live: true }).zone, /max-h-\[52dvh\]/);
+  assert.match(frameSlots("stack", false).zone, /max-h-\[38dvh\]/);
+  assert.deepEqual(frameSlots("rail", false, { live: true }), frameSlots("rail", false));
 });
 
 // ---------------------------------------------------------------- chat: reply quotes
@@ -121,6 +128,8 @@ test("top bar: immersive says who is live and how many watch, or that they are r
   assert.equal(topBarSubtitle({ immersive: false, holderName: "Dayo", count: 19, away: false }), undefined);
   assert.equal(topBarSubtitle({ immersive: true, holderName: "Dayo", count: 19, away: false }), "Dayo is live, 19 watching");
   assert.equal(topBarSubtitle({ immersive: true, holderName: "Dayo", count: 19, away: true }), "Dayo is reconnecting, 19 watching");
+  assert.equal(topBarSubtitle({ immersive: true, holderName: "Dayo", count: 19, away: false, self: true }), "You're live, 19 watching");
+  assert.equal(topBarSubtitle({ immersive: true, holderName: "Dayo", count: 19, away: true, self: true }), "You're reconnecting, 19 watching");
 });
 test("rail: a live holder gets Stop live; a viewer who may ask gets Ask, then Cancel request", () => {
   assert.equal(railAction({ isHolder: true, cameraOn: true, videoPaused: false, canAsk: false, asked: false, askLabel: "Go live" })?.kind, "stop");

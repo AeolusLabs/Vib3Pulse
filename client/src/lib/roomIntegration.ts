@@ -32,8 +32,10 @@ export function replyFromItem(item: { userId: string; text: string }): ChatReply
 }
 
 /** The top bar's second line. Immersive shows who is live (or reconnecting) and how many watch; otherwise the host line. */
-export function topBarSubtitle(s: { immersive: boolean; holderName: string | null; count: number; away: boolean }): string | undefined {
-  return s.immersive ? liveMeta(s.holderName, s.count, s.away) : undefined;
+export function topBarSubtitle(s: { immersive: boolean; holderName: string | null; count: number; away: boolean; self?: boolean }): string | undefined {
+  if (!s.immersive) return undefined;
+  if (s.self) return `${s.away ? "You're reconnecting" : "You're live"}, ${s.count} watching`;
+  return liveMeta(s.holderName, s.count, s.away);
 }
 
 /** One status line at a time: something aimed at you, then a server notice, then the reaction slow-down line. */

@@ -64,7 +64,7 @@ export type FrameSlot = "root" | "top" | "zone" | "chat" | "chatHeading" | "pin"
  * Class names for every slot of RoomFrame. One element tree serves stack, rail and immersive; only these classes change, so
  * rotating a tablet across 1024 px never unmounts the picture, the composer draft or the chat scroll. Desktop is never immersive.
  */
-export function frameSlots(layout: "stack" | "rail", immersive: boolean): Record<FrameSlot, string> {
+export function frameSlots(layout: "stack" | "rail", immersive: boolean, opts: { live?: boolean } = {}): Record<FrameSlot, string> {
   if (layout === "rail") {
     return {
       root: "relative grid h-full min-h-0 grid-cols-[minmax(0,1fr)_360px] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-background text-foreground",
@@ -94,7 +94,8 @@ export function frameSlots(layout: "stack" | "rail", immersive: boolean): Record
     root: "relative grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden bg-background text-foreground",
     top: "min-w-0 px-2 pb-2 pt-[max(0.75rem,env(safe-area-inset-top,0px))]",
     // Capped so chat is always on screen at 390 x 800; the scene scrolls inside its own box when the room is busy.
-    zone: "max-h-[38dvh] min-h-0 min-w-0 overflow-y-auto px-3",
+    // Live video (compact) gets more: the picture, its controls and the speaker strip, with chat still on screen.
+    zone: `${opts.live ? "max-h-[52dvh]" : "max-h-[38dvh]"} min-h-0 min-w-0 overflow-y-auto px-3`,
     chat: "mt-1.5 flex min-h-0 flex-col",
     chatHeading: "hidden",
     pin: "px-3 pb-1",

@@ -67,6 +67,9 @@ interface Props {
   onControlsOpenChange?: (open: boolean) => void;
 }
 
+/** Buttons over the picture: neutral dark glass (the shared secondary button is amber, which is kept for money), 44 px tall. */
+const OVER = "absolute inline-flex h-11 items-center rounded-full bg-black/55 text-white backdrop-blur focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary [@media(hover:hover)_and_(pointer:fine)]:hover:bg-black/70";
+
 type FsVideo = HTMLVideoElement & { webkitEnterFullscreen?: () => void };
 type FsElement = HTMLElement & { webkitRequestFullscreen?: () => Promise<void> | void };
 const fsElement = () => (document.fullscreenElement ?? (document as any).webkitFullscreenElement) as Element | null | undefined;
@@ -257,7 +260,7 @@ export default function ScreenStage({ track, holderName, isHolder, cameraOn, cam
               </div>
             ) : (
               <>
-                <p className="font-serif text-2xl font-bold">{isHolder ? "You're up" : "No one is live"}</p>
+                <p className="font-serif text-2xl font-bold">{isHolder ? "You're up" : holderName ? (audioOnly ? "Sound only" : "Picture is off") : "No one is live"}</p>
                 <p className={`text-sm ${sub}`}>
                   {isHolder ? "Pick your camera and microphone, then go live."
                     : holderName && audioOnly ? `Sound only: you can hear ${holderName}. Tap Watch video to see the picture.`
@@ -265,7 +268,7 @@ export default function ScreenStage({ track, holderName, isHolder, cameraOn, cam
                     : "The host can put someone on the screen."}
                 </p>
                 {immersive && isHolder && <Button type="button" className="mt-2 min-h-[44px] rounded-full" onClick={() => setSheetOpen(true)} data-testid="button-open-live-controls">Choose camera and go live</Button>}
-                {immersive && !isHolder && audioOnly && holderName && <Button type="button" variant="secondary" className="mt-2 min-h-[44px] rounded-full" onClick={() => onAudioOnly(false)} data-testid="button-watch-video">Watch video</Button>}
+                {immersive && !isHolder && audioOnly && holderName && <Button type="button" variant="outline" className="mt-2 min-h-[44px] rounded-full text-foreground" onClick={() => onAudioOnly(false)} data-testid="button-watch-video">Watch video</Button>}
                 {immersive && askButton && <div className="mt-2">{askButton}</div>}
               </>
             )}
@@ -278,15 +281,15 @@ export default function ScreenStage({ track, holderName, isHolder, cameraOn, cam
               <span role="status" className="inline-flex items-center gap-1.5 rounded-full bg-background/80 px-2.5 py-1 text-xs font-medium backdrop-blur" data-testid="live-badge"><span className="h-1.5 w-1.5 rounded-full bg-red-500" aria-hidden />{holderAway ? "Reconnecting…" : isHolder ? "You're live" : holderName ? `${holderName} is live` : "Live"}</span>
               {typeof watching === "number" && <span className="rounded-full bg-background/80 px-2.5 py-1 text-xs font-medium tabular-nums backdrop-blur" data-testid="live-watching">{watching} watching</span>}
             </div>
-            {!isFull && <Button type="button" ref={fsButton} variant="secondary" size="sm" className="absolute bottom-3 right-3 min-h-[44px] rounded-full" onClick={fullscreen} data-testid="button-screen-fullscreen">Fullscreen</Button>}
+            {!isFull && <button type="button" ref={fsButton} className={`${OVER} bottom-3 right-3 px-4 text-sm font-medium`} onClick={fullscreen} data-testid="button-screen-fullscreen">Fullscreen</button>}
           </>
         )}
         {!immersive && !isFull && showVideo && onExpand && (
-          <Button type="button" size="icon" variant="secondary" onClick={onExpand} className="absolute right-3 top-3 h-11 w-11 rounded-full" aria-label="Immersive view" data-testid="button-screen-expand"><MaximizeIcon className="h-5 w-5" aria-hidden /></Button>
+          <button type="button" onClick={onExpand} className={`${OVER} right-3 top-3 w-11 justify-center`} aria-label="Immersive view" data-testid="button-screen-expand"><MaximizeIcon className="h-5 w-5" aria-hidden /></button>
         )}
         {isFull && (
           <>
-            <Button type="button" ref={exitButton} size="icon" variant="secondary" onClick={exitFullscreen} className="absolute right-3 top-3 z-20 h-11 w-11 rounded-full" aria-label="Exit fullscreen" data-testid="button-screen-exit"><MinimizeIcon className="h-5 w-5" aria-hidden /></Button>
+            <button type="button" ref={exitButton} onClick={exitFullscreen} className={`${OVER} right-3 top-3 z-20 w-11 justify-center`} aria-label="Exit fullscreen" data-testid="button-screen-exit"><MinimizeIcon className="h-5 w-5" aria-hidden /></button>
             {strip && (
               <div className="absolute inset-x-0 bottom-0 z-20 max-h-[45%] overflow-y-auto bg-background/85 p-2 backdrop-blur" data-testid="stage-strip">
                 <Button type="button" size="sm" variant="ghost" className="mb-1 min-h-[44px] rounded-full" onClick={() => setStripOpen((o) => !o)} aria-expanded={stripOpen} data-testid="button-stage-strip">
