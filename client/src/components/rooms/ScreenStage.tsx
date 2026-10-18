@@ -7,7 +7,7 @@ import type { ScreenTrack } from "@/hooks/useRoomVoice";
 import { pickDevices, rememberDevice, rememberedDevice, type Dev } from "@/lib/mediaDevices";
 import { formatMmSs } from "@/lib/voiceState";
 import type { VideoProfile } from "@/lib/bandwidth";
-import { immersiveNotice } from "@/lib/videoViewState";
+import { immersiveNotice, weakDismissedAfter } from "@/lib/videoViewState";
 
 interface Props {
   /** The track to show: your own preview while you hold the screen, otherwise what the holder sends. */
@@ -33,6 +33,8 @@ interface Props {
   holderAway: boolean;
   /** Only for the holder, while their own connection is down: about how long the spot is held (ms), null otherwise. */
   holderLeftMs: number | null;
+  /** Viewers, while the holder is away: about how long their spot is still held (ms), from awayRemainingMs. Shown on the slate and the immersive away banner. */
+  holderAwayLeftMs?: number | null;
   /** Weak connections. Holder: picture quality, and dropping the picture while keeping the sound. Viewer: sound only to save data. */
   quality: VideoProfile | "auto";
   onQuality: (q: VideoProfile | "auto") => void;
@@ -69,7 +71,7 @@ type FsElement = HTMLElement & { webkitRequestFullscreen?: () => Promise<void> |
 const fsElement = () => (document.fullscreenElement ?? (document as any).webkitFullscreenElement) as Element | null | undefined;
 
 /** The room's screen when live video is on: one stage, one person on it, 16:9. Nothing is recorded. */
-export default function ScreenStage({ track, holderName, isHolder, cameraOn, cameraError, onGoLive, onStop, canAsk, askLabel, asked, onAsk, onWithdraw, needsTap, onTap, holderAway, holderLeftMs, quality, onQuality, videoPaused, onPauseVideo, onResumeVideo, audioOnly, onAudioOnly, weakLink, comingBack, strip, layout = "compact", onPictureTap, onExpand, watching, controlsOpen, onControlsOpenChange }: Props) {
+export default function ScreenStage({ track, holderName, isHolder, cameraOn, cameraError, onGoLive, onStop, canAsk, askLabel, asked, onAsk, onWithdraw, needsTap, onTap, holderAway, holderLeftMs, quality, onQuality, videoPaused, onPauseVideo, onResumeVideo, audioOnly, onAudioOnly, weakLink, comingBack, strip, holderAwayLeftMs = null, layout = "compact", onPictureTap, onExpand, watching, controlsOpen, onControlsOpenChange }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const videoEl = useRef<HTMLVideoElement>(null);
   const [cams, setCams] = useState<Dev[]>([]);
@@ -88,7 +90,9 @@ export default function ScreenStage({ track, holderName, isHolder, cameraOn, cam
   const sheetOpen = controlsOpen ?? ownSheetOpen;
   const setSheetOpen = (open: boolean) => { if (controlsOpen === undefined) setOwnSheetOpen(open); onControlsOpenChange?.(open); };
   const [weakDismissed, setWeakDismissed] = useState(false); // immersive "Not now" on the weak link banner, until the link recovers
-  useEffect(() => { if (!weakLink) setWeakDismissed(false); }, [weakLink]);
+  useEffect(() => { setWeakDismissed((d) => weakDismissedAfter(d, weakLink)); }, [weakLink]);
+  // Immersive: once the camera is on, the controls sheet has done its job; close it so the picture shows.
+  useEffect(() => { if (cameraOn && layout === "immersive") setSheetOpen(false); }, [cameraOn]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The <video> belongs to this component; the track is attached to it and detached again, never the other way round.
   useEffect(() => {
@@ -149,7 +153,7 @@ export default function ScreenStage({ track, holderName, isHolder, cameraOn, cam
   const showVideo = !!track;
   const immersive = layout === "immersive";
   const sub = immersive ? "text-white/80" : "text-muted-foreground";
-  const notice = immersive ? immersiveNotice({ isHolder, holderLeftMs, videoPaused, weakLink, cameraOn, audioOnly }) : null;
+  const notice = immersive ? immersiveNotice({ isHolder, holderLeftMs, videoPaused, weakLink, cameraOn, audioOnly, holderAway, hasPicture: showVideo }) : null;
   const shownNotice = notice === "weak-link-viewer" && weakDismissed ? null : notice;
 
   // Immersive: a tap on the picture itself (not on a button or field) hides or shows the controls around it.
@@ -163,6 +167,9 @@ export default function ScreenStage({ track, holderName, isHolder, cameraOn, cam
       <p role="status">Your connection dropped. We're holding your spot. Your stream carries on by itself when you're back.</p>
       <p className="text-muted-foreground">Time left: <span className="font-medium tabular-nums text-foreground" aria-live="off">{formatMmSs(holderLeftMs)}</span></p>
     </div>
+  );
+  const awayLeft = holderAwayLeftMs !== null && (
+    <span className="font-medium tabular-nums" aria-live="off" data-testid="holder-away-left">{formatMmSs(holderAwayLeftMs)}</span>
   );
   const pausedNote = (
     <p role="status" className="rounded-xl bg-muted px-3 py-2 text-sm text-foreground" data-testid="video-paused">Your picture is off to save your connection. Your sound is still live.</p>
@@ -245,6 +252,7 @@ export default function ScreenStage({ track, holderName, isHolder, cameraOn, cam
                 <Loader2Icon className={`h-5 w-5 animate-spin ${sub}`} aria-hidden />
                 <p className="font-serif text-2xl font-bold">Back in a moment</p>
                 <p className={`text-sm ${sub}`}>{holderName ?? "The streamer"} lost connection. Their spot is being held.</p>
+                {awayLeft && <p className={`text-sm ${sub}`}>Time left: {awayLeft}</p>}
               </div>
             ) : (
               <>
@@ -272,7 +280,7 @@ export default function ScreenStage({ track, holderName, isHolder, cameraOn, cam
             {!isFull && <Button type="button" ref={fsButton} variant="secondary" size="sm" className="absolute bottom-3 right-3 min-h-[44px] rounded-full" onClick={fullscreen} data-testid="button-screen-fullscreen">Fullscreen</Button>}
           </>
         )}
-        {!immersive && !isFull && onExpand && (
+        {!immersive && !isFull && showVideo && onExpand && (
           <Button type="button" size="icon" variant="secondary" onClick={onExpand} className="absolute right-3 top-3 h-11 w-11 rounded-full" aria-label="Immersive view" data-testid="button-screen-expand"><MaximizeIcon className="h-5 w-5" aria-hidden /></Button>
         )}
         {isFull && (
@@ -291,11 +299,24 @@ export default function ScreenStage({ track, holderName, isHolder, cameraOn, cam
       </div>
 
       {/* Immersive: one banner at a time over the picture, under the top bar. Same conditions as the compact view. */}
-      {shownNotice && (
-        <div className="absolute inset-x-2 top-[calc(64px+env(safe-area-inset-top,0px))] z-[6]" data-testid="immersive-notice">
+      {immersive && (shownNotice || (cameraError && !sheetOpen)) && (
+        <div className="absolute inset-x-2 top-[calc(64px+env(safe-area-inset-top,0px))] z-[6] space-y-2" data-testid="immersive-notice">
+          {cameraError && !sheetOpen && (
+            <div role="alert" className="flex flex-wrap items-center gap-2 rounded-xl bg-muted px-3 py-2 text-sm text-destructive" data-testid="camera-error-immersive">
+              <p className="min-w-0 flex-1">{cameraError}</p>
+              {isHolder && <Button type="button" size="sm" variant="outline" className="min-h-[44px] rounded-full text-foreground" onClick={() => setSheetOpen(true)} data-testid="button-camera-error-open">Live controls</Button>}
+            </div>
+          )}
           {shownNotice === "holder-reconnecting" && reconnecting}
           {shownNotice === "video-paused" && pausedNote}
           {shownNotice === "weak-link-holder" && weakHolder}
+          {shownNotice === "holder-away" && (
+            <div className="space-y-1 rounded-xl bg-muted px-3 py-2 text-sm text-foreground" data-testid="holder-away-notice">
+              {/* Announced once; the ticking time sits outside the status. */}
+              <p role="status">{holderName ?? "The streamer"} lost connection. The picture is paused while their spot is held.</p>
+              {awayLeft && <p className="text-muted-foreground">Time left: <span className="text-foreground">{awayLeft}</span></p>}
+            </div>
+          )}
           {shownNotice === "weak-link-viewer" && (
             <div role="status" className="flex flex-wrap items-center gap-2 rounded-xl bg-muted px-3 py-2 text-sm text-foreground" data-testid="weak-link-viewer">
               <p className="min-w-0 flex-1">Your connection is weak. Switch to sound only to keep listening smoothly?</p>

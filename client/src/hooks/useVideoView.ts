@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "@/hooks/use-toast";
 import { defaultVideoView, type VideoView } from "@/lib/roomLayout";
-import { chromeHiddenFor, crossesRailLine, effectiveView, shouldShowImmersiveHint, viewAfterResize } from "@/lib/videoViewState";
+import { chromeHiddenFor, effectiveView, resizeStep, shouldShowImmersiveHint } from "@/lib/videoViewState";
 
 const width = () => (typeof window === "undefined" ? 1280 : window.innerWidth);
 const store = () => { try { return window.localStorage; } catch { return null; } };
@@ -14,9 +14,8 @@ let hintedThisVisit = false; // blocked storage would otherwise show the hint on
  */
 export function useVideoView(isLive: boolean): { view: VideoView; setView(v: VideoView): void; chromeHidden: boolean; toggleChrome(): void; showChrome(): void; canImmerse: boolean } {
   const [w, setW] = useState(width);
-  const [chosen, setChosen] = useState<VideoView>(() => defaultVideoView(width()));
+  const [pick, setPick] = useState(() => ({ view: defaultVideoView(width()), userChose: false }));
   const [hidden, setHidden] = useState(false);
-  const userChose = useRef(false);
   const lastW = useRef(w);
 
   useEffect(() => {
@@ -24,16 +23,14 @@ export function useVideoView(isLive: boolean): { view: VideoView; setView(v: Vid
       const before = lastW.current, after = width();
       if (before === after) return;
       lastW.current = after;
-      const chose = userChose.current;
-      setChosen((cur) => viewAfterResize(cur, chose, before, after));
-      if (crossesRailLine(before, after)) userChose.current = false;
+      setPick((cur) => resizeStep(cur, before, after));
       setW(after);
     };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  const view = effectiveView(chosen, w);
+  const view = effectiveView(pick.view, w);
 
   // Controls come back whenever the view changes or the live picture ends.
   useEffect(() => { setHidden(false); }, [view, isLive]);
@@ -45,7 +42,7 @@ export function useVideoView(isLive: boolean): { view: VideoView; setView(v: Vid
     if (shouldShowImmersiveHint(store())) toast({ description: "Tap the picture to hide controls" });
   }, [isLive, view]);
 
-  const setView = useCallback((v: VideoView) => { userChose.current = true; setChosen(v); }, []);
+  const setView = useCallback((v: VideoView) => setPick({ view: v, userChose: true }), []);
   const toggleChrome = useCallback(() => setHidden((h) => !h), []);
   const showChrome = useCallback(() => setHidden(false), []);
 

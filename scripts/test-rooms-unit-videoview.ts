@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import {
   IMMERSIVE_HINT_KEY, chromeHiddenFor, crossesRailLine, effectiveView, immersiveNotice, liveMeta, qualityLabel,
-  shouldShowImmersiveHint, stripOrder, viewAfterResize, type NoticeInput,
+  railAction, railPrimary, resizeStep, shouldShowImmersiveHint, stripOrder, viewAfterResize, weakDismissedAfter, type NoticeInput,
 } from "../client/src/lib/videoViewState";
 
 let passed = 0, failed = 0;
@@ -70,7 +70,7 @@ test("hint: blocked storage does not throw; no storage still shows it", () => {
 });
 
 // ---------------------------------------------------------------- weak network notice (immersive shows one at a time)
-const n = (o: Partial<NoticeInput> = {}): NoticeInput => ({ isHolder: false, holderLeftMs: null, videoPaused: false, weakLink: false, cameraOn: false, audioOnly: false, ...o });
+const n = (o: Partial<NoticeInput> = {}): NoticeInput => ({ isHolder: false, holderLeftMs: null, videoPaused: false, weakLink: false, cameraOn: false, audioOnly: false, holderAway: false, hasPicture: true, ...o });
 test("notice: viewer on a weak link is offered sound only, unless sound only is already on", () => {
   assert.equal(immersiveNotice(n({ weakLink: true })), "weak-link-viewer");
   assert.equal(immersiveNotice(n({ weakLink: true, audioOnly: true })), null);
@@ -84,6 +84,49 @@ test("notice: holder sees reconnecting first, then paused picture, then weak lin
   assert.equal(h({ weakLink: true, cameraOn: true }), "weak-link-holder");
   assert.equal(h({ weakLink: true, cameraOn: false }), null);
   assert.equal(h({ weakLink: true, audioOnly: true }), null);
+  // sound only is a viewer setting: a holder whose camera is on still gets the weak link advice
+  assert.equal(h({ weakLink: true, audioOnly: true, cameraOn: true }), "weak-link-holder");
+});
+test("notice: viewer sees the holder is away over a frozen picture, ahead of weak link advice", () => {
+  assert.equal(immersiveNotice(n({ holderAway: true })), "holder-away");
+  assert.equal(immersiveNotice(n({ holderAway: true, weakLink: true })), "holder-away");
+  assert.equal(immersiveNotice(n({ holderAway: true, audioOnly: true })), "holder-away");
+  // no picture: the be-right-back slate already says it, so no banner on top of it
+  assert.equal(immersiveNotice(n({ holderAway: true, hasPicture: false })), null);
+  assert.equal(immersiveNotice(n({ holderAway: true, hasPicture: false, weakLink: true })), "weak-link-viewer");
+  // the holder's own drop is the reconnecting banner, not the viewer's away notice
+  assert.equal(immersiveNotice(n({ isHolder: true, holderAway: true, holderLeftMs: 5000 })), "holder-reconnecting");
+  assert.equal(immersiveNotice(n({ isHolder: true, holderAway: true })), null);
+});
+test("notice: Not now on the weak link banner lasts until the link recovers", () => {
+  assert.equal(weakDismissedAfter(true, true), true);
+  assert.equal(weakDismissedAfter(true, false), false);
+  assert.equal(weakDismissedAfter(false, true), false);
+});
+
+// ---------------------------------------------------------------- rail
+test("rail: holders get Live controls, viewers get the quality name", () => {
+  assert.deepEqual(railPrimary(true, "Auto"), { label: "Live controls", caption: "Controls" });
+  assert.deepEqual(railPrimary(false, "Data saver"), { label: "Video quality: Data saver", caption: "Data saver" });
+});
+test("rail: one-tap Stop live for a live holder; ask or cancel for a viewer who may ask", () => {
+  const a = (o: Partial<Parameters<typeof railAction>[0]>) => railAction({ isHolder: false, cameraOn: false, videoPaused: false, canAsk: false, asked: false, askLabel: "Ask to go live", ...o });
+  assert.deepEqual(a({ isHolder: true, cameraOn: true }), { kind: "stop", label: "Stop live" });
+  assert.deepEqual(a({ isHolder: true, videoPaused: true }), { kind: "stop", label: "Stop live" });
+  assert.equal(a({ isHolder: true }), null); // not live yet: Go live needs the device picker
+  assert.deepEqual(a({ canAsk: true }), { kind: "ask", label: "Ask to go live" });
+  assert.deepEqual(a({ canAsk: true, asked: true }), { kind: "withdraw", label: "Cancel request" });
+  assert.equal(a({}), null);
+});
+
+// ---------------------------------------------------------------- resize step (useVideoView)
+test("resize step: crossing the line resets the view and forgets the user's choice", () => {
+  assert.deepEqual(resizeStep({ view: "immersive", userChose: true }, 768, 1280), { view: "compact", userChose: false });
+  assert.deepEqual(resizeStep({ view: "compact", userChose: true }, 390, 768), { view: "compact", userChose: true });
+  assert.deepEqual(resizeStep({ view: "compact", userChose: false }, 390, 768), { view: "immersive", userChose: false });
+  // after a reset the default follows the width again
+  const s1 = resizeStep({ view: "compact", userChose: true }, 1280, 800);
+  assert.deepEqual(resizeStep(s1, 800, 600), { view: "immersive", userChose: false });
 });
 
 // ---------------------------------------------------------------- labels
@@ -93,6 +136,11 @@ test("labels: quality names match the quality picker; sound only wins", () => {
   assert.equal(qualityLabel("balanced", false), "Balanced");
   assert.equal(qualityLabel("standard", false), "High");
   assert.equal(qualityLabel("standard", true), "Sound only");
+});
+test("labels: the top bar says when the holder is away", () => {
+  assert.equal(liveMeta("Dayo", 19, true), "Dayo is reconnecting, 19 watching");
+  assert.equal(liveMeta(null, 3, true), "Reconnecting, 3 watching");
+  assert.equal(liveMeta("Dayo", 19, false), "Dayo is live, 19 watching");
 });
 test("labels: the immersive top bar line, with no em dash", () => {
   assert.equal(liveMeta("Dayo", 19), "Dayo is live, 19 watching");
