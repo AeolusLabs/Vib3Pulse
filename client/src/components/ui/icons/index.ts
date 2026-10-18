@@ -61,6 +61,7 @@ export { default as MegaphoneIcon } from "./megaphone-icon";
 export { default as MenuIcon } from "./menu-icon";
 export { default as MessageCircleIcon } from "./message-circle-icon";
 export { default as MessageSquareIcon } from "./message-square-icon";
+export { default as MicIcon } from "./mic-icon";
 export { default as MinimizeIcon } from "./minimize-icon";
 export { default as MinusIcon } from "./minus-icon";
 export { default as MoonIcon } from "./moon-icon";
