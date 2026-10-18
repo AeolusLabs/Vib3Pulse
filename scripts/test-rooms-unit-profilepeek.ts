@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { profilePath } from "../client/src/lib/profilePath";
+import { profilePath, shouldFetchProfile, fillMissing } from "../client/src/lib/profilePath";
 
 let passed = 0, failed = 0;
 const test = (name: string, fn: () => void) => {
@@ -21,6 +21,23 @@ test("unsafe characters cannot escape the path", () => {
   const p = profilePath({ username: "../x?y#z", userId: "1" });
   assert.ok(p.startsWith("/profile/") && !p.slice(9).match(/[\/?#]/), p);
   assert.ok(!profilePath({ userId: "a/../b" }).slice(6).includes("/"));
+});
+
+test("shouldFetchProfile: default true, false when disabled or anonymous or missing", () => {
+  assert.equal(shouldFetchProfile({ userId: "1" }), true);
+  assert.equal(shouldFetchProfile({ userId: "1" }, true), true);
+  assert.equal(shouldFetchProfile({ userId: "1" }, false), false);
+  assert.equal(shouldFetchProfile({ userId: "1", anonymous: true }, true), false);
+  assert.equal(shouldFetchProfile(null, true), false);
+});
+test("fillMissing keeps known avatar and fills gaps", () => {
+  const m = { userId: "1", avatar: { a: 1 }, displayName: null as string | null, avatarUrl: undefined as string | undefined };
+  const r = fillMissing(m, { avatar: null, displayName: "Ada", avatarUrl: "u.png", bio: "hi" });
+  assert.deepEqual(r.avatar, { a: 1 });
+  assert.equal(r.displayName, "Ada");
+  assert.equal(r.avatarUrl, "u.png");
+  assert.equal((r as any).bio, "hi");
+  assert.equal(fillMissing({ userId: "1", displayName: "Zed" }, { displayName: "Ada" }).displayName, "Zed");
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

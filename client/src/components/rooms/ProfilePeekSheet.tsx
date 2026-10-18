@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import HostAvatar from "@/components/rooms/HostAvatar";
 import type { RoomMemberView } from "@/lib/roomReducer";
-import { profilePath } from "@/lib/profilePath";
+import { profilePath, shouldFetchProfile, fillMissing } from "@/lib/profilePath";
 import { ExternalLinkIcon } from "@/components/ui/icons";
 
 export { profilePath };
@@ -14,6 +14,8 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   member: RoomMemberView | null;
+  /** When false (anonymous guests, later phases) nothing is fetched and nothing renders. Defaults to true. */
+  canViewProfile?: boolean;
 }
 
 /** Only the fields we show are read; the server already withholds birthdate, email and phone from this endpoint. */
@@ -23,10 +25,11 @@ interface FollowStats { followersCount: number; followingCount: number }
 const nameOf = (m: { displayName?: string | null; organizationName?: string | null; username?: string | null }) => m.displayName || m.organizationName || m.username || "Guest";
 
 /** A quick look at someone's public profile without leaving the room. */
-export default function ProfilePeekSheet({ open, onOpenChange, member }: Props) {
+export default function ProfilePeekSheet({ open, onOpenChange, member, canViewProfile = true }: Props) {
   const [, navigate] = useLocation();
-  const identifier = member ? (member.username?.trim() || member.userId) : null;
-  const enabled = open && !!identifier;
+  const allowed = shouldFetchProfile(member, canViewProfile);
+  const identifier = member && allowed ? (member.username?.trim() || member.userId) : null;
+  const enabled = open && allowed && !!identifier;
 
   const user = useQuery<PeekUser>({
     queryKey: ["/api/users", identifier, "peek"],
@@ -49,9 +52,9 @@ export default function ProfilePeekSheet({ open, onOpenChange, member }: Props) 
     staleTime: 30_000,
   });
 
-  if (!member) return null;
+  if (!member || !allowed) return null;
   // Room data first (already on screen), then the fuller public profile when it arrives.
-  const shown = { ...member, ...(user.data ?? {}) };
+  const shown = fillMissing(member, user.data);
   const bio = user.data?.bio?.trim();
 
   return (

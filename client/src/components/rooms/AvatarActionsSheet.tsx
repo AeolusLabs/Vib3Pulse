@@ -163,7 +163,7 @@ export default function AvatarActionsSheet({ open, onOpenChange, roomId, target,
         </SheetContent>
       </Sheet>
 
-      <ProfilePeekSheet open={peeking} onOpenChange={setPeeking} member={target} />
+      <ProfilePeekSheet open={peeking} onOpenChange={setPeeking} member={target} canViewProfile={canViewProfile} />
 
       <AlertDialog open={confirm !== null} onOpenChange={(o) => { if (!o) setConfirm(null); }}>
         <AlertDialogContent>
