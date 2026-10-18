@@ -650,7 +650,7 @@ export function setupAdminRoutes(app: Express) {
       const r = await correctDateOfBirth({ adminId: req.session.adminId!, userId: req.params.id, ...body, ip: req.ip });
       if (!r.ok) return res.status(r.status).json({ message: r.message });
       if (r.roomsFailed) {
-        return res.status(500).json({ message: "The date of birth was saved, but applying it to this person's rooms failed. Check their rooms now.", saved: true, code: "ROOMS_NOT_UPDATED", user: r.user });
+        return res.status(500).json({ message: "The date of birth was saved, but applying it to this person's rooms failed. Check their rooms now.", saved: true, code: "ROOMS_NOT_UPDATED", failedRoomIds: r.failedRoomIds ?? [], user: r.user });
       }
       res.json(r.user);
     } catch (error) {

@@ -89,6 +89,21 @@ export async function setStatus(id: string, status: RoomStatus, now = new Date()
   return row;
 }
 
+/**
+ * Scheduled -> live, checked in the write itself. Returns null when the room is not scheduled any more (already live, or
+ * ended by a safety rule in between), so an ended room can never be brought back to life.
+ */
+export async function startScheduledRoom(id: string, now = new Date()): Promise<Room | null> {
+  const [row] = await db.update(rooms).set({ status: "live", startedAt: now }).where(and(eq(rooms.id, id), eq(rooms.status, "scheduled"))).returning();
+  return row ?? null;
+}
+
+/** Cancels a scheduled room, checked in the write. Returns null when it is not scheduled any more (it went live, or ended). */
+export async function cancelScheduledRoom(id: string, now = new Date()): Promise<Room | null> {
+  const [row] = await db.update(rooms).set({ status: "ended", endedAt: now }).where(and(eq(rooms.id, id), eq(rooms.status, "scheduled"))).returning();
+  return row ?? null;
+}
+
 export interface ListRoomsOpts {
   scope: "live" | "upcoming" | "friends";
   viewerId: string;

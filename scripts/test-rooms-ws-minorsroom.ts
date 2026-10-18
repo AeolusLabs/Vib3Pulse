@@ -504,6 +504,117 @@ try {
     release8();
   }
 
+  // ---- one step of a birthdate correction throws: the later steps and the other rooms still run; running it again finishes the job
+  const HC = await mk("iso_host"), XA = await mk("iso_adult_a"), XB = await mk("iso_adult_b");
+  await mutual(HC, XA); await mutual(HC, XB);
+  const mkLive = async (title: string) => { const r = await rs.createRoom(HC, { title, kind: "party", visibility: "friends", ageLimit: "all" } as any); await rs.setStatus(r.id, "live"); expectHost(r.id); return r.id as string; };
+  const mkLive2 = async (host: string, title: string) => { const r = await rs.createRoom(host, { title, kind: "party", visibility: "friends", ageLimit: "all" } as any); await rs.setStatus(r.id, "live"); expectHost(r.id); return r.id as string; };
+  const RA = await mkLive("iso room a"), RB = await mkLive("iso room b");
+  const RPub = (await rs.createRoom(HC, { title: "iso public", kind: "party", visibility: "public", ageLimit: "all", scheduledFor: new Date(Date.now() + 3600e3).toISOString() } as any)).id as string;
+  const hc = await connect(HC), xa = await connect(XA), xb = await connect(XB);
+  check("isolation setup: the adult guests are in two different live rooms", (await join(hc, RA))?.type === "room:state" && (await join(xa, RA))?.type === "room:state" && (await join(xb, RB))?.type === "room:state");
+  (storage as any).getUser = async (id: string) => { if (id === XA) throw new Error("injected failure"); return realGetUser(id); };
+  let isoRes: any;
+  try { isoRes = await correctDateOfBirth({ adminId: fixAdmin, userId: HC, dateOfBirth: yearsAgo(15), reason: "test correction" }); }
+  finally { (storage as any).getUser = realGetUser; }
+  check("a throwing step is reported: the birthdate is saved and roomsFailed is set with the failed room id", isoRes?.ok === true && isoRes.roomsFailed === true && (isoRes.failedRoomIds ?? []).includes(RA) && !(isoRes.failedRoomIds ?? []).includes(RB), JSON.stringify(isoRes));
+  check("...both rooms were still flagged as minors' rooms", (await rs.getRoom(RA))!.minorsRoom === true && (await rs.getRoom(RB))!.minorsRoom === true);
+  check("...the adult in the OTHER room is still evicted", !roomHub.get(RB, XB));
+  check("...the later step still ran: the public room a 15-year-old cannot host is cancelled", (await rs.getRoom(RPub))!.status === "ended");
+  check("...the guest whose check threw is taken out (fail closed; they can rejoin through the gated join), with a plain notice and no warning", !roomHub.get(RA, XA) && xa.msgs.some((m) => m.type === "room:notice" && m.code === "REVIEW") && !xa.msgs.some((m) => m.warning !== undefined || m.code === "MINORS_ROOM"));
+  const isoAgain = await correctDateOfBirth({ adminId: fixAdmin, userId: HC, dateOfBirth: yearsAgo(15), reason: "test correction again" });
+  check("running the correction again succeeds without roomsFailed", isoAgain?.ok === true && !isoAgain.roomsFailed, JSON.stringify(isoAgain));
+  check("...and the rooms are otherwise unchanged", !roomHub.get(RA, XA) && !roomHub.get(RB, XB) && (await rs.getRoom(RA))!.status === "live" && (await rs.getRoom(RB))!.status === "live" && (await rs.getRoom(RPub))!.status === "ended");
+  await correctDateOfBirth({ adminId: fixAdmin, userId: HC, dateOfBirth: yearsAgo(15), reason: "test correction a third time" });
+  check("...a third run changes nothing (idempotent)", !roomHub.get(RA, XA) && (await rs.getRoom(RA))!.minorsRoom === true && (await rs.getRoom(RPub))!.status === "ended");
+
+  // ---- Round 6: a public room with an adult inside is ended with the NEUTRAL notice before anything can flag it; the adult never sees the under-18s warning
+  const HP = await mk("neutral_host"), XP = await mk("neutral_adult");
+  const RP = (await rs.createRoom(HP, { title: "neutral public", kind: "party", visibility: "public", ageLimit: "all" } as any)).id as string;
+  await rs.setStatus(RP, "live"); expectHost(RP);
+  const hp = await connect(HP), xp = await connect(XP);
+  check("neutral order setup: the adult host and an adult guest are in a live public room", (await join(hp, RP))?.type === "room:state" && (await join(xp, RP))?.type === "room:state");
+  xp.drain();
+  await correctDateOfBirth({ adminId: fixAdmin, userId: HP, dateOfBirth: yearsAgo(15), reason: "test correction" });
+  check("neutral order: the room is ended", (await rs.getRoom(RP))!.status === "ended");
+  check("neutral order: the adult got the plain HOST_REVIEW notice", xp.msgs.some((m) => m.type === "room:notice" && m.code === "HOST_REVIEW"));
+  check("neutral order: the adult NEVER received the under-18s warning or a MINORS_ROOM error", !xp.msgs.some((m) => m.warning !== undefined || m.code === "MINORS_ROOM" || JSON.stringify(m).includes("legal action")), JSON.stringify(xp.msgs.slice(-5)));
+  check("neutral order: the ended room was never flagged as a minors' room", (await rs.getRoom(RP))!.minorsRoom === false);
+
+  // ---- Round 6: the flag step throws: the host's live room is still closed (neutral), nobody is left in a room that should be a minors' room
+  const { db: dbF } = await import("../server/storage");
+  const HF = await mk("flagfail_host"), XF = await mk("flagfail_adult");
+  await mutual(HF, XF);
+  const RF = await mkLive2(HF, "flag fail room");
+  const hf = await connect(HF), xf = await connect(XF);
+  check("flag failure setup: host and an adult guest are in a live friends room", (await join(hf, RF))?.type === "room:state" && (await join(xf, RF))?.type === "room:state");
+  xf.drain();
+  const realUpdate = dbF.update.bind(dbF);
+  (dbF as any).update = (t: any) => { // only the write that sets minorsRoom fails
+    const b = realUpdate(t); const realSet = b.set.bind(b);
+    (b as any).set = (v: any) => { if (v && "minorsRoom" in v) throw new Error("injected flag failure"); return realSet(v); };
+    return b;
+  };
+  let flagRes: any;
+  try { flagRes = await correctDateOfBirth({ adminId: fixAdmin, userId: HF, dateOfBirth: yearsAgo(15), reason: "test correction" }); }
+  finally { (dbF as any).update = realUpdate; }
+  check("flag step failure is reported (roomsFailed)", flagRes?.ok === true && flagRes.roomsFailed === true, JSON.stringify(flagRes));
+  check("...and fails closed: the host's live room is ended", (await rs.getRoom(RF))!.status === "ended" && !roomHub.get(RF, XF));
+  check("...the adult got the neutral notice, never the warning", xf.msgs.some((m) => m.type === "room:notice" && m.code === "HOST_REVIEW") && !xf.msgs.some((m) => m.warning !== undefined || m.code === "MINORS_ROOM"));
+  const flagAgain = await correctDateOfBirth({ adminId: fixAdmin, userId: HF, dateOfBirth: yearsAgo(15), reason: "test correction again" });
+  check("...a re-run works (nothing left to do)", flagAgain?.ok === true && !flagAgain.roomsFailed, JSON.stringify(flagAgain));
+
+  // ---- Round 7: the host-age invariant at the door. The correction job failed to flag / list, and the host was not in the hub.
+  const { rooms: roomsTable } = await import("../shared/schema");
+  // (1) host corrected to a teen while disconnected, the flag step fails: nothing flags the live room. On reconnect it is flagged and uninvited adults leave.
+  const HD = await mk("inv_host"), XD = await mk("inv_adult"), GD = await mk("inv_teen", yearsAgo(15));
+  await mutual(HD, XD); await mutual(HD, GD);
+  const RD = await mkLive2(HD, "invariant room");
+  const xd = await connect(XD), gd = await connect(GD);
+  check("invariant (1) setup: an adult and a teen guest are in the live room, the host is disconnected", (await join(xd, RD))?.type === "room:state" && (await join(gd, RD))?.type === "room:state");
+  xd.drain();
+  const realUpdate2 = dbF.update.bind(dbF);
+  (dbF as any).update = (t: any) => {
+    const b = realUpdate2(t); const realSet = b.set.bind(b);
+    (b as any).set = (v: any) => { if (v && "minorsRoom" in v) throw new Error("injected flag failure"); return realSet(v); };
+    return b;
+  };
+  let invRes: any;
+  try { invRes = await correctDateOfBirth({ adminId: fixAdmin, userId: HD, dateOfBirth: yearsAgo(15), reason: "test correction" }); }
+  finally { (dbF as any).update = realUpdate2; }
+  check("invariant (1): the correction reports the failure and the live room is left unflagged with the adult inside", invRes?.roomsFailed === true && (await rs.getRoom(RD))!.minorsRoom === false && !!roomHub.get(RD, XD), JSON.stringify(invRes));
+  const hd = await connect(HD);
+  const hdj = await join(hd, RD);
+  check("invariant (1): the host reconnects: allowed in, the room is now flagged in the database and in the hub", hdj?.type === "room:state" && (await rs.getRoom(RD))!.minorsRoom === true && roomHub.isMinorsRoom(RD), JSON.stringify(hdj));
+  check("invariant (1): the uninvited adult is evicted with the warning (the room truly is a teen host's); the teen stays", !roomHub.get(RD, XD) && xd.msgs.some((m) => isMinorsError(m, "MINORS_ROOM")) && !!roomHub.get(RD, GD));
+  const xd2 = await connect(XD);
+  check("invariant (1): a new adult cannot join the now-flagged room (MINORS_ROOM + warning)", isMinorsError(await join(xd2, RD), "MINORS_ROOM"));
+
+  // (2) host corrected to an adult while disconnected, the list step fails: the minors' room stays open. On reconnect it ends, neutrally.
+  const HT = await mk("inv2_host", yearsAgo(15)), GT = await mk("inv2_teen", yearsAgo(15));
+  await mutual(HT, GT);
+  const crT = await rest("POST", "/api/rooms", HT, { title: "inv2 room", kind: "party", visibility: "friends" });
+  const RT = crT.json.room.id as string;
+  await rest("POST", `/api/rooms/${RT}/start`, HT);
+  const gt = await connect(GT);
+  check("invariant (2) setup: a flagged live minors' room with a teen guest and a disconnected teen host", crT.json.room.minorsRoom === true && (await join(gt, RT))?.type === "room:state");
+  gt.drain();
+  const realSelect = dbF.select.bind(dbF);
+  let listArmed = true;
+  (dbF as any).select = (...a: any[]) => { // the first read of the rooms table (the host's room list) fails once
+    const b = (realSelect as any)(...a); const realFrom = b.from.bind(b);
+    (b as any).from = (t: any) => { if (listArmed && t === roomsTable) { listArmed = false; throw new Error("injected list failure"); } return realFrom(t); };
+    return b;
+  };
+  let listRes: any;
+  try { listRes = await correctDateOfBirth({ adminId: fixAdmin, userId: HT, dateOfBirth: yearsAgo(30), reason: "test correction" }); }
+  finally { (dbF as any).select = realSelect; }
+  check("invariant (2): the correction reports the failure and the minors' room is still live with an adult host", listRes?.roomsFailed === true && (await rs.getRoom(RT))!.status === "live", JSON.stringify(listRes));
+  const ht = await connect(HT);
+  const htj = await join(ht, RT);
+  check("invariant (2): the adult host is refused on reconnect (ROOM_ENDED) and the room is ended", htj?.type === "room:error" && htj.code === "ROOM_ENDED" && (await rs.getRoom(RT))!.status === "ended", JSON.stringify(htj));
+  check("invariant (2): the guest got the neutral notice and the room end, never the warning", gt.msgs.some((m) => m.type === "room:notice" && m.code === "HOST_REVIEW") && gt.msgs.some((m) => m.type === "room:ended") && !gt.msgs.some((m) => m.warning !== undefined || m.code === "MINORS_ROOM"), JSON.stringify(gt.msgs.slice(-4)));
+
   // ---- restart gap: at boot, LiveKit participants in a live minors' room who are not teens are removed
   const { sweepMinorsVoiceAtBoot } = await import("../server/rooms/roomSocket");
   const bootRoom = (await rs.getRoom(SR))!;

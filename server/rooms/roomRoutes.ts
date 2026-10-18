@@ -264,6 +264,7 @@ export function registerRoomRoutes(app: Express): void {
 
   // ------------------------------------------------------------ start / end
   app.post("/api/rooms/:id/start", requireAuth, roomLimiter, async (req, res) => {
+    let wentLive = false; // set once the conditional write succeeded: from then on a failure must not leave the room live
     try {
       const ctx = await loadHostRoom(req, res);
       if (!ctx) return;
@@ -275,13 +276,34 @@ export function registerRoomRoutes(app: Express): void {
       if ((await rs.countLiveRoomsByHost(host.id)) >= MAX_LIVE) {
         return res.status(429).json({ message: "You already have a live room. End it before starting another.", code: "LIVE_LIMIT" });
       }
-      const live = await rs.setStatus(room.id, "live");
+      // A teen host's room must never go live as an ordinary room (a correction job that failed may have left it unflagged):
+      // flag it BEFORE it goes live. One way, never cleared.
+      if (isTeen(ageFromDob(host.dateOfBirth)) && !room.minorsRoom) await mr.markHostRoomsMinors(host.id);
+      // Checked in the write: a room that was ended since we read it (for example by a birthdate correction) stays ended.
+      let live = await rs.startScheduledRoom(room.id);
+      if (!live) return res.status(409).json({ message: "This room can't be started now.", code: "BAD_STATE" });
+      wentLive = true;
+      expectHost(room.id); // the host has the grace period to connect to the room, or it ends (a timer on every path from here)
+      // The host's age may have been corrected after the first read. Look again now that the room is live: an adult host never
+      // keeps a live minors' room, and a teen host never keeps an unflagged one, whatever the order of events was.
+      const fresh = await storage.getUser(host.id);
+      const freshTeen = !!fresh && isTeen(ageFromDob(fresh.dateOfBirth));
+      if (live.minorsRoom && !freshTeen) {
+        await endRoom(room.id);
+        return res.status(403).json({ ...HOST_NOT_MINOR, message: "This room was set up for under 18s, so it can't be started now. Create a new room instead." });
+      }
+      if (!live.minorsRoom && freshTeen) {
+        await mr.markHostRoomsMinors(host.id);
+        live = { ...live, minorsRoom: true };
+      }
+      if (live.minorsRoom) roomHub.markMinorsRoom(room.id);
       await rs.upsertMember(room.id, host.id, "host");
-      expectHost(room.id); // the host has the grace period to connect to the room, or it ends
       await notifyFollowers(live, host).catch((e) => console.error("[rooms] notify failed:", e));
       res.json({ room: { ...publicRoom(live), host: hostSummary(host) } });
     } catch (e) {
       console.error("[rooms] start failed:", e);
+      // Fail closed: a room that went live must not stay live without a grace timer when a later step threw.
+      if (wentLive) await endRoom(req.params.id).catch((e2) => console.error("[rooms] ending a room that failed to start also failed:", e2));
       res.status(500).json({ message: "Failed to start room" });
     }
   });

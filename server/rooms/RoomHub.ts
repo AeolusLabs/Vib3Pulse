@@ -84,6 +84,13 @@ export class RoomHub {
     return this.rooms.get(roomId)?.size ?? 0;
   }
 
+  /** Rooms the hub knows this person hosts (the host is present in them). Used to fail closed when the database cannot be read. */
+  roomsHostedBy(userId: string): string[] {
+    const out: string[] = [];
+    this.rooms.forEach((members, roomId) => { if (members.get(userId)?.role === "host") out.push(roomId); });
+    return out;
+  }
+
   roomOf(userId: string): string | null {
     return this.byUser.get(userId) ?? null;
   }

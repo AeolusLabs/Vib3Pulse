@@ -265,7 +265,11 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
   // The invite is always read: the room may become a minors' room (host corrected to under 18) while we wait.
   const [fresh, freshMember, freshInvite, freshUser] = await Promise.all([
     rs.getRoom(roomId), rs.getMember(roomId, userId), getInviteState(roomId, userId), storage.getUser(userId),
-  ]);
+  ]).catch(async (e) => {
+    // The host's own lookup failed: nothing can be trusted about this room's flag. Fail closed: close it (neutral notice).
+    if (userId === room.hostId) await endForHostReview(roomId).catch((e2) => console.error("[rooms] closing a room after a host lookup failure failed:", e2));
+    throw e;
+  });
   const freshAge = ageFromDob(freshUser?.dateOfBirth);
   if (ws.readyState !== OPEN) return; // the socket died while we were checking: do not create a ghost
   if (!fresh || fresh.status === "ended") return refuse(ws, "ROOM_ENDED");
@@ -274,6 +278,33 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
   if ((kicked.get(`${roomId}:${userId}`) ?? 0) > Date.now()) return refuse(ws, "KICKED");
   if (!freshUser || freshUser.deletedAt) return refuse(ws, "NOT_FOUND");
   if (!canJoinRoom({ age: freshAge }, fresh as any).ok) return refuse(ws, freshAge === null ? "AGE_UNKNOWN" : "AGE_LIMIT"); // limit raised meanwhile
+  // Host-age invariant, checked at the door whatever the correction job did or failed to do (it can fail, and it cannot see a
+  // room whose host is disconnected): a minors' room never has an adult host, and a teen host's room is always a minors' room.
+  // Fail closed: any problem closes the room with the neutral notice.
+  if (userId === fresh.hostId) {
+    try {
+      const hostIsTeen = freshAge !== null && freshAge < 18;
+      if (fresh.minorsRoom && !hostIsTeen) {
+        await endForHostReview(roomId);
+        return refuse(ws, "ROOM_ENDED");
+      }
+      if (hostIsTeen && !fresh.minorsRoom) {
+        // Flag it (database and hub) and take out every adult without an acknowledged invite. The warning is right here: the
+        // room genuinely is a teen host's.
+        const problems: DobStepFailure[] = [];
+        const flagged = await enforceMinorsHost(userId, problems);
+        if (problems.length || !flagged.includes(roomId)) {
+          await endForHostReview(roomId);
+          return refuse(ws, "ROOM_ENDED");
+        }
+        fresh.minorsRoom = true;
+      }
+    } catch (e) {
+      console.error(`[rooms] host-age check failed (user ${userId}, room ${roomId}):`, e);
+      await endForHostReview(roomId).catch((e2) => console.error("[rooms] closing the room failed:", e2));
+      return refuse(ws, "ROOM_ENDED");
+    }
+  }
   // The hub flag is set (synchronously) by a host correction right after its UPDATE commits, and is never cleared while the
   // room lives, so a row read that predates the correction cannot let an uninvited adult in. No await from here to the insert.
   const mg = minorsGate({ minorsRoom: fresh.minorsRoom || roomHub.isMinorsRoom(roomId), hostId: fresh.hostId }, userId, freshAge, freshInvite);
@@ -461,11 +492,69 @@ export async function enforceMinorsRoomFor(userId: string): Promise<void> {
   if (!minorsGate(room, userId, ageFromDob(user.dateOfBirth), invite).ok) await removeFromMinorsRoom(roomId, userId);
 }
 
+/** A step (or one room or member inside a step) of a birthdate correction that threw. roomId is null when there is no room. */
+export type DobStepFailure = { step: string; roomId: string | null };
+
+/** Thrown by applyDobCorrection after every step has run, when at least one failed. The birthdate itself is already saved. */
+export class DobCorrectionIncomplete extends Error {
+  readonly failedRoomIds: string[];
+  constructor(readonly failures: DobStepFailure[]) {
+    const ids = Array.from(new Set(failures.map((f) => f.roomId).filter((x): x is string => !!x)));
+    super(`ROOMS_NOT_UPDATED: ${failures.length} step(s) failed${ids.length ? `; rooms: ${ids.join(", ")}` : ""}`);
+    this.name = "DobCorrectionIncomplete";
+    this.failedRoomIds = ids;
+  }
+}
+
 /**
- * Every admin birthdate correction ends here. In order: the person's live age in the hub is refreshed (the stage rule reads
- * it), a host now under 18 has their open rooms made minors' rooms, the room they are in is reconciled at once (mic, camera,
- * stage and live screen follow the new age: an adult host of a minors' room loses them, a host corrected to a teen gets them
- * back), and a member who may no longer be in a minors' room is taken out.
+ * Runs one piece of a birthdate correction on its own: a throw is logged with the user id and room id, recorded in
+ * `failures`, and the caller carries on with the next piece. Returns undefined when it threw.
+ */
+async function attempt<T>(failures: DobStepFailure[], userId: string, step: string, roomId: string | null, fn: () => Promise<T>, onFail?: () => Promise<void>): Promise<T | undefined> {
+  try {
+    return await fn();
+  } catch (e) {
+    console.error(`[rooms] birthdate correction step "${step}" failed (user ${userId}, room ${roomId ?? "none"}):`, e);
+    failures.push({ step, roomId });
+    if (onFail) await onFail().catch((e2) => console.error(`[rooms] fail-closed fallback for "${step}" failed (user ${userId}, room ${roomId ?? "none"}):`, e2));
+    return undefined;
+  }
+}
+
+/** Plain notice to a person removed because a safety check could not be completed. Says nothing about ages or the room. */
+export const REVIEW_REMOVED_MESSAGE = "You were removed from this room while an account change was applied. You can try to join again.";
+
+/** Fail closed: a member whose check could not be completed is taken out (they can come back through the gated join). A host is never taken out here. */
+async function evictFailClosed(roomId: string | null, userId: string): Promise<void> {
+  if (!roomId) return;
+  const tm = roomHub.get(roomId, userId);
+  if (!tm || tm.role === "host") return;
+  tm.send({ type: "room:notice", code: "REVIEW", message: REVIEW_REMOVED_MESSAGE });
+  await dropCohostRole(roomId, userId).catch(() => {});
+  await evict(roomId, userId);
+}
+
+/** Closes a room for a reviewed host with the neutral notice (no ages, no mention of under 18s). */
+async function endForHostReview(roomId: string): Promise<void> {
+  roomHub.broadcast(roomId, { type: "room:notice", code: "HOST_REVIEW", message: HOST_REVIEW_MESSAGE });
+  await endRoom(roomId);
+}
+
+/** Fail closed: when the host's rooms cannot be read or flagged, every room the hub knows this person hosts is closed neutrally. */
+async function endHostedRoomsFailClosed(hostId: string, failures: DobStepFailure[], step: string): Promise<void> {
+  for (const id of roomHub.roomsHostedBy(hostId)) await attempt(failures, hostId, step, id, () => endForHostReview(id));
+}
+
+/**
+ * Every admin birthdate correction ends here. The person's live age in the hub is refreshed first (the stage rule reads it).
+ * Then the protective steps: a host now under 18 has their open rooms made minors' rooms and uninvited adults are taken out;
+ * rooms the host may no longer keep are ended. Then the softer ones: the room they are in is reconciled (mic, camera, stage
+ * and live screen follow the new age), a member below the room's age limit leaves, and a member who may no longer be in a
+ * minors' room is taken out.
+ *
+ * Each step, and each room inside a step, runs on its own: one that throws is logged and recorded, and the rest still run.
+ * If anything failed, DobCorrectionIncomplete is thrown at the end with the failed room ids. Every step is idempotent, so
+ * running the correction again finishes whatever failed.
  */
 export async function applyDobCorrection(userId: string): Promise<void> {
   await (joinLocks.get(userId) ?? Promise.resolve()); // a join in flight finishes first (it re-reads the birthdate itself)
@@ -473,19 +562,28 @@ export async function applyDobCorrection(userId: string): Promise<void> {
   if (!user) return;
   const age = ageFromDob(user.dateOfBirth);
   const roomId = roomHub.roomOf(userId);
-  const changed = roomId ? roomHub.refreshAge(roomId, userId, age) : false;
+  if (roomId) roomHub.refreshAge(roomId, userId, age);
+  const failures: DobStepFailure[] = [];
 
-  // Rooms they host. An adult (18+) loses every minors' room they host; anyone loses a room they may no longer host.
-  await endRoomsHostCannotKeep(user, age);
-  if (age !== null && age < 18) await enforceMinorsHost(userId);
+  // Protective first: the rooms they host. Rooms they may no longer host are closed FIRST, with the neutral review notice, so
+  // nobody in them ever sees the under-18s warning (which would tell them the host is a child). Flagging skips ended rooms.
+  await endRoomsHostCannotKeep(user, age, failures); // an adult loses minors' rooms; anyone loses a room they may no longer host
+  if (age !== null && age < 18) await enforceMinorsHost(userId, failures); // flag the rest, take out uninvited adults
 
-  // The room they are in.
-  if (roomId && changed) await reconcileVoice(roomId);
-  const room = roomId ? await rs.getRoom(roomId) : null;
-  if (room && room.status === "live" && room.hostId !== userId && roomHub.get(room.id, userId) && !canJoinRoom({ age }, room as any).ok) {
-    await removeForAgeLimit(room.id, userId); // corrected below the room's age limit
+  // Softer: the room they are in.
+  if (roomId) {
+    // Runs even when the age did not change this time: it is idempotent, and a re-run after a failure must still do it.
+    await attempt(failures, userId, "reconcile voice", roomId, () => reconcileVoice(roomId));
+    await attempt(failures, userId, "age limit", roomId, async () => {
+      const room = await rs.getRoom(roomId);
+      if (room && room.status === "live" && room.hostId !== userId && roomHub.get(room.id, userId) && !canJoinRoom({ age }, room as any).ok) {
+        await removeForAgeLimit(room.id, userId); // corrected below the room's age limit
+      }
+    }, () => evictFailClosed(roomId, userId));
   }
-  await enforceMinorsRoomFor(userId);
+  await attempt(failures, userId, "minors room member", roomId, () => enforceMinorsRoomFor(userId), () => evictFailClosed(roomHub.roomOf(userId), userId));
+
+  if (failures.length) throw new DobCorrectionIncomplete(failures);
 }
 
 /** Message to everyone in a room that is closed because its host's account is under review. Plain, no accusation. */
@@ -497,19 +595,18 @@ export const HOST_REVIEW_MESSAGE = "This room has closed because the host's acco
  *  - nobody keeps a room they could not create at their corrected age (age limit above them; a teen and a public room).
  * Their other rooms are left alone. One way and idempotent (ended rooms are skipped).
  */
-async function endRoomsHostCannotKeep(host: User, age: number | null): Promise<void> {
-  const open = (await rs.listOpenRoomsByHost(host.id));
-  for (const room of open) {
-    const adultInMinorsRoom = room.minorsRoom && (age === null || age >= 18);
-    const hc = canHostRoom({ age, accountAgeDays: Number.MAX_SAFE_INTEGER }, { visibility: room.visibility as any, ageLimit: room.ageLimit as any }, { minAccountAgeDays: 0 });
-    const cannotHost = !hc.ok && (hc.code === "HOST_BELOW_LIMIT" || hc.code === "TEEN_PUBLIC" || hc.code === "AGE_UNKNOWN");
-    if (!adultInMinorsRoom && !cannotHost) continue;
-    if (room.status === "live") {
-      roomHub.broadcast(room.id, { type: "room:notice", code: "HOST_REVIEW", message: HOST_REVIEW_MESSAGE });
-      await endRoom(room.id);
-    } else {
-      await rs.setStatus(room.id, "ended"); // a scheduled room is cancelled: it can never be started
-    }
+async function endRoomsHostCannotKeep(host: User, age: number | null, failures: DobStepFailure[] = []): Promise<void> {
+  // If the list cannot be read, fail closed: every room the hub knows this person hosts is closed.
+  const open = await attempt(failures, host.id, "list host rooms", null, () => rs.listOpenRoomsByHost(host.id), () => endHostedRoomsFailClosed(host.id, failures, "end hosted room (list failed)"));
+  for (const room of open ?? []) {
+    await attempt(failures, host.id, "end room host cannot keep", room.id, async () => {
+      const adultInMinorsRoom = room.minorsRoom && (age === null || age >= 18);
+      const hc = canHostRoom({ age, accountAgeDays: Number.MAX_SAFE_INTEGER }, { visibility: room.visibility as any, ageLimit: room.ageLimit as any }, { minAccountAgeDays: 0 });
+      const cannotHost = !hc.ok && (hc.code === "HOST_BELOW_LIMIT" || hc.code === "TEEN_PUBLIC" || hc.code === "AGE_UNKNOWN");
+      if (!adultInMinorsRoom && !cannotHost) return;
+      if (room.status === "scheduled" && (await rs.cancelScheduledRoom(room.id))) return; // cancelled: it can never be started
+      await endForHostReview(room.id); // live, or it went live while we were deciding
+    });
   }
 }
 
@@ -533,21 +630,24 @@ async function dropCohostRole(roomId: string, userId: string): Promise<void> {
  * never cleared), and in each live one anyone who may no longer be there (adults without an acknowledged invite, unknown
  * age) is taken out with the warning. Returns the ids of the rooms that were flagged.
  */
-export async function enforceMinorsHost(hostId: string): Promise<string[]> {
-  const flagged = await markHostRoomsMinors(hostId);
-  for (const r of flagged) {
+export async function enforceMinorsHost(hostId: string, failures: DobStepFailure[] = []): Promise<string[]> {
+  // If the flag cannot be written, fail closed: every room the hub knows this person hosts is closed (neutral notice).
+  const flagged = await attempt(failures, hostId, "flag minors rooms", null, () => markHostRoomsMinors(hostId), () => endHostedRoomsFailClosed(hostId, failures, "end hosted room (flag failed)"));
+  for (const r of flagged ?? []) {
     if (r.status !== "live") continue;
     // Marked (even if empty) and the members snapshotted in the same synchronous step: anyone inserted before this is in the
     // snapshot and gated below; anyone inserted after it is caught by the re-check at the hub insert in joinOnce.
     roomHub.markMinorsRoom(r.id); // the stage rule switches now: teens may speak, adults may not
     for (const m of roomHub.members(r.id)) {
       if (m.userId === hostId) continue;
-      const [u, invite] = await Promise.all([storage.getUser(m.userId), getInviteState(r.id, m.userId)]);
-      if (!minorsGate({ minorsRoom: true, hostId }, m.userId, ageFromDob(u?.dateOfBirth), invite).ok) await removeFromMinorsRoom(r.id, m.userId);
+      await attempt(failures, hostId, "remove uninvited member", r.id, async () => {
+        const [u, invite] = await Promise.all([storage.getUser(m.userId), getInviteState(r.id, m.userId)]);
+        if (!minorsGate({ minorsRoom: true, hostId }, m.userId, ageFromDob(u?.dateOfBirth), invite).ok) await removeFromMinorsRoom(r.id, m.userId);
+      }, () => evictFailClosed(r.id, m.userId)); // the check could not be made: out they go (they can rejoin through the gated join)
     }
-    await reconcileVoice(r.id).catch((e) => console.error("[voice] reconcile failed:", e?.message ?? e)); // staged adults off, teens back on mic
+    await attempt(failures, hostId, "reconcile voice", r.id, () => reconcileVoice(r.id)); // staged adults off, teens back on mic
   }
-  return flagged.map((r) => r.id);
+  return (flagged ?? []).map((r) => r.id);
 }
 
 // ---------------------------------------------------------------- screen

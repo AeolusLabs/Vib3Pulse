@@ -277,6 +277,12 @@ try {
   await rs.upsertMember(R, C18, "guest");
   const co18 = await http("PUT", `/api/rooms/${R}/members/${C18}/role`, T, { role: "cohost" });
   check("(c) a host who turned 18 cannot make an adult co-host", co18.status === 403, JSON.stringify(co18));
+  // (d) the HOST_NOT_MINOR branch itself: the target IS an invited and acknowledged adult (so the NOT_ALLOWED check passes), the host is 18+.
+  // The invite route refuses an 18+ host, so the acknowledged invite is written directly, as it would have been before they turned 18.
+  await q(`insert into room_adult_invites (room_id, user_id, invited_by, acknowledged_at, first_acknowledged_at) values ($1,$2,$3, now(), now())`, [R, C18, T]);
+  const co18ack = await http("PUT", `/api/rooms/${R}/members/${C18}/role`, T, { role: "cohost" });
+  check("(d) an adult host cannot make an invited, acknowledged adult co-host (403 HOST_NOT_MINOR, not NOT_ALLOWED)", co18ack.status === 403 && co18ack.json?.code === "HOST_NOT_MINOR", JSON.stringify(co18ack));
+  check("(d) ...and the member stays a guest", (await rs.getMember(R, C18))?.role === "guest");
   const st18 = await http("POST", `/api/rooms/${RI}/start`, T);
   check("(b) a host who turned 18 cannot start their scheduled minors' room (403 HOST_NOT_MINOR)", st18.status === 403 && st18.json?.code === "HOST_NOT_MINOR" && (await rs.getRoom(RI))!.status === "scheduled", JSON.stringify(st18));
   const H18 = await mk("sched18", yearsAgo(17));
@@ -285,6 +291,126 @@ try {
   const sc18s = await http("POST", `/api/rooms/${sc18.json?.room?.id}/start`, H18);
   check("(b) a host with no live room who turned 18 cannot start their scheduled minors' room", sc18.json?.room?.minorsRoom === true && sc18s.status === 403 && sc18s.json?.code === "HOST_NOT_MINOR" && (await rs.getRoom(sc18.json.room.id))!.status === "scheduled", JSON.stringify(sc18s));
   check("...but the live minors' room carries on (they may finish it)", (await rs.getRoom(R))!.status === "live" && (await http("GET", `/api/rooms/${R}`, T)).status === 200);
+
+  // ---- conditional start: a scheduled minors' room that was ended in between is never brought back to life (race with a birthdate correction)
+  const sleepA = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const untilA = async (f: () => boolean, ms = 10_000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (f()) return true; await sleepA(50); } return false; };
+  const mkSched = async (host: string, title: string) => (await http("POST", "/api/rooms", host, { title, kind: "party", visibility: "friends", scheduledFor: new Date(Date.now() + 3600e3).toISOString() })).json.room.id as string;
+  const statusOf = async (id: string) => (await rs.getRoom(id))!.status;
+
+  // storage level: the write itself only moves scheduled -> live
+  const HS = await mk("startrace", yearsAgo(16));
+  const S0 = await mkSched(HS, "cond start 0");
+  const s0a = await rs.startScheduledRoom(S0);
+  const s0b = await rs.startScheduledRoom(S0);
+  check("startScheduledRoom: scheduled -> live once (startedAt set), a second call returns null", s0a?.status === "live" && !!s0a.startedAt && s0b === null, JSON.stringify([s0a?.status, s0b]));
+  await rs.setStatus(S0, "ended");
+  check("startScheduledRoom: an ended room is not brought back (null, stays ended)", (await rs.startScheduledRoom(S0)) === null && (await statusOf(S0)) === "ended");
+
+  // (b) already live / ended: 409 BAD_STATE, nothing changes
+  const S1 = await mkSched(HS, "cond start 1");
+  const s1ok = await http("POST", `/api/rooms/${S1}/start`, HS);
+  const s1again = await http("POST", `/api/rooms/${S1}/start`, HS);
+  check("(b) starting a room that is already live: 409 BAD_STATE", s1ok.status === 200 && s1again.status === 409 && s1again.json?.code === "BAD_STATE", JSON.stringify(s1again));
+  await http("POST", `/api/rooms/${S1}/end`, HS);
+  const s1ended = await http("POST", `/api/rooms/${S1}/start`, HS);
+  check("(b) starting an ended room: 409 BAD_STATE, it stays ended", s1ended.status === 409 && s1ended.json?.code === "BAD_STATE" && (await statusOf(S1)) === "ended", JSON.stringify(s1ended));
+
+  // (a) the room is ended (as a birthdate correction does) before the start: refused, stays ended
+  const S2 = await mkSched(HS, "cond start 2");
+  await rs.setStatus(S2, "ended");
+  const s2 = await http("POST", `/api/rooms/${S2}/start`, HS);
+  check("(a) a scheduled minors' room ended before the start call: 409, still ended", s2.status === 409 && (await statusOf(S2)) === "ended", JSON.stringify(s2));
+
+  // (a) held start: the handler has read the room as scheduled and the host as a teen; the room is ended meanwhile; the write must refuse
+  const realGetUserA = storage.getUser.bind(storage);
+  let holdFor: { userId: string; roomId: string; mode: "pre" | "post" } | null = null;
+  let holdCalls = 0, holdHit = false, holdRelease!: () => void;
+  const holdGate = new Promise<void>((r) => { holdRelease = r; });
+  (storage as any).getUser = async (id: string) => {
+    if (holdFor && id === holdFor.userId && !holdHit) {
+      holdCalls++;
+      const st = (await q(`select status from rooms where id=$1`, [holdFor.roomId]))[0]?.status;
+      // pre: the 2nd or later read of the host while the room is still scheduled (the 1st is the test auth middleware, before the handler)
+      // post: the first read after the room went live (the re-check after the write)
+      if (holdFor.mode === "pre" ? holdCalls >= 2 && st === "scheduled" : st === "live") { holdHit = true; await holdGate; }
+    }
+    return realGetUserA(id);
+  };
+  try {
+    const S3 = await mkSched(HS, "cond start 3 held pre");
+    holdFor = { userId: HS, roomId: S3, mode: "pre" }; holdCalls = 0; holdHit = false;
+    const startP = http("POST", `/api/rooms/${S3}/start`, HS);
+    check("(a) held start: the handler is paused after its reads", await untilA(() => holdHit));
+    await rs.setStatus(S3, "ended"); // the correction ended the scheduled room in between
+    holdRelease();
+    const s3 = await startP;
+    check("(a) held start: refused with 409 BAD_STATE and the room stays ended (never live)", s3.status === 409 && s3.json?.code === "BAD_STATE" && (await statusOf(S3)) === "ended", JSON.stringify(s3));
+    check("(a) ...and the host has no live room", (await rs.countLiveRoomsByHost(HS)) === 0);
+
+    // (a) last-moment ordering: the write wins, the host is corrected to an adult right after it; the re-check ends the room again
+    const S4 = await mkSched(HS, "cond start 4 held post");
+    holdFor = { userId: HS, roomId: S4, mode: "post" }; holdCalls = 0; holdHit = false;
+    let release4!: () => void;
+    const gate4 = new Promise<void>((r) => { release4 = r; });
+    (storage as any).getUser = async (id: string) => {
+      if (holdFor && id === holdFor.userId && !holdHit) {
+        const st = (await q(`select status from rooms where id=$1`, [holdFor.roomId]))[0]?.status;
+        if (st === "live") { holdHit = true; await gate4; }
+      }
+      return realGetUserA(id);
+    };
+    const start4 = http("POST", `/api/rooms/${S4}/start`, HS);
+    check("(a) post-write: the handler is paused right after the room went live", await untilA(() => holdHit));
+    await q(`update users set date_of_birth=$1 where id=$2`, [yearsAgo(30), HS]); // the correction lands now
+    release4();
+    const s4 = await start4;
+    check("(a) post-write: answered 403 HOST_NOT_MINOR", s4.status === 403 && s4.json?.code === "HOST_NOT_MINOR", JSON.stringify(s4));
+    check("(a) post-write: the room is ended again, so no live minors' room has an adult host", (await statusOf(S4)) === "ended" && (await rs.countLiveRoomsByHost(HS)) === 0);
+  } finally {
+    (storage as any).getUser = realGetUserA;
+    holdRelease();
+  }
+
+  // ---- Round 6: conditional cancel, and a failure after the start write does not leave the room live
+  const SC = await mkSched(HS, "cancel cond 1");
+  const cOk = await rs.cancelScheduledRoom(SC);
+  check("cancelScheduledRoom: a scheduled room is cancelled once (ended, endedAt set); a second call returns null", cOk?.status === "ended" && !!cOk.endedAt && (await rs.cancelScheduledRoom(SC)) === null);
+  const SL = await mkSched(HS, "cancel cond 2");
+  await rs.startScheduledRoom(SL);
+  check("cancelScheduledRoom: a room that went live is not touched (null, stays live)", (await rs.cancelScheduledRoom(SL)) === null && (await statusOf(SL)) === "live");
+  await rs.setStatus(SL, "ended");
+
+  const HS2 = await mk("startfail", yearsAgo(16));
+  const S5 = await mkSched(HS2, "start fails after the write");
+  const realGetUserB = storage.getUser.bind(storage);
+  (storage as any).getUser = async (id: string) => {
+    if (id === HS2 && (await q(`select status from rooms where id=$1`, [S5]))[0]?.status === "live") throw new Error("injected failure after the write");
+    return realGetUserB(id);
+  };
+  let s5: any;
+  try { s5 = await http("POST", `/api/rooms/${S5}/start`, HS2); }
+  finally { (storage as any).getUser = realGetUserB; }
+  check("a failure after the start write answers 500 and the room is not left live (ended, fail closed)", s5.status === 500 && (await statusOf(S5)) === "ended" && (await rs.countLiveRoomsByHost(HS2)) === 0, JSON.stringify(s5));
+
+  // ---- Round 7: /start flags a teen host's unflagged scheduled room BEFORE it goes live; an adult host's room is untouched; a grace timer exists
+  const HT3 = await mk("flagstart", yearsAgo(16)), HA3 = await mk("flagstart_adult", yearsAgo(30));
+  const schedAt = new Date(Date.now() + 3600e3).toISOString();
+  const U1 = (await rs.createRoom(HT3, { title: "unflagged teen room", kind: "party", visibility: "friends", ageLimit: "all", scheduledFor: schedAt } as any)).id as string; // a correction job that failed left it unflagged
+  const U2 = (await rs.createRoom(HA3, { title: "adult normal room", kind: "party", visibility: "friends", ageLimit: "all", scheduledFor: schedAt } as any)).id as string;
+  check("round 7 setup: both rooms start unflagged", (await rs.getRoom(U1))!.minorsRoom === false && (await rs.getRoom(U2))!.minorsRoom === false);
+  const realGraceMs = tuning.graceMs;
+  tuning.graceMs = 300; // nobody connects: a grace timer that exists ends the room quickly
+  try {
+    const u1 = await http("POST", `/api/rooms/${U1}/start`, HT3);
+    check("teen host's unflagged scheduled room: starts, and is flagged as a minors' room (answer and database)", u1.status === 200 && u1.json?.room?.minorsRoom === true && (await rs.getRoom(U1))!.minorsRoom === true, JSON.stringify(u1));
+    const u2 = await http("POST", `/api/rooms/${U2}/start`, HA3);
+    check("an adult host's normal room is unaffected (live, not flagged)", u2.status === 200 && u2.json?.room?.minorsRoom === false && (await rs.getRoom(U2))!.minorsRoom === false, JSON.stringify(u2));
+    await sleepA(1500);
+    check("the grace timer exists right after the start: with nobody connecting, both rooms end", (await statusOf(U1)) === "ended" && (await statusOf(U2)) === "ended");
+  } finally {
+    tuning.graceMs = realGraceMs;
+  }
 
   // ---- an admin birthdate correction that makes a guest an adult takes them out of the minors' room
   const { correctDateOfBirth } = await import("../server/services/dobCorrection");
