@@ -61,3 +61,72 @@ export function fixtureState(scene: FixtureScene): RoomState {
   });
   return s;
 }
+
+// ---------------------------------------------------------------- the real room shell in the fixture (task 1.7)
+
+export const FIXTURE_IDS = { self: SELF, host: HOST, cohost: COHOST, stage: STAGE_GUEST, anon: ANON } as const;
+
+/** The room record the shell needs. Plain data: the fixture never talks to the server. */
+export const FIXTURE_ROOM = {
+  id: "fixture-room", hostId: HOST, title: "Friday Pre-Drinks, Lagos to London", description: null, kind: "party" as const,
+  visibility: "public" as const, ageLimit: "13+" as const, capacity: 50, status: "live" as const, scheduledFor: null,
+  startedAt: null, endedAt: null, screen: null, eventId: null, venueId: null, noDirectInteractions: false,
+};
+
+export const FIXTURE_HOST = {
+  id: HOST, username: "maya", displayName: "Maya Okafor", organizationName: null, avatarUrl: null, avatar: null, isVerified: null, isOfficial: null,
+};
+
+export interface FixtureOptions {
+  scene: FixtureScene;
+  theme: "dark" | "light";
+  /** Who you are: a guest on the floor (default), the person live on the screen, or the host. */
+  as: "guest" | "holder" | "host";
+  /** Viewer data saver on. */
+  sound: boolean;
+  /** Room audio waits for a tap. */
+  tap: boolean;
+  /** The host invited you to speak (the Accept / Decline alert). */
+  invite: boolean;
+  /** Push this many chat lines over ten seconds (0 = none, at most 1000). */
+  flood: number;
+}
+
+const SCENES: FixtureScene[] = ["voice", "live", "immersive", "weak", "dropped"];
+
+/** Reads the fixture's query string. Anything unknown falls back to the default, so a typo never breaks the page. */
+export function parseFixtureQuery(search: string): FixtureOptions {
+  const p = new URLSearchParams(search);
+  const scene = p.get("scene") as FixtureScene;
+  const as = p.get("as");
+  const flood = Number(p.get("flood"));
+  return {
+    scene: SCENES.includes(scene) ? scene : "voice",
+    theme: p.get("theme") === "light" ? "light" : "dark",
+    as: as === "holder" || as === "host" ? as : "guest",
+    sound: p.get("sound") === "1",
+    tap: p.get("tap") === "1",
+    invite: p.get("invite") === "1",
+    flood: Number.isFinite(flood) && flood > 0 ? Math.min(1000, Math.floor(flood)) : 0,
+  };
+}
+
+/** "live" opens compact (the picture on top, chat under it); every other live scene opens the width's default (immersive on phones). */
+export function fixtureStartView(scene: FixtureScene): "compact" | undefined {
+  return scene === "live" ? "compact" : undefined;
+}
+
+/** A dropped holder's spot is held for about 100 s from now, so the slate shows a real countdown. */
+export function fixtureLiveState(scene: FixtureScene, opts: { as: FixtureOptions["as"]; now: number; invite?: boolean }): RoomState {
+  let s = fixtureState(scene);
+  if (opts.as === "holder") s = roomReducer(s, { type: "client:self", userId: STAGE_GUEST });
+  if (opts.as === "host") s = roomReducer(s, { type: "client:self", userId: HOST });
+  const role: MemberRole = opts.as === "host" ? "host" : "guest";
+  return {
+    ...s,
+    you: { role, muted: false },
+    holderAwayUntil: scene === "dropped" ? opts.now + 100_000 : s.holderAwayUntil,
+    serverOffsetMs: 0,
+    invitedYou: !!opts.invite,
+  };
+}

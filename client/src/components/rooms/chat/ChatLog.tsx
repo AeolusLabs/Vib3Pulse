@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ChevronDownIcon, HeartIcon, ReplyIcon } from "@/components/ui/icons";
 import { useIdleScrollbar } from "@/hooks/useIdleScrollbar";
-import { quoteView, replyProgress, swipeDecision } from "@/lib/chatReply";
+import { canQuote, quoteView, replyProgress, swipeDecision } from "@/lib/chatReply";
 import type { ChatItem } from "@/lib/roomReducer";
 
 /**
@@ -10,8 +10,8 @@ import type { ChatItem } from "@/lib/roomReducer";
  * - `nameOf`: display name for a userId; return "" for someone who left and the quote shows "Someone".
  * - `selfId`: the viewer's userId, or null. Own lines get no Wave action.
  * - `hidden`: userIds the viewer muted locally; their lines are not rendered.
- * - `immersive`: the log sits over the picture. Rows get a dark translucent panel, and aria-live goes "off"
- *   because the dock's log is the one that announces.
+ * - `immersive`: the log sits over the picture. Rows get a dark translucent panel (the scrim that keeps the text readable).
+ *   It stays a polite live region: the room page renders one chat log in every view, so it is the one that announces.
  * - `onReply` / `onHeart`: the viewer chose that line (swipe right 56 px or more, or the action row).
  * - `onWave` / `onPickAuthor`: addressed by userId, never by name.
  * The component fills its parent (`h-full`); the parent decides the height.
@@ -38,6 +38,8 @@ interface RowProps {
   mine: boolean;
   open: boolean;
   immersive: boolean;
+  /** Still in the server's quote window (the newest 50 lines): older lines offer no Reply and ignore the swipe. */
+  canReply: boolean;
   onToggle(id: string): void;
   onReply(item: ChatItem): void;
   onHeart(item: ChatItem): void;
@@ -45,7 +47,7 @@ interface RowProps {
   onPickAuthor(userId: string): void;
 }
 
-const ChatRow = memo(function ChatRow({ item, name, quoteName, quoteText, mine, open, immersive, onToggle, onReply, onHeart, onWave, onPickAuthor }: RowProps) {
+const ChatRow = memo(function ChatRow({ item, name, quoteName, quoteText, mine, open, immersive, canReply, onToggle, onReply, onHeart, onWave, onPickAuthor }: RowProps) {
   const rowRef = useRef<HTMLDivElement>(null);
   const hintRef = useRef<HTMLSpanElement>(null);
   const drag = useRef<{ x: number; y: number; active: boolean; dx: number; id: number } | null>(null);
@@ -87,7 +89,7 @@ const ChatRow = memo(function ChatRow({ item, name, quoteName, quoteText, mine, 
     swiped.current = true; // the click that follows the release must not toggle the action row
     setTimeout(() => { swiped.current = false; }, 80);
     paint(0, 0, false);
-    if (!cancelled && replyProgress(d.dx).commit) onReply(item);
+    if (!cancelled && canReply && replyProgress(d.dx).commit) onReply(item);
   };
 
   const onClickCapture = (e: React.MouseEvent) => {
@@ -152,7 +154,7 @@ const ChatRow = memo(function ChatRow({ item, name, quoteName, quoteText, mine, 
           {open && (
             <div className="mt-1.5 flex flex-wrap gap-1.5" role="group" aria-label="Message actions" aria-live="off">
               <ActionButton onClick={act(() => onHeart(item))}><HeartIcon size={16} /> Heart</ActionButton>
-              <ActionButton onClick={act(() => onReply(item))}><ReplyIcon size={16} /> Reply</ActionButton>
+              {canReply && <ActionButton onClick={act(() => onReply(item))}><ReplyIcon size={16} /> Reply</ActionButton>}
               {!mine && <ActionButton onClick={act(() => onWave(item.userId))}><span aria-hidden="true">👋</span> Wave</ActionButton>}
             </div>
           )}
@@ -184,6 +186,7 @@ export function ChatLog({ chat, nameOf, selfId, hidden, immersive = false, onRep
 
   const lines = hidden && hidden.size ? chat.filter((c) => !hidden.has(c.userId)) : chat;
   const lastId = lines.length ? lines[lines.length - 1].id : null;
+  const position = new Map(chat.map((c, i) => [c.id, i]));
 
   // New lines since the reader last had the bottom in view. If that line aged out of the capped list, all of them count.
   let unseen = 0;
@@ -224,7 +227,7 @@ export function ChatLog({ chat, nameOf, selfId, hidden, immersive = false, onRep
       <div
         ref={listRef}
         role="log"
-        aria-live={immersive ? "off" : "polite"}
+        aria-live="polite"
         aria-label="Room chat"
         data-scrolling="false"
         onScroll={onScroll}
@@ -241,6 +244,7 @@ export function ChatLog({ chat, nameOf, selfId, hidden, immersive = false, onRep
             quoteText={c.replyTo ? quoteView(c.replyTo, hidden, nameOf).text : ""}
             mine={c.userId === selfId}
             open={openId === c.id}
+            canReply={canQuote(position.get(c.id) ?? -1, chat.length)}
             immersive={immersive}
             onToggle={toggle}
             onReply={onReply}

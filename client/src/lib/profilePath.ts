@@ -20,3 +20,19 @@ export function fillMissing<T extends Record<string, any>>(member: T, fetched: R
   }
   return out as T;
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** What the peek asks GET /api/users/:identifier for: the userId (the endpoint resolves UUIDs), else the username. */
+export function peekIdentifier(m: { userId: string; username?: string | null }): string {
+  if (UUID.test(m.userId)) return m.userId;
+  return m.username?.trim() || m.userId;
+}
+
+/**
+ * Opens a page in a new tab so the room (socket, voice, a host's live room) keeps running in this one.
+ * With "noopener" the browser returns null whether or not the tab opened, so there is nothing to check here.
+ */
+export function openInNewTab(path: string, open: (url: string, target: string, features: string) => unknown = (u, t, f) => window.open(u, t, f)): void {
+  open(path, "_blank", "noopener,noreferrer");
+}

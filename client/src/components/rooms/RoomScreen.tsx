@@ -169,7 +169,7 @@ export default function RoomScreen({ screen, canControl, onChange, strip, nowPla
 
         {isFull && (
           <>
-            <Button type="button" ref={exitRef} size="icon" variant="secondary" onClick={exit} className="absolute right-3 top-3 z-20 h-11 w-11" aria-label="Exit fullscreen" data-testid="screen-exit"><MinimizeIcon className="h-5 w-5" /></Button>
+            <button type="button" ref={exitRef} onClick={exit} className="absolute right-3 top-3 z-20 inline-flex h-11 w-11 items-center justify-center rounded-full bg-black/55 text-white backdrop-blur focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary [@media(hover:hover)_and_(pointer:fine)]:hover:bg-black/70" aria-label="Exit fullscreen" data-testid="screen-exit"><MinimizeIcon className="h-5 w-5" aria-hidden /></button>
             {strip && (
               <div className="absolute inset-x-0 bottom-0 z-20 max-h-[45%] overflow-y-auto bg-black/70 p-2 text-white" data-testid="screen-strip">
                 <Button type="button" size="sm" variant="ghost" className="mb-1 h-8 text-white hover:bg-white/10 hover:text-white" onClick={() => setStripOpen((o) => !o)} aria-expanded={stripOpen}>

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { profilePath, shouldFetchProfile, fillMissing } from "../client/src/lib/profilePath";
+import { profilePath, shouldFetchProfile, fillMissing, openInNewTab, peekIdentifier } from "../client/src/lib/profilePath";
 
 let passed = 0, failed = 0;
 const test = (name: string, fn: () => void) => {
@@ -38,6 +38,18 @@ test("fillMissing keeps known avatar and fills gaps", () => {
   assert.equal(r.avatarUrl, "u.png");
   assert.equal((r as any).bio, "hi");
   assert.equal(fillMissing({ userId: "1", displayName: "Zed" }, { displayName: "Ada" }).displayName, "Zed");
+});
+
+test("peek fetches by userId when it is a UUID (the endpoint resolves UUIDs), else by username", () => {
+  const id = "3f2a9c1e-1b2c-4d5e-8f90-a1b2c3d4e5f6";
+  assert.equal(peekIdentifier({ userId: id, username: "ada" }), id);
+  assert.equal(peekIdentifier({ userId: "fx-1", username: "ada" }), "ada");
+  assert.equal(peekIdentifier({ userId: "fx-1", username: "  " }), "fx-1");
+});
+test("full profile opens in a new tab with noopener,noreferrer (the room stays open in this one)", () => {
+  const calls: unknown[][] = [];
+  openInNewTab("/profile/ada", (...a: unknown[]) => { calls.push(a); return null; });
+  assert.deepEqual(calls, [["/profile/ada", "_blank", "noopener,noreferrer"]]);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

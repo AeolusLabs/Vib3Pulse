@@ -36,7 +36,7 @@ export default function SpeakerStrip({ members, stage, speaking, selfId, onPick 
               data-testid={`strip-${m.userId}`}
             >
               <span className="relative">
-                <span className={on ? "block rounded-full ring-[3px] ring-green-500 ring-offset-2 ring-offset-background" : "block"} data-testid={on ? `strip-speaking-${m.userId}` : undefined}>
+                <span className={on ? "block rounded-full ring-[3px] ring-primary ring-offset-2 ring-offset-background" : "block"} data-testid={on ? `strip-speaking-${m.userId}` : undefined}>
                   <HostAvatar person={m} className="h-11 w-11" />
                 </span>
                 {m.muted && <MicOffMark />}
