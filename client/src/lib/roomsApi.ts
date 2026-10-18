@@ -1,7 +1,7 @@
 // Types and small helpers shared by the rooms pages. Rules (age, interactions, screen parsing) come from @shared.
 import type { AgeLimit } from "@shared/age";
 import type { Screen } from "@shared/screen";
-import type { RoomKind, RoomVisibility, ROOM_LIMITS } from "@shared/rooms";
+import { MINORS_ROOM_WARNING, type RoomKind, type RoomVisibility, type ROOM_LIMITS } from "@shared/rooms";
 import { useQuery } from "@tanstack/react-query";
 
 export interface RoomHostSummary {
@@ -46,6 +46,8 @@ export interface RoomView {
   eventId: string | null;
   venueId: string | null;
   noDirectInteractions: boolean;
+  /** Hosted by someone under 18 when it was made. Adults without access never receive a room object, so they never see this. */
+  minorsRoom?: boolean;
   liveVideo?: boolean;
   memberCount?: number;
   peek?: PeekMember[];
@@ -79,6 +81,11 @@ export function formatWhen(iso: string | null): string {
   return new Date(iso).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
+/** Shown to guests when a live room closes because its host's account is being reviewed (neutral, no accusation). */
+export const HOST_REVIEW_COPY = "This room has closed because the host's account is being reviewed.";
+/** Someone already inside no longer meets the room's age limit (their birthdate was corrected). */
+export const AGE_LIMIT_EVICTED_COPY = "You no longer meet this room's age limit.";
+
 /** Message for a join/read refusal code from the server. Never mentions anyone's age. */
 export const DENIED_MESSAGE: Record<string, string> = {
   AGE_LIMIT: "This room has an age limit.",
@@ -90,6 +97,11 @@ export const DENIED_MESSAGE: Record<string, string> = {
   ROOM_FULL: "This room is full.",
   ROOM_ENDED: "The host ended the room.",
   ROOM_NOT_LIVE: "This room hasn't started yet.",
+  // Minors' rooms: even a path that falls back to this table shows the one warning, never a room name or a host.
+  MINORS_ROOM: MINORS_ROOM_WARNING,
+  MINORS_ROOM_ACK: MINORS_ROOM_WARNING,
+  HOST_NOT_MINOR: "Only hosts under 18 can do this in a room for under 18s.",
+  NOT_ALLOWED: "You can't invite this person.",
 };
 
 export const NOTICE_MESSAGE: Record<string, string> = {
@@ -107,6 +119,9 @@ export const NOTICE_MESSAGE: Record<string, string> = {
   NOT_ELIGIBLE: "You can't speak in this room right now.",
   BAD_STATE: "That isn't possible right now.",
   BAD_REQUEST: "That didn't work.",
+  HOST_REVIEW: HOST_REVIEW_COPY,
+  HOST_NOT_MINOR: "Only hosts under 18 can do this in a room for under 18s.",
+  AGE_LIMIT: AGE_LIMIT_EVICTED_COPY,
 };
 
 /** Public switches and limits from GET /api/rooms/config. */

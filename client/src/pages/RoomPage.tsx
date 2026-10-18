@@ -6,6 +6,7 @@ import BottomNavigation from "@/components/BottomNavigation";
 import HostControls from "@/components/rooms/HostControls";
 import RoomLobby from "@/components/rooms/RoomLobby";
 import HostAvatar from "@/components/rooms/HostAvatar";
+import MinorsRoomWarning from "@/components/rooms/MinorsRoomWarning";
 import RoomShell from "@/components/rooms/shell/RoomShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,8 +16,9 @@ import { useAuth } from "@/hooks/useAuth";
 import { useRoomSocket } from "@/hooks/useRoomSocket";
 import { useRoomVoice } from "@/hooks/useRoomVoice";
 import { showsShell } from "@/lib/roomIntegration";
-import { DENIED_MESSAGE, KIND_LABEL, type PeekMember, VISIBILITY_LABEL, ageLimitLabel, fetchRooms, formatWhen, hostName, type RoomHostSummary, type RoomView } from "@/lib/roomsApi";
+import { AGE_LIMIT_EVICTED_COPY, DENIED_MESSAGE, HOST_REVIEW_COPY, KIND_LABEL, type PeekMember, VISIBILITY_LABEL, ageLimitLabel, fetchRooms, formatWhen, hostName, type RoomHostSummary, type RoomView } from "@/lib/roomsApi";
 import { ArrowLeftIcon } from "@/components/ui/icons";
+import { isMinorsDenied, listenOnlyHere, minorsCodeFor, parseRoomDenial, type MinorsDenied } from "@/lib/minorsRoomUi";
 
 interface RoomDetail {
   room: Omit<RoomView, "host" | "memberCount">;
@@ -48,20 +50,25 @@ function RoomPageInner({ id }: { id: string }) {
   const { data: me } = useAuth();
   const token = useMemo(() => new URLSearchParams(window.location.search).get("token") ?? undefined, []);
 
-  const { data: detail, isLoading, error, refetch } = useQuery<RoomDetail | null>({
+  const { data: raw, isLoading, error, refetch } = useQuery<RoomDetail | MinorsDenied | null>({
     queryKey: ["room", id, token ?? ""],
     queryFn: async () => {
       const r = await fetch(`/api/rooms/${id}${token ? `?token=${encodeURIComponent(token)}` : ""}`, { credentials: "include" });
       if (r.status === 404) return null;
+      // A minors' room refusal keeps only its code: the text and anything else in the body is dropped, so nothing about the room is cached.
+      if (r.status === 403) { const denied = parseRoomDenial(r.status, await r.json().catch(() => null)); if (denied) return denied; }
       if (!r.ok) throw new Error("Couldn't load the room");
       return r.json();
     },
     staleTime: 0,
-    refetchInterval: (q) => (q.state.data?.room.status === "scheduled" ? 15_000 : false), // a waiting guest sees it go live
+    refetchInterval: (q) => { const d = q.state.data; return d && !isMinorsDenied(d) && d.room.status === "scheduled" ? 15_000 : false; }, // a waiting guest sees it go live
+    gcTime: 0, // a refusal or a room is not kept around once the page closes
   });
 
   const sock = useRoomSocket(id, { inviteToken: token });
   const { state } = sock;
+  const detail = isMinorsDenied(raw) ? null : raw;
+  const minorsCode = minorsCodeFor(isMinorsDenied(raw) ? raw : null, state); // one screen, whether the refusal came over HTTP or the socket
   // "reconnecting" counts as live: a blip in the app connection must not hang up the media (that ended the stream by our own hand).
   const voice = useRoomVoice(id, { enabled: state.voiceEnabled && (state.phase === "live" || state.phase === "reconnecting"), inviteToken: token, onCameraLost: () => sock.liveAction("stop") });
   const room = detail?.room;
@@ -78,6 +85,11 @@ function RoomPageInner({ id }: { id: string }) {
   useEffect(() => {
     if (joinTapped && state.phase === "live" && state.voiceEnabled && voice.status === "needs-tap") void voice.unlock();
   }, [joinTapped, state.phase, state.voiceEnabled, voice.status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Adults only listen and chat in a minors' room. The age is the viewer's own, read from their own settings; the server enforces it regardless.
+  const minorsRoom = detail?.room.minorsRoom === true || state.room?.minorsRoom === true;
+  const { data: myAge } = useQuery<{ age: number | null }>({ queryKey: ["/api/users/me/room-privacy"], enabled: !!me && minorsRoom });
+  const listenOnly = listenOnlyHere({ minorsRoom, age: myAge?.age });
 
   const role = state.you?.role ?? detail?.you?.role ?? "guest";
   const isHost = detail?.you?.role === "host" || state.you?.role === "host";
@@ -116,6 +128,7 @@ function RoomPageInner({ id }: { id: string }) {
         hostControls={<HostControls room={{ ...room, host: detail.host }} onChanged={() => refetch()} />}
         onLeave={leave}
         detailsError={!!error}
+        listenOnly={listenOnly}
       />
     );
   }
@@ -124,18 +137,23 @@ function RoomPageInner({ id }: { id: string }) {
   let content: React.ReactNode;
   if (isLoading) {
     content = <div className="space-y-3"><Skeleton className="aspect-video w-full rounded-2xl" /><Skeleton className="h-40 w-full rounded-2xl" /></div>;
+  } else if (minorsCode) {
+    // The warning screen alone: no title, no host. Acknowledging records it, clears any socket refusal, reloads the room and joins.
+    content = <MinorsRoomWarning code={minorsCode} roomId={id} onAcknowledged={() => { if (state.phase === "denied") sock.leave(); setJoinTapped(true); void refetch(); }} />;
   } else if (error) {
     content = <Panel title="Couldn't load this room" action={<Button onClick={() => refetch()}>Try again</Button>} />;
   } else if (!detail || !room) {
     content = <Panel title="This room isn't available" body="It may have been removed, or you may not have access." action={back} />;
   } else if (room.status === "ended" || state.phase === "ended") {
-    content = <Panel title="The host ended the room" body="Thanks for joining." action={back} />;
+    content = state.notice?.code === "HOST_REVIEW"
+      ? <Panel title="This room has closed" body={HOST_REVIEW_COPY} action={back} />
+      : <Panel title="The host ended the room" body="Thanks for joining." action={back} />;
   } else if (!detail.canJoin.ok) {
     const code = detail.canJoin.code;
     content = <Panel title={code === "AGE_LIMIT" ? "This room has an age limit" : "You can't join this room"} body={DENIED_MESSAGE[code] ?? "You can't join this room."} action={back} />;
   } else if (state.phase === "denied") {
     const code = state.error ?? "NOT_FOUND";
-    content = <Panel title={code === "AGE_LIMIT" ? "This room has an age limit" : code === "KICKED" ? "You were removed" : "You can't join this room"} body={DENIED_MESSAGE[code] ?? "You can't join this room."} action={back} />;
+    content = <Panel title={code === "AGE_LIMIT" ? "This room has an age limit" : code === "KICKED" ? "You were removed" : "You can't join this room"} body={code === "AGE_LIMIT" && state.room ? AGE_LIMIT_EVICTED_COPY : DENIED_MESSAGE[code] ?? "You can't join this room."} action={back} />;
   } else if (room.status === "scheduled") {
     content = (
       <div className="space-y-4">
@@ -150,7 +168,7 @@ function RoomPageInner({ id }: { id: string }) {
     );
   }
 
-  const showHeader = !!detail && !!room;
+  const showHeader = !!detail && !!room && !minorsCode; // never the title or host above a minors' room warning
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
       <Navigation />
