@@ -565,7 +565,10 @@ try {
     const PF = await mk("pb_flood"); await rs.upsertMember(PR.id, PF, "cohost");
     const pf = await connect(PF); await join(pf, PR.id); pf.drain(); pg.drain();
     for (let i = 0; i < 25; i++) pf.send({ type: "room:playback", state: "playing", positionMs: i, screenVersion: ver + 1 });
-    await sleep(2500);
+    // Each delivery is two remote-DB queries and up to 8 run at once, so a fixed 2.5 s sometimes counted before the burst had
+    // arrived (saw 2 of 8). Wait for the bucket's burst to land, then give any extras a moment to show up before counting.
+    await until(async () => pg.all((m) => m.type === "room:playback").length >= 8, 20000);
+    await sleep(1500);
     const delivered = pg.all((m) => m.type === "room:playback").length;
     check("a burst of 25 playback messages is rate limited", delivered >= 8 && delivered < 25, `${delivered}`);
     check("the flooding host is told", pf.all((m) => m.type === "room:notice" && m.code === "RATE_LIMITED").length >= 1);
