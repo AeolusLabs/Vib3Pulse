@@ -31,6 +31,12 @@ export async function ensureCsrfToken(): Promise<string> {
   return csrfToken || "";
 }
 
+/** Drop the cached CSRF token and fetch a new one (a stale token answers 403). */
+export async function refreshCsrfToken(): Promise<string> {
+  csrfToken = null;
+  return ensureCsrfToken();
+}
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;

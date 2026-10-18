@@ -3,11 +3,16 @@
 // sheets read are answered in the page. The app around it (auth, notifications) still makes its usual requests.
 // Query: ?scene=voice|live|immersive|weak|dropped &theme=dark|light &as=guest|holder|host &sound=1 (sound only)
 // &tap=1 (audio waits for a tap) &invite=1 (invited to speak) &flood=300 (chat lines over ten seconds).
+// &minors=refuse|ack|invites|listen|teennote shows the minors' room screens (listen is the room shell seen as an adult).
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import RoomShell, { type RoomShellSocket } from "@/components/rooms/shell/RoomShell";
+import MinorsRoomWarning from "@/components/rooms/MinorsRoomWarning";
+import AdultInviteSheet from "@/components/rooms/AdultInviteSheet";
+import TeenHostNote from "@/components/rooms/TeenHostNote";
+import type { AdultInvite } from "@/lib/minorsRoomApi";
 import type { RoomVoice, ScreenTrack } from "@/hooks/useRoomVoice";
 import { roomReducer, type RoomState } from "@/lib/roomReducer";
-import { FIXTURE_HOST, FIXTURE_IDS, FIXTURE_NAMES, FIXTURE_ROOM, fixtureLiveState, fixtureStartView, parseFixtureQuery } from "@/lib/roomFixtures";
+import { FIXTURE_HOST, FIXTURE_INVITES, FIXTURE_IDS, FIXTURE_NAMES, FIXTURE_ROOM, fixtureLiveState, fixtureStartView, parseFixtureQuery } from "@/lib/roomFixtures";
 
 type Ev = Parameters<typeof roomReducer>[1];
 
@@ -45,6 +50,9 @@ function useFixtureFetch() {
       const path = url.replace(window.location.origin, "");
       if (/^\/api\/rooms\/fixture-room\/members\/[^/]+\/actions/.test(path)) return json({ actions: { interact: true, dm: false, invite: false, profile: true } });
       if (/^\/api\/rooms\/fixture-room\/report/.test(path)) return json({ ok: true });
+      if (path.startsWith("/api/rooms/fixture-room/adult-invites")) return json(init?.method && init.method !== "GET" ? { ok: true } : { invites: FIXTURE_INVITES.active });
+      if (path === "/api/blocks") return json({ blocked: [] });
+      if (path.startsWith("/api/users/search")) return json([]);
       if (/^\/api\/users\/[^/]+\/follow-stats/.test(path)) return json({ followersCount: 128, followingCount: 64 });
       if (/^\/api\/users\/[^/?]+$/.test(path)) return json({ bio: "Fixture profile. Nothing here is real." });
       return real(input, init);
@@ -53,8 +61,42 @@ function useFixtureFetch() {
   }, []);
 }
 
+/** The minors' room screens that are not the room shell: the two warnings, the adult invite sheet and the teen host note. */
+function MinorsFixture({ scene, theme }: { scene: "refuse" | "ack" | "invites" | "teennote"; theme: "dark" | "light" }) {
+  useFixtureFetch();
+  const was = useRef<boolean | null>(null);
+  useEffect(() => {
+    const root = document.documentElement;
+    if (was.current === null) was.current = root.classList.contains("dark");
+    root.classList.toggle("dark", theme === "dark");
+    return () => { root.classList.toggle("dark", was.current === true); };
+  }, [theme]);
+  const [revoked, setRevoked] = useState<Map<string, AdultInvite>>(() => new Map([[FIXTURE_INVITES.revoked.user.id, FIXTURE_INVITES.revoked]]));
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="min-h-screen bg-background font-sans text-foreground" data-testid="room-fixture" data-scene={scene}>
+      <main className="mx-auto max-w-2xl space-y-4 px-4 py-4">
+        {scene === "refuse" && <MinorsRoomWarning code="MINORS_ROOM" roomId={FIXTURE_ROOM.id} onAcknowledged={async () => true} />}
+        {scene === "ack" && <MinorsRoomWarning code="MINORS_ROOM_ACK" roomId={FIXTURE_ROOM.id} onAcknowledged={async () => true} />}
+        {scene === "teennote" && <TeenHostNote onDismiss={() => {}} />}
+        {scene === "invites" && (
+          <>
+            <button type="button" className="min-h-[44px] rounded-lg border px-4" onClick={() => setOpen(true)}>Invite an adult</button>
+            <AdultInviteSheet open={open} onOpenChange={setOpen} roomId={FIXTURE_ROOM.id} revoked={revoked} onRevokedChange={setRevoked} />
+          </>
+        )}
+      </main>
+    </div>
+  );
+}
+
 export default function RoomFixture() {
   const opts = useMemo(() => parseFixtureQuery(window.location.search), []);
+  if (opts.minors && opts.minors !== "listen") return <MinorsFixture scene={opts.minors} theme={opts.theme} />;
+  return <ShellFixture opts={opts} />;
+}
+
+function ShellFixture({ opts }: { opts: ReturnType<typeof parseFixtureQuery> }) {
   const [state, dispatch] = useReducer((s: RoomState, e: Ev) => roomReducer(s, e), undefined, () => fixtureLiveState(opts.scene, { as: opts.as, now: Date.now(), invite: opts.invite }));
   const was = useRef<boolean | null>(null);
   useFixtureFetch();
@@ -132,7 +174,7 @@ export default function RoomFixture() {
     <div className="font-sans" data-testid="room-fixture" data-scene={opts.scene}>
       <RoomShell
         id={FIXTURE_ROOM.id}
-        room={FIXTURE_ROOM}
+        room={opts.minors === "listen" ? { ...FIXTURE_ROOM, minorsRoom: true } : FIXTURE_ROOM}
         host={FIXTURE_HOST}
         fallbackCount={state.memberCount}
         isHost={opts.as === "host"}
@@ -146,6 +188,8 @@ export default function RoomFixture() {
         hostControls={<p className="text-sm text-muted-foreground">Room settings (fixture stand-in)</p>}
         onLeave={() => window.history.back()}
         startView={fixtureStartView(opts.scene)}
+        listenOnly={opts.minors === "listen"}
+        listenLine={opts.minors === "listen"}
       />
     </div>
   );
