@@ -11,6 +11,8 @@ if (!/test/i.test(dbName)) {
   console.error(`Refusing to run against database "${dbName}" (name must contain "test")`);
   process.exit(2);
 }
+// The runner loads .env; a ROOMS_* value there must not decide the default-flags-off assertion.
+for (const k of ["ROOMS_ANONYMOUS_JOIN", "ROOMS_PAID", "ROOMS_SPRAY"]) delete process.env[k];
 process.env.DISABLE_GEOCODING = "1";
 process.env.RESEND_API_KEY ||= "re_dummy_not_real";
 

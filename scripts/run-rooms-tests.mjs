@@ -37,22 +37,29 @@ const dbName = `vib3_rooms_test_${crypto.randomBytes(4).toString("hex")}`;
 const url = withDb(adminUrl, dbName);
 let ok = true;
 let created = false;
+// A renamed or missing suite must fail the run, not be skipped silently.
+const requireFiles = (kind, files) => {
+  if (files.length === 0) { console.error(`ERROR: no scripts/test-rooms-${kind}*.ts files found; refusing to report green with an empty ${kind} suite`); ok = false; }
+  return files;
+};
 try {
   console.log("unit (no database):");
   if (!only || only === "unit") {
-    for (const f of testFiles("unit")) {
+    for (const f of requireFiles("unit", testFiles("unit"))) {
       const u = await run("npx", ["tsx", f], {});
       console.log(u.out.trim().split("\n").filter((l) => !/DEP0190|trace-deprecation/.test(l)).map((l) => `  ${l}`).join("\n"));
       if (u.code !== 0) ok = false;
     }
   }
   if (!only || only === "api") {
+    const apiFiles = requireFiles("api", testFiles("api"));
+    const wsFiles = requireFiles("ws", testFiles("ws"));
     await admin(`CREATE DATABASE ${dbName}`); created = true;
     process.stdout.write("\napi: building scratch schema... ");
     const push = await run("npx", ["drizzle-kit", "push", "--force"], { DATABASE_URL: url });
     if (push.code !== 0) throw new Error(`drizzle-kit push failed:\n${push.out.slice(-600)}`);
     console.log("done");
-    for (const f of [...testFiles("api"), ...testFiles("ws")]) {
+    for (const f of [...apiFiles, ...wsFiles]) {
       const r = await run("npx", ["tsx", f], { DATABASE_URL: url, SESSION_SECRET: "test", DISABLE_GEOCODING: "1", RESEND_API_KEY: "re_dummy_not_real" });
       console.log(`  -- ${f}`);
       console.log(r.out.trim().split("\n").filter((l) => !/DEP0190|trace-deprecation/.test(l)).map((l) => `  ${l}`).join("\n"));

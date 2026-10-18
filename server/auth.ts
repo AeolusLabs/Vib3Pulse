@@ -123,4 +123,10 @@ export const SENSITIVE_RESPONSE_KEYS = new Set<string>([
   "inviteTokenHash",
   "guestTokenHash",
   "guestName",
+  // ID-verification columns: the owner reads them via GET /api/users/me/age-verification, which uses the
+  // different keys verified/band/at/method, so a stray raw users row can never carry them out.
+  "ageVerifiedAt",
+  "ageVerifiedMethod",
+  "age_verified_at",
+  "age_verified_method",
 ]);
