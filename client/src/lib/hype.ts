@@ -33,3 +33,45 @@ export function reactGate(s: ReactGateState, now: number): { ok: boolean; state:
   if (tokens >= 1) return { ok: true, state: { tokens: tokens - 1, at: nowOrAt } };
   return { ok: false, state: { tokens, at: nowOrAt } };
 }
+
+/** Split a reactions list into the ones not counted yet. `seen` is rebuilt from the current list so it stays bounded. */
+export function splitFresh<T extends { id: string }>(seen: ReadonlySet<string>, items: readonly T[]): { fresh: T[]; seen: Set<string> } {
+  return { fresh: items.filter((r) => !seen.has(r.id)), seen: new Set(items.map((r) => r.id)) };
+}
+
+/**
+ * The bar's value lives here, outside React, so draining it never re-renders the page. The value is a pure function of
+ * time: it is stored with the moment it was set and decayed on read, so a hidden tab needs no timer to stay correct.
+ */
+export interface HypeStore {
+  read(now?: number): number;
+  /** Apply `count` reaction events; returns true if the bar burst at least once. */
+  add(count: number, now?: number): boolean;
+  subscribe(fn: () => void): () => void;
+}
+
+export function createHypeStore(): HypeStore {
+  let value = 0;
+  let at = 0;
+  const subs = new Set<() => void>();
+  const settle = (now: number) => {
+    const t = Number.isFinite(now) ? now : at;
+    value = hypeDecay(value, Math.max(0, t - at) / 1000);
+    at = Math.max(at, t);
+  };
+  return {
+    read(now = Date.now()) { settle(now); return value; },
+    add(count, now = Date.now()) {
+      settle(now);
+      let burst = false;
+      for (let i = 0; i < count; i++) {
+        const r = hypeNext(value, "reaction", now);
+        value = r.value;
+        if (r.burst) burst = true;
+      }
+      subs.forEach((f) => f());
+      return burst;
+    },
+    subscribe(fn) { subs.add(fn); return () => { subs.delete(fn); }; },
+  };
+}

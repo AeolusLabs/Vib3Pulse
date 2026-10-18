@@ -1,9 +1,33 @@
 import { useEffect, useState } from "react";
-import { HYPE } from "@/lib/hype";
+import { HYPE, type HypeStore } from "@/lib/hype";
 import type { HypeBurstState } from "@/hooks/useHype";
 
-/** A 4 px bar above the composer. Decorative: the burst is announced by HypeBurst instead. Animates transform only. */
-export function HypeBar({ value }: { value: number }) {
+const TICK_MS = 250;
+
+/**
+ * A 4 px bar above the composer. Decorative (the burst is announced by HypeBurst). It owns its own state and timer, so a
+ * draining bar re-renders only this component. The timer stops while the tab is hidden; the value is recomputed from the
+ * clock on return.
+ */
+export function HypeBar({ store }: { store: HypeStore }) {
+  const [value, setValue] = useState(() => store.read());
+  useEffect(() => {
+    const sync = () => setValue(store.read());
+    const off = store.subscribe(sync);
+    sync();
+    return off;
+  }, [store]);
+  const draining = value > 0;
+  useEffect(() => {
+    if (!draining) return;
+    let t: ReturnType<typeof setInterval> | undefined;
+    const start = () => { if (!t && !document.hidden) t = setInterval(() => setValue(store.read()), TICK_MS); };
+    const stop = () => { if (t) { clearInterval(t); t = undefined; } };
+    const onVis = () => { if (document.hidden) stop(); else { setValue(store.read()); start(); } };
+    start();
+    document.addEventListener("visibilitychange", onVis);
+    return () => { stop(); document.removeEventListener("visibilitychange", onVis); };
+  }, [draining, store]);
   const ratio = Math.min(1, Math.max(0, value / HYPE.max));
   return (
     <div className="h-1 w-full overflow-hidden rounded-full bg-muted" aria-hidden="true" data-testid="hype-bar">
@@ -26,13 +50,14 @@ function useReducedMotion() {
 
 /**
  * The burst: floating emoji (skipped under reduced motion) and a polite "Hype moment" line. The live region stays mounted
- * so a screen reader hears the text when it appears. Place inside a relatively positioned frame.
+ * so a screen reader hears the text when it appears. Place inside a relatively positioned frame. In the rail layout it is
+ * centred over the video column (the frame minus the 360 px chat rail); in the stack layout over the whole width.
  */
-export function HypeBurst({ burst }: { burst: HypeBurstState | null }) {
+export function HypeBurst({ burst, layout = "stack" }: { burst: HypeBurstState | null; layout?: "stack" | "rail" }) {
   const reduce = useReducedMotion();
   const emojis = burst?.emojis ?? [];
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-[132px] z-[13] h-0" data-testid="hype-burst">
+    <div className={`pointer-events-none absolute bottom-[132px] z-[13] h-0 ${layout === "rail" ? "left-0 right-[360px]" : "inset-x-0"}`} data-testid="hype-burst">
       <div role="status" aria-live="polite" className="flex justify-center">
         {burst && <p className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-lg" data-testid="hype-toast">Hype moment</p>}
       </div>

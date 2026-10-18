@@ -222,6 +222,8 @@ function RoomPageInner({ id }: { id: string }) {
   const hype = useHype(state.reactions);
   // Taps are metered a little under the server's reaction bucket so RATE_LIMITED should not fire; a blocked tap shows the usual calm line.
   const reactGateState = useRef<ReactGateState>({ tokens: REACT_GATE.burst, at: Date.now() });
+  // Its own line and timer, so it and the server-notice effect above never clear each other.
+  const [gateNotice, setGateNotice] = useState<string | null>(null);
   const gateTimer = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => () => clearTimeout(gateTimer.current), []);
   const sendReaction = (emoji: string) => {
@@ -229,9 +231,9 @@ function RoomPageInner({ id }: { id: string }) {
     reactGateState.current = g.state;
     if (g.ok) sock.react(emoji);
     else {
-      setNoticeText(NOTICE_MESSAGE.RATE_LIMITED);
+      setGateNotice(NOTICE_MESSAGE.RATE_LIMITED);
       clearTimeout(gateTimer.current);
-      gateTimer.current = setTimeout(() => setNoticeText(null), 2500);
+      gateTimer.current = setTimeout(() => setGateNotice(null), 2500);
     }
   };
   // The wave / private reaction line fades after a few seconds instead of sitting over the room.
@@ -397,15 +399,15 @@ function RoomPageInner({ id }: { id: string }) {
           onClick: () => { if (isHolder) stopLive(); else if (asked) sock.liveAction("withdraw"); else askLive(); },
         }}
         immersive={immersive}
-        hype={<HypeBar value={hype.value} />}
+        hype={<HypeBar store={hype.store} />}
         tray={<ReactionTray emojis={TRAY_EMOJIS} open={trayOpen} onClose={() => setTrayOpen(false)} onPick={sendReaction} />}
       />
     );
 
-    const statusLine = incomingShown ?? noticeText;
+    const statusLine = incomingShown ?? noticeText ?? gateNotice;
     const floating = (
       <>
-      <HypeBurst burst={hype.burst} />
+      <HypeBurst burst={hype.burst} layout={layout} />
       <div role="status" aria-live="polite" className={`pointer-events-none absolute top-[68px] z-[13] w-max -translate-x-1/2 ${layout === "rail" ? "left-[calc((100%-360px)/2)] max-w-[calc((100%-360px)*0.9)]" : "left-1/2 max-w-[90%]"}`} data-testid="room-status-line">
         {statusLine && <p className="rounded-full bg-foreground px-4 py-2 text-center text-sm font-medium text-background shadow-lg">{statusLine}</p>}
       </div>

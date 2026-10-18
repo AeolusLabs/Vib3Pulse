@@ -1,6 +1,6 @@
 // Rooms hype checks (no database, no DOM):   npx tsx scripts/test-rooms-unit-hype.ts   (or npm run test:rooms)
 import assert from "node:assert/strict";
-import { HYPE, hypeNext, hypeDecay, reactGate, REACT_GATE } from "../client/src/lib/hype";
+import { HYPE, hypeNext, hypeDecay, reactGate, REACT_GATE, splitFresh, createHypeStore } from "../client/src/lib/hype";
 import { ROOM_REACTIONS } from "../shared/rooms";
 import { TRAY_EMOJIS } from "../client/src/lib/roomShell";
 
@@ -72,6 +72,42 @@ test("reactGate refills over time and ignores a clock that goes backwards", () =
   assert.equal(reactGate(s, 500).ok, false);
   assert.equal(reactGate(s, 2000).ok, true);
   assert.equal(reactGate({ tokens: NaN, at: 0 }, 10).ok, true);
+});
+
+test("splitFresh skips ids already seen and rebuilds seen from the current list", () => {
+  const r = splitFresh(new Set(["a"]), [{ id: "a" }, { id: "b" }]);
+  assert.deepEqual(r.fresh, [{ id: "b" }]);
+  assert.deepEqual([...r.seen].sort(), ["a", "b"]);
+  assert.equal(splitFresh(new Set(["a", "gone"]), [{ id: "a" }]).seen.size, 1);
+});
+test("seeding seen from the initial list counts nothing", () => {
+  const initial = Array.from({ length: 30 }, (_, i) => ({ id: `r${i}` }));
+  assert.equal(splitFresh(new Set(initial.map((x) => x.id)), initial).fresh.length, 0);
+});
+test("store: add, decay by timestamp, clock going backwards", () => {
+  const s = createHypeStore();
+  assert.equal(s.add(2, 1000), false);
+  assert.equal(s.read(1000), 24);
+  assert.equal(s.read(3000), 18);
+  assert.equal(s.read(2000), 18);
+  assert.equal(s.read(1e9), 0);
+});
+test("store: nine in a row burst on the ninth and leave 0", () => {
+  const s = createHypeStore();
+  assert.equal(s.add(8, 0), false);
+  assert.equal(s.add(1, 0), true);
+  assert.equal(s.read(0), 0);
+});
+test("store: a hidden tab needs no timer, reading later decays correctly", () => {
+  const s = createHypeStore();
+  s.add(5, 0);
+  assert.equal(s.read(10_000), 30);
+});
+test("store notifies subscribers and unsubscribes", () => {
+  const s = createHypeStore(); let n = 0;
+  const off = s.subscribe(() => n++);
+  s.add(1, 0); off(); s.add(1, 0);
+  assert.equal(n, 1);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
