@@ -15,8 +15,9 @@ import { ageBand, AGE_LIMITS, minAgeForLimit, type AgeLimit } from "@shared/age"
 import { resolveScreen } from "@shared/screen";
 import { ROOM_KINDS, ROOM_LIMITS, ROOM_VISIBILITY, validateRoomInput, type RoomKind, type RoomVisibility } from "@shared/rooms";
 import { KIND_LABEL, LINK_SCREENS, PROVIDER_LABEL, VISIBILITY_LABEL, ageLimitLabel } from "@/lib/roomsApi";
-import { CopyIcon, InfoIcon, Loader2Icon } from "@/components/ui/icons";
-import { TEEN_HOST_NOTE, showTeenHostNote } from "@/lib/minorsRoomUi";
+import { CopyIcon, Loader2Icon } from "@/components/ui/icons";
+import TeenHostNote from "@/components/rooms/TeenHostNote";
+import { showTeenHostNote } from "@/lib/minorsRoomUi";
 
 const TEEN_NOTE_KEY = "rooms.teenHostNote.seen";
 const noteSeen = () => { try { return localStorage.getItem(TEEN_NOTE_KEY) === "1"; } catch { return false; } };
@@ -127,13 +128,7 @@ export default function CreateRoomDialog({ open, onOpenChange, defaultEventId, d
               <DialogDescription>A space for a night, a listening session or a chat. Guests join as their avatar.</DialogDescription>
             </DialogHeader>
 
-            {showNote && (
-              <div role="note" className="flex items-start gap-3 rounded-lg border bg-muted p-3 text-sm" data-testid="text-teen-host-note">
-                <InfoIcon className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
-                <p className="flex-1">{TEEN_HOST_NOTE}</p>
-                <Button type="button" variant="ghost" className="min-h-[44px] shrink-0" onClick={dismissNote} data-testid="button-teen-note-dismiss">Got it</Button>
-              </div>
-            )}
+            {showNote && <TeenHostNote onDismiss={dismissNote} />}
 
             {!ageKnown && me && (
               <p role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm" data-testid="text-room-needs-dob">

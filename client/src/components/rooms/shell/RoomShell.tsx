@@ -68,6 +68,8 @@ export interface RoomShellProps {
   detailsError?: boolean;
   /** An adult in a room for under 18s: they listen and chat. No mic, hand, or camera offers, and a short line says why. */
   listenOnly?: boolean;
+  /** Show the line that says why. Only for a viewer known to be an adult, so a teen never sees it while their age loads. */
+  listenLine?: boolean;
   /** Dev fixture only: open in this video view instead of the width's default. */
   startView?: VideoView;
 }
@@ -89,7 +91,7 @@ const byTestId = (id: string | null) => (id ? document.querySelector<HTMLElement
  * immersive). Crossing 1024 px or switching views only changes classes, so the picture, the camera choice, the composer
  * draft and the chat scroll survive. People are always addressed by RoomMemberView.userId, never by username.
  */
-export default function RoomShell({ id, token, room, host, fallbackCount, isHost, role, meId, state, sock, voice, myRoomId, nav, hostControls, onLeave, startView, detailsError = false, listenOnly = false }: RoomShellProps) {
+export default function RoomShell({ id, token, room, host, fallbackCount, isHost, role, meId, state, sock, voice, myRoomId, nav, hostControls, onLeave, startView, detailsError = false, listenOnly = false, listenLine = false }: RoomShellProps) {
   const { toast } = useToast();
 
   const [hidden, setHidden] = useState<Set<string>>(new Set()); // people the viewer muted for themselves
@@ -254,7 +256,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
             </div>
           </div>
         )}
-        {listenOnly && (
+        {listenOnly && listenLine && (
           <p role="status" className="rounded-xl border bg-muted px-3 py-2 text-sm text-muted-foreground" data-testid="banner-listen-only">{ADULT_LISTEN_LINE}</p>
         )}
         {state.phase === "reconnecting" && (

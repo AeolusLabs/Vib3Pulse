@@ -7,11 +7,11 @@ import { SheetDescription, SheetHeader, SheetTitle, Sheet } from "@/components/u
 import RoomSheetContent from "@/components/rooms/shell/RoomSheetContent";
 import HostAvatar from "@/components/rooms/HostAvatar";
 import { Loader2Icon, SearchIcon, UserMinusIcon, UserPlusIcon } from "@/components/ui/icons";
-import { useBlockedUsers } from "@/components/BlockButton";
+import type { BlockedUser } from "@/components/BlockButton";
 import { useAuth } from "@/hooks/useAuth";
 import { hostName, type RoomHostSummary } from "@/lib/roomsApi";
 import { inviteAdult, listAdultInvites, revokeAdult, type AdultInvite } from "@/lib/minorsRoomApi";
-import { INVITE_SHEET_HELP, INVITE_SHEET_TITLE, INVITE_STATUS_LABEL, inviteErrorMessage, inviteStatus } from "@/lib/minorsRoomUi";
+import { ALREADY_INVITED_COPY, INVITE_SHEET_HELP, INVITE_SHEET_TITLE, INVITE_STATUS_LABEL, inviteErrorMessage, inviteStatus } from "@/lib/minorsRoomUi";
 
 type Found = Pick<RoomHostSummary, "id" | "username" | "displayName" | "organizationName" | "avatarUrl" | "avatar">;
 
@@ -19,6 +19,9 @@ interface Props {
   open: boolean;
   onOpenChange(o: boolean): void;
   roomId: string;
+  /** Invites taken back this session; the server only lists active ones. Held by the caller so they survive this sheet closing. */
+  revoked: Map<string, AdultInvite>;
+  onRevokedChange(next: Map<string, AdultInvite>): void;
   /** The button that opened the sheet, so focus goes back to it on close. */
   returnFocusTo?: () => HTMLElement | null;
 }
@@ -30,14 +33,14 @@ const FOCUS = "focus-visible:outline focus-visible:outline-2 focus-visible:outli
  * invited and whether they have read the notice, and take an invite back. The server decides who can be invited; a refusal
  * gets one plain line that never says why (age, blocks and bans stay private).
  */
-export default function AdultInviteSheet({ open, onOpenChange, roomId, returnFocusTo }: Props) {
+export default function AdultInviteSheet({ open, onOpenChange, roomId, revoked, onRevokedChange, returnFocusTo }: Props) {
   const { data: me } = useAuth();
-  const { data: blockedData } = useBlockedUsers();
+  // Read only while the sheet is open, so a minors' room does not fetch the block list on load.
+  const { data: blockedData } = useQuery<{ blocked: BlockedUser[] }>({ queryKey: ["/api/blocks"], enabled: open });
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [revoked, setRevoked] = useState<Map<string, AdultInvite>>(new Map());
 
   useEffect(() => { const t = setTimeout(() => setDebounced(query.trim()), 250); return () => clearTimeout(t); }, [query]);
   useEffect(() => { if (!open) { setQuery(""); setError(null); } }, [open]);
@@ -80,7 +83,7 @@ export default function AdultInviteSheet({ open, onOpenChange, roomId, returnFoc
     const r = await inviteAdult(roomId, u.id);
     setBusyId(null);
     if (!r.ok) { setError(inviteErrorMessage(r.status, r.code)); return; }
-    if (again) setRevoked((m) => { const n = new Map(m); n.delete(u.id); return n; });
+    if (again) { const n = new Map(revoked); n.delete(u.id); onRevokedChange(n); }
     setQuery(""); setDebounced("");
     void invites.refetch();
   };
@@ -91,7 +94,7 @@ export default function AdultInviteSheet({ open, onOpenChange, roomId, returnFoc
     const r = await revokeAdult(roomId, i.user.id);
     setBusyId(null);
     if (!r.ok) { setError(inviteErrorMessage(r.status, r.code)); return; }
-    setRevoked((m) => new Map(m).set(i.user.id, i));
+    onRevokedChange(new Map(revoked).set(i.user.id, i));
   };
 
   return (
@@ -115,11 +118,11 @@ export default function AdultInviteSheet({ open, onOpenChange, roomId, returnFoc
         {searching && (
           <ul className="mt-2 grid gap-0.5" aria-label="Search results" data-testid="adult-search-results">
             {search.isLoading && <li className="px-2 py-3 text-sm text-muted-foreground" role="status">Searching…</li>}
-            {!search.isLoading && results.length === 0 && <li className="px-2 py-3 text-sm text-muted-foreground" role="status">{search.isError ? "Search didn't work. Try again." : "Nobody found."}</li>}
+            {!search.isLoading && results.length === 0 && <li className="px-2 py-3 text-sm text-muted-foreground" role="status">{search.isError ? "Search didn't work. Try again." : (search.data ?? []).length > 0 && (search.data ?? []).every((u) => activeIds.has(u.id)) ? ALREADY_INVITED_COPY : "Nobody found."}</li>}
             {results.map((u) => (
               <li key={u.id} className="flex min-h-[52px] items-center gap-3 px-2 py-1.5">
                 <HostAvatar person={u} className="h-9 w-9 shrink-0 rounded-full" />
-                <span className="min-w-0 flex-1 truncate text-sm">{hostName(u as RoomHostSummary)}<span className="text-muted-foreground"> @{u.username}</span></span>
+                <span className="min-w-0 flex-1 truncate text-sm">{hostName(u)}<span className="text-muted-foreground"> @{u.username}</span></span>
                 <Button variant="outline" className={`min-h-[44px] shrink-0 ${FOCUS}`} disabled={!!busyId} onClick={() => void invite(u)} aria-label={`Invite ${u.username}`} data-testid={`button-invite-${u.id}`}>
                   {busyId === u.id ? <Loader2Icon className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <UserPlusIcon className="mr-2 h-4 w-4" aria-hidden />}Invite
                 </Button>

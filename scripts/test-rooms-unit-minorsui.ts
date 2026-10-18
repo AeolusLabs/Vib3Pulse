@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { MINORS_ROOM_WARNING } from "../shared/rooms";
 import {
-  ADULT_LISTEN_LINE, MINORS_UI_COPY, TEEN_HOST_NOTE, acknowledgeErrorMessage, ackAlreadyDone, inviteErrorMessage, inviteStatus,
+  ADULT_LISTEN_LINE, MINORS_UI_COPY, WARNING_TITLE, showListenLine, isAgeUnknownDenied, isRoomDenial, TEEN_HOST_NOTE, acknowledgeErrorMessage, ackAlreadyDone, inviteErrorMessage, inviteStatus,
   isMinorsCode, isMinorsDenied, listenOnlyHere, minorsCodeFor, parseRoomDenial, showAdultInvite, showTeenHostNote, warningScreenFor,
 } from "../client/src/lib/minorsRoomUi";
 import { AGE_LIMIT_EVICTED_COPY, DENIED_MESSAGE, HOST_REVIEW_COPY, NOTICE_MESSAGE } from "../client/src/lib/roomsApi";
@@ -38,9 +38,24 @@ test("other answers are not minors denials", () => {
   assert.equal(parseRoomDenial(200, { code: "MINORS_ROOM" }), null);
   assert.equal(parseRoomDenial(403, null), null);
   assert.equal(parseRoomDenial(403, "MINORS_ROOM"), null);
+  assert.equal(parseRoomDenial(403, { message: "Forbidden" }), null);
   assert.equal(isMinorsDenied({ minorsDenied: "NOPE" }), false);
   assert.equal(isMinorsDenied(null), false);
   assert.equal(isMinorsDenied({ room: {} }), false);
+});
+test("a 403 AGE_UNKNOWN keeps only that code: no warning, no room details", () => {
+  const kept = parseRoomDenial(403, { code: "AGE_UNKNOWN", message: "Add your date of birth in your profile to join rooms.", canJoin: { ok: false, code: "AGE_UNKNOWN" }, title: "Secret" });
+  assert.deepEqual(kept, { denied: "AGE_UNKNOWN" });
+  assert.equal(isAgeUnknownDenied(kept), true);
+  assert.equal(isRoomDenial(kept), true);
+  assert.equal(isMinorsDenied(kept), false);
+  assert.equal(minorsCodeFor(kept as any, { phase: "idle", error: null }), null, "never the warning screen");
+  assert.equal(warningScreenFor("AGE_UNKNOWN"), null);
+  assert.equal(parseRoomDenial(404, { code: "AGE_UNKNOWN" }), null);
+  assert.equal(DENIED_MESSAGE.AGE_UNKNOWN, "Add your date of birth in your profile to join rooms.");
+  assert.ok(!DENIED_MESSAGE.AGE_UNKNOWN.includes(MINORS_ROOM_WARNING));
+  const page = readFileSync(new URL("../client/src/pages/RoomPage.tsx", import.meta.url), "utf8");
+  assert.ok(page.includes("ageUnknownDenied") && page.includes("DENIED_MESSAGE.AGE_UNKNOWN"), "the page renders the plain panel");
 });
 test("the HTTP answer and the socket refusal give the same screen", () => {
   const idle = { phase: "idle", error: null };
@@ -89,6 +104,13 @@ test("while the viewer's age is not known yet, the offers stay hidden in a minor
   assert.equal(listenOnlyHere({ minorsRoom: true, age: undefined }), true);
   assert.equal(listenOnlyHere({ minorsRoom: false, age: null }), false);
 });
+test("the listen line shows only to a viewer known to be 18 or over", () => {
+  assert.equal(showListenLine({ minorsRoom: true, age: 18 }), true);
+  assert.equal(showListenLine({ minorsRoom: true, age: 17 }), false);
+  assert.equal(showListenLine({ minorsRoom: true, age: null }), false);
+  assert.equal(showListenLine({ minorsRoom: true, age: undefined }), false);
+  assert.equal(showListenLine({ minorsRoom: false, age: 30 }), false);
+});
 test("invite status: invited, acknowledged, revoked", () => {
   assert.equal(inviteStatus({ acknowledged: false }), "invited");
   assert.equal(inviteStatus({ acknowledged: true }), "acknowledged");
@@ -115,12 +137,18 @@ test("the page keeps the code only and hides the header above the warning", () =
   assert.ok(page.includes("!minorsCode"), "the header is hidden for the warning");
 });
 test("host refusal and review closure copy exist and read plainly", () => {
-  assert.equal(DENIED_MESSAGE.HOST_NOT_MINOR, "Only hosts under 18 can do this in a room for under 18s.");
-  assert.equal(NOTICE_MESSAGE.HOST_NOT_MINOR, DENIED_MESSAGE.HOST_NOT_MINOR);
   assert.equal(NOTICE_MESSAGE.HOST_REVIEW, "This room has closed because the host's account is being reviewed.");
   assert.equal(HOST_REVIEW_COPY, NOTICE_MESSAGE.HOST_REVIEW);
-  assert.equal(NOTICE_MESSAGE.AGE_LIMIT, "You no longer meet this room's age limit.");
-  assert.equal(AGE_LIMIT_EVICTED_COPY, NOTICE_MESSAGE.AGE_LIMIT);
+  assert.equal(AGE_LIMIT_EVICTED_COPY, "You no longer meet this room's age limit.");
+  for (const k of ["NOT_ALLOWED", "HOST_NOT_MINOR"]) assert.equal(k in DENIED_MESSAGE, false, "unused denial copy removed: " + k);
+  for (const k of ["HOST_NOT_MINOR", "AGE_LIMIT"]) assert.equal(k in NOTICE_MESSAGE, false, "unused notice copy removed: " + k);
+});
+test("the heading does not repeat the warning, and the call retries a stale token once", () => {
+  assert.ok(!MINORS_ROOM_WARNING.includes(WARNING_TITLE));
+  assert.ok(!MINORS_ROOM_WARNING.startsWith(WARNING_TITLE));
+  assert.equal(WARNING_TITLE, "You can't enter this room");
+  const api = readFileSync(new URL("../client/src/lib/minorsRoomApi.ts", import.meta.url), "utf8");
+  assert.ok(api.includes("refreshCsrfToken") && api.includes("attempt === 0"), "one retry after a refresh");
 });
 test("fixed lines are exactly the agreed wording", () => {
   assert.equal(TEEN_HOST_NOTE, "Only people under 18 can join. You can invite an adult yourself.");
@@ -128,7 +156,8 @@ test("fixed lines are exactly the agreed wording", () => {
 });
 test("invite errors are plain and tell the host nothing about why", () => {
   assert.equal(inviteErrorMessage(403, "NOT_ALLOWED"), "You can't invite this person.");
-  assert.equal(inviteErrorMessage(403, "HOST_NOT_MINOR"), DENIED_MESSAGE.HOST_NOT_MINOR);
+  assert.equal(inviteErrorMessage(403, "HOST_NOT_MINOR"), "Only hosts under 18 can do this in a room for under 18s.");
+  assert.equal(inviteErrorMessage(403), "That didn't work. Try again.", "a stale token is not worded as a host rule");
   assert.equal(inviteErrorMessage(429, "RATE_LIMITED"), "Slow down a little, then try again.");
   assert.equal(inviteErrorMessage(429), inviteErrorMessage(200, "RATE_LIMITED"));
   assert.equal(inviteErrorMessage(500), "That didn't work. Try again.");
@@ -136,12 +165,15 @@ test("invite errors are plain and tell the host nothing about why", () => {
 });
 test("acknowledge errors cover revoked, banned, ended and unknown cases", () => {
   assert.match(acknowledgeErrorMessage(403, "MINORS_ROOM"), /took back your invite/);
+  assert.equal(acknowledgeErrorMessage(403), "That didn't work. Try again.", "a codeless 403 is not the revoked wording");
+  assert.equal(acknowledgeErrorMessage(429, "RATE_LIMITED"), "Slow down a little, then try again.");
+  assert.equal(acknowledgeErrorMessage(429), "Slow down a little, then try again.");
   assert.match(acknowledgeErrorMessage(409, "ROOM_ENDED"), /ended/);
   assert.match(acknowledgeErrorMessage(404), /isn't available/);
   assert.match(acknowledgeErrorMessage(0), /didn't work/);
 });
 test("no em dash, en dash or the word cash in any new copy", () => {
-  const all = [...MINORS_UI_COPY, HOST_REVIEW_COPY, AGE_LIMIT_EVICTED_COPY, DENIED_MESSAGE.MINORS_ROOM, DENIED_MESSAGE.HOST_NOT_MINOR, DENIED_MESSAGE.NOT_ALLOWED];
+  const all = [...MINORS_UI_COPY, HOST_REVIEW_COPY, AGE_LIMIT_EVICTED_COPY, DENIED_MESSAGE.MINORS_ROOM];
   assert.ok(all.length > 20);
   for (const t of all) {
     assert.ok(!/[—–]/.test(t), `dash in: ${t}`);
@@ -150,7 +182,7 @@ test("no em dash, en dash or the word cash in any new copy", () => {
   }
 });
 test("no em dash or the word cash in the new component source either", () => {
-  for (const f of ["components/rooms/MinorsRoomWarning.tsx", "components/rooms/AdultInviteSheet.tsx", "lib/minorsRoomUi.ts", "lib/minorsRoomApi.ts"]) {
+  for (const f of ["components/rooms/MinorsRoomWarning.tsx", "components/rooms/AdultInviteSheet.tsx", "lib/minorsRoomUi.ts", "lib/minorsRoomApi.ts", "components/rooms/TeenHostNote.tsx"]) {
     const src = readFileSync(new URL(`../client/src/${f}`, import.meta.url), "utf8");
     assert.ok(!/[—–]/.test(src), `dash in ${f}`);
     assert.ok(!/cash/i.test(src), `cash in ${f}`);

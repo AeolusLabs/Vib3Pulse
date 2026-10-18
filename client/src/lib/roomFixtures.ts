@@ -90,7 +90,23 @@ export interface FixtureOptions {
   invite: boolean;
   /** Push this many chat lines over ten seconds (0 = none, at most 1000). */
   flood: number;
+  /** Minors' room scenes: the two warnings, the adult invite sheet, an adult listening in the shell, the teen host note. */
+  minors: MinorsScene | null;
 }
+
+export type MinorsScene = "refuse" | "ack" | "invites" | "listen" | "teennote";
+export const MINORS_SCENES: MinorsScene[] = ["refuse", "ack", "invites", "listen", "teennote"];
+
+const adult = (id: string, username: string, displayName: string) => ({ id, username, displayName, organizationName: null, avatarUrl: null, avatar: null, isVerified: null, isOfficial: null });
+
+/** The invite sheet fixture: an Active and an Acknowledged row from the server, plus a Revoked row the page keeps locally. */
+export const FIXTURE_INVITES = {
+  active: [
+    { user: adult("adult-1", "tolu", "Tolu Adeyemi"), invitedAt: "2026-10-18T09:00:00.000Z", acknowledged: false },
+    { user: adult("adult-2", "sam", "Sam Rivers"), invitedAt: "2026-10-18T09:05:00.000Z", acknowledged: true },
+  ],
+  revoked: { user: adult("adult-3", "kemi", "Kemi Bello"), invitedAt: "2026-10-18T08:50:00.000Z", acknowledged: true },
+};
 
 const SCENES: FixtureScene[] = ["voice", "live", "immersive", "weak", "dropped"];
 
@@ -107,6 +123,7 @@ export function parseFixtureQuery(search: string): FixtureOptions {
     sound: p.get("sound") === "1",
     tap: p.get("tap") === "1",
     invite: p.get("invite") === "1",
+    minors: MINORS_SCENES.includes(p.get("minors") as MinorsScene) ? (p.get("minors") as MinorsScene) : null,
     flood: Number.isFinite(flood) && flood > 0 ? Math.min(1000, Math.floor(flood)) : 0,
   };
 }

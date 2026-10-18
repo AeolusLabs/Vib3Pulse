@@ -18,7 +18,8 @@ import { useRoomVoice } from "@/hooks/useRoomVoice";
 import { showsShell } from "@/lib/roomIntegration";
 import { AGE_LIMIT_EVICTED_COPY, DENIED_MESSAGE, HOST_REVIEW_COPY, KIND_LABEL, type PeekMember, VISIBILITY_LABEL, ageLimitLabel, fetchRooms, formatWhen, hostName, type RoomHostSummary, type RoomView } from "@/lib/roomsApi";
 import { ArrowLeftIcon } from "@/components/ui/icons";
-import { isMinorsDenied, listenOnlyHere, minorsCodeFor, parseRoomDenial, type MinorsDenied } from "@/lib/minorsRoomUi";
+import { isAgeUnknownDenied, isMinorsDenied, isRoomDenial, listenOnlyHere, minorsCodeFor, parseRoomDenial, showListenLine, type RoomDenial } from "@/lib/minorsRoomUi";
+import type { AdultInvite } from "@/lib/minorsRoomApi";
 
 interface RoomDetail {
   room: Omit<RoomView, "host" | "memberCount">;
@@ -50,7 +51,7 @@ function RoomPageInner({ id }: { id: string }) {
   const { data: me } = useAuth();
   const token = useMemo(() => new URLSearchParams(window.location.search).get("token") ?? undefined, []);
 
-  const { data: raw, isLoading, error, refetch } = useQuery<RoomDetail | MinorsDenied | null>({
+  const { data: raw, isLoading, error, refetch } = useQuery<RoomDetail | RoomDenial | null>({
     queryKey: ["room", id, token ?? ""],
     queryFn: async () => {
       const r = await fetch(`/api/rooms/${id}${token ? `?token=${encodeURIComponent(token)}` : ""}`, { credentials: "include" });
@@ -61,13 +62,16 @@ function RoomPageInner({ id }: { id: string }) {
       return r.json();
     },
     staleTime: 0,
-    refetchInterval: (q) => { const d = q.state.data; return d && !isMinorsDenied(d) && d.room.status === "scheduled" ? 15_000 : false; }, // a waiting guest sees it go live
+    refetchInterval: (q) => { const d = q.state.data; return d && !isRoomDenial(d) && d.room.status === "scheduled" ? 15_000 : false; }, // a waiting guest sees it go live
     gcTime: 0, // a refusal or a room is not kept around once the page closes
   });
 
   const sock = useRoomSocket(id, { inviteToken: token });
   const { state } = sock;
-  const detail = isMinorsDenied(raw) ? null : raw;
+  const detail = isRoomDenial(raw) ? null : raw;
+  const ageUnknownDenied = isAgeUnknownDenied(raw);
+  // Invites taken back this session. Lives here, not in the Controls sheet, so the "Revoked" rows survive the sheet closing.
+  const [revokedInvites, setRevokedInvites] = useState<Map<string, AdultInvite>>(new Map());
   const minorsCode = minorsCodeFor(isMinorsDenied(raw) ? raw : null, state); // one screen, whether the refusal came over HTTP or the socket
   // "reconnecting" counts as live: a blip in the app connection must not hang up the media (that ended the stream by our own hand).
   const voice = useRoomVoice(id, { enabled: state.voiceEnabled && (state.phase === "live" || state.phase === "reconnecting"), inviteToken: token, onCameraLost: () => sock.liveAction("stop") });
@@ -90,6 +94,7 @@ function RoomPageInner({ id }: { id: string }) {
   const minorsRoom = detail?.room.minorsRoom === true || state.room?.minorsRoom === true;
   const { data: myAge } = useQuery<{ age: number | null }>({ queryKey: ["/api/users/me/room-privacy"], enabled: !!me && minorsRoom });
   const listenOnly = listenOnlyHere({ minorsRoom, age: myAge?.age });
+  const listenLine = showListenLine({ minorsRoom, age: myAge?.age });
 
   const role = state.you?.role ?? detail?.you?.role ?? "guest";
   const isHost = detail?.you?.role === "host" || state.you?.role === "host";
@@ -125,10 +130,11 @@ function RoomPageInner({ id }: { id: string }) {
         voice={voice}
         myRoomId={myRoomId}
         nav={<Navigation />}
-        hostControls={<HostControls room={{ ...room, host: detail.host }} onChanged={() => refetch()} />}
+        hostControls={<HostControls room={{ ...room, host: detail.host }} onChanged={() => refetch()} isHost={isHost} revokedInvites={revokedInvites} onRevokedInvitesChange={setRevokedInvites} />}
         onLeave={leave}
         detailsError={!!error}
         listenOnly={listenOnly}
+        listenLine={listenLine}
       />
     );
   }
@@ -139,7 +145,15 @@ function RoomPageInner({ id }: { id: string }) {
     content = <div className="space-y-3"><Skeleton className="aspect-video w-full rounded-2xl" /><Skeleton className="h-40 w-full rounded-2xl" /></div>;
   } else if (minorsCode) {
     // The warning screen alone: no title, no host. Acknowledging records it, clears any socket refusal, reloads the room and joins.
-    content = <MinorsRoomWarning code={minorsCode} roomId={id} onAcknowledged={() => { if (state.phase === "denied") sock.leave(); setJoinTapped(true); void refetch(); }} />;
+    content = <MinorsRoomWarning code={minorsCode} roomId={id} onAcknowledged={async () => {
+      if (state.phase === "denied") sock.leave();
+      setJoinTapped(true);
+      const r = await refetch();
+      return !r.isError && !isRoomDenial(r.data); // still refused or failed: the screen says so
+    }} />;
+  } else if (ageUnknownDenied) {
+    // No date of birth on file: the plain message only. No warning (they may be a teen) and no room details.
+    content = <Panel title="You can't join this room" body={DENIED_MESSAGE.AGE_UNKNOWN} action={back} />;
   } else if (error) {
     content = <Panel title="Couldn't load this room" action={<Button onClick={() => refetch()}>Try again</Button>} />;
   } else if (!detail || !room) {
@@ -158,7 +172,7 @@ function RoomPageInner({ id }: { id: string }) {
     content = (
       <div className="space-y-4">
         <Panel title="This room hasn't started" body={room.scheduledFor ? `Planned for ${formatWhen(room.scheduledFor)}.` : "The host will start it soon."} action={isHost ? undefined : back} />
-        {isHost && <HostControls room={{ ...room, host: detail.host }} onChanged={() => refetch()} />}
+        {isHost && <HostControls room={{ ...room, host: detail.host }} onChanged={() => refetch()} isHost={isHost} revokedInvites={revokedInvites} onRevokedInvitesChange={setRevokedInvites} />}
       </div>
     );
   } else {

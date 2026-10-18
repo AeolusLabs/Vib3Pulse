@@ -4,14 +4,14 @@ import { Button } from "@/components/ui/button";
 import { AlertTriangleIcon, Loader2Icon } from "@/components/ui/icons";
 import { MINORS_ROOM_WARNING, type MinorsRoomCode } from "@shared/rooms";
 import { acknowledgeMinorsRoom } from "@/lib/minorsRoomApi";
-import { ackAlreadyDone, acknowledgeErrorMessage, BACK_BUTTON, ENTER_BUTTON, warningScreenFor, WARNING_TITLE } from "@/lib/minorsRoomUi";
+import { ackAlreadyDone, acknowledgeErrorMessage, BACK_BUTTON, ENTER_BUTTON, RELOAD_FAILED_COPY, warningScreenFor, WARNING_TITLE } from "@/lib/minorsRoomUi";
 
 interface Props {
   /** Only ever the two minors' room codes. The page renders this for no other reason, so a teen never sees it. */
   code: MinorsRoomCode;
   roomId: string;
-  /** The warning was acknowledged (or already was): the page loads the room again and joins. */
-  onAcknowledged(): void;
+  /** The warning was acknowledged (or already was): the page loads the room again and joins. Resolves false if the room could not be opened. */
+  onAcknowledged(): Promise<boolean>;
 }
 
 /**
@@ -33,7 +33,12 @@ export default function MinorsRoomWarning({ code, roomId, onAcknowledged }: Prop
     if (busy) return;
     setBusy(true); setError(null);
     const r = await acknowledgeMinorsRoom(roomId);
-    if (r.ok || ackAlreadyDone(r.status, r.code)) { setBusy(false); onAcknowledged(); return; }
+    if (r.ok || ackAlreadyDone(r.status, r.code)) {
+      // Stay busy while the room reloads: no second tap. On success this screen is replaced; on failure say so.
+      const opened = await onAcknowledged().catch(() => false);
+      if (!opened) { setBusy(false); setError(RELOAD_FAILED_COPY); }
+      return;
+    }
     setBusy(false);
     setError(acknowledgeErrorMessage(r.status, r.code));
   };

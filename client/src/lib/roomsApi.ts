@@ -61,7 +61,7 @@ export const VISIBILITY_LABEL: Record<RoomVisibility, string> = { public: "Publi
 
 export const ageLimitLabel = (l: AgeLimit) => (l === "all" ? "All ages" : l);
 
-export const hostName = (h: RoomHostSummary | null) => h?.displayName || h?.organizationName || h?.username || "Host";
+export const hostName = (h: Pick<RoomHostSummary, "displayName" | "organizationName" | "username"> | null) => h?.displayName || h?.organizationName || h?.username || "Host";
 
 export const PROVIDER_LABEL: Record<string, string> = {
   youtube: "YouTube", vimeo: "Vimeo", spotify: "Spotify", apple_music: "Apple Music", soundcloud: "SoundCloud", image: "Image", link: "Link",
@@ -100,8 +100,6 @@ export const DENIED_MESSAGE: Record<string, string> = {
   // Minors' rooms: even a path that falls back to this table shows the one warning, never a room name or a host.
   MINORS_ROOM: MINORS_ROOM_WARNING,
   MINORS_ROOM_ACK: MINORS_ROOM_WARNING,
-  HOST_NOT_MINOR: "Only hosts under 18 can do this in a room for under 18s.",
-  NOT_ALLOWED: "You can't invite this person.",
 };
 
 export const NOTICE_MESSAGE: Record<string, string> = {
@@ -120,8 +118,6 @@ export const NOTICE_MESSAGE: Record<string, string> = {
   BAD_STATE: "That isn't possible right now.",
   BAD_REQUEST: "That didn't work.",
   HOST_REVIEW: HOST_REVIEW_COPY,
-  HOST_NOT_MINOR: "Only hosts under 18 can do this in a room for under 18s.",
-  AGE_LIMIT: AGE_LIMIT_EVICTED_COPY,
 };
 
 /** Public switches and limits from GET /api/rooms/config. */
