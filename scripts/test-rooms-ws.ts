@@ -18,6 +18,7 @@ const { wsManager } = await import("../server/websocket");
 const rs = await import("../server/rooms/roomStorage");
 const { roomHub } = await import("../server/rooms/RoomHub");
 const { roomFeatures } = await import("../server/rooms/features");
+const { MEMBER_LIST_CAP } = await import("../server/rooms/memberList");
 roomFeatures.linkScreens = true; // dormant in production (default off), still tested; one block below pins the default
 const { tuning, rehydrateLiveRooms, expectHost } = await import("../server/rooms/roomSocket");
 
@@ -237,9 +238,16 @@ try {
   check("capacity 2: third refused ROOM_FULL", (await join(g2, small.id))?.code === "ROOM_FULL");
   await join(g1, R.id); hs2.close();
   const big = await liveRoom(H, { capacity: 100, title: "big" });
-  for (let i = 0; i < 45; i++) roomHub.join(big.id, { userId: `fake-${i}`, role: "guest", muted: false, joinedAt: i, send: () => {} });
+  for (let i = 0; i < 60; i++) roomHub.join(big.id, { userId: `fake-${i}`, role: "guest", muted: false, joinedAt: i, send: () => {} });
+  // A chat author past the cap (the 58th joiner) must still be in the list, or their lines read "Someone" and can't be opened.
+  roomHub.recordChat(big.id, { userId: "fake-57", text: "late talker", at: Date.now() });
   const bs = await join(g2, big.id);
-  check("member list capped at 40 with memberCount", bs?.members?.length <= 40 && bs.memberCount === 46, `${bs?.members?.length} ${bs?.memberCount}`);
+  check(`member list capped at MEMBER_LIST_CAP (${MEMBER_LIST_CAP}) plus wanted people, with memberCount`, bs?.members?.length === MEMBER_LIST_CAP + 1 && bs.memberCount === 61, `${bs?.members?.length} ${bs?.memberCount}`);
+  check("a recent chat author past the cap is in room:state members", bs?.members?.some((m: any) => m.userId === "fake-57"));
+  const full = await liveRoom(H, { capacity: 50, title: "full free room" });
+  for (let i = 0; i < 44; i++) roomHub.join(full.id, { userId: `ff-${i}`, role: "guest", muted: false, joinedAt: i, send: () => {} });
+  const fullState = await join(g2, full.id);
+  check("a room of 45 (over the old cap of 40) is sent whole", fullState?.members?.length === fullState?.memberCount && fullState?.memberCount === 45, `${fullState?.members?.length} ${fullState?.memberCount}`);
   await join(g2, R.id);
 
   const g1tab2 = await connect(G1);
@@ -614,16 +622,16 @@ try {
     check("rejoining when the stage is full does not restore them (cap holds at 6)", back?.type === "room:state" && !back.stage.includes(caps[0]) && roomHub.stageOf(CRoom.id).stage.length === 5, JSON.stringify(back?.stage));
     check("...and their stored right is cleared", !(await rs.listOnStage(CRoom.id)).includes(caps[0]));
 
-    // I9: stage guests and raised hands are always in room:state even beyond the 40-member cap
-    const BH = await mk("rv_bigH"); const BR = await liveRoom(BH, { title: "big stage" }); await rs.setVoiceEnabled(BR.id, true);
+    // I9: stage guests and raised hands are always in room:state even beyond the member cap
+    const BH = await mk("rv_bigH"); const BR = await liveRoom(BH, { title: "big stage", capacity: 100 }); await rs.setVoiceEnabled(BR.id, true);
     const bh = await connect(BH); await join(bh, BR.id);
-    for (let i = 0; i < 44; i++) roomHub.join(BR.id, { userId: `ghost-${i}`, role: "guest", muted: false, joinedAt: i + 1, age: 30, send: () => {}, info: { username: `ghost${i}` } });
+    for (let i = 0; i < MEMBER_LIST_CAP + 4; i++) roomHub.join(BR.id, { userId: `ghost-${i}`, role: "guest", muted: false, joinedAt: i + 1, age: 30, send: () => {}, info: { username: `ghost${i}` } });
     const lateSpeaker = await mk("rv_late"); const lc = await connect(lateSpeaker);
     roomHub.setVoiceOn(BR.id, true);
     await join(lc, BR.id);
     roomHub.setStage(BR.id, { stage: [lateSpeaker], hands: [], invited: [] });
     const bstate = await join(bh, BR.id);
-    check("the 45th member who is on stage is in room:state members although the cap is 40", bstate?.members.some((m: any) => m.userId === lateSpeaker) && bstate.members.length <= 41, `${bstate?.members?.length}`);
+    check("a member past the cap who is on stage is in room:state members", bstate?.members.some((m: any) => m.userId === lateSpeaker) && bstate.members.length <= MEMBER_LIST_CAP + 1, `${bstate?.members?.length}`);
     check("room:state carries serverNowMs for clock correction", typeof bstate?.serverNowMs === "number" && Math.abs(bstate.serverNowMs - Date.now()) < 60_000);
     check("room:state never carries anyone's age", !/"age"/.test(JSON.stringify(bstate)));
     roomHub.end(BR.id);
