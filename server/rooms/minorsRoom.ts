@@ -2,7 +2,7 @@
 // host (a row here, never a link) that they have acknowledged. The door rule itself is the shared canAdultEnterMinorsRoom.
 import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "../storage";
-import { roomAdultInvites, users, type Room, type User } from "@shared/schema";
+import { roomAdultInvites, rooms, users, type Room, type User } from "@shared/schema";
 import { canAdultEnterMinorsRoom, type Check } from "@shared/roomRules";
 import { MINORS_ROOM_WARNING, type MinorsRoomCode } from "@shared/rooms";
 
@@ -18,7 +18,7 @@ export async function getInviteState(roomId: string, userId: string): Promise<In
 
 /**
  * Creates the invite, or brings back a revoked one. A revoked invite that comes back must be acknowledged again (the old
- * acknowledgement belonged to the old invite). An active invite is left as it is.
+ * acknowledgement belonged to the old invite); first_acknowledged_at is never touched here. An active invite is left as it is.
  */
 export async function upsertInvite(roomId: string, userId: string, invitedBy: string): Promise<InviteState> {
   const [row] = await db.insert(roomAdultInvites).values({ roomId, userId, invitedBy }).onConflictDoUpdate({
@@ -43,7 +43,10 @@ export async function revokeInvite(roomId: string, userId: string): Promise<bool
 
 /** Records the acknowledgement on the active invite; the first time is kept. Null when there is no active invite. */
 export async function acknowledgeInvite(roomId: string, userId: string): Promise<Date | null> {
-  const [row] = await db.update(roomAdultInvites).set({ acknowledgedAt: sql`COALESCE(${roomAdultInvites.acknowledgedAt}, now())` })
+  const [row] = await db.update(roomAdultInvites).set({
+    acknowledgedAt: sql`COALESCE(${roomAdultInvites.acknowledgedAt}, now())`,
+    firstAcknowledgedAt: sql`COALESCE(${roomAdultInvites.firstAcknowledgedAt}, now())`, // evidence: the first time is kept forever
+  })
     .where(and(eq(roomAdultInvites.roomId, roomId), eq(roomAdultInvites.userId, userId), isNull(roomAdultInvites.revokedAt)))
     .returning({ at: roomAdultInvites.acknowledgedAt });
   return row?.at ?? null;
@@ -70,6 +73,13 @@ export async function ackedInviteesOf(roomId: string): Promise<Set<string>> {
   const rows = await db.select({ id: roomAdultInvites.userId }).from(roomAdultInvites)
     .where(and(eq(roomAdultInvites.roomId, roomId), isNull(roomAdultInvites.revokedAt), isNotNull(roomAdultInvites.acknowledgedAt)));
   return new Set(rows.map((r) => r.id));
+}
+
+/** Flags every room of this host that has not ended as a minors' room. One way: nothing ever clears the flag. */
+export async function markHostRoomsMinors(hostId: string): Promise<Array<{ id: string; status: string }>> {
+  return db.update(rooms).set({ minorsRoom: true })
+    .where(and(eq(rooms.hostId, hostId), sql`${rooms.status} <> 'ended'`))
+    .returning({ id: rooms.id, status: rooms.status });
 }
 
 /** The door, server side: the host is never stopped; everyone else goes through the shared rule. */

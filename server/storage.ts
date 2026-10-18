@@ -353,20 +353,12 @@ CREATE TABLE IF NOT EXISTS room_members (
     ALTER TABLE users ADD COLUMN IF NOT EXISTS age_verified_at timestamp;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS age_verified_method text;
   `);
-  // Minors' rooms (same statements as migrations/add_minors_rooms.sql; additive + idempotent)
-  await pool.query(`
-    ALTER TABLE rooms ADD COLUMN IF NOT EXISTS minors_room boolean NOT NULL DEFAULT false;
-    CREATE TABLE IF NOT EXISTS room_adult_invites (
-      room_id varchar NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
-      user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      invited_by varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      created_at timestamp NOT NULL DEFAULT now(),
-      acknowledged_at timestamp,
-      revoked_at timestamp,
-      PRIMARY KEY (room_id, user_id)
-    );
-    CREATE INDEX IF NOT EXISTS room_adult_invites_user_idx ON room_adult_invites (user_id) WHERE revoked_at IS NULL;
-  `);
+  // Minors' rooms: schema + backfill of open teen-hosted rooms, one batch (= one transaction). Same statements as
+  // migrations/add_minors_rooms.sql; additive, idempotent, the backfill only ever sets the flag.
+  {
+    const { MINORS_ROOMS_SCHEMA_SQL } = await import("./rooms/minorsRoomsMigration");
+    await pool.query(MINORS_ROOMS_SCHEMA_SQL);
+  }
   await pool.query(`
     ALTER TABLE venues ADD COLUMN IF NOT EXISTS building JSONB
   `);

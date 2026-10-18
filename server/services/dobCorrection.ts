@@ -22,7 +22,11 @@ export async function correctDateOfBirth(a: {
     adminId: a.adminId, action: "user.dob_corrected", targetType: "user", targetId: a.userId,
     details: `DOB ${user.dateOfBirth ?? "none"} -> ${a.dateOfBirth.slice(0, 10)}: ${reason}`, reason, ipAddress: a.ip,
   });
-  // Someone corrected from under 18 to an adult while inside a minors' room is taken out unless the host invited them.
-  await import("../rooms/roomSocket").then((m) => m.enforceMinorsRoomFor(a.userId)).catch((e) => console.error("[rooms] minors' room re-check failed:", e));
+  // Rooms: someone corrected from under 18 to an adult while inside a minors' room is taken out unless the host invited
+  // them; a host corrected to under 18 has every open room made a minors' room, and uninvited adults are taken out.
+  await import("../rooms/roomSocket").then(async (m) => {
+    if (age < 18) await m.enforceMinorsHost(a.userId);
+    await m.enforceMinorsRoomFor(a.userId);
+  }).catch((e) => console.error("[rooms] minors' room re-check failed:", e));
   return { ok: true, user: toPublicUser(updated) };
 }

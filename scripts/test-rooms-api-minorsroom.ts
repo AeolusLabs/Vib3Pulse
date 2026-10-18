@@ -283,6 +283,66 @@ try {
   await correctDateOfBirth({ adminId: admin, userId: T4, dateOfBirth: yearsAgo(16), reason: "test correction" });
   check("...a correction that keeps them a teen leaves them in", !!roomHub.get(R, T4));
 
+  // ---- a host corrected to under 18: open rooms become minors' rooms, uninvited adults inside are taken out
+  const AH2 = await mk("fixhost", yearsAgo(30)), X = await mk("fixadult", yearsAgo(30)), Y = await mk("fixteen", yearsAgo(15));
+  const LR = await rs.createRoom(AH2, { title: "was adult", kind: "party", visibility: "friends", ageLimit: "all" } as any); await rs.setStatus(LR.id, "live");
+  const SR2 = await rs.createRoom(AH2, { title: "later", kind: "party", visibility: "friends", ageLimit: "all", scheduledFor: new Date(Date.now() + 3600e3).toISOString() } as any);
+  const ER = await rs.createRoom(AH2, { title: "over", kind: "party", visibility: "friends", ageLimit: "all" } as any); await rs.setStatus(ER.id, "ended");
+  const gotX: any[] = [];
+  roomHub.join(LR.id, { userId: AH2, role: "host", muted: false, joinedAt: Date.now(), send: () => {} });
+  roomHub.join(LR.id, { userId: X, role: "guest", muted: false, joinedAt: Date.now(), send: (m) => gotX.push(m) });
+  roomHub.join(LR.id, { userId: Y, role: "guest", muted: false, joinedAt: Date.now(), send: () => {} });
+  await correctDateOfBirth({ adminId: admin, userId: AH2, dateOfBirth: yearsAgo(15), reason: "test correction" });
+  const flag = async (id: string) => (await rs.getRoom(id))!.minorsRoom;
+  check("host corrected to 15: their live room becomes a minors' room", await flag(LR.id));
+  check("...and their scheduled room", await flag(SR2.id));
+  check("...but not an ended room", !(await flag(ER.id)));
+  check("...the uninvited adult inside is taken out with the warning", !roomHub.get(LR.id, X) && gotX.some((m) => m.type === "room:error" && m.code === "MINORS_ROOM" && m.warning === MINORS_ROOM_WARNING), JSON.stringify(gotX));
+  check("...the teen guest and the host stay", !!roomHub.get(LR.id, Y) && !!roomHub.get(LR.id, AH2));
+  await correctDateOfBirth({ adminId: admin, userId: AH2, dateOfBirth: yearsAgo(30), reason: "test correction back" });
+  check("...correcting them back to an adult never clears the flag", await flag(LR.id));
+
+  // ---- backfill of rooms created before the flag existed (the exact statements ensureSchema and the migration run)
+  const { MINORS_ROOMS_SCHEMA_SQL, MINORS_ROOMS_BACKFILL } = await import("../server/rooms/minorsRoomsMigration");
+  const BT = await mk("bf_teen", yearsAgo(16)), BA = await mk("bf_adult", yearsAgo(30)), BE = await mk("bf_edge18", yearsAgo(18));
+  const BJ = await mk("bf_junk", "2010-13-45"), BN = await mk("bf_null", null), BX = await mk("bf_text", "not a date");
+  const exact18 = (() => { const d = new Date(); d.setUTCFullYear(d.getUTCFullYear() - 18); return d.toISOString().slice(0, 10); })();
+  await q(`update users set date_of_birth=$1 where id=$2`, [exact18, BE]); // 18 today: an adult
+  const seed = async (host: string, status: "live" | "scheduled" | "ended", visibility = "friends") => {
+    const r = await rs.createRoom(host, { title: `bf ${status}`, kind: "party", visibility, ageLimit: "all" } as any);
+    if (status !== "scheduled") await rs.setStatus(r.id, status);
+    return r.id;
+  };
+  const bTeenLive = await seed(BT, "live"), bTeenSched = await seed(BT, "scheduled", "invite"), bTeenEnded = await seed(BT, "ended");
+  const bAdultLive = await seed(BA, "live"), bEdge = await seed(BE, "live"), bJunk = await seed(BJ, "live"), bNull = await seed(BN, "scheduled"), bText = await seed(BX, "scheduled");
+  check("backfill seed: all start with the flag off", !(await Promise.all([bTeenLive, bTeenSched, bTeenEnded, bAdultLive, bEdge, bJunk, bNull, bText].map(flag))).some(Boolean));
+  await pool.query(MINORS_ROOMS_SCHEMA_SQL); // full batch: DDL is a no-op on an existing schema, then the backfill
+  check("backfill: teen host's live friends room flipped", await flag(bTeenLive));
+  check("backfill: teen host's scheduled invite room flipped", await flag(bTeenSched));
+  check("backfill: teen host's ended room left alone", !(await flag(bTeenEnded)));
+  check("backfill: adult host's room left alone", !(await flag(bAdultLive)));
+  check("backfill: a host who is exactly 18 today is an adult (left alone)", !(await flag(bEdge)));
+  check("backfill: malformed, null and non-date birthdates neither fail the statement nor flip anything", !(await flag(bJunk)) && !(await flag(bNull)) && !(await flag(bText)));
+  const again = await pool.query(MINORS_ROOMS_BACKFILL);
+  check("backfill: re-running changes nothing (idempotent) and keeps the flags", again.rowCount === 0 && (await flag(bTeenLive)) && !(await flag(bAdultLive)), String(again.rowCount));
+
+  // ---- audit trail: a renewed invite needs a new acknowledgement but keeps the first one
+  const fa = (await q(`select acknowledged_at, first_acknowledged_at from room_adult_invites where room_id=$1 and user_id=$2`, [R, F]))[0];
+  check("audit: first_acknowledged_at is kept after ban/revoke (acknowledged_at too, on the revoked row)", fa?.first_acknowledged_at instanceof Date, JSON.stringify(fa));
+  const bRow = (await q(`select acknowledged_at, first_acknowledged_at from room_adult_invites where room_id=$1 and user_id=$2`, [R, B]))[0];
+  check("audit: B's re-invite reset acknowledged_at but kept first_acknowledged_at from the first acknowledgement", bRow.acknowledged_at === null && bRow.first_acknowledged_at?.getTime() === ackRow.acknowledged_at.getTime(), JSON.stringify(bRow));
+  await http("POST", `/api/rooms/${R}/adult-invites/acknowledge`, B);
+  const bRow2 = (await q(`select acknowledged_at, first_acknowledged_at from room_adult_invites where room_id=$1 and user_id=$2`, [R, B]))[0];
+  check("audit: acknowledging the renewed invite sets a new acknowledged_at and leaves first_acknowledged_at", bRow2.acknowledged_at instanceof Date && bRow2.acknowledged_at.getTime() > bRow2.first_acknowledged_at.getTime() && bRow2.first_acknowledged_at.getTime() === ackRow.acknowledged_at.getTime(), JSON.stringify(bRow2));
+  // Accounts are normally soft-deleted; a hard delete of the inviting account must still not erase the evidence row.
+  const tmpHost = await mk("bf_delhost", yearsAgo(15)), tmpAdult = await mk("bf_deladult", yearsAgo(30));
+  const tr = await rs.createRoom(tmpHost, { title: "d", kind: "party", visibility: "friends", ageLimit: "all", minorsRoom: true } as any);
+  const tr2 = await rs.createRoom(BT, { title: "d2", kind: "party", visibility: "friends", ageLimit: "all", minorsRoom: true } as any);
+  await q(`insert into room_adult_invites (room_id, user_id, invited_by) values ($1,$2,$3)`, [tr2.id, tmpAdult, tmpHost]);
+  await q(`delete from rooms where id=$1`, [tr.id]); await q(`delete from users where id=$1`, [tmpHost]);
+  const kept = await q(`select invited_by from room_adult_invites where room_id=$1 and user_id=$2`, [tr2.id, tmpAdult]);
+  check("audit: deleting the inviting account keeps the invite row, invited_by becomes null", kept.length === 1 && kept[0].invited_by === null, JSON.stringify(kept));
+
   check("no response in this file leaked the warning to a teen", t2Get.text.indexOf("legal action") === -1 && t2Tok.text.indexOf("legal action") === -1);
 } catch (e: any) {
   failed++; console.log(`FAIL uncaught: ${e.stack || e}`);

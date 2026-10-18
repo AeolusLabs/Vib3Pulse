@@ -62,5 +62,26 @@ test("denial codes are exactly MINORS_ROOM and MINORS_ROOM_ACK", () => {
   assert.deepEqual([...MINORS_ROOM_CODES], ["MINORS_ROOM", "MINORS_ROOM_ACK"]);
 });
 
+// The migration file and the constant ensureSchema runs must be the same statements (backfill included).
+{
+  const { readFileSync } = await import("node:fs");
+  const { MINORS_ROOMS_SCHEMA_SQL, MINORS_ROOMS_BACKFILL } = await import("../server/rooms/minorsRoomsMigration");
+  const norm = (x: string) => x.split("\n").filter((l) => !l.trim().startsWith("--")).join(" ").replace(/\s+/g, " ").trim();
+  const file = readFileSync(new URL("../migrations/add_minors_rooms.sql", import.meta.url), "utf8");
+  const body = norm(file);
+  test("migration file is BEGIN; <the exact ensureSchema statements>; COMMIT;", () => {
+    assert.equal(body, `BEGIN; ${norm(MINORS_ROOMS_SCHEMA_SQL)} COMMIT;`);
+  });
+  test("the backfill only ever sets the flag (never clears) and skips ended rooms", () => {
+    assert.match(MINORS_ROOMS_BACKFILL, /SET minors_room = true/);
+    assert.doesNotMatch(MINORS_ROOMS_BACKFILL, /minors_room = false\s*(,|WHERE|FROM)/i);
+    assert.match(MINORS_ROOMS_BACKFILL, /status <> 'ended'/);
+  });
+  test("the audit columns: invited_by is ON DELETE SET NULL, first_acknowledged_at exists", () => {
+    assert.match(MINORS_ROOMS_SCHEMA_SQL, /invited_by varchar REFERENCES users\(id\) ON DELETE SET NULL/);
+    assert.match(MINORS_ROOMS_SCHEMA_SQL, /first_acknowledged_at timestamp/);
+  });
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

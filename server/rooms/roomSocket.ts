@@ -10,7 +10,7 @@ import { canInteract, canJoinRoom } from "@shared/roomRules";
 import type { Room, User } from "@shared/schema";
 import * as rs from "./roomStorage";
 import { mutualFollow, plainText, publicRoom, viewRoom } from "./roomAccess";
-import { getInviteState, minorsGate, NO_INVITE, revokeInvite } from "./minorsRoom";
+import { getInviteState, markHostRoomsMinors, minorsGate, NO_INVITE, revokeInvite } from "./minorsRoom";
 import { roomHub, type HubMember } from "./RoomHub";
 import { TokenBucket } from "./rateLimit";
 import { LIVE_HOLD_MS } from "@shared/liveScreen";
@@ -236,16 +236,19 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
   // Everything above can take a while on a slow database. Re-read what can change meanwhile, then do the
   // capacity check and the hub insert with no await between them, so concurrent joins cannot overshoot.
   // The minors' room invite is re-read too: a revoke that landed during the awaits above must keep them out.
-  const [fresh, freshMember, freshInvite] = await Promise.all([
-    rs.getRoom(roomId), rs.getMember(roomId, userId), room.minorsRoom ? getInviteState(roomId, userId) : Promise.resolve(NO_INVITE),
+  // The user is re-read as well: an admin birthdate correction during the awaits must decide with the new age.
+  const [fresh, freshMember, freshInvite, freshUser] = await Promise.all([
+    rs.getRoom(roomId), rs.getMember(roomId, userId), room.minorsRoom ? getInviteState(roomId, userId) : Promise.resolve(NO_INVITE), storage.getUser(userId),
   ]);
+  const freshAge = ageFromDob(freshUser?.dateOfBirth);
   if (ws.readyState !== OPEN) return; // the socket died while we were checking: do not create a ghost
   if (!fresh || fresh.status === "ended") return refuse(ws, "ROOM_ENDED");
   if (fresh.status !== "live") return refuse(ws, "ROOM_NOT_LIVE");
   if (freshMember?.banned) return refuse(ws, "BANNED");
   if ((kicked.get(`${roomId}:${userId}`) ?? 0) > Date.now()) return refuse(ws, "KICKED");
-  if (!canJoinRoom({ age: ageFromDob(user.dateOfBirth) }, fresh as any).ok) return refuse(ws, "AGE_LIMIT"); // limit raised meanwhile
-  const mg = minorsGate(fresh, userId, ageFromDob(user.dateOfBirth), freshInvite);
+  if (!freshUser || freshUser.deletedAt) return refuse(ws, "NOT_FOUND");
+  if (!canJoinRoom({ age: freshAge }, fresh as any).ok) return refuse(ws, freshAge === null ? "AGE_UNKNOWN" : "AGE_LIMIT"); // limit raised meanwhile
+  const mg = minorsGate(fresh, userId, freshAge, freshInvite);
   if (!mg.ok) return direct(ws, minorsError(mg.code)); // no await from here to the hub insert
 
   const role = userId === fresh.hostId ? "host" : freshMember?.role === "cohost" ? "cohost" : "guest";
@@ -253,7 +256,7 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
   const isNew = !me;
   if (!me) {
     if (role === "guest" && roomHub.count(roomId) >= fresh.capacity) return refuse(ws, "ROOM_FULL");
-    me = { userId, role, muted: freshMember?.muted ?? false, joinedAt: Date.now(), send: (m) => fanout(userId, m), info: memberInfo(user), age: ageFromDob(user.dateOfBirth) };
+    me = { userId, role, muted: freshMember?.muted ?? false, joinedAt: Date.now(), send: (m) => fanout(userId, m), info: memberInfo(freshUser), age: freshAge };
     roomHub.join(roomId, me);
     // Only the first person in sets the room's flags from the database. Once anyone is in, the voice / live-video routes keep
     // them current, and this joiner's row may predate a switch-off: writing it would turn voice or the camera back on.
@@ -420,11 +423,30 @@ export async function removeFromMinorsRoom(roomId: string, userId: string): Prom
 
 /** A birthdate was corrected: if that person is in a minors' room they may no longer be let into, they are taken out. */
 export async function enforceMinorsRoomFor(userId: string): Promise<void> {
+  await (joinLocks.get(userId) ?? Promise.resolve()); // a join in flight finishes first (it re-reads the birthdate itself)
   const roomId = roomHub.roomOf(userId);
   if (!roomId) return;
   const [room, user, invite] = await Promise.all([rs.getRoom(roomId), storage.getUser(userId), getInviteState(roomId, userId)]);
   if (!room?.minorsRoom || !user) return;
   if (!minorsGate(room, userId, ageFromDob(user.dateOfBirth), invite).ok) await removeFromMinorsRoom(roomId, userId);
+}
+
+/**
+ * A host's birthdate was corrected to under 18: every room of theirs that has not ended becomes a minors' room (one way,
+ * never cleared), and in each live one anyone who may no longer be there (adults without an acknowledged invite, unknown
+ * age) is taken out with the warning. Returns the ids of the rooms that were flagged.
+ */
+export async function enforceMinorsHost(hostId: string): Promise<string[]> {
+  const flagged = await markHostRoomsMinors(hostId);
+  for (const r of flagged) {
+    if (r.status !== "live") continue;
+    for (const m of roomHub.members(r.id)) {
+      if (m.userId === hostId) continue;
+      const [u, invite] = await Promise.all([storage.getUser(m.userId), getInviteState(r.id, m.userId)]);
+      if (!minorsGate({ minorsRoom: true, hostId }, m.userId, ageFromDob(u?.dateOfBirth), invite).ok) await removeFromMinorsRoom(r.id, m.userId);
+    }
+  }
+  return flagged.map((r) => r.id);
 }
 
 // ---------------------------------------------------------------- screen

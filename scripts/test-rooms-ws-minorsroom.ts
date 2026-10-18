@@ -207,10 +207,10 @@ try {
   // ---- deterministic race: the revoke lands while the join is held between its first check and the fresh re-read.
   // B2 sits in another room with voice on; joining R first leaves that room, which calls LiveKit. That call is held open.
   class GatedVoice extends FakeVoice {
-    gate: Promise<void> | null = null; held = false; heldRoom = "";
+    gate: Promise<void> | null = null; held = false; heldRoom = ""; heldUser = "";
     async removeParticipant(roomId: string, userId: string) {
       await super.removeParticipant(roomId, userId);
-      if (this.gate && roomId === this.heldRoom && userId === B2) { this.held = true; await this.gate; }
+      if (this.gate && roomId === this.heldRoom && userId === (this.heldUser || B2)) { this.held = true; await this.gate; }
     }
   }
   const gv = new GatedVoice();
@@ -240,6 +240,27 @@ try {
   check("held race: the adult is not in the minors' room", !roomHub.get(R, B2));
   gv.gate = null;
 
+  // ---- held race 2: a teen's birthdate is corrected to an adult while their join is held; the fresh re-read uses the new age
+  const { correctDateOfBirth } = await import("../server/services/dobCorrection");
+  const admin = (await q(`insert into admin_users (username, email, password_hash, display_name, role) values ($1,$2,$3,'A','super_admin') returning id`,
+    [`mr_adm${stamp}`, `mr_adm${stamp}@t.dev`, hash]))[0].id as string;
+  const TG = await mk("teen_fixed", yearsAgo(16));
+  await mutual(T, TG);
+  const tg = await connect(TG);
+  check("held race 2 setup: the teen is in another room", (await join(tg, Y.id))?.type === "room:state");
+  let release2!: () => void;
+  gv.held = false; gv.heldUser = TG; gv.gate = new Promise<void>((r) => { release2 = r; });
+  tg.drain();
+  tg.send({ type: "room:join", roomId: R });
+  check("held race 2: the teen's join passed its first check and is held", await until(() => gv.held));
+  const fixing = correctDateOfBirth({ adminId: admin, userId: TG, dateOfBirth: yearsAgo(30), reason: "test correction" });
+  check("held race 2: the correction is saved while the join is held", await until(async () => (await q(`select date_of_birth from users where id=$1`, [TG]))[0]?.date_of_birth === yearsAgo(30)));
+  release2();
+  const tgFirst = await tg.waitFor((m) => (m.type === "room:state" && m.room?.id === R) || m.type === "room:error");
+  check("held race 2: refused at the fresh re-read with the new age (MINORS_ROOM + warning), never a room:state", isMinorsError(tgFirst, "MINORS_ROOM"), JSON.stringify(tgFirst));
+  check("held race 2: the correction finishes and they are not in the minors' room", (await fixing).ok && !roomHub.get(R, TG));
+  gv.gate = null; gv.heldUser = "";
+
   // ---- teen stage rule unchanged: an invited adult still takes teen speakers off the stage
   const fake = new FakeVoice();
   setVoiceServiceForTests(fake);
@@ -253,6 +274,10 @@ try {
   const stageNow = async (cl: Client, pred: (s: any) => boolean) => { await until(() => { const s = lastStage(cl); return !!s && pred(s); }); const s = lastStage(cl); return !!s && pred(s); };
   const sth = await connect(TH), s1 = await connect(S1), ad = await connect(AD);
   await join(sth, SR); await join(s1, SR);
+  const hostTok = await rest("POST", `/api/rooms/${SR}/voice-token`, TH);
+  check("all-teen minors' room: the teen host's voice token can publish", hostTok.status === 200 && hostTok.json?.canPublish === true, JSON.stringify(hostTok));
+  const logOf = (op: string, roomId: string, userId?: string, canPublish?: boolean) =>
+    fake.calls.filter((c) => c.op === op && c.roomId === roomId && (userId === undefined || c.userId === userId) && (canPublish === undefined || c.canPublish === canPublish));
   s1.send({ type: "room:stage", action: "raise" });
   check("all-teen minors' room: a teen can raise a hand", await stageNow(sth, (s) => s.hands.includes(S1)));
   sth.send({ type: "room:stage", action: "accept", targetId: S1 });
@@ -261,12 +286,23 @@ try {
   await rest("POST", `/api/rooms/${SR}/adult-invites/acknowledge`, AD);
   check("an invited, acknowledged adult joins", (await join(ad, SR))?.type === "room:state");
   check("...and the teen speaker comes off the stage (existing rule, unchanged)", await stageNow(sth, (s) => s.stage.length === 0));
+  check("...and the teen HOST's own mic permission is revoked while the adult is there (existing rule; host keeps the role)", await until(() => logOf("setCanPublish", SR, TH, false).length >= 1) && roomHub.get(SR, TH)?.role === "host");
   s1.drain();
   s1.send({ type: "room:stage", action: "raise" });
   check("...a teen cannot raise a hand while the adult is there (NOT_ELIGIBLE)", !!(await s1.waitFor((m) => m.type === "room:notice" && m.code === "NOT_ELIGIBLE")));
   sth.drain(); s1.drain();
   await rest("DELETE", `/api/rooms/${SR}/adult-invites/${AD}`, TH);
   check("revoking the adult takes them out of the stage room too", await until(() => !roomHub.get(SR, AD)));
+  check("...and LiveKit is told to drop them at once", logOf("remove", SR, AD).length >= 1);
+  check("...the teen host's mic permission comes back", await until(() => logOf("setCanPublish", SR, TH, true).length >= 1));
+  // A token minted before the revoke lives up to 60 s: if they reconnect to LiveKit with it, the sweep removes anyone not in the room.
+  const { sweepVoice } = await import("../server/rooms/stage");
+  const removesBefore = logOf("remove", SR, AD).length;
+  fake.participants = [{ identity: TH, canPublish: true }, { identity: S1, canPublish: false }, { identity: AD, canPublish: false }];
+  await sweepVoice(SR);
+  check("voice sweep: a revoked adult back in LiveKit on an old token is removed", logOf("remove", SR, AD).length > removesBefore);
+  check("...and nobody who is in the room is removed", logOf("remove", SR, TH).length === 0 && logOf("remove", SR, S1).length === 0);
+  fake.participants = [];
   s1.send({ type: "room:stage", action: "raise" });
   check("...and teens can raise a hand again once the adult is gone", await stageNow(sth, (s) => s.hands.includes(S1)));
   setVoiceServiceForTests(undefined);

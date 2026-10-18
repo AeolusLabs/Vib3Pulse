@@ -1151,11 +1151,16 @@ export type Room = typeof rooms.$inferSelect;
 export const roomAdultInvites = pgTable("room_adult_invites", {
   roomId: varchar("room_id").notNull().references(() => rooms.id, { onDelete: "cascade" }),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  invitedBy: varchar("invited_by").notNull().references(() => users.id, { onDelete: "cascade" }),
+  invitedBy: varchar("invited_by").references(() => users.id, { onDelete: "set null" }), // kept as evidence if the host account goes
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
-  acknowledgedAt: timestamp("acknowledged_at"),
+  acknowledgedAt: timestamp("acknowledged_at"),            // this invite's acknowledgement (reset when a revoked invite is renewed)
+  firstAcknowledgedAt: timestamp("first_acknowledged_at"), // the first acknowledgement ever for this room and person: set once, never overwritten
   revokedAt: timestamp("revoked_at"),
-}, (t) => ({ pk: primaryKey({ columns: [t.roomId, t.userId] }) }));
+}, (t) => ({
+  pk: primaryKey({ columns: [t.roomId, t.userId] }),
+  // Also created by migrations/add_minors_rooms.sql and ensureSchema; declared here so drizzle-kit push keeps it.
+  userIdx: index("room_adult_invites_user_idx").on(t.userId).where(sql`revoked_at IS NULL`),
+}));
 export type RoomAdultInvite = typeof roomAdultInvites.$inferSelect;
 
 export const roomMembers = pgTable("room_members", {
