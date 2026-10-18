@@ -372,6 +372,27 @@ try {
     holdRelease();
   }
 
+  // ---- Round 6: conditional cancel, and a failure after the start write does not leave the room live
+  const SC = await mkSched(HS, "cancel cond 1");
+  const cOk = await rs.cancelScheduledRoom(SC);
+  check("cancelScheduledRoom: a scheduled room is cancelled once (ended, endedAt set); a second call returns null", cOk?.status === "ended" && !!cOk.endedAt && (await rs.cancelScheduledRoom(SC)) === null);
+  const SL = await mkSched(HS, "cancel cond 2");
+  await rs.startScheduledRoom(SL);
+  check("cancelScheduledRoom: a room that went live is not touched (null, stays live)", (await rs.cancelScheduledRoom(SL)) === null && (await statusOf(SL)) === "live");
+  await rs.setStatus(SL, "ended");
+
+  const HS2 = await mk("startfail", yearsAgo(16));
+  const S5 = await mkSched(HS2, "start fails after the write");
+  const realGetUserB = storage.getUser.bind(storage);
+  (storage as any).getUser = async (id: string) => {
+    if (id === HS2 && (await q(`select status from rooms where id=$1`, [S5]))[0]?.status === "live") throw new Error("injected failure after the write");
+    return realGetUserB(id);
+  };
+  let s5: any;
+  try { s5 = await http("POST", `/api/rooms/${S5}/start`, HS2); }
+  finally { (storage as any).getUser = realGetUserB; }
+  check("a failure after the start write answers 500 and the room is not left live (ended, fail closed)", s5.status === 500 && (await statusOf(S5)) === "ended" && (await rs.countLiveRoomsByHost(HS2)) === 0, JSON.stringify(s5));
+
   // ---- an admin birthdate correction that makes a guest an adult takes them out of the minors' room
   const { correctDateOfBirth } = await import("../server/services/dobCorrection");
   const admin = (await q(`insert into admin_users (username, email, password_hash, display_name, role) values ($1,$2,$3,'A','super_admin') returning id`,

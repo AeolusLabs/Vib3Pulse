@@ -508,6 +508,7 @@ try {
   const HC = await mk("iso_host"), XA = await mk("iso_adult_a"), XB = await mk("iso_adult_b");
   await mutual(HC, XA); await mutual(HC, XB);
   const mkLive = async (title: string) => { const r = await rs.createRoom(HC, { title, kind: "party", visibility: "friends", ageLimit: "all" } as any); await rs.setStatus(r.id, "live"); expectHost(r.id); return r.id as string; };
+  const mkLive2 = async (host: string, title: string) => { const r = await rs.createRoom(host, { title, kind: "party", visibility: "friends", ageLimit: "all" } as any); await rs.setStatus(r.id, "live"); expectHost(r.id); return r.id as string; };
   const RA = await mkLive("iso room a"), RB = await mkLive("iso room b");
   const RPub = (await rs.createRoom(HC, { title: "iso public", kind: "party", visibility: "public", ageLimit: "all", scheduledFor: new Date(Date.now() + 3600e3).toISOString() } as any)).id as string;
   const hc = await connect(HC), xa = await connect(XA), xb = await connect(XB);
@@ -520,12 +521,48 @@ try {
   check("...both rooms were still flagged as minors' rooms", (await rs.getRoom(RA))!.minorsRoom === true && (await rs.getRoom(RB))!.minorsRoom === true);
   check("...the adult in the OTHER room is still evicted", !roomHub.get(RB, XB));
   check("...the later step still ran: the public room a 15-year-old cannot host is cancelled", (await rs.getRoom(RPub))!.status === "ended");
-  check("...the room whose guest check threw is not left half done: the guest is still there (to be fixed by a re-run)", !!roomHub.get(RA, XA));
+  check("...the guest whose check threw is taken out (fail closed; they can rejoin through the gated join), with a plain notice and no warning", !roomHub.get(RA, XA) && xa.msgs.some((m) => m.type === "room:notice" && m.code === "REVIEW") && !xa.msgs.some((m) => m.warning !== undefined || m.code === "MINORS_ROOM"));
   const isoAgain = await correctDateOfBirth({ adminId: fixAdmin, userId: HC, dateOfBirth: yearsAgo(15), reason: "test correction again" });
   check("running the correction again succeeds without roomsFailed", isoAgain?.ok === true && !isoAgain.roomsFailed, JSON.stringify(isoAgain));
-  check("...and finishes the job: the first adult is evicted, the rooms are unchanged otherwise", !roomHub.get(RA, XA) && !roomHub.get(RB, XB) && (await rs.getRoom(RA))!.status === "live" && (await rs.getRoom(RB))!.status === "live" && (await rs.getRoom(RPub))!.status === "ended");
+  check("...and the rooms are otherwise unchanged", !roomHub.get(RA, XA) && !roomHub.get(RB, XB) && (await rs.getRoom(RA))!.status === "live" && (await rs.getRoom(RB))!.status === "live" && (await rs.getRoom(RPub))!.status === "ended");
   await correctDateOfBirth({ adminId: fixAdmin, userId: HC, dateOfBirth: yearsAgo(15), reason: "test correction a third time" });
   check("...a third run changes nothing (idempotent)", !roomHub.get(RA, XA) && (await rs.getRoom(RA))!.minorsRoom === true && (await rs.getRoom(RPub))!.status === "ended");
+
+  // ---- Round 6: a public room with an adult inside is ended with the NEUTRAL notice before anything can flag it; the adult never sees the under-18s warning
+  const HP = await mk("neutral_host"), XP = await mk("neutral_adult");
+  const RP = (await rs.createRoom(HP, { title: "neutral public", kind: "party", visibility: "public", ageLimit: "all" } as any)).id as string;
+  await rs.setStatus(RP, "live"); expectHost(RP);
+  const hp = await connect(HP), xp = await connect(XP);
+  check("neutral order setup: the adult host and an adult guest are in a live public room", (await join(hp, RP))?.type === "room:state" && (await join(xp, RP))?.type === "room:state");
+  xp.drain();
+  await correctDateOfBirth({ adminId: fixAdmin, userId: HP, dateOfBirth: yearsAgo(15), reason: "test correction" });
+  check("neutral order: the room is ended", (await rs.getRoom(RP))!.status === "ended");
+  check("neutral order: the adult got the plain HOST_REVIEW notice", xp.msgs.some((m) => m.type === "room:notice" && m.code === "HOST_REVIEW"));
+  check("neutral order: the adult NEVER received the under-18s warning or a MINORS_ROOM error", !xp.msgs.some((m) => m.warning !== undefined || m.code === "MINORS_ROOM" || JSON.stringify(m).includes("legal action")), JSON.stringify(xp.msgs.slice(-5)));
+  check("neutral order: the ended room was never flagged as a minors' room", (await rs.getRoom(RP))!.minorsRoom === false);
+
+  // ---- Round 6: the flag step throws: the host's live room is still closed (neutral), nobody is left in a room that should be a minors' room
+  const { db: dbF } = await import("../server/storage");
+  const HF = await mk("flagfail_host"), XF = await mk("flagfail_adult");
+  await mutual(HF, XF);
+  const RF = await mkLive2(HF, "flag fail room");
+  const hf = await connect(HF), xf = await connect(XF);
+  check("flag failure setup: host and an adult guest are in a live friends room", (await join(hf, RF))?.type === "room:state" && (await join(xf, RF))?.type === "room:state");
+  xf.drain();
+  const realUpdate = dbF.update.bind(dbF);
+  (dbF as any).update = (t: any) => { // only the write that sets minorsRoom fails
+    const b = realUpdate(t); const realSet = b.set.bind(b);
+    (b as any).set = (v: any) => { if (v && "minorsRoom" in v) throw new Error("injected flag failure"); return realSet(v); };
+    return b;
+  };
+  let flagRes: any;
+  try { flagRes = await correctDateOfBirth({ adminId: fixAdmin, userId: HF, dateOfBirth: yearsAgo(15), reason: "test correction" }); }
+  finally { (dbF as any).update = realUpdate; }
+  check("flag step failure is reported (roomsFailed)", flagRes?.ok === true && flagRes.roomsFailed === true, JSON.stringify(flagRes));
+  check("...and fails closed: the host's live room is ended", (await rs.getRoom(RF))!.status === "ended" && !roomHub.get(RF, XF));
+  check("...the adult got the neutral notice, never the warning", xf.msgs.some((m) => m.type === "room:notice" && m.code === "HOST_REVIEW") && !xf.msgs.some((m) => m.warning !== undefined || m.code === "MINORS_ROOM"));
+  const flagAgain = await correctDateOfBirth({ adminId: fixAdmin, userId: HF, dateOfBirth: yearsAgo(15), reason: "test correction again" });
+  check("...a re-run works (nothing left to do)", flagAgain?.ok === true && !flagAgain.roomsFailed, JSON.stringify(flagAgain));
 
   // ---- restart gap: at boot, LiveKit participants in a live minors' room who are not teens are removed
   const { sweepMinorsVoiceAtBoot } = await import("../server/rooms/roomSocket");

@@ -264,6 +264,7 @@ export function registerRoomRoutes(app: Express): void {
 
   // ------------------------------------------------------------ start / end
   app.post("/api/rooms/:id/start", requireAuth, roomLimiter, async (req, res) => {
+    let wentLive = false; // set once the conditional write succeeded: from then on a failure must not leave the room live
     try {
       const ctx = await loadHostRoom(req, res);
       if (!ctx) return;
@@ -278,6 +279,7 @@ export function registerRoomRoutes(app: Express): void {
       // Checked in the write: a room that was ended since we read it (for example by a birthdate correction) stays ended.
       const live = await rs.startScheduledRoom(room.id);
       if (!live) return res.status(409).json({ message: "This room can't be started now.", code: "BAD_STATE" });
+      wentLive = true;
       if (live.minorsRoom) {
         // The host's age may have been corrected after the first read. Look again now that the room is live: an adult host
         // never keeps a live minors' room, whatever the order of events was.
@@ -293,6 +295,8 @@ export function registerRoomRoutes(app: Express): void {
       res.json({ room: { ...publicRoom(live), host: hostSummary(host) } });
     } catch (e) {
       console.error("[rooms] start failed:", e);
+      // Fail closed: a room that went live must not stay live without a grace timer when a later step threw.
+      if (wentLive) await endRoom(req.params.id).catch((e2) => console.error("[rooms] ending a room that failed to start also failed:", e2));
       res.status(500).json({ message: "Failed to start room" });
     }
   });

@@ -98,6 +98,12 @@ export async function startScheduledRoom(id: string, now = new Date()): Promise<
   return row ?? null;
 }
 
+/** Cancels a scheduled room, checked in the write. Returns null when it is not scheduled any more (it went live, or ended). */
+export async function cancelScheduledRoom(id: string, now = new Date()): Promise<Room | null> {
+  const [row] = await db.update(rooms).set({ status: "ended", endedAt: now }).where(and(eq(rooms.id, id), eq(rooms.status, "scheduled"))).returning();
+  return row ?? null;
+}
+
 export interface ListRoomsOpts {
   scope: "live" | "upcoming" | "friends";
   viewerId: string;
