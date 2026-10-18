@@ -85,7 +85,7 @@ const liveRoom = async (host: string, over: Record<string, unknown> = {}) => {
 
 tuning.join = { rate: 1000, burst: 1000 }; // lifted for the many joins below; one test lowers it
 tuning.sweepMs = 0; // the periodic LiveKit sweep must not run behind the tests; they call sweepVoice directly
-tuning.graceMs = 2500; // the scratch DB can be remote: a join is several round trips, so keep the grace well above one
+tuning.graceMs = 6000; // the scratch DB can be remote (about 200 ms per query): a join is several round trips and was seen taking over 2.5 s, so keep the grace well above one
 const until = async (f: () => Promise<boolean>, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await f()) return true; await sleep(100); } return false; };
 
 try {
@@ -328,7 +328,10 @@ try {
   const twoU = await mk("w_two"); const ra = await liveRoom(await mk("w_ra"), { title: "A" }); const rb = await liveRoom(await mk("w_rb"), { title: "B" });
   const tabA = await connect(twoU), tabB = await connect(twoU);
   tabA.send({ type: "room:join", roomId: ra.id }); tabB.send({ type: "room:join", roomId: rb.id });
-  await sleep(3000);
+  // wait for both joins to be answered (state or notice) instead of a fixed sleep: join time depends on DB latency
+  const answered = (m: any) => m.type === "room:state" || m.type === "room:notice";
+  await Promise.all([tabA.waitFor(answered, 15000), tabB.waitFor(answered, 15000)]);
+  await sleep(500);
   const inA = roomHub.get(ra.id, twoU) !== undefined, inB = roomHub.get(rb.id, twoU) !== undefined;
   check("concurrent joins to two rooms: in exactly one, and the hub agrees", inA !== inB && roomHub.roomOf(twoU) === (inA ? ra.id : rb.id));
 
@@ -340,6 +343,9 @@ try {
   await until(async () => spc.all((m) => m.type === "room:state" || m.type === "room:notice").length >= 6, 15000);
   check("room:join is rate limited (burst 3)", spc.all((m) => m.type === "room:notice" && m.code === "RATE_LIMITED").length >= 2);
   tuning.join = { rate: 1000, burst: 1000 };
+  // Slow refill (1 token per 10s) so the rejoin's DB latency (seconds on a remote DB) cannot top the bucket back up:
+  // the check then depends only on whether leaving resets it, not on wall-clock time.
+  const chatTuning = tuning.chat; tuning.chat = { rate: 0.1, burst: chatTuning.burst };
   const sp2 = await connect(await mk("w_sp2")); await join(sp2, spamRoom.id); const w2 = await connect(spamHost); await join(w2, spamRoom.id);
   w2.drain();
   for (let i = 0; i < 8; i++) sp2.send({ type: "room:chat", text: `a${i}` });
@@ -348,6 +354,7 @@ try {
   for (let i = 0; i < 5; i++) sp2.send({ type: "room:chat", text: `b${i}` });
   await sleep(600);
   check("leaving and rejoining does not refill the chat bucket", w2.all((m) => m.type === "room:chat" && /^b/.test(m.text)).length <= 1, `${w2.all((m) => m.type === "room:chat" && /^b/.test(m.text)).length}`);
+  tuning.chat = chatTuning;
 
   // ---------------- leave during an in-flight join; deleted accounts get no socket
   const lvU = await mk("w_leave"); const lvHost = await mk("w_lvh"); const lvRoom = await liveRoom(lvHost, { title: "leave race" });
