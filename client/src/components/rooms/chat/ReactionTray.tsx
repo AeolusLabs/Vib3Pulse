@@ -9,6 +9,19 @@ export interface ReactionTrayProps {
 
 const FOCUS = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
 const ITEM = '[role="menuitem"]';
+const HEART = '[data-testid="dock-heart"]';
+
+interface Containing { contains(other: Node | null): boolean }
+/**
+ * What a pointerdown anywhere on the page means while the tray is open. Inside the tray: a pick (handled by the item).
+ * On the heart: the heart's own click toggles the tray, so closing here would close and re-open it. Anywhere else: close.
+ */
+export function trayOutsideTap(target: Node | null, tray: Containing | null, heart: Containing | null): "ignore" | "close" {
+  if (!target) return "ignore";
+  if (tray?.contains(target)) return "ignore";
+  if (heart?.contains(target)) return "ignore";
+  return "close";
+}
 
 /**
  * The immersive reaction tray. A menu that scales in from the heart button (bottom right), closes after a pick, on Escape
@@ -21,18 +34,13 @@ export function ReactionTray({ emojis, onPick, open, onClose }: ReactionTrayProp
 
   useEffect(() => {
     if (!open) return;
-    const opener = document.activeElement as HTMLElement | null;
-    // Some touch browsers don't focus a tapped button, so fall back to the dock heart.
-    const back = () => {
-      const target = opener && opener !== document.body && opener.isConnected ? opener : document.querySelector<HTMLElement>('[data-testid="dock-heart"]');
-      target?.focus();
-    };
+    // Anchored on the heart itself, never on document.activeElement: iPhone Safari does not focus a tapped button, so the
+    // active element can be <body> (which contains every target) or the composer (whose tap would close, then re-open).
+    const heart = () => document.querySelector<HTMLElement>(HEART);
+    const back = () => heart()?.focus();
     root.current?.querySelector<HTMLElement>(ITEM)?.focus();
     const outside = (ev: PointerEvent) => {
-      const t = ev.target as Node | null;
-      if (!t || root.current?.contains(t)) return;
-      if (opener && opener.contains(t)) return; // the heart toggles the tray itself
-      onCloseRef.current();
+      if (trayOutsideTap(ev.target as Node | null, root.current, heart()) === "close") onCloseRef.current();
     };
     document.addEventListener("pointerdown", outside, true);
     return () => { document.removeEventListener("pointerdown", outside, true); back(); };
