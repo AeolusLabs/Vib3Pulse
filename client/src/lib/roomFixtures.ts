@@ -86,6 +86,8 @@ export interface FixtureOptions {
   sound: boolean;
   /** Room audio waits for a tap. */
   tap: boolean;
+  /** The host invited you to speak (the Accept / Decline alert). */
+  invite: boolean;
   /** Push this many chat lines over ten seconds (0 = none, at most 1000). */
   flood: number;
 }
@@ -104,6 +106,7 @@ export function parseFixtureQuery(search: string): FixtureOptions {
     as: as === "holder" || as === "host" ? as : "guest",
     sound: p.get("sound") === "1",
     tap: p.get("tap") === "1",
+    invite: p.get("invite") === "1",
     flood: Number.isFinite(flood) && flood > 0 ? Math.min(1000, Math.floor(flood)) : 0,
   };
 }
@@ -114,7 +117,7 @@ export function fixtureStartView(scene: FixtureScene): "compact" | undefined {
 }
 
 /** A dropped holder's spot is held for about 100 s from now, so the slate shows a real countdown. */
-export function fixtureLiveState(scene: FixtureScene, opts: { as: FixtureOptions["as"]; now: number }): RoomState {
+export function fixtureLiveState(scene: FixtureScene, opts: { as: FixtureOptions["as"]; now: number; invite?: boolean }): RoomState {
   let s = fixtureState(scene);
   if (opts.as === "holder") s = roomReducer(s, { type: "client:self", userId: STAGE_GUEST });
   if (opts.as === "host") s = roomReducer(s, { type: "client:self", userId: HOST });
@@ -124,5 +127,6 @@ export function fixtureLiveState(scene: FixtureScene, opts: { as: FixtureOptions
     you: { role, muted: false },
     holderAwayUntil: scene === "dropped" ? opts.now + 100_000 : s.holderAwayUntil,
     serverOffsetMs: 0,
+    invitedYou: !!opts.invite,
   };
 }

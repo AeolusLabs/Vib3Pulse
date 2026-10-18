@@ -53,6 +53,16 @@ export function memberById<M extends { userId: string }>(members: readonly M[], 
   return members.find((m) => m.userId === userId) ?? null;
 }
 
+/**
+ * A tap on a chat author's name. In the member list: open their actions. Not in it but seen in the room before: they left.
+ * Never seen (the list the server sent did not include them): don't claim they left, just say it couldn't open.
+ */
+export function authorPick<M extends { userId: string }>(members: readonly M[], seen: (userId: string) => boolean, userId: string): { kind: "open"; member: M } | { kind: "left" } | { kind: "unknown" } {
+  const member = memberById(members, userId);
+  if (member) return { kind: "open", member };
+  return seen(userId) ? { kind: "left" } : { kind: "unknown" };
+}
+
 /** Where focus goes when a sheet opened from another sheet closes: the top bar button that started the chain. */
 export function returnFocusTestId(origin: "more" | "people" | null): string | null {
   return origin === "more" ? "room-more" : origin === "people" ? "room-people" : null;
@@ -66,4 +76,13 @@ export function chromeClasses(immersive: boolean, hidden: boolean): string {
   if (!immersive) return "";
   const base = "transition-opacity duration-200 ease-out motion-reduce:transition-none";
   return hidden ? `${base} pointer-events-none opacity-0 focus-within:pointer-events-auto focus-within:opacity-100` : `${base} opacity-100`;
+}
+
+/**
+ * Whether the page shows the live room. A failed refetch of the room details does not count: the last details are kept and
+ * the socket is still live, so unmounting would throw away the draft, local mutes, the view and open sheets for nothing.
+ */
+export function showsShell(s: { isLoading: boolean; hasDetail: boolean; roomStatus: string; canJoin: boolean; phase: string }): boolean {
+  return !s.isLoading && s.hasDetail && s.canJoin && s.roomStatus !== "ended" && s.roomStatus !== "scheduled"
+    && (s.phase === "live" || s.phase === "reconnecting");
 }

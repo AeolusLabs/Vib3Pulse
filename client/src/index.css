@@ -309,11 +309,9 @@
   .scroll-fade {
     scrollbar-width: thin;
     scrollbar-color: hsl(var(--muted-foreground) / 0.55) transparent;
-    transition: scrollbar-color 500ms;
   }
   .scroll-fade[data-scrolling="false"] {
     scrollbar-color: transparent transparent;
-    transition: scrollbar-color 500ms;
   }
   @media (hover: hover) and (pointer: fine) {
     .scroll-fade:hover {

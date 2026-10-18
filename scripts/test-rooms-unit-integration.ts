@@ -2,18 +2,19 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  ROOM_SHEET_CLOSE, chromeClasses, memberById, replyFromItem, returnFocusTestId, shellImmersive, statusLine, stripNotice, topBarSubtitle, videoIsLive,
+  ROOM_SHEET_CLOSE, authorPick, showsShell, chromeClasses, memberById, replyFromItem, returnFocusTestId, shellImmersive, statusLine, stripNotice, topBarSubtitle, videoIsLive,
 } from "../client/src/lib/roomIntegration";
 import { defaultVideoView, layoutFor } from "../client/src/lib/roomLayout";
 import { effectiveView, railAction, resizeStep } from "../client/src/lib/videoViewState";
 import { CHAT_CAP, initialRoomState, roomReducer, type RoomState } from "../client/src/lib/roomReducer";
-import { quoteView } from "../client/src/lib/chatReply";
+import { canQuote, quoteView } from "../client/src/lib/chatReply";
 import { REACT_GATE, reactGate } from "../client/src/lib/hype";
 import { NOTICE_MESSAGE } from "../client/src/lib/roomsApi";
 import { FIXTURE_IDS, fixtureLiveState, fixtureStartView, parseFixtureQuery } from "../client/src/lib/roomFixtures";
 import { cn } from "../client/src/lib/utils";
 import { frameSlots } from "../client/src/lib/roomShell";
-import { ROOM_LIMITS, resolveChatReply } from "../shared/rooms";
+import { trayOutsideTap } from "../client/src/components/rooms/chat/ReactionTray";
+import { CHAT_QUOTE_WINDOW, ROOM_LIMITS, resolveChatReply } from "../shared/rooms";
 
 let passed = 0, failed = 0;
 const test = (name: string, fn: () => void) => {
@@ -59,6 +60,17 @@ test("views: compact live video on a phone gives the zone room for picture, cont
   assert.deepEqual(frameSlots("rail", false, { live: true }), frameSlots("rail", false));
 });
 
+test("page: a failed details refetch keeps the live room on screen; no details or a closed room never shows it", () => {
+  const base = { isLoading: false, hasDetail: true, roomStatus: "live", canJoin: true, phase: "live" };
+  assert.equal(showsShell(base), true);
+  assert.equal(showsShell({ ...base, phase: "reconnecting" }), true);
+  assert.equal(showsShell({ ...base, hasDetail: false }), false);
+  assert.equal(showsShell({ ...base, isLoading: true }), false);
+  for (const roomStatus of ["ended", "scheduled"]) assert.equal(showsShell({ ...base, roomStatus }), false, roomStatus);
+  for (const phase of ["idle", "connecting", "ended", "denied"]) assert.equal(showsShell({ ...base, phase }), false, phase);
+  assert.equal(showsShell({ ...base, canJoin: false }), false);
+});
+
 // ---------------------------------------------------------------- chat: reply quotes
 test("reply: the quote is cut exactly like the server cuts it, so the server accepts it", () => {
   const long = `  ${"word ".repeat(80)}  `;
@@ -81,6 +93,22 @@ test("reply: a reply to someone who left still renders, attributed to Someone", 
   assert.deepEqual(quoteView(s.chat[0].replyTo!, new Set(), nameOf), { name: "Someone", text: "see you" });
   assert.equal(memberById([{ userId: "me" }], "gone"), null);
   assert.deepEqual(memberById([{ userId: "me" }], "me"), { userId: "me" });
+});
+
+test("author pick: open someone in the list; say they left only if we saw them; otherwise never claim it", () => {
+  const members = [{ userId: "here" }];
+  assert.deepEqual(authorPick(members, () => true, "here"), { kind: "open", member: { userId: "here" } });
+  assert.deepEqual(authorPick(members, (id) => id === "gone", "gone"), { kind: "left" });
+  assert.deepEqual(authorPick(members, () => false, "stranger"), { kind: "unknown" });
+});
+
+test("reply: only the newest CHAT_QUOTE_WINDOW lines can be quoted (the server keeps no more), so older lines offer no Reply", () => {
+  assert.equal(CHAT_QUOTE_WINDOW, 50);
+  assert.equal(canQuote(199, 200), true);   // newest
+  assert.equal(canQuote(150, 200), true);   // 50th newest
+  assert.equal(canQuote(149, 200), false);  // 51st newest
+  assert.equal(canQuote(0, 10), true);
+  assert.equal(canQuote(-1, 10), false);
 });
 
 // ---------------------------------------------------------------- chat: a busy room
@@ -109,6 +137,19 @@ test("status lines: one at a time; the fullscreen strip shows the slow-down line
   assert.equal(statusLine(null, null, null), null);
   assert.equal(stripNotice(null, NOTICE_MESSAGE.RATE_LIMITED), "Slow down a little.");
   assert.equal(stripNotice("Muted", "gate"), "Muted");
+});
+
+test("tray: a tap inside the tray or on the heart never closes it from outside; anywhere else does (even if <body> was active)", () => {
+  const node = (name: string) => ({ name }) as unknown as Node;
+  const box = (...inside: Node[]) => ({ contains: (n: Node | null) => !!n && inside.includes(n) });
+  const item = node("item"), heartIcon = node("heart-svg"), composer = node("composer"), page = node("page");
+  const tray = box(item), heart = box(heartIcon);
+  assert.equal(trayOutsideTap(item, tray, heart), "ignore");
+  assert.equal(trayOutsideTap(heartIcon, tray, heart), "ignore");
+  assert.equal(trayOutsideTap(composer, tray, heart), "close");
+  assert.equal(trayOutsideTap(page, tray, heart), "close");
+  assert.equal(trayOutsideTap(page, tray, null), "close"); // heart gone (typing): still closes
+  assert.equal(trayOutsideTap(null, tray, heart), "ignore");
 });
 
 // ---------------------------------------------------------------- immersive chrome, rail, top bar
@@ -163,9 +204,9 @@ test("sheets: a sheet opened from another sheet hands focus back to the top bar 
 
 // ---------------------------------------------------------------- dev fixture options
 test("fixture query: defaults, clamps and unknown values", () => {
-  assert.deepEqual(parseFixtureQuery(""), { scene: "voice", theme: "dark", as: "guest", sound: false, tap: false, flood: 0 });
-  const o = parseFixtureQuery("?scene=weak&theme=light&as=holder&sound=1&tap=1&flood=300");
-  assert.deepEqual(o, { scene: "weak", theme: "light", as: "holder", sound: true, tap: true, flood: 300 });
+  assert.deepEqual(parseFixtureQuery(""), { scene: "voice", theme: "dark", as: "guest", sound: false, tap: false, invite: false, flood: 0 });
+  const o = parseFixtureQuery("?scene=weak&theme=light&as=holder&sound=1&tap=1&invite=1&flood=300");
+  assert.deepEqual(o, { scene: "weak", theme: "light", as: "holder", sound: true, tap: true, invite: true, flood: 300 });
   assert.equal(parseFixtureQuery("?scene=nope&as=admin&flood=-4").scene, "voice");
   assert.equal(parseFixtureQuery("?as=admin").as, "guest");
   assert.equal(parseFixtureQuery("?flood=99999").flood, 1000);
@@ -181,6 +222,8 @@ test("fixture state: dropped holds the spot for about 100 s from now; holder and
   const h = fixtureLiveState("voice", { as: "host", now });
   assert.equal(h.selfId, FIXTURE_IDS.host);
   assert.equal(h.you?.role, "host");
+  assert.equal(fixtureLiveState("immersive", { as: "guest", now, invite: true }).invitedYou, true);
+  assert.equal(fixtureLiveState("immersive", { as: "guest", now }).invitedYou, false);
   assert.equal(fixtureStartView("live"), "compact");
   assert.equal(fixtureStartView("immersive"), undefined);
 });

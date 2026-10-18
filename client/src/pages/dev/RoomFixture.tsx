@@ -1,7 +1,8 @@
 // Dev-only: renders the REAL room shell (RoomShell: top bar, picture, chat log, dock, tray, rail, sheets) from seeded state.
-// No sockets, no LiveKit: socket actions feed a local reducer, the picture is a canvas, and the few room endpoints the
-// sheets read are answered in the page. Query: ?scene=voice|live|immersive|weak|dropped &theme=dark|light
-// &as=guest|holder|host &sound=1 (sound only) &tap=1 (audio waits for a tap) &flood=300 (chat lines over ten seconds).
+// No room socket and no LiveKit: socket actions feed a local reducer, the picture is a canvas, and the few room endpoints the
+// sheets read are answered in the page. The app around it (auth, notifications) still makes its usual requests.
+// Query: ?scene=voice|live|immersive|weak|dropped &theme=dark|light &as=guest|holder|host &sound=1 (sound only)
+// &tap=1 (audio waits for a tap) &invite=1 (invited to speak) &flood=300 (chat lines over ten seconds).
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import RoomShell, { type RoomShellSocket } from "@/components/rooms/shell/RoomShell";
 import type { RoomVoice, ScreenTrack } from "@/hooks/useRoomVoice";
@@ -54,7 +55,7 @@ function useFixtureFetch() {
 
 export default function RoomFixture() {
   const opts = useMemo(() => parseFixtureQuery(window.location.search), []);
-  const [state, dispatch] = useReducer((s: RoomState, e: Ev) => roomReducer(s, e), undefined, () => fixtureLiveState(opts.scene, { as: opts.as, now: Date.now() }));
+  const [state, dispatch] = useReducer((s: RoomState, e: Ev) => roomReducer(s, e), undefined, () => fixtureLiveState(opts.scene, { as: opts.as, now: Date.now(), invite: opts.invite }));
   const was = useRef<boolean | null>(null);
   useFixtureFetch();
 

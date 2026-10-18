@@ -83,7 +83,7 @@ export function frameSlots(layout: "stack" | "rail", immersive: boolean, opts: {
       top: "absolute inset-x-0 top-0 z-[5] min-w-0 bg-gradient-to-b from-black/70 to-transparent px-2 pb-5 pt-[max(0.75rem,env(safe-area-inset-top,0px))]",
       zone: "absolute inset-0 z-0",
       // Chat floats over the lower picture, clear of the right-hand rail (task 1.5).
-      chat: "absolute bottom-[76px] left-0 right-16 z-[4] flex h-[30%] min-h-0 flex-col",
+      chat: "absolute bottom-[calc(76px+env(safe-area-inset-bottom,0px))] left-0 right-16 z-[4] flex h-[30%] min-h-0 flex-col",
       chatHeading: "hidden",
       pin: "hidden",
       chatBody: "flex min-h-0 flex-1 flex-col",

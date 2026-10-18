@@ -32,7 +32,7 @@ import { pickStartProfile, weakLinkAdvice, type ConnInfo, type VideoProfile } fr
 import { layoutFor, type VideoView } from "@/lib/roomLayout";
 import { TRAY_EMOJIS, camLockReason, micTapAction, shareRoomUrl } from "@/lib/roomShell";
 import { qualityLabel, railAction } from "@/lib/videoViewState";
-import { memberById, replyFromItem, returnFocusTestId, shellImmersive, statusLine, stripNotice, topBarSubtitle, videoIsLive } from "@/lib/roomIntegration";
+import { authorPick, replyFromItem, returnFocusTestId, shellImmersive, statusLine, stripNotice, topBarSubtitle, videoIsLive } from "@/lib/roomIntegration";
 import { KIND_LABEL, LINK_SCREENS, NOTICE_MESSAGE, VISIBILITY_LABEL, ageLimitLabel, hostName, type RoomHostSummary, type RoomView } from "@/lib/roomsApi";
 import type { ChatReply } from "@shared/rooms";
 import { LIVE_HOLD_MS } from "@shared/liveScreen";
@@ -63,6 +63,8 @@ export interface RoomShellProps {
   /** Host only: the room settings block inside the Controls sheet. */
   hostControls?: ReactNode;
   onLeave(): void;
+  /** The last refetch of the room details failed. The room carries on with the details it has; a small line says so. */
+  detailsError?: boolean;
   /** Dev fixture only: open in this video view instead of the width's default. */
   startView?: VideoView;
 }
@@ -84,7 +86,7 @@ const byTestId = (id: string | null) => (id ? document.querySelector<HTMLElement
  * immersive). Crossing 1024 px or switching views only changes classes, so the picture, the camera choice, the composer
  * draft and the chat scroll survive. People are always addressed by RoomMemberView.userId, never by username.
  */
-export default function RoomShell({ id, token, room, host, fallbackCount, isHost, role, meId, state, sock, voice, myRoomId, nav, hostControls, onLeave, startView }: RoomShellProps) {
+export default function RoomShell({ id, token, room, host, fallbackCount, isHost, role, meId, state, sock, voice, myRoomId, nav, hostControls, onLeave, startView, detailsError = false }: RoomShellProps) {
   const { toast } = useToast();
 
   const [hidden, setHidden] = useState<Set<string>>(new Set()); // people the viewer muted for themselves
@@ -104,7 +106,9 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
   const [controlsOpen, setControlsOpen] = useState(false);
   const [liveControlsOpen, setLiveControlsOpen] = useState(false);
   // Opening a sheet from another sheet: wait for the first one's close animation so focus return doesn't fight the new trap.
-  const after = (fn: () => void) => setTimeout(fn, 220);
+  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  useEffect(() => () => { timers.current.forEach(clearTimeout); }, []);
+  const after = (fn: () => void) => { const t = setTimeout(() => { timers.current.delete(t); fn(); }, 220); timers.current.add(t); };
 
   const [reply, setReply] = useState<ChatReply | null>(null);
   const [trayOpen, setTrayOpen] = useState(false);
@@ -120,7 +124,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
   // Chat lines outlive the people who wrote them, so remember every name seen while they were in the room.
   const names = useRef(new Map<string, string>());
   state.members.forEach((m) => names.current.set(m.userId, m.displayName || m.organizationName || m.username || "Guest"));
-  const nameOf = useCallback((uid: string) => names.current.get(uid) ?? (uid === host?.id ? hostName(host) : "Someone"), [host]);
+  const nameOf = useCallback((uid: string) => names.current.get(uid) ?? (uid === host?.id ? hostName(host) : "Someone"), [host, state.members]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A short spoken/visible line for the most recent private thing aimed at me, and for the last rejected action.
   const incoming = state.interactions.filter((i) => i.targetId === meId && !hidden.has(i.fromId)).slice(-1)[0];
@@ -199,9 +203,9 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
     heart: () => sendReaction("❤️"),
     wave: (uid) => { sock.interact(uid, "wave"); },
     author: (uid) => {
-      const m = memberById(state.members, uid);
-      if (m) pick(m);
-      else toast({ title: `${nameOf(uid)} has left the room.` });
+      const r = authorPick(state.members, (id) => names.current.has(id), uid);
+      if (r.kind === "open") pick(r.member);
+      else toast({ title: r.kind === "left" ? `${nameOf(uid)} has left the room.` : "Couldn't open that person." });
     },
   };
   const onReply = useCallback((item: ChatItem) => chatActions.current.reply(item), []);
@@ -233,16 +237,11 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
   const voiceNeedsAttention = voice.status === "needs-tap" || voice.status === "connecting" || voice.status === "error" || !!voice.micError;
 
   const zone = (
-    // Same children in every view; in immersive the banners float above the chat and the picture fills the frame.
+    // Same children in every view; in immersive the banners float above the chat, clear of the rail (right-16, like the chat)
+    // and never under the top bar (capped height, scrolls on a short landscape phone); the picture fills the frame.
     <div className={immersive ? "absolute inset-0" : "space-y-3 pb-2"} data-testid="room-zone-inner">
-      <div className={immersive ? "absolute inset-x-2 bottom-[calc(30%+84px)] z-[7] space-y-2 empty:hidden" : "space-y-3 empty:hidden"} data-testid="room-banners">
-        {state.phase === "reconnecting" && (
-          <div role="status" className="flex items-center gap-2 rounded-xl border bg-muted px-3 py-2 text-sm text-foreground" data-testid="banner-reconnecting">
-            <AlertTriangleIcon className="h-4 w-4 shrink-0" aria-hidden /> Reconnecting… the room will pick up where you left off.
-          </div>
-        )}
-        {/* The dock owns the mic otherwise; this only shows while audio needs a tap, is connecting, failed, or the mic errored. */}
-        {voiceNeedsAttention && <VoiceBar voice={voice} hasHand={!!meId && state.hands.includes(meId)} canAskToSpeak={role === "guest"} onRaise={() => sock.stageAction("raise")} onLower={() => sock.stageAction("lower")} />}
+      <div className={immersive ? "absolute left-2 right-16 bottom-[calc(30%+84px+env(safe-area-inset-bottom,0px))] z-[7] max-h-[calc(70%-148px-env(safe-area-inset-bottom,0px))] space-y-2 overflow-y-auto overscroll-contain empty:hidden" : "space-y-3 empty:hidden"} data-testid="room-banners">
+        {/* First: the one that needs an answer stays in view when the box has to scroll (short landscape phones). */}
         {state.invitedYou && (
           <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/40 bg-card p-3 text-foreground" data-testid="invite-to-speak">
             <p className="text-sm font-medium">The host invited you to speak.</p>
@@ -252,6 +251,16 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
             </div>
           </div>
         )}
+        {state.phase === "reconnecting" && (
+          <div role="status" className="flex items-center gap-2 rounded-xl border bg-muted px-3 py-2 text-sm text-foreground" data-testid="banner-reconnecting">
+            <AlertTriangleIcon className="h-4 w-4 shrink-0" aria-hidden /> Reconnecting… the room will pick up where you left off.
+          </div>
+        )}
+        {detailsError && (
+          <p role="status" className="rounded-xl border bg-muted px-3 py-2 text-sm text-muted-foreground" data-testid="banner-details-error">Couldn't refresh the room details. You're still in the room.</p>
+        )}
+        {/* The dock owns the mic otherwise; this only shows while audio needs a tap, is connecting, failed, or the mic errored. */}
+        {voiceNeedsAttention && <VoiceBar voice={voice} hasHand={!!meId && state.hands.includes(meId)} canAskToSpeak={role === "guest"} onRaise={() => sock.stageAction("raise")} onLower={() => sock.stageAction("lower")} />}
       </div>
       {LINK_SCREENS && (
         <RoomScreen
@@ -334,7 +343,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
   const floating = (
     <>
       <HypeBurst burst={hype.burst} layout={layout} />
-      <div role="status" aria-live="polite" className={`pointer-events-none absolute top-[68px] z-[13] w-max -translate-x-1/2 ${layout === "rail" ? "left-[calc((100%-360px)/2)] max-w-[calc((100%-360px)*0.9)]" : "left-1/2 max-w-[90%]"}`} data-testid="room-status-line">
+      <div role="status" aria-live="polite" className={`pointer-events-none absolute top-[calc(68px+env(safe-area-inset-top,0px))] z-[13] w-max -translate-x-1/2 ${layout === "rail" ? "left-[calc((100%-360px)/2)] max-w-[calc((100%-360px)*0.9)]" : "left-1/2 max-w-[90%]"}`} data-testid="room-status-line">
         {line && <p className="rounded-full bg-foreground px-4 py-2 text-center text-sm font-medium text-background shadow-lg">{line}</p>}
       </div>
       {immersive && (

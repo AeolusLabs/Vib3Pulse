@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/hooks/useAuth";
 import { useRoomSocket } from "@/hooks/useRoomSocket";
 import { useRoomVoice } from "@/hooks/useRoomVoice";
+import { showsShell } from "@/lib/roomIntegration";
 import { DENIED_MESSAGE, KIND_LABEL, type PeekMember, VISIBILITY_LABEL, ageLimitLabel, fetchRooms, formatWhen, hostName, type RoomHostSummary, type RoomView } from "@/lib/roomsApi";
 import { ArrowLeftIcon } from "@/components/ui/icons";
 
@@ -93,8 +94,8 @@ function RoomPageInner({ id }: { id: string }) {
   const back = <Button asChild variant="outline"><Link href="/rooms">Back to Rooms</Link></Button>;
 
   // ---------------------------------------------------------------- the room itself (chat-first shell)
-  const inRoom = !isLoading && !error && !!detail && !!room && room.status !== "ended" && state.phase !== "ended" && detail.canJoin.ok
-    && state.phase !== "denied" && room.status !== "scheduled" && (state.phase === "live" || state.phase === "reconnecting");
+  // A failed refetch keeps the last details (react-query keeps data on error), so the live room stays; it says so in a line.
+  const inRoom = showsShell({ isLoading, hasDetail: !!detail && !!room, roomStatus: room?.status ?? "", canJoin: detail?.canJoin.ok === true, phase: state.phase });
 
   if (inRoom && detail && room) {
     return (
@@ -114,6 +115,7 @@ function RoomPageInner({ id }: { id: string }) {
         nav={<Navigation />}
         hostControls={<HostControls room={{ ...room, host: detail.host }} onChanged={() => refetch()} />}
         onLeave={leave}
+        detailsError={!!error}
       />
     );
   }
