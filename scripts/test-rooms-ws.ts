@@ -878,7 +878,9 @@ try {
     sendLive(ah, "grant", AA); await liveNow(ah, (l) => l.holder === AA);
     ah.drain(); aa.close(); await liveNow(ah, (l) => typeof l.away === "number");
     sendLive(ah, "revoke", AA);
-    check("hold: a host revoke during the hold releases the member at once", await liveNow(ah, (l) => l.holder === null) && !!(await ah.waitFor((m) => m.type === "room:left" && m.userId === AA, 600)));
+    // "At once" means released by the revoke, not by the hold window running out (about 4 s here). The release writes to the DB
+  // (about 200 ms per query on a remote scratch DB), so 600 ms was too tight; 3 s still proves the window did not have to expire.
+    check("hold: a host revoke during the hold releases the member at once", await liveNow(ah, (l) => l.holder === null) && !!(await ah.waitFor((m) => m.type === "room:left" && m.userId === AA, 3000)));
     await sleep(4400);
     check("hold: ...and no second room:left when the old timer would have fired", ah.all((m) => m.type === "room:left" && m.userId === AA).length === 1);
 
