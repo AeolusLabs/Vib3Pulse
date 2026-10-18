@@ -48,7 +48,9 @@ class Client {
   async open() { await new Promise<void>((res, rej) => { this.ws.once("open", () => res()); this.ws.once("error", rej); this.ws.once("close", () => rej(new Error("closed before open"))); }); await this.waitFor((m) => m.type === "connected"); return this; }
   send(o: object) { this.ws.send(JSON.stringify(o)); }
   drain() { this.base = this.msgs.length; }
-  async waitFor(pred: (m: any) => boolean, ms = 3000): Promise<any> {
+  // 10 s, not 3: a join is 10+ sequential queries and the scratch DB is remote (about 200 ms each), so 3 s sat on the edge.
+  // Every caller asserts presence (!!await ...); absence checks use none(), so a longer wait only slows reporting a real failure.
+  async waitFor(pred: (m: any) => boolean, ms = 10000): Promise<any> {
     const t0 = Date.now();
     while (Date.now() - t0 < ms) {
       const m = this.msgs.slice(this.base).find(pred);
