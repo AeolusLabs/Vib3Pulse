@@ -404,6 +404,7 @@ export function registerRoomRoutes(app: Express): void {
       const targetId = await modTarget(req, res, ctx);
       if (!targetId) return;
       await rs.setMemberFlag(ctx.room.id, targetId, { banned: false });
+      roomHub.setChatBanned(ctx.room.id, targetId, false);
       res.json({ ok: true });
     } catch (e) {
       console.error("[rooms] unban failed:", e);
@@ -517,7 +518,8 @@ export function registerRoomRoutes(app: Express): void {
   function chatExcerpt(roomId: string): string {
     const lines = roomHub.recentChat(roomId).map((l) => {
       const who = (roomHub.get(roomId, l.userId)?.info?.username as string | undefined) ?? l.userId.slice(0, 8);
-      return `${new Date(l.at).toISOString().slice(11, 19)} ${who}: ${l.text}`;
+      const q = l.replyTo ? ` (replying to ${l.replyTo.userId.slice(0, 8)}: ${l.replyTo.text})` : "";
+      return `${new Date(l.at).toISOString().slice(11, 19)} ${who}: ${l.text}${q}`;
     });
     return lines.length ? `\n\n--- last chat lines ---\n${lines.join("\n")}`.slice(0, 8000) : "";
   }

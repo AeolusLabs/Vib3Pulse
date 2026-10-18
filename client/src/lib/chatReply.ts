@@ -19,3 +19,20 @@ export function replyProgress(dx: number): { offset: number; reveal: number; com
 export function quoteLabel(userId: string, nameOf: (userId: string) => string): string {
   return nameOf(userId)?.trim() || "Someone";
 }
+
+/**
+ * What a pointer move means for a row's swipe. "cancel": a mouse move with no button held is a stale drag (the release
+ * happened outside the row), so it must never slide the row or reply. "start": a clear rightward move (over 10 px and
+ * mostly horizontal). "drag": already swiping. "wait": keep watching (vertical moves stay a scroll).
+ */
+export function swipeDecision(i: { active: boolean; dx: number; dy: number; pointerType: string; buttons: number }): "wait" | "start" | "drag" | "cancel" {
+  if (i.pointerType === "mouse" && i.buttons === 0) return "cancel";
+  if (i.active) return "drag";
+  return i.dx > 10 && i.dx > Math.abs(i.dy) * 1.5 ? "start" : "wait";
+}
+
+/** How a reply quote is shown. If the viewer hid its author, the words are not shown inside someone else's reply either. */
+export function quoteView(reply: { userId: string; text: string }, hidden: ReadonlySet<string> | undefined, nameOf: (userId: string) => string): { name: string; text: string } {
+  if (hidden?.has(reply.userId)) return { name: "Someone", text: "" };
+  return { name: quoteLabel(reply.userId, nameOf), text: reply.text };
+}

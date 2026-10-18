@@ -150,6 +150,57 @@ try {
   const left = await chatOf(b, "quote-left");
   check("reply to a member who left still delivers the quote", left?.replyTo?.userId === C, JSON.stringify(left));
 
+
+  // ---- kick and ban purge the person's lines: nobody can keep quoting them
+  const K = await mk("cr_k"), N = await mk("cr_n");
+  const k = await connect(K), n = await connect(N);
+  await join(k, R.id); await join(n, R.id);
+  k.send({ type: "room:chat", text: "kicked words" });
+  await chatOf(a, "kicked words");
+  h.send({ type: "room:mod", action: "kick", targetId: K });
+  await until(async () => roomHub.roomOf(K) === null);
+  check("kick purges the person's lines from the ring", !roomHub.recentChat(R.id).some((l) => l.userId === K));
+  b.drain();
+  a.send({ type: "room:chat", text: "quote-kicked", replyTo: { userId: K, text: "kicked words" } });
+  const qk = await chatOf(b, "quote-kicked");
+  check("quote of a kicked member degrades to a plain message", !!qk && qk.replyTo === undefined, JSON.stringify(qk));
+  n.send({ type: "room:chat", text: "banned words" });
+  await chatOf(a, "banned words");
+  h.send({ type: "room:mod", action: "ban", targetId: N });
+  await until(async () => roomHub.roomOf(N) === null);
+  check("ban purges the person's lines and flags them", !roomHub.recentChat(R.id).some((l) => l.userId === N) && roomHub.isChatBanned(R.id, N));
+  a.send({ type: "room:chat", text: "quote-banned", replyTo: { userId: N, text: "banned words" } });
+  const qn = await chatOf(b, "quote-banned");
+  check("quote of a banned member degrades to a plain message", !!qn && qn.replyTo === undefined, JSON.stringify(qn));
+
+  // ---- muted, rate limited, oversize id, hostile shapes
+  const M = await mk("cr_m"); const mu = await connect(M); await join(mu, R.id);
+  h.send({ type: "room:mod", action: "mute", targetId: M });
+  await mu.waitFor((m) => m.type === "room:mod" && m.action === "mute");
+  b.drain();
+  mu.send({ type: "room:chat", text: "muted reply", replyTo: { userId: B, text: "earlier" } });
+  check("a muted member's reply is dropped like any chat", await b.none((m) => m.type === "room:chat" && m.text === "muted reply") && !!(await mu.waitFor((m) => m.type === "room:notice" && m.code === "MUTED")));
+
+  tuning.chat = { rate: 0.001, burst: 2 };
+  const L = await mk("cr_l"); const lm = await connect(L); await join(lm, R.id);
+  for (let i = 0; i < 4; i++) lm.send({ type: "room:chat", text: `lim${i}`, replyTo: { userId: B, text: "earlier" } });
+  check("rate limit applies to replies (RATE_LIMITED notice)", !!(await lm.waitFor((m) => m.type === "room:notice" && m.code === "RATE_LIMITED")));
+  check("...and only the allowed two were broadcast", (await until(async () => b.all((m) => m.type === "room:chat" && /^lim/.test(m.text)).length >= 2)) && await b.none((m) => m.type === "room:chat" && m.text === "lim3", 600));
+  tuning.chat = { rate: 1000, burst: 1000 };
+
+  b.drain();
+  a.send({ type: "room:chat", text: "longid", replyTo: { userId: "u".repeat(65), text: "earlier" } });
+  const li = await chatOf(b, "longid");
+  check("userId over 64 chars: quote dropped, message delivered", !!li && li.replyTo === undefined);
+  a.send({ type: "room:chat", text: "nested", replyTo: { userId: B, text: "earlier", replyTo: { userId: B, text: "earlier" } } });
+  const ne = await chatOf(b, "nested");
+  check("nested replyTo (extra key) dropped, message delivered", !!ne && ne.replyTo === undefined);
+  a.ws.send(`{"type":"room:chat","text":"proto","replyTo":{"__proto__":{"polluted":1},"userId":"${B}","text":"earlier"}}`);
+  const pr = await chatOf(b, "proto");
+  check("__proto__ shape: message delivered, nothing polluted", !!pr && (pr.replyTo === undefined || JSON.stringify(pr.replyTo) === JSON.stringify({ userId: B, text: "earlier" })) && ({} as any).polluted === undefined, JSON.stringify(pr));
+  a.send({ type: "room:chat", text: "alive", replyTo: { userId: B, text: "earlier" } });
+  check("socket still alive after hostile shapes", !!(await chatOf(b, "alive")));
+
   // Ring buffer replay (what a new joiner or a report gets) keeps replyTo.
   const ring = roomHub.recentChat(R.id);
   const line = ring.find((l) => l.text === "hello");

@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ChevronDownIcon, HeartIcon, ReplyIcon } from "@/components/ui/icons";
 import { useIdleScrollbar } from "@/hooks/useIdleScrollbar";
-import { quoteLabel, replyProgress } from "@/lib/chatReply";
+import { quoteView, replyProgress, swipeDecision } from "@/lib/chatReply";
 import type { ChatItem } from "@/lib/roomReducer";
 
 /**
@@ -29,12 +29,12 @@ export interface ChatLogProps {
 }
 
 const STICK_PX = 48;
-const SWIPE_START_PX = 10;
 
 interface RowProps {
   item: ChatItem;
   name: string;
-  quoteName: string | null;
+  quoteName: string | null; // primitives, so memo still skips untouched rows
+  quoteText: string;
   mine: boolean;
   open: boolean;
   immersive: boolean;
@@ -45,7 +45,7 @@ interface RowProps {
   onPickAuthor(userId: string): void;
 }
 
-const ChatRow = memo(function ChatRow({ item, name, quoteName, mine, open, immersive, onToggle, onReply, onHeart, onWave, onPickAuthor }: RowProps) {
+const ChatRow = memo(function ChatRow({ item, name, quoteName, quoteText, mine, open, immersive, onToggle, onReply, onHeart, onWave, onPickAuthor }: RowProps) {
   const rowRef = useRef<HTMLDivElement>(null);
   const hintRef = useRef<HTMLSpanElement>(null);
   const drag = useRef<{ x: number; y: number; active: boolean; dx: number; id: number } | null>(null);
@@ -65,11 +65,16 @@ const ChatRow = memo(function ChatRow({ item, name, quoteName, mine, open, immer
     const d = drag.current;
     if (!d) return;
     const dx = e.clientX - d.x, dy = e.clientY - d.y;
-    if (!d.active) {
-      if (dx > SWIPE_START_PX && dx > Math.abs(dy) * 1.5) {
-        d.active = true;
-        try { rowRef.current?.setPointerCapture(d.id); } catch { /* pointer already gone */ }
-      } else return;
+    const step = swipeDecision({ active: d.active, dx, dy, pointerType: e.pointerType, buttons: e.buttons });
+    if (step === "cancel") { // a mouse moving over the row with no button held: the press ended elsewhere
+      drag.current = null;
+      if (d.active) paint(0, 0, false);
+      return;
+    }
+    if (step === "wait") return;
+    if (step === "start") {
+      d.active = true;
+      try { rowRef.current?.setPointerCapture(d.id); } catch { /* pointer already gone */ }
     }
     d.dx = dx;
     const p = replyProgress(dx);
@@ -95,6 +100,8 @@ const ChatRow = memo(function ChatRow({ item, name, quoteName, mine, open, immer
   const pick = (e: React.MouseEvent) => { e.stopPropagation(); onPickAuthor(item.userId); };
   const act = (fn: () => void) => (e: React.MouseEvent) => { e.stopPropagation(); fn(); onToggle(item.id); };
 
+  useEffect(() => { if (open) rowRef.current?.scrollIntoView?.({ block: "nearest" }); }, [open]);
+
   const initial = (name.trim()[0] ?? "?").toUpperCase();
   const who = mine ? "You" : name;
   return (
@@ -104,22 +111,22 @@ const ChatRow = memo(function ChatRow({ item, name, quoteName, mine, open, immer
       </span>
       <div
         ref={rowRef}
-        tabIndex={0}
-        aria-expanded={open}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={() => finish(false)}
         onPointerCancel={() => finish(true)}
+        onPointerLeave={() => { if (drag.current && !drag.current.active) drag.current = null; }}
+        onLostPointerCapture={() => finish(true)}
         onClickCapture={onClickCapture}
         onClick={toggle}
-        onKeyDown={onKeyDown}
         style={{ touchAction: "pan-y" }}
-        className={`flex min-w-0 items-start gap-2 rounded-xl px-2 py-1.5 transition-transform duration-150 motion-reduce:transition-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${
+        className={`flex min-w-0 items-start gap-2 rounded-xl px-2 py-1.5 transition-transform duration-150 motion-reduce:transition-none ${
           immersive ? "bg-black/35 text-white [text-shadow:0_1px_2px_rgb(0_0_0/0.6)]" : open ? "bg-muted/60" : ""
         }`}
       >
         <button
           type="button"
+          tabIndex={-1}
           onClick={pick}
           aria-label={`Open profile card for ${who}`}
           className="-m-1.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
@@ -132,12 +139,18 @@ const ChatRow = memo(function ChatRow({ item, name, quoteName, mine, open, immer
           </button>
           {item.replyTo && (
             <div className={`mb-0.5 truncate rounded-lg px-2 py-0.5 text-[13px] ${immersive ? "bg-white/15" : "bg-muted text-muted-foreground"}`} data-testid="chat-quote">
-              <span className="font-medium">{quoteName}</span> {item.replyTo.text}
+              <span className="font-medium">{quoteName}</span> {quoteText}
             </div>
           )}
-          <p className="whitespace-pre-wrap text-[15px] leading-snug [overflow-wrap:anywhere]">{item.text}</p>
+          <p
+            role="button"
+            tabIndex={0}
+            aria-expanded={open}
+            onKeyDown={onKeyDown}
+            className="whitespace-pre-wrap rounded text-[15px] leading-snug [overflow-wrap:anywhere] focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+          >{item.text}</p>
           {open && (
-            <div className="mt-1.5 flex flex-wrap gap-1.5" role="group" aria-label="Message actions">
+            <div className="mt-1.5 flex flex-wrap gap-1.5" role="group" aria-label="Message actions" aria-live="off">
               <ActionButton onClick={act(() => onHeart(item))}><HeartIcon size={16} /> Heart</ActionButton>
               <ActionButton onClick={act(() => onReply(item))}><ReplyIcon size={16} /> Reply</ActionButton>
               {!mine && <ActionButton onClick={act(() => onWave(item.userId))}><span aria-hidden="true">👋</span> Wave</ActionButton>}
@@ -224,7 +237,8 @@ export function ChatLog({ chat, nameOf, selfId, hidden, immersive = false, onRep
             key={c.id}
             item={c}
             name={nameOf(c.userId)}
-            quoteName={c.replyTo ? quoteLabel(c.replyTo.userId, nameOf) : null}
+            quoteName={c.replyTo ? quoteView(c.replyTo, hidden, nameOf).name : null}
+            quoteText={c.replyTo ? quoteView(c.replyTo, hidden, nameOf).text : ""}
             mine={c.userId === selfId}
             open={openId === c.id}
             immersive={immersive}
