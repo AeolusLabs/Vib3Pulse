@@ -344,3 +344,12 @@
   80% { opacity: 1; }
   100% { opacity: 0; transform: translate(-50%, -44px) scale(1); }
 }
+
+/* Rooms: the reaction tray scales in from the heart button. Nothing animates under reduced motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .room-tray-in { animation: room-tray-in 160ms ease-out; }
+}
+@keyframes room-tray-in {
+  from { opacity: 0; transform: scale(.7); }
+  to { opacity: 1; transform: scale(1); }
+}

@@ -1,4 +1,8 @@
 // Pure helpers for the chat-first room shell (dock, People sheet, More sheet). No React, no window.
+import { ROOM_REACTIONS } from "@shared/rooms";
+
+/** The reaction tray offers exactly what the server accepts (it drops anything else). */
+export const TRAY_EMOJIS: readonly string[] = ROOM_REACTIONS;
 
 /** The six reactions in the dock's row (and, from task 1.4, the tray). All are in ROOM_REACTIONS, which the server checks. */
 export const DOCK_REACTIONS: readonly string[] = ["🔥", "❤️", "😂", "👏", "🎉", "🙌"];

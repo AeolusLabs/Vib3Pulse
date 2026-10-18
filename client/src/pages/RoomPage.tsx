@@ -24,6 +24,10 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useRoomSocket } from "@/hooks/useRoomSocket";
 import { useRoomVoice } from "@/hooks/useRoomVoice";
+import { HypeBar, HypeBurst } from "@/components/rooms/chat/HypeBar";
+import { ReactionTray } from "@/components/rooms/chat/ReactionTray";
+import { useHype } from "@/hooks/useHype";
+import { REACT_GATE, reactGate, type ReactGateState } from "@/lib/hype";
 import VoiceBar from "@/components/rooms/VoiceBar";
 import StagePanel from "@/components/rooms/StagePanel";
 import ScreenStage from "@/components/rooms/ScreenStage";
@@ -31,7 +35,7 @@ import { useNow } from "@/hooks/useNow";
 import { awayRemainingMs, downSince, shouldShowHold } from "@/lib/voiceState";
 import { pickStartProfile, weakLinkAdvice, type VideoProfile } from "@/lib/bandwidth";
 import { layoutFor } from "@/lib/roomLayout";
-import { UNLOCK_FAILED, camLockReason, micTapAction, shareRoomUrl, unlockStep, unlockWaitMs, type UnlockPending } from "@/lib/roomShell";
+import { TRAY_EMOJIS, UNLOCK_FAILED, camLockReason, micTapAction, shareRoomUrl, unlockStep, unlockWaitMs, type UnlockPending } from "@/lib/roomShell";
 import { LIVE_HOLD_MS } from "@shared/liveScreen";
 import { DENIED_MESSAGE, KIND_LABEL, LINK_SCREENS, type PeekMember, NOTICE_MESSAGE, VISIBILITY_LABEL, ageLimitLabel, fetchRooms, formatWhen, hostName, type RoomHostSummary, type RoomView } from "@/lib/roomsApi";
 import type { ChatItem, RoomMemberView } from "@/lib/roomReducer";
@@ -193,7 +197,7 @@ function RoomPageInner({ id }: { id: string }) {
 
   // Reply target for the composer. Task 1.3's ChatLog sets it (onReply); task 1.3 also sends it with the message.
   const [reply, setReply] = useState<{ userId: string; text: string } | null>(null);
-  // Immersive reaction tray (task 1.4 renders it).
+  // Immersive reaction tray, and the hype bar fed by every reaction the room delivers (including your own).
   const [trayOpen, setTrayOpen] = useState(false);
 
   const width = useViewportWidth();
@@ -215,6 +219,23 @@ function RoomPageInner({ id }: { id: string }) {
     const t = setTimeout(() => setNoticeText(null), 3500);
     return () => clearTimeout(t);
   }, [state.notice?.n]); // eslint-disable-line react-hooks/exhaustive-deps
+  const hype = useHype(state.reactions);
+  // Taps are metered a little under the server's reaction bucket so RATE_LIMITED should not fire; a blocked tap shows the usual calm line.
+  const reactGateState = useRef<ReactGateState>({ tokens: REACT_GATE.burst, at: Date.now() });
+  // Its own line and timer, so it and the server-notice effect above never clear each other.
+  const [gateNotice, setGateNotice] = useState<string | null>(null);
+  const gateTimer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => () => clearTimeout(gateTimer.current), []);
+  const sendReaction = (emoji: string) => {
+    const g = reactGate(reactGateState.current, Date.now());
+    reactGateState.current = g.state;
+    if (g.ok) sock.react(emoji);
+    else {
+      setGateNotice(NOTICE_MESSAGE.RATE_LIMITED);
+      clearTimeout(gateTimer.current);
+      gateTimer.current = setTimeout(() => setGateNotice(null), 2500);
+    }
+  };
   // The wave / private reaction line fades after a few seconds instead of sitting over the room.
   const [incomingShown, setIncomingShown] = useState<string | null>(null);
   useEffect(() => {
@@ -291,7 +312,7 @@ function RoomPageInner({ id }: { id: string }) {
     const askLive = () => (isCoHostOrHost && me ? sock.liveAction("grant", me.id) : sock.liveAction("ask"));
 
     // Chat + reactions over a fullscreen screen (only rendered while it is fullscreen).
-    const strip = <div className="space-y-2"><RoomChat compact chat={state.chat} nameOf={nameOf} onSend={sock.chat} muted={muted} hidden={hidden} notice={noticeText} /><ReactionBar onReact={sock.react} /></div>;
+    const strip = <div className="space-y-2"><RoomChat compact chat={state.chat} nameOf={nameOf} onSend={sock.chat} muted={muted} hidden={hidden} notice={noticeText} /><ReactionBar onReact={sendReaction} /></div>;
     const voiceNeedsAttention = voice.status === "needs-tap" || voice.status === "connecting" || voice.status === "error" || !!voice.micError;
 
     const zone = (
@@ -356,7 +377,7 @@ function RoomPageInner({ id }: { id: string }) {
         onCancelReply={() => setReply(null)}
         // Task 1.3: `sock.chat(text, reply ?? undefined)`.
         onSend={(text) => { sock.chat(text); setReply(null); }}
-        onReact={sock.react}
+        onReact={sendReaction}
         trayOpen={trayOpen}
         onToggleTray={() => setTrayOpen((o) => !o)}
         voice={{
@@ -378,14 +399,19 @@ function RoomPageInner({ id }: { id: string }) {
           onClick: () => { if (isHolder) stopLive(); else if (asked) sock.liveAction("withdraw"); else askLive(); },
         }}
         immersive={immersive}
+        hype={<HypeBar store={hype.store} />}
+        tray={<ReactionTray emojis={TRAY_EMOJIS} open={trayOpen} onClose={() => setTrayOpen(false)} onPick={sendReaction} />}
       />
     );
 
-    const statusLine = incomingShown ?? noticeText;
+    const statusLine = incomingShown ?? noticeText ?? gateNotice;
     const floating = (
+      <>
+      <HypeBurst burst={hype.burst} layout={layout} />
       <div role="status" aria-live="polite" className={`pointer-events-none absolute top-[68px] z-[13] w-max -translate-x-1/2 ${layout === "rail" ? "left-[calc((100%-360px)/2)] max-w-[calc((100%-360px)*0.9)]" : "left-1/2 max-w-[90%]"}`} data-testid="room-status-line">
         {statusLine && <p className="rounded-full bg-foreground px-4 py-2 text-center text-sm font-medium text-background shadow-lg">{statusLine}</p>}
       </div>
+      </>
     );
 
     const top = (
