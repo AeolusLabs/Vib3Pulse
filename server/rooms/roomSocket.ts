@@ -16,6 +16,7 @@ import { LIVE_HOLD_MS } from "@shared/liveScreen";
 import { broadcastLive, dropFromVoice, handleLive, handleStage, liveAway, reconcileVoice, registerAwayReleaser, restoreStageOnJoin, sweepAllVoiceRooms } from "./stage";
 import { getVoiceService } from "./voice/voiceService";
 import { roomFeatures } from "./features";
+import { MEMBER_LIST_CAP, selectStateMembers, wantedMemberIds } from "./memberList";
 
 /** Injectable so tests can shorten the host grace period; rates are the documented limits. */
 export const tuning = {
@@ -32,7 +33,6 @@ export const tuning = {
   kickMs: 10 * 60_000,               // a kick keeps the person out this long (a ban is forever)
 };
 
-const MEMBER_LIST_CAP = 40;
 const OPEN = 1;
 
 export interface RoomClient { send(data: string): void; readyState: number }
@@ -177,13 +177,12 @@ async function sendState(ws: RoomClient, room: Room, you: HubMember) {
     type: "room:state",
     room: publicRoom(room),
     members: (() => {
-      // The list is capped, but the host must always be able to see (and take the mic from) everyone on stage or asking for it.
-      const first = roomHub.members(room.id, MEMBER_LIST_CAP);
+      // A full free room is sent whole. Past that, the host must still see (and act on) everyone on stage or asking, and
+      // everyone in the recent chat must resolve to a person, or their name would read "Someone" and could not be reported.
       const s = roomHub.stageOf(room.id);
       const live = roomHub.liveOf(room.id);
-      const wanted = new Set([...s.stage, ...s.hands, ...live.asks, ...(live.holder ? [live.holder] : [])]);
-      const have = new Set(first.map((m) => m.userId));
-      return [...first, ...roomHub.members(room.id).filter((m) => wanted.has(m.userId) && !have.has(m.userId))].map(memberPayload);
+      const wanted = wantedMemberIds({ stage: s.stage, hands: s.hands, asks: live.asks, holder: live.holder, chat: roomHub.recentChat(room.id) });
+      return selectStateMembers(roomHub.members(room.id), MEMBER_LIST_CAP, wanted).map(memberPayload);
     })(),
     serverNowMs: Date.now(),
     memberCount: roomHub.count(room.id),
