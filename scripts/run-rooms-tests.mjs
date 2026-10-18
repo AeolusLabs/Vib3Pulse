@@ -60,7 +60,9 @@ try {
     if (push.code !== 0) throw new Error(`drizzle-kit push failed:\n${push.out.slice(-600)}`);
     console.log("done");
     for (const f of [...apiFiles, ...wsFiles]) {
-      const r = await run("npx", ["tsx", f], { DATABASE_URL: url, SESSION_SECRET: "test", DISABLE_GEOCODING: "1", RESEND_API_KEY: "re_dummy_not_real" });
+      // LIVEKIT_* blanked: a test server's boot (rehydrate + boot voice sweep) must never reach the real LiveKit project;
+      // tests that need voice install a fake with setVoiceServiceForTests.
+      const r = await run("npx", ["tsx", f], { DATABASE_URL: url, SESSION_SECRET: "test", DISABLE_GEOCODING: "1", RESEND_API_KEY: "re_dummy_not_real", LIVEKIT_URL: "", LIVEKIT_API_KEY: "", LIVEKIT_API_SECRET: "" });
       console.log(`  -- ${f}`);
       console.log(r.out.trim().split("\n").filter((l) => !/DEP0190|trace-deprecation/.test(l)).map((l) => `  ${l}`).join("\n"));
       if (r.code !== 0) ok = false;

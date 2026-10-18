@@ -1140,9 +1140,28 @@ export const rooms = pgTable("rooms", {
   maxSpeakers: integer("max_speakers").notNull().default(6),
   screenVersion: integer("screen_version").notNull().default(0), // bumped whenever the screen changes
   nowPlaying: jsonb("now_playing").$type<NowPlaying | null>(),
+  // Phase 2: true when the host was under 18 at creation. Set only by the server, never changed afterwards.
+  minorsRoom: boolean("minors_room").notNull().default(false),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 export type Room = typeof rooms.$inferSelect;
+
+// A minors' room host's personal invite to one adult. Never a link: a link could be forwarded. The adult must also
+// acknowledge the warning (time kept for any later investigation). Revoked rows are kept, with the revoke time.
+export const roomAdultInvites = pgTable("room_adult_invites", {
+  roomId: varchar("room_id").notNull().references(() => rooms.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  invitedBy: varchar("invited_by").references(() => users.id, { onDelete: "set null" }), // kept as evidence if the host account goes
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  acknowledgedAt: timestamp("acknowledged_at"),            // this invite's acknowledgement (reset when a revoked invite is renewed)
+  firstAcknowledgedAt: timestamp("first_acknowledged_at"), // the first acknowledgement ever for this room and person: set once, never overwritten
+  revokedAt: timestamp("revoked_at"),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.roomId, t.userId] }),
+  // Also created by migrations/add_minors_rooms.sql and ensureSchema; declared here so drizzle-kit push keeps it.
+  userIdx: index("room_adult_invites_user_idx").on(t.userId).where(sql`revoked_at IS NULL`),
+}));
+export type RoomAdultInvite = typeof roomAdultInvites.$inferSelect;
 
 export const roomMembers = pgTable("room_members", {
   roomId: varchar("room_id").notNull().references(() => rooms.id, { onDelete: "cascade" }),

@@ -38,6 +38,7 @@ export class RoomHub {
   private voice = new Map<string, boolean>();
   private lives = new Map<string, LiveState>();
   private liveVideo = new Map<string, boolean>();
+  private minors = new Set<string>(); // live rooms that are minors' rooms (mirrors rooms.minors_room, which never clears)
 
   /** One room per user: joining another leaves the first. Returns the room that was left, if any. */
   join(roomId: string, m: HubMember): string | null {
@@ -98,6 +99,7 @@ export class RoomHub {
     this.voice.delete(roomId);
     this.lives.delete(roomId);
     this.liveVideo.delete(roomId);
+    this.minors.delete(roomId);
     return gone;
   }
 
@@ -125,6 +127,26 @@ export class RoomHub {
   setLive(roomId: string, s: LiveState): void {
     if (s.holder || s.asks.length) this.lives.set(roomId, { holder: s.holder, asks: [...s.asks] });
     else this.lives.delete(roomId);
+  }
+
+  /** Minors' room flag for the stage rule (hot path, no query). Set from the room row on every join; one way, like the column. */
+  isMinorsRoom(roomId: string): boolean { return this.minors.has(roomId); }
+  /**
+   * Marked even while the room is empty, and NOT cleared when it empties (only when the room ends), like the column it
+   * mirrors: a join whose row read predates the flag is still caught right before its hub insert, even if other people came
+   * and went in between.
+   */
+  markMinorsRoom(roomId: string): void { this.minors.add(roomId); }
+
+  /**
+   * The one place a live member's age changes after they joined (an admin birthdate correction). The stage rule reads
+   * HubMember.age, so the caller must reconcile the room's voice right after. Returns true if the age changed.
+   */
+  refreshAge(roomId: string, userId: string, age: number | null): boolean {
+    const m = this.get(roomId, userId);
+    if (!m || m.age === age) return false;
+    m.age = age;
+    return true;
   }
 
   /** Whether live video is on for the room (mirrors rooms.live_video). Like voice, only kept while someone is in the room. */

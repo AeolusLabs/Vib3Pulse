@@ -12,12 +12,20 @@ type Role = "host" | "cohost" | "guest";
 export interface StageState { stage: string[]; hands: string[]; invited: string[] }
 
 /**
- * Adults may always speak. A teen may speak only when everyone present is a teen: an adult in the room, even one who is
- * only listening, blocks it. Someone of unknown age never speaks.
+ * Who may speak (stage, mic, live camera). Someone of unknown age never speaks.
+ * Normal rooms: adults may always speak; a teen may speak only when everyone present is a teen (an adult in the room, even
+ * one who is only listening, blocks it).
+ * Minors' rooms (host under 18 at creation): the room is the teens' own. Teens may always speak, whoever is present; adults
+ * (who are there only by personal invite) never speak: they listen and chat.
  */
-export function canBeOnStage(user: { age: number | null }, present: { bands: Array<AgeBand | null> }): Check<"AGE_UNKNOWN" | "ADULT_PRESENT"> {
+export function canBeOnStage(
+  user: { age: number | null },
+  present: { bands: Array<AgeBand | null> },
+  room: { minorsRoom: boolean } = { minorsRoom: false },
+): Check<"AGE_UNKNOWN" | "ADULT_PRESENT" | "MINORS_ROOM_ADULT"> {
   const band = ageBand(user.age);
   if (!band) return { ok: false, code: "AGE_UNKNOWN" };
+  if (room.minorsRoom) return band === "teen" ? { ok: true } : { ok: false, code: "MINORS_ROOM_ADULT" };
   if (band === "adult") return { ok: true };
   return present.bands.every((b) => b === "teen") ? { ok: true } : { ok: false, code: "ADULT_PRESENT" };
 }

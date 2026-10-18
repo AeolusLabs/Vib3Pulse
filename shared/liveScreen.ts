@@ -17,7 +17,7 @@ export interface LiveContext {
   targetPresent: boolean;
   /** True for the host and co-hosts (implicit speakers) and for a guest on the stage. */
   targetOnStage: boolean;
-  /** The teen rule: the same check as speaking (`canBeOnStage`). */
+  /** Who may speak: the same check as speaking (`canBeOnStage`: the teen rule, or in a minors room teens only). */
   targetEligible: boolean;
   liveOn: boolean;
 }

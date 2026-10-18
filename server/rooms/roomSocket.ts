@@ -5,11 +5,12 @@ import { isBlockedEitherWay } from "../utils/blocks";
 import { ageFromDob } from "@shared/age";
 import { resolveScreen } from "@shared/screen";
 import { sanitizePlaybackInput, type NowPlaying } from "@shared/playback";
-import { HOST_LEAVE_GRACE_MS, ROOM_LIMITS, ROOM_REACTIONS, resolveRoomPrivacy, resolveChatReply, validateChatReply } from "@shared/rooms";
-import { canInteract, canJoinRoom } from "@shared/roomRules";
+import { HOST_LEAVE_GRACE_MS, MINORS_ROOM_WARNING, ROOM_LIMITS, ROOM_REACTIONS, resolveRoomPrivacy, resolveChatReply, validateChatReply, type MinorsRoomCode } from "@shared/rooms";
+import { canHostRoom, canInteract, canJoinRoom } from "@shared/roomRules";
 import type { Room, User } from "@shared/schema";
 import * as rs from "./roomStorage";
-import { canViewRoom, mutualFollow, plainText, publicRoom } from "./roomAccess";
+import { mutualFollow, plainText, publicRoom, viewRoom } from "./roomAccess";
+import { getInviteState, markHostRoomsMinors, minorsGate, NO_INVITE, revokeInvite } from "./minorsRoom";
 import { roomHub, type HubMember } from "./RoomHub";
 import { TokenBucket } from "./rateLimit";
 import { LIVE_HOLD_MS } from "@shared/liveScreen";
@@ -56,6 +57,8 @@ function fanout(userId: string, msg: object) {
 const direct = (ws: RoomClient, msg: object) => { if (ws.readyState === OPEN) ws.send(wire(msg)); };
 const notice = (ws: RoomClient, code: string) => direct(ws, { type: "room:notice", code });
 const refuse = (ws: RoomClient, code: string) => direct(ws, { type: "room:error", code });
+/** Every minors' room refusal carries the one warning text (and nothing about the room). */
+const minorsError = (code: MinorsRoomCode) => ({ type: "room:error", code, warning: MINORS_ROOM_WARNING });
 
 const BUCKET_TTL_MS = 10 * 60_000;
 const bucketsFor = (userId: string) => {
@@ -111,7 +114,32 @@ export function expectHost(roomId: string) { scheduleEnd(roomId); }
 
 /** After a restart nobody is in the hub: any live room whose host does not reconnect in time is ended. */
 export async function rehydrateLiveRooms(): Promise<void> {
-  for (const room of await rs.listLiveRooms()) if (!roomHub.get(room.id, room.hostId)) scheduleEnd(room.id);
+  const live = await rs.listLiveRooms();
+  for (const room of live) if (!roomHub.get(room.id, room.hostId)) scheduleEnd(room.id);
+  await sweepMinorsVoiceAtBoot(live).catch((e) => console.error("[voice] boot sweep failed:", e?.message ?? e));
+}
+
+/**
+ * LiveKit sessions outlive a restart, and the regular sweep only covers rooms with someone in the hub. At boot, every live
+ * minors' room with voice on drops any LiveKit participant who is not a teen (adults never speak there; unknown age never
+ * speaks). Teens are left connected; everyone rejoins the hub through the gated room:join as usual.
+ */
+export async function sweepMinorsVoiceAtBoot(live: Room[]): Promise<void> {
+  const svc = getVoiceService();
+  if (!svc) return;
+  const err = (what: string) => (e: unknown) => console.error(`[voice] boot sweep ${what} failed:`, e instanceof Error ? e.message : e);
+  for (const room of live) {
+    try {
+      if (!room.minorsRoom || !room.voiceEnabled) continue;
+      const present = await svc.listParticipants(room.id);
+      for (const p of present) {
+        try {
+          const age = ageFromDob((await storage.getUser(p.identity))?.dateOfBirth);
+          if (age === null || age >= 18) await svc.removeParticipant(room.id, p.identity);
+        } catch (e) { err("participant")(e); } // one participant failing never stops the others
+      }
+    } catch (e) { err("room")(e); } // nor one room the rest
+  }
 }
 
 // ---------------------------------------------------------------- leave
@@ -217,8 +245,13 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
   if (member?.banned) return refuse(ws, "BANNED");
   if ((kicked.get(`${roomId}:${userId}`) ?? 0) > Date.now()) return refuse(ws, "KICKED");
   const token = typeof msg.inviteToken === "string" ? msg.inviteToken : undefined;
-  // Includes the block check: a blocked person gets the same answer as for a room that doesn't exist.
-  if (!(await canViewRoom(room, userId, token))) return refuse(ws, "NOT_FOUND");
+  // Includes the block check: a blocked person gets the same answer as for a room that doesn't exist. In a minors' room an
+  // adult without an acknowledged personal invite is refused here with the warning (an invite link alone is not enough).
+  const view = await viewRoom(room, userId, token);
+  if (!view.ok) {
+    if (view.code === "NOT_FOUND" || view.code === "AGE_UNKNOWN") return refuse(ws, view.code);
+    return direct(ws, minorsError(view.code));
+  }
   const gate = canJoinRoom({ age: ageFromDob(user.dateOfBirth) }, room as any);
   if (!gate.ok) return refuse(ws, JOIN_AGE_CODES[gate.code]);
 
@@ -227,21 +260,33 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
 
   // Everything above can take a while on a slow database. Re-read what can change meanwhile, then do the
   // capacity check and the hub insert with no await between them, so concurrent joins cannot overshoot.
-  const [fresh, freshMember] = await Promise.all([rs.getRoom(roomId), rs.getMember(roomId, userId)]);
+  // The minors' room invite is re-read too: a revoke that landed during the awaits above must keep them out.
+  // The user is re-read as well: an admin birthdate correction during the awaits must decide with the new age.
+  // The invite is always read: the room may become a minors' room (host corrected to under 18) while we wait.
+  const [fresh, freshMember, freshInvite, freshUser] = await Promise.all([
+    rs.getRoom(roomId), rs.getMember(roomId, userId), getInviteState(roomId, userId), storage.getUser(userId),
+  ]);
+  const freshAge = ageFromDob(freshUser?.dateOfBirth);
   if (ws.readyState !== OPEN) return; // the socket died while we were checking: do not create a ghost
   if (!fresh || fresh.status === "ended") return refuse(ws, "ROOM_ENDED");
   if (fresh.status !== "live") return refuse(ws, "ROOM_NOT_LIVE");
   if (freshMember?.banned) return refuse(ws, "BANNED");
   if ((kicked.get(`${roomId}:${userId}`) ?? 0) > Date.now()) return refuse(ws, "KICKED");
-  if (!canJoinRoom({ age: ageFromDob(user.dateOfBirth) }, fresh as any).ok) return refuse(ws, "AGE_LIMIT"); // limit raised meanwhile
+  if (!freshUser || freshUser.deletedAt) return refuse(ws, "NOT_FOUND");
+  if (!canJoinRoom({ age: freshAge }, fresh as any).ok) return refuse(ws, freshAge === null ? "AGE_UNKNOWN" : "AGE_LIMIT"); // limit raised meanwhile
+  // The hub flag is set (synchronously) by a host correction right after its UPDATE commits, and is never cleared while the
+  // room lives, so a row read that predates the correction cannot let an uninvited adult in. No await from here to the insert.
+  const mg = minorsGate({ minorsRoom: fresh.minorsRoom || roomHub.isMinorsRoom(roomId), hostId: fresh.hostId }, userId, freshAge, freshInvite);
+  if (!mg.ok) return direct(ws, minorsError(mg.code));
 
   const role = userId === fresh.hostId ? "host" : freshMember?.role === "cohost" ? "cohost" : "guest";
   let me = roomHub.get(roomId, userId);
   const isNew = !me;
   if (!me) {
     if (role === "guest" && roomHub.count(roomId) >= fresh.capacity) return refuse(ws, "ROOM_FULL");
-    me = { userId, role, muted: freshMember?.muted ?? false, joinedAt: Date.now(), send: (m) => fanout(userId, m), info: memberInfo(user), age: ageFromDob(user.dateOfBirth) };
+    me = { userId, role, muted: freshMember?.muted ?? false, joinedAt: Date.now(), send: (m) => fanout(userId, m), info: memberInfo(freshUser), age: freshAge };
     roomHub.join(roomId, me);
+    if (fresh.minorsRoom) roomHub.markMinorsRoom(roomId); // before any stage decision for this room
     // Only the first person in sets the room's flags from the database. Once anyone is in, the voice / live-video routes keep
     // them current, and this joiner's row may predate a switch-off: writing it would turn voice or the camera back on.
     if (roomHub.count(roomId) === 1) {
@@ -304,6 +349,7 @@ export async function applyMod(roomId: string, action: ModAction, targetId: stri
   if (action === "ban" || action === "kick") roomHub.markUnquotable(roomId, targetId); // lines stay for reports, but cannot be quoted
   if (action === "ban") {
     await rs.setMemberFlag(roomId, targetId, { banned: true });
+    await revokeInvite(roomId, targetId); // a ban ends a minors' room adult invite for good: unbanning does not bring it back
     await rs.setOnStage(roomId, targetId, false);
     // Even if they are not in the room right now: a token they still hold must not get them back into the audio.
     if (!tm) await getVoiceService()?.removeParticipant(roomId, targetId).catch((e) => console.error("[voice] removeParticipant failed:", e?.message ?? e));
@@ -384,6 +430,124 @@ export async function enforceAgeLimit(roomId: string): Promise<void> {
     m.send({ type: "room:error", code: "AGE_LIMIT" });
     await evict(roomId, m.userId);
   }
+}
+
+/**
+ * Minors' room: takes an adult who may no longer be there out of the live room, with the warning. Waits for any join of
+ * theirs that is in flight first (joins run one at a time per user), so a join that read the invite just before it was
+ * revoked is undone here instead of slipping in; a join that starts later reads the revoke and is refused.
+ */
+export async function removeFromMinorsRoom(roomId: string, userId: string): Promise<void> {
+  await (joinLocks.get(userId) ?? Promise.resolve());
+  await dropCohostRole(roomId, userId);
+  const tm = roomHub.get(roomId, userId);
+  if (!tm) {
+    // Not in the room: a voice token they may still hold must not get them back into the audio.
+    await getVoiceService()?.removeParticipant(roomId, userId).catch((e) => console.error("[voice] removeParticipant failed:", e?.message ?? e));
+    return;
+  }
+  roomHub.markUnquotable(roomId, userId);
+  tm.send(minorsError("MINORS_ROOM")); // the person hears why before being removed
+  await evict(roomId, userId);
+}
+
+/** A birthdate was corrected: if that person is in a minors' room they may no longer be let into, they are taken out. */
+export async function enforceMinorsRoomFor(userId: string): Promise<void> {
+  await (joinLocks.get(userId) ?? Promise.resolve()); // a join in flight finishes first (it re-reads the birthdate itself)
+  const roomId = roomHub.roomOf(userId);
+  if (!roomId) return;
+  const [room, user, invite] = await Promise.all([rs.getRoom(roomId), storage.getUser(userId), getInviteState(roomId, userId)]);
+  if (!room?.minorsRoom || !user) return;
+  if (!minorsGate(room, userId, ageFromDob(user.dateOfBirth), invite).ok) await removeFromMinorsRoom(roomId, userId);
+}
+
+/**
+ * Every admin birthdate correction ends here. In order: the person's live age in the hub is refreshed (the stage rule reads
+ * it), a host now under 18 has their open rooms made minors' rooms, the room they are in is reconciled at once (mic, camera,
+ * stage and live screen follow the new age: an adult host of a minors' room loses them, a host corrected to a teen gets them
+ * back), and a member who may no longer be in a minors' room is taken out.
+ */
+export async function applyDobCorrection(userId: string): Promise<void> {
+  await (joinLocks.get(userId) ?? Promise.resolve()); // a join in flight finishes first (it re-reads the birthdate itself)
+  const user = await storage.getUser(userId);
+  if (!user) return;
+  const age = ageFromDob(user.dateOfBirth);
+  const roomId = roomHub.roomOf(userId);
+  const changed = roomId ? roomHub.refreshAge(roomId, userId, age) : false;
+
+  // Rooms they host. An adult (18+) loses every minors' room they host; anyone loses a room they may no longer host.
+  await endRoomsHostCannotKeep(user, age);
+  if (age !== null && age < 18) await enforceMinorsHost(userId);
+
+  // The room they are in.
+  if (roomId && changed) await reconcileVoice(roomId);
+  const room = roomId ? await rs.getRoom(roomId) : null;
+  if (room && room.status === "live" && room.hostId !== userId && roomHub.get(room.id, userId) && !canJoinRoom({ age }, room as any).ok) {
+    await removeForAgeLimit(room.id, userId); // corrected below the room's age limit
+  }
+  await enforceMinorsRoomFor(userId);
+}
+
+/** Message to everyone in a room that is closed because its host's account is under review. Plain, no accusation. */
+export const HOST_REVIEW_MESSAGE = "This room has closed because the host's account is being reviewed.";
+
+/**
+ * After a birthdate correction: ends (live) or cancels (scheduled) every room of this host that they may no longer host.
+ *  - an adult (18 or over) never keeps a minors' room;
+ *  - nobody keeps a room they could not create at their corrected age (age limit above them; a teen and a public room).
+ * Their other rooms are left alone. One way and idempotent (ended rooms are skipped).
+ */
+async function endRoomsHostCannotKeep(host: User, age: number | null): Promise<void> {
+  const open = (await rs.listOpenRoomsByHost(host.id));
+  for (const room of open) {
+    const adultInMinorsRoom = room.minorsRoom && (age === null || age >= 18);
+    const hc = canHostRoom({ age, accountAgeDays: Number.MAX_SAFE_INTEGER }, { visibility: room.visibility as any, ageLimit: room.ageLimit as any }, { minAccountAgeDays: 0 });
+    const cannotHost = !hc.ok && (hc.code === "HOST_BELOW_LIMIT" || hc.code === "TEEN_PUBLIC" || hc.code === "AGE_UNKNOWN");
+    if (!adultInMinorsRoom && !cannotHost) continue;
+    if (room.status === "live") {
+      roomHub.broadcast(room.id, { type: "room:notice", code: "HOST_REVIEW", message: HOST_REVIEW_MESSAGE });
+      await endRoom(room.id);
+    } else {
+      await rs.setStatus(room.id, "ended"); // a scheduled room is cancelled: it can never be started
+    }
+  }
+}
+
+/** A member corrected below the room's age limit leaves it now, told why (same code as a raised limit). */
+async function removeForAgeLimit(roomId: string, userId: string): Promise<void> {
+  await dropCohostRole(roomId, userId);
+  const tm = roomHub.get(roomId, userId);
+  if (!tm) return;
+  tm.send({ type: "room:error", code: "AGE_LIMIT" });
+  await evict(roomId, userId);
+}
+
+/** Someone removed by a safety rule does not keep a co-host role for a later return (same as the invite-revoke route). */
+async function dropCohostRole(roomId: string, userId: string): Promise<void> {
+  const m = await rs.getMember(roomId, userId);
+  if (m?.role === "cohost") await rs.setMemberRole(roomId, userId, "guest");
+}
+
+/**
+ * A host's birthdate was corrected to under 18: every room of theirs that has not ended becomes a minors' room (one way,
+ * never cleared), and in each live one anyone who may no longer be there (adults without an acknowledged invite, unknown
+ * age) is taken out with the warning. Returns the ids of the rooms that were flagged.
+ */
+export async function enforceMinorsHost(hostId: string): Promise<string[]> {
+  const flagged = await markHostRoomsMinors(hostId);
+  for (const r of flagged) {
+    if (r.status !== "live") continue;
+    // Marked (even if empty) and the members snapshotted in the same synchronous step: anyone inserted before this is in the
+    // snapshot and gated below; anyone inserted after it is caught by the re-check at the hub insert in joinOnce.
+    roomHub.markMinorsRoom(r.id); // the stage rule switches now: teens may speak, adults may not
+    for (const m of roomHub.members(r.id)) {
+      if (m.userId === hostId) continue;
+      const [u, invite] = await Promise.all([storage.getUser(m.userId), getInviteState(r.id, m.userId)]);
+      if (!minorsGate({ minorsRoom: true, hostId }, m.userId, ageFromDob(u?.dateOfBirth), invite).ok) await removeFromMinorsRoom(r.id, m.userId);
+    }
+    await reconcileVoice(r.id).catch((e) => console.error("[voice] reconcile failed:", e?.message ?? e)); // staged adults off, teens back on mic
+  }
+  return flagged.map((r) => r.id);
 }
 
 // ---------------------------------------------------------------- screen

@@ -2,7 +2,8 @@ import { ageFromDob, MIN_PLATFORM_AGE } from "@shared/age";
 import { storage } from "../storage";
 import { toPublicUser } from "../auth";
 
-type Result = { ok: true; user: ReturnType<typeof toPublicUser> } | { ok: false; status: 400 | 404; message: string };
+/** roomsFailed: the birthdate WAS saved, but applying it to the person's rooms threw (logged); the admin must be told. */
+type Result = { ok: true; user: ReturnType<typeof toPublicUser>; roomsFailed?: true } | { ok: false; status: 400 | 404; message: string };
 
 /** The only way a stored birthdate changes after signup. Admin-initiated, reasoned, audited. */
 export async function correctDateOfBirth(a: {
@@ -22,5 +23,13 @@ export async function correctDateOfBirth(a: {
     adminId: a.adminId, action: "user.dob_corrected", targetType: "user", targetId: a.userId,
     details: `DOB ${user.dateOfBirth ?? "none"} -> ${a.dateOfBirth.slice(0, 10)}: ${reason}`, reason, ipAddress: a.ip,
   });
+  // Rooms: someone corrected from under 18 to an adult while inside a minors' room is taken out unless the host invited
+  // them; a host corrected to under 18 has every open room made a minors' room, and uninvited adults are taken out.
+  try {
+    await (await import("../rooms/roomSocket")).applyDobCorrection(a.userId);
+  } catch (e) {
+    console.error("[rooms] applying a birthdate correction to rooms failed:", e);
+    return { ok: true, user: toPublicUser(updated), roomsFailed: true };
+  }
   return { ok: true, user: toPublicUser(updated) };
 }

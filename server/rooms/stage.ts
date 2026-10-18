@@ -26,7 +26,8 @@ function withRoomLock<T>(roomId: string, fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
-const eligible = (m: HubMember, roomId: string) => canBeOnStage({ age: m.age ?? null }, { bands: roomHub.bandsIn(roomId) }).ok;
+// In a minors' room teens always may speak and adults never may (see canBeOnStage); elsewhere the band rule applies.
+const eligible = (m: HubMember, roomId: string) => canBeOnStage({ age: m.age ?? null }, { bands: roomHub.bandsIn(roomId) }, { minorsRoom: roomHub.isMinorsRoom(roomId) }).ok;
 const without = (list: string[], id: string) => list.filter((x) => x !== id);
 
 /** Host, co-hosts and guests on stage may publish, as long as the teen rule allows them to speak right now. */

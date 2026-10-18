@@ -353,6 +353,12 @@ CREATE TABLE IF NOT EXISTS room_members (
     ALTER TABLE users ADD COLUMN IF NOT EXISTS age_verified_at timestamp;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS age_verified_method text;
   `);
+  // Minors' rooms: schema + backfill of open teen-hosted rooms, one batch (= one transaction). Same statements as
+  // migrations/add_minors_rooms.sql; additive, idempotent, the backfill only ever sets the flag.
+  {
+    const { MINORS_ROOMS_SCHEMA_SQL } = await import("./rooms/minorsRoomsMigration");
+    await pool.query(MINORS_ROOMS_SCHEMA_SQL);
+  }
   await pool.query(`
     ALTER TABLE venues ADD COLUMN IF NOT EXISTS building JSONB
   `);
