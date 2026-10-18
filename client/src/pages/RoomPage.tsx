@@ -31,7 +31,7 @@ import { useNow } from "@/hooks/useNow";
 import { awayRemainingMs, downSince, shouldShowHold } from "@/lib/voiceState";
 import { pickStartProfile, weakLinkAdvice, type VideoProfile } from "@/lib/bandwidth";
 import { layoutFor } from "@/lib/roomLayout";
-import { camLockReason, shareRoomUrl } from "@/lib/roomShell";
+import { camLockReason, micTapAction, shareRoomUrl } from "@/lib/roomShell";
 import { LIVE_HOLD_MS } from "@shared/liveScreen";
 import { DENIED_MESSAGE, KIND_LABEL, LINK_SCREENS, type PeekMember, NOTICE_MESSAGE, VISIBILITY_LABEL, ageLimitLabel, fetchRooms, formatWhen, hostName, type RoomHostSummary, type RoomView } from "@/lib/roomsApi";
 import type { ChatItem, RoomMemberView } from "@/lib/roomReducer";
@@ -262,6 +262,9 @@ function RoomPageInner({ id }: { id: string }) {
             <AlertTriangleIcon className="h-4 w-4 shrink-0" aria-hidden /> Reconnecting… the room will pick up where you left off.
           </div>
         )}
+        {/* First in the zone so it is on screen without scrolling. The dock owns the mic otherwise; this only shows while audio
+            needs a tap, is connecting, failed, or the mic errored (the dock mic also unlocks audio on tap). */}
+        {voiceNeedsAttention && <VoiceBar voice={voice} hasHand={!!me && state.hands.includes(me.id)} canAskToSpeak={role === "guest"} onRaise={() => sock.stageAction("raise")} onLower={() => sock.stageAction("lower")} />}
         {LINK_SCREENS && (
           <RoomScreen
             screen={state.room ? state.screen : room.screen}
@@ -301,12 +304,11 @@ function RoomPageInner({ id }: { id: string }) {
         )}
         {/* Task 1.5 swaps this for SpeakerStrip while live video is on. */}
         <RoomScene members={state.members} memberCount={state.memberCount} selfId={me?.id ?? null} reactions={state.reactions} interactions={state.interactions} hidden={hidden} stage={state.voiceEnabled ? state.stage : []} speaking={voice.activeSpeakers} onAvatarTap={pick} />
-        {/* The dock owns the mic; this only shows while audio needs a tap, is connecting, failed, or the mic errored. */}
-        {voiceNeedsAttention && <VoiceBar voice={voice} hasHand={!!me && state.hands.includes(me.id)} canAskToSpeak={role === "guest"} onRaise={() => sock.stageAction("raise")} onLower={() => sock.stageAction("lower")} />}
       </div>
     );
 
     const voiceUp = voice.status === "listening" || voice.status === "speaking";
+    const micAction = state.voiceEnabled ? micTapAction({ status: voice.status, canPublish: voice.canPublish, canAsk: role === "guest" }) : null;
     const dock = (
       <RoomDock
         muted={muted}
@@ -323,7 +325,10 @@ function RoomPageInner({ id }: { id: string }) {
           canAsk: state.voiceEnabled && role === "guest" && !voice.canPublish,
           onRaise: () => sock.stageAction("raise"),
           onLower: () => sock.stageAction("lower"),
-          muteLocked: state.voiceEnabled && !voiceUp ? (voice.status === "needs-tap" ? "Tap to hear the room first." : voice.status === "error" ? "Audio couldn't connect. Try again above." : "Audio is still connecting.") : undefined,
+          // A mic tap while audio waits for a tap (or failed) unlocks it; while connecting it only explains.
+          needsUnlock: micAction === "unlock",
+          onUnlock: () => voice.unlock(),
+          muteLocked: micAction === "wait" ? "Audio is still connecting." : undefined,
           mic: voiceUp && voice.canPublish ? { on: voice.micOn, onToggle: () => void voice.toggleMic() } : undefined,
         }}
         cam={{
@@ -339,7 +344,7 @@ function RoomPageInner({ id }: { id: string }) {
 
     const statusLine = incomingShown ?? noticeText;
     const floating = (
-      <div role="status" aria-live="polite" className="pointer-events-none absolute left-1/2 top-[68px] z-[13] w-max max-w-[90%] -translate-x-1/2" data-testid="room-status-line">
+      <div role="status" aria-live="polite" className={`pointer-events-none absolute top-[68px] z-[13] w-max -translate-x-1/2 ${layout === "rail" ? "left-[calc((100%-360px)/2)] max-w-[calc((100%-360px)*0.9)]" : "left-1/2 max-w-[90%]"}`} data-testid="room-status-line">
         {statusLine && <p className="rounded-full bg-foreground px-4 py-2 text-center text-sm font-medium text-background shadow-lg">{statusLine}</p>}
       </div>
     );
@@ -360,9 +365,11 @@ function RoomPageInner({ id }: { id: string }) {
     );
 
     return (
-      <div className={layout === "rail" ? "flex h-[100dvh] flex-col bg-background" : "h-[100dvh] bg-background"}>
-        {layout === "rail" && <Navigation />}
-        <div className={layout === "rail" ? "mx-auto min-h-0 w-full max-w-[1440px] flex-1" : "h-full"}>
+      // One stable tree for both layouts: crossing 1024 px (a tablet rotating) only changes classes, so the picture, the
+      // composer draft and the chat scroll survive. Navigation stays mounted and is only hidden in the stack layout.
+      <div className="flex h-[100dvh] flex-col bg-background">
+        <div className={layout === "rail" ? "contents" : "hidden"}><Navigation /></div>
+        <div className={`mx-auto min-h-0 w-full flex-1 ${layout === "rail" ? "max-w-[1440px]" : ""}`}>
           <RoomFrame
             layout={layout}
             immersive={immersive}

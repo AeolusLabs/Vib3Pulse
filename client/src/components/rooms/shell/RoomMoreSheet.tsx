@@ -4,7 +4,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { CheckIcon, EyeIcon, FlagIcon, LogOutIcon, SettingsIcon, Share2Icon, ShieldIcon, XIcon } from "@/components/ui/icons";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { roomSafetyRules, type SafetyTone } from "@/lib/roomShell";
+import { reportErrorToast, roomSafetyRules, type SafetyTone } from "@/lib/roomShell";
 
 export interface RoomMoreSheetProps {
   open: boolean;
@@ -62,9 +62,9 @@ export default function RoomMoreSheet({ open, onOpenChange, roomId, isHost, canS
 }
 
 const TONE: Record<SafetyTone, { cls: string; icon: ReactNode }> = {
-  ok: { cls: "text-green-700 dark:text-green-400", icon: <CheckIcon className="mt-0.5 h-[18px] w-[18px]" /> },
+  ok: { cls: "text-primary", icon: <CheckIcon className="mt-0.5 h-[18px] w-[18px]" /> },
   no: { cls: "text-destructive", icon: <XIcon className="mt-0.5 h-[18px] w-[18px]" /> },
-  eye: { cls: "text-primary", icon: <EyeIcon className="mt-0.5 h-[18px] w-[18px]" /> },
+  eye: { cls: "text-muted-foreground", icon: <EyeIcon className="mt-0.5 h-[18px] w-[18px]" /> },
 };
 
 /** Plain rules for this room, adapted to its age limit. */
@@ -97,7 +97,12 @@ export function RoomReportSheet({ open, onOpenChange, roomId, inviteToken }: { o
   const send = useMutation({
     mutationFn: (reason: string) => apiRequest("POST", `/api/rooms/${roomId}/report${inviteToken ? `?token=${encodeURIComponent(inviteToken)}` : ""}`, { reason, type: "room" }),
     onSuccess: () => { toast({ title: "Report sent", description: "Thanks. Our team will look at it." }); onOpenChange(false); },
-    onError: (e: any) => toast({ title: "Couldn't send report", description: e?.message, variant: "destructive" }),
+    onError: (e: any) => {
+      const t = reportErrorToast(e?.message);
+      const repeat = t.title !== "Couldn't send report"; // already reported: nothing went wrong, just close
+      toast({ ...t, variant: repeat ? undefined : "destructive" });
+      if (repeat) onOpenChange(false);
+    },
   });
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>

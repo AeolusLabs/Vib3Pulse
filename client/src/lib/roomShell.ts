@@ -53,3 +53,71 @@ export function shareRoomUrl(origin: string, room: { id: string; visibility: str
   if (room.visibility === "invite") return null;
   return `${origin}/rooms/${encodeURIComponent(room.id)}`;
 }
+
+export type FrameSlot = "root" | "top" | "zone" | "chat" | "chatHeading" | "pin" | "chatBody" | "dock";
+
+/**
+ * Class names for every slot of RoomFrame. One element tree serves stack, rail and immersive; only these classes change, so
+ * rotating a tablet across 1024 px never unmounts the picture, the composer draft or the chat scroll. Desktop is never immersive.
+ */
+export function frameSlots(layout: "stack" | "rail", immersive: boolean): Record<FrameSlot, string> {
+  if (layout === "rail") {
+    return {
+      root: "relative grid h-full min-h-0 grid-cols-[minmax(0,1fr)_360px] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-background text-foreground",
+      top: "col-start-1 row-start-1 min-w-0 px-2 pb-2 pt-3",
+      zone: "col-start-1 row-span-2 row-start-2 min-h-0 min-w-0 overflow-y-auto px-4 pb-4",
+      chat: "col-start-2 row-span-2 row-start-1 flex min-h-0 flex-col border-l bg-card",
+      chatHeading: "px-4 pb-2 pt-4 text-sm font-semibold",
+      pin: "px-3 pb-1",
+      chatBody: "flex min-h-0 flex-1 flex-col",
+      dock: "col-start-2 row-start-3 border-l bg-card",
+    };
+  }
+  if (immersive) {
+    return {
+      root: "relative h-full min-h-0 overflow-hidden bg-black text-white",
+      top: "absolute inset-x-0 top-0 z-[5] min-w-0 bg-gradient-to-b from-black/70 to-transparent px-2 pb-5 pt-3",
+      zone: "absolute inset-0 z-0",
+      // Chat floats over the lower picture, clear of the right-hand rail (task 1.5).
+      chat: "absolute bottom-[76px] left-0 right-16 z-[4] flex h-[30%] min-h-0 flex-col",
+      chatHeading: "hidden",
+      pin: "hidden",
+      chatBody: "flex min-h-0 flex-1 flex-col",
+      dock: "absolute inset-x-0 bottom-0 z-[5] bg-gradient-to-t from-black/70 to-transparent pt-3",
+    };
+  }
+  return {
+    root: "relative grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden bg-background text-foreground",
+    top: "min-w-0 px-2 pb-2 pt-3",
+    // Capped so chat is always on screen at 390 x 800; the scene scrolls inside its own box when the room is busy.
+    zone: "max-h-[38dvh] min-h-0 min-w-0 overflow-y-auto px-3",
+    chat: "mt-1.5 flex min-h-0 flex-col",
+    chatHeading: "hidden",
+    pin: "px-3 pb-1",
+    chatBody: "flex min-h-0 flex-1 flex-col",
+    dock: "border-t bg-card",
+  };
+}
+
+/**
+ * What a tap on the dock's mic does. Audio that is waiting for a tap (or failed) is unlocked by the tap itself, since it is a
+ * user gesture. While connecting it only explains. With the mic it toggles; a guest without it raises or lowers a hand.
+ */
+export function micTapAction(s: { status: string; canPublish: boolean; canAsk: boolean }): "unlock" | "wait" | "toggle-mic" | "hand" | null {
+  if (s.status === "needs-tap" || s.status === "error") return "unlock";
+  if (s.status === "connecting") return "wait";
+  if (s.status !== "listening" && s.status !== "speaking") return null;
+  if (s.canPublish) return "toggle-mic";
+  return s.canAsk ? "hand" : null;
+}
+
+/** Enter pressed to confirm an IME composition (Japanese, Chinese, Korean input), which must not send the message. */
+export function isImeEnter(e: { key: string; isComposing?: boolean; keyCode?: number }): boolean {
+  return e.key === "Enter" && (!!e.isComposing || e.keyCode === 229);
+}
+
+/** Toast for a failed room report. The server answers a repeat with 409 "You've already reported this". */
+export function reportErrorToast(message: string | undefined): { title: string; description?: string } {
+  if (message && /already reported/i.test(message)) return { title: "You already reported this room." };
+  return { title: "Couldn't send report", description: message };
+}

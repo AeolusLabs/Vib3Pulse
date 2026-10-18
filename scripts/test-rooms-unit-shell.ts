@@ -1,7 +1,7 @@
 // Rooms shell unit checks (no database, no DOM):   npx tsx scripts/test-rooms-unit-shell.ts   (or npm run test:rooms)
 import assert from "node:assert/strict";
 import { RAIL_MIN_WIDTH, defaultVideoView, layoutFor } from "../client/src/lib/roomLayout";
-import { DOCK_REACTIONS, camLockReason, orderPeople, roomSafetyRules, shareRoomUrl } from "../client/src/lib/roomShell";
+import { DOCK_REACTIONS, camLockReason, frameSlots, isImeEnter, micTapAction, orderPeople, reportErrorToast, roomSafetyRules, shareRoomUrl } from "../client/src/lib/roomShell";
 import { ROOM_REACTIONS } from "../shared/rooms";
 
 let passed = 0, failed = 0;
@@ -94,6 +94,46 @@ test("share: public and friends rooms share a plain link; invite rooms cannot be
   assert.equal(shareRoomUrl("https://x.test", { id: "r1", visibility: "friends" }), "https://x.test/rooms/r1");
   assert.equal(shareRoomUrl("https://x.test", { id: "r1", visibility: "invite" }), null);
   assert.equal(shareRoomUrl("https://x.test", { id: "a b", visibility: "public" }), "https://x.test/rooms/a%20b");
+});
+
+// ---------------------------------------------------------------- fix round 1
+// Rotating a tablet across 1024 px must not remount the room: one element tree, only classes change.
+test("frame: every layout and immersive state uses the same slots, so crossing 1024 px never remounts", () => {
+  const keys = (l: "stack" | "rail", imm: boolean) => Object.keys(frameSlots(l, imm)).sort().join(",");
+  const want = keys("stack", false);
+  assert.equal(keys("rail", false), want);
+  assert.equal(keys("stack", true), want);
+  assert.equal(keys("rail", true), want);
+  for (const s of Object.values(frameSlots("stack", false))) assert.equal(typeof s, "string");
+});
+test("frame: rail is two columns with a 360 px chat; stack is rows; immersive floats over the picture", () => {
+  assert.match(frameSlots("rail", false).root, /360px/);
+  assert.doesNotMatch(frameSlots("stack", false).root, /360px/);
+  assert.match(frameSlots("stack", false).zone, /max-h-\[38dvh\]/);
+  assert.match(frameSlots("stack", true).zone, /absolute inset-0/);
+  assert.match(frameSlots("stack", false).chatHeading, /\bhidden\b/);
+  assert.doesNotMatch(frameSlots("rail", false).chatHeading, /\bhidden\b/);
+  assert.deepEqual(frameSlots("rail", true), frameSlots("rail", false)); // desktop is never immersive
+});
+test("dock: mic tap while audio is locked behind a tap or failed unlocks it (a user gesture), connecting only explains", () => {
+  assert.equal(micTapAction({ status: "needs-tap", canPublish: false, canAsk: true }), "unlock");
+  assert.equal(micTapAction({ status: "error", canPublish: false, canAsk: true }), "unlock");
+  assert.equal(micTapAction({ status: "connecting", canPublish: false, canAsk: true }), "wait");
+  assert.equal(micTapAction({ status: "listening", canPublish: true, canAsk: false }), "toggle-mic");
+  assert.equal(micTapAction({ status: "speaking", canPublish: true, canAsk: false }), "toggle-mic");
+  assert.equal(micTapAction({ status: "listening", canPublish: false, canAsk: true }), "hand");
+  assert.equal(micTapAction({ status: "listening", canPublish: false, canAsk: false }), null);
+  assert.equal(micTapAction({ status: "off", canPublish: false, canAsk: false }), null);
+});
+test("dock: Enter while an IME is composing never sends", () => {
+  assert.equal(isImeEnter({ key: "Enter", isComposing: true, keyCode: 13 }), true);
+  assert.equal(isImeEnter({ key: "Enter", isComposing: false, keyCode: 229 }), true);
+  assert.equal(isImeEnter({ key: "Enter", isComposing: false, keyCode: 13 }), false);
+  assert.equal(isImeEnter({ key: "a", isComposing: true, keyCode: 65 }), false);
+});
+test("report: a repeat report gets a friendly line, anything else keeps the server's message", () => {
+  assert.deepEqual(reportErrorToast("You've already reported this"), { title: "You already reported this room." });
+  assert.deepEqual(reportErrorToast("Room not found"), { title: "Couldn't send report", description: "Room not found" });
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
