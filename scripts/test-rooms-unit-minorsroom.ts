@@ -62,6 +62,24 @@ test("denial codes are exactly MINORS_ROOM and MINORS_ROOM_ACK", () => {
   assert.deepEqual([...MINORS_ROOM_CODES], ["MINORS_ROOM", "MINORS_ROOM_ACK"]);
 });
 
+// Stage rule in a minors' room: teens always speak, adults never; normal rooms keep the band rule.
+{
+  const { canBeOnStage } = await import("../shared/stage");
+  const M = { minorsRoom: true };
+  test("minors' room: a teen may speak with adults present", () => assert.deepEqual(canBeOnStage({ age: 16 }, { bands: ["teen", "adult", "adult"] }, M), { ok: true }));
+  test("minors' room: a teen may speak alongside unknown-age people", () => assert.deepEqual(canBeOnStage({ age: 13 }, { bands: ["teen", null] }, M), { ok: true }));
+  test("minors' room: an adult never speaks, even with only adults present", () => {
+    assert.deepEqual(canBeOnStage({ age: 30 }, { bands: ["teen", "adult"] }, M), { ok: false, code: "MINORS_ROOM_ADULT" });
+    assert.deepEqual(canBeOnStage({ age: 18 }, { bands: ["adult"] }, M), { ok: false, code: "MINORS_ROOM_ADULT" });
+  });
+  test("minors' room: unknown age never speaks", () => assert.deepEqual(canBeOnStage({ age: null }, { bands: ["teen"] }, M), { ok: false, code: "AGE_UNKNOWN" }));
+  test("normal room unchanged: teen blocked by an adult, adult allowed, default is the normal rule", () => {
+    assert.deepEqual(canBeOnStage({ age: 16 }, { bands: ["teen", "adult"] }, { minorsRoom: false }), { ok: false, code: "ADULT_PRESENT" });
+    assert.deepEqual(canBeOnStage({ age: 16 }, { bands: ["teen", "adult"] }), { ok: false, code: "ADULT_PRESENT" });
+    assert.deepEqual(canBeOnStage({ age: 30 }, { bands: ["teen", "adult"] }, { minorsRoom: false }), { ok: true });
+  });
+}
+
 // The migration file and the constant ensureSchema runs must be the same statements (backfill included).
 {
   const { readFileSync } = await import("node:fs");

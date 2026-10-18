@@ -261,54 +261,124 @@ try {
   check("held race 2: the correction finishes and they are not in the minors' room", (await fixing).ok && !roomHub.get(R, TG));
   gv.gate = null; gv.heldUser = "";
 
-  // ---- teen stage rule unchanged: an invited adult still takes teen speakers off the stage
+  // ---- minors' room stage rule: teens keep the mic and camera whoever is present; adults listen and chat only
   const fake = new FakeVoice();
   setVoiceServiceForTests(fake);
-  const TH = await mk("st_teenhost", yearsAgo(16)), S1 = await mk("st_t1", yearsAgo(15)), AD = await mk("st_adult");
-  await mutual(TH, S1); await mutual(TH, AD);
+  const { canPublishNow, canCameraNow, sweepVoice } = await import("../server/rooms/stage");
+  const TH = await mk("st_teenhost", yearsAgo(16)), S1 = await mk("st_t1", yearsAgo(15)), S2 = await mk("st_t2", yearsAgo(14)), AD = await mk("st_adult");
+  for (const x of [S1, S2, AD]) await mutual(TH, x);
   const sr = await rest("POST", "/api/rooms", TH, { title: "teen stage", kind: "party", visibility: "friends" });
   const SR = sr.json.room.id as string;
   await rest("POST", `/api/rooms/${SR}/start`, TH);
-  await rs.setVoiceEnabled(SR, true);
+  await rs.setVoiceEnabled(SR, true); await rs.setLiveVideo(SR, true);
   const lastStage = (cl: Client) => [...cl.msgs].reverse().find((m) => m.type === "room:stage" && !m.invitedYou);
   const stageNow = async (cl: Client, pred: (s: any) => boolean) => { await until(() => { const s = lastStage(cl); return !!s && pred(s); }); const s = lastStage(cl); return !!s && pred(s); };
-  const sth = await connect(TH), s1 = await connect(S1), ad = await connect(AD);
-  await join(sth, SR); await join(s1, SR);
-  const hostTok = await rest("POST", `/api/rooms/${SR}/voice-token`, TH);
-  check("all-teen minors' room: the teen host's voice token can publish", hostTok.status === 200 && hostTok.json?.canPublish === true, JSON.stringify(hostTok));
+  const lastLive = (cl: Client) => [...cl.msgs].reverse().find((m) => m.type === "room:live");
+  const liveNow = async (cl: Client, pred: (l: any) => boolean) => { await until(() => { const l = lastLive(cl); return !!l && pred(l); }); const l = lastLive(cl); return !!l && pred(l); };
+  const noticeOf = (cl: Client, code: string) => cl.waitFor((m) => m.type === "room:notice" && m.code === code);
   const logOf = (op: string, roomId: string, userId?: string, canPublish?: boolean) =>
     fake.calls.filter((c) => c.op === op && c.roomId === roomId && (userId === undefined || c.userId === userId) && (canPublish === undefined || c.canPublish === canPublish));
+  const revokedPublish = (from: number, except?: string) => fake.calls.slice(from).filter((c) => c.op === "setCanPublish" && c.canPublish === false && c.userId !== except);
+  const sth = await connect(TH), s1 = await connect(S1), s2 = await connect(S2), ad = await connect(AD);
+  await join(sth, SR); await join(s1, SR); await join(s2, SR);
+  const hostTok = await rest("POST", `/api/rooms/${SR}/voice-token`, TH);
+  check("minors' room: the teen host's voice token can publish", hostTok.status === 200 && hostTok.json?.canPublish === true, JSON.stringify(hostTok));
   s1.send({ type: "room:stage", action: "raise" });
-  check("all-teen minors' room: a teen can raise a hand", await stageNow(sth, (s) => s.hands.includes(S1)));
+  check("minors' room: a teen raises a hand", await stageNow(sth, (s) => s.hands.includes(S1)));
   sth.send({ type: "room:stage", action: "accept", targetId: S1 });
-  check("...and the teen host gives them the mic", await stageNow(sth, (s) => s.stage.includes(S1)));
+  sth.send({ type: "room:stage", action: "accept", targetId: S2 });
+  check("...and the teen host gives two teens the mic", await stageNow(sth, (s) => s.stage.includes(S1) && s.stage.includes(S2)));
+  s1.drain();
+  s1.send({ type: "room:live", action: "ask" });
+  check("...a teen on stage asks for the live screen", await liveNow(sth, (l) => l.asks.includes(S1)));
+  sth.send({ type: "room:live", action: "grant", targetId: S1 });
+  check("...and the host gives it to them (camera)", await liveNow(sth, (l) => l.holder === S1) && canCameraNow(SR, S1));
+
   await rest("POST", `/api/rooms/${SR}/adult-invites/${AD}`, TH);
   await rest("POST", `/api/rooms/${SR}/adult-invites/acknowledge`, AD);
-  check("an invited, acknowledged adult joins", (await join(ad, SR))?.type === "room:state");
-  check("...and the teen speaker comes off the stage (existing rule, unchanged)", await stageNow(sth, (s) => s.stage.length === 0));
-  check("...and the teen HOST's own mic permission is revoked while the adult is there (existing rule; host keeps the role)", await until(() => logOf("setCanPublish", SR, TH, false).length >= 1) && roomHub.get(SR, TH)?.role === "host");
+  const callsBefore = fake.calls.length;
+  check("an invited, acknowledged adult joins", (await join(ad, SR))?.type === "room:state"); // the join's reconcile runs before room:state
+  check("...the teen speakers stay on the stage", roomHub.stageOf(SR).stage.includes(S1) && roomHub.stageOf(SR).stage.includes(S2));
+  check("...the teen host keeps the mic and no teen's publish permission is revoked", canPublishNow(SR, TH) && canPublishNow(SR, S1) && canPublishNow(SR, S2) && revokedPublish(callsBefore, AD).length === 0, JSON.stringify(fake.calls.slice(callsBefore)));
+  check("...the teen keeps the live screen and camera", roomHub.liveOf(SR).holder === S1 && canCameraNow(SR, S1));
+  const hostTok2 = await rest("POST", `/api/rooms/${SR}/voice-token`, TH);
+  check("...a fresh token for the teen host can still publish", hostTok2.json?.canPublish === true, JSON.stringify(hostTok2.json));
+  const adTok = await rest("POST", `/api/rooms/${SR}/voice-token`, AD);
+  check("the adult's voice token is listen only (canPublish false)", adTok.status === 200 && adTok.json?.canPublish === false, JSON.stringify(adTok.json));
+  ad.drain();
+  ad.send({ type: "room:stage", action: "raise" });
+  check("the adult cannot raise a hand (NOT_ELIGIBLE)", !!(await noticeOf(ad, "NOT_ELIGIBLE")));
+  sth.drain();
+  sth.send({ type: "room:stage", action: "accept", targetId: AD });
+  check("the host cannot give the adult the mic (NOT_ELIGIBLE)", !!(await noticeOf(sth, "NOT_ELIGIBLE")));
+  sth.drain();
+  sth.send({ type: "room:stage", action: "invite", targetId: AD });
+  check("...nor invite them to the stage (NOT_ELIGIBLE)", !!(await noticeOf(sth, "NOT_ELIGIBLE")));
+  ad.drain();
+  ad.send({ type: "room:live", action: "ask" });
+  check("the adult cannot ask for the live screen", !!(await ad.waitFor((m) => m.type === "room:notice" && (m.code === "NOT_ON_STAGE" || m.code === "TEEN_RULE"))));
   s1.drain();
-  s1.send({ type: "room:stage", action: "raise" });
-  check("...a teen cannot raise a hand while the adult is there (NOT_ELIGIBLE)", !!(await s1.waitFor((m) => m.type === "room:notice" && m.code === "NOT_ELIGIBLE")));
-  sth.drain(); s1.drain();
+  ad.send({ type: "room:chat", text: "hello from the adult" });
+  check("the adult can still chat", !!(await s1.waitFor((m) => m.type === "room:chat" && m.userId === AD)));
+
+  // An adult co-host would be an implicit speaker elsewhere: in a minors' room their publish permission is off.
+  const adMember = roomHub.get(SR, AD);
+  if (adMember) adMember.role = "cohost";
+  check("an adult co-host in a minors' room cannot publish", !!adMember && !canPublishNow(SR, AD));
+  if (adMember) adMember.role = "guest";
+
+  const callsBeforeRevoke = fake.calls.length;
   await rest("DELETE", `/api/rooms/${SR}/adult-invites/${AD}`, TH);
-  check("revoking the adult takes them out of the stage room too", await until(() => !roomHub.get(SR, AD)));
-  check("...and LiveKit is told to drop them at once", logOf("remove", SR, AD).length >= 1);
-  check("...the teen host's mic permission comes back", await until(() => logOf("setCanPublish", SR, TH, true).length >= 1));
+  check("revoking the adult takes them out", await until(() => !roomHub.get(SR, AD)));
+  check("...LiveKit is told to drop them at once", logOf("remove", SR, AD).length >= 1);
+  check("...and nothing changes for the teens (stage, screen, publish)", roomHub.stageOf(SR).stage.includes(S1) && roomHub.stageOf(SR).stage.includes(S2) && roomHub.liveOf(SR).holder === S1 && canPublishNow(SR, TH)
+    && revokedPublish(callsBeforeRevoke).length === 0, JSON.stringify(fake.calls.slice(callsBeforeRevoke)));
   // A token minted before the revoke lives up to 60 s: if they reconnect to LiveKit with it, the sweep removes anyone not in the room.
-  const { sweepVoice } = await import("../server/rooms/stage");
   const removesBefore = logOf("remove", SR, AD).length;
-  fake.participants = [{ identity: TH, canPublish: true }, { identity: S1, canPublish: false }, { identity: AD, canPublish: false }];
+  fake.participants = [{ identity: TH, canPublish: true }, { identity: S1, canPublish: true }, { identity: AD, canPublish: false }];
   await sweepVoice(SR);
   check("voice sweep: a revoked adult back in LiveKit on an old token is removed", logOf("remove", SR, AD).length > removesBefore);
   check("...and nobody who is in the room is removed", logOf("remove", SR, TH).length === 0 && logOf("remove", SR, S1).length === 0);
   fake.participants = [];
-  s1.send({ type: "room:stage", action: "raise" });
-  check("...and teens can raise a hand again once the adult is gone", await stageNow(sth, (s) => s.hands.includes(S1)));
+
+  // An adult who simply leaves: nothing changes for teens either.
+  const AD2 = await mk("st_adult2"); await mutual(TH, AD2);
+  await rest("POST", `/api/rooms/${SR}/adult-invites/${AD2}`, TH);
+  await rest("POST", `/api/rooms/${SR}/adult-invites/acknowledge`, AD2);
+  const ad2 = await connect(AD2);
+  check("a second invited adult joins", (await join(ad2, SR))?.type === "room:state");
+  const callsBeforeLeave = fake.calls.length;
+  ad2.send({ type: "room:leave" });
+  check("...and leaves", await until(() => !roomHub.get(SR, AD2)));
+  check("...teens unchanged after the adult leaves", roomHub.stageOf(SR).stage.length === 2 && roomHub.liveOf(SR).holder === S1 && revokedPublish(callsBeforeLeave).length === 0);
+
+  // ---- an adult already on the stage when a room becomes a minors' room (host corrected to a teen) is taken off it
+  const NH = await mk("st_normhost"), NA = await mk("st_normadult"), NT = await mk("st_normteen", yearsAgo(15));
+  const NR = await rs.createRoom(NH, { title: "normal first", kind: "party", visibility: "public", ageLimit: "all" } as any);
+  await rs.setStatus(NR.id, "live"); await rs.setVoiceEnabled(NR.id, true);
+  const nh = await connect(NH), na = await connect(NA), nt = await connect(NT);
+  await join(nh, NR.id); await join(na, NR.id); await join(nt, NR.id);
+  nh.send({ type: "room:stage", action: "accept", targetId: NA });
+  check("normal room (unchanged rule): the host gives an adult the mic", await stageNow(nh, (s) => s.stage.includes(NA)));
+  nt.drain();
+  nt.send({ type: "room:stage", action: "raise" });
+  check("normal room (unchanged rule): a teen cannot raise a hand with adults present", !!(await noticeOf(nt, "NOT_ELIGIBLE")));
+  // An adult holding an acknowledged invite stays in the room after the switch. Such a row cannot be made through the API
+  // for a room that is not yet a minors' room, so it is written directly.
+  await q(`insert into room_adult_invites (room_id, user_id, invited_by, acknowledged_at, first_acknowledged_at) values ($1,$2,$3, now(), now())`, [NR.id, NA, NH]);
+  const fixAdmin = (await q(`insert into admin_users (username, email, password_hash, display_name, role) values ($1,$2,$3,'A','super_admin') returning id`,
+    [`mr_adm2${stamp}`, `mr_adm2${stamp}@t.dev`, hash]))[0].id as string;
+  await correctDateOfBirth({ adminId: fixAdmin, userId: NH, dateOfBirth: yearsAgo(15), reason: "test correction" });
+  check("host corrected to a teen: the room becomes a minors' room", (await rs.getRoom(NR.id))!.minorsRoom === true);
+  check("...the invited adult stays in the room but is taken off the stage", !!roomHub.get(NR.id, NA) && await stageNow(nh, (s) => !s.stage.includes(NA)));
+  check("...and loses publish permission", !canPublishNow(NR.id, NA));
+  nt.drain();
+  nt.send({ type: "room:stage", action: "raise" });
+  check("...while the teen can now raise a hand with the adult present", await stageNow(nh, (s) => s.hands.includes(NT)));
   setVoiceServiceForTests(undefined);
 
   // ---- nothing a teen received in this file carried the warning
-  check("the warning was never sent to a teen", ![t2, s1, sth, th].some((cl) => cl.msgs.some((m) => m.warning !== undefined || JSON.stringify(m).includes("legal action"))));
+  check("the warning was never sent to a teen", ![t2, s1, s2, sth, th, nt].some((cl) => cl.msgs.some((m) => m.warning !== undefined || JSON.stringify(m).includes("legal action"))));
 } catch (e: any) {
   failed++; console.log(`FAIL uncaught: ${e.stack || e}`);
 } finally {

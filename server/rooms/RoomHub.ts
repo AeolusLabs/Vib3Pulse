@@ -38,6 +38,7 @@ export class RoomHub {
   private voice = new Map<string, boolean>();
   private lives = new Map<string, LiveState>();
   private liveVideo = new Map<string, boolean>();
+  private minors = new Set<string>(); // live rooms that are minors' rooms (mirrors rooms.minors_room, which never clears)
 
   /** One room per user: joining another leaves the first. Returns the room that was left, if any. */
   join(roomId: string, m: HubMember): string | null {
@@ -57,7 +58,7 @@ export class RoomHub {
     if (!room || !m) return undefined;
     room.delete(userId);
     if (this.byUser.get(userId) === roomId) this.byUser.delete(userId);
-    if (room.size === 0) { this.rooms.delete(roomId); this.chat.delete(roomId); this.stages.delete(roomId); this.voice.delete(roomId); this.lives.delete(roomId); this.liveVideo.delete(roomId); }
+    if (room.size === 0) { this.rooms.delete(roomId); this.chat.delete(roomId); this.stages.delete(roomId); this.voice.delete(roomId); this.lives.delete(roomId); this.liveVideo.delete(roomId); this.minors.delete(roomId); }
     return m;
   }
 
@@ -98,6 +99,7 @@ export class RoomHub {
     this.voice.delete(roomId);
     this.lives.delete(roomId);
     this.liveVideo.delete(roomId);
+    this.minors.delete(roomId);
     return gone;
   }
 
@@ -126,6 +128,10 @@ export class RoomHub {
     if (s.holder || s.asks.length) this.lives.set(roomId, { holder: s.holder, asks: [...s.asks] });
     else this.lives.delete(roomId);
   }
+
+  /** Minors' room flag for the stage rule (hot path, no query). Set from the room row on every join; one way, like the column. */
+  isMinorsRoom(roomId: string): boolean { return this.minors.has(roomId); }
+  markMinorsRoom(roomId: string): void { if (this.count(roomId) > 0) this.minors.add(roomId); }
 
   /** Whether live video is on for the room (mirrors rooms.live_video). Like voice, only kept while someone is in the room. */
   liveVideoOn(roomId: string): boolean { return this.liveVideo.get(roomId) === true; }

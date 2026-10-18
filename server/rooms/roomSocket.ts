@@ -258,6 +258,7 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
     if (role === "guest" && roomHub.count(roomId) >= fresh.capacity) return refuse(ws, "ROOM_FULL");
     me = { userId, role, muted: freshMember?.muted ?? false, joinedAt: Date.now(), send: (m) => fanout(userId, m), info: memberInfo(freshUser), age: freshAge };
     roomHub.join(roomId, me);
+    if (fresh.minorsRoom) roomHub.markMinorsRoom(roomId); // before any stage decision for this room
     // Only the first person in sets the room's flags from the database. Once anyone is in, the voice / live-video routes keep
     // them current, and this joiner's row may predate a switch-off: writing it would turn voice or the camera back on.
     if (roomHub.count(roomId) === 1) {
@@ -440,11 +441,13 @@ export async function enforceMinorsHost(hostId: string): Promise<string[]> {
   const flagged = await markHostRoomsMinors(hostId);
   for (const r of flagged) {
     if (r.status !== "live") continue;
+    roomHub.markMinorsRoom(r.id); // the stage rule switches now: teens may speak, adults may not
     for (const m of roomHub.members(r.id)) {
       if (m.userId === hostId) continue;
       const [u, invite] = await Promise.all([storage.getUser(m.userId), getInviteState(r.id, m.userId)]);
       if (!minorsGate({ minorsRoom: true, hostId }, m.userId, ageFromDob(u?.dateOfBirth), invite).ok) await removeFromMinorsRoom(r.id, m.userId);
     }
+    await reconcileVoice(r.id).catch((e) => console.error("[voice] reconcile failed:", e?.message ?? e)); // staged adults off, teens back on mic
   }
   return flagged.map((r) => r.id);
 }
