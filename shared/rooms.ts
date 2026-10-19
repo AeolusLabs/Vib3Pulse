@@ -12,9 +12,28 @@ export const ROOM_REACTIONS: readonly string[] = ["❤️", "🔥", "👏", "�
 /** How long a room stays open after its host leaves or drops, before it ends on its own (the server uses this; the client words it). */
 export const HOST_LEAVE_GRACE_MS = 120_000;
 
-export const ROOM_LIMITS = { capacityDefault: 50, capacityMax: 50, capacityMaxPaid: 150, liveVideoMax: 50, title: 80, description: 500, chat: 300, replyText: 120 } as const;
+export const ROOM_LIMITS = { capacityDefault: 50, capacityMax: 50, capacityMaxPaid: 150, liveVideoMax: 50, title: 80, description: 500, chat: 300, replyText: 120, pinned: 200 } as const;
 const MAX_SCHEDULE_DAYS = 90;
 const MAX_URL = 2048;
+
+// ---------------------------------------------------------------- host settings
+/** Slow mode choices, in seconds between two chat lines from the same person (0 = off). Host and co-hosts are exempt. */
+export const SLOW_MODES = [0, 5, 15, 30] as const;
+export type SlowMode = (typeof SLOW_MODES)[number];
+/** What a pinned message may be sent as, before it is made plain text and cut to ROOM_LIMITS.pinned (longer is refused). */
+export const PINNED_INPUT_MAX = 2000;
+
+/**
+ * Cuts text to ROOM_LIMITS.pinned characters (whole code points, so an emoji is never split) and trims it.
+ * Empty gives null (no pinned message). The server runs this AFTER stripping HTML; the client can use it for previews.
+ */
+export function cutPinned(text: string): string | null {
+  const t = Array.from(text.trim()).slice(0, ROOM_LIMITS.pinned).join("").trim();
+  return t ? t : null;
+}
+
+/** The three host settings as the room shows them (WS `room:settings` and inside `room:state.room`). */
+export interface RoomSettings { pinnedMessage: string | null; slowModeSec: number; locked: boolean }
 
 // ---------------------------------------------------------------- minors' rooms
 /**
@@ -87,6 +106,13 @@ export interface RoomInput {
   noDirectInteractions?: boolean;
   screenUrl?: string;
   capacity?: number;
+  /**
+   * Host setting. undefined = not sent; null = no pinned message. A string here is only trimmed: the server makes it
+   * plain text and cuts it to ROOM_LIMITS.pinned (pinnedPlainText), so tags never count towards the length.
+   */
+  pinnedMessage?: string | null;
+  /** Host setting: one of SLOW_MODES. undefined = not sent. */
+  slowModeSec?: SlowMode;
 }
 
 const optId = (v: unknown) => v === undefined || v === null || v === "" ? undefined : typeof v === "string" && v.length <= 64 ? v : null;
@@ -132,11 +158,28 @@ export function validateRoomInput(input: unknown, now = new Date()): Validated<R
     scheduledFor = new Date(t).toISOString();
   }
 
+  // Only the exact numbers in SLOW_MODES (the string "5" or 7 are refused). Absent means "not sent".
+  let slowModeSec: SlowMode | undefined;
+  if (input.slowModeSec !== undefined) {
+    if (typeof input.slowModeSec !== "number" || !(SLOW_MODES as readonly number[]).includes(input.slowModeSec)) return fail("slowModeSec");
+    slowModeSec = input.slowModeSec as SlowMode;
+  }
+
+  // null or "" clears it. Anything else must be a string; it is made plain text and cut to 200 by the server.
+  let pinnedMessage: string | null | undefined;
+  if (input.pinnedMessage !== undefined) {
+    if (input.pinnedMessage === null || input.pinnedMessage === "") pinnedMessage = null;
+    else if (typeof input.pinnedMessage !== "string" || input.pinnedMessage.length > PINNED_INPUT_MAX) return fail("pinnedMessage");
+    else pinnedMessage = input.pinnedMessage.trim() || null;
+  }
+
   return {
     ok: true,
     value: {
       title, description, kind: input.kind as RoomKind, visibility: input.visibility as RoomVisibility, ageLimit: ageLimit as AgeLimit,
       eventId, venueId, scheduledFor, noDirectInteractions: input.noDirectInteractions === true, screenUrl, capacity,
+      ...(slowModeSec !== undefined ? { slowModeSec } : {}),
+      ...(pinnedMessage !== undefined ? { pinnedMessage } : {}),
     },
   };
 }

@@ -359,6 +359,12 @@ CREATE TABLE IF NOT EXISTS room_members (
     const { MINORS_ROOMS_SCHEMA_SQL } = await import("./rooms/minorsRoomsMigration");
     await pool.query(MINORS_ROOMS_SCHEMA_SQL);
   }
+  // Rooms host settings (same statements as migrations/add_rooms_host_settings.sql; additive + idempotent, one batch)
+  await pool.query(`
+    ALTER TABLE rooms ADD COLUMN IF NOT EXISTS pinned_message text;
+    ALTER TABLE rooms ADD COLUMN IF NOT EXISTS slow_mode_sec integer NOT NULL DEFAULT 0;
+    ALTER TABLE rooms ADD COLUMN IF NOT EXISTS locked boolean NOT NULL DEFAULT false;
+  `);
   await pool.query(`
     ALTER TABLE venues ADD COLUMN IF NOT EXISTS building JSONB
   `);
