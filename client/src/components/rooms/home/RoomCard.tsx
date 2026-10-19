@@ -20,7 +20,7 @@ export default function RoomCard({ room, friendIds, selfId, paidRoomsOn }: Props
   const cover = coverColour(room.id);
   const friends = friendsInside(room.peek, friendIds, selfId);
   const faces = (room.peek?.length ? room.peek : room.host ? [{ userId: room.host.id, role: "host", ...room.host } as PeekMember] : []).slice(0, 4);
-  const label = cardLabel(room, hostName(room.host), KIND_LABEL[room.kind], friends.map(nameOf));
+  const label = cardLabel(room, hostName(room.host), KIND_LABEL[room.kind], friends.map(nameOf), live ? undefined : formatWhen(room.scheduledFor));
   return (
     <Link href={`/rooms/${room.id}`} aria-label={label} className="group block min-h-[44px] rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary" data-testid={`room-card-${room.id}`}>
       <article className="overflow-hidden rounded-2xl border border-border bg-card transition-[transform,border-color] duration-200 motion-reduce:transition-none group-hover:border-primary/40 motion-safe:group-hover:-translate-y-[3px] motion-safe:group-active:translate-y-0">

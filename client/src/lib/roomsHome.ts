@@ -39,7 +39,12 @@ export function activeFilterCount(f: HomeFilters, paidRoomsOn: boolean): number 
   return (f.kinds.length ? 1 : 0) + (f.friendsInside ? 1 : 0) + (paidRoomsOn && f.price !== "any" ? 1 : 0);
 }
 
-/** People in the room's peek list whom the viewer follows. The viewer themself never counts. */
+/**
+ * People in the room's peek list whom the viewer follows (one-way follows, not the mutual "Friends" tab).
+ * The peek is only the first few people the server sends (5 at most), so someone later in a big room is not seen here.
+ * Both the "People you follow inside" filter and the card line share this limit; widening it needs a server change.
+ * The viewer themself never counts.
+ */
 export function friendsInside(peek: readonly PeekMember[] | undefined, friendIds: ReadonlySet<string>, selfId?: string | null): PeekMember[] {
   return (peek ?? []).filter((p) => p.userId !== selfId && friendIds.has(p.userId));
 }
@@ -71,10 +76,10 @@ export function peopleLabel(n: number): string {
   return `${n} ${n === 1 ? "person" : "people"}`;
 }
 
-/** One sentence naming the card for a screen reader. */
-export function cardLabel(room: Pick<HomeRoom, "title" | "kind" | "status" | "ageLimit" | "memberCount">, hostLabel: string, kindLabel: string, friendNames: readonly string[]): string {
+/** One sentence naming the card for a screen reader. `when` is the start time text for a room that has not started. */
+export function cardLabel(room: Pick<HomeRoom, "title" | "kind" | "status" | "ageLimit" | "memberCount">, hostLabel: string, kindLabel: string, friendNames: readonly string[], when?: string): string {
   const parts = [room.title, `hosted by ${hostLabel}`, kindLabel, ageTagLabel(room.ageLimit)];
-  parts.push(room.status === "live" ? `live, ${peopleLabel(room.memberCount ?? 0)} inside` : "not started yet");
+  parts.push(room.status === "live" ? `live, ${peopleLabel(room.memberCount ?? 0)} inside` : (when ? `not started yet, starts ${when}` : "not started yet"));
   if (friendNames.length) parts.push(`${friendNames.slice(0, 2).join(" and ")} inside`);
   return parts.join(", ");
 }
@@ -82,10 +87,21 @@ export function cardLabel(room: Pick<HomeRoom, "title" | "kind" | "status" | "ag
 export const TAB_COPY: Record<RoomScope, { label: string; empty: string; emptyFiltered: string }> = {
   live: { label: "Live", empty: "Quiet right now", emptyFiltered: "No live rooms match these filters." },
   upcoming: { label: "Upcoming", empty: "Nothing is scheduled yet", emptyFiltered: "No upcoming rooms match these filters." },
-  friends: { label: "Following", empty: "None of the people you follow back are in a room", emptyFiltered: "No rooms from people you follow match these filters." },
+  // The server's `friends` scope is MUTUAL followers: people you follow who follow you back.
+  friends: { label: "Friends", empty: "None of your friends are in a room", emptyFiltered: "No rooms from your friends match these filters." },
 };
 
 export const TAB_ORDER: readonly RoomScope[] = ["live", "upcoming", "friends"];
+
+/** The tab an arrow, Home or End key moves to; null for any other key. Wraps at the ends. */
+export function nextTab(current: RoomScope, key: string): RoomScope | null {
+  const i = TAB_ORDER.indexOf(current);
+  if (key === "ArrowRight") return TAB_ORDER[(i + 1) % TAB_ORDER.length];
+  if (key === "ArrowLeft") return TAB_ORDER[(i - 1 + TAB_ORDER.length) % TAB_ORDER.length];
+  if (key === "Home") return TAB_ORDER[0];
+  if (key === "End") return TAB_ORDER[TAB_ORDER.length - 1];
+  return null;
+}
 
 // ---- DEV fixture (?home=live|empty), no network. Fake people only.
 const fixPerson = (n: number): PeekMember => ({ userId: `fx-u${n}`, role: n === 1 ? "host" : "guest", username: `fixture${n}`, displayName: ["Ada", "Tolu", "Mira", "Kemi", "Jo"][n - 1] ?? `Guest ${n}`, avatarUrl: null, avatar: null });
