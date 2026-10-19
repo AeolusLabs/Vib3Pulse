@@ -6,7 +6,8 @@ import { ageFromDob } from "@shared/age";
 import { resolveScreen } from "@shared/screen";
 import { sanitizePlaybackInput, type NowPlaying } from "@shared/playback";
 import { HOST_LEAVE_GRACE_MS, MINORS_ROOM_WARNING, ROOM_LIMITS, ROOM_REACTIONS, resolveRoomPrivacy, resolveChatReply, validateChatReply, type MinorsRoomCode, type RoomSettings } from "@shared/rooms";
-import { canHostRoom, canInteract, canJoinRoom } from "@shared/roomRules";
+import { canHostRoom, canInteract, canJoinRoom, isTicketedRoom, roomCapacity } from "@shared/roomRules";
+import { hasPaidTicket } from "./ticketStorage";
 import type { Room, User } from "@shared/schema";
 import * as rs from "./roomStorage";
 import { mutualFollow, plainText, viewerRoom, viewRoom } from "./roomAccess";
@@ -284,6 +285,16 @@ registerAwayReleaser(releaseAwayMember);
 // ---------------------------------------------------------------- join
 const JOIN_AGE_CODES = { AGE_UNKNOWN: "AGE_UNKNOWN", AGE_LIMIT: "AGE_LIMIT" } as const;
 
+/**
+ * Is there room for one more guest? A free room counts everyone against its capacity (as before). A ticketed room counts
+ * GUESTS against its ticket capacity (roomCapacity), so every paid seat is honoured: the host and co-hosts do not take one.
+ * Synchronous (hub only), so it can sit between the door checks and the hub insert.
+ */
+function roomIsFull(roomId: string, room: Room): boolean {
+  if (!isTicketedRoom(room)) return roomHub.count(roomId) >= room.capacity;
+  return roomHub.members(roomId).filter((m) => m.role === "guest").length >= roomCapacity(room);
+}
+
 async function sendState(ws: RoomClient, room: Room, you: HubMember) {
   direct(ws, {
     type: "room:state",
@@ -355,6 +366,16 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
     }
   }
 
+  // Paid rooms, pre-check: after the minors' gate, the age limit and the lock, and BEFORE the joiner is taken out of the room
+  // they are in (someone without a ticket stays where they are). The bare code only: never a price. Stands aside when the hub
+  // knows the room became a minors' room after this row was read (the minors' gate below must speak first). The
+  // authoritative check is next to the hub insert, on fresh reads.
+  if (isTicketedRoom(room) && userId !== room.hostId && !(member && !member.banned && member.role === "cohost")
+    && (room.minorsRoom || !roomHub.isMinorsRoom(roomId))
+    && !(await hasPaidTicket(roomId, userId))) {
+    return refuse(ws, "TICKET_REQUIRED");
+  }
+
   const current = roomHub.roomOf(userId);
   if (current && current !== roomId) await leaveRoom(userId, current); // one room at a time
 
@@ -363,8 +384,9 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
   // The minors' room invite is re-read too: a revoke that landed during the awaits above must keep them out.
   // The user is re-read as well: an admin birthdate correction during the awaits must decide with the new age.
   // The invite is always read: the room may become a minors' room (host corrected to under 18) while we wait.
-  const [fresh, freshMember, freshInvite, freshUser] = await Promise.all([
-    rs.getRoom(roomId), rs.getMember(roomId, userId), getInviteState(roomId, userId), storage.getUser(userId),
+  // The paid ticket is re-read too: a ticket refunded during the awaits above must not admit.
+  const [fresh, freshMember, freshInvite, freshUser, freshTicket] = await Promise.all([
+    rs.getRoom(roomId), rs.getMember(roomId, userId), getInviteState(roomId, userId), storage.getUser(userId), hasPaidTicket(roomId, userId),
   ]).catch(async (e) => {
     // The host's own lookup failed: nothing can be trusted about this room's flag. Fail closed: close it (neutral notice).
     if (userId === room.hostId) await endForHostReview(roomId).catch((e2) => console.error("[rooms] closing a room after a host lookup failure failed:", e2));
@@ -422,12 +444,17 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
     });
     if (!admits) return refuse(ws, "ROOM_LOCKED");
   }
+  // Paid rooms: the ticket check, last of the door checks (after the minors' gate, the age limit and the lock), still with
+  // no await before the hub insert. Decided from the fresh reads: a ticket refunded before them does not admit, and a room
+  // made ticketed meanwhile is respected. Host and co-hosts (fresh member row) never need one; banned and kicked people were
+  // refused above. Applies to a second tab too (a refunded holder's new tab is refused; enforceTicketFor removes the rest).
+  if (isTicketedRoom(fresh) && userId !== fresh.hostId && freshMember?.role !== "cohost" && !freshTicket) return refuse(ws, "TICKET_REQUIRED");
 
   const role = userId === fresh.hostId ? "host" : freshMember?.role === "cohost" ? "cohost" : "guest";
   let me = roomHub.get(roomId, userId);
   const isNew = !me;
   if (!me) {
-    if (role === "guest" && roomHub.count(roomId) >= fresh.capacity) return refuse(ws, "ROOM_FULL");
+    if (role === "guest" && roomIsFull(roomId, fresh)) return refuse(ws, "ROOM_FULL");
     me = { userId, role, muted: freshMember?.muted ?? false, joinedAt: Date.now(), send: (m) => fanout(userId, m), info: memberInfo(freshUser), age: freshAge };
     roomHub.join(roomId, me);
     if (fresh.minorsRoom) roomHub.markMinorsRoom(roomId); // before any stage decision for this room
@@ -611,6 +638,25 @@ export async function enforceMinorsRoomFor(userId: string): Promise<void> {
   const [room, user, invite] = await Promise.all([rs.getRoom(roomId), storage.getUser(userId), getInviteState(roomId, userId)]);
   if (!room?.minorsRoom || !user) return;
   if (!minorsGate(room, userId, ageFromDob(user.dateOfBirth), invite).ok) await removeFromMinorsRoom(roomId, userId);
+}
+
+/**
+ * Paid rooms: call after a ticket is refunded (server/rooms/refunds.ts). Waits for any join of theirs in flight (that join
+ * may have read the ticket before the refund committed), then, if they are in that ticketed room as a guest and no longer
+ * hold a paid ticket, tells them TICKET_REQUIRED (no price) and removes them. Host and co-hosts are never removed by this.
+ * Returns true when someone was removed.
+ */
+export async function enforceTicketFor(roomId: string, userId: string): Promise<boolean> {
+  await (joinLocks.get(userId) ?? Promise.resolve());
+  const tm = roomHub.get(roomId, userId);
+  if (!tm || tm.role !== "guest") return false;
+  const [room, paid] = await Promise.all([rs.getRoom(roomId), hasPaidTicket(roomId, userId)]);
+  if (!room || room.hostId === userId || !isTicketedRoom(room) || paid) return false;
+  const now = roomHub.get(roomId, userId);
+  if (!now || now.role !== "guest") return false; // left, or was made a co-host, while we looked
+  now.send({ type: "room:error", code: "TICKET_REQUIRED" });
+  await evict(roomId, userId);
+  return true;
 }
 
 /** A step (or one room or member inside a step) of a birthdate correction that threw. roomId is null when there is no room. */
