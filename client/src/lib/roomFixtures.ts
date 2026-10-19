@@ -1,5 +1,6 @@
 // Seeded room states for the dev fixture route. Pure: no sockets, no network, no clock reads at import time.
 import { initialRoomState, roomReducer, type MemberRole, type RoomMemberView, type RoomState } from "./roomReducer";
+import { ticketBreakdown } from "@shared/money";
 
 export type FixtureScene = "voice" | "live" | "immersive" | "weak" | "dropped";
 
@@ -166,4 +167,38 @@ export function fixtureLiveState(scene: FixtureScene, opts: { as: FixtureOptions
     serverOffsetMs: 0,
     invitedYou: !!opts.invite,
   };
+}
+
+// ---------------------------------------------------------------- paid room screens (task 4.7)
+// ?ticket=page|confirmed|waiting|hostsales|price|refund. Sample data only; the numbers come from ticketBreakdown like the
+// server's summary does, so the host sheet reads like the real thing (38 of 100 at 5,000 naira, as in img/f-hostsales).
+
+export type TicketScene = "page" | "checkout" | "confirmed" | "waiting" | "hostsales" | "price" | "refund";
+export const TICKET_SCENES: TicketScene[] = ["page", "checkout", "confirmed", "waiting", "hostsales", "price", "refund"];
+export function parseTicketFixture(search: string): TicketScene | null {
+  const t = new URLSearchParams(search).get("ticket") as TicketScene | null;
+  return t && TICKET_SCENES.includes(t) ? t : null;
+}
+
+export const FIXTURE_TICKET_PRICE_KOBO = 500_000;
+
+/** A scheduled 18+ paid room. `scheduledFor` is filled in by the caller from its own clock (no clock reads here). */
+export function fixtureTicketRoom(scheduledFor: string) {
+  return {
+    ...FIXTURE_ROOM, id: "fixture-paid-room", title: "Amapiano Sunday Session", ageLimit: "18+" as const, status: "scheduled" as const,
+    scheduledFor, liveVideo: true, capacity: 100, ticketCapacity: 100, refundBeforeStart: true,
+  };
+}
+
+export const FIXTURE_TICKET_BLOCK = { required: true, priceKobo: FIXTURE_TICKET_PRICE_KOBO, held: false, soldOut: false, left: 62, capacity: 100 };
+
+export const FIXTURE_TICKET = {
+  id: "00000000-0000-4000-8000-00000000f1c7", roomId: "fixture-paid-room", code: "VB7K2Q", amountKobo: FIXTURE_TICKET_PRICE_KOBO,
+  status: "paid" as const, createdAt: "2026-10-17T18:00:00.000Z",
+};
+
+/** The host summary as the server would sum it: `sold` tickets at the fixture price through ticketBreakdown. */
+export function fixtureTicketSummary(sold = 38, releaseAt: string | null = "2026-10-20T20:00:00.000Z") {
+  const b = ticketBreakdown(FIXTURE_TICKET_PRICE_KOBO);
+  return { sold, grossKobo: b.price * sold, platformKobo: b.platform * sold, hostKobo: b.host * sold, releaseAt, capacity: 100, soldOut: sold >= 100 };
 }
