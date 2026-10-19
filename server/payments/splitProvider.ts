@@ -28,12 +28,18 @@ export interface SplitSpec { shares: { subaccountCode: string; amountKobo: numbe
 export type ChargeFailure = "DECLINED" | "INSUFFICIENT_FUNDS" | "NOT_REUSABLE" | "NETWORK";
 export interface ChargeResult { status: "success" | "action_required" | "failed"; reference: string; authorizationUrl?: string; failure?: ChargeFailure; }
 
-/** A saved card as the provider reports it. `code` is a secret: encrypt it at once (tokenCrypto) and never log or return it. */
-export interface ProviderAuthorization { code: string; last4: string; brand: string; bank?: string; reusable: boolean; signature: string }
+/**
+ * A saved card as the provider reports it. `authorizationCode` is a secret: encrypt it at once (tokenCrypto) and never log
+ * or return it. The key is named authorizationCode (not a generic `code`) so the global response redaction strips it, and
+ * the object always travels under the key `authorization`, which is redacted too.
+ */
+export interface ProviderAuthorization { authorizationCode: string; last4: string; brand: string; bank?: string; reusable: boolean; signature: string }
 
 /**
  * The provider's view of one transaction.
- *  - paid: true ONLY when the provider says success AND the currency is NGN AND the reference it returned is ours.
+ *  - paid: true when the provider says success for OUR reference (money was taken), whatever the currency or amount. The
+ *    caller compares currency and amount with the stored row and refunds a mismatch in full (never "unpaid": a payment
+ *    reported unpaid would be marked failed and kept).
  *  - state (added to the contract): "paid" | "failed" (final, no money taken or already reversed) | "pending" (still
  *    possible: abandoned checkouts, ongoing, queued, OTP steps). Only "failed" may be treated as never paid.
  *  - currency (added to the contract): exactly as the provider reports it, upper case. Callers still compare amountKobo
@@ -61,8 +67,11 @@ export interface SplitPaymentProvider {
   verify(reference: string): Promise<SplitVerifyResult | null>;
   /** Full refund. Idempotent: does nothing when a refund for this reference already exists. Throws on outage / refusal. */
   refund(reference: string): Promise<void>;
-  /** Was this payment refunded (by our note, or at all)? Throws when the provider cannot answer: do NOT refund then. */
-  refundState(reference: string): Promise<ProviderRefundState>;
+  /**
+   * Was this payment refunded (by our note, or at all)? Throws when the provider cannot answer: do NOT refund then. With
+   * fullKobo, "done" only when processed refunds add up to it (a partial refund is needs_attention).
+   */
+  refundState(reference: string, fullKobo?: number): Promise<ProviderRefundState>;
 }
 
 // Rule B8: production with the spray flag ON and no PAYMENT_TOKEN_KEY refuses to start. This module is loaded at boot by

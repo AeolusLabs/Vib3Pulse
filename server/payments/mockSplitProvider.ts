@@ -101,7 +101,9 @@ export class MockSplitProvider implements SplitPaymentProvider {
     if (!looksLikeSprayReference(reference)) return null;
     const t = this.txs.get(reference);
     if (!t) return null;
-    const paid = t.state === "paid" && t.currency === "NGN";
+    // Same contract as Paystack's mapVerifyData: paid = success on our reference whatever the currency or amount (the
+    // caller compares them and refunds a mismatch); the currency and amount are passed through.
+    const paid = t.state === "paid";
     const reversed = t.refund === "done";
     return {
       paid: paid && !reversed,
@@ -109,7 +111,7 @@ export class MockSplitProvider implements SplitPaymentProvider {
       amountKobo: t.amountKobo,
       currency: t.currency,
       metadata: { ...t.metadata },
-      ...(paid ? { authorization: { ...this.card, code: this.card.code, reusable: t.reusable } } : {}),
+      ...(paid ? { authorization: { authorizationCode: this.card.code, last4: this.card.last4, brand: this.card.brand, bank: this.card.bank, signature: this.card.signature, reusable: t.reusable } } : {}),
     };
   }
 
@@ -124,7 +126,7 @@ export class MockSplitProvider implements SplitPaymentProvider {
     this.refunds.push(reference);
   }
 
-  async refundState(reference: string): Promise<ProviderRefundState> {
+  async refundState(reference: string, _fullKobo?: number): Promise<ProviderRefundState> {
     this.calls.push({ method: "refundState", reference });
     if (this.refundMode === "outage") throw new Error(`${PAYSTACK_UNAVAILABLE}: mock outage`);
     const t = this.txs.get(reference);

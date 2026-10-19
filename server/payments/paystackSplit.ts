@@ -11,21 +11,25 @@
 //    only channel whose authorization can be reused), the server-made reference and callback.
 //  - saved card: POST /transaction/charge_authorization. At or above 10,000 naira (or force3ds) we never charge silently:
 //    a card-only checkout is started instead and the answer is action_required (rule B9).
-//  - verify: GET /transaction/verify/:reference. paid only on status success, currency NGN, and the same reference.
+//  - verify: GET /transaction/verify/:reference. paid on status success for the same reference; the currency and amount
+//    are passed through for the caller to compare exactly (a mismatch is refunded in full, never treated as unpaid).
+//  - a saved-card charge that needs a bank step (OTP, PIN, open_url, paused) answers action_required with the bank's https
+//    link so the payer can approve it; without a link it is NOT_REUSABLE once verify shows nothing final.
 //  - refund: full refund with our deterministic merchant note, after a lookup (phase 4 helpers in paystack.ts).
 //
 // Never logged, never in an error message: request bodies, the authorization code, the card signature, the email.
 // Errors from Paystack are scrubbed (scrubProviderMessage) before they go anywhere.
 import crypto from "crypto";
 import { MIN_CHARGE_KOBO } from "@shared/money";
+import { THREE_DS_AT_KOBO } from "@shared/spray";
 import {
   PAYSTACK_UNAVAILABLE, getPaystackRefundState, refundPaystackPayment, paystackMetadataObject, type ProviderRefundState,
 } from "./paystack.js";
 import { looksLikeSprayReference, sprayRefundNote } from "./sprayReference.js";
 import type { ChargeFailure, ChargeResult, ProviderAuthorization, SplitPaymentProvider, SplitSpec, SplitVerifyResult } from "./splitProvider.js";
 
-/** Rule B9: at or above this a saved card is never charged silently (mirrors THREE_DS_AT_KOBO in shared/spray.ts). */
-export const THREE_DS_FLOOR_KOBO = 1_000_000;
+/** Rule B9: at or above this a saved card is never charged silently. The one constant: THREE_DS_AT_KOBO (shared/spray.ts). */
+export const THREE_DS_FLOOR_KOBO = THREE_DS_AT_KOBO;
 const SUBACCOUNT_RE = /^ACCT_[A-Za-z0-9]{4,64}$/;
 const SPLIT_CODE_RE = /^SPL_[A-Za-z0-9]{4,64}$/;
 const METADATA_KEY_RE = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
@@ -113,7 +117,10 @@ export function buildChargeBody(p: ChargeBodyInput): Record<string, unknown> {
     if (p.splitCode !== undefined) throw new RangeError("splitCode: only for two recipients");
     const only = p.split.shares[0];
     body.subaccount = only.subaccountCode;
-    body.transaction_charge = p.amountKobo - only.amountKobo; // what stays with us
+    const charge = p.amountKobo - only.amountKobo; // what stays with us
+    // Never 0: Paystack may read 0 as "not set" and fall back to the subaccount's default percentage charge.
+    if (!Number.isSafeInteger(charge) || charge <= 0) throw new RangeError("transaction_charge: must be a positive integer of kobo");
+    body.transaction_charge = charge;
     body.bearer = "account";
   } else {
     if (typeof p.splitCode !== "string" || !SPLIT_CODE_RE.test(p.splitCode)) throw new RangeError("splitCode: required for two recipients");
@@ -122,7 +129,7 @@ export function buildChargeBody(p: ChargeBodyInput): Record<string, unknown> {
 
   if (p.kind === "initialize") {
     if (p.authorizationCode !== undefined) throw new RangeError("authorizationCode: not for initialize");
-    if (typeof p.callbackUrl !== "string" || !/^https?:\/\/[^\s]+$/.test(p.callbackUrl)) throw new RangeError("callbackUrl: required");
+    if (typeof p.callbackUrl !== "string" || !callbackUrlAllowed(p.callbackUrl)) throw new RangeError("callbackUrl: required (https)");
     body.callback_url = p.callbackUrl;
     body.channels = ["card"];
   } else if (p.kind === "charge_authorization") {
@@ -133,6 +140,19 @@ export function buildChargeBody(p: ChargeBodyInput): Record<string, unknown> {
     throw new RangeError("kind: unknown");
   }
   return body;
+}
+
+/**
+ * The payer's way back from the bank page. https only; plain http is accepted ONLY outside production and only for a
+ * local address (the dev server and the test server), never for a public host.
+ */
+export function callbackUrlAllowed(url: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (typeof url !== "string" || url.length > 2048 || /\s/.test(url)) return false;
+  let u: URL;
+  try { u = new URL(url); } catch { return false; }
+  if (u.protocol === "https:") return !!u.hostname;
+  if (u.protocol !== "http:" || env.NODE_ENV === "production") return false;
+  return u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "[::1]";
 }
 
 /** A copy safe to log or show in a test failure: no authorization code, no email. */
@@ -191,15 +211,41 @@ export function classifyDecline(gatewayResponse: unknown): Exclude<ChargeFailure
   return "DECLINED";
 }
 
+/** Statuses where the bank wants the payer to do something (an OTP, a PIN, a bank page) before the charge can finish. */
+const INTERACTIVE_CHARGE_STATUSES = new Set(["send_otp", "send_pin", "send_phone", "send_birthday", "send_address", "open_url", "paused"]);
+
+export type ChargeData = { status?: unknown; reference?: unknown; gateway_response?: unknown; url?: unknown; authorization_url?: unknown; paused?: unknown };
+
+/** The bank page Paystack named for a charge step (authorization_url, else url), only when it is https. */
+function bankStepLink(data: ChargeData): string | null {
+  for (const v of [data.authorization_url, data.url]) {
+    if (typeof v === "string" && v.length <= 2048 && /^https:\/\/[^\s]+$/.test(v)) return v;
+  }
+  return null;
+}
+
+const isInteractive = (data: ChargeData) =>
+  data.paused === true || (typeof data.status === "string" && INTERACTIVE_CHARGE_STATUSES.has(data.status));
+
 /**
- * A charge_authorization answer as a ChargeResult. Pure. Only "success" is success, only "failed" is a decline; any other
- * status (pending, send_otp, open_url, a reference that is not ours) is NETWORK = outcome unknown, verify later.
+ * A charge_authorization answer as a ChargeResult. Pure. Only "success" is success, only "failed" is a decline.
+ * A bank step (send_otp, open_url, paused, ...) WITH an https link is action_required carrying that link, so the payer can
+ * approve it (the link is the bank's page, not a secret). Any other status (pending, a bank step without a link, a
+ * reference that is not ours) is NETWORK = outcome unknown, verify later (chargeSaved then uses interactiveWithoutLink).
  */
-export function mapChargeData(reference: string, data: { status?: unknown; reference?: unknown; gateway_response?: unknown } | null | undefined): ChargeResult {
+export function mapChargeData(reference: string, data: ChargeData | null | undefined): ChargeResult {
   if (!data || data.reference !== reference) return { status: "failed", reference, failure: "NETWORK" };
   if (data.status === "success") return { status: "success", reference };
   if (data.status === "failed") return { status: "failed", reference, failure: classifyDecline(data.gateway_response) };
+  const link = bankStepLink(data);
+  if (link && isInteractive(data)) return { status: "action_required", reference, authorizationUrl: link };
   return { status: "failed", reference, failure: "NETWORK" };
+}
+
+/** A bank step the payer cannot be shown (no https link): the saved card cannot be used silently for this charge. */
+export function interactiveWithoutLink(reference: string, data: ChargeData | null | undefined): boolean {
+  if (!data || data.reference !== reference || bankStepLink(data)) return false;
+  return isInteractive(data);
 }
 
 type PaystackAuthorization = {
@@ -211,18 +257,20 @@ export type PaystackVerifyRaw = {
 };
 
 /**
- * A verify answer as a SplitVerifyResult. Pure. paid needs status success AND currency NGN AND our reference AND an integer
- * amount; a reusable authorization is reported only for a card with all of code, last4 and signature.
+ * A verify answer as a SplitVerifyResult. Pure. paid = Paystack says success on OUR reference: money was taken. The
+ * currency and the amount are reported as Paystack gave them (a non-integer or missing amount is reported as 0), and the
+ * CALLER compares them with the stored row (verifiedMatches in spray.ts): a wrong currency or amount is then a full refund,
+ * never "unpaid" (owner ruling 4: reporting it unpaid let the sweep mark it failed and keep the money).
+ * A reusable authorization is reported only for a card with all of code, last4 and signature.
  */
 export function mapVerifyData(reference: string, data: PaystackVerifyRaw): SplitVerifyResult {
   const status = typeof data.status === "string" ? data.status.toLowerCase() : "";
   const currency = typeof data.currency === "string" ? data.currency.toUpperCase() : "";
   const amountKobo = typeof data.amount === "number" && Number.isSafeInteger(data.amount) && data.amount >= 0 ? data.amount : -1;
   const sameRef = data.reference === reference;
-  const paid = sameRef && status === "success" && currency === "NGN" && amountKobo > 0;
-  // "failed" only for Paystack's final no-money words on OUR reference ("reversed" = already refunded in full). Everything
-  // else is "pending", including a success with a wrong currency or amount: never paid, and never released as "failed"
-  // either (a human looks at it; the caller reverses it, it never delivers).
+  const paid = sameRef && status === "success";
+  // "failed" only for Paystack's final no-money words on OUR reference ("reversed" = already refunded in full). Anything
+  // else that is not paid is "pending" (abandoned, ongoing, queued).
   const state: SplitVerifyResult["state"] = paid ? "paid"
     : sameRef && (status === "failed" || status === "reversed") ? "failed"
     : "pending";
@@ -236,7 +284,7 @@ export function mapVerifyData(reference: string, data: PaystackVerifyRaw): Split
       && typeof a.last4 === "string" && /^\d{4}$/.test(a.last4)) {
     const brandRaw = typeof a.brand === "string" && a.brand.trim() ? a.brand : typeof a.card_type === "string" ? a.card_type : "card";
     authorization = {
-      code: a.authorization_code,
+      authorizationCode: a.authorization_code,
       last4: a.last4,
       brand: brandRaw.trim().toLowerCase().slice(0, 20),
       ...(typeof a.bank === "string" && a.bank.trim() ? { bank: a.bank.trim().slice(0, 60) } : {}),
@@ -356,7 +404,6 @@ export function createPaystackSplitProvider(): SplitPaymentProvider {
       buildChargeBody({ kind: "charge_authorization", reference: p.reference, email: p.email, amountKobo: p.amountKobo, currency: "NGN", split: p.split, metadata: p.metadata, authorizationCode: p.authorizationCode, splitCode: p.split.shares.length === 2 ? "SPL_placeholder0" : undefined });
       const splitCode = p.split.shares.length === 2 ? await ensureSplitCode(p.split.shares) : undefined;
       const body = buildChargeBody({ kind: "charge_authorization", reference: p.reference, email: p.email, amountKobo: p.amountKobo, currency: "NGN", split: p.split, metadata: p.metadata, authorizationCode: p.authorizationCode, splitCode });
-      type ChargeData = { status?: unknown; reference?: unknown; gateway_response?: unknown };
       let a: Answer<ChargeData>;
       try {
         a = await answer<ChargeData>("/transaction/charge_authorization", { method: "POST", body: JSON.stringify(body) });
@@ -372,6 +419,13 @@ export function createPaystackSplitProvider(): SplitPaymentProvider {
         return settleUnclear(p.reference, true);
       }
       const mapped = mapChargeData(p.reference, a.data);
+      if (interactiveWithoutLink(p.reference, a.data)) {
+        // The bank wants a step we cannot show the payer. Unless verify says paid or failed, this card cannot be charged
+        // silently: NOT_REUSABLE (no money moved now; a payment that lands later is caught by the sweep's 24 hour re-check
+        // of failed sprays and refunded as LATE_PAYMENT).
+        const settled = await settleUnclear(p.reference, false);
+        return settled.failure === "NETWORK" ? { status: "failed", reference: p.reference, failure: "NOT_REUSABLE" } : settled;
+      }
       return mapped.failure === "NETWORK" ? settleUnclear(p.reference, false) : mapped;
     },
 
@@ -385,9 +439,11 @@ export function createPaystackSplitProvider(): SplitPaymentProvider {
       await refundPaystackPayment(reference, { merchantNote: note });
     },
 
-    async refundState(reference: string): Promise<ProviderRefundState> {
+    async refundState(reference: string, fullKobo?: number): Promise<ProviderRefundState> {
       if (!looksLikeSprayReference(reference)) throw new Error("BAD_REFERENCE");
-      return getPaystackRefundState(reference, sprayRefundNote(reference));
+      // With the full amount, "done" needs processed refunds adding up to all of it (a partial refund made by hand in the
+      // dashboard is needs_attention, never "reversed").
+      return getPaystackRefundState(reference, sprayRefundNote(reference), fullKobo !== undefined ? { fullKobo } : {});
     },
   };
 }
