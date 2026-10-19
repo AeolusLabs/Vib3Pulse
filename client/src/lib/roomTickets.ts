@@ -1,20 +1,19 @@
-// Paid room tickets on the client (phase 4, task 4.7). Pure: no React, no window, no network, no clock reads.
-// The server is the gate for everything here: who may buy, the price, the charge, refunds and payouts. This file only
-// mirrors the shared rules so the screens never offer what the server will refuse, and never show a price it did not send.
+// Paid room tickets on the client (phase 4, task 4.7; fix round 4F). Pure: no React, no window, no network, no clock reads
+// (storage is passed in where it is needed). The server is the gate for everything here: who may buy, the price, the
+// charge, refunds and payouts. This file only mirrors the shared rules so the screens never offer what the server will
+// refuse, and never show a price it did not send.
 import { TICKET_PLATFORM_PCT, ticketBreakdown } from "@shared/money";
 import { ROOM_LIMITS } from "@shared/rooms";
-import type { RoomTicketBlock, RoomTicketSummary } from "./roomsApi";
+import { BUYER_REFUND_CUTOFF_MS, buyerRefundCheck, type BuyerRefundCode } from "@shared/roomRefunds";
+import type { RoomPayoutView, RoomTicketBlock, RoomTicketSummary, RoomTicketView } from "./roomsApi";
 
 // ---------------------------------------------------------------- limits
-/**
- * Mirror of the ticket limits in shared/rooms.ts (lane S1: ticketMinKobo, ticketMaxKobo, ticketCapacityMin, ticketCapacityMax).
- * Kept here so this lane builds on its own; a test checks they match once shared/rooms.ts has them.
- */
+/** The ticket limits come from shared/rooms.ts ROOM_LIMITS (the server validates with the same numbers). The rest is UI only. */
 export const TICKET_LIMITS = {
-  minKobo: 100_000,          // 1,000 naira
-  maxKobo: 10_000_000,       // 100,000 naira
-  capacityMin: 20,
-  capacityMax: ROOM_LIMITS.capacityMaxPaid, // 150
+  minKobo: ROOM_LIMITS.ticketMinKobo,           // 1,000 naira
+  maxKobo: ROOM_LIMITS.ticketMaxKobo,           // 100,000 naira
+  capacityMin: ROOM_LIMITS.ticketCapacityMin,   // 20
+  capacityMax: ROOM_LIMITS.ticketCapacityMax,   // 150
   priceStepNaira: 500,
   capacityStep: 10,
   defaultPriceNaira: 5_000,
@@ -24,7 +23,10 @@ export const TICKET_LIMITS = {
 // ---------------------------------------------------------------- money display
 const MINUS = "−"; // a real minus sign, not a dash
 
-/** "₦5,000" from 500000 kobo. Whole naira show no decimals; anything else shows two. The only naira formatter for tickets. */
+/**
+ * "₦5,000" from 500000 kobo. For prices only (the buyer pays exactly this): whole naira show no decimals, and a price
+ * that is not whole (only possible through the API) shows two, so a charge is never misstated.
+ */
 export function formatNaira(kobo: number): string {
   if (!Number.isFinite(kobo)) return "₦0";
   const k = Math.round(kobo);
@@ -35,8 +37,19 @@ export function formatNaira(kobo: number): string {
   return `${sign}₦${naira}`;
 }
 
-/** "−₦21,806" for a deduction line (always shown as taken away, whatever the sign it arrives with). */
-export const formatDeduction = (kobo: number) => `${MINUS}${formatNaira(Math.abs(kobo))}`;
+/**
+ * Whole naira for sums and estimates (host sales, the earnings estimate). Earnings use "floor" so they are never
+ * overstated; deductions use "ceil" so costs are never understated.
+ */
+export function formatNairaWhole(kobo: number, how: "floor" | "round" | "ceil" = "round"): string {
+  if (!Number.isFinite(kobo)) return "₦0";
+  const n = Math[how](kobo / 100);
+  const sign = n < 0 ? MINUS : "";
+  return `${sign}₦${Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+}
+
+/** "−₦21,806" for a deduction line: whole naira, rounded up, always shown as taken away whatever sign it arrives with. */
+export const formatDeduction = (kobo: number) => `${MINUS}${formatNairaWhole(Math.abs(kobo), "ceil")}`;
 
 // ---------------------------------------------------------------- who sees what
 /**
@@ -49,9 +62,10 @@ export function parseTicketBlock(x: unknown): RoomTicketBlock | null {
   if (typeof t.required !== "boolean" || typeof t.held !== "boolean" || typeof t.soldOut !== "boolean") return null;
   if (typeof t.priceKobo !== "number" || !Number.isInteger(t.priceKobo) || t.priceKobo <= 0) return null;
   const block: RoomTicketBlock = { required: t.required, priceKobo: t.priceKobo, held: t.held, soldOut: t.soldOut };
-  // Optional counts, only when the server sends them as whole numbers.
+  // Optional extras (fix round 4F), only when the server sends them in the right shape.
   if (typeof t.left === "number" && Number.isInteger(t.left) && t.left >= 0) block.left = t.left;
   if (typeof t.capacity === "number" && Number.isInteger(t.capacity) && t.capacity > 0) block.capacity = t.capacity;
+  if (typeof t.refundBeforeStart === "boolean") block.refundBeforeStart = t.refundBeforeStart;
   return block;
 }
 
@@ -83,12 +97,14 @@ export function afterTicketRefusal(ticket: unknown): "page" | "plain" {
 }
 
 // ---------------------------------------------------------------- the return from Paystack
+/** Exactly the shape server/rooms/ticketReference.ts makes: vib3rt_<24 hex nonce>_<32 hex MAC>. Anything else is ignored. */
+export const TICKET_REF_SHAPE = /^vib3rt_[0-9a-f]{24}_[0-9a-f]{32}$/;
 /** The payment reference on the way back to /rooms/:id. Our own `ref` first; Paystack also adds `reference` and `trxref`. */
 export function returnRef(search: string): string | null {
   const p = new URLSearchParams(search);
   for (const k of ["ref", "reference", "trxref"]) {
     const v = (p.get(k) ?? "").trim();
-    if (v && v.length <= 200 && /^[A-Za-z0-9._:-]+$/.test(v)) return v;
+    if (TICKET_REF_SHAPE.test(v)) return v;
   }
   return null;
 }
@@ -100,7 +116,7 @@ export function searchWithoutRef(search: string): string {
   return s ? `?${s}` : "";
 }
 
-/** Only ever leave for a Paystack page over https, or our own origin (the mock provider). Anything else is refused. */
+/** Only ever leave for a Paystack page over https, or our own origin (the dev fixture). Anything else is refused. */
 export function safeCheckoutUrl(url: unknown, origin: string): string | null {
   if (typeof url !== "string" || !url) return null;
   try {
@@ -113,6 +129,34 @@ export function safeCheckoutUrl(url: unknown, origin: string): string | null {
   }
 }
 
+// ---------------------------------------------------------------- the invite token across the Paystack trip
+// Checkout, refund and cancel are gated on canViewRoom(room, user, ?token=). The server keeps the token out of the
+// Paystack return URL (it would be handed to Paystack), so the page keeps it in sessionStorage for this tab.
+type TokenStore = Pick<Storage, "getItem" | "setItem">;
+export const inviteTokenKey = (roomId: string) => `room-invite:${roomId}`;
+const TOKEN_SHAPE = /^[A-Za-z0-9_-]{1,200}$/;
+export function rememberInviteToken(store: TokenStore | null | undefined, roomId: string, token: string | null | undefined): void {
+  if (!store || !token || !TOKEN_SHAPE.test(token)) return;
+  try { store.setItem(inviteTokenKey(roomId), token); } catch { /* storage off: the URL token still works until the redirect */ }
+}
+export function recallInviteToken(store: TokenStore | null | undefined, roomId: string): string | undefined {
+  if (!store) return undefined;
+  try {
+    const v = store.getItem(inviteTokenKey(roomId));
+    return v && TOKEN_SHAPE.test(v) ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+/** The URL's ?token= first, then the one kept for this room before the Paystack trip. */
+export function inviteTokenFor(search: string, store: TokenStore | null | undefined, roomId: string): string | undefined {
+  const fromUrl = new URLSearchParams(search).get("token");
+  if (fromUrl) return fromUrl;
+  return recallInviteToken(store, roomId);
+}
+/** "?token=..." for the ticket calls, or "" when there is no token. */
+export const withToken = (token: string | null | undefined) => (token ? `?token=${encodeURIComponent(token)}` : "");
+
 // ---------------------------------------------------------------- refusals in plain words
 export type TicketPhase = "checkout" | "verify" | "refund" | "summary" | "cancel";
 export interface TicketFailure { status: number; code?: string }
@@ -121,68 +165,133 @@ export const TICKET_ERROR = {
   offline: "Couldn't reach Vib3Pulse. Check your connection and try again.",
   rateLimited: "You're doing that too fast. Please try again in a bit.",
   notFound: "This room isn't available.",
+  signIn: "Sign in again to buy a ticket.",
+  signInVerify: "Sign in again to finish getting your ticket. You will never be charged twice.",
+  signInGeneric: "Sign in again, then try once more.",
+  // checkout
   featureOff: "Tickets are not on sale yet.",
+  notEligible: "You can't buy a ticket for this room.",
+  isHost: "You host this room, so you don't need a ticket.",
+  notTicketed: "This room doesn't sell tickets.",
+  ended: "This room has ended.",
+  notOnSale: "Tickets aren't on sale right now.",
   alreadyTicketed: "You already have a ticket for this room.",
   soldOut: "This room is sold out.",
-  ineligible: "You can't buy a ticket for this room.",
-  ended: "This room has ended.",
-  started: "This room has already started.",
+  roomLocked: "The host has paused ticket sales.",
+  salesPaused: "Ticket sales are paused for this room.",
   checkoutGeneric: "Couldn't start the payment. Try again.",
-  verifyPending: "Your payment is still being confirmed. Try again in a moment.",
-  verifyFailed: "Your payment did not go through. You have not been charged.",
+  // verify
+  badRef: "This payment link isn't valid.",
+  paymentNotFound: "We couldn't find this payment on your account.",
+  notPaid: "Your payment hasn't gone through. If you paid, try again in a moment. If not, you have not been charged.",
   verifySoldOut: "The last ticket went just before your payment. Your money is on its way back to your card.",
   verifyMismatch: "Something did not match on your payment, so it is being refunded to your card.",
-  verifyIneligible: "Tickets are for verified adults, so your payment is being refunded to your card.",
+  verifyIneligible: "We couldn't give you a ticket for this room, so your payment is being refunded to your card.",
+  verifyRefunded: "This ticket was refunded.",
   verifyGeneric: "Couldn't confirm your ticket yet. Try again. You will never be charged twice.",
-  refundClosed: "Refunds for this room have closed.",
-  refundNone: "You don't have a ticket to refund.",
+  // refund, summary, cancel
   refundGeneric: "Couldn't refund your ticket. Try again.",
   summaryGeneric: "Couldn't load your ticket sales. Try again.",
-  cancelGeneric: "Couldn't cancel the room. Try again.",
   notHost: "Only the host can see ticket sales.",
+  cancelNotHost: "Only the host can cancel this room.",
+  cancelLive: "A live room can't be cancelled. End it instead.",
+  cancelBadState: "This room can't be cancelled now.",
+  cancelGeneric: "Couldn't cancel the room. Try again.",
 } as const;
+
+/** Checkout 409 codes, in the buyer's words. Any 409 also reloads the room (the page may be stale). */
+const CHECKOUT_409: Record<string, string> = {
+  IS_HOST: TICKET_ERROR.isHost,
+  NOT_TICKETED: TICKET_ERROR.notTicketed,
+  ROOM_ENDED: TICKET_ERROR.ended,
+  NOT_ON_SALE: TICKET_ERROR.notOnSale,
+  ALREADY_TICKETED: TICKET_ERROR.alreadyTicketed,
+  SOLD_OUT: TICKET_ERROR.soldOut,
+  ROOM_LOCKED: TICKET_ERROR.roomLocked,
+  SALES_PAUSED: TICKET_ERROR.salesPaused,
+};
+/** Verify 409s: the charge was refused and is being refunded (the server answers refunded: true with these). */
+const VERIFY_409: Record<string, string> = {
+  SOLD_OUT: TICKET_ERROR.verifySoldOut,
+  AMOUNT_MISMATCH: TICKET_ERROR.verifyMismatch,
+  INELIGIBLE: TICKET_ERROR.verifyIneligible,
+};
 
 /** Plain words for a refused ticket call. Never the server's own text, so every line follows the copy rules. */
 export function ticketErrorMessage(f: TicketFailure, phase: TicketPhase): string {
   const c = f.code;
   if (f.status === 0) return TICKET_ERROR.offline;
   if (f.status === 429 || c === "RATE_LIMITED") return TICKET_ERROR.rateLimited;
-  if (c === "FEATURE_OFF") return TICKET_ERROR.featureOff;
-  if (phase === "verify") {
-    if (c === "SOLD_OUT" || c === "OVERSOLD") return TICKET_ERROR.verifySoldOut;
-    if (c === "AMOUNT_MISMATCH") return TICKET_ERROR.verifyMismatch;
-    if (c === "INELIGIBLE") return TICKET_ERROR.verifyIneligible;
-    if (c === "PAYMENT_PENDING" || c === "PENDING") return TICKET_ERROR.verifyPending;
-    if (c === "PAYMENT_FAILED" || c === "DECLINED" || c === "ABANDONED") return TICKET_ERROR.verifyFailed;
-    if (f.status === 404 && !c) return TICKET_ERROR.notFound;
-    return TICKET_ERROR.verifyGeneric;
+  if (f.status === 401) return phase === "checkout" ? TICKET_ERROR.signIn : phase === "verify" ? TICKET_ERROR.signInVerify : TICKET_ERROR.signInGeneric;
+  switch (phase) {
+    case "checkout":
+      if (c === "FEATURE_OFF") return TICKET_ERROR.featureOff;
+      if (f.status === 404) return c === "NOT_ELIGIBLE" ? TICKET_ERROR.notEligible : TICKET_ERROR.notFound;
+      if (f.status === 409 && c && CHECKOUT_409[c]) return CHECKOUT_409[c];
+      return TICKET_ERROR.checkoutGeneric; // 5xx / 502 CHECKOUT_FAILED and anything unknown
+    case "verify":
+      if (f.status === 400) return TICKET_ERROR.badRef;
+      if (f.status === 404) return TICKET_ERROR.paymentNotFound;
+      if (f.status === 402 || c === "NOT_PAID") return TICKET_ERROR.notPaid;
+      if (f.status === 409 && c && VERIFY_409[c]) return VERIFY_409[c];
+      return TICKET_ERROR.verifyGeneric; // 502 VERIFY_FAILED, 500 VERIFY_ERROR and anything unknown
+    case "refund":
+      if (c && REFUND_REFUSAL[c]) return REFUND_REFUSAL[c];
+      if (f.status === 404) return TICKET_ERROR.notFound;
+      return TICKET_ERROR.refundGeneric;
+    case "summary":
+      if (f.status === 403) return TICKET_ERROR.notHost;
+      if (f.status === 404) return TICKET_ERROR.notFound;
+      return TICKET_ERROR.summaryGeneric;
+    case "cancel":
+      if (f.status === 403) return TICKET_ERROR.cancelNotHost;
+      if (f.status === 404) return TICKET_ERROR.notFound;
+      if (c === "ROOM_LIVE") return TICKET_ERROR.cancelLive;
+      if (c === "BAD_STATE") return TICKET_ERROR.cancelBadState;
+      return TICKET_ERROR.cancelGeneric;
   }
-  if (phase === "refund") {
-    if (c === "REFUND_CLOSED" || c === "NOT_ALLOWED" || c === "not_allowed") return TICKET_ERROR.refundClosed;
-    if (c === "NO_TICKET" || f.status === 404) return TICKET_ERROR.refundNone;
-    return TICKET_ERROR.refundGeneric;
-  }
-  if (phase === "summary") return f.status === 403 ? TICKET_ERROR.notHost : TICKET_ERROR.summaryGeneric;
-  if (phase === "cancel") return TICKET_ERROR.cancelGeneric;
-  // checkout
-  if (c === "ALREADY_TICKETED" || (f.status === 409 && !c)) return TICKET_ERROR.alreadyTicketed;
-  if (c === "SOLD_OUT") return TICKET_ERROR.soldOut;
-  if (c === "INELIGIBLE" || c === "AGE_LIMIT" || c === "NOT_VERIFIED") return TICKET_ERROR.ineligible;
-  if (c === "ROOM_ENDED") return TICKET_ERROR.ended;
-  if (c === "ROOM_STARTED") return TICKET_ERROR.started;
-  if (f.status === 404) return TICKET_ERROR.notFound;
-  return TICKET_ERROR.checkoutGeneric;
 }
 
-/** Codes a POST/PATCH room answers about ticket fields (canSellTickets and the limits), in the host's words. */
+/** After a refused checkout: any 409 means the room changed under the page (sold out, ended, you host it...): reload it. */
+export const checkoutNeedsRefetch = (f: TicketFailure) => f.status === 409;
+/** After a refused cancel: the room's state changed, reload it. */
+export const cancelNeedsRefetch = (f: TicketFailure) => f.status === 409;
+
+/**
+ * Whether "Try again" makes sense after a refused verify. Not for a bad or foreign reference, nor a refused charge that is
+ * already being refunded, nor a signed-out buyer (they sign in instead). Yes for not-paid-yet and provider hiccups.
+ */
+export function verifyRetryable(f: TicketFailure): boolean {
+  if (f.status === 400 || f.status === 401 || f.status === 404) return false;
+  if (f.status === 409 && !!f.code && !!VERIFY_409[f.code]) return false;
+  return true;
+}
+
+/** What a 2xx verify body means. Only a ticket with status "paid" is "You are in"; a refunded one says so. */
+export type VerifyOutcome =
+  | { kind: "paid"; ticket: RoomTicketView; duplicateRefunded: boolean }
+  | { kind: "refunded" }
+  | { kind: "bad" };
+export function verifyOutcome(body: unknown): VerifyOutcome {
+  if (!body || typeof body !== "object") return { kind: "bad" };
+  const b = body as Record<string, unknown>;
+  const t = b.ticket as Record<string, unknown> | null | undefined;
+  if (!t || typeof t !== "object" || typeof t.code !== "string" || !t.code) return { kind: "bad" };
+  if (t.status === "refunded") return { kind: "refunded" };
+  if (t.status !== "paid") return { kind: "bad" };
+  return { kind: "paid", ticket: t as unknown as RoomTicketView, duplicateRefunded: b.duplicateRefunded === true };
+}
+
+/** Codes a POST/PATCH room answers about ticket fields (canSellTickets, the sale guard, the live guard), in the host's words. */
 export const TICKET_CREATE_ERROR: Record<string, string> = {
   FEATURE_OFF: "Paid rooms are not available yet.",
   HOST_NOT_ADULT: "You need to be 18 to sell tickets.",
   HOST_NOT_VERIFIED: "Verify your ID before you sell tickets.",
   NO_PAYOUT_ACCOUNT: "Connect a payout account in your organizer settings before you sell tickets.",
   ROOM_NOT_ADULT: "Tickets are only for 18+ and 21+ rooms.",
-  PRICE_LOCKED: "The price can't change once tickets are sold.",
+  TICKETS_SOLD: "Tickets are sold, so the price, age limit and refunds can't change.",
   CAPACITY_BELOW_SOLD: "You can't have fewer tickets than you have sold.",
+  NOT_SCHEDULED: "You can only start selling tickets before the room goes live.",
 };
 export const TICKET_FIELDS = ["ticketPriceKobo", "ticketCapacity", "refundBeforeStart"] as const;
 /** A refusal that belongs to the price step: a ticket code or a ticket field. */
@@ -196,6 +305,8 @@ export function ticketCreateMessage(f: { code?: string; field?: string }): strin
   if (f.field === "refundBeforeStart") return PRICE_COPY.refundBad;
   return null;
 }
+/** Whether a wizard error belongs to one of the price step's own fields (otherwise the step shows it in a general box). */
+export const isPriceStepField = (field: string | undefined | null) => !!field && (TICKET_FIELDS as readonly string[]).includes(field);
 /** Where focus goes for a ticket field in error (the price step's own ids). */
 export function ticketFieldSelectors(field: string): string[] {
   if (field === "ticketPriceKobo") return ["#wiz-price"];
@@ -219,10 +330,8 @@ export function waitingClock(ms: number): string {
 export const waitingTickMs = (ms: number | null) => (ms !== null && ms > 86_400_000 ? 60_000 : 1000);
 
 // ---------------------------------------------------------------- refunds
-/** Buyer refunds close this long before the scheduled start (server/rooms/refunds.ts, task 4.5). */
-export const REFUND_CLOSE_MS = 60 * 60_000;
+export { BUYER_REFUND_CUTOFF_MS };
 
-export type RefundWindow = { open: true; closesAt: number } | { open: false; reason: string };
 export const REFUND_COPY = {
   button: "Refund my ticket",
   confirmTitle: "Refund your ticket?",
@@ -231,18 +340,31 @@ export const REFUND_COPY = {
   confirmNo: "Keep my ticket",
   working: "Refunding",
   done: "Your ticket is refunded. It can take a few days to show on your card.",
+  pending: "Your refund is on its way. It can take a few days to show on your card.",
   already: "This ticket was already refunded.",
-  closedStarted: "Refunds close when the room starts.",
-  closedHour: "Refunds closed 1 hour before the start.",
-  closedNoSchedule: "This room started straight away, so there is no refund window.",
-  closedHost: "The host does not offer refunds before the start. If the room does not start, you are refunded automatically.",
   closedRefunded: "This ticket was already refunded.",
 } as const;
 
 /**
- * Whether the buyer may ask for a refund now. Mirrors the server rule: only before scheduledFor minus 60 minutes, only
- * when the host offered it (refundBeforeStart), only for a paid ticket in a room that has not started. An unknown
- * refundBeforeStart (older room payloads) is left to the server, which answers not_allowed if it is off.
+ * Why a refund is refused, by code: the shared rule's codes (buyerRefundCheck, used for the button) and the refund
+ * route's own 404/409 codes (server/rooms/ticketMoneyRoutes.ts). One line per code.
+ */
+export const REFUND_REFUSAL: Record<BuyerRefundCode | "PAYOUT_RELEASED" | "BAD_STATE" | "REFUND_IN_PROGRESS" | "NO_TICKET", string> & Record<string, string> = {
+  ROOM_NOT_SCHEDULED: "Refunds close when the room starts.",
+  NO_REFUNDS: "The host does not offer refunds before the start. If the room does not start, you are refunded automatically.",
+  NO_START_TIME: "This room has no start time, so there is no refund window. If the room does not start, you are refunded automatically.",
+  WINDOW_CLOSED: "Refunds closed 1 hour before the start.",
+  PAYOUT_RELEASED: "This ticket can't be refunded any more.",
+  BAD_STATE: "This ticket can't be refunded.",
+  REFUND_IN_PROGRESS: "Your refund is already being processed.",
+  NO_TICKET: "You don't have a ticket to refund.",
+};
+
+export type RefundWindow = { open: true; closesAt: number } | { open: false; reason: string };
+
+/**
+ * Whether the buyer may ask for a refund now, by the shared rule (shared/roomRefunds.ts buyerRefundCheck, which the server
+ * uses too). An unknown refundBeforeStart (the server did not send it) is left to the server: the button stays on.
  */
 export function refundWindow(
   room: { status: "scheduled" | "live" | "ended"; scheduledFor: string | null; refundBeforeStart?: boolean },
@@ -250,16 +372,24 @@ export function refundWindow(
   now: number,
 ): RefundWindow {
   if (ticketStatus === "refunded") return { open: false, reason: REFUND_COPY.closedRefunded };
-  if (room.refundBeforeStart === false) return { open: false, reason: REFUND_COPY.closedHost };
-  if (room.status !== "scheduled") return { open: false, reason: REFUND_COPY.closedStarted };
-  const start = room.scheduledFor ? Date.parse(room.scheduledFor) : NaN;
-  if (Number.isNaN(start)) return { open: false, reason: REFUND_COPY.closedNoSchedule };
-  const closesAt = start - REFUND_CLOSE_MS;
-  if (now >= closesAt) return { open: false, reason: REFUND_COPY.closedHour };
-  return { open: true, closesAt };
+  const parsed = room.scheduledFor ? Date.parse(room.scheduledFor) : NaN;
+  const scheduledForMs = Number.isNaN(parsed) ? null : parsed;
+  const chk = buyerRefundCheck({ status: room.status, refundBeforeStart: room.refundBeforeStart !== false, scheduledForMs }, now);
+  if (!chk.ok) return { open: false, reason: REFUND_REFUSAL[chk.code] };
+  return { open: true, closesAt: (scheduledForMs as number) - BUYER_REFUND_CUTOFF_MS };
 }
 
-/** The refund promise on the ticket page. The automatic refund if the room never starts is always true (task 4.5 job). */
+/** What a 2xx refund body means for the buyer. A refund not yet confirmed by the provider is "on its way". */
+export function refundOutcome(body: unknown): { kind: "refunded" | "already" | "pending"; text: string } | null {
+  if (!body || typeof body !== "object") return null;
+  const b = body as Record<string, unknown>;
+  if (b.result === "pending" || ((b.result === "refunded" || b.result === "already") && b.settled === false)) return { kind: "pending", text: REFUND_COPY.pending };
+  if (b.result === "refunded") return { kind: "refunded", text: REFUND_COPY.done };
+  if (b.result === "already") return { kind: "already", text: REFUND_COPY.already };
+  return null;
+}
+
+/** The refund promise on the ticket page. The "1 hour" line only when the server said the host offers it. */
 export function refundPromise(room: { scheduledFor: string | null; refundBeforeStart?: boolean }): string {
   const auto = "If the room does not start, you are refunded automatically.";
   if (room.refundBeforeStart === true && room.scheduledFor) return `Full refund up to 1 hour before. ${auto}`;
@@ -283,8 +413,10 @@ export const TICKET_COPY = {
   checkoutTitle: "Checking your payment",
   checkoutBody: "This takes a few seconds. Please keep this page open.",
   retry: "Try again",
+  signIn: "Sign in",
   backToTicket: "Back to the ticket",
   confirmedTitle: "You are in",
+  duplicateRefunded: "You already had a ticket; the second payment is being refunded.",
   ticketTag: "Ticket",
   codeLabel: "Ticket code",
   codeHelp: "Your ticket lives on your account. You don't need to show this code to get in.",
@@ -340,9 +472,15 @@ export const PRICE_COPY = {
   refundHelp: "If the room never starts, everyone is refunded automatically.",
   payoutTitle: "Payouts",
   payoutBody: "Ticket money is held until 48 hours after the room ends, then paid to your payout account.",
+  videoOver: `Live video works in rooms of up to ${ROOM_LIMITS.liveVideoMax} people, so with more tickets than that this room has voice only.`,
+  videoNeedsFewer: `Live video works in rooms of up to ${ROOM_LIMITS.liveVideoMax} people. Sell ${ROOM_LIMITS.liveVideoMax} tickets or fewer to use it.`,
   reviewTicket: "Ticket",
   reviewTickets: (n: number) => `${n} tickets`,
 } as const;
+
+/** Live video is refused above this many ticket holders (lane S1). True when this draft leaves no room for it. */
+export const ticketsTooManyForVideo = (d: Pick<TicketDraft, "on" | "capacity">) =>
+  d.on && !(Number.isFinite(d.capacity) && d.capacity <= ROOM_LIMITS.liveVideoMax);
 
 /** The step's clamps for the stepper buttons (typing is checked, not clamped, so a host sees what they typed). */
 export const clampPriceNaira = (n: number) =>
@@ -369,7 +507,7 @@ export function ticketDraftProblem(d: TicketDraft): { field: string; reason: str
 
 /**
  * The live earnings estimate, from shared/money.ts ticketBreakdown only (the server uses the same). "If half sell" uses
- * half the tickets, rounded. Null while the price is not valid.
+ * half the tickets, rounded. Null while the price is not valid. Shown in whole naira, rounded down (formatNairaWhole floor).
  */
 export function earningsEstimate(priceNaira: number, capacity: number): { perTicketKobo: number; half: number; halfKobo: number } | null {
   const kobo = priceKoboOf(priceNaira);
@@ -378,6 +516,8 @@ export function earningsEstimate(priceNaira: number, capacity: number): { perTic
   const half = Math.max(1, Math.round((Number.isFinite(capacity) ? capacity : TICKET_LIMITS.defaultCapacity) / 2));
   return { perTicketKobo: host, half, halfKobo: host * half };
 }
+/** "about ₦3,762": the estimate in whole naira, never more than the host would get. */
+export const estimateText = (kobo: number) => PRICE_COPY.about(formatNairaWhole(kobo, "floor"));
 
 /** Ticket fields of the create payload. Empty unless the price step is enabled AND switched on AND valid. */
 export interface TicketPayload { ticketPriceKobo: number; ticketCapacity: number; refundBeforeStart: boolean }
@@ -402,12 +542,14 @@ export const SALES_COPY = {
   desc: "Ticket sales for this room.",
   sold: "Tickets sold",
   of: (cap: number) => `of ${cap}`,
+  refunded: (n: number) => (n === 1 ? "1 ticket refunded" : `${n} tickets refunded`),
   gross: "Gross",
   costs: "VAT, card fees, reserve",
   platform: `Platform ${TICKET_PLATFORM_PCT}%`,
   earn: "You earn",
   heldUntil: (when: string) => `Held until ${when}, then paid out. Late sales and refunds change these numbers.`,
   heldAfterEnd: "Paid out 48 hours after the room ends. Late sales and refunds change these numbers.",
+  paidOn: (when: string) => `Paid out on ${when}.`,
   soldOut: "Sold out",
   cancel: "Cancel room and refund everyone",
   cancelTitle: "Cancel this room?",
@@ -417,20 +559,54 @@ export const SALES_COPY = {
   cancelled: "Room cancelled. Everyone with a ticket is being refunded.",
 } as const;
 
-/** The host's sheet lines from the summary route. The costs line is what is left between gross and the two shares. */
+/**
+ * The host's sheet lines from the summary route, in whole naira. Costs are the stored VAT, card fee and reserve sums
+ * (rounded up), the platform share is rounded up, and what the host earns is rounded down, so it is never overstated.
+ */
 export function salesLines(s: RoomTicketSummary): { gross: string; costs: string; platform: string; earn: string } {
-  const costs = Math.max(0, s.grossKobo - s.platformKobo - s.hostKobo);
-  return { gross: formatNaira(s.grossKobo), costs: formatDeduction(costs), platform: formatDeduction(s.platformKobo), earn: formatNaira(s.hostKobo) };
+  return {
+    gross: formatNairaWhole(s.grossKobo, "round"),
+    costs: formatDeduction(s.vatKobo + s.feeKobo + s.reserveKobo),
+    platform: formatDeduction(s.platformKobo),
+    earn: formatNairaWhole(s.hostKobo, "floor"),
+  };
+}
+/** Sold out once paid tickets reach the room's ticket capacity (the host's own room carries it; the summary does not). */
+export const salesSoldOut = (sold: number, capacity: number | null | undefined) =>
+  typeof capacity === "number" && capacity > 0 && sold >= capacity;
+
+/** The payout line under the numbers. */
+export function salesReleaseLine(payout: RoomPayoutView | null, when: (iso: string) => string): string {
+  if (payout?.paidAt) return SALES_COPY.paidOn(when(payout.paidAt));
+  if (payout?.releaseAt) return SALES_COPY.heldUntil(when(payout.releaseAt));
+  return SALES_COPY.heldAfterEnd;
 }
 
-/** Reads the summary body; null for anything that is not the shape we expect. */
-export function parseSummary(x: unknown): RoomTicketSummary | null {
-  if (!x || typeof x !== "object") return null;
-  const s = x as Record<string, unknown>;
-  const int = (v: unknown) => typeof v === "number" && Number.isInteger(v) && v >= 0;
-  if (!int(s.sold) || !int(s.grossKobo) || !int(s.platformKobo) || !int(s.hostKobo) || !int(s.capacity) || typeof s.soldOut !== "boolean") return null;
-  const releaseAt = typeof s.releaseAt === "string" && !Number.isNaN(Date.parse(s.releaseAt)) ? s.releaseAt : null;
-  return { sold: s.sold as number, grossKobo: s.grossKobo as number, platformKobo: s.platformKobo as number, hostKobo: s.hostKobo as number, releaseAt, capacity: s.capacity as number, soldOut: s.soldOut };
+/**
+ * Reads the summary route's body, `{ summary: { ... } }`; null for anything that is not that shape. Fields the server
+ * may add later (refusedCharges) are ignored.
+ */
+export function parseSummary(body: unknown): RoomTicketSummary | null {
+  if (!body || typeof body !== "object") return null;
+  const raw = (body as Record<string, unknown>).summary;
+  if (!raw || typeof raw !== "object") return null;
+  const s = raw as Record<string, unknown>;
+  const int = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0;
+  const keys = ["sold", "refunded", "grossKobo", "vatKobo", "feeKobo", "reserveKobo", "platformKobo", "hostKobo"] as const;
+  for (const k of keys) if (!int(s[k])) return null;
+  const iso = (v: unknown) => (typeof v === "string" && !Number.isNaN(Date.parse(v)) ? v : null);
+  let payout: RoomPayoutView | null = null;
+  const p = s.payout;
+  if (p && typeof p === "object") {
+    const q = p as Record<string, unknown>;
+    if (typeof q.status === "string" && int(q.amountKobo)) payout = { status: q.status, amountKobo: q.amountKobo, releaseAt: iso(q.releaseAt), paidAt: iso(q.paidAt) };
+  }
+  return {
+    sold: s.sold as number, refunded: s.refunded as number,
+    grossKobo: s.grossKobo as number, vatKobo: s.vatKobo as number, feeKobo: s.feeKobo as number, reserveKobo: s.reserveKobo as number,
+    platformKobo: s.platformKobo as number, hostKobo: s.hostKobo as number,
+    payout,
+  };
 }
 
 // ---------------------------------------------------------------- amber contrast
@@ -470,7 +646,8 @@ export function hslTripletToHex(triplet: string): string {
 }
 /**
  * Amber is drawn ONLY as a fill (bg-secondary) with its own text colour (text-secondary-foreground), never as text on the
- * page background: amber text on the light background is about 2:1. These are the class strings every money moment uses.
+ * page background: amber text on the light background is about 2:1. These are the class strings every money moment uses
+ * (price chip, earnings, the ticket). Decorative surfaces such as the ticket cover use the violet primary only.
  */
 export const AMBER = {
   fill: "bg-secondary text-secondary-foreground",
@@ -482,7 +659,7 @@ export const AMBER = {
 /** Every sentence these screens use, so one test can check the copy rules over all of them. */
 const filled = (v: unknown): string => (typeof v === "function" ? String((v as unknown as (...a: unknown[]) => unknown)("Dayo", 50)) : String(v));
 export const TICKET_UI_COPY: readonly string[] = [
-  ...Object.values(TICKET_ERROR), ...Object.values(TICKET_CREATE_ERROR),
+  ...Object.values(TICKET_ERROR), ...Object.values(TICKET_CREATE_ERROR), ...Object.values(REFUND_REFUSAL),
   ...Object.values(REFUND_COPY).map(filled), ...Object.values(TICKET_COPY).map(filled),
   ...Object.values(PRICE_COPY).map(filled), ...Object.values(SALES_COPY).map(filled),
   refundPromise({ scheduledFor: "2026-10-20T20:00:00Z", refundBeforeStart: true }), refundPromise({ scheduledFor: null }),
