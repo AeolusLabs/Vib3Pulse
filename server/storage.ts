@@ -187,6 +187,9 @@ export const pool = new Pool({
 pool.on("error", (err) => console.error("[DB] idle client error (pool will reconnect):", err.message));
 export const db = drizzle(pool);
 
+/** Ledger types of paid rooms whose buyer fields a host must never see (getOrganizerTransactions strips them). */
+const ROOM_LEDGER_TYPES: ReadonlySet<string> = new Set(["room_ticket", "room_ticket_refund", "room_payout", "room_payout_reversal"]);
+
 // Idempotent schema migration — runs at server startup to add new columns safely
 export async function ensureSchema() {
   await pool.query(`
@@ -5364,13 +5367,16 @@ export class DbStorage implements IStorage {
   // this organizer regardless of provider (Stripe + Paystack together), most
   // recent first.
   async getOrganizerTransactions(organizerId: string, limit: number = 50, offset: number = 0): Promise<PaymentTransaction[]> {
-    return await db
+    const rows = await db
       .select()
       .from(paymentTransactions)
       .where(eq(paymentTransactions.organizerId, organizerId))
       .orderBy(desc(paymentTransactions.createdAt))
       .limit(limit)
       .offset(offset);
+    // Paid rooms: a host sees amounts and dates only, never who bought (buyerUserId) nor the buyer's payment reference
+    // (providerPaymentId) or the ticket id. Room ledger rows are the only ones stripped; event/venue rows are unchanged.
+    return rows.map((r) => (ROOM_LEDGER_TYPES.has(r.type) ? { ...r, buyerUserId: null, providerPaymentId: null, ticketId: null } : r));
   }
 
   async getAllStoriesAdmin(limit: number = 50, offset: number = 0): Promise<{ items: Array<Story & { user: PublicUser }>; total: number }> {
