@@ -30,6 +30,7 @@ import { roomHub } from "./RoomHub";
 import { roomFeatures } from "./features";
 import { clearReminder, hasReminder, setReminder } from "./reminders";
 import { registerRoomTicketRoutes } from "./ticketRoutes";
+import { registerRoomMoneyRoutes } from "./ticketMoneyRoutes";
 
 const MAX_SCHEDULED = 10;
 const MAX_LIVE = 1;
@@ -941,4 +942,6 @@ export function registerRoomRoutes(app: Express): void {
       res.status(500).json({ message: "Failed to save room privacy" });
     }
   });
+
+  registerRoomMoneyRoutes(app); // paid rooms: refund, cancel, sales summary (lane S3)
 }

@@ -1339,7 +1339,7 @@ export type VenueTicket = typeof venueTickets.$inferSelect;
 // Previously these were only ever console.error'd (oversell auto-refunds,
 // event cancellations). This table makes them queryable so finance/admin
 // can find and resolve them instead of relying on someone reading server logs.
-export const paymentIssueReasons = ["refund_failed"] as const;
+export const paymentIssueReasons = ["refund_failed", "payout_failed"] as const; // payout_failed: room payouts (server/rooms/settlement.ts)
 export type PaymentIssueReason = typeof paymentIssueReasons[number];
 
 export const paymentIssues = pgTable("payment_issues", {
@@ -1634,6 +1634,7 @@ export const notificationTypes = [
   "rsvp_removed",
   "room_live",
   "room_starting",
+  "room_refund", // paid room ticket refunded (phase 4, server/rooms/refunds.ts)
 ] as const;
 export type NotificationType = typeof notificationTypes[number];
 
@@ -2059,6 +2060,8 @@ export const paymentTransactionTypes = [
   "venue_promotion",
   "social_promotion",
   "refund",
+  "room_ticket_refund", // paid room ticket refunded (server/rooms/refunds.ts)
+  "room_payout",        // host paid for a ticketed room (server/rooms/settlement.ts)
 ] as const;
 export type PaymentTransactionType = typeof paymentTransactionTypes[number];
 

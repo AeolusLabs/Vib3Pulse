@@ -173,6 +173,9 @@ export async function endRoom(roomId: string): Promise<void> {
   Array.from(awayTimers.keys()).forEach((k) => { if (k.startsWith(`${roomId}:`)) { clearTimeout(awayTimers.get(k)); awayTimers.delete(k); } });
   const room = await rs.getRoom(roomId);
   if (room && room.status !== "ended") await rs.setStatus(roomId, "ended");
+  // Paid rooms: schedule the host's payout (room went live) or refund every ticket (it never started). Never throws;
+  // imported lazily so the money modules stay out of this module's import cycle.
+  if (room) await import("./settlement").then((m) => m.afterRoomEnded(roomId)).catch((e) => console.error("[rooms] after-end money step failed:", e?.message ?? e));
   if (room?.voiceEnabled || roomHub.voiceOn(roomId)) {
     await rs.clearStage(roomId).catch(() => {});
     await getVoiceService()?.deleteRoom(roomId).catch((e) => console.error("[voice] deleteRoom failed:", e?.message ?? e));

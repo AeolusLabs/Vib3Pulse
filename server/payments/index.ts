@@ -1,6 +1,10 @@
 import type { SupportedCurrency, PaymentProvider, CreateCheckoutParams, CheckoutResult, VerifiedSession, CreatePaymentIntentParams, PaymentIntentResult, VerifiedPaymentIntent } from "./types.js";
 import { createStripeCheckout, verifyStripeSession, createStripePaymentIntent, verifyStripePaymentIntent, refundStripePayment } from "./stripe.js";
 import { createPaystackCheckout, verifyPaystackTransaction, createPaystackInlineSession, refundPaystackPayment } from "./paystack.js";
+import {
+  getPaystackRefundState, createPaystackTransferRecipient, createPaystackTransfer, verifyPaystackTransfer,
+  type ProviderRefundState, type TransferResult,
+} from "./paystack.js";
 
 export type { SupportedCurrency, PaymentProvider, CheckoutResult, VerifiedSession, VerifiedPaymentIntent };
 
@@ -10,7 +14,14 @@ export type { SupportedCurrency, PaymentProvider, CheckoutResult, VerifiedSessio
 export interface PaymentProviderForTests {
   createCheckout?: (params: CreateCheckoutParams) => Promise<CheckoutResult>;
   verifyCheckoutSession?: (sessionId: string, provider: PaymentProvider) => Promise<VerifiedSession | null>;
+  /** Refund without options (ticket checkout tests). `refund` below takes precedence when both are set. */
   refundPayment?: (providerPaymentId: string, provider: PaymentProvider) => Promise<void>;
+  /** Refund with options (the room refund lane passes its idempotency note). */
+  refund?: (providerPaymentId: string, provider: PaymentProvider, opts: { note?: string }) => Promise<void>;
+  refundState?: (providerPaymentId: string, provider: PaymentProvider, note: string) => Promise<ProviderRefundState>;
+  createTransferRecipient?: (params: { subaccountCode: string }) => Promise<{ recipientCode: string }>;
+  createTransfer?: (params: { amountKobo: number; recipientCode: string; reference: string; reason: string }) => Promise<TransferResult>;
+  verifyTransfer?: (reference: string) => Promise<TransferResult | null>;
 }
 let testProvider: PaymentProviderForTests | null = null;
 export function setPaymentProviderForTests(p: PaymentProviderForTests | null): void {
@@ -89,9 +100,40 @@ export async function verifyPaymentIntent(
   return verifyStripePaymentIntent(paymentIntentId);
 }
 
-export async function refundPayment(providerPaymentId: string, provider: PaymentProvider): Promise<void> {
+export async function refundPayment(providerPaymentId: string, provider: PaymentProvider, opts: { note?: string } = {}): Promise<void> {
+  if (testProvider?.refund) return testProvider.refund(providerPaymentId, provider, opts);
   if (testProvider?.refundPayment) return testProvider.refundPayment(providerPaymentId, provider);
-  if (provider === "paystack") return refundPaystackPayment(providerPaymentId);
+  if (provider === "paystack") return refundPaystackPayment(providerPaymentId, { merchantNote: opts.note });
   if (provider === "stripe") return refundStripePayment(providerPaymentId);
   // "free" provider (promotion credits, free RSVPs) never charged anything to refund.
 }
+
+// ------------------------------------------------------------ paid rooms: refund lookup and host transfers (lane S3)
+// Behind this module so the room money code never calls Paystack directly and the tests can swap in a mock.
+
+export type { ProviderRefundState, TransferResult };
+
+/** Was this payment already refunded (by our note, or at all)? Throws when the provider cannot answer: do NOT refund then. */
+export async function refundState(providerPaymentId: string, provider: PaymentProvider, note: string): Promise<ProviderRefundState> {
+  if (testProvider?.refundState) return testProvider.refundState(providerPaymentId, provider, note);
+  if (provider === "paystack") return getPaystackRefundState(providerPaymentId, note);
+  throw new Error(`refund lookup is not supported for provider ${provider}`);
+}
+
+/** A transfer recipient built only from the host's verified Paystack subaccount code (bank details never pass through us). */
+export async function createTransferRecipient(params: { subaccountCode: string }): Promise<{ recipientCode: string }> {
+  if (testProvider?.createTransferRecipient) return testProvider.createTransferRecipient(params);
+  return createPaystackTransferRecipient(params);
+}
+
+export async function createTransfer(params: { amountKobo: number; recipientCode: string; reference: string; reason: string }): Promise<TransferResult> {
+  if (testProvider?.createTransfer) return testProvider.createTransfer(params);
+  return createPaystackTransfer(params);
+}
+
+/** null = the provider has no transfer with this reference. Throws on an outage. */
+export async function verifyTransfer(reference: string): Promise<TransferResult | null> {
+  if (testProvider?.verifyTransfer) return testProvider.verifyTransfer(reference);
+  return verifyPaystackTransfer(reference);
+}
+
