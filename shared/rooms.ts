@@ -27,16 +27,19 @@ export const PINNED_INPUT_MAX = 2000;
  * The user-perceived characters of `text` (grapheme clusters: a flag, a skin-toned emoji or a family emoji is ONE).
  * Falls back to code points where Intl.Segmenter is missing (older browsers): never splits a surrogate pair either way.
  */
-let segmenter: { segment(s: string): Iterable<{ segment: string }> } | null | undefined;
-export function graphemes(text: string): string[] {
-  if (segmenter === undefined) {
-    try {
-      const Seg = (Intl as any)?.Segmenter;
-      segmenter = typeof Seg === "function" ? new Seg(undefined, { granularity: "grapheme" }) : null;
-    } catch { segmenter = null; }
+let segmenter: { segment(s: string): Iterable<{ segment: string }> } | null = null;
+function graphemeSegmenter(): typeof segmenter {
+  const Seg = typeof Intl !== "undefined" ? (Intl as any).Segmenter : undefined;
+  if (typeof Seg !== "function") return null; // looked up each time, so a missing Segmenter is never cached as present
+  if (!segmenter) {
+    try { segmenter = new Seg(undefined, { granularity: "grapheme" }); } catch { return null; }
   }
-  if (segmenter) {
-    try { return Array.from(segmenter.segment(text), (s) => s.segment); } catch { /* fall back below */ }
+  return segmenter;
+}
+export function graphemes(text: string): string[] {
+  const seg = graphemeSegmenter();
+  if (seg) {
+    try { return Array.from(seg.segment(text), (s) => s.segment); } catch { /* fall back below */ }
   }
   return Array.from(text);
 }
