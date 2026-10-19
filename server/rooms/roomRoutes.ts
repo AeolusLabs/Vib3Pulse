@@ -409,7 +409,7 @@ export function registerRoomRoutes(app: Express): void {
       // Paid rooms. Selling (or changing a sale) needs the same host checks as creating. Once any ticket is sold the price,
       // the free/paid switch, the age limit and the refund promise are fixed, and the ticket capacity never goes below the
       // tickets sold. Those two are decided in the write itself, under the room row lock (updateRoomWithTicketGuard).
-      let ticketGuard: { lockedBySale: boolean; capacity: number | null } | null = null;
+      let ticketGuard: { lockedBySale: boolean; capacity: number | null; requireScheduled?: boolean } | null = null;
       {
         const newPrice = v.value.ticketPriceKobo ?? null, newCap = v.value.ticketCapacity ?? null;
         const priceChange = "ticketPriceKobo" in b && newPrice !== (room.ticketPriceKobo ?? null);
