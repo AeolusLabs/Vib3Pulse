@@ -4,11 +4,13 @@
 // Query: ?scene=voice|live|immersive|weak|dropped &theme=dark|light &as=guest|holder|host &sound=1 (sound only)
 // &tap=1 (audio waits for a tap) &invite=1 (invited to speak) &flood=300 (chat lines over ten seconds).
 // &minors=refuse|ack|invites|listen|teennote shows the minors' room screens (listen is the room shell seen as an adult).
+// ?wizard=adult|teen shows the Start a room sheet and the create wizard for that host, with every endpoint answered here.
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import RoomShell, { type RoomShellSocket } from "@/components/rooms/shell/RoomShell";
 import MinorsRoomWarning from "@/components/rooms/MinorsRoomWarning";
 import AdultInviteSheet from "@/components/rooms/AdultInviteSheet";
 import TeenHostNote from "@/components/rooms/TeenHostNote";
+import StartRoomFlow from "@/components/rooms/create/StartRoomFlow";
 import type { AdultInvite } from "@/lib/minorsRoomApi";
 import type { RoomVoice, ScreenTrack } from "@/hooks/useRoomVoice";
 import { roomReducer, type RoomState } from "@/lib/roomReducer";
@@ -90,8 +92,53 @@ function MinorsFixture({ scene, theme }: { scene: "refuse" | "ack" | "invites" |
   );
 }
 
+/**
+ * The create-a-room wizard as an adult (25) or a teen (15) host. Every endpoint it calls is answered in the page; a
+ * "created" room is the fixture room, so going live lands on /rooms/fixture-room (which is not faked).
+ */
+function WizardFixture({ as, theme }: { as: "adult" | "teen"; theme: "dark" | "light" }) {
+  useEffect(() => {
+    const real = window.fetch;
+    const json = (body: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }));
+    window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const path = url.replace(window.location.origin, "");
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (path === "/api/csrf-token") return json({ csrfToken: "fixture" });
+      if (path === "/api/users/me/room-privacy") return json({ roomPrivacy: {}, age: as === "teen" ? 15 : 25 });
+      if (path === "/api/users/me/age-verification") return json({ verified: false, band: null, at: null, method: null });
+      if (path === "/api/rooms/config") return json({ features: { paidRooms: false, spray: false }, limits: {}, currency: "NGN", region: "NG" });
+      if (path === "/api/events/my-events" || path === "/api/my-venues") return json([]);
+      if (path === "/api/rooms" && method === "POST") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { visibility?: string };
+        return json({ room: { id: FIXTURE_ROOM.id }, ...(body.visibility === "invite" ? { inviteLink: `/rooms/${FIXTURE_ROOM.id}?token=fixture` } : {}) }, 201);
+      }
+      if (/^\/api\/rooms\/fixture-room\/(start|voice|live-video)$/.test(path)) return json({ ok: true });
+      return real(input, init);
+    }) as typeof window.fetch;
+    return () => { window.fetch = real; };
+  }, [as]);
+  useEffect(() => {
+    const root = document.documentElement;
+    const was = root.classList.contains("dark");
+    root.classList.toggle("dark", theme === "dark");
+    return () => { root.classList.toggle("dark", was); };
+  }, [theme]);
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="min-h-screen bg-background font-sans text-foreground" data-testid="room-fixture" data-scene={`wizard-${as}`}>
+      <main className="mx-auto max-w-2xl px-4 py-4">
+        <button type="button" className="min-h-[44px] rounded-lg border px-4" onClick={() => setOpen(true)}>Start a room</button>
+        <StartRoomFlow open={open} onOpenChange={setOpen} />
+      </main>
+    </div>
+  );
+}
+
 export default function RoomFixture() {
   const opts = useMemo(() => parseFixtureQuery(window.location.search), []);
+  const wizard = new URLSearchParams(window.location.search).get("wizard");
+  if (wizard === "adult" || wizard === "teen") return <WizardFixture as={wizard} theme={opts.theme} />;
   if (opts.minors && opts.minors !== "listen") return <MinorsFixture scene={opts.minors} theme={opts.theme} />;
   return <ShellFixture opts={opts} />;
 }

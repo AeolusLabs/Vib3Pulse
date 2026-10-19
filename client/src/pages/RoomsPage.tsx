@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
-import CreateRoomDialog from "@/components/rooms/CreateRoomDialog";
+import StartRoomFlow from "@/components/rooms/create/StartRoomFlow";
 import HostAvatar from "@/components/rooms/HostAvatar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -123,7 +123,7 @@ export default function RoomsPage() {
         </section>
       </main>
       <BottomNavigation />
-      <CreateRoomDialog open={creating} onOpenChange={setCreating} />
+      <StartRoomFlow open={creating} onOpenChange={setCreating} />
     </div>
   );
 }

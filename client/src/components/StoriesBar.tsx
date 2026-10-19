@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import YourVibeSheet from "@/components/YourVibeSheet";
-import CreateRoomDialog from "@/components/rooms/CreateRoomDialog";
+import CreateRoomWizard from "@/components/rooms/create/CreateRoomWizard";
 import StoryCircle from "./StoryCircle";
 import { StoryCircleSkeleton } from "@/components/ui/skeleton-layouts";
 
@@ -55,7 +55,7 @@ export default function StoriesBar({ stories, isLoading, onStoryClick, onCreateS
       </ScrollArea>
     </div>
     <YourVibeSheet open={choosing} onOpenChange={setChoosing} onStory={() => onCreateStory?.()} onRoom={() => setCreatingRoom(true)} />
-    <CreateRoomDialog open={creatingRoom} onOpenChange={setCreatingRoom} />
+    <CreateRoomWizard open={creatingRoom} onOpenChange={setCreatingRoom} />
     </>
   );
 }
