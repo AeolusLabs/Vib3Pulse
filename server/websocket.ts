@@ -4,6 +4,8 @@ import cookie from "cookie";
 import session from "express-session";
 import { storage } from "./storage";
 import { startReminderJob } from "./rooms/reminders";
+import { startRoomRefundJob } from "./rooms/refunds";
+import { startSettlementJob } from "./rooms/settlement";
 import { handleRoomMessage, handleSocketClose, rehydrateLiveRooms, startVoiceSweep } from "./rooms/roomSocket";
 
 interface AuthenticatedWebSocket extends WebSocket {
@@ -144,6 +146,10 @@ class WebSocketManager {
     rehydrateLiveRooms().catch((e) => console.error("[rooms] rehydrate failed:", e));
     startReminderJob();
     startVoiceSweep();
+    // Paid rooms: refunds owed (rooms that never started, unconfirmed refunds) and host payouts. Both guard against a
+    // second start, unref their timers and catch every error; they run whatever the paidRooms flag says (money in flight).
+    try { startRoomRefundJob(); } catch (e) { console.error("[rooms] refund job failed to start:", e); }
+    try { startSettlementJob(); } catch (e) { console.error("[rooms] settlement job failed to start:", e); }
 
     console.log("WebSocket server initialized on /ws");
   }
