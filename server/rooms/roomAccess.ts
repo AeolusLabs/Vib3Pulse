@@ -39,7 +39,7 @@ export function pinnedPlainText(raw: string | null | undefined): string | null {
  * view the room: use viewerRoom there).
  */
 export function publicRoom(room: Room) {
-  const { inviteTokenHash, pinnedMessage, ...rest } = room;
+  const { inviteTokenHash, pinnedMessage, reminderNotifiedAt, ...rest } = room;
   return rest;
 }
 

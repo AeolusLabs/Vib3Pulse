@@ -26,6 +26,7 @@ import { afterRoleChange, canCameraNow, canPublishNow, shutdownVoice, stopAllLiv
 import { applyMod, endRoom, enforceAgeLimit, expectHost, interactionVerdict, notifyScreen, removeFromMinorsRoom, writeRoomSettings } from "./roomSocket";
 import { roomHub } from "./RoomHub";
 import { roomFeatures } from "./features";
+import { clearReminder, hasReminder, setReminder } from "./reminders";
 
 const MAX_SCHEDULED = 10;
 const MAX_LIVE = 1;
@@ -201,10 +202,44 @@ export function registerRoomRoutes(app: Express): void {
       res.json({
         room: viewerRoom(room), host: host ? hostSummary(host) : null, canJoin, memberCount: roomHub.count(room.id), peek: peekOf(room.id, 8),
         you: isHost(room, req.user!.id) ? { role: "host" } : member && !member.banned ? { role: member.role } : null,
+        reminderSet: await hasReminder(room.id, req.user!.id), // this viewer's own flag only
       });
     } catch (e) {
       console.error("[rooms] get failed:", e);
       res.status(500).json({ message: "Failed to load room" });
+    }
+  });
+
+  // ------------------------------------------------------------ reminder (self only)
+  // Invisible rooms (including a minors' room an adult has no acknowledged invite to) answer 404 like a missing one.
+  async function reminderRoom(req: Request, res: Response): Promise<Room | null> {
+    const room = await rs.getRoom(req.params.id);
+    if (!room || !(await canViewRoom(room, req.user!.id, typeof req.query.token === "string" ? req.query.token : undefined))) {
+      res.status(404).json({ message: "Room not found" }); return null;
+    }
+    return room;
+  }
+  app.put("/api/rooms/:id/reminder", requireAuth, roomLimiter, async (req, res) => {
+    try {
+      const room = await reminderRoom(req, res);
+      if (!room) return;
+      if (room.status !== "scheduled") return res.status(409).json({ message: "This room is not waiting to start.", code: "BAD_STATE" });
+      await setReminder(room.id, req.user!.id);
+      res.json({ reminder: true });
+    } catch (e) {
+      console.error("[rooms] reminder set failed:", e);
+      res.status(500).json({ message: "Failed to set the reminder" });
+    }
+  });
+  app.delete("/api/rooms/:id/reminder", requireAuth, roomLimiter, async (req, res) => {
+    try {
+      const room = await reminderRoom(req, res);
+      if (!room) return;
+      await clearReminder(room.id, req.user!.id);
+      res.json({ reminder: false });
+    } catch (e) {
+      console.error("[rooms] reminder clear failed:", e);
+      res.status(500).json({ message: "Failed to clear the reminder" });
     }
   });
 
