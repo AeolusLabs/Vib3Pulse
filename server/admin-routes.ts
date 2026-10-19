@@ -81,6 +81,98 @@ export function registerAgeVerificationAdminRoute(app: Express) {
   });
 }
 
+// ============================================
+// PAID ROOMS FINANCE (read-only; Finance Manager + Super Admin)
+// ============================================
+// Payouts to room hosts and ticket totals, plus the alerts finance must act on. No mutation endpoints, no buyer identities,
+// no bank details (they are never stored here). last_error is already sanitized when written (shared/roomRefunds.ts).
+const PAYOUT_STUCK_MS = 24 * 3600_000;
+const msToIso = (ms: unknown) => (ms === null || ms === undefined ? null : new Date(Number(ms)).toISOString());
+
+export function registerRoomFinanceAdminRoutes(app: Express) {
+  const FINANCE = ["super_admin", "finance_manager"] as const;
+
+  app.get("/api/admin/finance/room-payouts", requireRole(...FINANCE), async (req: Request, res: Response) => {
+    try {
+      const status = typeof req.query.status === "string" && ["held", "queued", "paid", "failed"].includes(req.query.status) ? req.query.status : null;
+      const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+      const offset = Math.max(Number(req.query.offset) || 0, 0);
+      const now = Date.now();
+      const [rows, total] = await Promise.all([
+        pool.query(
+          `select p.id, p.room_id, r.title as room_title, p.host_id, u.username as host_username, p.amount_kobo, p.status,
+                  p.transfer_ref, p.attempts, p.last_error,
+                  round(extract(epoch from p.release_at) * 1000)::float8 as release_ms,
+                  round(extract(epoch from p.paid_at) * 1000)::float8 as paid_ms,
+                  round(extract(epoch from p.created_at) * 1000)::float8 as created_ms
+             from room_payouts p join rooms r on r.id = p.room_id left join users u on u.id = p.host_id
+            where ($1::text is null or p.status = $1::text)
+            order by (p.status = 'failed') desc, (p.last_error is not null) desc, p.release_at asc
+            limit $2 offset $3`,
+          [status, limit, offset],
+        ),
+        pool.query(`select count(*)::int as n from room_payouts where ($1::text is null or status = $1::text)`, [status]),
+      ]);
+      res.json({
+        payouts: (rows.rows as any[]).map((p) => {
+          const releaseMs = p.release_ms === null ? null : Number(p.release_ms);
+          const stuck = p.status === "queued" && releaseMs !== null && now - releaseMs > PAYOUT_STUCK_MS;
+          return {
+            id: p.id, roomId: p.room_id, roomTitle: p.room_title, hostId: p.host_id, hostUsername: p.host_username ?? null,
+            amountKobo: Number(p.amount_kobo), status: p.status, transferRef: p.transfer_ref, attempts: Number(p.attempts),
+            lastError: p.last_error, releaseAt: msToIso(p.release_ms), paidAt: msToIso(p.paid_ms), createdAt: msToIso(p.created_ms),
+            alert: p.status === "failed" || stuck || p.last_error === "NO_PAYOUT_ACCOUNT" || p.last_error === "TRANSFER_NEEDS_OTP",
+          };
+        }),
+        total: total.rows[0]?.n ?? 0,
+      });
+    } catch (error) {
+      console.error("[ADMIN] room payouts failed:", (error as Error)?.message);
+      res.status(500).json({ message: "Failed to load room payouts" });
+    }
+  });
+
+  app.get("/api/admin/finance/room-tickets", requireRole(...FINANCE), async (_req: Request, res: Response) => {
+    try {
+      const [tickets, owed, payouts, issues] = await Promise.all([
+        pool.query(
+          `select status, count(*)::int as n,
+                  coalesce(sum(amount_kobo), 0)::bigint as gross, coalesce(sum(vat_kobo), 0)::bigint as vat,
+                  coalesce(sum(fee_kobo), 0)::bigint as fee, coalesce(sum(reserve_kobo), 0)::bigint as reserve,
+                  coalesce(sum(platform_kobo), 0)::bigint as platform, coalesce(sum(host_kobo), 0)::bigint as host
+             from room_tickets group by status`,
+        ),
+        pool.query(`select count(*)::int as n, coalesce(sum(amount_kobo), 0)::bigint as amount from room_tickets where status = 'refunded' and refunded_at is null`),
+        pool.query(`select status, count(*)::int as n, coalesce(sum(amount_kobo), 0)::bigint as amount from room_payouts group by status`),
+        pool.query(
+          `select i.id, i.reason, i.ticket_id, i.provider_payment_id, i.error_message,
+                  round(extract(epoch from i.created_at) * 1000)::float8 as created_ms
+             from payment_issues i
+            where i.resolved_at is null
+              and ((i.reason = 'refund_failed' and exists (select 1 from room_tickets t where t.id::text = i.ticket_id))
+                or (i.reason = 'payout_failed' and i.provider_payment_id like 'room-payout-%'))
+            order by i.created_at desc limit 100`,
+        ),
+      ]);
+      const num = (v: unknown) => Number(v ?? 0);
+      res.json({
+        tickets: (tickets.rows as any[]).map((r) => ({
+          status: r.status, count: r.n, grossKobo: num(r.gross), vatKobo: num(r.vat), feeKobo: num(r.fee),
+          reserveKobo: num(r.reserve), platformKobo: num(r.platform), hostKobo: num(r.host),
+        })),
+        refundsAwaitingProvider: { count: owed.rows[0]?.n ?? 0, amountKobo: num(owed.rows[0]?.amount) },
+        payouts: (payouts.rows as any[]).map((r) => ({ status: r.status, count: r.n, amountKobo: num(r.amount) })),
+        alerts: (issues.rows as any[]).map((i) => ({
+          id: i.id, kind: i.reason, ticketId: i.ticket_id, reference: i.provider_payment_id, error: i.error_message, since: msToIso(i.created_ms),
+        })),
+      });
+    } catch (error) {
+      console.error("[ADMIN] room tickets totals failed:", (error as Error)?.message);
+      res.status(500).json({ message: "Failed to load room ticket totals" });
+    }
+  });
+}
+
 export function setupAdminRoutes(app: Express) {
   // Create admin session store with separate table
   const adminPool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -1070,6 +1162,8 @@ export function setupAdminRoutes(app: Express) {
       res.status(500).json({ message: "Failed to update commission rate" });
     }
   });
+
+  registerRoomFinanceAdminRoutes(app); // paid rooms: payouts + ticket totals, read-only
 
   // ============================================
   // UTILITIES (Super Admin only)
