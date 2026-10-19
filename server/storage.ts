@@ -377,6 +377,12 @@ CREATE TABLE IF NOT EXISTS room_members (
     );
     CREATE INDEX IF NOT EXISTS room_reminders_user_idx ON room_reminders (user_id);
   `);
+  // Paid rooms (phase 4): ticket columns on rooms, room_tickets, room_payouts. One batch (= one transaction), same SQL as
+  // migrations/add_room_tickets.sql; additive and idempotent.
+  {
+    const { ROOM_TICKETS_SCHEMA_SQL } = await import("./rooms/roomTicketsMigration");
+    await pool.query(ROOM_TICKETS_SCHEMA_SQL);
+  }
   await pool.query(`
     ALTER TABLE venues ADD COLUMN IF NOT EXISTS building JSONB
   `);

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, integer, boolean, unique, primaryKey, doublePrecision, check, jsonb, numeric, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, integer, boolean, unique, primaryKey, doublePrecision, check, jsonb, numeric, index, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import type { AvatarConfig } from "./avatar";
@@ -1149,7 +1149,17 @@ export const rooms = pgTable("rooms", {
   // Phase 3.7: claimed (set) once by the reminder job so two server instances cannot both send the 15-minute reminders.
   reminderNotifiedAt: timestamp("reminder_notified_at"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
-});
+  // Phase 4 paid rooms. Both null = a free room. Price in integer kobo; ticket capacity 20 to 150 (free rooms keep capacity).
+  // Never sent to clients inside a room object: the price reaches only eligible viewers, through GET /api/rooms/:id `ticket`.
+  ticketPriceKobo: integer("ticket_price_kobo"),
+  ticketCapacity: integer("ticket_capacity"),
+  refundBeforeStart: boolean("refund_before_start").notNull().default(true),
+}, (t) => ({
+  // Also created by migrations/add_room_tickets.sql and ensureSchema; declared here so drizzle-kit push keeps them.
+  ticketPriceCheck: check("rooms_ticket_price_kobo_check", sql`${t.ticketPriceKobo} IS NULL OR ${t.ticketPriceKobo} > 0`),
+  ticketCapacityCheck: check("rooms_ticket_capacity_check", sql`${t.ticketCapacity} IS NULL OR (${t.ticketCapacity} >= 20 AND ${t.ticketCapacity} <= 150)`),
+  ticketBothCheck: check("rooms_ticket_both_check", sql`(${t.ticketPriceKobo} IS NULL) = (${t.ticketCapacity} IS NULL)`),
+}));
 export type Room = typeof rooms.$inferSelect;
 
 // "Remind me" for a scheduled room. Also created by migrations/add_room_reminders.sql and ensureSchema.
@@ -1192,6 +1202,54 @@ export const roomMembers = pgTable("room_members", {
   onStage: boolean("on_stage").notNull().default(false), // a guest given the mic; kept so a reconnect restores it
 }, (t) => ({ pk: primaryKey({ columns: [t.roomId, t.userId] }) }));
 export type RoomMember = typeof roomMembers.$inferSelect;
+
+// Phase 4: one row per ticket bought for a paid room. All amounts integer kobo, from ticketBreakdown (shared/money.ts),
+// never from the client. Also created by migrations/add_room_tickets.sql and ensureSchema (same constraint names).
+export const roomTickets = pgTable("room_tickets", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  roomId: varchar("room_id").notNull().references(() => rooms.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  amountKobo: integer("amount_kobo").notNull(),
+  vatKobo: integer("vat_kobo").notNull(),
+  feeKobo: integer("fee_kobo").notNull(),
+  reserveKobo: integer("reserve_kobo").notNull(),
+  platformKobo: integer("platform_kobo").notNull(),
+  hostKobo: integer("host_kobo").notNull(),
+  provider: text("provider").notNull(),                       // "paystack"
+  providerRef: text("provider_ref").notNull().unique("room_tickets_provider_ref_key"), // the payment reference: issuing is idempotent on it
+  status: text("status").notNull().default("paid"),           // paid | refunded
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  refundedAt: timestamp("refunded_at"),
+  refundReason: text("refund_reason"),
+}, (t) => ({
+  // At most one PAID ticket per person per room; refunded rows stay as the record.
+  paidUnique: uniqueIndex("room_tickets_paid_uniq").on(t.roomId, t.userId).where(sql`status = 'paid'`),
+  userIdx: index("room_tickets_user_idx").on(t.userId),
+  statusCheck: check("room_tickets_status_check", sql`${t.status} IN ('paid', 'refunded')`),
+  amountsCheck: check("room_tickets_amounts_check", sql`${t.amountKobo} > 0 AND ${t.vatKobo} >= 0 AND ${t.feeKobo} >= 0 AND ${t.reserveKobo} >= 0 AND ${t.platformKobo} >= 0 AND ${t.hostKobo} >= 0`),
+}));
+export type RoomTicket = typeof roomTickets.$inferSelect;
+
+// Phase 4: the ring-fenced record of what a paid room's host is owed, paid out after the room ends (+48 h).
+// No cascade on the room or the host on purpose: a money record never disappears with a deleted row.
+export const roomPayouts = pgTable("room_payouts", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  roomId: varchar("room_id").notNull().references(() => rooms.id).unique("room_payouts_room_id_key"),
+  hostId: varchar("host_id").notNull().references(() => users.id),
+  amountKobo: integer("amount_kobo").notNull().default(0),
+  status: text("status").notNull().default("held"),           // held | queued | paid | failed
+  releaseAt: timestamp("release_at").notNull(),
+  transferRef: text("transfer_ref").unique("room_payouts_transfer_ref_key"),
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  paidAt: timestamp("paid_at"),
+}, (t) => ({
+  statusReleaseIdx: index("room_payouts_status_release_idx").on(t.status, t.releaseAt),
+  statusCheck: check("room_payouts_status_check", sql`${t.status} IN ('held', 'queued', 'paid', 'failed')`),
+  amountCheck: check("room_payouts_amount_check", sql`${t.amountKobo} >= 0`),
+}));
+export type RoomPayout = typeof roomPayouts.$inferSelect;
 
 export const venueEntryNights = pgTable("venue_entry_nights", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
