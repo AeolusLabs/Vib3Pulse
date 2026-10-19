@@ -4,6 +4,7 @@
 import { validateChatReply, type ChatReply } from "@shared/rooms";
 import type { Screen } from "@shared/screen";
 import type { NowPlaying } from "@shared/playback";
+import { isSprayTier, type SprayTier } from "@shared/money";
 
 export type RoomPhase = "idle" | "connecting" | "live" | "reconnecting" | "ended" | "denied";
 export type MemberRole = "host" | "cohost" | "guest";
@@ -23,6 +24,12 @@ export interface RoomMemberView {
 export interface ChatItem { id: string; userId: string; text: string; at: number; replyTo?: ChatReply }
 export interface ReactionItem { id: string; userId: string; emoji: string; at: number }
 export interface InteractionItem { id: string; fromId: string; targetId: string; kind: "wave" | "reaction"; emoji?: string; at: number }
+/**
+ * Phase 5: a delivered spray, exactly as the server broadcast it (`room:spray`). It is animation fuel only: the receipt chat
+ * line is a normal server chat line (room:chat), so nothing here ever makes a chat line. `id` is the server's spray id.
+ * No amount beyond what the tier implies, no card, no reference.
+ */
+export interface SprayEvent { id: string; tier: SprayTier; v3c: number; fromId: string; toId: string; at: number }
 
 export interface RoomState {
   selfId: string | null;
@@ -35,6 +42,8 @@ export interface RoomState {
   chat: ChatItem[];
   reactions: ReactionItem[];
   interactions: InteractionItem[];
+  /** Phase 5: the last SPRAY_CAP delivered sprays, newest last (ring). */
+  sprays: SprayEvent[];
   /** Terminal failure code (AGE_LIMIT, BANNED, KICKED, ROOM_FULL ...). */
   error: string | null;
   /** Last non-terminal rejection (RATE_LIMITED, MUTED, PRIVACY, SLOW_MODE ...); `n` changes on every notice so the UI can react to repeats. `retryMs` comes with SLOW_MODE. */
@@ -60,10 +69,11 @@ export interface RoomState {
 export const CHAT_CAP = 200;
 const REACTION_CAP = 30;
 const INTERACTION_CAP = 20;
+export const SPRAY_CAP = 20;
 
 export const initialRoomState = (selfId: string | null = null): RoomState => ({
   selfId, phase: "idle", room: null, members: [], memberCount: 0, screen: null, you: null,
-  chat: [], reactions: [], interactions: [], error: null, notice: null, seq: 0,
+  chat: [], reactions: [], interactions: [], sprays: [], error: null, notice: null, seq: 0,
   voiceEnabled: false, stage: [], hands: [], invitedYou: false, liveVideo: false, holder: null, asks: [], holderAwayUntil: null, nowPlaying: null, serverOffsetMs: 0,
 });
 
@@ -74,6 +84,7 @@ export type RoomServerMessage =
   | { type: "room:chat"; userId: string; text: string; at: number; replyTo?: ChatReply }
   | { type: "room:react"; userId: string; emoji: string; at?: number }
   | { type: "room:interact"; fromId: string; targetId: string; kind: "wave" | "reaction"; emoji?: string }
+  | { type: "room:spray"; id: string; tier: SprayTier; v3c: number; fromId: string; toId: string; at: number }
   | { type: "room:screen"; screen: Screen | null; screenVersion?: number }
   | { type: "room:stage"; stage: string[]; hands: string[]; invitedYou?: boolean }
   | { type: "room:voice"; enabled: boolean }
@@ -121,7 +132,7 @@ export function roomReducer(state: RoomState, event: RoomEvent, now: () => numbe
         voiceEnabled: event.voiceEnabled === true, stage: event.stage ?? [], hands: event.hands ?? [], invitedYou: false, liveVideo: (event.room as { liveVideo?: boolean }).liveVideo === true, holder: event.holder ?? null, asks: event.asks ?? [], holderAwayUntil: event.away ?? null, nowPlaying: event.nowPlaying ?? null,
         // A late joiner has the host's clock from this message, not only from the next heartbeat.
         serverOffsetMs: event.serverNowMs !== undefined ? event.serverNowMs - now() : state.serverOffsetMs,
-        chat: sameRoom ? state.chat : [], reactions: sameRoom ? state.reactions : [], interactions: sameRoom ? state.interactions : [],
+        chat: sameRoom ? state.chat : [], reactions: sameRoom ? state.reactions : [], interactions: sameRoom ? state.interactions : [], sprays: sameRoom ? state.sprays : [],
       };
     }
     case "room:joined": {
@@ -147,6 +158,16 @@ export function roomReducer(state: RoomState, event: RoomEvent, now: () => numbe
     case "room:interact": {
       const item: InteractionItem = { id: `i${state.seq}`, fromId: event.fromId, targetId: event.targetId, kind: event.kind, emoji: event.emoji, at: now() };
       return { ...state, seq: state.seq + 1, interactions: cap([...state.interactions, item], INTERACTION_CAP) };
+    }
+    case "room:spray": {
+      // Server-made, but still checked: a malformed event is dropped, never animated. The same id twice (a resend after a
+      // reconnect) is kept once, so a spray never plays twice.
+      const e = event as Partial<SprayEvent>;
+      if (typeof e.id !== "string" || !e.id || !isSprayTier(e.tier) || typeof e.fromId !== "string" || !e.fromId || typeof e.toId !== "string" || !e.toId) return state;
+      if (typeof e.v3c !== "number" || !Number.isSafeInteger(e.v3c) || e.v3c <= 0) return state;
+      if (state.sprays.some((x) => x.id === e.id)) return state;
+      const item: SprayEvent = { id: e.id, tier: e.tier, v3c: e.v3c, fromId: e.fromId, toId: e.toId, at: typeof e.at === "number" && Number.isFinite(e.at) ? e.at : now() };
+      return { ...state, sprays: cap([...state.sprays, item], SPRAY_CAP) };
     }
     case "room:screen":
       return { ...state, screen: event.screen, nowPlaying: null, room: state.room && event.screenVersion !== undefined ? { ...state.room, screenVersion: event.screenVersion } : state.room };
