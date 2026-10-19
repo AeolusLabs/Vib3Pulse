@@ -1343,7 +1343,7 @@ export type VenueTicket = typeof venueTickets.$inferSelect;
 // can find and resolve them instead of relying on someone reading server logs.
 // payout_failed: room payouts (server/rooms/settlement.ts). room_charge_unhandled: a paid room ticket charge that could not
 // become a ticket or an automatic refund (server/rooms/tickets.ts openRoomChargeIssue): a person settles it in Paystack.
-export const paymentIssueReasons = ["refund_failed", "payout_failed", "room_charge_unhandled"] as const;
+export const paymentIssueReasons = ["refund_failed", "payout_failed", "room_charge_unhandled", "refund_pending", "refund_overdue"] as const;
 export type PaymentIssueReason = typeof paymentIssueReasons[number];
 
 export const paymentIssues = pgTable("payment_issues", {
@@ -2067,6 +2067,7 @@ export const paymentTransactionTypes = [
   "room_ticket",        // paid room ticket sold (server/rooms/tickets.ts issueRoomTicket)
   "room_ticket_refund", // paid room ticket refunded (server/rooms/refunds.ts)
   "room_payout",        // host paid for a ticketed room (server/rooms/settlement.ts)
+  "room_payout_reversal", // a payout transfer that Paystack later reversed (server/rooms/settlement.ts)
 ] as const;
 export type PaymentTransactionType = typeof paymentTransactionTypes[number];
 
