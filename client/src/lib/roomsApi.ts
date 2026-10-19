@@ -63,13 +63,29 @@ export interface RoomView {
  * adults; absent for everyone else, and absence means no price and no ticket UI. `left` and `capacity` are optional extras
  * (the contract does not promise them); without them the page says "On sale".
  */
-export interface RoomTicketBlock { required: boolean; priceKobo: number; held: boolean; soldOut: boolean; left?: number; capacity?: number }
+export interface RoomTicketBlock {
+  required: boolean; priceKobo: number; held: boolean; soldOut: boolean;
+  /** Optional (fix round 4F, eligible viewers only): tickets left and the ticket capacity, for "62 of 100". */
+  left?: number; capacity?: number;
+  /** Optional: the host's refund promise. The viewer's room object does not carry it, so the block does. */
+  refundBeforeStart?: boolean;
+}
 
 /** A buyer's ticket as the verify route returns it (lane S2). `code` is a short code derived from the ticket id. */
 export interface RoomTicketView { id: string; roomId: string; code: string; amountKobo: number; status: "paid" | "refunded"; createdAt: string }
 
-/** GET /api/rooms/:id/tickets/summary (host only, lane S3). Sums of ticketBreakdown over paid tickets, in kobo. */
-export interface RoomTicketSummary { sold: number; grossKobo: number; platformKobo: number; hostKobo: number; releaseAt: string | null; capacity: number; soldOut: boolean }
+/** The payout row of a room, as the summary route sends it (null until the room has one). */
+export interface RoomPayoutView { status: string; amountKobo: number; releaseAt: string | null; paidAt: string | null }
+
+/**
+ * GET /api/rooms/:id/tickets/summary (host only, lane S3) answers `{ summary: RoomTicketSummary }`. Sums of the stored
+ * ticketBreakdown over paid tickets, in kobo. No capacity here: the host's own room carries ticketCapacity.
+ */
+export interface RoomTicketSummary {
+  sold: number; refunded: number;
+  grossKobo: number; vatKobo: number; feeKobo: number; reserveKobo: number; platformKobo: number; hostKobo: number;
+  payout: RoomPayoutView | null;
+}
 
 export type RoomScope = "live" | "upcoming" | "friends";
 

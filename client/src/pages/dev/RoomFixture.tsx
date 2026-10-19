@@ -20,7 +20,7 @@ import type { RoomVoice, ScreenTrack } from "@/hooks/useRoomVoice";
 import { roomReducer, type RoomState } from "@/lib/roomReducer";
 import { FIXTURE_HOST, FIXTURE_INVITES, FIXTURE_IDS, FIXTURE_NAMES, FIXTURE_ROOM, fixtureControlsState, fixtureLiveState, fixtureStartView, parseControlsFixture, parseFixtureQuery } from "@/lib/roomFixtures";
 import {
-  FIXTURE_TICKET, FIXTURE_TICKET_BLOCK, FIXTURE_TICKET_PRICE_KOBO, fixtureTicketRoom, fixtureTicketSummary, parseTicketFixture, type TicketScene,
+  FIXTURE_TICKET, FIXTURE_TICKET_BLOCK, FIXTURE_TICKET_PRICE_KOBO, FIXTURE_TICKET_REF, fixtureTicketRoom, fixtureTicketSummary, parseTicketFixture, type TicketScene,
 } from "@/lib/roomFixtures";
 import TicketPage from "@/components/rooms/tickets/TicketPage";
 import Checkout from "@/components/rooms/tickets/Checkout";
@@ -29,7 +29,7 @@ import WaitingRoom from "@/components/rooms/tickets/WaitingRoom";
 import RefundButton from "@/components/rooms/tickets/RefundButton";
 import HostSales, { HostSalesBody } from "@/components/rooms/tickets/HostSales";
 import StepPrice from "@/components/rooms/create/StepPrice";
-import { PRICE_COPY, defaultTicketDraft, type TicketDraft } from "@/lib/roomTickets";
+import { PRICE_COPY, defaultTicketDraft, parseSummary, type TicketDraft } from "@/lib/roomTickets";
 import type { RoomTicketView } from "@/lib/roomsApi";
 
 type Ev = Parameters<typeof roomReducer>[1];
@@ -204,9 +204,9 @@ function TicketFixture({ scene: first, theme }: { scene: TicketScene; theme: "da
       const path = url.replace(window.location.origin, "");
       const base = "/api/rooms/fixture-paid-room";
       if (path === "/api/csrf-token") return json({ csrfToken: "fixture" });
-      if (path === `${base}/tickets/checkout`) return json({ url: `${window.location.origin}/dev/room-fixture?ticket=checkout`, reference: "fx-ref" }, 200, 400);
+      if (path === `${base}/tickets/checkout`) return json({ url: `${window.location.origin}/dev/room-fixture?ticket=checkout`, reference: FIXTURE_TICKET_REF }, 200, 400);
       if (path === `${base}/tickets/verify`) return json({ ticket: FIXTURE_TICKET }, 200, 900);
-      if (path === `${base}/tickets/refund`) return json({ result: "refunded" }, 200, 500);
+      if (path === `${base}/tickets/refund`) return json({ result: "refunded", settled: true }, 200, 500);
       if (path === `${base}/tickets/summary`) return json(fixtureTicketSummary(), 200, 300);
       if (path === `${base}/cancel`) return json({ ok: true }, 200, 400);
       return real(input, init);
@@ -231,7 +231,7 @@ function TicketFixture({ scene: first, theme }: { scene: TicketScene; theme: "da
     <div className="min-h-screen bg-background font-sans text-foreground" data-testid="room-fixture" data-scene={`ticket-${scene}`}>
       <main className="mx-auto max-w-md space-y-4 px-4 py-4">
         {scene === "page" && <TicketPage room={room} host={FIXTURE_HOST} ticket={FIXTURE_TICKET_BLOCK} go={() => setScene("checkout")} />}
-        {scene === "checkout" && <Checkout roomId={room.id} reference="fx-ref" onVerified={(t) => { setTicket(t); setScene("confirmed"); }} onBack={() => setScene("page")} />}
+        {scene === "checkout" && <Checkout roomId={room.id} reference={FIXTURE_TICKET_REF} onVerified={(t) => { setTicket(t); setScene("confirmed"); }} onBack={() => setScene("page")} />}
         {scene === "confirmed" && <TicketConfirmed ticket={ticket} room={room} hostName="Maya Okafor" onContinue={() => setScene("waiting")} />}
         {scene === "waiting" && <WaitingRoom room={room} hostName="Maya Okafor" priceKobo={FIXTURE_TICKET_PRICE_KOBO} onRecheck={() => {}} onRefunded={() => {}} />}
         {scene === "refund" && (
@@ -247,8 +247,8 @@ function TicketFixture({ scene: first, theme }: { scene: TicketScene; theme: "da
         {scene === "hostsales" && (
           <>
             <h1 className="text-lg font-semibold">Tickets</h1>
-            <HostSalesBody summary={fixtureTicketSummary()} />
-            <HostSales room={room} onChanged={() => {}} />
+            <HostSalesBody summary={parseSummary(fixtureTicketSummary())!} capacity={room.ticketCapacity} />
+            <HostSales room={room} capacity={room.ticketCapacity} onChanged={() => {}} />
           </>
         )}
         {scene === "price" && (

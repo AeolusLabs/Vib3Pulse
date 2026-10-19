@@ -1,6 +1,7 @@
 // The host's ticket sales (img/f-hostsales): tickets sold of capacity, gross, the costs line, the platform share, what
-// the host earns, and when it is paid out. Every number comes from GET /api/rooms/:id/tickets/summary (host only), which
-// sums ticketBreakdown over paid tickets on the server; nothing is computed here except the costs line (the remainder).
+// the host earns, and when it is paid out. Every sum comes from GET /api/rooms/:id/tickets/summary (host only), which
+// answers { summary: {...} } with the stored ticketBreakdown sums over paid tickets. The capacity is the host's own room's
+// ticketCapacity (the summary does not carry it), so "sold out" is worked out here. Whole naira, earnings rounded down.
 import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -11,32 +12,32 @@ import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/u
 import RoomSheetContent from "@/components/rooms/shell/RoomSheetContent";
 import { Loader2Icon, TicketIcon } from "@/components/ui/icons";
 import { formatWhen, type RoomTicketSummary } from "@/lib/roomsApi";
-import { AMBER, SALES_COPY, salesLines, ticketErrorMessage } from "@/lib/roomTickets";
+import { AMBER, SALES_COPY, cancelNeedsRefetch, salesLines, salesReleaseLine, salesSoldOut, ticketErrorMessage } from "@/lib/roomTickets";
 import { cancelTicketedRoom, fetchTicketSummary } from "./ticketsApi";
 
 export const summaryKey = (roomId: string) => ["/api/rooms", roomId, "tickets", "summary"] as const;
 
 /** The numbers on their own (the sheet body; the dev fixture draws it too). */
-export function HostSalesBody({ summary }: { summary: RoomTicketSummary }) {
+export function HostSalesBody({ summary, capacity }: { summary: RoomTicketSummary; capacity: number | null }) {
   const l = salesLines(summary);
+  const soldOut = salesSoldOut(summary.sold, capacity);
   return (
     <div className="space-y-4" data-testid="host-sales">
       <div className={`rounded-2xl p-4 ${AMBER.fill}`}>
         <p className="text-sm">{SALES_COPY.sold}</p>
         <p className="font-serif text-5xl font-bold tabular-nums" data-testid="host-sales-sold">
-          {summary.sold} <span className="font-sans text-lg font-semibold">{SALES_COPY.of(summary.capacity)}</span>
+          {summary.sold}{capacity ? <> <span className="font-sans text-lg font-semibold">{SALES_COPY.of(capacity)}</span></> : null}
         </p>
-        {summary.soldOut && <p className="mt-1 text-sm font-semibold">{SALES_COPY.soldOut}</p>}
+        {soldOut && <p className="mt-1 text-sm font-semibold">{SALES_COPY.soldOut}</p>}
+        {summary.refunded > 0 && <p className="mt-1 text-sm" data-testid="host-sales-refunded">{SALES_COPY.refunded(summary.refunded)}</p>}
       </div>
       <dl className="space-y-2 rounded-2xl bg-muted/60 p-4 text-sm">
         <Line label={SALES_COPY.gross} value={l.gross} testId="host-sales-gross" />
-        <Line label={SALES_COPY.costs} value={l.costs} />
+        <Line label={SALES_COPY.costs} value={l.costs} testId="host-sales-costs" />
         <Line label={SALES_COPY.platform} value={l.platform} testId="host-sales-platform" />
         <div className="border-t border-border pt-2"><Line label={SALES_COPY.earn} value={l.earn} testId="host-sales-earn" strong /></div>
       </dl>
-      <p className="text-sm text-muted-foreground" data-testid="host-sales-release">
-        {summary.releaseAt ? SALES_COPY.heldUntil(formatWhen(summary.releaseAt)) : SALES_COPY.heldAfterEnd}
-      </p>
+      <p className="text-sm text-muted-foreground" data-testid="host-sales-release">{salesReleaseLine(summary.payout, formatWhen)}</p>
     </div>
   );
 }
@@ -52,12 +53,16 @@ function Line({ label, value, testId, strong }: { label: string; value: string; 
 
 interface Props {
   room: { id: string; status: "scheduled" | "live" | "ended" };
+  /** The room's ticket capacity, from the host's own room object (room.ticketCapacity). */
+  capacity: number | null;
+  /** The invite token the page was opened with, for the token-gated routes. */
+  token?: string;
   /** After a cancel, so the page reloads the room. */
   onChanged(): void;
 }
 
 /** "Tickets" for the host: opens the sales sheet. A scheduled room also offers Cancel and refund everyone (POST /cancel). */
-export default function HostSales({ room, onChanged }: Props) {
+export default function HostSales({ room, capacity, token, onChanged }: Props) {
   const [open, setOpen] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [cancelBusy, setCancelBusy] = useState(false);
@@ -65,7 +70,7 @@ export default function HostSales({ room, onChanged }: Props) {
   const btn = useRef<HTMLButtonElement>(null);
   const q = useQuery({
     queryKey: summaryKey(room.id),
-    queryFn: () => fetchTicketSummary(room.id),
+    queryFn: () => fetchTicketSummary(room.id, token),
     enabled: open,
     staleTime: 0,
     refetchInterval: open && room.status !== "ended" ? 30_000 : false, // late sales change the numbers
@@ -75,10 +80,13 @@ export default function HostSales({ room, onChanged }: Props) {
   const cancel = async () => {
     if (cancelBusy) return;
     setCancelBusy(true); setNote(null);
-    const r = await cancelTicketedRoom(room.id);
+    const r = await cancelTicketedRoom(room.id, token);
     setCancelBusy(false); setConfirm(false);
     if (r.ok) { setNote({ text: SALES_COPY.cancelled, error: false }); onChanged(); }
-    else setNote({ text: ticketErrorMessage(r, "cancel"), error: true });
+    else {
+      setNote({ text: ticketErrorMessage(r, "cancel"), error: true });
+      if (cancelNeedsRefetch(r)) onChanged(); // it went live or ended meanwhile: show the room as it is now
+    }
   };
 
   return (
@@ -96,7 +104,7 @@ export default function HostSales({ room, onChanged }: Props) {
             {q.isLoading || !res ? (
               <div className="grid place-items-center py-8"><span role="status" aria-label="Loading"><Loader2Icon className="h-6 w-6 animate-spin motion-reduce:animate-none" aria-hidden /></span></div>
             ) : res.ok ? (
-              <HostSalesBody summary={res.body} />
+              <HostSalesBody summary={res.body} capacity={capacity} />
             ) : (
               <div className="space-y-2">
                 <p role="alert" className="text-sm text-destructive">{ticketErrorMessage(res, "summary")}</p>

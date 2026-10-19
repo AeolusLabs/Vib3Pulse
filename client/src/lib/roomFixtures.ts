@@ -190,15 +190,29 @@ export function fixtureTicketRoom(scheduledFor: string) {
   };
 }
 
-export const FIXTURE_TICKET_BLOCK = { required: true, priceKobo: FIXTURE_TICKET_PRICE_KOBO, held: false, soldOut: false, left: 62, capacity: 100 };
+export const FIXTURE_TICKET_BLOCK = { required: true, priceKobo: FIXTURE_TICKET_PRICE_KOBO, held: false, soldOut: false, left: 62, capacity: 100, refundBeforeStart: true };
+
+/** A reference in the exact shape checkout makes (vib3rt_<24 hex>_<32 hex>), so the return parser accepts it. */
+export const FIXTURE_TICKET_REF = `vib3rt_${"0f".repeat(12)}_${"a1".repeat(16)}`;
 
 export const FIXTURE_TICKET = {
   id: "00000000-0000-4000-8000-00000000f1c7", roomId: "fixture-paid-room", code: "VB7K2Q", amountKobo: FIXTURE_TICKET_PRICE_KOBO,
   status: "paid" as const, createdAt: "2026-10-17T18:00:00.000Z",
 };
 
-/** The host summary as the server would sum it: `sold` tickets at the fixture price through ticketBreakdown. */
-export function fixtureTicketSummary(sold = 38, releaseAt: string | null = "2026-10-20T20:00:00.000Z") {
+/**
+ * The summary route's body as the server sends it, `{ summary: {...} }`: `sold` paid tickets at the fixture price through
+ * ticketBreakdown, `refunded` refunded ones, and a held payout when `releaseAt` is given (null: no payout row yet).
+ * No capacity in it: the host's own room carries ticketCapacity (100 in the fixture room).
+ */
+export function fixtureTicketSummary(sold = 38, releaseAt: string | null = "2026-10-20T20:00:00.000Z", refunded = 2) {
   const b = ticketBreakdown(FIXTURE_TICKET_PRICE_KOBO);
-  return { sold, grossKobo: b.price * sold, platformKobo: b.platform * sold, hostKobo: b.host * sold, releaseAt, capacity: 100, soldOut: sold >= 100 };
+  return {
+    summary: {
+      sold, refunded,
+      grossKobo: b.price * sold, vatKobo: b.vat * sold, feeKobo: b.fee * sold, reserveKobo: b.reserve * sold,
+      platformKobo: b.platform * sold, hostKobo: b.host * sold,
+      payout: releaseAt ? { status: "held", amountKobo: b.host * sold, releaseAt, paidAt: null } : null,
+    },
+  };
 }

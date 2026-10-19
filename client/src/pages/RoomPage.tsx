@@ -24,7 +24,7 @@ import { useRoomSocket } from "@/hooks/useRoomSocket";
 import { useRoomVoice } from "@/hooks/useRoomVoice";
 import { showsShell } from "@/lib/roomIntegration";
 import { AGE_LIMIT_EVICTED_COPY, DENIED_MESSAGE, HOST_REVIEW_COPY, KIND_LABEL, type PeekMember, VISIBILITY_LABEL, ageLimitLabel, fetchRooms, hostName, type RoomHostSummary, type RoomTicketView, type RoomView } from "@/lib/roomsApi";
-import { parseTicketBlock, returnRef, searchWithoutRef, showsPrice, ticketGate } from "@/lib/roomTickets";
+import { inviteTokenFor, parseTicketBlock, returnRef, searchWithoutRef, showsPrice, ticketGate } from "@/lib/roomTickets";
 import { kickRemainingAfter, stateForCode } from "@/lib/roomStates";
 import { ArrowLeftIcon } from "@/components/ui/icons";
 import { isAgeUnknownDenied, isMinorsDenied, isRoomDenial, listenOnlyHere, minorsCodeFor, parseRoomDenial, showListenLine, type RoomDenial } from "@/lib/minorsRoomUi";
@@ -46,6 +46,9 @@ interface RoomDetail {
   ticket?: unknown;
 }
 
+/** sessionStorage, or null where the browser refuses it (private modes): the invite token then lives only in the URL. */
+const sessionStore = () => { try { return window.sessionStorage; } catch { return null; } };
+
 function Panel({ title, body, action }: { title: string; body?: string; action?: React.ReactNode }) {
   return (
     <Card className="mx-auto max-w-md space-y-3 rounded-2xl p-8 text-center" role="status" data-testid="room-panel">
@@ -66,7 +69,8 @@ function RoomPageInner({ id }: { id: string }) {
   const [, navigate] = useLocation();
   const { data: me } = useAuth();
   const { toast } = useToast();
-  const token = useMemo(() => new URLSearchParams(window.location.search).get("token") ?? undefined, []);
+  // The URL's ?token= first; on the way back from Paystack (no token in the return URL) the one TicketPage kept for this room.
+  const token = useMemo(() => inviteTokenFor(window.location.search, sessionStore(), id), [id]);
 
   const { data: raw, isLoading, error, refetch } = useQuery<RoomDetail | RoomDenial | null>({
     queryKey: ["room", id, token ?? ""],
@@ -119,7 +123,7 @@ function RoomPageInner({ id }: { id: string }) {
   // ---------------------------------------------------------------- paid rooms (task 4.7)
   // The way back from Paystack carries the payment reference; it is verified once, then dropped from the address.
   const [payRef, setPayRef] = useState(() => returnRef(window.location.search));
-  const [confirmed, setConfirmed] = useState<RoomTicketView | null>(null);
+  const [confirmed, setConfirmed] = useState<{ ticket: RoomTicketView; duplicateRefunded: boolean } | null>(null);
   const clearPayRef = () => {
     try { window.history.replaceState(window.history.state, "", `${window.location.pathname}${searchWithoutRef(window.location.search)}${window.location.hash}`); } catch { /* the reference stays; verify is idempotent */ }
     setPayRef(null);
@@ -176,7 +180,7 @@ function RoomPageInner({ id }: { id: string }) {
         nav={<Navigation />}
         hostControls={<>
           <HostControls room={{ ...room, host: detail.host }} onChanged={() => refetch()} isHost={isHost} revokedInvites={revokedInvites} onRevokedInvitesChange={setRevokedInvites} endElsewhere ticketed={ticketed} />
-          {ticketed && <HostSales room={room} onChanged={() => { void refetch(); }} />}
+          {ticketed && <HostSales room={room} capacity={room.ticketCapacity ?? ticketBlock?.capacity ?? null} token={token} onChanged={() => { void refetch(); }} />}
         </>}
         onLeave={leave}
         detailsError={!!error}
@@ -189,7 +193,17 @@ function RoomPageInner({ id }: { id: string }) {
   // ---------------------------------------------------------------- everything before and after the room
   let content: React.ReactNode;
   let bare = false; // the ticket screens carry the title themselves: only a back button above them
-  if (isLoading) {
+  if (confirmed) {
+    // First: the return from Paystack verified a paid ticket. The room may still be loading (or unavailable); the
+    // confirmation then shows the ticket without the room's details.
+    bare = true;
+    content = <TicketConfirmed ticket={confirmed.ticket} duplicateRefunded={confirmed.duplicateRefunded} room={room ?? null} hostName={detail ? hostName(detail.host) : null} onContinue={() => { setConfirmed(null); void refetch(); }} />;
+  } else if (payRef) {
+    // Before the room loads, any refusal and the not-available panel: verify is bound to this buyer by the reference and
+    // shows nothing about the room, so a charge always gets its answer.
+    bare = true;
+    content = <Checkout roomId={id} reference={payRef} onVerified={(t, dup) => { clearPayRef(); setConfirmed({ ticket: t, duplicateRefunded: dup }); void refetch(); }} onBack={() => { clearPayRef(); void refetch(); }} />;
+  } else if (isLoading) {
     content = <div className="space-y-3"><Skeleton className="aspect-video w-full rounded-2xl" /><Skeleton className="h-40 w-full rounded-2xl" /></div>;
   } else if (minorsCode) {
     // The warning screen alone: no title, no host. Acknowledging records it, clears any socket refusal, reloads the room and joins.
@@ -206,12 +220,6 @@ function RoomPageInner({ id }: { id: string }) {
     content = <Panel title="Couldn't load this room" action={<Button onClick={() => refetch()}>Try again</Button>} />;
   } else if (!detail || !room) {
     content = <Panel title="This room isn't available" body="It may have been removed, or you may not have access." action={back} />;
-  } else if (confirmed) {
-    bare = true;
-    content = <TicketConfirmed ticket={confirmed} room={room} hostName={hostName(detail.host)} onContinue={() => { setConfirmed(null); void refetch(); }} />;
-  } else if (payRef) {
-    bare = true;
-    content = <Checkout roomId={id} reference={payRef} onVerified={(t) => { clearPayRef(); setConfirmed(t); void refetch(); }} onBack={() => { clearPayRef(); void refetch(); }} />;
   } else if (room.status === "ended" || state.phase === "ended") {
     content = state.notice?.code === "HOST_REVIEW"
       ? <Panel title="This room has closed" body={HOST_REVIEW_COPY} action={back} />
@@ -219,7 +227,7 @@ function RoomPageInner({ id }: { id: string }) {
   } else if (ticketBlock && showsPrice(gate)) {
     bare = true;
     // Only from the server's ticket block (an eligible adult who can view the room). Never inferred from anything else.
-    content = <TicketPage room={room} host={detail.host} ticket={ticketBlock} onAlreadyHeld={() => { void refetch(); }} />;
+    content = <TicketPage room={room} host={detail.host} ticket={ticketBlock} token={token} onRefetch={() => { void refetch(); }} />;
   } else if (!detail.canJoin.ok && !(detail.canJoin.code === "ROOM_NOT_LIVE" && room.status === "scheduled")) {
     const code = detail.canJoin.code;
     content = stateForCode(code)
@@ -231,13 +239,15 @@ function RoomPageInner({ id }: { id: string }) {
     const code = state.error ?? "NOT_FOUND";
     content = <Panel title={code === "AGE_LIMIT" ? "This room has an age limit" : "You can't join this room"} body={code === "AGE_LIMIT" && state.room ? AGE_LIMIT_EVICTED_COPY : DENIED_MESSAGE[code] ?? "You can't join this room."} action={back} />;
   } else if (room.status === "scheduled" && gate === "held" && ticketBlock) {
-    content = <WaitingRoom room={{ ...room, id }} hostName={hostName(detail.host)} priceKobo={ticketBlock.priceKobo} onRecheck={() => { void refetch(); }} onRefunded={onRefunded} />;
+    bare = true;
+    // The refund promise comes from the ticket block (a guest's room object does not carry refundBeforeStart).
+    content = <WaitingRoom room={{ ...room, id, refundBeforeStart: ticketBlock.refundBeforeStart ?? room.refundBeforeStart }} hostName={hostName(detail.host)} token={token} priceKobo={ticketBlock.priceKobo} onRecheck={() => { void refetch(); }} onRefunded={onRefunded} />;
   } else if (room.status === "scheduled") {
     content = (
       <div className="space-y-4">
         <NotStartedPanel room={room} reminderSet={detail.reminderSet === true} hostName={hostName(detail.host)} canRemind={!isHost} />
         {isHost && <HostControls room={{ ...room, host: detail.host }} onChanged={() => refetch()} isHost={isHost} revokedInvites={revokedInvites} onRevokedInvitesChange={setRevokedInvites} ticketed={ticketed} />}
-        {ticketed && <HostSales room={room} onChanged={() => { void refetch(); }} />}
+        {ticketed && <HostSales room={room} capacity={room.ticketCapacity ?? ticketBlock?.capacity ?? null} token={token} onChanged={() => { void refetch(); }} />}
       </div>
     );
   } else {
