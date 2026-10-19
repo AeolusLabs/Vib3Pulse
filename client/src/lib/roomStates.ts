@@ -45,7 +45,7 @@ export function msUntil(iso: string | null | undefined, now: number): number | n
 /** How often the countdown needs to redraw: every second in the last minute, otherwise every 30 s. */
 export const countdownTickMs = (ms: number | null) => (ms !== null && ms <= 60_000 ? 1000 : 30_000);
 
-/** "You can try again in 10 minutes." Uses the server's remaining time when it sends one, else the standard 10 minutes. */
+/** "You can try again in 10 minutes." Uses the time left on the removal when known, else the standard 10 minutes. */
 export function kickedBody(remainingMs: number | null | undefined): string {
   if (remainingMs === null || remainingMs === undefined || !Number.isFinite(remainingMs)) return "The host removed you from this room. You can try again in 10 minutes.";
   if (remainingMs <= 0) return "The host removed you from this room. You can try again now.";
@@ -53,13 +53,13 @@ export function kickedBody(remainingMs: number | null | undefined): string {
   return `The host removed you from this room. You can try again in ${mins} ${mins === 1 ? "minute" : "minutes"}.`;
 }
 
-/** The remaining removal time from whatever a refusal carries (seconds, or an ISO end time); null when it says nothing. */
-export function kickRemainingMs(extra: unknown, now: number): number | null {
-  if (!extra || typeof extra !== "object") return null;
-  const e = extra as { retryAfterSeconds?: unknown; until?: unknown };
-  if (typeof e.retryAfterSeconds === "number" && Number.isFinite(e.retryAfterSeconds)) return e.retryAfterSeconds * 1000;
-  if (typeof e.until === "string") return msUntil(e.until, now);
-  return null;
+/** How long a removal lasts (the server's standard 10 minutes). */
+export const KICK_WINDOW_MS = 10 * 60_000;
+
+/** Time left on a removal that reached this client at `kickedAt` (the server sends none). Null when we never saw it arrive: the copy then says the generic 10 minutes. */
+export function kickRemainingAfter(kickedAt: number | null | undefined, now: number): number | null {
+  if (typeof kickedAt !== "number" || !Number.isFinite(kickedAt)) return null;
+  return kickedAt + KICK_WINDOW_MS - now;
 }
 
 /** The recap block of an ended room: a length and a peak only when the room object already carries them, else one plain line. */

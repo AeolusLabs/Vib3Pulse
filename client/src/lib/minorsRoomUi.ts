@@ -1,4 +1,5 @@
 // Pure rules and words for the minors' room screens (no React, no network). The server is the gate; this only decides what to show.
+import { DENIED_MESSAGE } from "./roomsApi";
 import { MINORS_ROOM_CODES, MINORS_ROOM_WARNING, type MinorsRoomCode } from "@shared/rooms";
 
 export const ADULT_LISTEN_LINE = "In this room adults can listen and chat.";
@@ -73,12 +74,12 @@ export function inviteErrorMessage(status: number, code?: string): string {
   if (code === "HOST_NOT_MINOR") return "Only hosts under 18 can do this in a room for under 18s.";
   if (status === 403 && !code) return "That didn't work. Try again."; // a stale session token looks like this; the call already retried once
   if (code === "NOT_MINORS_ROOM") return "This room doesn't need adult invites.";
-  if (code === "ROOM_ENDED") return "This room has ended.";
+  if (code === "ROOM_ENDED") return DENIED_MESSAGE.ROOM_ENDED;
   return "That didn't work. Try again.";
 }
 
 export function acknowledgeErrorMessage(status: number, code?: string): string {
-  if (code === "ROOM_ENDED") return "The host ended the room.";
+  if (code === "ROOM_ENDED") return DENIED_MESSAGE.ROOM_ENDED; // one source for the ended copy
   if (code === "AGE_UNKNOWN") return "Add your date of birth in your profile to join rooms.";
   if (status === 429) return "Slow down a little, then try again.";
   if (code === "MINORS_ROOM") return "The host took back your invite, or you can't come into this room.";
