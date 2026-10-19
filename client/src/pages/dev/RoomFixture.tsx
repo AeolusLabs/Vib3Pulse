@@ -4,6 +4,7 @@
 // Query: ?scene=voice|live|immersive|weak|dropped &theme=dark|light &as=guest|holder|host &sound=1 (sound only)
 // &tap=1 (audio waits for a tap) &invite=1 (invited to speak) &flood=300 (chat lines over ten seconds).
 // &minors=refuse|ack|invites|listen|teennote shows the minors' room screens (listen is the room shell seen as an adult).
+// &controls=host|cohost opens the Controls sheet as the host or a co-host (requests waiting, settings set; saves settle locally).
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import RoomShell, { type RoomShellSocket } from "@/components/rooms/shell/RoomShell";
 import MinorsRoomWarning from "@/components/rooms/MinorsRoomWarning";
@@ -12,7 +13,7 @@ import TeenHostNote from "@/components/rooms/TeenHostNote";
 import type { AdultInvite } from "@/lib/minorsRoomApi";
 import type { RoomVoice, ScreenTrack } from "@/hooks/useRoomVoice";
 import { roomReducer, type RoomState } from "@/lib/roomReducer";
-import { FIXTURE_HOST, FIXTURE_INVITES, FIXTURE_IDS, FIXTURE_NAMES, FIXTURE_ROOM, fixtureLiveState, fixtureStartView, parseFixtureQuery } from "@/lib/roomFixtures";
+import { FIXTURE_HOST, FIXTURE_INVITES, FIXTURE_IDS, FIXTURE_NAMES, FIXTURE_ROOM, fixtureControlsState, fixtureLiveState, fixtureStartView, parseControlsFixture, parseFixtureQuery } from "@/lib/roomFixtures";
 
 type Ev = Parameters<typeof roomReducer>[1];
 
@@ -52,6 +53,7 @@ function useFixtureFetch() {
       if (/^\/api\/rooms\/fixture-room\/report/.test(path)) return json({ ok: true });
       if (path.startsWith("/api/rooms/fixture-room/adult-invites")) return json(init?.method && init.method !== "GET" ? { ok: true } : { invites: FIXTURE_INVITES.active });
       if (path === "/api/blocks") return json({ blocked: [] });
+      if (path === "/api/rooms/config") return json({ features: { paidRooms: false, spray: false }, limits: {}, currency: "NGN", region: "NG" });
       if (path.startsWith("/api/users/search")) return json([]);
       if (/^\/api\/users\/[^/]+\/follow-stats/.test(path)) return json({ followersCount: 128, followingCount: 64 });
       if (/^\/api\/users\/[^/?]+$/.test(path)) return json({ bio: "Fixture profile. Nothing here is real." });
@@ -97,7 +99,9 @@ export default function RoomFixture() {
 }
 
 function ShellFixture({ opts }: { opts: ReturnType<typeof parseFixtureQuery> }) {
-  const [state, dispatch] = useReducer((s: RoomState, e: Ev) => roomReducer(s, e), undefined, () => fixtureLiveState(opts.scene, { as: opts.as, now: Date.now(), invite: opts.invite }));
+  const controls = useMemo(() => parseControlsFixture(window.location.search), []);
+  const [state, dispatch] = useReducer((s: RoomState, e: Ev) => roomReducer(s, e), undefined, () =>
+    controls ? fixtureControlsState(controls) : fixtureLiveState(opts.scene, { as: opts.as, now: Date.now(), invite: opts.invite }));
   const was = useRef<boolean | null>(null);
   useFixtureFetch();
 
@@ -162,11 +166,40 @@ function ShellFixture({ opts }: { opts: ReturnType<typeof parseFixtureQuery> }) 
   } as RoomVoice;
 
   const ok = () => true;
+  // Controls fixture: the fakes answer like the server would, a moment later, through the same reducer events.
+  const later = (e: Ev) => { setTimeout(() => dispatch(e), 300); };
   const sock: RoomShellSocket = {
     chat: (text, replyTo) => { dispatch({ type: "room:chat", userId: self, text, at: Date.now(), ...(replyTo ? { replyTo } : {}) }); return true; },
     react: (emoji) => { dispatch({ type: "room:react", userId: self, emoji, at: Date.now() }); return true; },
-    interact: ok, setScreen: ok, mod: ok, stageAction: ok, liveAction: ok, sendPlayback: ok,
-    setVoice: async () => true, setLiveVideo: async () => true,
+    interact: ok, setScreen: ok, sendPlayback: ok,
+    mod: (action, targetId) => { later(action === "mute" || action === "unmute" ? { type: "room:mod", action, targetId } : { type: "room:left", userId: targetId }); return true; },
+    stageAction: (action, targetId) => {
+      if (targetId && (action === "accept" || action === "remove")) {
+        const stage = action === "accept" ? [...state.stage.filter((x) => x !== targetId), targetId] : state.stage.filter((x) => x !== targetId);
+        later({ type: "room:stage", stage, hands: state.hands.filter((x) => x !== targetId) });
+      }
+      return true;
+    },
+    liveAction: (action, targetId) => {
+      if (action === "grant" && targetId) later({ type: "room:live", holder: targetId, asks: state.asks.filter((x) => x !== targetId) });
+      if ((action === "revoke" || action === "stop") && targetId) later({ type: "room:live", holder: null, asks: state.asks });
+      return true;
+    },
+    setVoice: async (on) => { later({ type: "room:voice", enabled: on }); return true; },
+    setLiveVideo: async (on) => { later({ type: "room:livevideo", enabled: on }); return true; },
+    saveSettings: async (patch) => {
+      const cur = state.room ?? {};
+      const next = {
+        pinnedMessage: "pinnedMessage" in patch ? patch.pinnedMessage ?? null : ((cur as { pinnedMessage?: string | null }).pinnedMessage ?? null),
+        slowModeSec: patch.slowModeSec ?? ((cur as { slowModeSec?: number }).slowModeSec ?? 0),
+        locked: patch.locked ?? ((cur as { locked?: boolean }).locked ?? false),
+      };
+      if (controls === "cohost" && ("slowModeSec" in patch || "locked" in patch)) return "Only the host can change that."; // what the server answers
+      later({ type: "room:settings", ...next });
+      return null;
+    },
+    setRole: async (targetId, role) => { later({ type: "room:mod", action: "role", targetId, role }); return null; },
+    endRoom: async () => { later({ type: "room:ended" }); return null; },
     dismissInvite: () => {},
   };
 
@@ -177,8 +210,8 @@ function ShellFixture({ opts }: { opts: ReturnType<typeof parseFixtureQuery> }) 
         room={opts.minors === "listen" ? { ...FIXTURE_ROOM, minorsRoom: true } : FIXTURE_ROOM}
         host={FIXTURE_HOST}
         fallbackCount={state.memberCount}
-        isHost={opts.as === "host"}
-        role={opts.as === "host" ? "host" : "guest"}
+        isHost={controls ? controls === "host" : opts.as === "host"}
+        role={controls ?? (opts.as === "host" ? "host" : "guest")}
         meId={self}
         state={state}
         sock={sock}
@@ -188,6 +221,7 @@ function ShellFixture({ opts }: { opts: ReturnType<typeof parseFixtureQuery> }) 
         hostControls={<p className="text-sm text-muted-foreground">Room settings (fixture stand-in)</p>}
         onLeave={() => window.history.back()}
         startView={fixtureStartView(opts.scene)}
+        startControlsOpen={!!controls}
         listenOnly={opts.minors === "listen"}
         listenLine={opts.minors === "listen"}
       />
