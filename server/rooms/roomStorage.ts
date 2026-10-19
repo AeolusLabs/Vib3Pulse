@@ -31,6 +31,8 @@ export async function createRoom(hostId: string, input: CreateRoomInput): Promis
     screen: input.screen ?? null,
     inviteTokenHash: input.inviteTokenHash ?? null,
     minorsRoom: input.minorsRoom === true,
+    pinnedMessage: input.pinnedMessage ?? null, // the route passes it through pinnedPlainText first
+    slowModeSec: input.slowModeSec ?? 0,
   }).returning();
   return row;
 }
@@ -40,7 +42,8 @@ export async function getRoom(id: string): Promise<Room | null> {
   return row ?? null;
 }
 
-export type RoomPatch = Partial<Pick<Room, "title" | "description" | "ageLimit" | "screen" | "noDirectInteractions" | "capacity" | "moderationStatus" | "scheduledFor" | "inviteTokenHash">>;
+/** pinnedMessage must already be plain text cut to 200 (pinnedPlainText); slowModeSec one of SLOW_MODES. minorsRoom is never patchable. */
+export type RoomPatch = Partial<Pick<Room, "title" | "description" | "ageLimit" | "screen" | "noDirectInteractions" | "capacity" | "moderationStatus" | "scheduledFor" | "inviteTokenHash" | "pinnedMessage" | "slowModeSec" | "locked">>;
 
 export async function updateRoom(id: string, patch: RoomPatch): Promise<Room> {
   // A different screen is a different thing to play: bump the version (a late playback message for the old one is then

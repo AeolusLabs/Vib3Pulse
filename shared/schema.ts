@@ -1142,6 +1142,10 @@ export const rooms = pgTable("rooms", {
   nowPlaying: jsonb("now_playing").$type<NowPlaying | null>(),
   // Phase 2: true when the host was under 18 at creation. Set only by the server, never changed afterwards.
   minorsRoom: boolean("minors_room").notNull().default(false),
+  // Phase 3 host settings. Pinned message is plain text, at most 200 characters (made so by the server, never HTML).
+  pinnedMessage: text("pinned_message"),
+  slowModeSec: integer("slow_mode_sec").notNull().default(0), // one of SLOW_MODES (shared/rooms.ts); host and co-hosts exempt
+  locked: boolean("locked").notNull().default(false),        // no NEW joiners (host, co-hosts, current members, invite holders still get in)
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 export type Room = typeof rooms.$inferSelect;
