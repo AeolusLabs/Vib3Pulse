@@ -33,6 +33,8 @@ export default function StepFeatures({ state, set, error, directInteractions, se
 
   return (
     <div className="space-y-4">
+      {/* A scheduled room can't store voice or live video yet: the host switches them on when they start it. */}
+      {state.when === "later" && <p className="text-sm text-muted-foreground" data-testid="text-scheduled-features">{COPY.scheduledFeatures}</p>}
       <SwitchRow
         id="wiz-voice" label={COPY.voiceLabel} help={COPY.voiceHelp} checked={state.voice}
         // Live video rides on voice: switching voice off switches video off too.

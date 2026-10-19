@@ -2,7 +2,7 @@
 // server's code and the field (apiRequest only keeps the message text), so the screens can word every refusal themselves.
 import { useQuery } from "@tanstack/react-query";
 import { ensureCsrfToken, refreshCsrfToken } from "@/lib/queryClient";
-import { useRoomsConfig } from "@/lib/roomsApi";
+import { fetchRoomsConfig, type RoomsConfig } from "@/lib/roomsApi";
 import type { WizardHost, WizardState } from "@/lib/createRoomRules";
 import { buildCreatePayload, type ApiFailure, type RoomLink, type WizardExtras } from "@/lib/createRoomWizardUi";
 
@@ -61,20 +61,29 @@ export async function createRoom(s: WizardState, extras: WizardExtras, link: Roo
   return { ...base, live: true, startFailure: null, voiceFailed, videoFailed };
 }
 
-/** The client is never told the account's age; assume old enough until the server says otherwise. */
+/** Used only while GET /api/rooms/config has not said how old the account is: assume old enough, the server decides. */
 const ASSUMED_ACCOUNT_DAYS = 365;
 
+/** The caller's own account age and the minimum for public rooms, from GET /api/rooms/config (optional until the server sends it). */
+type HostConfig = { accountAgeDays: number; minAccountAgeDays: number };
+
 /**
- * What the wizard knows about the host. accountAgeDays is not sent to the client, so it starts as "old enough" and drops to 0
- * once the server has answered ACCOUNT_TOO_NEW (the caller passes that in): from then on public is never offered again.
+ * What the wizard knows about the host. accountAgeDays and minAccountAgeDays come from GET /api/rooms/config `host`, so
+ * public is closed up front for a new account. Without them the account is assumed old enough; once the server has answered
+ * ACCOUNT_TOO_NEW (the caller passes that in) accountAgeDays drops to 0 and public is never offered again.
+ * Every request waits for `open`, so a closed wizard (StoriesBar mounts one on every feed) fetches nothing.
  */
 export function useWizardHost(open: boolean, accountTooNew: boolean) {
   const me = useQuery<{ age: number | null }>({ queryKey: ["/api/users/me/room-privacy"], enabled: open });
   const verification = useQuery<{ verified: boolean; band: "adult" | "teen" | null }>({ queryKey: ["/api/users/me/age-verification"], enabled: open });
-  const config = useRoomsConfig();
+  // Same key and fetcher as useRoomsConfig in roomsApi, so it shares that cache; only the `enabled` gate is added.
+  const config = useQuery({ queryKey: ["/api/rooms/config"], queryFn: fetchRoomsConfig, staleTime: 5 * 60 * 1000, enabled: open });
+  const hostConfig = (config.data as (RoomsConfig & { host?: HostConfig }) | undefined)?.host;
+  const knownDays = typeof hostConfig?.accountAgeDays === "number" ? hostConfig.accountAgeDays : ASSUMED_ACCOUNT_DAYS;
+  const minAccountAgeDays = typeof hostConfig?.minAccountAgeDays === "number" ? hostConfig.minAccountAgeDays : 0;
   const host: WizardHost | null = me.data
-    ? { age: me.data.age ?? null, accountAgeDays: accountTooNew ? 0 : ASSUMED_ACCOUNT_DAYS, idVerifiedAdult: !!verification.data?.verified && verification.data.band === "adult" }
+    ? { age: me.data.age ?? null, accountAgeDays: accountTooNew ? 0 : knownDays, idVerifiedAdult: !!verification.data?.verified && verification.data.band === "adult" }
     : null;
   const flags = { paidRooms: config.data?.features.paidRooms === true, spray: config.data?.features.spray === true };
-  return { host, flags, loading: me.isLoading, failed: me.isError };
+  return { host, flags, minAccountAgeDays, loading: me.isLoading, failed: me.isError };
 }

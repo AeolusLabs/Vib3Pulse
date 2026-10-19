@@ -5,7 +5,10 @@ import { useToast } from "@/hooks/use-toast";
 import { COPY } from "@/lib/createRoomWizardUi";
 
 interface Props {
-  live: boolean;
+  /** The Done screen's line for this outcome (DONE_COPY): live, made but not live, scheduled, scheduled invite room. */
+  body: string;
+  /** Why the room did not go live, when the start was refused. */
+  note?: string | null;
   url: string;
   /** Invite rooms: the token is in the link and is shown once. */
   inviteOnce: boolean;
@@ -13,7 +16,7 @@ interface Props {
 }
 
 /** The body of the Done screen. "Go to room" is the wizard footer's main button. */
-export default function StepDone({ live, url, inviteOnce, title }: Props) {
+export default function StepDone({ body, note, url, inviteOnce, title }: Props) {
   const { toast } = useToast();
   const copy = async () => {
     try { await navigator.clipboard.writeText(url); toast({ title: COPY.copied }); }
@@ -29,7 +32,8 @@ export default function StepDone({ live, url, inviteOnce, title }: Props) {
     <div className="space-y-5">
       <div className="grid justify-items-center gap-3 pt-4 text-center">
         <span className="grid h-16 w-16 place-items-center rounded-full bg-primary text-primary-foreground" aria-hidden><CheckIcon className="h-8 w-8" /></span>
-        <p className="text-sm text-muted-foreground">{live ? COPY.doneLiveBody : COPY.doneScheduledBody}</p>
+        <p className="text-sm text-muted-foreground" data-testid="text-done-body">{body}</p>
+        {note && <p className="text-sm text-muted-foreground" data-testid="text-done-note">{note}</p>}
       </div>
       <div className="space-y-2">
         <label htmlFor="wiz-done-link" className="text-sm font-medium">{COPY.doneLinkLabel}</label>

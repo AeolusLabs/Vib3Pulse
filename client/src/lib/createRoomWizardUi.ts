@@ -29,6 +29,7 @@ export const STEP_TITLE: Record<WizardStep, string> = {
 
 export const COPY = {
   wizardTitle: "Start a room",
+  wizardDesc: "Set up your room one step at a time.",
   close: "Close",
   back: "Back",
   next: "Continue",
@@ -89,6 +90,8 @@ export const COPY = {
   doneLiveBody: "Guests can join now. Head into your room soon so it stays open.",
   doneScheduledTitle: "Room scheduled",
   doneScheduledBody: "It shows under Upcoming. Start it from the room page when it is time.",
+  doneScheduledInviteBody: "Only people with the link can see it. Start it from the room page when it is time.",
+  doneNotLiveBody: "Your room is made but not live yet. Start it from the room page.",
   doneInviteOnce: "Only people with this link can find it. It's shown once, so copy it now.",
   doneLinkLabel: "Room link",
   copy: "Copy link",
@@ -368,8 +371,45 @@ export function roomShareUrl(origin: string, roomId: string, inviteLink?: string
   return inviteLink ? `${origin}${inviteLink}` : `${origin}/rooms/${encodeURIComponent(roomId)}`;
 }
 
-/** "Step 2 of 5: Who can join?" for the live region. */
-export const progressLine = (index: number, total: number, title: string) => `Step ${index + 1} of ${total}: ${title}`;
+/** What the Done screen says. A room that was meant to go live but did not start, and a scheduled invite room, get their own words. */
+export type DoneKind = "live" | "notLive" | "scheduled" | "scheduledInvite";
+export function doneKind(o: { when: "now" | "later"; live: boolean; invite: boolean }): DoneKind {
+  if (o.live) return "live";
+  if (o.when === "now") return "notLive";
+  return o.invite ? "scheduledInvite" : "scheduled";
+}
+export const DONE_COPY: Record<DoneKind, { title: string; body: string }> = {
+  live: { title: COPY.doneLiveTitle, body: COPY.doneLiveBody },
+  notLive: { title: COPY.startedLate, body: COPY.doneNotLiveBody },
+  scheduled: { title: COPY.doneScheduledTitle, body: COPY.doneScheduledBody },
+  scheduledInvite: { title: COPY.doneScheduledTitle, body: COPY.doneScheduledInviteBody },
+};
+
+/**
+ * Where focus goes for a field in error, most wanted first (ids and radio names as the step components render them).
+ * A radio group prefers the picked radio, then any radio that can take focus. Empty for a field no control owns.
+ */
+export function fieldSelectors(field: string): string[] {
+  const radios = (name: string) => [`input[name="${name}"]:checked:not(:disabled)`, `input[name="${name}"]:not(:disabled)`];
+  switch (field) {
+    case "title": return ["#wiz-title"];
+    case "description": return ["#wiz-desc"];
+    case "capacity": return ["#wiz-capacity"];
+    case "eventId": case "venueId": return ["#wiz-link"];
+    case "ageLimit": return radios("wiz-age");
+    case "visibility": return radios("wiz-visibility");
+    case "slowModeSec": return radios("wiz-slow");
+    case "pinned": case "pinnedMessage": return ["#wiz-pinned"];
+    case "screenUrl": return ["#wiz-screen"];
+    case "scheduledFor": case "when": return ["#wiz-schedule", ...radios("wiz-when")];
+    default: return [];
+  }
+}
+
+/** "Step 2 of 5: " read before the step heading, so the heading alone tells a screen reader where they are. */
+export const progressPrefix = (index: number, total: number) => `Step ${index + 1} of ${total}: `;
+/** "Step 2 of 5: Who can join?" */
+export const progressLine = (index: number, total: number, title: string) => `${progressPrefix(index, total)}${title}`;
 
 /** Every sentence this file adds, so one test can check the copy rules over all of them. */
 export const WIZARD_UI_COPY: readonly string[] = [

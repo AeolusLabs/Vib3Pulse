@@ -1,13 +1,16 @@
 // Pure helpers and copy for the create-a-room wizard UI (no database, no browser): npx tsx scripts/test-rooms-unit-wizardui.ts
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { ROOM_LIMITS } from "../shared/rooms";
+import { ROOM_LIMITS, SLOW_MODES } from "../shared/rooms";
 import {
-  COPY, CREATE_ERROR, FIELD_ERROR, GENERIC_CREATE_ERROR, HOST_REFUSAL, OFFLINE_ERROR, PINNED_MAX, WIZARD_UI_COPY,
-  buildCreatePayload, createErrorMessage, cutText, defaultRoomTitle, defaultWizardState, fieldForFailure, isKnownStep, linkChoiceOf,
-  localProblem, maxScheduleInput, minScheduleInput, parseLinkChoice, progressLine, quickStartState, quickVisibilityLine, roomShareUrl,
-  ruleMessage, scheduleProblem, stepForFailure, stepOfField, toLocalInput,
+  COPY, CREATE_ERROR, DONE_COPY, FIELD_ERROR, GENERIC_CREATE_ERROR, HOST_REFUSAL, OFFLINE_ERROR, PINNED_MAX, SLOW_MODE_CHOICES, WIZARD_UI_COPY,
+  buildCreatePayload, createErrorMessage, cutText, defaultRoomTitle, defaultWizardState, doneKind, fieldForFailure, fieldSelectors, isKnownStep,
+  linkChoiceOf, localProblem, maxScheduleInput, minScheduleInput, parseLinkChoice, progressLine, progressPrefix, quickStartState,
+  quickVisibilityLine, roomShareUrl, ruleMessage, scheduleProblem, stepForFailure, stepOfField, toLocalInput,
 } from "../client/src/lib/createRoomWizardUi";
+import { normalizeWizard } from "../client/src/lib/createRoomRules";
+
+const src = (rel: string) => readFileSync(new URL(rel, import.meta.url), "utf8");
 
 let passed = 0, failed = 0;
 function test(name: string, fn: () => void) {
@@ -207,6 +210,91 @@ test("done link: the invite link when there is one, else the room page", () => {
 });
 test("progress line", () => {
   assert.equal(progressLine(1, 5, "Who can join?"), "Step 2 of 5: Who can join?");
+  assert.equal(progressPrefix(0, 5), "Step 1 of 5: ");
+});
+
+// ---------------------------------------------------------------- fix round (3.3 review)
+test("constants come from @shared/rooms", () => {
+  assert.equal(PINNED_MAX, ROOM_LIMITS.pinned);
+  assert.deepEqual([...SLOW_MODE_CHOICES], [...SLOW_MODES]);
+  const ui = src("../client/src/lib/createRoomWizardUi.ts");
+  assert.ok(!/PINNED_MAX = 200/.test(ui) && !/\[0, 5, 15, 30\]/.test(ui), "no hand copies");
+  // StepFeatures takes the limit from one place only
+  const features = src("../client/src/components/rooms/create/StepFeatures.tsx");
+  assert.equal((features.match(/PINNED_MAX/g) ?? []).length >= 1, true);
+  assert.ok(!/PINNED_MAX\s*=/.test(features));
+  assert.ok(/import \{[^}]*PINNED_MAX[^}]*\} from "@\/lib\/createRoomWizardUi"/.test(features), "imported from createRoomWizardUi");
+});
+test("done screen: its own words for live, made but not live, scheduled and scheduled invite rooms", () => {
+  assert.equal(doneKind({ when: "now", live: true, invite: false }), "live");
+  assert.equal(doneKind({ when: "now", live: true, invite: true }), "live");
+  assert.equal(doneKind({ when: "now", live: false, invite: true }), "notLive");
+  assert.equal(doneKind({ when: "now", live: false, invite: false }), "notLive");
+  assert.equal(doneKind({ when: "later", live: false, invite: false }), "scheduled");
+  assert.equal(doneKind({ when: "later", live: false, invite: true }), "scheduledInvite");
+  assert.equal(DONE_COPY.notLive.title, COPY.startedLate);
+  assert.ok(!/upcoming/i.test(DONE_COPY.scheduledInvite.body), "an invite room never shows under Upcoming");
+  assert.ok(!/upcoming/i.test(DONE_COPY.notLive.body));
+  assert.notEqual(DONE_COPY.notLive.body, DONE_COPY.scheduled.body);
+  for (const k of Object.values(DONE_COPY)) { assert.ok(!/[—–]/.test(k.title + k.body)); assert.ok(!/cash/i.test(k.title + k.body)); }
+});
+test("field to focus after a refusal: every field a refusal can name has a control", () => {
+  for (const f of ["title", "description", "capacity", "eventId", "venueId", "ageLimit", "visibility", "slowModeSec", "pinned", "pinnedMessage", "screenUrl", "scheduledFor"]) {
+    assert.ok(fieldSelectors(f).length > 0, f);
+  }
+  assert.deepEqual(fieldSelectors("title"), ["#wiz-title"]);
+  assert.equal(fieldSelectors("visibility")[0], 'input[name="wiz-visibility"]:checked:not(:disabled)');
+  assert.deepEqual(fieldSelectors(fieldForFailure({ code: "ACCOUNT_TOO_NEW" })), fieldSelectors("visibility"));
+  assert.deepEqual(fieldSelectors(fieldForFailure({ code: "HOST_BELOW_LIMIT" })), fieldSelectors("ageLimit"));
+  assert.deepEqual(fieldSelectors("nonsense"), []);
+  // the ids and radio names are the ones the steps render
+  const steps = ["StepBasics", "StepAudience", "StepFeatures", "StepWhen"].map((f) => src(`../client/src/components/rooms/create/${f}.tsx`)).join("\n");
+  for (const id of ["wiz-title", "wiz-desc", "wiz-capacity", "wiz-link", "wiz-pinned", "wiz-schedule"]) assert.ok(steps.includes(`id="${id}"`), id);
+  for (const name of ["wiz-age", "wiz-visibility", "wiz-slow", "wiz-when"]) assert.ok(steps.includes(`name="${name}"`), name);
+});
+test("capacity typed out of range is reported, not silently corrected (the wizard checks the raw state first)", () => {
+  const host = { age: 30, accountAgeDays: 400, idVerifiedAdult: false };
+  for (const capacity of [Number.NaN, 0, 1, ROOM_LIMITS.capacityMax + 1, 20.5]) {
+    const raw = { ...base(), capacity };
+    assert.equal(localProblem(raw, NOW)?.field, "capacity", String(capacity));
+    assert.equal(localProblem(normalizeWizard(raw, host), NOW), null, "normalizing first would hide it");
+  }
+  const wiz = src("../client/src/components/rooms/create/CreateRoomWizard.tsx");
+  assert.ok(/firstProblem\(state, s, now\)/.test(wiz), "goNext passes the raw state to the local checks");
+  assert.ok(/localProblem\(raw, now\)/.test(wiz));
+});
+test("wizard: reopening refits the fresh state, steps are announced once, spinner has a status, focus goes back", () => {
+  const wiz = src("../client/src/components/rooms/create/CreateRoomWizard.tsx");
+  assert.ok(/setState\(host \? fit\(fresh\) : fresh\)/.test(wiz), "open effect fits a fresh state when the host is known");
+  assert.ok(!/aria-live/.test(wiz), "no live region on top of the heading focus");
+  assert.ok(/role="status" aria-label="Loading"/.test(wiz));
+  assert.ok(/onCloseAutoFocus/.test(wiz) && /returnFocusTo/.test(wiz));
+  assert.ok(/minAccountAgeDays, state\.ageLimit/.test(wiz), "wizardOptions gets the real minimum account age");
+  assert.ok(/validateWizard\(s, host, now, minAccountAgeDays\)/.test(wiz));
+  const flow = src("../client/src/components/rooms/create/StartRoomFlow.tsx");
+  assert.ok((flow.match(/returnFocusTo=\{returnFocusTo\}/g) ?? []).length === 2, "sheet and wizard both get it");
+  assert.ok(/returnFocusTo=\{\(\) => btn\.current\}/.test(src("../client/src/components/rooms/home/StartRoomButton.tsx")));
+});
+test("wizard host: config fetched only while open, account age read as optional", () => {
+  const api = src("../client/src/components/rooms/create/createRoomApi.ts");
+  assert.ok(/queryKey: \["\/api\/rooms\/config"\][^\n]*enabled: open/.test(api));
+  assert.ok(!/useRoomsConfig\(\)/.test(api), "the ungated hook would fetch on every feed (StoriesBar)");
+  assert.ok(/host\?: HostConfig/.test(api));
+});
+test("features step: the scheduled note shows when the room is scheduled", () => {
+  const f = src("../client/src/components/rooms/create/StepFeatures.tsx");
+  assert.ok(/state\.when === "later" && [^\n]*COPY\.scheduledFeatures/.test(f));
+});
+test("quick start: ACCOUNT_TOO_NEW forgets public as the last pick and never retries it", () => {
+  const q = src("../client/src/components/rooms/create/QuickStartSheet.tsx");
+  assert.ok(/ACCOUNT_TOO_NEW/.test(q) && /removeItem\(LAST_VISIBILITY_KEY\)/.test(q));
+  assert.ok(/publicBlocked && s\.visibility === "public"/.test(q));
+});
+test("fixture: the wizard scene answers requests before the children's first fetch", () => {
+  const fx = src("../client/src/pages/dev/RoomFixture.tsx");
+  const wizard = fx.slice(fx.indexOf("function WizardFixture"), fx.indexOf("const STATE_SCENES"));
+  assert.ok(/useLayoutEffect\(\(\) => \{\s*const real = window\.fetch/.test(wizard));
+  assert.ok(/minAccountAgeDays/.test(wizard));
 });
 
 // ---------------------------------------------------------------- copy rules
