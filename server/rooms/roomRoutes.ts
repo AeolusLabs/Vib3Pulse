@@ -32,6 +32,8 @@ import { roomFeatures } from "./features";
 import { clearReminder, hasReminder, setReminder } from "./reminders";
 import { registerRoomTicketRoutes } from "./ticketRoutes";
 import { registerRoomMoneyRoutes } from "./ticketMoneyRoutes";
+import { registerSprayRoutes } from "./sprayRoutes";
+import { sprayBlockFor } from "./spray";
 
 const MAX_SCHEDULED = 10;
 const MAX_LIVE = 1;
@@ -297,12 +299,15 @@ export function registerRoomRoutes(app: Express): void {
       // The host of a ticketed room is told when sales are paused and why (a buyer only ever sees SALES_PAUSED at
       // checkout): a stored price outside the limits, or the host's ID verification / payout account is gone.
       const ticketSales = self && isTicketedRoom(room) ? await hostTicketSales(room) : null;
+      // Spraying (phase 5): present ONLY for a viewer who passes payer eligibility in a live money room; never enabled: false.
+      const spray = await sprayBlockFor(room, req.user!.id).catch((e) => { console.error("[rooms:spray] spray block failed:", e?.message ?? e); return null; });
       res.json({
         room: self ? hostRoom(room) : viewerRoom(room), host: host ? hostSummary(host) : null, canJoin, memberCount: roomHub.count(room.id), peek: peekOf(room.id, 8),
         you: self ? { role: "host" } : member && !member.banned ? { role: member.role } : null,
         reminderSet: await hasReminder(room.id, req.user!.id), // this viewer's own flag only
         ...(ticket ? { ticket } : {}),
         ...(ticketSales ? { ticketSales } : {}),
+        ...(spray ? { spray } : {}),
       });
     } catch (e) {
       console.error("[rooms] get failed:", e);
@@ -986,4 +991,5 @@ export function registerRoomRoutes(app: Express): void {
   });
 
   registerRoomMoneyRoutes(app); // paid rooms: refund, cancel, sales summary (lane S3)
+  registerSprayRoutes(app); // spraying (phase 5): spray, status, limits, saved card
 }

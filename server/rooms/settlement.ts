@@ -132,18 +132,18 @@ export async function afterRoomEnded(roomId: string, opts: { hostReview?: boolea
 }
 
 /** held -> queued (or removed when nothing is left to pay), under the payout row lock. Returns the new status, or null. */
-async function queueDuePayout(payoutId: string, now: Date): Promise<"queued" | "removed" | "refunding" | null> {
+async function queueDuePayout(payoutId: string, now: Date): Promise<"queued" | "removed" | "refunding" | "clawed_back" | null> {
   const c = await pool.connect();
   let blocked: { roomId: string; block: PayoutBlock } | null = null;
   try {
     await c.query("BEGIN");
     const p = (await c.query(
-      `select p.id, p.room_id, p.status, round(extract(epoch from p.release_at) * 1000)::float8 as release_ms,
+      `select p.id, p.room_id, p.host_id, p.status, round(extract(epoch from p.release_at) * 1000)::float8 as release_ms,
               (r.started_at is not null) as started
          from room_payouts p join rooms r on r.id = p.room_id
         where p.id = $1 for update of p`,
       [payoutId],
-    )).rows[0] as { id: string; room_id: string; status: string; release_ms: number | null; started: boolean } | undefined;
+    )).rows[0] as { id: string; room_id: string; host_id: string; status: string; release_ms: number | null; started: boolean } | undefined;
     if (!p || p.status !== "held" || p.release_ms === null || isAdminHold(Number(p.release_ms)) || Number(p.release_ms) > now.getTime()) {
       await c.query("ROLLBACK"); return null;
     }
@@ -163,9 +163,28 @@ async function queueDuePayout(payoutId: string, now: Date): Promise<"queued" | "
         await c.query("COMMIT");
         return "removed";
       }
+      // Spraying (phase 5, rule B10): open clawbacks this host owes (chargebacks on sprays) come off this payout, in this
+      // transaction, under the payout row lock. The host is paid max(0, amount - applied); the applied rows are recovered.
+      // Lazy import: clawbacks.ts reaches the room modules (cycle); call time only.
+      const { applyClawbacks } = await import("./clawbacks");
+      const gross = Number(sum.amount);
+      const cb = await applyClawbacks(p.host_id, gross, { client: c, now });
+      const net = Math.max(0, gross - cb.appliedKobo);
+      if (net <= 0) {
+        // Everything went to clawbacks: nothing to send. Closed as paid with 0 and a note, so it is never sent and never
+        // looks unpaid (the recovered clawbacks are the record of where the money went).
+        await c.query(
+          `update room_payouts set status = 'paid', amount_kobo = 0, transfer_ref = $2, paid_at = $3::timestamp, last_error = 'CLAWED_BACK'
+            where id = $1 and status = 'held'`,
+          [p.id, payoutReference(p.room_id), iso(now)],
+        );
+        await c.query("COMMIT");
+        console.error(`[rooms] payout ${p.id} (room ${p.room_id}) fully used to recover ${cb.recoveredIds.length} spray clawback(s)`);
+        return "clawed_back";
+      }
       await c.query(
-        `update room_payouts set status = 'queued', amount_kobo = $2, transfer_ref = $3, last_error = null where id = $1 and status = 'held'`,
-        [p.id, Number(sum.amount), payoutReference(p.room_id)],
+        `update room_payouts set status = 'queued', amount_kobo = $2, transfer_ref = $3, last_error = $4 where id = $1 and status = 'held'`,
+        [p.id, net, payoutReference(p.room_id), cb.appliedKobo > 0 ? `CLAWBACK_APPLIED: ${cb.appliedKobo}` : null],
       );
       await c.query("COMMIT");
       return "queued";
@@ -391,7 +410,7 @@ export async function handleRoomTransferWebhook(data: unknown): Promise<boolean>
 
 // ------------------------------------------------------------ the job
 
-export interface SettlementPassResult { scheduled: number; queued: string[]; removed: string[]; refunding: string[]; outcomes: Record<string, PayOutcome> }
+export interface SettlementPassResult { scheduled: number; queued: string[]; removed: string[]; refunding: string[]; clawedBack: string[]; outcomes: Record<string, PayOutcome> }
 
 /**
  * One pass: (1) safety net: ended + started rooms with paid tickets and no payout row get one (or refunds); (2) held
@@ -399,7 +418,7 @@ export interface SettlementPassResult { scheduled: number; queued: string[]; rem
  * may not pay out; admin holds are skipped; (3) queued payouts are paid.
  */
 export async function runSettlementPass(now: Date = moneyClock.now()): Promise<SettlementPassResult> {
-  const out: SettlementPassResult = { scheduled: 0, queued: [], removed: [], refunding: [], outcomes: {} };
+  const out: SettlementPassResult = { scheduled: 0, queued: [], removed: [], refunding: [], clawedBack: [], outcomes: {} };
   try {
     const missing = await pool.query(
       `select r.id from rooms r
@@ -421,6 +440,7 @@ export async function runSettlementPass(now: Date = moneyClock.now()): Promise<S
       if (s === "queued") out.queued.push(id);
       if (s === "removed") out.removed.push(id);
       if (s === "refunding") out.refunding.push(id);
+      if (s === "clawed_back") out.clawedBack.push(id);
     }
 
     const queued = await pool.query(`select id from room_payouts where status = 'queued' order by release_at limit 20`);

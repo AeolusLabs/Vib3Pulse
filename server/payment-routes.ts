@@ -40,6 +40,9 @@ import { handleRoomTicketCharge, IssueQueueFullError } from "./rooms/tickets.js"
 import { looksLikeTicketReference } from "./rooms/ticketReference.js";
 import { handleRoomRefundWebhook } from "./rooms/refunds.js";
 import { handleRoomTransferWebhook } from "./rooms/settlement.js";
+import { looksLikeSprayReference } from "./payments/sprayReference.js";
+import { finalizeSpray, handleSprayChargeWebhook, QueueFullError as SprayQueueFullError } from "./rooms/spray.js";
+import { disputeReference, handleSprayDispute } from "./rooms/clawbacks.js";
 
 function requireAuth(req: Request, res: Response, next: Function) {
   if (!req.isAuthenticated() || !req.user) {
@@ -935,6 +938,29 @@ export function registerPaymentRoutes(app: Express): void {
     try {
       if (payload.event === "charge.success") {
         const reference = payload.data?.reference as string;
+        // Spraying (phase 5, rule B12). Routed by the reference SHAPE only (vib3rs_..., made only by the spray endpoint), never by
+        // the metadata (which may arrive as a string, or be chosen by whoever set up the transaction). handleSprayChargeWebhook
+        // re-verifies with the split provider, checks the reference MAC against the stored row, the exact amount and NGN, and
+        // is idempotent with the endpoint and the sweep. No row / bad MAC: 200 and nothing done. Anything transient throws
+        // (500, Paystack retries); a full per-reference queue answers 503 with Retry-After.
+        if (typeof reference === "string" && looksLikeSprayReference(reference)) {
+          try {
+            await handleSprayChargeWebhook(reference);
+          } catch (e) {
+            if (e instanceof SprayQueueFullError) {
+              res.setHeader("Retry-After", "5");
+              return res.status(503).json({ message: "Busy, retry later" });
+            }
+            throw e;
+          }
+          return res.json({ received: true });
+        }
+        // A payload that CLAIMS to be a spray without our reference shape: someone else's transaction. Never a spray, and never
+        // handed to the other branches either (a spray-typed payload must not fall through to tickets or plans). 200, logged.
+        if (reference && paystackMetadataObject(payload.data?.metadata).type === "spray") {
+          console.warn(`[Paystack Webhook] spray-typed charge without a spray reference ignored (ref ${String(reference).slice(0, 12)}...)`);
+          return res.json({ received: true });
+        }
         if (reference) {
           // Through the payments index (same Paystack call) so tests can swap in the mock provider.
           const verified = await verifyCheckoutSession(reference, "paystack");
@@ -1035,9 +1061,26 @@ export function registerPaymentRoutes(app: Express): void {
       // Room ones only (a ticket's payment reference / a room-payout-* transfer reference); anything else is left alone.
       // A transfer Paystack cannot be asked about right now throws => 500 => Paystack sends the event again.
       if (payload.event === "refund.processed" || payload.event === "refund.failed") {
-        await handleRoomRefundWebhook(payload.data);
+        // A spray refund: only triggers the same provider lookup the sweep does (the body's status is never trusted).
+        const d = (payload.data && typeof payload.data === "object" ? payload.data : {}) as Record<string, any>;
+        const sprayRef = [d.transaction_reference, d.transaction?.reference, d.reference].find((v) => looksLikeSprayReference(v));
+        if (sprayRef) {
+          const out = await finalizeSpray(sprayRef);
+          if (out === "busy") throw new Error("spray reference is busy; retry the refund webhook");
+        } else {
+          await handleRoomRefundWebhook(payload.data);
+        }
       } else if (payload.event === "transfer.success" || payload.event === "transfer.failed" || payload.event === "transfer.reversed") {
         await handleRoomTransferWebhook(payload.data);
+      } else if (payload.event === "charge.dispute.create" || payload.event === "charge.dispute.remind") {
+        // Spraying (rule B10): a chargeback on a spray reference. Idempotent (a second event changes nothing); the clawbacks
+        // are the stored shares, never payload amounts. Other disputes (tickets, events) are not handled here.
+        const ref = disputeReference(payload.data);
+        if (ref && looksLikeSprayReference(ref)) await handleSprayDispute(ref);
+      } else if (payload.event === "charge.dispute.resolve") {
+        const ref = disputeReference(payload.data);
+        // What a resolution means for a clawback is an owner decision (lane report); a person follows up.
+        if (ref && looksLikeSprayReference(ref)) console.error(`[Paystack Webhook] ALERT spray dispute resolved (ref ${ref.slice(0, 12)}...); check the clawback by hand`);
       }
 
       if (payload.event === "subscription.create") {

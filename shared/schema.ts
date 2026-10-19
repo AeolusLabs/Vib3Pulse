@@ -1743,6 +1743,7 @@ export const notificationTypes = [
   "room_live",
   "room_starting",
   "room_refund", // paid room ticket refunded (phase 4, server/rooms/refunds.ts)
+  "spray_reversed", // a paid spray could not be delivered and was refunded in full (phase 5, server/rooms/spray.ts)
 ] as const;
 export type NotificationType = typeof notificationTypes[number];
 

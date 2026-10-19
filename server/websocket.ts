@@ -6,6 +6,7 @@ import { storage } from "./storage";
 import { startReminderJob } from "./rooms/reminders";
 import { startRoomRefundJob } from "./rooms/refunds";
 import { startSettlementJob } from "./rooms/settlement";
+import { startSprayJob } from "./rooms/sprayJobs";
 import { handleRoomMessage, handleSocketClose, rehydrateLiveRooms, startVoiceSweep } from "./rooms/roomSocket";
 
 interface AuthenticatedWebSocket extends WebSocket {
@@ -150,6 +151,8 @@ class WebSocketManager {
     // second start, unref their timers and catch every error; they run whatever the paidRooms flag says (money in flight).
     try { startRoomRefundJob(); } catch (e) { console.error("[rooms] refund job failed to start:", e); }
     try { startSettlementJob(); } catch (e) { console.error("[rooms] settlement job failed to start:", e); }
+    // Spraying: every 15 s, delivers or reverses paid sprays and finishes refunds, whatever the spray flag says (money in flight).
+    try { startSprayJob(); } catch (e) { console.error("[rooms:spray] sweep job failed to start:", e); }
 
     console.log("WebSocket server initialized on /ws");
   }
