@@ -3,11 +3,21 @@
 import type { RoomVisibility } from "@shared/rooms";
 import { ROOM_LIMITS, SLOW_MODES } from "@shared/rooms";
 import type { WizardState } from "@/lib/createRoomRules";
+import { PRICE_COPY, ticketPayload, type TicketDraft, type TicketPayload } from "./roomTickets";
 
 /** The steps this UI knows how to draw. stepsFor() may name others later (a price step); unknown names are skipped. */
 export const KNOWN_STEPS = ["basics", "audience", "features", "when", "review"] as const;
 export type WizardStep = (typeof KNOWN_STEPS)[number];
 export const isKnownStep = (s: string): s is WizardStep => (KNOWN_STEPS as readonly string[]).includes(s);
+/**
+ * The steps the wizard draws, including the price step ("money" in stepsFor). The price step is kept only when the caller
+ * says it is on: paidRooms flag on, moneyLocked null and Paid room switched on (roomTickets.priceStepAvailable).
+ */
+export type UiStep = WizardStep | "money";
+export function uiSteps(raw: readonly string[], priceStepOn: boolean): UiStep[] {
+  return raw.filter((s): s is UiStep => isKnownStep(s) || (s === "money" && priceStepOn));
+}
+export const uiStepTitle = (s: UiStep) => (s === "money" ? PRICE_COPY.title : STEP_TITLE[s]);
 
 /** Pinned message limit and slow mode choices for the wizard, straight from the shared room rules (the server uses the same). */
 export const PINNED_MAX = ROOM_LIMITS.pinned;
@@ -233,6 +243,9 @@ export interface WizardExtras {
   noDirectInteractions?: boolean;
   /** Only sent while link screens are switched on (LINK_SCREENS). */
   screenUrl?: string;
+  /** Paid room draft from the price step; sent only when `ticketsEnabled` is true (flag on, money unlocked, switched on). */
+  ticket?: TicketDraft;
+  ticketsEnabled?: boolean;
 }
 
 export interface CreateRoomPayload {
@@ -249,6 +262,10 @@ export interface CreateRoomPayload {
   pinnedMessage?: string;
   eventId?: string;
   venueId?: string;
+  /** Paid rooms only (see ticketPayload). The server uses its stored price for every charge; this only sets it. */
+  ticketPriceKobo?: TicketPayload["ticketPriceKobo"];
+  ticketCapacity?: TicketPayload["ticketCapacity"];
+  refundBeforeStart?: TicketPayload["refundBeforeStart"];
 }
 
 /** Cut to `max` characters (code points, so an emoji is never split in half). */
@@ -283,6 +300,7 @@ export function buildCreatePayload(s: WizardState, extras: WizardExtras = {}, li
     ...(pinned ? { pinnedMessage: pinned } : {}),
     ...(eventId ? { eventId } : {}),
     ...(venueId ? { venueId } : {}),
+    ...ticketPayload(extras.ticket, extras.ticketsEnabled === true),
   };
 }
 

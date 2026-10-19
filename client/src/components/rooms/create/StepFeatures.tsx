@@ -6,6 +6,7 @@ import { resolveScreen } from "@shared/screen";
 import { LINK_SCREENS, PROVIDER_LABEL } from "@/lib/roomsApi";
 import type { WizardState } from "@/lib/createRoomRules";
 import { COPY, PINNED_MAX, SLOW_MODE_CHOICES, slowModeLabel } from "@/lib/createRoomWizardUi";
+import { PRICE_COPY } from "@/lib/roomTickets";
 import { ChipGroup, SwitchRow } from "./parts";
 import { FieldErr, type FieldError } from "./StepBasics";
 
@@ -19,9 +20,14 @@ interface Props {
   setScreenUrl(v: string): void;
   /** True only when a money flag is on AND the room is money-eligible (18+/21+, adult host). Never true while flags are off. */
   moneyPlaceholder: boolean;
+  /**
+   * The Paid room switch. Null (not drawn) unless the paidRooms flag is on and money is unlocked for this room. A host
+   * who is not ID-verified sees it off with the reason (the server refuses HOST_NOT_VERIFIED anyway).
+   */
+  paid?: { on: boolean; set(on: boolean): void; needsId: boolean } | null;
 }
 
-export default function StepFeatures({ state, set, error, directInteractions, setDirectInteractions, screenUrl, setScreenUrl, moneyPlaceholder }: Props) {
+export default function StepFeatures({ state, set, error, directInteractions, setDirectInteractions, screenUrl, setScreenUrl, moneyPlaceholder, paid = null }: Props) {
   const pinnedLen = Array.from(state.pinned).length;
   const screenPreview = useMemo(() => {
     if (!LINK_SCREENS || !screenUrl.trim()) return null;
@@ -80,6 +86,13 @@ export default function StepFeatures({ state, set, error, directInteractions, se
           {screenPreview && <p className={`text-xs ${screenPreview.ok ? "text-muted-foreground" : "text-destructive"}`} role="status">{screenPreview.text}</p>}
           <p className="text-xs text-muted-foreground">{COPY.screenHelp}</p>
         </div>
+      )}
+
+      {paid && (
+        <SwitchRow
+          id="wiz-paid" label={PRICE_COPY.paidLabel} help={PRICE_COPY.paidHelp} checked={paid.on && !paid.needsId}
+          onChange={paid.set} disabledReason={paid.needsId ? PRICE_COPY.paidNeedsId : undefined} testId="switch-room-paid"
+        />
       )}
 
       {moneyPlaceholder && (
