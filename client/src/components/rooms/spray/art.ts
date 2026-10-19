@@ -1,9 +1,14 @@
 // Spray artwork, drawn once into offscreen canvases and reused as sprites by the engine.
 // Ported from docs/design/rooms-2026-10/notes.html with the phase 5 revisions: one note design (no denomination,
 // no currency sign, no serial number, no security thread, no "legal tender" text, no banknote frame). It is an
-// abstract game token: a rounded chip with sound-wave lines and a rosette drawn from a sound wave around a "V3" disc.
+// abstract game token: a flat rounded ticket (NOTE_ASPECT, not a banknote's 2:1) with a flat "V3" disc and three pulse
+// arcs. The banknote-style patterns of the prototype (guilloche rosette, wavy security lines) are REMOVED until the owner
+// signs off on any pattern at all (fix round FC, ruling 8).
 // Colours come from sprayTokens.ts, never from CSS variables. Nothing here runs at import time.
 import { NOTE_PALETTES, SPRAY_TOKENS as K, type NoteVariant } from "@/lib/sprayTokens";
+
+/** Width to height of one token: a game ticket, clearly not a banknote (about 2:1 or wider). */
+export const NOTE_ASPECT = 1.6;
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -33,105 +38,74 @@ function rr(g: Ctx, x: number, y: number, w: number, h: number, r: number) {
   g.closePath();
 }
 
-const ROSETTE: readonly { lobes: number; rings: number }[] = [
-  { lobes: 7, rings: 9 },
-  { lobes: 9, rings: 11 },
-  { lobes: 12, rings: 13 },
-];
-
 /**
  * One note (a game token). `variant` only changes the colourway; `back` draws the plain reverse used while a
- * note flips; `phase` (0 to 1) moves a soft sheen for showcase shimmer.
+ * note flips; `phase` (0 to 1) moves a soft sheen for showcase shimmer. Flat fills only: a disc with "V3" and, on
+ * the front, three pulse arcs. No line patterns of any kind.
  */
 export function noteArt(w: number, h: number, o: { back?: boolean; phase?: number; dpr?: number; variant?: NoteVariant } = {}): HTMLCanvasElement {
   const dpr = artDpr(o.dpr);
   const { c, g } = surface(w, h, dpr);
   const v = o.variant ?? 0;
   const P = NOTE_PALETTES[v] ?? NOTE_PALETTES[0];
-  const ro = ROSETTE[v] ?? ROSETTE[0];
-  const r = h * 0.18;
+  const r = h * 0.24;
 
   rr(g, 0, 0, w, h, r);
   g.save();
-  g.clip();
-  const gr = g.createLinearGradient(0, 0, w, h);
-  gr.addColorStop(0, P.a);
-  gr.addColorStop(1, P.b);
-  g.fillStyle = gr;
-  g.fillRect(0, 0, w, h);
-
-  // sound-wave lines across the token
-  g.strokeStyle = P.line;
-  g.globalAlpha = 0.14;
-  g.lineWidth = 1;
-  for (let i = 0; i < 9; i++) {
-    g.beginPath();
-    for (let x = 0; x <= w; x += 4) {
-      const y = h * (0.15 + i * 0.09) + Math.sin((x / w) * Math.PI * (3 + i * 0.2) + i) * h * 0.04;
-      if (x) g.lineTo(x, y); else g.moveTo(x, y);
-    }
-    g.stroke();
-  }
-  g.globalAlpha = 1;
-
-  // rosette from a sound wave
-  const cx = o.back ? w / 2 : w * 0.66, cy = h / 2, R = h * (o.back ? 0.46 : 0.44);
-  g.strokeStyle = P.line;
-  g.globalAlpha = 0.5;
-  g.lineWidth = 0.9;
-  for (let i = 0; i < ro.rings; i++) {
-    const rad = (R * (i + 1)) / ro.rings;
-    g.beginPath();
-    for (let a = 0; a <= Math.PI * 2 + 0.05; a += 0.05) {
-      const rd = rad + Math.sin(a * ro.lobes + i * 0.55) * rad * 0.075;
-      const px = cx + Math.cos(a) * rd, py = cy + Math.sin(a) * rd;
-      if (a) g.lineTo(px, py); else g.moveTo(px, py);
-    }
-    g.closePath();
-    g.stroke();
-  }
-  g.globalAlpha = 0.92;
-  g.fillStyle = P.ink;
-  g.beginPath();
-  g.arc(cx, cy, R * 0.36, 0, Math.PI * 2);
-  g.fill();
-  g.globalAlpha = 1;
-  g.fillStyle = P.tx;
-  g.font = `700 ${R * 0.34}px ${K.font}`;
-  g.textAlign = "center";
-  g.textBaseline = "alphabetic";
-  g.fillText("V3", cx, cy + R * 0.12);
-
-  if (!o.back) {
-    // a pulse glyph (three sound arcs) on the left instead of any number
-    const gx = w * 0.17, gy = h / 2;
-    g.strokeStyle = P.line;
-    g.lineCap = "round";
-    g.lineWidth = Math.max(1, h * 0.05);
-    g.globalAlpha = 0.85;
-    g.beginPath();
-    g.arc(gx - h * 0.06, gy, h * 0.05, 0, Math.PI * 2);
-    g.stroke();
-    for (let k = 1; k <= 3; k++) {
-      g.globalAlpha = 0.85 - k * 0.18;
-      g.beginPath();
-      g.arc(gx - h * 0.06, gy, h * (0.05 + k * 0.1), -Math.PI / 4, Math.PI / 4);
-      g.stroke();
-    }
-    g.globalAlpha = 1;
-    // soft diagonal sheen, moved by `phase` for showcase shimmer
-    const ph = Number.isFinite(o.phase) ? (o.phase as number) % 1 : 0;
-    const sx = (ph * 2 - 0.5) * w;
-    const sg = g.createLinearGradient(sx - w * 0.2, 0, sx + w * 0.2, h);
-    sg.addColorStop(0, "rgba(255,255,255,0)");
-    sg.addColorStop(0.5, K.sheenA);
-    sg.addColorStop(1, "rgba(255,255,255,0)");
-    g.globalAlpha = 0.16;
-    g.fillStyle = sg;
+  try {
+    g.clip();
+    const gr = g.createLinearGradient(0, 0, w, h);
+    gr.addColorStop(0, P.a);
+    gr.addColorStop(1, P.b);
+    g.fillStyle = gr;
     g.fillRect(0, 0, w, h);
+
+    // the flat "V3" disc
+    const cx = o.back ? w / 2 : w * 0.62, cy = h / 2, R = h * 0.3;
+    g.globalAlpha = 0.92;
+    g.fillStyle = P.ink;
+    g.beginPath();
+    g.arc(cx, cy, R, 0, Math.PI * 2);
+    g.fill();
     g.globalAlpha = 1;
+    g.fillStyle = P.tx;
+    g.font = `700 ${R * 0.9}px ${K.font}`;
+    g.textAlign = "center";
+    g.textBaseline = "alphabetic";
+    g.fillText("V3", cx, cy + R * 0.32);
+
+    if (!o.back) {
+      // a pulse glyph (a dot and three sound arcs) on the left instead of any number
+      const gx = w * 0.2, gy = h / 2;
+      g.strokeStyle = P.line;
+      g.lineCap = "round";
+      g.lineWidth = Math.max(1, h * 0.06);
+      g.globalAlpha = 0.85;
+      g.beginPath();
+      g.arc(gx - h * 0.08, gy, h * 0.06, 0, Math.PI * 2);
+      g.stroke();
+      for (let k = 1; k <= 3; k++) {
+        g.globalAlpha = 0.85 - k * 0.18;
+        g.beginPath();
+        g.arc(gx - h * 0.08, gy, h * (0.06 + k * 0.11), -Math.PI / 4, Math.PI / 4);
+        g.stroke();
+      }
+      g.globalAlpha = 1;
+      // soft diagonal sheen, moved by `phase` for showcase shimmer
+      const ph = Number.isFinite(o.phase) ? (o.phase as number) % 1 : 0;
+      const sx = (ph * 2 - 0.5) * w;
+      const sg = g.createLinearGradient(sx - w * 0.2, 0, sx + w * 0.2, h);
+      sg.addColorStop(0, "rgba(255,255,255,0)");
+      sg.addColorStop(0.5, K.sheenA);
+      sg.addColorStop(1, "rgba(255,255,255,0)");
+      g.globalAlpha = 0.16;
+      g.fillStyle = sg;
+      g.fillRect(0, 0, w, h);
+      g.globalAlpha = 1;
+    }
+  } finally {
+    g.restore();
   }
-  g.restore();
   g.strokeStyle = "rgba(255,255,255,.28)";
   g.lineWidth = 1;
   rr(g, 0.5, 0.5, w - 1, h - 1, r);
@@ -143,7 +117,7 @@ export function noteArt(w: number, h: number, o: { back?: boolean; phase?: numbe
 export function bundleArt(w: number, h: number, dpr?: number): HTMLCanvasElement {
   const d = artDpr(dpr);
   const { c, g } = surface(w, h, d);
-  const nw = w * 0.7, nh = nw / 2.2;
+  const nw = w * 0.7, nh = nw / NOTE_ASPECT;
   const vs: NoteVariant[] = [0, 1, 0, 1, 2, 1, 2];
   for (let i = 0; i < vs.length; i++) {
     const n = noteArt(nw, nh, { dpr: d, variant: vs[i] });
@@ -251,7 +225,7 @@ export function bagArt(w: number, h: number, dpr?: number, open = 0): HTMLCanvas
     g.rect(0, 0, w, zy);
     g.clip();
     const peek: [NoteVariant, number, number, number][] = [[2, -0.62, -0.12, 0.9], [1, 0.02, -0.2, 1], [2, 0.55, -0.1, 0.86], [0, -0.28, -0.3, 0.78], [1, 0.3, -0.26, 0.8]];
-    const pw = w * 0.3, ph = pw / 2.2;
+    const pw = w * 0.3, ph = pw / NOTE_ASPECT;
     for (const [vv, dx, dy, sc] of peek) {
       const a2 = noteArt(pw, ph, { dpr: d, variant: vv });
       g.save();
@@ -347,7 +321,7 @@ export function bagArt(w: number, h: number, dpr?: number, open = 0): HTMLCanvas
 export function rainArt(w: number, h: number, dpr?: number): HTMLCanvasElement {
   const d = artDpr(dpr);
   const { c, g } = surface(w, h, d);
-  const nw = w * 0.34, nh = nw / 2.2;
+  const nw = w * 0.34, nh = nw / NOTE_ASPECT;
   const items: [NoteVariant, number, number, number][] = [[2, w * 0.24, h * 0.66, -0.35], [1, w * 0.5, h * 0.8, 0.12], [0, w * 0.76, h * 0.66, 0.4], [2, w * 0.38, h * 0.9, 0.25], [0, w * 0.64, h * 0.92, -0.3]];
   for (const [vv, x, y, rot] of items) {
     const n = noteArt(nw, nh, { dpr: d, variant: vv });

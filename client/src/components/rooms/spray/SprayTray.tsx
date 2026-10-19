@@ -8,17 +8,18 @@ import { Switch } from "@/components/ui/switch";
 import { SPRAY_TIERS, formatV3c, type SprayTier } from "@shared/money";
 import { sprayPrice } from "@shared/spray";
 import { AMBER } from "@/lib/roomTickets";
-import { SPRAY_COPY, TIER_LINE, cardLabel, limitChipText, tileAction, type SprayBlock, type SprayMe } from "@/lib/sprayUi";
+import { SPRAY_COPY, TIER_LINE, cardInSentence, cardLabel, limitChipText, tileAction, type SprayBlock, type SprayMe } from "@/lib/sprayUi";
 
 /** A small drawing of each tier for the tray and the confirm step. Decorative. */
 export function TierMark({ tier, className = "h-10 w-14" }: { tier: SprayTier; className?: string }) {
   return (
     <svg viewBox="0 0 56 40" className={className} aria-hidden focusable="false" data-testid={`tier-mark-${tier}`}>
       {tier === "note" && (
+        // A game ticket (about 1.6:1), not a banknote: flat fill, one V3 disc.
         <g>
-          <rect x="6" y="9" width="44" height="22" rx="4" className="fill-primary" />
-          <circle cx="28" cy="20" r="6.5" className="fill-primary-foreground" opacity="0.9" />
-          <text x="28" y="23" textAnchor="middle" fontSize="7" fontWeight="700" className="fill-primary">V3</text>
+          <rect x="10" y="6" width="36" height="23" rx="6" className="fill-primary" />
+          <circle cx="30" cy="17.5" r="7" className="fill-primary-foreground" opacity="0.9" />
+          <text x="30" y="20.5" textAnchor="middle" fontSize="7" fontWeight="700" className="fill-primary">V3</text>
         </g>
       )}
       {tier === "bundle" && (
@@ -77,9 +78,10 @@ export default function SprayTray({ block, me, meError, onRetryMe, targets, targ
       </SheetHeader>
 
       {targets.length > 1 && (
-        <div className="flex gap-2 overflow-x-auto [scrollbar-width:none]" role="radiogroup" aria-label="Who to spray" data-testid="spray-targets">
+        // Plain toggle buttons (aria-pressed) in a labelled group: Tab reaches each one, no roving focus needed (review M14).
+        <div className="flex gap-2 overflow-x-auto [scrollbar-width:none]" role="group" aria-label="Who to spray" data-testid="spray-targets">
           {targets.map((t) => (
-            <button key={t.id} type="button" role="radio" aria-checked={t.id === targetId} onClick={() => onTarget(t.id)}
+            <button key={t.id} type="button" aria-pressed={t.id === targetId} onClick={() => onTarget(t.id)}
               className={`min-h-[44px] shrink-0 rounded-full border px-4 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${t.id === targetId ? "border-primary bg-primary text-primary-foreground" : "border-border bg-muted"}`}
               data-testid={`spray-target-${t.id}`}>{t.name}</button>
           ))}
@@ -100,9 +102,10 @@ export default function SprayTray({ block, me, meError, onRetryMe, targets, targ
           const blocked = a.kind === "blocked";
           return (
             <li key={tier}>
-              <button type="button" disabled={blocked} onClick={() => { if (!blocked) onPick(tier); }}
+              {/* aria-disabled, not disabled: a blocked tile stays focusable so screen readers reach its reason (review M13). */}
+              <button type="button" aria-disabled={blocked || undefined} onClick={() => { if (!blocked) onPick(tier); }}
                 aria-describedby={blocked ? `spray-why-${tier}` : undefined}
-                className="flex min-h-[64px] w-full items-center gap-3 rounded-2xl border border-border bg-muted/60 px-3 py-2 text-left disabled:opacity-50 [@media(hover:hover)_and_(pointer:fine)]:hover:border-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary motion-safe:transition-transform motion-safe:active:scale-[0.98]"
+                className="flex min-h-[64px] w-full items-center gap-3 rounded-2xl border border-border bg-muted/60 px-3 py-2 text-left aria-disabled:cursor-not-allowed aria-disabled:opacity-50 [@media(hover:hover)_and_(pointer:fine)]:hover:border-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary motion-safe:transition-transform motion-safe:active:scale-[0.98]"
                 data-testid={`spray-tile-${tier}`} data-action={a.kind}>
                 <TierMark tier={tier} />
                 <span className="min-w-0 flex-1">
@@ -122,16 +125,19 @@ export default function SprayTray({ block, me, meError, onRetryMe, targets, targ
         <Button className="min-h-[44px] rounded-full px-6" onClick={onDone} data-testid="spray-done">{SPRAY_COPY.done}</Button>
       </div>
 
+      {/* The whole 44 px row toggles the switch (the switch itself is smaller), review M15. */}
       <div className="flex min-h-[44px] items-center justify-between gap-2 text-sm">
-        <label htmlFor="spray-quiet" className="min-w-0">
+        <label htmlFor="spray-quiet" className="flex min-h-[44px] min-w-0 flex-1 cursor-pointer flex-col justify-center">
           <span className="block font-medium">{SPRAY_COPY.quietLabel}</span>
           <span className="block text-xs text-muted-foreground">{SPRAY_COPY.quietHint}</span>
         </label>
-        <Switch id="spray-quiet" checked={quiet} onCheckedChange={onQuiet} data-testid="spray-quiet" />
+        <label htmlFor="spray-quiet" className="flex min-h-[44px] min-w-[44px] cursor-pointer items-center justify-center">
+          <Switch id="spray-quiet" checked={quiet} onCheckedChange={onQuiet} data-testid="spray-quiet" />
+        </label>
       </div>
 
       <p className="text-xs text-muted-foreground" data-testid="spray-card-line">
-        {card ? `Paying with ${card}. ` : "No card saved. Your bank asks you to add one the first time. "}
+        {card ? `Paying with ${cardInSentence(card)}. ` : "No card saved. Your bank asks you to add one the first time. "}
         <button type="button" onClick={onLimits} className="min-h-[44px] font-medium text-primary underline-offset-2 hover:underline" data-testid="spray-open-limits">{SPRAY_COPY.openLimits}</button>
       </p>
     </div>

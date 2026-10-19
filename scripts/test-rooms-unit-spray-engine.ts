@@ -14,6 +14,8 @@ const test = (name: string, fn: () => void) => {
 
 // ---------- stubs (installed before the engine is imported) ----------
 const fault = { draw: false, clear: false };
+/** save() minus restore() over every fake context: must be 0 whenever no frame is mid-paint (review M10). */
+const stack = { depth: 0 };
 function fakeCtx(): any {
   const grad = { addColorStop() { /* noop */ } };
   const t: Record<string | symbol, unknown> = { createLinearGradient: () => grad, createRadialGradient: () => grad, measureText: () => ({ width: 0 }) };
@@ -21,6 +23,8 @@ function fakeCtx(): any {
     get(o, p) {
       if (p === "drawImage") return () => { if (fault.draw) throw new Error("draw failed"); };
       if (p === "clearRect") return () => { if (fault.clear) throw new Error("clear failed"); };
+      if (p === "save") return () => { stack.depth++; };
+      if (p === "restore") return () => { stack.depth--; };
       if (p in o) return o[p];
       return () => { /* any other 2d call is a noop */ };
     },
@@ -237,6 +241,23 @@ test("a particle that throws while painting is dropped, onLand still fires once,
   assert.equal(e.liveCount, 0);
   assert.equal(e.isRunning, false);
   assert.equal(frames.size, 0);
+  e.destroy();
+});
+
+test("M10: every save() is restored even when a draw throws mid-paint (no state stack drift)", () => {
+  reset();
+  const e = make();
+  e.spray("note", A, B); // builds the sprites with working draws
+  pump(3);
+  stack.depth = 0;
+  fault.draw = true;
+  let lands = 0;
+  for (const k of SPRAY_KINDS) e.spray(k, A, B, { onLand: () => lands++ });
+  pump(10000, 16.7, () => assert.equal(stack.depth, 0, "unbalanced after a frame"));
+  fault.draw = false;
+  assert.equal(stack.depth, 0);
+  assert.equal(lands, 4);
+  assert.equal(e.isRunning, false);
   e.destroy();
 });
 

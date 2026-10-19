@@ -16,7 +16,7 @@
 //
 // The pure helpers (`clampDt`, `rainRate`, `windAt`, `beamAt`, `bezierAt`, `noteCap`, `easeOutQuart`) have no DOM and
 // are unit tested in scripts/test-rooms-unit-spray-engine.ts. Nothing touches the DOM at import time.
-import { artDpr, bagArt, bundleArt, noteArt } from "./art";
+import { NOTE_ASPECT, artDpr, bagArt, bundleArt, noteArt } from "./art";
 import { snd } from "./sound";
 import { SPRAY_TOKENS as K, type NoteVariant } from "@/lib/sprayTokens";
 
@@ -34,7 +34,7 @@ export const FIRST_DT = 0.016;
 export const RAIN_SECONDS = 5;
 /** When rain "lands" for the onLand hook: the end of the ramp, when the room is full of notes. */
 export const RAIN_LAND_AT = 0.9;
-const NW = 58, NH = NW / 2.2, BIG_W = 110;
+const NW = 58, NH = NW / NOTE_ASPECT, BIG_W = 110;
 
 // ---------- pure helpers (tested without a DOM) ----------
 
@@ -568,57 +568,78 @@ export class SprayEngine {
     const g = this.g, set = this.sprites[p.v];
     if (!g || !set) return;
     const d = this.dpr, cs = Math.cos(p.fp), spr = cs >= 0 ? set.f : set.b, ax = Math.max(0.14, Math.abs(cs)), tm = 0.9 + 0.1 * Math.cos(p.tp || 0);
+    // Every save() has its restore() in a finally: a throw in drawImage can never leave the state stack unbalanced.
     g.save();
-    g.setTransform(d, 0, 0, d, 0, 0);
-    if (p.sh) {
-      g.globalAlpha = alpha * 0.2 * ax;
-      g.fillStyle = "#000";
-      g.translate(p.x + 5 * p.s, p.y + 9 * p.s);
+    try {
+      g.setTransform(d, 0, 0, d, 0, 0);
+      if (p.sh) {
+        g.globalAlpha = alpha * 0.2 * ax;
+        g.fillStyle = "#000";
+        g.translate(p.x + 5 * p.s, p.y + 9 * p.s);
+        g.rotate(p.rz);
+        g.scale(ax * p.s, p.s * tm);
+        g.fillRect(-NW / 2, -NH / 2, NW, NH);
+        g.setTransform(d, 0, 0, d, 0, 0);
+      }
+      g.translate(p.x, p.y);
       g.rotate(p.rz);
       g.scale(ax * p.s, p.s * tm);
-      g.fillRect(-NW / 2, -NH / 2, NW, NH);
-      g.setTransform(d, 0, 0, d, 0, 0);
+      g.globalAlpha = alpha * (0.72 + 0.28 * Math.abs(cs));
+      g.drawImage(spr, -NW / 2, -NH / 2, NW, NH);
+      if (ax < 0.34) {
+        g.globalAlpha = alpha * (0.34 - ax) * 2.2;
+        g.fillStyle = K.white;
+        g.fillRect(-NW / 2, -NH / 2, NW, NH);
+      }
+    } finally {
+      g.restore();
     }
-    g.translate(p.x, p.y);
-    g.rotate(p.rz);
-    g.scale(ax * p.s, p.s * tm);
-    g.globalAlpha = alpha * (0.72 + 0.28 * Math.abs(cs));
-    g.drawImage(spr, -NW / 2, -NH / 2, NW, NH);
-    if (ax < 0.34) {
-      g.globalAlpha = alpha * (0.34 - ax) * 2.2;
-      g.fillStyle = K.white;
-      g.fillRect(-NW / 2, -NH / 2, NW, NH);
-    }
-    g.restore();
     if (p.gl && p.gl > 0) {
       g.save();
-      g.setTransform(d, 0, 0, d, 0, 0);
-      const gx = p.x + NW * 0.32 * p.s, gy = p.y - NH * 0.3 * p.s, gs = 7 * p.s * (p.gl / 0.16);
-      g.globalAlpha = alpha * Math.min(1, p.gl * 9);
-      g.fillStyle = K.white;
-      g.fillRect(gx - gs, gy - 0.7, gs * 2, 1.4);
-      g.fillRect(gx - 0.7, gy - gs, 1.4, gs * 2);
+      try {
+        g.setTransform(d, 0, 0, d, 0, 0);
+        const gx = p.x + NW * 0.32 * p.s, gy = p.y - NH * 0.3 * p.s, gs = 7 * p.s * (p.gl / 0.16);
+        g.globalAlpha = alpha * Math.min(1, p.gl * 9);
+        g.fillStyle = K.white;
+        g.fillRect(gx - gs, gy - 0.7, gs * 2, 1.4);
+        g.fillRect(gx - 0.7, gy - gs, 1.4, gs * 2);
+      } finally {
+        g.restore();
+      }
+    }
+  }
+
+  /** Paint one particle. Every case that saves the context restores it in a finally (balanced even when a draw throws). */
+  private paint(p: Part): void {
+    const g = this.g;
+    if (!g) return;
+    if (p.type === "fly") {
+      for (let k = p.tr.length - 1; k >= 0; k--) {
+        const t0 = p.tr[k];
+        this.sprite({ x: t0.x, y: t0.y, rz: t0.rz, fp: t0.fp, s: 1, v: p.v, tp: p.tp, sh: false }, 0.16 - 0.045 * k);
+      }
+      this.sprite(p, 1);
+      return;
+    }
+    if (p.type === "note") {
+      this.sprite(p, Math.max(0, Math.min(1, (p.life - p.age) / 0.5)) * p.al);
+      return;
+    }
+    g.save();
+    try {
+      this.paintSaved(g, p);
+    } finally {
       g.restore();
     }
   }
 
-  private paint(p: Part): void {
-    const g = this.g;
-    if (!g) return;
+  /** The cases that draw straight on the context; the caller (paint) holds save() and restores in a finally. */
+  private paintSaved(g: CanvasRenderingContext2D, p: Part): void {
     const d = this.dpr;
     switch (p.type) {
-      case "fly": {
-        for (let k = p.tr.length - 1; k >= 0; k--) {
-          const t0 = p.tr[k];
-          this.sprite({ x: t0.x, y: t0.y, rz: t0.rz, fp: t0.fp, s: 1, v: p.v, tp: p.tp, sh: false }, 0.16 - 0.045 * k);
-        }
-        this.sprite(p, 1);
-        return;
-      }
       case "bigfly": {
         const u = Math.min(1, p.t / p.dur), bag = p.kind === "bag", sp = bag ? this.bagS : this.bundleS;
         if (!sp) return;
-        g.save();
         g.setTransform(d, 0, 0, d, 0, 0);
         g.globalAlpha = 0.25 * u;
         g.fillStyle = "#000";
@@ -632,15 +653,10 @@ export class SprayEngine {
         g.scale(pu, pu);
         const sh = sp.height / d;
         g.drawImage(sp, -BIG_W / 2, -sh / 2, BIG_W, sh);
-        g.restore();
         return;
       }
-      case "note":
-        this.sprite(p, Math.max(0, Math.min(1, (p.life - p.age) / 0.5)) * p.al);
-        return;
       case "ring": {
         const u = Math.max(0, Math.min(1, p.age / p.life)), e = easeOutQuart(u);
-        g.save();
         g.setTransform(d, 0, 0, d, 0, 0);
         g.globalAlpha = Math.max(0, 1 - u) * 0.85;
         g.strokeStyle = p.col;
@@ -648,7 +664,6 @@ export class SprayEngine {
         g.beginPath();
         g.arc(p.x, p.y, Math.max(1, 6 + (p.r1 - 6) * e), 0, Math.PI * 2);
         g.stroke();
-        g.restore();
         return;
       }
       case "rig": {
@@ -658,7 +673,6 @@ export class SprayEngine {
         const op = Math.max(0, Math.min(1, (q - 0.28) / 0.26));
         const shake = q > 0.46 && q < 1.9 ? Math.sin(q * 75) * 2.6 * (1 - Math.min(1, (q - 0.46) / 1.5)) : 0;
         const ex = q > 1.9 ? q - 1.9 : 0, al = 1 - Math.min(1, ex / 0.6);
-        g.save();
         g.setTransform(d, 0, 0, d, 0, 0);
         g.globalAlpha = 0.25 * al;
         g.fillStyle = "#000";
@@ -673,11 +687,9 @@ export class SprayEngine {
         g.drawImage(this.bagS, -BIG_W / 2, -hh / 2, BIG_W, hh);
         g.globalAlpha = op * al;
         g.drawImage(this.bagO, -BIG_W / 2, -hh / 2, BIG_W, hh);
-        g.restore();
         return;
       }
       case "spark": {
-        g.save();
         g.setTransform(d, 0, 0, d, 0, 0);
         const tw = p.tw ? 0.6 + 0.4 * Math.sin(p.age * 30 + p.ph) : 1;
         g.globalAlpha = Math.max(0, 1 - p.age / p.life) * tw;
@@ -691,9 +703,10 @@ export class SprayEngine {
           g.arc(p.x, p.y, p.size, 0, Math.PI * 2);
           g.fill();
         }
-        g.restore();
         return;
       }
+      default:
+        return; // fly and note are painted through sprite(), which balances its own save/restore
     }
   }
 
@@ -701,21 +714,24 @@ export class SprayEngine {
     const g = this.g, r = this.rain;
     if (!g || r.beam <= 0.01) return;
     g.save();
-    g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    for (let b = 0; b < 3; b++) {
-      const bx = this.W * (0.2 + 0.3 * b) + Math.sin(r.t * 0.5 + b * 2) * 40, sw = 26 + 10 * b;
-      const gr = g.createLinearGradient(bx, 0, bx + 60, this.H * 0.8);
-      gr.addColorStop(0, `rgba(${K.beamRgb},${0.17 * r.beam})`);
-      gr.addColorStop(1, `rgba(${K.beamRgb},0)`);
-      g.fillStyle = gr;
-      g.beginPath();
-      g.moveTo(bx - sw * 0.4, 0);
-      g.lineTo(bx + sw * 0.4, 0);
-      g.lineTo(bx + sw * 2.6 + 60, this.H * 0.8);
-      g.lineTo(bx - sw * 2.2 + 60, this.H * 0.8);
-      g.closePath();
-      g.fill();
+    try {
+      g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      for (let b = 0; b < 3; b++) {
+        const bx = this.W * (0.2 + 0.3 * b) + Math.sin(r.t * 0.5 + b * 2) * 40, sw = 26 + 10 * b;
+        const gr = g.createLinearGradient(bx, 0, bx + 60, this.H * 0.8);
+        gr.addColorStop(0, `rgba(${K.beamRgb},${0.17 * r.beam})`);
+        gr.addColorStop(1, `rgba(${K.beamRgb},0)`);
+        g.fillStyle = gr;
+        g.beginPath();
+        g.moveTo(bx - sw * 0.4, 0);
+        g.lineTo(bx + sw * 0.4, 0);
+        g.lineTo(bx + sw * 2.6 + 60, this.H * 0.8);
+        g.lineTo(bx - sw * 2.2 + 60, this.H * 0.8);
+        g.closePath();
+        g.fill();
+      }
+    } finally {
+      g.restore();
     }
-    g.restore();
   }
 }
