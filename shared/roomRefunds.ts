@@ -17,8 +17,46 @@ export const NO_START_TIME_GRACE_MS = 24 * HOUR;
 export const PAYOUT_HOLD_MS = 48 * HOUR;
 /** Settlement gives up on a payout (status failed, admin alert) after this many failed attempts. */
 export const MAX_PAYOUT_ATTEMPTS = 5;
-/** Unconfirmed provider refunds are retried automatically for this long; after that only an admin follows up. */
+/**
+ * A refund the PROVIDER REJECTED is retried automatically for this long after the first rejection; after that only an
+ * admin follows up. A lookup outage is never capped (the job keeps asking until the provider answers).
+ */
 export const REFUND_RETRY_FOR_MS = 24 * HOUR;
+/** A refund still owed (provider not confirmed) this long raises one finance alert (payment_issues refund_overdue). */
+export const REFUND_OVERDUE_MS = 24 * HOUR;
+/** A refused charge (S2 auto_* row) younger than this is left to the request that refused it; the job only picks up stragglers. */
+export const AUTO_REFUND_JOB_DELAY_MS = 10 * MIN;
+/** A payout whose bank could not be matched is tried again at most this often (and that attempt is counted only once). */
+export const BANK_UNRESOLVED_RETRY_MS = HOUR;
+
+/** A payout an admin put on hold: release_at is pushed to this sentinel (no new status or column). */
+export const PAYOUT_HOLD_SENTINEL_ISO = "9999-12-31T00:00:00.000Z";
+export const PAYOUT_HOLD_SENTINEL_MS = Date.parse(PAYOUT_HOLD_SENTINEL_ISO);
+/** release_at at (or past) the sentinel = held by an admin. */
+export function isAdminHold(releaseAtMs: number | null | undefined): boolean {
+  return releaseAtMs !== null && releaseAtMs !== undefined && Number.isFinite(releaseAtMs) && releaseAtMs >= PAYOUT_HOLD_SENTINEL_MS;
+}
+/** last_error prefix of an admin hold (followed by the admin's reason, sanitized). */
+export const ADMIN_HOLD_NOTE = "ADMIN_HOLD";
+
+/** Refused charges (lane S2) are stored as room_tickets rows with refund_reason auto_*: never a ticket, never host money. */
+export function isAutoRefundReason(reason: string | null | undefined): boolean {
+  return typeof reason === "string" && reason.startsWith("auto_");
+}
+
+/**
+ * Why a room that ended must NOT pay its host (its paid tickets are refunded with host_cancelled instead), or null.
+ * minors' room (never ticketed by the rules; fail safe if one is), moderation not approved, closed for a host review, or a
+ * host who may not host it any more (under 18, age unknown, or below the room's age limit after a birthdate correction).
+ */
+export type PayoutBlock = "MINORS_ROOM" | "NOT_APPROVED" | "HOST_REVIEW" | "HOST_NOT_ELIGIBLE";
+export function payoutBlockReason(r: { minorsRoom: boolean; moderationStatus: string | null; hostReview?: boolean; hostAge: number | null; minAge: number }): PayoutBlock | null {
+  if (r.minorsRoom) return "MINORS_ROOM";
+  if ((r.moderationStatus ?? "approved") !== "approved") return "NOT_APPROVED";
+  if (r.hostReview) return "HOST_REVIEW";
+  if (r.hostAge === null || r.hostAge < 18 || r.hostAge < r.minAge) return "HOST_NOT_ELIGIBLE";
+  return null;
+}
 /** Both jobs run this often. */
 export const MONEY_JOB_EVERY_MS = 5 * MIN;
 
@@ -90,8 +128,23 @@ export function afterFailedAttempt(attempts: number): { attempts: number; giveUp
   return { attempts: next, giveUp: next >= MAX_PAYOUT_ATTEMPTS };
 }
 
-/** The deterministic references. Paystack transfer references must be lowercase alphanumeric with - or _, at least 16 long. */
-export const payoutReference = (roomId: string) => `room-payout-${roomId.toLowerCase()}`;
+/**
+ * The deterministic references. Paystack transfer references must be lowercase alphanumeric with - or _, at least 16 long.
+ * A payout is first sent as `room-payout-<roomId>`. Only after Paystack gave a CONCLUSIVE failure (failed, reversed...) and
+ * an admin requeued it does it get a new generation `room-payout-<roomId>-r<n>` (a new reference is a new transfer, so it
+ * is never used while an earlier one might still go through).
+ */
+export const payoutReference = (roomId: string, generation = 1) =>
+  generation <= 1 ? `room-payout-${roomId.toLowerCase()}` : `room-payout-${roomId.toLowerCase()}-r${generation}`;
+/** The generation of a payout reference for this room, or null when it is not one of this room's references. */
+export function payoutGeneration(roomId: string, ref: string | null | undefined): number | null {
+  if (!ref) return null;
+  const base = `room-payout-${roomId.toLowerCase()}`;
+  if (ref === base) return 1;
+  const m = ref.startsWith(`${base}-r`) ? /^(\d{1,4})$/.exec(ref.slice(base.length + 2)) : null;
+  const n = m ? Number(m[1]) : NaN;
+  return Number.isInteger(n) && n >= 2 ? n : null;
+}
 export const ticketRefundReference = (ticketId: string) => `ticket-refund-${ticketId.toLowerCase()}`;
 export function isValidTransferReference(ref: string): boolean {
   return ref.length >= 16 && ref.length <= 100 && /^[a-z0-9_-]+$/.test(ref);
@@ -111,13 +164,36 @@ const REASON_LINE: Record<RefundReason, string> = {
   oversold: "The room was already full.",
 };
 
-/** The buyer's refund notification. Amount in naira, the room title, the reason. Never card or bank data. */
-export function refundNotice(amountKobo: number, roomTitle: string, reason: RefundReason): { title: string; message: string } {
+/**
+ * The buyer's refund notification. Amount in naira, the room title, the reason. Never card or bank data.
+ * stage "pending": the provider accepted the refund but has not processed it ("on its way"); "processed": the provider
+ * reports it done ("refunded"). Never says "refunded" before the provider does.
+ */
+export function refundNotice(amountKobo: number, roomTitle: string, reason: RefundReason, stage: "pending" | "processed" = "processed"): { title: string; message: string } {
+  if (stage === "pending") {
+    return {
+      title: "Refund on its way",
+      message: `Your refund of ${nairaText(amountKobo)} for "${roomTitle}" is on its way. ${REASON_LINE[reason]} It can take a few working days to reach your account.`,
+    };
+  }
   return {
     title: "Ticket refunded",
     message: `Your ${nairaText(amountKobo)} ticket for "${roomTitle}" was refunded. ${REASON_LINE[reason]} It can take a few working days to reach your account.`,
   };
 }
+
+/**
+ * A payment we did not turn into a ticket (lane S2 refused it: sold out, amount mismatch, not eligible, duplicate) is
+ * returned. Never "the host cancelled": the host had nothing to do with it.
+ */
+export function returnedPaymentNotice(amountKobo: number, stage: "pending" | "processed"): { title: string; message: string } {
+  return stage === "pending"
+    ? { title: "Payment on its way back", message: `Your payment of ${nairaText(amountKobo)} for the ticket is on its way back to you. It can take a few working days to reach your account.` }
+    : { title: "Payment returned", message: `Your payment of ${nairaText(amountKobo)} for the ticket was returned. It can take a few working days to reach your account.` };
+}
+
+/** The deterministic key stored in notifications.related_entity_id so a retry can never notify twice. */
+export const refundNoticeKey = (ticketId: string, stage: "pending" | "processed") => `${ticketRefundReference(ticketId)}:${stage}`;
 
 /** Errors stored in room_payouts.last_error / payment_issues: no digit runs that could be an account number, short. */
 export function sanitizeMoneyError(raw: unknown): string {

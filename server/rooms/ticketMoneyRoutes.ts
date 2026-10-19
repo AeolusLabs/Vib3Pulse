@@ -12,6 +12,7 @@ import * as rs from "./roomStorage";
 import { canViewRoom, viewerRoom } from "./roomAccess";
 import { TokenBucket } from "./rateLimit";
 import { MoneyLockBusy, moneyClock, refundAllForRoom, refundTicketDetailed } from "./refunds";
+import { isAdminHold } from "@shared/roomRefunds";
 
 const REFUSAL_MESSAGES: Record<string, string> = {
   ROOM_NOT_SCHEDULED: "This room has already started, so the ticket can't be refunded.",
@@ -50,8 +51,14 @@ export function registerRoomMoneyRoutes(app: Express): void {
       const room = await rs.getRoom(req.params.id);
       if (!room || !(await canViewRoom(room, req.user!.id, tokenOf(req)))) return res.status(404).json({ message: "Room not found" });
       // The caller's own ticket only (a paid one first). The id never comes from the request.
+      // A refused charge (lane S2 row, refund_reason auto_*) is NOT a ticket: it answers NO_TICKET, unless its money is still
+      // owed (refunded_at NULL), in which case this call only finishes the provider step (refundTicketDetailed -> "already").
       const t = (await pool.query(
-        `select id from room_tickets where room_id = $1 and user_id = $2 order by (status = 'paid') desc, created_at desc limit 1`,
+        `select t.id from room_tickets t
+          where t.room_id = $1 and t.user_id = $2
+            and (coalesce(left(t.refund_reason, 5), '') <> 'auto_' or t.refunded_at is null)
+          order by (t.status = 'paid') desc, (coalesce(left(t.refund_reason, 5), '') = 'auto_') asc, t.created_at desc
+          limit 1`,
         [room.id, req.user!.id],
       )).rows[0] as { id: string } | undefined;
       if (!t) return res.status(404).json({ result: "not_allowed", code: "NO_TICKET", message: REFUSAL_MESSAGES.NOT_FOUND });
@@ -93,13 +100,15 @@ export function registerRoomMoneyRoutes(app: Express): void {
     try {
       const room = await hostRoom(req, res);
       if (!room) return;
+      // Refused charges (lane S2, auto_*) are a separate bucket: never a sale, never a refund of a ticket (M1).
       const [sums, payout] = await Promise.all([
         pool.query(
-          `select status, count(*)::int as n,
+          `select case when coalesce(left(refund_reason, 5), '') = 'auto_' then 'refused' else status end as status, count(*)::int as n,
                   coalesce(sum(amount_kobo), 0)::bigint as gross, coalesce(sum(vat_kobo), 0)::bigint as vat,
                   coalesce(sum(fee_kobo), 0)::bigint as fee, coalesce(sum(reserve_kobo), 0)::bigint as reserve,
                   coalesce(sum(platform_kobo), 0)::bigint as platform, coalesce(sum(host_kobo), 0)::bigint as host
-             from room_tickets where room_id = $1 group by status`,
+             from room_tickets where room_id = $1
+            group by 1`,
           [room.id],
         ),
         pool.query(
@@ -113,17 +122,22 @@ export function registerRoomMoneyRoutes(app: Express): void {
       const paid = by.get("paid");
       const n = (v: unknown) => Number(v ?? 0);
       const p = payout.rows[0] as { status: string; amount_kobo: number; release_ms: number | null; paid_ms: number | null } | undefined;
+      const onHold = !!p && p.status === "held" && isAdminHold(p.release_ms === null ? null : Number(p.release_ms));
+      const refused = by.get("refused");
       res.json({
         summary: {
           sold: n(paid?.n),
           refunded: n(by.get("refunded")?.n),
+          // Payments refused before they became tickets (sold out, amount mismatch...), returned to the payer. Count + gross.
+          refusedCharges: { count: n(refused?.n), grossKobo: n(refused?.gross) },
           grossKobo: n(paid?.gross),
           vatKobo: n(paid?.vat),
           feeKobo: n(paid?.fee),
           reserveKobo: n(paid?.reserve),
           platformKobo: n(paid?.platform),
           hostKobo: n(paid?.host),
-          payout: p ? { status: p.status, amountKobo: n(p.amount_kobo), releaseAt: isoOrNull(p.release_ms), paidAt: isoOrNull(p.paid_ms) } : null,
+          // An admin hold shows as onHold with no release date (never the internal far-future sentinel).
+          payout: p ? { status: p.status, amountKobo: n(p.amount_kobo), releaseAt: onHold ? null : isoOrNull(p.release_ms), paidAt: isoOrNull(p.paid_ms), onHold } : null,
         },
       });
     } catch (e) {
