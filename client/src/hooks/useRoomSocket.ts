@@ -82,6 +82,18 @@ export function useRoomSocket(roomId: string, opts: { inviteToken?: string } = {
     setVoice: async (enabled: boolean) => { try { await apiRequest("PUT", `/api/rooms/${roomId}/voice`, { enabled }); return true; } catch { return false; } },
     /** Host: switch live camera + mic streaming on or off. Resolves false if it was refused. */
     setLiveVideo: async (enabled: boolean) => { try { await apiRequest("PUT", `/api/rooms/${roomId}/live-video`, { enabled }); return true; } catch { return false; } },
+    /** Host (all three) or co-host (pinned message only): change room settings. Everyone hears room:settings. Null when saved, else the server's message. */
+    saveSettings: async (patch: { pinnedMessage?: string | null; slowModeSec?: number; locked?: boolean }): Promise<string | null> => {
+      try { await apiRequest("PATCH", `/api/rooms/${roomId}`, patch); return null; } catch (e) { return (e as Error)?.message || ""; }
+    },
+    /** Host: make someone a co-host or a guest again. Everyone hears room:mod role. Null when done, else the server's message. */
+    setRole: async (targetId: string, role: "cohost" | "guest"): Promise<string | null> => {
+      try { await apiRequest("PUT", `/api/rooms/${roomId}/members/${targetId}/role`, { role }); return null; } catch (e) { return (e as Error)?.message || ""; }
+    },
+    /** Host: end the room for everyone. Everyone hears room:ended. Null when done, else the server's message. */
+    endRoom: async (): Promise<string | null> => {
+      try { await apiRequest("POST", `/api/rooms/${roomId}/end`); return null; } catch (e) { return (e as Error)?.message || ""; }
+    },
     dismissInvite: () => dispatch({ type: "client:dismissInvite" }),
   };
 }

@@ -79,6 +79,7 @@ export type RoomServerMessage =
   | { type: "room:voice"; enabled: boolean }
   | { type: "room:live"; holder: string | null; asks: string[]; away?: number | null }
   | { type: "room:livevideo"; enabled: boolean }
+  | { type: "room:settings"; pinnedMessage: string | null; slowModeSec: number; locked: boolean }
   | { type: "room:playback"; nowPlaying: NowPlaying | null; serverNowMs: number }
   | { type: "room:mod"; action: "mute" | "unmute" | "kick" | "ban" | "role"; targetId: string; role?: MemberRole }
   | { type: "room:ended" }
@@ -159,6 +160,9 @@ export function roomReducer(state: RoomState, event: RoomEvent, now: () => numbe
       return { ...state, holder: event.holder, asks: event.asks, holderAwayUntil: event.holder ? event.away ?? null : null };
     case "room:livevideo":
       return event.enabled ? { ...state, liveVideo: true } : { ...state, liveVideo: false, holder: null, asks: [], holderAwayUntil: null };
+    case "room:settings":
+      // Host settings (pinned message, slow mode, lock) live on the room record, like they do inside room:state.room.
+      return state.room ? { ...state, room: { ...state.room, pinnedMessage: event.pinnedMessage, slowModeSec: event.slowModeSec, locked: event.locked } } : state;
     case "room:playback": {
       const current = (state.room as { screenVersion?: number } | null)?.screenVersion;
       // A message about a screen that has since been replaced (it crossed a screen change on the way) must not resurrect old playback.
