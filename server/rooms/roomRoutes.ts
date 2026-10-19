@@ -23,7 +23,7 @@ import * as mr from "./minorsRoom";
 import { TokenBucket } from "./rateLimit";
 import { getVoiceService } from "./voice/voiceService";
 import { afterRoleChange, canCameraNow, canPublishNow, shutdownVoice, stopAllLive } from "./stage";
-import { applyMod, endRoom, enforceAgeLimit, expectHost, interactionVerdict, notifyScreen, removeFromMinorsRoom, writeRoomSettings } from "./roomSocket";
+import { applyMod, endRoom, enforceAgeLimit, expectHost, interactionVerdict, isKicked, notifyScreen, removeFromMinorsRoom, writeRoomSettings } from "./roomSocket";
 import { roomHub } from "./RoomHub";
 import { roomFeatures } from "./features";
 import { clearReminder, hasReminder, setReminder } from "./reminders";
@@ -257,7 +257,8 @@ export function registerRoomRoutes(app: Express): void {
         const m = await rs.getMember(found.id, uid);
         const keys = Object.keys(b);
         const onlyPinned = keys.length > 0 && keys.every((k) => k === "pinnedMessage");
-        if (!m || m.banned || m.role !== "cohost" || !onlyPinned) return res.status(403).json({ message: "Only the host can do that." });
+        // A kick also resets the role to guest; the kick check covers a role write that failed or has not landed yet.
+        if (!m || m.banned || m.role !== "cohost" || !onlyPinned || isKicked(found.id, uid)) return res.status(403).json({ message: "Only the host can do that." });
         const hostRow = await storage.getUser(found.hostId);
         if (!hostRow) return res.status(404).json({ message: "Room not found" });
         ctx = { room: found, host: hostRow };

@@ -8,6 +8,7 @@ import type { NowPlaying } from "@shared/playback";
 import { ageFromDob } from "@shared/age";
 import { blockedWith } from "../utils/blocks";
 import { ackedRoomIdsFor } from "./minorsRoom";
+import { NEVER_JOINED } from "./roomLock";
 
 export type RoomStatus = "scheduled" | "live" | "ended";
 export type MemberRole = "host" | "cohost" | "guest";
@@ -216,12 +217,16 @@ export async function markLeft(roomId: string, userId: string): Promise<void> {
     .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId), isNull(roomMembers.leftAt)));
 }
 
-/** Creates the row if the user never joined, so a host can ban someone before they arrive. */
+/**
+ * Creates the row if the user never joined, so a host can ban someone before they arrive. Such a row carries NEVER_JOINED
+ * as joined_at and left_at: it never counts as a member of the live session (no pass through a locked room), and a real
+ * join later (upsertMember) starts joined_at afresh because left_at is set.
+ */
 export async function setMemberFlag(roomId: string, userId: string, flags: { muted?: boolean; banned?: boolean }): Promise<RoomMember> {
   const set: Partial<RoomMember> = {};
   if (flags.muted !== undefined) set.muted = flags.muted;
   if (flags.banned !== undefined) set.banned = flags.banned;
-  const [row] = await db.insert(roomMembers).values({ roomId, userId, leftAt: new Date(), ...set })
+  const [row] = await db.insert(roomMembers).values({ roomId, userId, joinedAt: NEVER_JOINED, leftAt: NEVER_JOINED, ...set })
     .onConflictDoUpdate({ target: [roomMembers.roomId, roomMembers.userId], set: Object.keys(set).length ? set : { role: sql`${roomMembers.role}` } })
     .returning();
   return row;
