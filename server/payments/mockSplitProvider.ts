@@ -149,7 +149,7 @@ export class MockSplitProvider implements SplitPaymentProvider {
   /** Refunds in progress become processed. Returns how many. */
   processRefunds(): number {
     let n = 0;
-    for (const t of this.txs.values()) if (t.refund === "in_progress") { t.refund = "done"; n++; }
+    for (const t of Array.from(this.txs.values())) if (t.refund === "in_progress") { t.refund = "done"; n++; }
     return n;
   }
 
