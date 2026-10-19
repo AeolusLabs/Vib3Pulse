@@ -15,6 +15,7 @@ import {
   constructStripeWebhookEvent,
 } from "./payments/stripe.js";
 import {
+  paystackMetadataObject,
   verifyPaystackWebhookSignature,
 } from "./payments/paystack.js";
 import { insertTicketSchema } from "@shared/schema";
@@ -35,7 +36,8 @@ import type { OrganizerSplit } from "./payments/types.js";
 import { sendTicketPurchaseEmail } from "./emailService.js";
 import { MAX_GROUP_MEMBERS } from "./routes/messages-routes.js";
 import { deliverNotification } from "./notifications.js";
-import { handleRoomTicketCharge } from "./rooms/tickets.js";
+import { handleRoomTicketCharge, IssueQueueFullError } from "./rooms/tickets.js";
+import { looksLikeTicketReference } from "./rooms/ticketReference.js";
 
 function requireAuth(req: Request, res: Response, next: Function) {
   if (!req.isAuthenticated() || !req.user) {
@@ -934,20 +936,34 @@ export function registerPaymentRoutes(app: Express): void {
         if (reference) {
           // Through the payments index (same Paystack call) so tests can swap in the mock provider.
           const verified = await verifyCheckoutSession(reference, "paystack");
+          // A room ticket charge: our reference shape (vib3rt_..., made only by room checkout), or a payload that says
+          // itemType room (metadata may arrive as a JSON string). Only decides "room or not" and "retry or not"; nothing in
+          // the payload is trusted for money.
+          const roomCharge = looksLikeTicketReference(reference) || paystackMetadataObject(payload.data?.metadata).itemType === "room";
           // A room ticket charge we could not re-verify: answer 500 so Paystack retries, instead of 200 and losing it.
-          // The payload's itemType only decides "retry or not"; nothing in the payload is trusted for money.
-          if (!verified && payload.data?.metadata?.itemType === "room") {
+          if (!verified && roomCharge) {
             throw new Error(`room ticket charge ${reference} could not be re-verified with Paystack`);
           }
           if (verified && verified.paid) {
             const meta = verified.metadata;
 
-            if (await handlePaystackCharge(payload.data, verified)) {
-              // Social plan payment (first charge, renewal, or one-off) — handled.
-            } else if (meta.roomId) {
+            if (roomCharge || meta.roomId) {
               // Room ticket: signature checked above, re-verified with Paystack just now; issueRoomTicket uses the
               // VERIFIED amount against the room's stored price and is idempotent with the client's verify call.
-              await handleRoomTicketCharge(reference, verified);
+              // A paid charge it cannot handle (no room/buyer in the verified metadata, a bad amount) becomes a payment
+              // issue for a person and 200: a retry would never change that answer. A full per-room queue answers 503
+              // with Retry-After so Paystack comes back later. Anything else throws: 500, Paystack retries.
+              try {
+                await handleRoomTicketCharge(reference, verified);
+              } catch (e) {
+                if (e instanceof IssueQueueFullError) {
+                  res.setHeader("Retry-After", "5");
+                  return res.status(503).json({ message: "Busy, retry later" });
+                }
+                throw e;
+              }
+            } else if (await handlePaystackCharge(payload.data, verified)) {
+              // Social plan payment (first charge, renewal, or one-off) — handled.
             } else if (meta.eventId) {
               await issueEventTickets({
                 eventId: meta.eventId,

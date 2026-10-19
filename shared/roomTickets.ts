@@ -3,6 +3,7 @@
 import { shortCodeOf } from "./ticketCode";
 import { ageFromDob, meetsAgeLimit, type AgeLimit } from "./age";
 import { isIdVerifiedAdult } from "./ageVerification";
+import { ROOM_LIMITS } from "./rooms";
 
 /** What the buyer is shown for their own ticket. Never the payment reference, never the split. */
 export interface RoomTicketView {
@@ -20,11 +21,11 @@ export interface RoomTicketView {
 export type RoomTicketRefusal = "SOLD_OUT" | "AMOUNT_MISMATCH" | "INELIGIBLE";
 
 /**
- * Ticket price limits in kobo (1,000 to 100,000 naira). Lane S1 adds the same numbers to shared/rooms.ts
- * (ticketMinKobo / ticketMaxKobo); at merge, point these at those and delete the copies.
+ * Ticket price limits in kobo (1,000 to 100,000 naira). One source: ROOM_LIMITS in shared/rooms.ts (the same numbers the
+ * create/PATCH validation uses), so what a host may set and what a buyer may pay can never drift apart.
  */
-export const ROOM_TICKET_MIN_KOBO = 100_000;
-export const ROOM_TICKET_MAX_KOBO = 10_000_000;
+export const ROOM_TICKET_MIN_KOBO: number = ROOM_LIMITS.ticketMinKobo;
+export const ROOM_TICKET_MAX_KOBO: number = ROOM_LIMITS.ticketMaxKobo;
 
 /** A stored price we are willing to charge: an integer of kobo inside the limits. Anything else is treated as "not for sale". */
 export function isSellablePrice(priceKobo: unknown): priceKobo is number {
@@ -56,7 +57,10 @@ export type PurchaseBlock =
   | "ROOM_NOT_OPEN"      // not scheduled or live (ended)
   | "ROOM_NOT_APPROVED"  // taken down by moderation
   | "BANNED_OR_BLOCKED"  // banned from the room, or a block either way with the host
-  | "NOT_TICKETED"       // no sellable stored price
+  | "NOT_TICKETED"       // no stored price: a free room
+  | "PRICE_INVALID"      // a stored price outside the limits (or not an integer): sales paused, the door stays closed
+  | "SALES_PAUSED"       // the host may no longer sell (ID verification or payout account gone): sales paused
+  | "IS_COHOST"          // a co-host gets in without a ticket (checked at checkout only)
   | "AMOUNT_MISMATCH"    // the verified charge is not the stored price to the kobo, in naira
   | "ALREADY_TICKETED"   // already holds a paid ticket for this room
   | "SOLD_OUT";
@@ -69,6 +73,13 @@ export interface PurchaseInput {
     ticketPriceKobo: number | null | undefined; ticketCapacity: number | null | undefined; capacity: number;
   };
   bannedOrBlocked: boolean;
+  /** The buyer is a (non-banned) co-host of this room. Passed by checkout only: a co-host never needs to buy. */
+  buyerIsCohost?: boolean;
+  /**
+   * The host may still sell: ID-verified adult with a verified payout account, read fresh. false pauses sales
+   * (checkout SALES_PAUSED, a charge that arrives anyway is refunded). Left out: not checked (pure callers).
+   */
+  hostCanSell?: boolean;
   paidCount: number;       // paid tickets in this room right now
   buyerHasPaid: boolean;   // this buyer already holds a paid ticket in this room
   /** Present when a charge was made (verify / webhook). Absent at checkout, where nothing has been paid yet. */
@@ -99,7 +110,10 @@ export function checkPurchase(i: PurchaseInput): { ok: true } | { ok: false; cod
   if (!meetsAgeLimit(ageFromDob(i.buyer.dateOfBirth, now), i.room.ageLimit as AgeLimit)) return no("BELOW_AGE_LIMIT");
   if (i.room.status !== "scheduled" && i.room.status !== "live") return no("ROOM_NOT_OPEN");
   if (i.room.moderationStatus !== "approved") return no("ROOM_NOT_APPROVED");
-  if (!isSellablePrice(i.room.ticketPriceKobo)) return no("NOT_TICKETED");
+  if (i.room.ticketPriceKobo === null || i.room.ticketPriceKobo === undefined) return no("NOT_TICKETED");
+  if (!isSellablePrice(i.room.ticketPriceKobo)) return no("PRICE_INVALID");
+  if (i.hostCanSell === false) return no("SALES_PAUSED");
+  if (i.buyerIsCohost) return no("IS_COHOST");
   if (i.payment && !amountMatches(i.payment.amountKobo, i.room.ticketPriceKobo, i.payment.currency ?? "NGN")) return no("AMOUNT_MISMATCH");
   if (i.buyerHasPaid) return no("ALREADY_TICKETED");
   if (i.paidCount >= ticketSeatLimit(i.room)) return no("SOLD_OUT");

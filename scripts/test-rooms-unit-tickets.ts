@@ -155,7 +155,8 @@ test("free room capacity is unchanged by ticketing (still 2..50, 51 refused)", (
     assert.match(ROOM_TICKETS_SCHEMA_SQL, /status IN \('held', 'queued', 'paid', 'failed'\)/);
     assert.match(ROOM_TICKETS_SCHEMA_SQL, /ticket_capacity >= 20 AND ticket_capacity <= 150/);
     assert.match(ROOM_TICKETS_SCHEMA_SQL, /CONSTRAINT room_payouts_room_id_key UNIQUE \(room_id\)/);
-    assert.match(ROOM_TICKETS_SCHEMA_SQL, /room_id varchar NOT NULL REFERENCES rooms\(id\) ON DELETE CASCADE/);
+    assert.match(ROOM_TICKETS_SCHEMA_SQL, /room_id varchar NOT NULL REFERENCES rooms\(id\) ON DELETE RESTRICT/);
+    assert.match(ROOM_TICKETS_SCHEMA_SQL, /user_id varchar NOT NULL REFERENCES users\(id\) ON DELETE RESTRICT/);
     assert.match(ROOM_TICKETS_SCHEMA_SQL, /refund_before_start boolean NOT NULL DEFAULT true/);
   });
   test("every IF NOT EXISTS: re-running is a no-op", () => {
@@ -171,6 +172,23 @@ test("free room capacity is unchanged by ticketing (still 2..50, 51 refused)", (
   test("ensureSchema runs the same constant", () => {
     const src = readFileSync(new URL("../server/storage.ts", import.meta.url), "utf8");
     assert.match(src, /ROOM_TICKETS_SCHEMA_SQL[\s\S]{0,80}pool\.query\(ROOM_TICKETS_SCHEMA_SQL\)/);
+  });
+  test("money records never cascade away: no ON DELETE CASCADE anywhere in the paid-rooms SQL (I5)", () => {
+    assert.doesNotMatch(ROOM_TICKETS_SCHEMA_SQL, /CASCADE/i);
+    assert.doesNotMatch(file, /CASCADE/i);
+  });
+  test("shared/schema.ts: room_tickets room_id and user_id are onDelete restrict (same as the SQL)", () => {
+    const src = readFileSync(new URL("../shared/schema.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+    const start = src.indexOf('export const roomTickets = pgTable("room_tickets"');
+    const block = src.slice(start, src.indexOf("}));", start));
+    assert.match(block, /roomId: varchar\("room_id"\)\.notNull\(\)\.references\(\(\) => rooms\.id, \{ onDelete: "restrict" \}\)/);
+    assert.match(block, /userId: varchar\("user_id"\)\.notNull\(\)\.references\(\(\) => users\.id, \{ onDelete: "restrict" \}\)/);
+    assert.doesNotMatch(block, /cascade/);
+  });
+  const schema = await import("../shared/schema");
+  test("schema.ts: the ledger knows room_ticket, room_ticket_refund, room_payout; payment issues know room_charge_unhandled", () => {
+    for (const t of ["room_ticket", "room_ticket_refund", "room_payout"]) assert.ok((schema.paymentTransactionTypes as readonly string[]).includes(t), t);
+    assert.ok((schema.paymentIssueReasons as readonly string[]).includes("room_charge_unhandled"));
   });
   test("shared/schema.ts declares the same constraint and index names (drizzle-kit push keeps them)", () => {
     const src = readFileSync(new URL("../shared/schema.ts", import.meta.url), "utf8");
@@ -226,6 +244,63 @@ test("joinOnce: the fresh ticket check sits after the minors' gate and the lock,
   assert.ok(age > 0 && pre > age && leave > pre, `${age} ${pre} ${leave}`);
   assert.match(body, /hasPaidTicket\(roomId, userId\),?\s*\]\)/, "the ticket is re-read in the fresh Promise.all");
 });
+
+// ---------------------------------------------------------------- fix round 4F (source checks: the server is the gate)
+{
+  const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  const socket = read("../server/rooms/roomSocket.ts");
+  const routes = read("../server/rooms/roomRoutes.ts");
+  const ticketStorage = read("../server/rooms/ticketStorage.ts");
+  test("I2: roomIsFull never refuses a ticket holder in a ticketed room; joinOnce passes the fresh ticket", () => {
+    const start = socket.indexOf("export function roomIsFull(");
+    const body = socket.slice(start, socket.indexOf("\n}\n", start));
+    assert.match(body, /if \(!isTicketedRoom\(room\)\) return roomHub\.count\(roomId\) >= room\.capacity;/);
+    assert.match(body, /if \(holdsTicket\) return false;/);
+    assert.ok(body.indexOf("if (holdsTicket) return false;") < body.indexOf('filter((m) => m.role === "guest")'));
+    assert.match(socket, /roomIsFull\(roomId, fresh, freshTicket\)\) return refuse\(ws, "ROOM_FULL"\)/);
+  });
+  test("I2: the role route calls enforceTicketFor after making someone a guest", () => {
+    const start = routes.indexOf('app.put("/api/rooms/:id/members/:userId/role"');
+    const body = routes.slice(start, routes.indexOf("\n  });\n", start));
+    const set = body.indexOf("await rs.setMemberRole(ctx.room.id, targetId, role);");
+    const enforce = body.indexOf("await enforceTicketFor(ctx.room.id, targetId)");
+    const reply = body.indexOf("res.json({ ok: true, role })");
+    assert.ok(set > 0 && enforce > set && reply > enforce, `${set} ${enforce} ${reply}`);
+    assert.match(body, /if \(role === "guest"\) \{\s*await enforceTicketFor/);
+  });
+  test("I1: PATCH free -> paid only while scheduled: early 409 NOT_SCHEDULED and the same rule under the row lock", () => {
+    assert.match(routes, /const becomingTicketed = newPrice !== null && !isTicketedRoom\(room\);/);
+    assert.match(routes, /if \(becomingTicketed && room\.status !== "scheduled"\) \{\s*return res\.status\(409\)\.json\(\{ message: TICKET_GUARD_MESSAGES\.NOT_SCHEDULED, code: "NOT_SCHEDULED" \}\);/);
+    assert.match(routes, /requireScheduled: becomingTicketed/);
+    assert.match(ticketStorage, /\.for\("update"\);\s*if \(guard\.requireScheduled && locked\?\.status !== "scheduled"\) throw new TicketGuardError\("NOT_SCHEDULED", 0\);/);
+  });
+  test("M8 + contract: GET skips the ticket block for a banned viewer; counts only for ticketed rooms", () => {
+    assert.match(routes, /if \(viewer && !member\?\.banned && ticketEligible\(viewer, room\)\)/);
+    assert.match(routes, /refundBeforeStart: room\.refundBeforeStart !== false, capacity, left: Math\.max\(0, capacity - sold\)/);
+    assert.match(routes, /ticket = \{ required: false, priceKobo: 0, held: false, soldOut: false \};/);
+  });
+  test("I5: the admin delete route answers 409 with the plain message for RoomMoneyRecordsError", () => {
+    const admin = read("../server/admin-routes.ts");
+    assert.match(admin, /if \(error instanceof RoomMoneyRecordsError\) return res\.status\(409\)\.json\(\{ message: error\.message, code: error\.code \}\);/);
+    const storageSrc = read("../server/storage.ts");
+    const start = storageSrc.indexOf("async deleteUser(id: string)");
+    const body = storageSrc.slice(start, storageSrc.indexOf("\n  }\n", start));
+    assert.ok(body.indexOf("await assertNoRoomMoneyRecords(id);") > 0 && body.indexOf("await assertNoRoomMoneyRecords(id);") < body.indexOf("db.delete(users)"), body);
+  });
+}
+{
+  const { RoomMoneyRecordsError } = await import("../server/storage");
+  test("I5: RoomMoneyRecordsError: typed code, plain message, counts kept", () => {
+    const owed = new RoomMoneyRecordsError({ owed: 2, tickets: 3, hostedTickets: 0, payouts: 0 });
+    assert.equal(owed.code, "ROOM_MONEY_RECORDS");
+    assert.match(owed.message, /2 room ticket payment\(s\) that are paid or still being refunded/);
+    assert.ok(!/—/.test(owed.message) && !/cash/i.test(owed.message), "plain copy: no em dash, never 'cash'");
+    const kept = new RoomMoneyRecordsError({ owed: 0, tickets: 0, hostedTickets: 5, payouts: 1 });
+    assert.match(kept.message, /payment records that must be kept/);
+    assert.equal(kept.counts.payouts, 1);
+    assert.ok(kept instanceof Error);
+  });
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

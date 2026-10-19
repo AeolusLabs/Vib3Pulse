@@ -93,7 +93,21 @@ export async function createPaystackCheckout(params: CreateCheckoutParams): Prom
  * The metadata shape callers of verifyPaystackTransaction see. Pure and exported so the test mock provider
  * (setPaymentProviderForTests) can produce exactly what the real verify call produces.
  */
-export function normalizePaystackMetadata(meta: Record<string, string>): VerifiedSession["metadata"] {
+/**
+ * Paystack sometimes returns `metadata` as a JSON string instead of an object (it stores what the initializer sent, and
+ * some paths hand it back serialised). Parsed here so every caller sees the same object; anything that is not an object
+ * (or a string holding one) becomes {}.
+ */
+export function paystackMetadataObject(meta: unknown): Record<string, string> {
+  let m: unknown = meta;
+  if (typeof m === "string") {
+    try { m = JSON.parse(m); } catch { return {}; }
+  }
+  return m && typeof m === "object" && !Array.isArray(m) ? (m as Record<string, string>) : {};
+}
+
+export function normalizePaystackMetadata(raw: Record<string, string> | string | null | undefined): VerifiedSession["metadata"] {
+  const meta = paystackMetadataObject(raw);
   return {
     // Pass through everything the initializer attached (type, tier, billing,
     // platforms, ...) — callers previously only saw the fixed fields below,
@@ -123,7 +137,7 @@ export async function verifyPaystackTransaction(reference: string): Promise<Veri
   try {
     const data = await paystackRequest<PaystackVerifyData>(`/transaction/verify/${encodeURIComponent(reference)}`);
     const paid = data.status === "success";
-    const meta = data.metadata ?? {};
+    const meta = paystackMetadataObject(data.metadata);
 
     return {
       paid,
@@ -131,7 +145,7 @@ export async function verifyPaystackTransaction(reference: string): Promise<Veri
       provider: "paystack",
       currency: (data.currency?.toUpperCase() ?? "NGN") as "GBP" | "NGN",
       amountSmallestUnit: data.amount,
-      metadata: normalizePaystackMetadata(meta as Record<string, string>),
+      metadata: normalizePaystackMetadata(meta),
     };
   } catch {
     return null;

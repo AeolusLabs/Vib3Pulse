@@ -222,30 +222,56 @@ try {
     release3();
   }
 
-  // ---- capacity: ticketCapacity counts guests only (host and co-host take no seat)
+  // ---- capacity (fix round 4F, I2): a ticket holder is NEVER refused ROOM_FULL. Paid tickets never exceed the ticket
+  // capacity (the issue path counts them under the room row lock), so holders alone cannot overfill the room; people
+  // inside WITHOUT a ticket (a demoted co-host, a guest whose refund is still being enforced) must not cost a holder a seat.
   const buyers = (await q(
     `insert into users (email, username, user_type, password_hash, is_verified, onboarding_complete, date_of_birth, created_at, age_verified_at)
      select 'tw_b' || g || '_' || $1 || '@t.dev', 'tw_b' || g || '_' || $1, 'social', $2, true, true, $3, now() - interval '60 days', now()
-     from generate_series(1, 20) g returning id`, [stamp, hash, yearsAgo(30)])).map((x: any) => x.id as string);
+     from generate_series(1, 19) g returning id`, [stamp, hash, yearsAgo(30)])).map((x: any) => x.id as string);
   created.push(...buyers);
-  for (const b of buyers) await insertTicket(R, b);
+  for (const b of buyers) await insertTicket(R, b); // HOLD + 19 buyers = 20 paid = the ticket capacity
   const guestsIn = () => roomHub.members(R).filter((m) => m.role === "guest").length;
   const fill: Client[] = [];
   let admittedAll = true;
-  for (const b of buyers.slice(0, 19)) { // HOLD is the 1st guest: 19 more make 20
+  for (const b of buyers.slice(0, 18)) { // HOLD is the 1st guest: 18 more make 19
     const c = await connect(b); fill.push(c);
     const s = await join(c, R);
     if (s?.type !== "room:state") { admittedAll = false; console.log(`  not admitted: ${JSON.stringify(s)}`); }
   }
-  check("19 more holders admitted: 20 guests = ticket capacity", admittedAll && guestsIn() === 20, `${guestsIn()} guests`);
-  check("host and co-host are in the room on top of the 20 seats", roomHub.count(R) === 22 && !!roomHub.get(R, H) && !!roomHub.get(R, CO), `${roomHub.count(R)}`);
-  const last = await connect(buyers[19]);
-  const full = await join(last, R);
-  check("the 21st holder is refused ROOM_FULL (sold out at the door)", bareRefusal(full, "ROOM_FULL"), JSON.stringify(full));
+  check("18 more holders admitted: 19 guests", admittedAll && guestsIn() === 19, `${guestsIn()} guests`);
+  check("host and co-host are in the room on top of the guests", roomHub.count(R) === 21 && !!roomHub.get(R, H) && !!roomHub.get(R, CO), `${roomHub.count(R)}`);
+
+  // A co-host (no ticket) made a guest is sent out at once: the role route calls enforceTicketFor.
+  co.drain(); h.drain();
+  const dem = await rest("PUT", `/api/rooms/${R}/members/${CO}/role`, H, { role: "guest" });
+  check("host demotes the co-host to guest: 200", dem.status === 200 && dem.json?.role === "guest", JSON.stringify(dem.json));
+  check("the demoted co-host without a ticket is told TICKET_REQUIRED (bare code)", bareRefusal(await co.waitFor((m) => m.type === "room:error"), "TICKET_REQUIRED"));
+  check("the demoted co-host is out of the hub (never a ticketless guest filling a paid seat)", !roomHub.get(R, CO) && guestsIn() === 19, `${guestsIn()} guests`);
+  check("the room sees room:left for the demoted co-host", !!(await h.waitFor((m) => m.type === "room:left" && m.userId === CO)));
+  check("the demoted co-host's rejoin is refused TICKET_REQUIRED", bareRefusal(await join(co, R), "TICKET_REQUIRED"));
+
+  // A co-host who also holds a paid ticket stays in when made a guest.
+  const CO2 = await mk("cohost_holder");
+  await q(`insert into room_members (room_id, user_id, role) values ($1,$2,'cohost') on conflict (room_id, user_id) do update set role = 'cohost'`, [R, CO2]);
+  const co2t = await insertTicket(R, CO2); // 21 paid for a moment (only a direct write can do this); refunded below
+  const co2 = await connect(CO2);
+  check("setup: co-host with a ticket admitted as co-host", (await join(co2, R))?.type === "room:state" && roomHub.get(R, CO2)?.role === "cohost");
+  const dem2 = await rest("PUT", `/api/rooms/${R}/members/${CO2}/role`, H, { role: "guest" });
+  check("a demoted co-host who holds a ticket stays in, now as a guest", dem2.status === 200 && roomHub.get(R, CO2)?.role === "guest", JSON.stringify(dem2.json));
+  // Their ticket is refunded but enforcement has not run yet: a ticketless guest is inside and the room is at 20 guests.
+  await refund(co2t);
+  check("setup: 20 guests inside, one of them without a ticket", guestsIn() === 20 && !!roomHub.get(R, CO2), `${guestsIn()} guests`);
+  const lastHolder = await connect(buyers[18]);
+  const lh = await join(lastHolder, R);
+  check("at 20 guests the 20th ticket holder still gets in: a holder is never refused ROOM_FULL", lh?.type === "room:state" && guestsIn() === 21, JSON.stringify(lh));
+  check("enforceTicketFor then removes the ticketless guest", (await enforceTicketFor(R, CO2)) === true && !roomHub.get(R, CO2) && guestsIn() === 20, `${guestsIn()} guests`);
+  // A non-holder at a full room hears TICKET_REQUIRED (the ticket check comes first), never ROOM_FULL.
+  check("a non-holder at a full room: TICKET_REQUIRED, not ROOM_FULL", bareRefusal(await join(non, R), "TICKET_REQUIRED"));
   fill[0].send({ type: "room:leave" });
   check("a guest leaves", await until(() => guestsIn() === 19));
-  const after = await join(last, R);
-  check("then the waiting holder gets in", after?.type === "room:state" && guestsIn() === 20, JSON.stringify(after));
+  const back = await join(fill[0], R);
+  check("and comes back in with their ticket", back?.type === "room:state" && guestsIn() === 20, JSON.stringify(back));
 
   // ---- minors' gate still first: an adult without an invite gets the minors' warning, never TICKET_REQUIRED
   const MH = await mk("minors_host", yearsAgo(15), false), MA = await mk("minors_adult"), MT = await mk("minors_teen", yearsAgo(15), true);
@@ -290,6 +316,8 @@ try {
   for (const c of conns) try { c.close(); } catch { /* ignore */ }
   try {
     if (created.length) {
+      // Tickets and payouts are money records (RESTRICT / no cascade): a scratch database is cleared explicitly first.
+      await q(`delete from room_tickets where user_id = any($1::varchar[]) or room_id in (select id from rooms where host_id = any($1::varchar[]))`, [created]);
       await q(`delete from room_payouts where host_id = any($1::varchar[])`, [created]);
       await q(`delete from users where id = any($1::varchar[])`, [created]);
     }

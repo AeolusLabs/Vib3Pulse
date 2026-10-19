@@ -4,6 +4,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db, storage } from "../storage";
 import { rooms, roomTickets, type Room } from "@shared/schema";
+import { isIdVerifiedAdult } from "@shared/ageVerification";
 import { roomPatchSet, type RoomPatch } from "./roomStorage";
 
 /** True when this person holds a PAID ticket for this room (a refunded ticket is not a ticket). */
@@ -29,7 +30,18 @@ export async function hasVerifiedPayoutAccount(userId: string): Promise<boolean>
   return !!acct && acct.payoutsEnabled === true && !!acct.paystackSubaccountCode;
 }
 
-export type TicketGuardCode = "TICKETS_SOLD" | "CAPACITY_BELOW_SOLD";
+/**
+ * May this host still sell tickets right now? Re-checked at checkout and when a charge is turned into a ticket: the host
+ * is an ID-verified adult (account not deleted) AND still has a verified payout account. Either one gone pauses sales.
+ * Not the paidRooms switch (checkout checks that first; a charge already taken is finished whatever it says).
+ */
+export async function hostCanSellNow(hostId: string): Promise<boolean> {
+  const host = await storage.getUser(hostId);
+  if (!host || host.deletedAt || !isIdVerifiedAdult(host)) return false;
+  return hasVerifiedPayoutAccount(hostId);
+}
+
+export type TicketGuardCode = "TICKETS_SOLD" | "CAPACITY_BELOW_SOLD" | "NOT_SCHEDULED";
 /** Thrown (inside the transaction, so nothing is written) when a ticket-guarded room change is refused. */
 export class TicketGuardError extends Error {
   constructor(public code: TicketGuardCode, public sold: number) { super(code); }
@@ -39,13 +51,20 @@ export class TicketGuardError extends Error {
  * Applies a room patch that touches the ticket settings, in one transaction that first locks the room row:
  *  - `lockedBySale`: the change is not allowed once any ticket is sold (price, free/paid switch, age limit of a ticketed
  *    room, taking back the refund promise);
- *  - `capacity`: the new ticket capacity, never below the tickets already sold.
+ *  - `capacity`: the new ticket capacity, never below the tickets already sold;
+ *  - `requireScheduled`: a free room becoming ticketed: only while it has not started (a live room would have people
+ *    inside without tickets taking the paid seats).
  * The paid-ticket count is read under the room row lock. A ticket issuer that locks the same row (SELECT ... FOR UPDATE or
  * an UPDATE of the rooms row) in the transaction that inserts the ticket is serialised with this write.
  */
-export async function updateRoomWithTicketGuard(roomId: string, patch: RoomPatch, guard: { lockedBySale: boolean; capacity: number | null }): Promise<Room> {
+export async function updateRoomWithTicketGuard(
+  roomId: string, patch: RoomPatch, guard: { lockedBySale: boolean; capacity: number | null; requireScheduled?: boolean },
+): Promise<Room> {
   return db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT id FROM rooms WHERE id = ${roomId} FOR UPDATE`);
+    // The status is read under the same lock: starting a room is a conditional UPDATE of this row, so it waits for us
+    // (or we see it live) and a free room can never turn ticketed after it went live.
+    const [locked] = await tx.select({ status: rooms.status }).from(rooms).where(eq(rooms.id, roomId)).for("update");
+    if (guard.requireScheduled && locked?.status !== "scheduled") throw new TicketGuardError("NOT_SCHEDULED", 0);
     const [c] = await tx.select({ n: sql<number>`count(*)::int` }).from(roomTickets)
       .where(and(eq(roomTickets.roomId, roomId), eq(roomTickets.status, "paid")));
     const sold = Number(c?.n ?? 0);

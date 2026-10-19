@@ -16,7 +16,7 @@ if (!/test/i.test(dbName)) {
 process.env.DISABLE_GEOCODING = "1";
 process.env.RESEND_API_KEY ||= "re_dummy_not_real";
 
-const { storage } = await import("../server/storage");
+const { storage, RoomMoneyRecordsError } = await import("../server/storage");
 const { redactSensitiveFields } = await import("../server/security");
 const { userToSessionUser } = await import("../server/auth");
 const { registerRoomRoutes } = await import("../server/rooms/roomRoutes");
@@ -155,10 +155,12 @@ try {
 
   // ---- GET: the ticket block per viewer
   let g = await rest("GET", `/api/rooms/${R}`, H);
-  check("host: ticket { required:false, priceKobo, held:false, soldOut:false }", g.status === 200 && JSON.stringify(g.json.ticket) === JSON.stringify({ required: false, priceKobo: PRICE, held: false, soldOut: false }), JSON.stringify(g.json?.ticket));
+  check("host: ticket { required:false, priceKobo, held:false, soldOut:false, refundBeforeStart, capacity, left }", g.status === 200 && JSON.stringify(g.json.ticket) === JSON.stringify({ required: false, priceKobo: PRICE, held: false, soldOut: false, refundBeforeStart: true, capacity: 20, left: 20 }), JSON.stringify(g.json?.ticket));
+  check("host: ticketSales says sales are on", JSON.stringify(g.json?.ticketSales) === JSON.stringify({ paused: false, code: null }), JSON.stringify(g.json?.ticketSales));
   check("host: the room object carries the ticket settings (hostRoom)", g.json?.room?.ticketPriceKobo === PRICE && g.json.room.ticketCapacity === 20, JSON.stringify(g.json?.room));
   g = await rest("GET", `/api/rooms/${R}`, E);
-  check("eligible adult: ticket { required:true, priceKobo, held:false, soldOut:false }", g.status === 200 && JSON.stringify(g.json.ticket) === JSON.stringify({ required: true, priceKobo: PRICE, held: false, soldOut: false }), JSON.stringify(g.json?.ticket));
+  check("eligible adult: ticket { required:true, priceKobo, held:false, soldOut:false, refundBeforeStart:true, capacity:20, left:20 }", g.status === 200 && JSON.stringify(g.json.ticket) === JSON.stringify({ required: true, priceKobo: PRICE, held: false, soldOut: false, refundBeforeStart: true, capacity: 20, left: 20 }), JSON.stringify(g.json?.ticket));
+  check("eligible adult: never the host's ticketSales", !("ticketSales" in g.json), JSON.stringify(g.json));
   check("eligible adult: the room object itself carries no ticket settings", !("ticketPriceKobo" in g.json.room) && !("ticketCapacity" in g.json.room) && !("refundBeforeStart" in g.json.room), JSON.stringify(g.json.room));
   g = await rest("GET", `/api/rooms/${R}`, U);
   check("unverified adult: 200, no ticket block, no price anywhere in the body", g.status === 200 && !("ticket" in g.json) && noPriceIn(g.text, PRICE), g.text.slice(0, 400));
@@ -219,6 +221,7 @@ try {
   check("helpers: E holds a paid ticket, count 1", (await hasPaidTicket(R, E)) && (await countPaidTickets(R)) === 1);
   g = await rest("GET", `/api/rooms/${R}`, E);
   check("eligible adult with a ticket: held true, still required (they need it to enter)", g.json?.ticket?.held === true && g.json.ticket.required === true, JSON.stringify(g.json?.ticket));
+  check("left counts paid tickets: 1 sold of 20 -> left 19, capacity 20", g.json?.ticket?.left === 19 && g.json.ticket.capacity === 20, JSON.stringify(g.json?.ticket));
   check("DB: a second PAID ticket for the same room and person is refused (unique)", (await pgCode(() => insertTicket(R, E, PRICE))) === "23505");
   const dupRef = (await q(`select provider_ref from room_tickets where id = $1`, [t1]))[0].provider_ref;
   check("DB: a duplicate provider_ref is refused (unique)", (await pgCode(() => q(
@@ -291,6 +294,70 @@ try {
   r = await rest("PATCH", `/api/rooms/${HUroom}`, HU, { ticketPriceKobo: 200000, ticketCapacity: 40 });
   check("PATCH free -> ticketed by an unverified host: 403 HOST_NOT_VERIFIED", r.status === 403 && r.json?.code === "HOST_NOT_VERIFIED", JSON.stringify(r.json));
 
+  // ---- fix round 4F
+  // M8: a viewer banned from the room gets no ticket block (no price, no counts), even as an eligible adult.
+  const BAN = await mk("banned", yearsAgo(30), true);
+  await q(`insert into room_members (room_id, user_id, role, banned) values ($1,$2,'guest',true) on conflict (room_id, user_id) do update set banned = true`, [R, BAN]);
+  g = await rest("GET", `/api/rooms/${R}`, BAN);
+  check("banned eligible adult: 200, no ticket block and no price anywhere", g.status === 200 && !("ticket" in g.json) && noPriceIn(g.text, PRICE) && g.json.canJoin?.code === "BANNED", g.text.slice(0, 400));
+
+  // Contract: the counts and the refund promise ride only on a ticketed room's block, only for eligible viewers.
+  g = await rest("GET", `/api/rooms/${R}`, U);
+  check("unverified adult: no left / capacity / refundBeforeStart anywhere", !("ticket" in g.json) && !/"left"|"capacity":20|refundBeforeStart/.test(g.text), g.text.slice(0, 400));
+
+  // I1: a free room cannot turn ticketed once it is live (people inside hold no ticket).
+  const LF = (await rest("POST", "/api/rooms", H, { title: "tk live free", kind: "party", visibility: "public", ageLimit: "18+" })).json?.room?.id as string;
+  await q(`update rooms set status = 'live', started_at = now() where id = $1`, [LF]);
+  r = await rest("PATCH", `/api/rooms/${LF}`, H, { ticketPriceKobo: 200000, ticketCapacity: 40 });
+  check("PATCH free -> ticketed while LIVE: 409 NOT_SCHEDULED with a plain message", r.status === 409 && r.json?.code === "NOT_SCHEDULED" && typeof r.json?.message === "string" && !/—/.test(r.json.message), JSON.stringify(r.json));
+  const lfRow = (await q(`select ticket_price_kobo p, ticket_capacity c from rooms where id = $1`, [LF]))[0];
+  check("the live room stays free in the DB", lfRow?.p === null && lfRow?.c === null, JSON.stringify(lfRow));
+  r = await rest("PATCH", `/api/rooms/${LF}`, H, { title: "tk live free renamed" });
+  check("other edits of the live free room still work (200)", r.status === 200, JSON.stringify(r.json));
+  await q(`update rooms set status = 'ended', ended_at = now() where id = $1`, [LF]);
+  r = await rest("PATCH", `/api/rooms/${LF}`, H, { ticketPriceKobo: 200000, ticketCapacity: 40 });
+  check("PATCH free -> ticketed on an ended room: 409 (ROOM_ENDED)", r.status === 409 && r.json?.code === "ROOM_ENDED", JSON.stringify(r.json));
+  // An already-ticketed live room keeps its existing guards (capacity can still go up while live).
+  await q(`update rooms set status = 'live', started_at = now() where id = $1`, [RC]);
+  r = await rest("PATCH", `/api/rooms/${RC}`, H, { ticketCapacity: 149 });
+  check("a ticketed LIVE room may still raise its ticket capacity (200)", r.status === 200 && r.json.room.ticketCapacity === 149, JSON.stringify(r.json));
+  await q(`update rooms set status = 'scheduled', started_at = null where id = $1`, [RC]);
+
+  // M1 / M7: the host is told when sales are paused, buyers never see why.
+  await q(`update organizer_payment_accounts set payouts_enabled = false where user_id = $1`, [H]);
+  g = await rest("GET", `/api/rooms/${R}`, H);
+  check("host lost the payout account: ticketSales { paused:true, code:HOST_CANNOT_SELL }", JSON.stringify(g.json?.ticketSales) === JSON.stringify({ paused: true, code: "HOST_CANNOT_SELL" }), JSON.stringify(g.json?.ticketSales));
+  await q(`update organizer_payment_accounts set payouts_enabled = true where user_id = $1`, [H]);
+  const PI = (await rest("POST", "/api/rooms", H, { title: "tk bad price", ...paid })).json?.room?.id as string;
+  await q(`update rooms set ticket_price_kobo = 50000 where id = $1`, [PI]); // below the limit: only a direct write can do this
+  g = await rest("GET", `/api/rooms/${PI}`, H);
+  check("stored price below the limit: host sees ticketSales PRICE_INVALID", JSON.stringify(g.json?.ticketSales) === JSON.stringify({ paused: true, code: "PRICE_INVALID" }), JSON.stringify(g.json?.ticketSales));
+  g = await rest("GET", `/api/rooms/${PI}`, E);
+  check("stored price below the limit: the door still requires a ticket (fail closed), no ticketSales for buyers", g.json?.ticket?.required === true && !("ticketSales" in g.json), JSON.stringify(g.json));
+
+  // I5: money records are never deleted with an account or a room.
+  const delErr = async (id: string) => { try { await storage.deleteUser(id); return null; } catch (e) { return e; } };
+  let de = await delErr(E);
+  check("deleteUser of a buyer with a paid ticket: RoomMoneyRecordsError (owed > 0), account kept", de instanceof RoomMoneyRecordsError && (de as any).counts.owed >= 1 && !!(await storage.getUser(E)), String(de));
+  de = await delErr(H);
+  check("deleteUser of a host whose room sold tickets: refused, account kept", de instanceof RoomMoneyRecordsError && (de as any).counts.hostedTickets >= 1 && !!(await storage.getUser(H)), String(de));
+  const SETTLED = await mk("settled", yearsAgo(30), true);
+  await insertTicket(R21, SETTLED, PRICE, "refunded"); // refunded and confirmed (refunded_at set)
+  de = await delErr(SETTLED);
+  check("deleteUser of a buyer with only a settled refund: still refused (records kept), owed 0", de instanceof RoomMoneyRecordsError && (de as any).counts.owed === 0 && (de as any).counts.tickets === 1, String(de));
+  const OWED = await mk("owed", yearsAgo(30), true);
+  await q(`insert into room_tickets (room_id, user_id, amount_kobo, vat_kobo, fee_kobo, reserve_kobo, platform_kobo, host_kobo, provider, provider_ref, status, refund_reason)
+           values ($1,$2,$3,0,0,0,0,0,'paystack',$4,'refunded','auto_sold_out')`, [R21, OWED, PRICE, `tk-owed-${stamp}`]);
+  de = await delErr(OWED);
+  check("deleteUser of a buyer owed a refund (refunded, refunded_at null): refused, owed 1", de instanceof RoomMoneyRecordsError && (de as any).counts.owed === 1, String(de));
+  check("the database itself refuses: raw DELETE of a ticket holder is a foreign key violation (RESTRICT)", (await pgCode(() => q(`delete from users where id = $1`, [E]))) === "23503");
+  check("the database itself refuses: raw DELETE of a room with tickets is a foreign key violation (RESTRICT)", (await pgCode(() => q(`delete from rooms where id = $1`, [R]))) === "23503");
+  check("tickets survived both attempts", (await countPaidTickets(R)) >= 1);
+  const NOBODY = await mk("nothing", yearsAgo(30), true);
+  check("deleteUser of an account with no room money records still works", (await delErr(NOBODY)) === null && !(await storage.getUser(NOBODY)));
+  const fk = await q(`select conname, confdeltype from pg_constraint where conrelid = 'room_tickets'::regclass and contype = 'f'`);
+  check("room_tickets foreign keys are RESTRICT ('r'), never CASCADE ('c')", fk.length === 2 && fk.every((x: any) => x.confdeltype === "r"), JSON.stringify(fk));
+
   // ---- the ensureSchema SQL applies cleanly on top of the drizzle-pushed schema, twice, with no duplicate constraints
   check("ensureSchema SQL applies on the pushed schema", (await pgCode(() => pool.query(ROOM_TICKETS_SCHEMA_SQL))) === "ok");
   check("ensureSchema SQL is idempotent (second run)", (await pgCode(() => pool.query(ROOM_TICKETS_SCHEMA_SQL))) === "ok");
@@ -306,8 +373,10 @@ try {
   roomFeatures.paidRooms = false;
   try {
     if (created.length) {
+      // Tickets and payouts are money records (RESTRICT / no cascade): a scratch database is cleared explicitly first.
+      await q(`delete from room_tickets where user_id = any($1::varchar[]) or room_id in (select id from rooms where host_id = any($1::varchar[]))`, [created]);
       await q(`delete from room_payouts where host_id = any($1::varchar[])`, [created]);
-      await q(`delete from users where id = any($1::varchar[])`, [created]); // rooms, tickets, members, payout accounts cascade
+      await q(`delete from users where id = any($1::varchar[])`, [created]); // rooms, members, payout accounts cascade
     }
   } catch (e: any) { console.log(`(cleanup failed: ${e.message})`); }
   server.close();

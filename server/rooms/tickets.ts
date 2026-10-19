@@ -17,7 +17,7 @@
 //   to finish.
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db, storage } from "../storage";
-import { rooms, roomTickets, type RoomTicket } from "@shared/schema";
+import { paymentIssues, rooms, roomTickets, type RoomTicket } from "@shared/schema";
 import { ticketBreakdown } from "@shared/money";
 import { checkPurchase, refusalOf, ticketCode, type RoomTicketRefusal, type RoomTicketView } from "@shared/roomTickets";
 import { refundPayment, type VerifiedSession } from "../payments/index";
@@ -25,6 +25,25 @@ import { recordTransaction } from "../payments/ledger";
 import { isBlockedEitherWay } from "../utils/blocks";
 import * as rs from "./roomStorage";
 import { ticketReferenceBelongsTo, ticketReferenceSecret } from "./ticketReference";
+import { hostCanSellNow } from "./ticketStorage";
+import { createKeyedQueue } from "./keyedQueue";
+
+export { QueueFullError as IssueQueueFullError } from "./keyedQueue";
+
+/**
+ * Issuing is serialised per room IN THIS PROCESS before a pool connection is taken (see keyedQueue.ts): at most one
+ * issue transaction per room holds a connection here, the others wait in memory. Beyond ISSUE_QUEUE_MAX waiting for one
+ * room, issueRoomTicket throws IssueQueueFullError at once: the webhook answers 503 (Paystack retries) and the client's
+ * verify answers 503 with Retry-After. Correctness does not depend on this queue: the room row lock still serialises
+ * issuing across server instances, and everything stays idempotent on the reference.
+ */
+export const ISSUE_QUEUE_MAX = 10;
+const issueQueue = createKeyedQueue({ maxPending: ISSUE_QUEUE_MAX });
+
+/** Thrown by issueRoomTicket for a verified amount that is not a positive integer: no row can record it (CHECK amount > 0). */
+export class UnrecordableChargeError extends Error {
+  constructor(public reference: string) { super(`room ticket charge ${reference} has no positive integer amount`); this.name = "UnrecordableChargeError"; }
+}
 
 export { ticketCode } from "@shared/roomTickets";
 export type { RoomTicketView } from "@shared/roomTickets";
@@ -47,15 +66,23 @@ export type IssueRoomTicketResult =
 
 // Stored in room_tickets.refund_reason for charges we refused. Distinct from lane S3's refund reasons
 // ("buyer" | "host_cancelled" | "never_started" | "oversold"), which belong to real tickets refunded later.
-const AUTO_REASON = {
+// HOST_INELIGIBLE: the host lost ID verification or their payout account while the buyer was paying (answered to the
+// buyer as INELIGIBLE, the contract code; kept apart in the row so finance can tell why).
+type AutoReason = RoomTicketRefusal | "DUPLICATE" | "HOST_INELIGIBLE";
+const AUTO_REASON: Record<AutoReason, string> = {
   SOLD_OUT: "auto_sold_out",
   AMOUNT_MISMATCH: "auto_amount_mismatch",
   INELIGIBLE: "auto_ineligible",
   DUPLICATE: "auto_duplicate",
-} as const;
-const FROM_AUTO = new Map<string, RoomTicketRefusal | "DUPLICATE">(
-  (Object.entries(AUTO_REASON) as Array<[RoomTicketRefusal | "DUPLICATE", string]>).map(([k, v]) => [v, k]),
-);
+  HOST_INELIGIBLE: "auto_host_ineligible",
+};
+const FROM_AUTO = new Map<string, RoomTicketRefusal | "DUPLICATE">([
+  [AUTO_REASON.SOLD_OUT, "SOLD_OUT"],
+  [AUTO_REASON.AMOUNT_MISMATCH, "AMOUNT_MISMATCH"],
+  [AUTO_REASON.INELIGIBLE, "INELIGIBLE"],
+  [AUTO_REASON.DUPLICATE, "DUPLICATE"],
+  [AUTO_REASON.HOST_INELIGIBLE, "INELIGIBLE"],
+]);
 
 /** For the buyer only. Never the payment reference or the split. */
 export function toTicketView(t: RoomTicket): RoomTicketView {
@@ -145,7 +172,7 @@ async function refundRefusedCharge(row: RoomTicket, reference: string, outcome: 
 type Decision =
   | { kind: "existing"; row: RoomTicket }
   | { kind: "issued"; ticket: RoomTicket }
-  | { kind: "refused"; row: RoomTicket; reason: RoomTicketRefusal | "DUPLICATE"; heldTicket: RoomTicket | null }
+  | { kind: "refused"; row: RoomTicket; reason: AutoReason; heldTicket: RoomTicket | null }
   | { kind: "no_row" }; // the room or the buyer's account no longer exists: nothing to attach a row to
 
 /**
@@ -162,13 +189,20 @@ export async function issueRoomTicket(opts: IssueRoomTicketOpts): Promise<IssueR
   // Replays (the usual second caller) answer from the stored row, without touching the room lock.
   const prior = await findTicketByReference(reference);
   if (prior) return outcomeOfRow(prior, roomId, userId);
+  // No row can hold a charge of 0 or a fraction of a kobo (CHECK amount_kobo > 0): inserting one would fail on every
+  // retry for ever. The caller (handleRoomTicketCharge) records a payment issue for a person instead.
+  if (!Number.isSafeInteger(opts.verifiedAmountKobo) || opts.verifiedAmountKobo <= 0) throw new UnrecordableChargeError(reference);
 
   // Inputs that do not race with other buyers: read before taking the lock, to keep the locked section short.
   const bound = ticketReferenceBelongsTo(reference, roomId, userId, ticketReferenceSecret());
   const [buyer, roomPeek, member] = await Promise.all([storage.getUser(userId), rs.getRoom(roomId), rs.getMember(roomId, userId)]);
-  const blocked = roomPeek ? await isBlockedEitherWay(userId, roomPeek.hostId) : false;
+  // The host may have lost ID verification or their payout account since checkout: then the charge is refunded.
+  const [blocked, hostCanSell]: [boolean, boolean] = roomPeek
+    ? await Promise.all([isBlockedEitherWay(userId, roomPeek.hostId), hostCanSellNow(roomPeek.hostId)])
+    : [false, false];
 
-  const decision = await db.transaction(async (tx): Promise<Decision> => {
+  // One issue transaction per room at a time in this process, queued in memory BEFORE a connection is taken.
+  const decision = await issueQueue.run(roomId, () => db.transaction(async (tx): Promise<Decision> => {
     // The room row lock: every issue for this room waits here, one at a time.
     const [room] = await tx.select().from(rooms).where(eq(rooms.id, roomId)).for("update");
     const [again] = await tx.select().from(roomTickets).where(eq(roomTickets.providerRef, reference)).limit(1);
@@ -183,7 +217,7 @@ export async function issueRoomTicket(opts: IssueRoomTicketOpts): Promise<IssueR
     const mine = Number(c?.mine ?? 0);
 
     const check = checkPurchase({
-      buyerId: userId, buyer, room, bannedOrBlocked: !!member?.banned || blocked,
+      buyerId: userId, buyer, room, bannedOrBlocked: !!member?.banned || blocked, hostCanSell,
       paidCount, buyerHasPaid: mine > 0,
       payment: { bound, amountKobo: opts.verifiedAmountKobo, currency: opts.currency ?? "NGN" },
     });
@@ -214,21 +248,23 @@ export async function issueRoomTicket(opts: IssueRoomTicketOpts): Promise<IssueR
       return { kind: "issued", ticket };
     }
 
-    const reason: RoomTicketRefusal | "DUPLICATE" = check.code === "ALREADY_TICKETED" ? "DUPLICATE" : refusalOf(check.code);
+    const reason: AutoReason = check.code === "ALREADY_TICKETED" ? "DUPLICATE"
+      : check.code === "SALES_PAUSED" ? "HOST_INELIGIBLE"
+      : refusalOf(check.code);
     const heldTicket = reason === "DUPLICATE"
       ? ((await tx.select().from(roomTickets)
           .where(and(eq(roomTickets.roomId, roomId), eq(roomTickets.userId, userId), eq(roomTickets.status, "paid"))).limit(1))[0] ?? null)
       : null;
-    // The record of a refused charge: what the provider charged, no split, never counted as a seat or a payout.
-    const charged = Number.isSafeInteger(opts.verifiedAmountKobo) && opts.verifiedAmountKobo > 0 ? opts.verifiedAmountKobo : 0;
+    // The record of a refused charge: what the provider charged (a positive integer, checked above), no split, never
+    // counted as a seat or a payout.
     const [row] = await tx.insert(roomTickets).values({
       roomId, userId,
-      amountKobo: charged, vatKobo: 0, feeKobo: 0, reserveKobo: 0, platformKobo: 0, hostKobo: 0,
+      amountKobo: opts.verifiedAmountKobo, vatKobo: 0, feeKobo: 0, reserveKobo: 0, platformKobo: 0, hostKobo: 0,
       provider: "paystack", providerRef: reference, status: "refunded", refundReason: AUTO_REASON[reason],
     }).onConflictDoNothing().returning();
     if (!row) throw new Error("refused-charge insert conflicted under the room lock");
     return { kind: "refused", row, reason, heldTicket };
-  });
+  }));
 
   switch (decision.kind) {
     case "existing":
@@ -254,24 +290,60 @@ export async function issueRoomTicket(opts: IssueRoomTicketOpts): Promise<IssueR
       if (decision.reason === "DUPLICATE") {
         return decision.heldTicket ? { ticket: decision.heldTicket, duplicateRefunded: true } : { refunded: true, reason: "INELIGIBLE" };
       }
-      return { refunded: true, reason: decision.reason };
+      return { refunded: true, reason: decision.reason === "HOST_INELIGIBLE" ? "INELIGIBLE" : decision.reason };
     }
   }
 }
 
 /**
- * A verified Paystack charge for a room ticket, from the webhook or the verify route. Returns null (and does nothing)
- * when the verified transaction is not a paid room charge for exactly this reference.
+ * A paid room charge we cannot turn into a ticket or a refund automatically: one unresolved payment_issues row per
+ * reference (not repeated on retries), for a person to settle in Paystack. Never throws.
+ */
+export async function openRoomChargeIssue(reference: string, why: string): Promise<void> {
+  try {
+    const [open] = await db.select({ id: paymentIssues.id }).from(paymentIssues)
+      .where(and(eq(paymentIssues.providerPaymentId, reference), eq(paymentIssues.reason, "room_charge_unhandled"), isNull(paymentIssues.resolvedAt)))
+      .limit(1);
+    if (open) return;
+    await storage.createPaymentIssue({ providerPaymentId: reference, provider: "paystack", reason: "room_charge_unhandled", errorMessage: why.slice(0, 500) });
+  } catch (e) {
+    console.error(`[rooms:tickets] ref=${reference} could not record an unhandled room charge, needs a person:`, errText(e));
+  }
+}
+
+/**
+ * A verified Paystack charge for a room ticket, from the webhook or the verify route. Returns null when the verified
+ * transaction is not a paid room charge for exactly this reference. A PAID charge that still cannot be handled (no room or
+ * buyer in the verified metadata, another reference, an amount that is not a positive integer) gets a payment issue for a
+ * person, and null: retrying would never change the answer, so the webhook can answer 200.
  */
 export async function handleRoomTicketCharge(reference: string, verified: VerifiedSession): Promise<IssueRoomTicketResult | null> {
   const roomId = verified.metadata.roomId;
   const userId = verified.metadata.userId;
-  if (!verified.paid || verified.provider !== "paystack" || verified.providerPaymentId !== reference || !roomId || !userId) {
-    logOutcome(reference, roomId ?? "?", userId ?? "?", "ignored:not_a_paid_room_charge");
+  if (!verified.paid || verified.provider !== "paystack") {
+    logOutcome(reference, roomId ?? "?", userId ?? "?", "ignored:not_paid");
     return null;
   }
-  return issueRoomTicket({
-    roomId, userId, reference, provider: "paystack",
-    verifiedAmountKobo: verified.amountSmallestUnit, currency: verified.currency,
-  });
+  if (verified.providerPaymentId !== reference || !roomId || !userId) {
+    logOutcome(reference, roomId ?? "?", userId ?? "?", "unhandled:metadata");
+    await openRoomChargeIssue(reference, "Paid room ticket charge without a usable room or buyer in the verified metadata");
+    return null;
+  }
+  if (!Number.isSafeInteger(verified.amountSmallestUnit) || verified.amountSmallestUnit <= 0) {
+    logOutcome(reference, roomId, userId, "unhandled:amount");
+    await openRoomChargeIssue(reference, "Paid room ticket charge whose verified amount is not a positive whole number of kobo");
+    return null;
+  }
+  try {
+    return await issueRoomTicket({
+      roomId, userId, reference, provider: "paystack",
+      verifiedAmountKobo: verified.amountSmallestUnit, currency: verified.currency,
+    });
+  } catch (e) {
+    if (e instanceof UnrecordableChargeError) { // not reachable after the check above; kept so it can never loop
+      await openRoomChargeIssue(reference, "Paid room ticket charge whose verified amount is not a positive whole number of kobo");
+      return null;
+    }
+    throw e;
+  }
 }

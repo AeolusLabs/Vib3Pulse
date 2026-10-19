@@ -187,6 +187,43 @@ export const pool = new Pool({
 pool.on("error", (err) => console.error("[DB] idle client error (pool will reconnect):", err.message));
 export const db = drizzle(pool);
 
+/**
+ * A hard delete was refused because the account carries room ticket money records (as a buyer, as the host of a room
+ * that sold tickets, or a payout). `owed` counts the tickets still paid or refunded but not yet confirmed returned
+ * (status 'refunded' and refunded_at NULL). The message is plain words, safe to show an admin.
+ */
+export class RoomMoneyRecordsError extends Error {
+  readonly code = "ROOM_MONEY_RECORDS";
+  constructor(readonly counts: { owed: number; tickets: number; hostedTickets: number; payouts: number }) {
+    super(counts.owed > 0
+      ? `This account can't be deleted: it has ${counts.owed} room ticket payment(s) that are paid or still being refunded. Suspend the account instead.`
+      : "This account can't be deleted: it has room ticket payment records that must be kept. Suspend the account instead.");
+    this.name = "RoomMoneyRecordsError";
+  }
+}
+
+/** Throws RoomMoneyRecordsError when a hard delete of this user would touch any room ticket or payout row. */
+export async function assertNoRoomMoneyRecords(userId: string): Promise<void> {
+  let row: { owed: number; tickets: number; hosted: number; payouts: number } | undefined;
+  try {
+    const r = await pool.query(
+      `select
+         (select count(*)::int from room_tickets where user_id = $1
+            and (status = 'paid' or (status = 'refunded' and refunded_at is null))) as owed,
+         (select count(*)::int from room_tickets where user_id = $1) as tickets,
+         (select count(*)::int from room_tickets t join rooms r on r.id = t.room_id where r.host_id = $1) as hosted,
+         (select count(*)::int from room_payouts where host_id = $1) as payouts`,
+      [userId],
+    );
+    row = r.rows[0];
+  } catch (e: any) {
+    if (e?.code === "42P01") return; // the paid-rooms tables do not exist yet: nothing to protect
+    throw e;
+  }
+  const counts = { owed: Number(row?.owed ?? 0), tickets: Number(row?.tickets ?? 0), hostedTickets: Number(row?.hosted ?? 0), payouts: Number(row?.payouts ?? 0) };
+  if (counts.owed || counts.tickets || counts.hostedTickets || counts.payouts) throw new RoomMoneyRecordsError(counts);
+}
+
 // Idempotent schema migration — runs at server startup to add new columns safely
 export async function ensureSchema() {
   await pool.query(`
@@ -5157,6 +5194,9 @@ export class DbStorage implements IStorage {
   }
 
   async deleteUser(id: string): Promise<void> {
+    // Paid rooms: room tickets and payouts are money records. Their foreign keys are RESTRICT, so the database would refuse
+    // anyway; this says why, in plain words, before trying (and before a cascade from rooms could get anywhere).
+    await assertNoRoomMoneyRecords(id);
     await db.delete(users).where(eq(users.id, id));
   }
 

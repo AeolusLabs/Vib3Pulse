@@ -20,12 +20,13 @@ import { canHostRoom, canJoinRoom, canSellTickets, isMinorsRoomHost, isTicketedR
 import { isIdVerifiedAdult } from "@shared/ageVerification";
 import * as rs from "./roomStorage";
 import { canViewRoom, hostRoom, hostSummary, mutualFollow, pinnedPlainText, plainText, publicRoom, sha256, viewerRoom, viewRoom } from "./roomAccess";
-import { countPaidTickets, hasPaidTicket, hasVerifiedPayoutAccount, TicketGuardError, updateRoomWithTicketGuard } from "./ticketStorage";
+import { countPaidTickets, hasPaidTicket, hasVerifiedPayoutAccount, hostCanSellNow, TicketGuardError, updateRoomWithTicketGuard } from "./ticketStorage";
+import { isSellablePrice } from "@shared/roomTickets";
 import * as mr from "./minorsRoom";
 import { TokenBucket } from "./rateLimit";
 import { getVoiceService } from "./voice/voiceService";
 import { afterRoleChange, canCameraNow, canPublishNow, shutdownVoice, stopAllLive } from "./stage";
-import { applyMod, endRoom, enforceAgeLimit, expectHost, interactionVerdict, isKicked, notifyScreen, removeFromMinorsRoom, writeRoomSettings } from "./roomSocket";
+import { applyMod, endRoom, enforceAgeLimit, enforceTicketFor, expectHost, interactionVerdict, isKicked, notifyScreen, removeFromMinorsRoom, writeRoomSettings } from "./roomSocket";
 import { roomHub } from "./RoomHub";
 import { roomFeatures } from "./features";
 import { clearReminder, hasReminder, setReminder } from "./reminders";
@@ -68,6 +69,7 @@ const TICKET_SALE_MESSAGES: Record<TicketSaleCode, string> = {
 const TICKET_GUARD_MESSAGES = {
   TICKETS_SOLD: "Tickets have been sold for this room, so this can't be changed now.",
   CAPACITY_BELOW_SOLD: "You can't set the number of tickets below the number already sold.",
+  NOT_SCHEDULED: "You can only start selling tickets before the room starts.",
 } as const;
 
 /**
@@ -77,6 +79,19 @@ const TICKET_GUARD_MESSAGES = {
 async function sellCheck(host: User, room: { ageLimit: string; minorsRoom: boolean }) {
   const hasPayoutAccount = roomFeatures.paidRooms ? await hasVerifiedPayoutAccount(host.id) : false;
   return canSellTickets({ age: ageFromDob(host.dateOfBirth), idVerified: isIdVerifiedAdult(host), hasPayoutAccount }, room, roomFeatures);
+}
+
+/** The ticket block of GET /api/rooms/:id (eligible viewers only). Counts and the refund promise only for a ticketed room. */
+type TicketBlock = {
+  required: boolean; priceKobo: number; held: boolean; soldOut: boolean;
+  refundBeforeStart?: boolean; capacity?: number; left?: number;
+};
+
+/** For the host of a ticketed room only: are sales paused, and why. Never sent to anyone else. */
+async function hostTicketSales(room: Room): Promise<{ paused: boolean; code: "PRICE_INVALID" | "HOST_CANNOT_SELL" | null }> {
+  if (!isSellablePrice(room.ticketPriceKobo)) return { paused: true, code: "PRICE_INVALID" };
+  if (!(await hostCanSellNow(room.hostId))) return { paused: true, code: "HOST_CANNOT_SELL" };
+  return { paused: false, code: null };
 }
 
 async function hostCheck(host: User, input: { visibility: Room["visibility"]; ageLimit: Room["ageLimit"] }) {
@@ -261,18 +276,33 @@ export function registerRoomRoutes(app: Express): void {
       // the minors' gate refused) AND may buy (ticketEligible: ID-verified adult, 18+/21+ room that is not a minors' room,
       // meets its age limit). Teens, unknown age and unverified people never get the key, so they never see a price.
       // required: this viewer needs a ticket to get in (host and co-hosts never do). soldOut: paid tickets reached capacity.
-      let ticket: { required: boolean; priceKobo: number; held: boolean; soldOut: boolean } | null = null;
-      if (viewer && ticketEligible(viewer, room)) {
+      // A viewer banned from the room gets no block at all (no price, no counts): they cannot buy or get in.
+      // For a ticketed room the block also carries refundBeforeStart, capacity (the ticket capacity) and left
+      // (max(0, capacity - paid tickets)); a free 18+/21+ room carries none of them (required false, priceKobo 0).
+      let ticket: TicketBlock | null = null;
+      if (viewer && !member?.banned && ticketEligible(viewer, room)) {
         const ticketed = isTicketedRoom(room);
-        const exempt = self || (!!member && !member.banned && member.role === "cohost");
-        const [held, sold] = ticketed ? await Promise.all([hasPaidTicket(room.id, req.user!.id), countPaidTickets(room.id)]) : ([false, 0] as [boolean, number]);
-        ticket = { required: ticketed && !exempt, priceKobo: room.ticketPriceKobo ?? 0, held, soldOut: ticketed && sold >= roomCapacity(room) };
+        const exempt = self || (!!member && member.role === "cohost");
+        if (ticketed) {
+          const [held, sold] = await Promise.all([hasPaidTicket(room.id, req.user!.id), countPaidTickets(room.id)]);
+          const capacity = roomCapacity(room);
+          ticket = {
+            required: !exempt, priceKobo: room.ticketPriceKobo ?? 0, held, soldOut: sold >= capacity,
+            refundBeforeStart: room.refundBeforeStart !== false, capacity, left: Math.max(0, capacity - sold),
+          };
+        } else {
+          ticket = { required: false, priceKobo: 0, held: false, soldOut: false };
+        }
       }
+      // The host of a ticketed room is told when sales are paused and why (a buyer only ever sees SALES_PAUSED at
+      // checkout): a stored price outside the limits, or the host's ID verification / payout account is gone.
+      const ticketSales = self && isTicketedRoom(room) ? await hostTicketSales(room) : null;
       res.json({
         room: self ? hostRoom(room) : viewerRoom(room), host: host ? hostSummary(host) : null, canJoin, memberCount: roomHub.count(room.id), peek: peekOf(room.id, 8),
         you: self ? { role: "host" } : member && !member.banned ? { role: member.role } : null,
         reminderSet: await hasReminder(room.id, req.user!.id), // this viewer's own flag only
         ...(ticket ? { ticket } : {}),
+        ...(ticketSales ? { ticketSales } : {}),
       });
     } catch (e) {
       console.error("[rooms] get failed:", e);
@@ -386,6 +416,12 @@ export function registerRoomRoutes(app: Express): void {
         const capChange = "ticketCapacity" in b && newCap !== (room.ticketCapacity ?? null);
         const ageChange = "ageLimit" in b && v.value.ageLimit !== room.ageLimit && isTicketedRoom(room);
         const refundOff = "refundBeforeStart" in b && v.value.refundBeforeStart === false && room.refundBeforeStart !== false;
+        // Free -> paid only before the room starts: people already inside a live room hold no ticket and would take the
+        // paid seats. Checked here for a clear answer and again under the room row lock (the start may land meanwhile).
+        const becomingTicketed = newPrice !== null && !isTicketedRoom(room);
+        if (becomingTicketed && room.status !== "scheduled") {
+          return res.status(409).json({ message: TICKET_GUARD_MESSAGES.NOT_SCHEDULED, code: "NOT_SCHEDULED" });
+        }
         if (newPrice !== null && (priceChange || capChange)) {
           const sell = await sellCheck(host, { ageLimit: v.value.ageLimit, minorsRoom: room.minorsRoom });
           if (!sell.ok) return res.status(403).json({ message: TICKET_SALE_MESSAGES[sell.code], code: sell.code });
@@ -394,7 +430,7 @@ export function registerRoomRoutes(app: Express): void {
         if (capChange) patch.ticketCapacity = newCap;
         if ("refundBeforeStart" in b && v.value.refundBeforeStart !== undefined) patch.refundBeforeStart = v.value.refundBeforeStart;
         if (priceChange || capChange || ageChange || refundOff) {
-          ticketGuard = { lockedBySale: priceChange || ageChange || refundOff, capacity: capChange ? newCap : null };
+          ticketGuard = { lockedBySale: priceChange || ageChange || refundOff, capacity: capChange ? newCap : null, requireScheduled: becomingTicketed };
         }
       }
       if ("screenUrl" in b) {
@@ -768,6 +804,12 @@ export function registerRoomRoutes(app: Express): void {
       if (live) live.role = role;
       await afterRoleChange(ctx.room.id, targetId); // a co-host is an implicit speaker, a guest only speaks from the stage: LiveKit follows at once
       roomHub.broadcast(ctx.room.id, { type: "room:mod", action: "role", targetId, role });
+      // Paid rooms: a co-host got in without a ticket. Made a guest, they must hold one like every other guest, or they
+      // are sent out (TICKET_REQUIRED, no price). enforceTicketFor waits for any join of theirs in flight and does nothing
+      // in a free room, for a ticket holder, or for someone not in the room.
+      if (role === "guest") {
+        await enforceTicketFor(ctx.room.id, targetId).catch((e) => console.error("[rooms] ticket check after demotion failed:", e));
+      }
       res.json({ ok: true, role });
     } catch (e) {
       console.error("[rooms] role failed:", e);
