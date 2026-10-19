@@ -6,8 +6,13 @@ import {
   nairaText, payoutReference, payoutReleaseAt, reasonNeedsBuyerWindow, refundAllowedByPayout, refundNotice, sanitizeMoneyError,
   ticketRefundReference, BUYER_REFUND_CUTOFF_MS, MAX_PAYOUT_ATTEMPTS, NEVER_STARTED_GRACE_MS, NO_START_TIME_GRACE_MS, PAYOUT_HOLD_MS,
   REFUND_REASONS,
+  isAdminHold, isAutoRefundReason, payoutBlockReason, payoutGeneration, refundNoticeKey, returnedPaymentNotice,
+  ADMIN_HOLD_NOTE, AUTO_REFUND_JOB_DELAY_MS, BANK_UNRESOLVED_RETRY_MS, PAYOUT_HOLD_SENTINEL_ISO, PAYOUT_HOLD_SENTINEL_MS,
+  REFUND_OVERDUE_MS, REFUND_RETRY_FOR_MS,
 } from "../shared/roomRefunds";
 import { ticketBreakdown } from "../shared/money";
+// Pure helpers of the Paystack layer (nothing here calls fetch).
+import { isPaystackOutage, isTransferNotFoundAnswer, matchSettlementBank, normaliseBankName, refundStateFrom } from "../server/payments/paystack";
 
 let passed = 0, failed = 0;
 const test = (name: string, fn: () => void) => {
@@ -151,6 +156,127 @@ test("payout amount is the sum of stored host shares (ticketBreakdown), never a 
   const hostShares = [b.host, b.host, b.host];
   assert.equal(hostShares.reduce((s, x) => s + x, 0), 3 * b.host);
   assert.equal(b.vat + b.fee + b.reserve + b.platform + b.host, b.price); // nothing lost to rounding
+});
+
+// ---------------------------------------------------------------- fix round 4F (lane FS2)
+
+test("timing constants: overdue alert 24 h, rejection retry cap 24 h, refused charges left to S2 for 10 min, bank retry hourly", () => {
+  assert.equal(REFUND_OVERDUE_MS, 24 * HOUR);
+  assert.equal(REFUND_RETRY_FOR_MS, 24 * HOUR);
+  assert.equal(AUTO_REFUND_JOB_DELAY_MS, 10 * MIN);
+  assert.equal(BANK_UNRESOLVED_RETRY_MS, HOUR);
+});
+
+test("refund notice: 'on its way' while pending, 'refunded' only when processed", () => {
+  const pending = refundNotice(500000, "Friday vibes", "buyer", "pending");
+  assert.equal(pending.title, "Refund on its way");
+  assert.match(pending.message, /^Your refund of ₦5,000 for "Friday vibes" is on its way\. You asked for this refund\./);
+  assert.ok(!/refunded/i.test(pending.message), pending.message);
+  const done = refundNotice(500000, "Friday vibes", "buyer", "processed");
+  assert.equal(done.title, "Ticket refunded");
+  assert.deepEqual(refundNotice(500000, "Friday vibes", "buyer"), done); // default stays "processed" (older callers)
+});
+
+test("returned payment (refused charge): never mentions the host or a cancellation", () => {
+  const p = returnedPaymentNotice(500000, "pending");
+  const d = returnedPaymentNotice(500000, "processed");
+  assert.match(d.message, /^Your payment of ₦5,000 for the ticket was returned\./);
+  assert.match(p.message, /^Your payment of ₦5,000 for the ticket is on its way back to you\./);
+  for (const m of [p.message, d.message, p.title, d.title]) assert.ok(!/host|cancel|card|bank|cash|—/i.test(m), m);
+});
+
+test("notification keys are deterministic per ticket and stage", () => {
+  assert.equal(refundNoticeKey("ABC", "pending"), "ticket-refund-abc:pending");
+  assert.equal(refundNoticeKey("abc", "processed"), "ticket-refund-abc:processed");
+  assert.notEqual(refundNoticeKey("abc", "pending"), refundNoticeKey("abc", "processed"));
+});
+
+test("refused charges are recognised by the auto_ prefix only", () => {
+  for (const r of ["auto_sold_out", "auto_amount_mismatch", "auto_ineligible", "auto_duplicate"]) assert.equal(isAutoRefundReason(r), true, r);
+  for (const r of ["buyer", "host_cancelled", "never_started", "oversold", "", null, undefined, "autox"]) assert.equal(isAutoRefundReason(r as any), false, String(r));
+});
+
+test("payout reference generations: 1 is the plain reference, requeues after a conclusive failure add -r<n>", () => {
+  const id = "6f1c2b4e-0a6b-4c1f-9c2d-1234567890ab";
+  assert.equal(payoutReference(id, 1), `room-payout-${id}`);
+  assert.equal(payoutReference(id, 2), `room-payout-${id}-r2`);
+  assert.equal(payoutGeneration(id, `room-payout-${id}`), 1);
+  assert.equal(payoutGeneration(id, `room-payout-${id}-r2`), 2);
+  assert.equal(payoutGeneration(id, `room-payout-${id}-r1`), null);
+  assert.equal(payoutGeneration(id, `room-payout-${id}-rx`), null);
+  assert.equal(payoutGeneration(id, `room-payout-00000000-0000-0000-0000-000000000000`), null);
+  assert.equal(payoutGeneration(id, null), null);
+  assert.equal(isValidTransferReference(payoutReference(id, 7)), true);
+});
+
+test("admin hold sentinel: 9999-12-31, recognised only at or past it", () => {
+  assert.equal(PAYOUT_HOLD_SENTINEL_ISO, "9999-12-31T00:00:00.000Z");
+  assert.equal(isAdminHold(PAYOUT_HOLD_SENTINEL_MS), true);
+  assert.equal(isAdminHold(PAYOUT_HOLD_SENTINEL_MS - 1), false);
+  assert.equal(isAdminHold(Date.parse("2026-10-26T23:10:00.000Z")), false);
+  assert.equal(isAdminHold(null), false);
+  assert.equal(ADMIN_HOLD_NOTE, "ADMIN_HOLD");
+});
+
+test("payout blocks: minors room, moderation, host review, host not eligible; an adult host of an approved room pays", () => {
+  const ok = { minorsRoom: false, moderationStatus: "approved" as string | null, hostReview: false, hostAge: 30 as number | null, minAge: 18 };
+  assert.equal(payoutBlockReason(ok), null);
+  assert.equal(payoutBlockReason({ ...ok, minorsRoom: true }), "MINORS_ROOM");
+  assert.equal(payoutBlockReason({ ...ok, moderationStatus: "removed" }), "NOT_APPROVED");
+  assert.equal(payoutBlockReason({ ...ok, moderationStatus: "pending" }), "NOT_APPROVED");
+  assert.equal(payoutBlockReason({ ...ok, moderationStatus: null }), null); // the column default is approved
+  assert.equal(payoutBlockReason({ ...ok, hostReview: true }), "HOST_REVIEW");
+  assert.equal(payoutBlockReason({ ...ok, hostAge: 17 }), "HOST_NOT_ELIGIBLE");
+  assert.equal(payoutBlockReason({ ...ok, hostAge: null }), "HOST_NOT_ELIGIBLE");
+  assert.equal(payoutBlockReason({ ...ok, hostAge: 20, minAge: 21 }), "HOST_NOT_ELIGIBLE");
+  assert.equal(payoutBlockReason({ ...ok, minorsRoom: true, moderationStatus: "removed" }), "MINORS_ROOM"); // order
+});
+
+test("Paystack refund states: processed wins, needs-attention next, anything not failed is in progress", () => {
+  assert.equal(refundStateFrom([]), "none");
+  assert.equal(refundStateFrom(["pending"]), "in_progress");
+  assert.equal(refundStateFrom(["processing"]), "in_progress");
+  assert.equal(refundStateFrom(["failed", "pending"]), "in_progress");
+  assert.equal(refundStateFrom(["failed", "processed"]), "done");
+  assert.equal(refundStateFrom(["needs-attention"]), "needs_attention");
+  assert.equal(refundStateFrom(["failed", "failed"]), "failed");
+  assert.equal(refundStateFrom(["something_new"]), "in_progress"); // unknown: exists, never create another
+});
+
+test("transfer not found: only when Paystack says so (404/400 + message); anything else is an outage", () => {
+  assert.equal(isTransferNotFoundAnswer({ httpStatus: 404, message: "Transfer not found" }), true);
+  assert.equal(isTransferNotFoundAnswer({ httpStatus: 400, message: "Transfer not found" }), true);
+  assert.equal(isTransferNotFoundAnswer({ httpStatus: 400, message: "x", code: "transfer_not_found" }), true);
+  assert.equal(isTransferNotFoundAnswer({ httpStatus: 404, message: "Cannot GET /transfer/verify" }), false);
+  assert.equal(isTransferNotFoundAnswer({ httpStatus: 400, message: "Invalid key" }), false);
+  assert.equal(isTransferNotFoundAnswer({ httpStatus: 500, message: "Transfer not found" }), false);
+  assert.equal(isTransferNotFoundAnswer({ httpStatus: 401, message: "Transfer not found" }), false);
+});
+
+test("outage classification: 'Paystack unavailable' is an outage, 'Paystack error' is an answer", () => {
+  assert.equal(isPaystackOutage(new Error("Paystack unavailable: HTTP 502")), true);
+  assert.equal(isPaystackOutage(new Error("Paystack error: Your balance is not enough")), false);
+  assert.equal(isPaystackOutage("Paystack unavailable: network"), true);
+  assert.equal(isPaystackOutage({}), false);
+});
+
+test("settlement bank: by bank id first, then code, then a unique normalised name; ambiguous or unknown => null", () => {
+  const banks = [
+    { id: 1, code: "044", name: "Access Bank" },
+    { id: 2, code: "063", name: "Access Bank (Diamond)" },
+    { id: 9, code: "058", name: "Guaranty Trust Bank" },
+    { id: 21, code: "011", name: "First Bank of Nigeria" },
+    { id: 22, code: "999", name: "First Bank of Nigeria Plc" },
+  ];
+  assert.deepEqual(matchSettlementBank({ bank_id: 9, settlement_bank: "Wrong Name" }, banks), banks[2]);
+  assert.deepEqual(matchSettlementBank({ bank: "9" }, banks), banks[2]);
+  assert.deepEqual(matchSettlementBank({ settlement_bank: "058" }, banks), banks[2]);
+  assert.deepEqual(matchSettlementBank({ settlement_bank: "guaranty trust bank" }, banks), banks[2]);
+  assert.deepEqual(matchSettlementBank({ settlement_bank: "GUARANTY TRUST BANK PLC" }, banks), banks[2]);
+  assert.equal(matchSettlementBank({ settlement_bank: "First Bank of Nigeria" }, banks), null); // two banks normalise alike
+  assert.equal(matchSettlementBank({ settlement_bank: "Unknown Bank" }, banks), null);
+  assert.equal(matchSettlementBank({}, banks), null);
+  assert.equal(normaliseBankName("Stanbic IBTC Bank Plc."), "stanbic ibtc bank");
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -25,22 +25,34 @@ const { registerRoomRoutes } = await import("../server/rooms/roomRoutes");
 const { setPaymentProviderForTests } = await import("../server/payments");
 const refunds = await import("../server/rooms/refunds");
 const { ticketBreakdown } = await import("../shared/money");
+const { pool: appPool } = await import("../server/storage");
 
 // ---------------------------------------------------------------- mock provider
+// A small refund state machine per payment reference. refund() moves a reference to `afterRefund` (default "done": the
+// provider processed it at once); a test can hold it at "in_progress" (pending) and later flip it to "done" / "failed" /
+// "needs_attention" by writing providerHas. refundState() reports providerHas (and counts every lookup).
+type RS = "none" | "in_progress" | "needs_attention" | "done" | "failed";
 const refundCalls: string[] = [];                  // provider refs, one entry per refund the provider received
-const providerHas = new Map<string, string>();     // provider ref -> refund state the provider reports
+const refundAttempts: string[] = [];               // every refund call, accepted or not
+const lookups: string[] = [];                      // every refund lookup
+const notes = new Map<string, string | undefined>(); // provider ref -> the merchant note of the last refund
+const providerHas = new Map<string, RS>();         // provider ref -> refund state the provider reports
+const afterRefund = new Map<string, RS>();         // provider ref -> state right after a refund is accepted
 const refuse = new Set<string>();                  // refs whose refund the provider refuses (e.g. charged back)
 const loseResponse = new Set<string>();            // refs whose refund is accepted but the answer never comes back
 const lookupDown = new Set<string>();              // refs whose lookup fails (outage)
 setPaymentProviderForTests({
   refundState: async (ref) => {
+    lookups.push(ref);
     if (lookupDown.has(ref)) throw new TypeError("fetch failed");
-    return (providerHas.get(ref) as any) ?? "none";
+    return providerHas.get(ref) ?? "none";
   },
-  refund: async (ref) => {
+  refund: async (ref, _provider, opts) => {
+    refundAttempts.push(ref);
     if (refuse.has(ref)) throw new Error("Paystack error: Transaction has a chargeback and cannot be refunded");
     refundCalls.push(ref);
-    providerHas.set(ref, "in_progress");
+    notes.set(ref, opts?.note);
+    providerHas.set(ref, afterRefund.get(ref) ?? "done");
     if (loseResponse.has(ref)) throw new TypeError("fetch failed");
   },
   createTransfer: async () => { throw new Error("no transfers in this suite"); },
@@ -98,10 +110,14 @@ const hash = await bcrypt.hash("Passw0rd!rooms", 4);
 const stamp = Date.now();
 const yearsAgo = (y: number) => { const d = new Date(); d.setUTCFullYear(d.getUTCFullYear() - y); d.setUTCDate(d.getUTCDate() - 3); return d.toISOString().slice(0, 10); };
 let userSeq = 0;
-const mk = async (name: string) => (await q(
-  `insert into users (email, username, user_type, password_hash, is_verified, onboarding_complete, date_of_birth, created_at)
-   values ($1,$2,'social',$3,true,true,$4, now() - interval '60 days') returning id`,
-  [`tr_${name}${stamp}_${++userSeq}@t.dev`, `tr_${name}${stamp}_${userSeq}`, hash, yearsAgo(30)]))[0].id as string;
+const mk = async (name: string) => {
+  const id = (await q(
+    `insert into users (email, username, user_type, password_hash, is_verified, onboarding_complete, date_of_birth, created_at)
+     values ($1,$2,'social',$3,true,true,$4, now() - interval '60 days') returning id`,
+    [`tr_${name}${stamp}_${++userSeq}@t.dev`, `tr_${name}${stamp}_${userSeq}`, hash, yearsAgo(30)]))[0].id as string;
+  madeUsers.push(id);
+  return id;
+};
 
 const PRICE = 500000; // 5,000 naira
 const B = ticketBreakdown(PRICE);
@@ -109,7 +125,7 @@ const B = ticketBreakdown(PRICE);
 async function mkRoom(host: string, o: { minutesAhead?: number | null; status?: string; visibility?: string; refundBeforeStart?: boolean; started?: boolean } = {}) {
   const at = o.minutesAhead === null ? null : new Date(Date.now() + (o.minutesAhead ?? 180) * 60_000).toISOString();
   const status = o.status ?? "scheduled";
-  return (await q(
+  const id = (await q(
     `insert into rooms (host_id, title, kind, visibility, age_limit, status, scheduled_for, started_at, ended_at, ticket_price_kobo, ticket_capacity, refund_before_start)
      values ($1, $2, 'party', $3, '18+', $4, $5::timestamp,
              case when $6 then $7::timestamp else null end,
@@ -118,6 +134,8 @@ async function mkRoom(host: string, o: { minutesAhead?: number | null; status?: 
      returning id`,
     [host, `tr room ${stamp} ${++userSeq}`, o.visibility ?? "public", status, at, o.started === true || status === "live", new Date().toISOString(), PRICE, o.refundBeforeStart ?? true],
   ))[0].id as string;
+  madeRooms.push(id);
+  return id;
 }
 let refSeq = 0;
 async function mkTicket(roomId: string, userId: string) {
@@ -127,11 +145,32 @@ async function mkTicket(roomId: string, userId: string) {
      values ($1,$2,$3,$4,$5,$6,$7,$8,'paystack',$9,'paid') returning id`,
     [roomId, userId, B.price, B.vat, B.fee, B.reserve, B.platform, B.host, ref],
   ))[0].id as string;
+  madeRefs.push(ref);
+  return { id, ref };
+}
+/** A charge lane S2 refused (sold out...): a row born 'refunded' with refund_reason auto_*, split columns 0. */
+async function mkRefused(roomId: string, userId: string, o: { minutesOld?: number; confirmed?: boolean } = {}) {
+  const ref = `tr_ref_${stamp}_${++refSeq}`;
+  const id = (await q(
+    `insert into room_tickets (room_id, user_id, amount_kobo, vat_kobo, fee_kobo, reserve_kobo, platform_kobo, host_kobo, provider, provider_ref,
+                               status, refund_reason, refunded_at, created_at)
+     values ($1,$2,$3,0,0,0,0,0,'paystack',$4,'refunded','auto_sold_out', case when $5 then now() else null end, now() - make_interval(mins => $6::int)) returning id`,
+    [roomId, userId, B.price, ref, o.confirmed === true, o.minutesOld ?? 30],
+  ))[0].id as string;
+  madeRefs.push(ref);
   return { id, ref };
 }
 const ticket = async (id: string) => (await q(`select status, refund_reason, refunded_at from room_tickets where id = $1`, [id]))[0];
 const ledgerRows = async (ticketId: string) => (await q(`select * from payment_transactions where ticket_id = $1 and type = 'room_ticket_refund'`, [ticketId]));
-const refundNotes = async (userId: string, roomId: string) => (await q(`select title, message, link from notifications where user_id = $1 and related_entity_id = $2 and type = 'room_refund'`, [userId, roomId]));
+// related_entity_id is the deterministic key ticket-refund-<id>:<stage> (idempotent notices); the link names the room.
+const refundNotes = async (userId: string, roomId: string) => (await q(
+  `select title, message, link, related_entity_id from notifications where user_id = $1 and link = $2 and type = 'room_refund' order by created_at`,
+  [userId, `/rooms/${roomId}`]));
+const enforced: string[] = [];                      // "roomId:userId" for every enforceTicketFor call after a refund commit
+refunds.refundTestHooks.onEnforce = (roomId, userId) => { enforced.push(`${roomId}:${userId}`); };
+const madeRooms: string[] = [];
+const madeUsers: string[] = [];
+const madeRefs: string[] = [];
 const callsFor = (ref: string) => refundCalls.filter((r) => r === ref).length;
 
 try {
@@ -297,12 +336,198 @@ try {
   check("refund while the payout is held: allowed", (await refunds.refundTicket(h1.id, "oversold")) === "refunded");
   check("...and the held payout drops to the remaining host share", Number((await q(`select amount_kobo from room_payouts where room_id = $1`, [RH]))[0].amount_kobo) === B.host);
   void h2;
+
+  // ================================================================ fix round 4F (lane FS2)
+
+  // ---- every refund carries our deterministic note; the holder is taken out of a live room after each commit (S3-I4)
+  check("every refund is sent with the note ticket-refund-<ticketId>", notes.get(t1.ref) === `ticket-refund-${t1.id}`, String(notes.get(t1.ref)));
+  check("enforceTicketFor ran after the buyer refund, the host cancel and the never-started job",
+    enforced.includes(`${R1}:${U1}`) && enforced.includes(`${RC}:${U1}`) && enforced.includes(`${RN}:${U2}`), JSON.stringify(enforced.slice(0, 30)));
+  check("...and not for a refusal (window closed: nothing committed)", !enforced.includes(`${R2}:${U1}`));
+
+  // ---- accepted is not refunded: pending until the provider says processed (S3-I2)
+  const RPd = await mkRoom(H2, { minutesAhead: 900 });
+  const pd = await mkTicket(RPd, U1);
+  afterRefund.set(pd.ref, "in_progress");
+  const pd1 = await refunds.refundTicketDetailed(pd.id, "host_cancelled");
+  const pdRow = await ticket(pd.id);
+  const pdNotes1 = await refundNotes(U1, RPd);
+  check("accepted is not refunded: settled false, refunded_at NULL, no ledger row",
+    pd1.result === "refunded" && pd1.settled === false && pdRow.refunded_at === null && (await ledgerRows(pd.id)).length === 0, JSON.stringify([pd1, pdRow]));
+  check("...the buyer is told 'Refund on its way' once, never 'refunded'",
+    pdNotes1.length === 1 && pdNotes1[0].title === "Refund on its way" && !/was refunded/.test(pdNotes1[0].message), JSON.stringify(pdNotes1));
+  const pass1 = await refunds.runRoomRefundPass(new Date());
+  check("a poll while the provider still says pending: still owed, no second refund, no second notice",
+    pass1.pending >= 1 && (await ticket(pd.id)).refunded_at === null && callsFor(pd.ref) === 1 && (await refundNotes(U1, RPd)).length === 1, JSON.stringify(pass1));
+  providerHas.set(pd.ref, "done");
+  const pass2 = await refunds.runRoomRefundPass(new Date());
+  const pdNotes2 = await refundNotes(U1, RPd);
+  check("processed later: the poll confirms (refunded_at, one ledger row) and tells the buyer 'refunded' once",
+    pass2.retried >= 1 && (await ticket(pd.id)).refunded_at !== null && (await ledgerRows(pd.id)).length === 1
+    && pdNotes2.length === 2 && pdNotes2[1].title === "Ticket refunded" && callsFor(pd.ref) === 1, JSON.stringify(pdNotes2));
+  await refunds.runRoomRefundPass(new Date());
+  check("...and nothing more on the next pass", (await ledgerRows(pd.id)).length === 1 && (await refundNotes(U1, RPd)).length === 2);
+  check("...the refund_pending marker is resolved", (await q(`select 1 from payment_issues where provider_payment_id = $1 and resolved_at is null`, [pd.ref])).length === 0);
+
+  // ---- pending, then the provider fails it: an issue, a new refund (same note), never "refunded"
+  const RPf = await mkRoom(H2, { minutesAhead: 900 });
+  const pf = await mkTicket(RPf, U2);
+  afterRefund.set(pf.ref, "in_progress");
+  await refunds.refundTicketDetailed(pf.id, "host_cancelled");
+  providerHas.set(pf.ref, "failed");
+  await refunds.runRoomRefundPass(new Date());
+  const pfIssue = await q(`select error_message from payment_issues where provider_payment_id = $1 and reason = 'refund_failed' and resolved_at is null`, [pf.ref]);
+  check("pending then failed at the provider: one refund_failed issue, one new refund, still owed, never told 'refunded'",
+    pfIssue.length === 1 && /^REFUND_FAILED_AT_PROVIDER/.test(pfIssue[0].error_message) && callsFor(pf.ref) === 2
+    && notes.get(pf.ref) === `ticket-refund-${pf.id}` && (await ticket(pf.id)).refunded_at === null
+    && !(await refundNotes(U2, RPf)).some((n) => n.title === "Ticket refunded"), JSON.stringify(pfIssue));
+
+  // ---- needs-attention: pending + an issue for finance, no second refund
+  const RNa = await mkRoom(H2, { minutesAhead: 900 });
+  const na = await mkTicket(RNa, U3);
+  afterRefund.set(na.ref, "needs_attention");
+  const na1 = await refunds.refundTicketDetailed(na.id, "host_cancelled");
+  await refunds.runRoomRefundPass(new Date());
+  check("needs-attention: not settled, one refund_failed issue (REFUND_NEEDS_ATTENTION), no second refund",
+    na1.settled === false && callsFor(na.ref) === 1
+    && (await q(`select 1 from payment_issues where provider_payment_id = $1 and reason = 'refund_failed' and error_message like 'REFUND_NEEDS_ATTENTION%' and resolved_at is null`, [na.ref])).length === 1);
+
+  // ---- refused charges (lane S2 rows, refund_reason auto_*): never a ticket, never host money (S3-I1, M1)
+  const RA = await mkRoom(H, { minutesAhead: 900 });
+  const aOld = await mkRefused(RA, U2, { minutesOld: 30 }); // a straggler lane S2 did not finish
+  const aNew = await mkRefused(RA, U3, { minutesOld: 0 });  // lane S2 is still on it
+  await refunds.runRoomRefundPass(new Date());
+  const aRow = await ticket(aOld.id);
+  check("the job finishes a refused charge: one refund with the note, confirmed",
+    callsFor(aOld.ref) === 1 && aRow.refunded_at !== null && notes.get(aOld.ref) === `ticket-refund-${aOld.id}`, JSON.stringify(aRow));
+  check("...no ledger row of any type for it (no sale row to reverse, nothing against the host)",
+    (await q(`select 1 from payment_transactions where provider_payment_id = $1`, [aOld.ref])).length === 0);
+  const aNotes = await refundNotes(U2, RA);
+  check("...the payer is told 'Your payment of ₦5,000 for the ticket was returned', never that the host cancelled",
+    aNotes.length === 1 && aNotes[0].message.startsWith("Your payment of ₦5,000 for the ticket was returned") && !/host|cancel/i.test(aNotes[0].message), JSON.stringify(aNotes));
+  check("a refused charge younger than 10 minutes is left to the request that refused it",
+    callsFor(aNew.ref) === 0 && (await ticket(aNew.id)).refunded_at === null);
+  const sumA = await http("GET", `/api/rooms/${RA}/tickets/summary`, H);
+  check("host summary: refused charges are not refunds (refunded 0, sold 0), reported as refusedCharges",
+    sumA.status === 200 && sumA.json?.summary?.refunded === 0 && sumA.json?.summary?.sold === 0
+    && sumA.json?.summary?.refusedCharges?.count === 2 && sumA.json?.summary?.refusedCharges?.grossKobo === 2 * B.price, JSON.stringify(sumA.json));
+
+  const UB = await mk("buyerb"); // fresh buyers: the refund route allows 3 quick calls per person (rate limit)
+  const UR = await mk("buyerr");
+  const RB = await mkRoom(H, { minutesAhead: 900 });
+  await mkRefused(RB, UB, { confirmed: true });
+  const nb = await http("POST", `/api/rooms/${RB}/tickets/refund`, UB);
+  check("buyer refund with only a returned refused charge: 404 NO_TICKET", nb.status === 404 && nb.json?.code === "NO_TICKET", JSON.stringify(nb));
+  const RB2 = await mkRoom(H, { minutesAhead: 900 });
+  const ob = await mkRefused(RB2, UB, { minutesOld: 0 });
+  const ob1 = await http("POST", `/api/rooms/${RB2}/tickets/refund`, UB);
+  check("...with a refused charge still owed: the call only finishes the provider step (already, settled), once",
+    ob1.status === 200 && ob1.json?.result === "already" && ob1.json?.settled === true && callsFor(ob.ref) === 1 && (await ticket(ob.id)).refunded_at !== null, JSON.stringify(ob1));
+  const ob2 = await http("POST", `/api/rooms/${RB2}/tickets/refund`, UB);
+  check("...after that it is no ticket again (404 NO_TICKET) and nothing is sent", ob2.status === 404 && ob2.json?.code === "NO_TICKET" && callsFor(ob.ref) === 1, JSON.stringify(ob2));
+
+  // ---- a buyer refund racing a start: the refund waits on the room row lock, then re-reads 'live' (S3-I4)
+  const RR = await mkRoom(H2, { minutesAhead: 600 });
+  const rr = await mkTicket(RR, UR);
+  const starter = await pool.connect();
+  let raced: { status: number; json: any; text: string } | null = null;
+  let waited = false;
+  try {
+    await starter.query("BEGIN");
+    await starter.query(`update rooms set status = 'live', started_at = now() where id = $1 and status = 'scheduled'`, [RR]);
+    const racing = http("POST", `/api/rooms/${RR}/tickets/refund`, UR);
+    // The event: the refund's locking read is waiting on a lock (not a fixed sleep).
+    waited = await waitFor(async () => Number((await q(
+      `select count(*)::int as n from pg_stat_activity where wait_event_type = 'Lock' and query ilike '%for update of t, r%'`))[0].n) > 0);
+    await starter.query("COMMIT");
+    raced = await racing;
+  } finally {
+    await starter.query("ROLLBACK").catch(() => {});
+    starter.release();
+  }
+  check("refund vs start: the refund waited for the start, then 409 ROOM_NOT_SCHEDULED; ticket still paid, no provider call",
+    waited && raced?.status === 409 && raced?.json?.code === "ROOM_NOT_SCHEDULED" && (await ticket(rr.id)).status === "paid" && callsFor(rr.ref) === 0, JSON.stringify(raced));
+
+  // ---- refunded_at and the ledger row are one transaction (S3-I5)
+  const RLf = await mkRoom(H2, { minutesAhead: 900 });
+  const lf = await mkTicket(RLf, U3);
+  refunds.refundTestHooks.failLedger = (id) => id === lf.id;
+  const lf1 = await refunds.refundTicketDetailed(lf.id, "host_cancelled");
+  check("ledger write fails: the confirmation rolls back (refunded_at NULL, no ledger row, no 'refunded' notice), not settled",
+    lf1.result === "refunded" && lf1.settled === false && (await ticket(lf.id)).refunded_at === null && (await ledgerRows(lf.id)).length === 0
+    && !(await refundNotes(U3, RLf)).some((n) => n.title === "Ticket refunded"), JSON.stringify(lf1));
+  refunds.refundTestHooks.failLedger = undefined;
+  await refunds.runRoomRefundPass(new Date());
+  check("...the next pass confirms it once: refunded_at and exactly one ledger row, no second refund",
+    (await ticket(lf.id)).refunded_at !== null && (await ledgerRows(lf.id)).length === 1 && callsFor(lf.ref) === 1);
+
+  // ---- refund webhooks only trigger a lookup; the body is never trusted
+  const RW = await mkRoom(H2, { minutesAhead: 900 });
+  const rw = await mkTicket(RW, U3);
+  afterRefund.set(rw.ref, "in_progress");
+  await refunds.refundTicketDetailed(rw.id, "host_cancelled");
+  check("refund.processed while the provider still says pending: ours, but nothing confirmed",
+    (await refunds.handleRoomRefundWebhook({ status: "processed", transaction_reference: rw.ref })) === true && (await ticket(rw.id)).refunded_at === null);
+  providerHas.set(rw.ref, "done");
+  await refunds.handleRoomRefundWebhook({ status: "processed", transaction_reference: rw.ref });
+  await refunds.handleRoomRefundWebhook({ status: "processed", transaction_reference: rw.ref }); // replay
+  check("...once the provider confirms: refunded_at, one ledger row, one 'refunded' notice (the replay changes nothing)",
+    (await ticket(rw.id)).refunded_at !== null && (await ledgerRows(rw.id)).length === 1
+    && (await refundNotes(U3, RW)).filter((n) => n.title === "Ticket refunded").length === 1 && callsFor(rw.ref) === 1);
+  check("a refund webhook for a payment that is not a room charge is left alone", (await refunds.handleRoomRefundWebhook({ transaction_reference: `evt_not_a_room_${stamp}` })) === false);
+
+  // ---- a provider REJECTION stops automatic retries 24 hours after it (admins only); clock injected
+  const RJ = await mkRoom(H2, { minutesAhead: 900 });
+  const rj = await mkTicket(RJ, U2);
+  refuse.add(rj.ref);
+  await refunds.refundTicketDetailed(rj.id, "host_cancelled", { now: new Date(Date.now() - 25 * 3600_000) }); // rejected 25 hours ago
+  const rjBefore = refundAttempts.filter((r) => r === rj.ref).length;
+  await refunds.runRoomRefundPass(new Date());
+  check("a refund the provider rejected more than 24 hours ago is no longer retried automatically",
+    rjBefore === 1 && refundAttempts.filter((r) => r === rj.ref).length === rjBefore && (await ticket(rj.id)).refunded_at === null);
+  refuse.delete(rj.ref);
+
+  // ---- owed for more than 24 hours because of a lookup outage: one alert, and the retries never stop (S3-I3)
+  const ROd = await mkRoom(H2, { minutesAhead: 900 });
+  const od = await mkTicket(ROd, U1);
+  lookupDown.add(od.ref);
+  await refunds.refundTicketDetailed(od.id, "host_cancelled", { now: new Date(Date.now() - 25 * 3600_000) }); // owed since 25 hours ago
+  const o1 = await refunds.runRoomRefundPass(new Date());
+  const o2 = await refunds.runRoomRefundPass(new Date());
+  check("a refund owed for more than 24 hours raises ONE refund_overdue alert over two passes",
+    o1.overdueAlerts >= 1 && (await q(`select 1 from payment_issues where provider_payment_id = $1 and reason = 'refund_overdue' and resolved_at is null`, [od.ref])).length === 1, JSON.stringify([o1, o2]));
+  check("...a lookup outage never becomes a refund_failed issue", (await q(`select 1 from payment_issues where provider_payment_id = $1 and reason = 'refund_failed'`, [od.ref])).length === 0);
+  const lkBefore = lookups.filter((r) => r === od.ref).length;
+  await refunds.runRoomRefundPass(new Date());
+  await refunds.runRoomRefundPass(new Date());
+  check("...past 24 hours every pass still asks the provider (no cap for outages), and never refunds blind",
+    lookups.filter((r) => r === od.ref).length >= lkBefore + 2 && refundAttempts.filter((r) => r === od.ref).length === 0);
+  lookupDown.delete(od.ref);
+  await refunds.runRoomRefundPass(new Date());
+  check("...when the provider answers again: refunded once, confirmed, every open issue for it resolved",
+    callsFor(od.ref) === 1 && (await ticket(od.id)).refunded_at !== null
+    && (await q(`select 1 from payment_issues where provider_payment_id = $1 and resolved_at is null`, [od.ref])).length === 0);
 } catch (e: any) {
   failed++; console.log(`FAIL uncaught: ${e.stack || e}`);
 } finally {
   setPaymentProviderForTests(null);
+  refunds.refundTestHooks.onEnforce = undefined;
+  refunds.refundTestHooks.failLedger = undefined;
+  // Teardown, children first (room_payouts has no cascade and room_tickets becomes ON DELETE RESTRICT): payment rows,
+  // notifications, payouts, tickets, rooms, then users. Only rows this run made (tr_ prefix + this stamp).
+  try {
+    await q(`delete from payment_issues where provider_payment_id = any($1::text[]) or ticket_id in (select id::text from room_tickets where room_id = any($2::varchar[]))`, [madeRefs, madeRooms]);
+    await q(`delete from payment_transactions where provider_payment_id = any($1::text[])`, [madeRefs]);
+    await q(`delete from notifications where user_id = any($1::varchar[])`, [madeUsers]);
+    await q(`delete from room_payouts where room_id = any($1::varchar[])`, [madeRooms]);
+    await q(`delete from room_tickets where room_id = any($1::varchar[])`, [madeRooms]);
+    await q(`delete from room_members where room_id = any($1::varchar[])`, [madeRooms]);
+    await q(`delete from rooms where id = any($1::varchar[])`, [madeRooms]);
+    await q(`delete from users where id = any($1::varchar[])`, [madeUsers]);
+  } catch (e: any) { console.log(`WARN teardown: ${e.message}`); }
   server.close();
   await pool.end();
+  await appPool.end().catch(() => {});
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
