@@ -1,7 +1,7 @@
 // Pure helpers and words for the create-a-room wizard and the quick start sheet (no React, no network, no storage).
 // The rules about what a host may pick live in createRoomRules.ts (task 3.2); the server is always the gate.
 import type { RoomVisibility } from "@shared/rooms";
-import { ROOM_LIMITS } from "@shared/rooms";
+import { ROOM_LIMITS, SLOW_MODES } from "@shared/rooms";
 import type { WizardState } from "@/lib/createRoomRules";
 
 /** The steps this UI knows how to draw. stepsFor() may name others later (a price step); unknown names are skipped. */
@@ -9,9 +9,9 @@ export const KNOWN_STEPS = ["basics", "audience", "features", "when", "review"] 
 export type WizardStep = (typeof KNOWN_STEPS)[number];
 export const isKnownStep = (s: string): s is WizardStep => (KNOWN_STEPS as readonly string[]).includes(s);
 
-/** Pinned message limit. Mirrors ROOM_LIMITS.pinned from task 3.1; kept here so this file works before that lands. */
-export const PINNED_MAX = 200;
-export const SLOW_MODE_CHOICES = [0, 5, 15, 30] as const;
+/** Pinned message limit and slow mode choices for the wizard, straight from the shared room rules (the server uses the same). */
+export const PINNED_MAX = ROOM_LIMITS.pinned;
+export const SLOW_MODE_CHOICES = SLOW_MODES;
 export const slowModeLabel = (sec: number) => (sec === 0 ? "Off" : `${sec}s`);
 
 /** Where a host's last picked visibility is remembered (adults only, this browser only). */

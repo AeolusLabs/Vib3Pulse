@@ -1,7 +1,7 @@
 // Unit tests for the create-room wizard rules. Written, not yet run (owner rule: no testing until all phases are done).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { normalizeWizard, stepsFor, validateWizard, wizardOptions, type WizardHost, type WizardState } from "../client/src/lib/createRoomRules";
+import { accountTooNewFor, normalizeWizard, stepsFor, validateWizard, wizardOptions, type WizardHost, type WizardState } from "../client/src/lib/createRoomRules";
 
 let passed = 0, failed = 0;
 const test = (name: string, fn: () => void) => {
@@ -23,6 +23,11 @@ const EM = String.fromCharCode(0x2014);
 const ADULT_ONLY = "You need to be 18 to host an adult room.";
 const TEEN_PUBLIC = "Public rooms are for adults. Try a friends-only or invite-only room.";
 const TOO_NEW = "Your account is too new to host a public room. Try a friends-only or invite-only room.";
+const NEED_16 = "You need to be 16 to host a 16+ room.";
+const NEED_21 = "You need to be 21 to host a 21+ room.";
+const teen17: WizardHost = { age: 17, accountAgeDays: 100, idVerifiedAdult: false };
+const young: WizardHost = { age: 19, accountAgeDays: 100, idVerifiedAdult: true };
+const reasonOf = (h: WizardHost) => Object.fromEntries(wizardOptions(h, off).ageOptions.map((a) => [a.value, a.disabledReason]));
 
 test("adult host: all five age options, none disabled, no teen option", () => {
   const o = wizardOptions(adult, off);
@@ -30,13 +35,21 @@ test("adult host: all five age options, none disabled, no teen option", () => {
   assert.ok(o.ageOptions.every((a) => a.disabledReason === undefined));
   assert.equal(o.teenHostNote, false);
 });
-test("teen host: 18+ and 21+ disabled with the exact reason, others open", () => {
+test("teen host under 16: 16+ needs 16, 18+ and 21+ disabled with the exact adult reason, others open", () => {
   const o = wizardOptions(teen, off);
-  for (const a of o.ageOptions) {
-    if (a.value === "18+" || a.value === "21+") assert.equal(a.disabledReason, ADULT_ONLY);
-    else assert.equal(a.disabledReason, undefined);
-  }
+  assert.deepEqual(reasonOf(teen), { all: undefined, "13+": undefined, "16+": NEED_16, "18+": ADULT_ONLY, "21+": ADULT_ONLY });
   assert.equal(o.teenHostNote, true);
+});
+test("teen host aged 16 or 17: 16+ open, 18+ and 21+ disabled with the adult reason", () => {
+  assert.deepEqual(reasonOf(teen17), { all: undefined, "13+": undefined, "16+": undefined, "18+": ADULT_ONLY, "21+": ADULT_ONLY });
+});
+test("adult host aged 18 to 20: only 21+ disabled, with the 21 reason (the server refuses HOST_BELOW_LIMIT)", () => {
+  assert.deepEqual(reasonOf(young), { all: undefined, "13+": undefined, "16+": undefined, "18+": undefined, "21+": NEED_21 });
+  assert.equal(reasonOf({ ...young, age: 21 })["21+"], undefined);
+  assert.equal(reasonOf({ ...young, age: 18 })["18+"], undefined);
+});
+test("unknown age: no age option is judged (the whole wizard is blocked instead)", () => {
+  assert.ok(wizardOptions({ ...adult, age: null }, off).ageOptions.every((a) => a.disabledReason === undefined));
 });
 test("visibility: adult open; teen public disabled; new adult account public disabled", () => {
   assert.ok(wizardOptions(adult, off).visibilityOptions.every((v) => !v.disabledReason));
@@ -62,9 +75,25 @@ test("moneyLocked: adult at 18+ with flags off is not-available-yet; null when a
 test("normalizeWizard: teen host 18+/21+ becomes 13+, public becomes friends", () => {
   assert.equal(normalizeWizard(state({ ageLimit: "18+" }), teen).ageLimit, "13+");
   assert.equal(normalizeWizard(state({ ageLimit: "21+" }), teen).ageLimit, "13+");
-  assert.equal(normalizeWizard(state({ ageLimit: "16+" }), teen).ageLimit, "16+");
+  assert.equal(normalizeWizard(state({ ageLimit: "18+" }), teen17).ageLimit, "13+", "revisions: a teen's adult limit is 13+, not 16+");
+  assert.equal(normalizeWizard(state({ ageLimit: "21+" }), teen17).ageLimit, "13+");
   assert.equal(normalizeWizard(state({ visibility: "public" }), teen).visibility, "friends");
   assert.equal(normalizeWizard(state({ visibility: "invite" }), teen).visibility, "invite");
+});
+test("normalizeWizard: an age limit above the host steps down to the highest one they may use", () => {
+  assert.equal(normalizeWizard(state({ ageLimit: "16+" }), teen).ageLimit, "13+", "13 to 15: 16+ becomes 13+");
+  assert.equal(normalizeWizard(state({ ageLimit: "16+" }), { ...teen, age: 13 }).ageLimit, "13+");
+  assert.equal(normalizeWizard(state({ ageLimit: "16+" }), teen17).ageLimit, "16+", "16 and 17 keep 16+");
+  assert.equal(normalizeWizard(state({ ageLimit: "21+" }), young).ageLimit, "18+", "18 to 20: 21+ becomes 18+");
+  assert.equal(normalizeWizard(state({ ageLimit: "21+" }), { ...young, age: 18 }).ageLimit, "18+");
+  assert.equal(normalizeWizard(state({ ageLimit: "18+" }), young).ageLimit, "18+");
+  assert.equal(normalizeWizard(state({ ageLimit: "21+" }), { ...young, age: 21 }).ageLimit, "21+");
+  assert.equal(normalizeWizard(state({ ageLimit: "all" }), teen).ageLimit, "all");
+  // whatever it picks is never refused by validateWizard on the age limit
+  for (const h of [teen, teen17, young, adult]) for (const l of ["all", "13+", "16+", "18+", "21+"] as const) {
+    const r = validateWizard(normalizeWizard(state({ ageLimit: l }), h), h, NOW);
+    assert.ok(r.ok || r.field !== "ageLimit", `${h.age} ${l}`);
+  }
 });
 test("normalizeWizard: adult host is left alone", () => {
   const s = state({ ageLimit: "21+", visibility: "public" });
@@ -107,6 +136,37 @@ test("validateWizard: title, unknown age, teen combos", () => {
   assert.equal((validateWizard(state({ ageLimit: "18+" }), teen, NOW) as any).reason, ADULT_ONLY);
   assert.equal((validateWizard(state({ visibility: "public" }), teen, NOW) as any).reason, TEEN_PUBLIC);
 });
+test("validateWizard: age limit above the host is refused with the same words the option shows", () => {
+  assert.equal((validateWizard(state({ ageLimit: "16+" }), teen, NOW) as any).reason, NEED_16);
+  assert.equal((validateWizard(state({ ageLimit: "16+" }), teen, NOW) as any).field, "ageLimit");
+  assert.equal((validateWizard(state({ ageLimit: "21+" }), young, NOW) as any).reason, NEED_21);
+  assert.equal((validateWizard(state({ ageLimit: "21+" }), teen17, NOW) as any).reason, ADULT_ONLY);
+  assert.deepEqual(validateWizard(state({ ageLimit: "16+" }), teen17, NOW), { ok: true });
+  assert.deepEqual(validateWizard(state({ ageLimit: "18+" }), young, NOW), { ok: true });
+});
+test("validateWizard: a public room from an account younger than the minimum is refused", () => {
+  const fresh: WizardHost = { ...adult, accountAgeDays: 2 };
+  const r = validateWizard(state({ visibility: "public" }), fresh, NOW, 7);
+  assert.equal(r.ok, false);
+  assert.equal((r as any).field, "visibility");
+  assert.equal((r as any).reason, TOO_NEW);
+  assert.deepEqual(validateWizard(state({ visibility: "friends" }), fresh, NOW, 7), { ok: true }, "friends is fine");
+  assert.deepEqual(validateWizard(state({ visibility: "invite" }), fresh, NOW, 7), { ok: true }, "invite is fine");
+  assert.deepEqual(validateWizard(state({ visibility: "public" }), { ...adult, accountAgeDays: 7 }, NOW, 7), { ok: true }, "exactly the minimum is old enough");
+  assert.deepEqual(validateWizard(state({ visibility: "public" }), fresh, NOW), { ok: true }, "minimum unknown (0): the server decides");
+  assert.equal((validateWizard(state({ visibility: "public" }), { ...teen, accountAgeDays: 2 }, NOW, 7) as any).reason, TEEN_PUBLIC, "a teen hears the teen reason");
+});
+test("accountTooNewFor: below the minimum only", () => {
+  assert.equal(accountTooNewFor({ ...adult, accountAgeDays: 6.9 }, 7), true);
+  assert.equal(accountTooNewFor({ ...adult, accountAgeDays: 7 }, 7), false);
+  assert.equal(accountTooNewFor({ ...adult, accountAgeDays: 0 }, 0), false);
+});
+test("module source: slow modes and the pinned limit come from @shared/rooms, not hand copies", () => {
+  const src = readFileSync(new URL("../client/src/lib/createRoomRules.ts", import.meta.url), "utf8");
+  assert.ok(/SLOW_MODES/.test(src) && /ROOM_LIMITS\.pinned/.test(src));
+  assert.ok(!/\[0, 5, 15, 30\]/.test(src));
+  assert.ok(!/=\s*200\b/.test(src));
+});
 test("stepsFor: money step only when unlocked and a flag is on", () => {
   const base = ["basics", "audience", "features", "when", "review"];
   assert.deepEqual(stepsFor(state(), off, adult), base);
@@ -129,6 +189,7 @@ test("every user-facing string: no em dash, no cash", () => {
     o.moneyLocked ?? "",
     wizardOptions(adult, off, 99, "18+").visibilityOptions[0].disabledReason ?? "",
     wizardOptions(adult, off, 0, "18+").moneyLocked ?? "",
+    ...wizardOptions(young, off).ageOptions.map((a) => a.disabledReason ?? ""),
     (validateWizard(state({ title: "" }), adult, NOW) as any).reason,
     (validateWizard(state({ when: "later" }), adult, NOW) as any).reason,
   ];
