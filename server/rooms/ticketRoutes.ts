@@ -13,13 +13,16 @@ import * as rs from "./roomStorage";
 import { canViewRoom } from "./roomAccess";
 import { roomFeatures } from "./features";
 import { TokenBucket } from "./rateLimit";
-import { handleRoomTicketCharge, replayRoomTicket, ticketCountsFor, toTicketView, type IssueRoomTicketResult } from "./tickets";
+import { handleRoomTicketCharge, IssueQueueFullError, replayRoomTicket, ticketCountsFor, toTicketView, type IssueRoomTicketResult } from "./tickets";
+import { hostCanSellNow } from "./ticketStorage";
+import { ticketCheckoutBaseUrl } from "./checkoutUrl";
 import { looksLikeTicketReference, makeTicketReference, ticketReferenceBelongsTo, ticketReferenceSecret } from "./ticketReference";
 
 // Checkout refusals. Everyone the buyer checks refuse (not verified, under 18, under the room's limit, banned, blocked)
 // gets the same 404-style answer with no price, whether or not the room sells tickets.
 const NOT_ELIGIBLE = [404, "NOT_ELIGIBLE", "Tickets for this room aren't available to you."] as const;
 const NOT_TICKETED = [409, "NOT_TICKETED", "This room doesn't sell tickets."] as const;
+const SALES_PAUSED = [409, "SALES_PAUSED", "Ticket sales for this room are paused right now. Try again later."] as const;
 const CHECKOUT_REFUSAL: Record<PurchaseBlock, readonly [number, string, string]> = {
   NOT_BOUND: NOT_ELIGIBLE, // not reachable at checkout (no payment yet)
   BUYER_GONE: NOT_ELIGIBLE,
@@ -29,6 +32,9 @@ const CHECKOUT_REFUSAL: Record<PurchaseBlock, readonly [number, string, string]>
   IS_HOST: [409, "IS_HOST", "You host this room, so you don't need a ticket."],
   ROOM_NOT_ADULT: NOT_TICKETED,
   NOT_TICKETED: NOT_TICKETED,
+  PRICE_INVALID: SALES_PAUSED, // a stored price outside the limits: the host is told (GET /api/rooms/:id ticketSales), never the buyer why
+  SALES_PAUSED: SALES_PAUSED,  // the host lost ID verification or their payout account
+  IS_COHOST: [409, "IS_COHOST", "You're a co-host here, so you don't need a ticket."],
   AMOUNT_MISMATCH: NOT_TICKETED, // not reachable at checkout (no payment yet)
   ROOM_NOT_OPEN: [409, "ROOM_ENDED", "This room has ended."],
   ROOM_NOT_APPROVED: [409, "NOT_ON_SALE", "Tickets for this room aren't on sale right now."],
@@ -43,6 +49,9 @@ const REFUND_MESSAGE: Record<RoomTicketRefusal, string> = {
 };
 
 const PAYMENT_NOT_FOUND = { message: "Payment not found", code: "PAYMENT_NOT_FOUND" } as const;
+
+/** Seconds a caller (Paystack, or the client's verify) should wait when the room's issue queue is full. */
+export const ISSUE_RETRY_AFTER_SEC = 5;
 
 function sendOutcome(res: Response, result: IssueRoomTicketResult) {
   if ("ticket" in result) {
@@ -73,11 +82,14 @@ export function registerRoomTicketRoutes(app: Express): void {
       // The view and minors' room gate first: a room the caller cannot see is not found, with nothing about it.
       if (!room || !(await canViewRoom(room, uid, token))) return res.status(404).json({ message: "Room not found" });
 
-      const [buyer, member, blocked, counts] = await Promise.all([
+      const [buyer, member, blocked, counts, hostCanSell] = await Promise.all([
         storage.getUser(uid), rs.getMember(room.id, uid), isBlockedEitherWay(uid, room.hostId), ticketCountsFor(room.id, uid),
+        hostCanSellNow(room.hostId),
       ]);
       const check = checkPurchase({
         buyerId: uid, buyer, room, bannedOrBlocked: !!member?.banned || blocked,
+        buyerIsCohost: !!member && !member.banned && member.role === "cohost",
+        hostCanSell,
         paidCount: counts.paid, buyerHasPaid: counts.mine > 0,
       });
       if (!check.ok) {
@@ -89,9 +101,13 @@ export function registerRoomTicketRoutes(app: Express): void {
       // checkPurchase proved this a sellable integer price. The buyer pays exactly it (VAT included); the split is
       // computed from it by ticketBreakdown when the ticket is issued.
       const price = room.ticketPriceKobo as number;
+      // Never the Host or Origin header in production (caller-controlled): APP_URL only.
+      const baseUrl = ticketCheckoutBaseUrl(process.env, `${req.protocol}://${req.headers.host}`);
+      if (!baseUrl) {
+        console.error(`[rooms:tickets] room=${room.id} user=${uid} outcome=checkout_no_app_url (set APP_URL to the site's https origin)`);
+        return res.status(500).json({ message: "Payment couldn't be started. Try again.", code: "CHECKOUT_FAILED" });
+      }
       const reference = makeTicketReference(room.id, uid, ticketReferenceSecret());
-      // Never req.headers.origin (user-controlled). Same rule as the event checkout.
-      const baseUrl = process.env.APP_URL || `${req.protocol}://${req.headers.host}`;
       const session = await createCheckout({
         itemId: room.id,
         itemType: "room",
@@ -155,6 +171,10 @@ export function registerRoomTicketRoutes(app: Express): void {
       if (!result) return res.status(404).json(PAYMENT_NOT_FOUND);
       return sendOutcome(res, result);
     } catch (e) {
+      if (e instanceof IssueQueueFullError) {
+        res.setHeader("Retry-After", String(ISSUE_RETRY_AFTER_SEC));
+        return res.status(503).json({ message: "Lots of people are buying right now. Your payment is safe: try again in a moment.", code: "BUSY" });
+      }
       console.error(`[rooms:tickets] room=${req.params.id} user=${uid} outcome=verify_error`, e instanceof Error ? e.message : e);
       res.status(500).json({ message: "We couldn't finish your ticket just now. Try again in a moment.", code: "VERIFY_ERROR" });
     }
