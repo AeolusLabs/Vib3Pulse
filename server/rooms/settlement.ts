@@ -117,7 +117,14 @@ export async function afterRoomEnded(roomId: string, opts: { hostReview?: boolea
     const room = (await pool.query(`select status, (started_at is not null) as started from rooms where id = $1`, [roomId])).rows[0] as
       { status: string; started: boolean } | undefined;
     if (!room || room.status !== "ended") return;
-    if (room.started) { await scheduleRoomPayout(roomId, opts); return; }
+    if (room.started) {
+      // A room that must not pay out refunds in the background (a host review can close many rooms; the room end must
+      // not wait on provider calls). The settlement safety net re-checks the block, so nothing is paid meanwhile.
+      const block = await payoutBlockFor(pool, roomId, opts);
+      if (block) { void refundInsteadOfPayout(roomId, block); return; }
+      await scheduleRoomPayout(roomId, opts);
+      return;
+    }
     void refundAllForRoom(roomId, "host_cancelled").catch((e) => console.error("[rooms] refunds after end failed:", roomId, sanitizeMoneyError(e)));
   } catch (e) {
     if (!isMissingTable(e)) console.error("[rooms] after-end money step failed:", roomId, sanitizeMoneyError(e));

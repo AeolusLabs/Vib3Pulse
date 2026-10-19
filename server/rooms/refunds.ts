@@ -260,6 +260,7 @@ async function finishProviderRefund(c: PoolClient, t: TicketRow, now: Date): Pro
   // Accepted. Some refunds are processed at once: ask once more (a failed lookup here only means "pending").
   const after = await refundState(t.provider_ref, provider, note).catch(() => "in_progress" as ProviderRefundState);
   if (after === "done") return confirmRefund(c, t, now);
+  if (after === "needs_attention") await issue("REFUND_NEEDS_ATTENTION: the provider flagged this refund for review");
   await notifyRefund(c, t, "pending");
   return "pending";
 }
