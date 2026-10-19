@@ -221,6 +221,22 @@ test("statuses: the eight, terminal ones, spend statuses", () => {
     assert.match(SPRAY_SCHEMA_SQL, /CONSTRAINT user_payment_methods_user_signature_key UNIQUE \(user_id, signature\)/);
     assert.match(SPRAY_SCHEMA_SQL, /ALTER TABLE users ADD COLUMN IF NOT EXISTS spray_daily_limit_kobo integer;/);
   });
+  test("fix round: clawbacks name the admin who wrote them off, allow partial recovery, record their origin", () => {
+    assert.match(SPRAY_SCHEMA_SQL, /written_off_by varchar REFERENCES admin_users\(id\) ON DELETE RESTRICT/);
+    assert.doesNotMatch(SPRAY_SCHEMA_SQL, /written_off_by varchar REFERENCES users/);
+    assert.match(SPRAY_SCHEMA_SQL, /recovered_kobo integer NOT NULL DEFAULT 0/);
+    assert.match(SPRAY_SCHEMA_SQL, /status <> 'recovered' OR recovered_kobo = amount_kobo/);
+    assert.match(SPRAY_SCHEMA_SQL, /status <> 'written_off' OR \(written_off_by IS NOT NULL AND written_off_reason IS NOT NULL\)/);
+    assert.match(SPRAY_SCHEMA_SQL, /origin IN \('dispute', 'reversal'\)/);
+    assert.match(SPRAY_SCHEMA_SQL, /check_attempts integer NOT NULL DEFAULT 0/);
+    assert.match(SPRAY_SCHEMA_SQL, /next_check_at timestamp/);
+    assert.match(SPRAY_SCHEMA_SQL, /authorization_url text,/); // client M7: a replay can hand the bank link back
+    assert.match(SPRAY_SCHEMA_SQL, /spray_daily_limit_kobo <= 10000000/);
+    const s = src("shared/schema.ts");
+    assert.match(s, /writtenOffBy: varchar\("written_off_by"\)\.references\(\(\) => adminUsers\.id, \{ onDelete: "restrict" \}\)/);
+    assert.match(s, /recoveredKobo: integer\("recovered_kobo"\)\.notNull\(\)\.default\(0\)/);
+    assert.match(s, /checkAttempts: integer\("check_attempts"\)\.notNull\(\)\.default\(0\)/);
+  });
   test("every spray tier and status in the SQL matches shared/spray.ts and shared/money.ts", () => {
     for (const t of SPRAY_TIERS) assert.ok(SPRAY_SCHEMA_SQL.includes(`'${t}'`), t);
     for (const s of SPRAY_STATUSES) assert.ok(SPRAY_SCHEMA_SQL.includes(`'${s}'`), s);
@@ -241,7 +257,11 @@ test("statuses: the eight, terminal ones, spend statuses", () => {
       "spray_payments_payer_key_key", "spray_payments_room_status_idx", "spray_payments_payer_created_idx", "spray_payments_status_created_idx",
       "spray_payments_status_check", "spray_payments_tier_check", "spray_payments_amounts_check", "spray_payments_not_self_check",
       "room_spend_pkey", "room_spend_spent_check", "host_clawbacks_spray_beneficiary_key", "host_clawbacks_host_status_idx",
-      "host_clawbacks_status_check", "host_clawbacks_amount_check"]) {
+      "host_clawbacks_status_check", "host_clawbacks_amount_check",
+      // fix round
+      "spray_payments_status_next_check_idx", "spray_payments_recipient_created_idx", "spray_payments_host_created_idx",
+      "room_spend_limit_check", "host_clawbacks_beneficiary_status_idx", "host_clawbacks_origin_check",
+      "host_clawbacks_recovered_check", "host_clawbacks_written_off_check"]) {
       assert.ok(s.includes(`"${n}"`), n);
       assert.ok(SPRAY_SCHEMA_SQL.includes(n), `${n} in SQL`);
     }
@@ -307,9 +327,14 @@ test("statuses: the eight, terminal ones, spend statuses", () => {
     });
     assert.deepEqual(out, {
       method: { id: "m1", last4: "4081", brand: "visa" },
-      provider: { data: { authorization: { last4: "4081" } } },
+      provider: { data: {} }, // the whole `authorization` card object goes (fix round: the key itself is redacted)
       list: [{ keep: 1 }],
     });
+  });
+  test("fix round: 'authorization' is a redacted key; a verify result's card never survives a forgetful body", () => {
+    assert.ok(SENSITIVE_RESPONSE_KEYS.has("authorization"));
+    const out = redact({ verify: { paid: true, authorization: { authorizationCode: "AUTH_x", last4: "4081", signature: "SIG_x" } }, authorizationUrl: "https://x.test/a" });
+    assert.deepEqual(out, { verify: { paid: true }, authorizationUrl: "https://x.test/a" });
   });
   test("the spray response shapes the routes use are untouched", () => {
     const me = { method: { last4: "4081", brand: "visa" }, dailyLimitKobo: 2000000, dailySpentKobo: 0, verified: true };
@@ -336,7 +361,8 @@ test("statuses: the eight, terminal ones, spend statuses", () => {
   test("sprayStorage exports every contract helper", () => {
     for (const n of ["insertSprayIfNew", "getSprayById", "getSprayByRef", "addSpend", "releaseSpend", "getRoomSpend", "sumPayerKoboSince",
       "countPayerSprays", "countPayerRecipientSprays", "listStaleSprays", "markSprayStatus", "insertClawbackIfNew", "openClawbacksFor",
-      "markClawbacksRecovered", "getSavedMethod", "saveMethod", "deleteMethod", "setDailyLimit"]) {
+      "markClawbacksRecovered", "getSavedMethod", "saveMethod", "deleteMethod", "setDailyLimit",
+      "noteSprayChecked", "payerRecipientInFlight", "sumReceivedSince", "hasOpenClawback"]) {
       assert.match(s, new RegExp(`export async function ${n}\\(`), n);
     }
   });
@@ -359,6 +385,60 @@ test("statuses: the eight, terminal ones, spend statuses", () => {
   });
   test("sprayStorage never logs", () => {
     assert.doesNotMatch(s, /console\./);
+  });
+  test("fix round: getSprayById uses a strict 8-4-4-4-12 uuid; the sweep list is fair (least recently checked first)", () => {
+    assert.match(s, /UUID_RE = \/\^\[0-9a-f\]\{8\}-\[0-9a-f\]\{4\}-\[0-9a-f\]\{4\}-\[0-9a-f\]\{4\}-\[0-9a-f\]\{12\}\$\/i/);
+    assert.match(fnBody("getSprayById"), /UUID_RE\.test\(id\)/);
+    assert.match(fnBody("listStaleSprays"), /lastCheckedAt\} asc nulls first/);
+    assert.match(fnBody("listStaleSprays"), /nextCheckAt\} is null or/);
+    assert.match(fnBody("markClawbacksRecovered"), /recoveredKobo: sql`\$\{hostClawbacks\.amountKobo\}`/);
+  });
+}
+
+// ---------------------------------------------------------------- fix round: server source rules (no database here)
+{
+  const spray = src("server/rooms/spray.ts");
+  const limits = src("server/rooms/sprayLimits.ts");
+  const jobs = src("server/rooms/sprayJobs.ts");
+  const claw = src("server/rooms/clawbacks.ts");
+  test("C1: every reversal goes through toReversing, which writes reversal clawbacks in the same transaction", () => {
+    const i = spray.indexOf("async function toReversing(");
+    const body = spray.slice(i, spray.indexOf("\n}\n", i));
+    assert.match(body, /db\.transaction/);
+    assert.match(body, /markSprayStatus\(row\.id, from, "reversing"/);
+    assert.match(body, /origin: "reversal"/g);
+    // No other path moves a spray to reversing.
+    assert.equal((spray.match(/"reversing", \{/g) ?? []).length, 1);
+    assert.match(spray, /BLOCKING G3 QUESTION/);
+  });
+  test("C1/C2: the receive cap counts reversing and reversed, for host and recipient, under spray-recv locks", () => {
+    assert.match(limits, /CAP_STATUSES_AT_START[^\n]*"reversing", "reversed"/);
+    assert.match(limits, /CAP_STATUSES_AT_DELIVERY[^\n]*"reversing", "reversed"/);
+    assert.match(limits, /recipient_id = \$1 or host_id = \$1/);
+    assert.match(spray, /capLockKey\(u\.id\)/);
+  });
+  test("ruling 5: payer-owned limits are checked before the gate", () => {
+    assert.ok(spray.indexOf("payerPrecheck(payerRow") > 0 && spray.indexOf("payerPrecheck(payerRow") < spray.indexOf("sprayGate(roomId, payerId, targetId, \"start\")"));
+  });
+  test("ruling 11: the reservation passes tx to every helper (one connection)", () => {
+    const i = spray.indexOf("db.transaction(async (tx): Promise<Reservation>");
+    const body = spray.slice(i, spray.indexOf("}));", i));
+    assert.match(body, /hasSprayInFlight\(payerId, targetId, now, tx\)/);
+    assert.match(body, /roomLimitFor\(roomId, payerId, tx\)/);
+    assert.match(body, /overNewHostCapAtStart\(people, price, now, tx\)/);
+    assert.doesNotMatch(body, /\bpool\./);
+  });
+  test("ruling 7: the spray receipt is not recorded in the chat ring", () => {
+    const i = spray.indexOf("function announceDelivery(");
+    assert.doesNotMatch(spray.slice(i, spray.indexOf("\n}\n", i)), /recordChat/);
+  });
+  test("ruling 10: the sweep is bounded per pass and re-checks failed rows", () => {
+    assert.match(jobs, /queue\.slice\(0, t\.maxRowsPerPass\)/);
+    assert.match(jobs, /listStaleSprays\(\["failed"\]/);
+    assert.match(jobs, /noteSprayChecked/);
+  });
+  test("ruling 14: a write-off records the admin", () => {
+    assert.match(claw, /written_off_by = \$3/);
   });
 }
 

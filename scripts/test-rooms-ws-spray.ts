@@ -65,7 +65,7 @@ const mock = {
   async chargeSaved(p: any) { this.charges++; this.txs.set(p.reference, { state: "paid", amountKobo: p.amountKobo, metadata: p.metadata }); return { status: "success", reference: p.reference }; },
   async verify(ref: string) { const t = this.txs.get(ref); return t ? { paid: t.state === "paid", state: t.state, amountKobo: t.amountKobo, currency: "NGN", metadata: t.metadata } : null; },
   async refund(ref: string) { this.refunds.add(ref); },
-  async refundState(ref: string) { return this.refunds.has(ref) ? "done" : "none"; },
+  async refundState(ref: string, _fullKobo?: number) { return this.refunds.has(ref) ? "done" : "none"; },
   pay(ref: string) { const t = this.txs.get(ref); if (t) t.state = "paid"; },
 };
 setSplitProviderForTests(mock as any);
@@ -179,7 +179,8 @@ try {
   check("the receipt chat line is made by the server and reaches everyone", receipts.every(Boolean) && receipts[0].userId === P && typeof receipts[0].text === "string" && !/₦|cash/i.test(receipts[0].text));
   await sleep(300);
   check("one receipt line and one room:spray per spray", by.c.all((m) => m.type === "room:chat" && m.system === "spray").length === 1 && by.c.all((m) => m.type === "room:spray").length === 1);
-  check("the receipt is in the server's chat ring (reports can attach it), not quotable", roomHub.recentChat(R).some((l) => l.userId === P && l.quotable === false));
+  // Fix round (R1 M5 / ruling 7): the receipt is a system line, kept OUT of the chat ring report excerpts are cut from.
+  check("the receipt is a system line and is not in the server's chat ring", receipts[0].system === "spray" && !roomHub.recentChat(R).some((l) => l.userId === P && l.text === receipts[0].text));
 
   // ---- double tap: one room:spray
   reset();
@@ -239,7 +240,13 @@ try {
   g.c.send({ type: "room:leave" });
   check("setup: recipient left", await until(() => !roomHub.get(R, G)));
   mock.pay(lrow.provider_ref);
-  check("finalize reverses", (await finalizeSpray(lrow.provider_ref)) === "reversed");
+  // Fix round (ruling 6): a recipient this process does not see is waited for until the 60 s delivery deadline.
+  check("before the deadline: finalize waits (pending), nothing refunded", (await finalizeSpray(lrow.provider_ref)) === "pending" && !mock.refunds.has(lrow.provider_ref));
+  const realNow = sprayClock.now;
+  sprayClock.now = () => Date.now() + 2 * 60_000;
+  let out: string;
+  try { out = await finalizeSpray(lrow.provider_ref); } finally { sprayClock.now = realNow; }
+  check("finalize reverses once past the deadline", out === "reversed", out);
   check("the payer gets the plain refund line", !!(await pl.c.waitFor((m) => m.type === "room:chat" && m.system === "spray_reversed" && m.text === "They left the stage, so you were refunded in full.")));
   await sleep(300);
   check("nobody else sees the payer's refund line, and no room:spray went out", [h.c, by.c, pr.c].every((c) => !c.all((m) => m.system === "spray_reversed").length)
@@ -254,6 +261,8 @@ try {
   for (const c of conns) try { c.close(); } catch { /* ignore */ }
   try {
     if (created.length) {
+      // Reversals write clawbacks now (RESTRICT on spray_payments): children first.
+      await q(`delete from host_clawbacks where host_id = any($1::varchar[]) or beneficiary_id = any($1::varchar[])`, [created]);
       await q(`delete from payment_transactions where provider_payment_id in (select provider_ref from spray_payments where payer_id = any($1::varchar[]))`, [created]);
       await q(`delete from payment_issues where provider_payment_id in (select provider_ref from spray_payments where payer_id = any($1::varchar[]))`, [created]);
       await q(`delete from spray_payments where payer_id = any($1::varchar[])`, [created]);
