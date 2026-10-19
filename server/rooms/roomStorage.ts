@@ -1,7 +1,7 @@
 // Durable room data. Live presence is NOT here (see RoomHub). All visibility rules for listings live in listRooms.
 import { and, eq, gt, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
 import { db } from "../storage";
-import { follows, roomMembers, rooms, users, type Room, type RoomMember } from "@shared/schema";
+import { follows, roomMembers, roomReminders, rooms, users, type Room, type RoomMember } from "@shared/schema";
 import type { RoomInput } from "@shared/rooms";
 import type { Screen } from "@shared/screen";
 import type { NowPlaying } from "@shared/playback";
@@ -49,8 +49,12 @@ export type RoomPatch = Partial<Pick<Room, "title" | "description" | "ageLimit" 
 export async function updateRoom(id: string, patch: RoomPatch): Promise<Room> {
   // A different screen is a different thing to play: bump the version (a late playback message for the old one is then
   // ignored) and forget the old playback state.
-  const set = patch.screen !== undefined ? { ...patch, screenVersion: sql`${rooms.screenVersion} + 1`, nowPlaying: null } : patch;
-  const [row] = await db.update(rooms).set(set).where(eq(rooms.id, id)).returning();
+  let set: Record<string, unknown> = patch.screen !== undefined ? { ...patch, screenVersion: sql`${rooms.screenVersion} + 1`, nowPlaying: null } : { ...patch };
+  // A new start time is a new reminder: the room is claimable again and everyone who asked is told again with the new time.
+  const rescheduled = patch.scheduledFor !== undefined;
+  if (rescheduled) set = { ...set, reminderNotifiedAt: null };
+  const [row] = await db.update(rooms).set(set as Partial<Room>).where(eq(rooms.id, id)).returning();
+  if (rescheduled && row) await db.update(roomReminders).set({ notifiedAt: null }).where(eq(roomReminders.roomId, id));
   return row;
 }
 
