@@ -77,6 +77,7 @@ import { SafetyTriggersProvider } from "@/components/safety/SafetyTriggersProvid
 
 // Dev-only fixture page: the condition is a build-time constant, so production bundles drop the route and its chunk.
 const RoomFixture = import.meta.env.DEV ? lazy(() => import("@/pages/dev/RoomFixture")) : null;
+const SprayFixture = import.meta.env.DEV ? lazy(() => import("@/pages/dev/SprayFixture")) : null;
 
 // New page, new scroll position: without this, opening a venue from the middle of Discover lands you
 // mid-page. Keyed on the path only, so a query-string change (like the ?venue= highlight) doesn't reset it.
@@ -213,6 +214,12 @@ function Router() {
       {RoomFixture && (
         <Route path="/dev/room-fixture">
           <Suspense fallback={null}><RoomFixture /></Suspense>
+        </Route>
+      )}
+
+      {SprayFixture && (
+        <Route path="/dev/spray-fixture">
+          <Suspense fallback={null}><SprayFixture /></Suspense>
         </Route>
       )}
 
