@@ -81,7 +81,8 @@ const SENSITIVE_USER_FIELDS = [
 // NOT stripped by key name from all responses: safety buddies legitimately return a "phoneNumber" to their owner.
 // ageVerifiedAt/Method: the owner reads them from GET /api/users/me/age-verification.
 // roomPrivacy: another user's room settings are theirs; the owner reads them from GET /api/users/me/room-privacy.
-const PUBLIC_HIDDEN_USER_FIELDS = ["phoneNumber", "roomPrivacy", "ageVerifiedAt", "ageVerifiedMethod"] as const;
+// sprayDailyLimitKobo: the owner reads it from GET /api/users/me/spray as dailyLimitKobo.
+const PUBLIC_HIDDEN_USER_FIELDS = ["phoneNumber", "roomPrivacy", "ageVerifiedAt", "ageVerifiedMethod", "sprayDailyLimitKobo"] as const;
 
 export type PublicUser = Omit<User, typeof SENSITIVE_USER_FIELDS[number] | typeof PUBLIC_HIDDEN_USER_FIELDS[number]>;
 
@@ -97,6 +98,7 @@ export function toPublicUser(user: User): PublicUser {
     roomPrivacy,
     ageVerifiedAt,
     ageVerifiedMethod,
+    sprayDailyLimitKobo,
     ...safe
   } = user;
   return safe;
@@ -129,4 +131,14 @@ export const SENSITIVE_RESPONSE_KEYS = new Set<string>([
   "ageVerifiedMethod",
   "age_verified_at",
   "age_verified_method",
+  // Spraying (phase 5): a saved card's encrypted authorization code, its card signature and any raw provider authorization
+  // code are secrets. The spray routes never return them; this strips them from any body that forgets. The daily limit
+  // column is private (the owner gets it as dailyLimitKobo).
+  "authEnc",
+  "auth_enc",
+  "signature",
+  "authorizationCode",
+  "authorization_code",
+  "sprayDailyLimitKobo",
+  "spray_daily_limit_kobo",
 ]);
