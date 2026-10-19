@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import HostAvatar from "@/components/rooms/HostAvatar";
 import { XIcon } from "@/components/ui/icons";
@@ -7,6 +6,9 @@ import type { RoomMemberView } from "@/lib/roomReducer";
 
 export interface RequestsPanelProps {
   members: RoomMemberView[];
+  /** Rows already acted on (`kind:userId`), hidden until the server's next list or a refusal brings them back. Owned by the sheet so its badge counts the same rows. */
+  acted: ReadonlySet<string>;
+  onActed(key: string): void;
   hands: string[];
   asks: string[];
   liveVideo: boolean;
@@ -22,17 +24,13 @@ const nameOf = (m?: RoomMemberView) => (m ? m.displayName || m.organizationName 
 const FOCUS = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
 
 /** Raised hands and go-live asks in one queue, one tap to accept. A tapped row hides at once and the next room:stage / room:live settles it. */
-export default function RequestsPanel({ members, hands, asks, liveVideo, onAccept, onDismiss, onFailed }: RequestsPanelProps) {
+export default function RequestsPanel({ members, acted, onActed, hands, asks, liveVideo, onAccept, onDismiss, onFailed }: RequestsPanelProps) {
   const byId = new Map(members.map((m) => [m.userId, m]));
-  // Rows already acted on, hidden until the server's next list arrives (then the list itself is the truth again).
-  const [acted, setActed] = useState<Set<string>>(new Set());
-  const listKey = `${hands.join(",")}|${asks.join(",")}|${liveVideo}`;
-  useEffect(() => { setActed(new Set()); }, [listKey]);
   const queue = requestQueue(hands, asks, liveVideo, acted);
 
   const act = (item: RequestItem, fn: (i: RequestItem) => boolean) => {
     if (!fn(item)) { onFailed(CONTROLS_COPY.sendFailed); return; }
-    setActed((s) => new Set(s).add(`${item.kind}:${item.userId}`));
+    onActed(`${item.kind}:${item.userId}`);
   };
 
   if (queue.length === 0) {

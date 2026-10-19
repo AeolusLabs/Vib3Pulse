@@ -1,5 +1,6 @@
 // Pure rules and copy for the host Controls sheet (task 3.4). No React, no network: tested by scripts/test-rooms-unit-controls.ts.
 // The server is the gate (PATCH /api/rooms/:id, the room:mod / room:stage / room:live handlers); this only decides what to offer.
+import { ROOM_LIMITS, SLOW_MODES } from "@shared/rooms";
 
 export type ControlsRole = "host" | "cohost";
 export type ControlsTab = "requests" | "stage" | "people" | "settings";
@@ -8,9 +9,9 @@ type MemberRole = "host" | "cohost" | "guest";
 export const CONTROLS_TABS: readonly ControlsTab[] = ["requests", "stage", "people", "settings"];
 export const TAB_LABEL: Record<ControlsTab, string> = { requests: "Requests", stage: "Stage", people: "People", settings: "Settings" };
 
-/** Mirrors SLOW_MODES and ROOM_LIMITS.pinned in shared/rooms.ts (task 3.1). The server validates either way. */
-export const SLOW_MODE_OPTIONS = [0, 5, 15, 30] as const;
-export const PINNED_MAX = 200;
+/** The one definition lives in shared/rooms.ts (SLOW_MODES, ROOM_LIMITS.pinned); the server validates either way. */
+export const SLOW_MODE_OPTIONS = SLOW_MODES;
+export const PINNED_MAX: number = ROOM_LIMITS.pinned;
 export const slowModeLabel = (sec: number) => (sec === 0 ? "Off" : `${sec}s`);
 
 /** What each role may do from the Controls sheet. A co-host gets the same four tabs, but Settings shows only the pinned message. */
@@ -91,6 +92,18 @@ export function pendingSettled(server: HostSettings, pending: SettingsPatch | nu
   return (Object.keys(pending) as Array<keyof HostSettings>).every((k) => server[k] === pending[k]);
 }
 
+/** The pending settings without these keys (a refused or timed-out save drops only its own fields). Null when nothing is left. */
+export function withoutKeys(pending: SettingsPatch | null, keys: readonly (keyof HostSettings)[]): SettingsPatch | null {
+  if (!pending) return null;
+  const next: SettingsPatch = { ...pending };
+  for (const k of keys) delete next[k];
+  return Object.keys(next).length ? next : null;
+}
+
+/** The pending keys the server already shows (room:settings arrived for them). */
+export const settledKeys = (server: HostSettings, pending: SettingsPatch | null): (keyof HostSettings)[] =>
+  pending ? (Object.keys(pending) as Array<keyof HostSettings>).filter((k) => server[k] === pending[k]) : [];
+
 /** After this long without a matching room:settings, the server's value is shown again (the UI never claims a change for long). */
 export const RECONCILE_MS = 1000;
 
@@ -163,7 +176,7 @@ export function moneyPlaceholderVisible(v: { role: ControlsRole; flags: { paidRo
 export const CONTROLS_COPY = {
   title: "Controls",
   hostSub: "Run the room. If you close this page the room ends shortly after.",
-  cohostSub: "Help the host with requests, the stage and the people in the room.",
+  cohostSub: "Help the host with requests, the stage, people and the pinned message.",
   requestsEmpty: "No requests right now.",
   requestsEmptySub: "Raised hands and go-live asks show up here.",
   oneOnCamera: "Only one person can be on camera at a time. Accepting someone else switches the picture.",
@@ -174,7 +187,7 @@ export const CONTROLS_COPY = {
   slowModeLabel: "Slow mode",
   slowModeNote: "How long people wait between chat messages. You and your co-hosts are never slowed.",
   lockLabel: "Lock the room",
-  lockNote: "No one new can join. People already in, co-hosts and anyone holding your invite can still come back.",
+  lockNote: "No one new can join. People here now stay. Someone who left can come back within 2 minutes.",
   voiceLabel: "Voice",
   liveLabel: "Live video",
   moneyLabel: "Paid entry and spray",

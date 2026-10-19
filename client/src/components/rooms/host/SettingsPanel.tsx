@@ -4,8 +4,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  CONTROLS_COPY, PINNED_MAX, RECONCILE_MS, SLOW_MODE_OPTIONS, controlsFor, isEmptyPatch, mergeOptimistic, normalizePinned, pendingSettled,
-  settingsErrorMessage, settingsPatch, slowModeLabel, type ControlsRole, type HostSettings, type SettingsPatch,
+  CONTROLS_COPY, PINNED_MAX, RECONCILE_MS, SLOW_MODE_OPTIONS, controlsFor, isEmptyPatch, mergeOptimistic, normalizePinned, settledKeys,
+  settingsErrorMessage, settingsPatch, slowModeLabel, withoutKeys, type ControlsRole, type HostSettings, type SettingsPatch,
 } from "@/lib/hostControls";
 
 export interface SettingsPanelProps {
@@ -29,6 +29,9 @@ export interface SettingsPanelProps {
 const FOCUS = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
 const ROW = "flex min-h-[56px] items-center justify-between gap-4 rounded-2xl border bg-muted px-3.5 py-2";
 
+// A whole switch row is the tap target (a 44 px label), not just the small switch.
+const ROW_LABEL = `${ROW} cursor-pointer`;
+
 /**
  * Room settings. Changes show at once and settle on the server's room:settings (which everyone in the room gets); if that
  * has not arrived within about a second the server's value shows again, and a refused save puts it back with a plain line.
@@ -37,23 +40,34 @@ export default function SettingsPanel({ role, settings, onSave, voiceEnabled, li
   const can = controlsFor(role);
   const ids = useId();
   const [pending, setPending] = useState<SettingsPatch | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout>>();
-  useEffect(() => () => clearTimeout(timer.current), []);
-  useEffect(() => { if (pending && pendingSettled(settings, pending)) { clearTimeout(timer.current); setPending(null); } }, [settings, pending]);
+  // Saves can overlap (a chip tap while the pinned message is still sending). Each save owns its own timer and its own keys:
+  // a refusal or a timeout takes back only that save's fields, and only if no newer save has since asked for the same field.
+  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  const latest = useRef<Partial<Record<keyof HostSettings, number>>>({});
+  const saveSeq = useRef(0);
+  useEffect(() => () => { timers.current.forEach(clearTimeout); }, []);
+  useEffect(() => {
+    const done = settledKeys(settings, pending);
+    if (done.length) setPending((p) => withoutKeys(p, done));
+  }, [settings, pending]);
   const shown = mergeOptimistic(settings, pending);
 
   const save = async (draft: SettingsPatch) => {
     const patch = settingsPatch(shown, draft, role);
     if (isEmptyPatch(patch)) return true;
-    clearTimeout(timer.current);
+    const id = ++saveSeq.current;
+    const keys = Object.keys(patch) as Array<keyof HostSettings>;
+    for (const k of keys) latest.current[k] = id;
+    const dropMine = () => setPending((p) => withoutKeys(p, keys.filter((k) => latest.current[k] === id)));
     setPending((p) => ({ ...(p ?? {}), ...patch }));
     const err = await onSave(patch);
     if (err !== null) {
-      setPending(null);
+      dropMine();
       onMessage(settingsErrorMessage(err));
       return false;
     }
-    timer.current = setTimeout(() => setPending(null), RECONCILE_MS);
+    const t = setTimeout(() => { timers.current.delete(t); dropMine(); }, RECONCILE_MS);
+    timers.current.add(t);
     return true;
   };
 
@@ -132,33 +146,33 @@ export default function SettingsPanel({ role, settings, onSave, voiceEnabled, li
       )}
 
       {can.lockRoom && (
-        <div className={ROW}>
+        <label htmlFor={`${ids}-lock`} className={ROW_LABEL}>
           <div className="min-w-0">
-            <Label htmlFor={`${ids}-lock`} className="font-semibold">{CONTROLS_COPY.lockLabel}</Label>
-            <p id={`${ids}-lock-note`} className="text-xs text-muted-foreground">{CONTROLS_COPY.lockNote}</p>
+            <span id={`${ids}-lock-t`} className="block font-semibold">{CONTROLS_COPY.lockLabel}</span>
+            <span id={`${ids}-lock-note`} className="block text-xs text-muted-foreground">{CONTROLS_COPY.lockNote}</span>
           </div>
-          <Switch id={`${ids}-lock`} checked={shown.locked} onCheckedChange={(v) => void save({ locked: v })} aria-describedby={`${ids}-lock-note`} data-testid="switch-lock" />
-        </div>
+          <Switch id={`${ids}-lock`} checked={shown.locked} onCheckedChange={(v) => void save({ locked: v })} aria-labelledby={`${ids}-lock-t`} aria-describedby={`${ids}-lock-note`} data-testid="switch-lock" />
+        </label>
       )}
 
       {can.switchVoice && (
-        <div className={ROW}>
+        <label htmlFor={`${ids}-voice`} className={ROW_LABEL}>
           <div className="min-w-0">
-            <Label htmlFor={`${ids}-voice`} className="font-semibold">{CONTROLS_COPY.voiceLabel}</Label>
-            <p className="text-xs text-muted-foreground">{voiceEnabled ? "The room can hear the host, co-hosts and whoever has the mic." : "Switch on to talk to the room."}</p>
+            <span id={`${ids}-voice-t`} className="block font-semibold">{CONTROLS_COPY.voiceLabel}</span>
+            <span id={`${ids}-voice-note`} className="block text-xs text-muted-foreground">{voiceEnabled ? "The room can hear the host, co-hosts and whoever has the mic." : "Switch on to talk to the room."}</span>
           </div>
-          <Switch id={`${ids}-voice`} checked={voiceAsk ?? voiceEnabled} disabled={voiceAsk !== null} onCheckedChange={(v) => void switchVoice(v)} data-testid="switch-voice" />
-        </div>
+          <Switch id={`${ids}-voice`} checked={voiceAsk ?? voiceEnabled} disabled={voiceAsk !== null} onCheckedChange={(v) => void switchVoice(v)} aria-labelledby={`${ids}-voice-t`} aria-describedby={`${ids}-voice-note`} data-testid="switch-voice" />
+        </label>
       )}
 
       {can.switchLive && (
-        <div className={ROW}>
+        <label htmlFor={`${ids}-live`} className={ROW_LABEL}>
           <div className="min-w-0">
-            <Label htmlFor={`${ids}-live`} className="font-semibold">{CONTROLS_COPY.liveLabel}</Label>
-            <p className="text-xs text-muted-foreground">{!voiceEnabled ? "Needs voice on first." : liveVideo ? "One person at a time streams their camera and mic." : "Switch on to let someone stream to the room."}</p>
+            <span id={`${ids}-live-t`} className="block font-semibold">{CONTROLS_COPY.liveLabel}</span>
+            <span id={`${ids}-live-note`} className="block text-xs text-muted-foreground">{!voiceEnabled ? "Needs voice on first." : liveVideo ? "One person at a time streams their camera and mic." : "Switch on to let someone stream to the room."}</span>
           </div>
-          <Switch id={`${ids}-live`} checked={liveAsk ?? liveVideo} disabled={liveAsk !== null || (!voiceEnabled && !liveVideo)} onCheckedChange={(v) => void switchLive(v)} data-testid="switch-live-video" />
-        </div>
+          <Switch id={`${ids}-live`} checked={liveAsk ?? liveVideo} disabled={liveAsk !== null || (!voiceEnabled && !liveVideo)} onCheckedChange={(v) => void switchLive(v)} aria-labelledby={`${ids}-live-t`} aria-describedby={`${ids}-live-note`} data-testid="switch-live-video" />
+        </label>
       )}
 
       {showMoney && (

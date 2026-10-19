@@ -31,6 +31,8 @@ interface Props {
    * left out here. Everything else (on the mic, on the screen, take the mic, stop) is the same panel.
    */
   inTabs?: boolean;
+  /** In the Controls tabs, the viewer is the host (who can switch voice and live video on in Settings). */
+  hostInTabs?: boolean;
   /** Extra buttons on a speaker's row (the Controls sheet adds Make co-host for the host). */
   speakerExtra?: (m: RoomMemberView) => ReactNode;
 }
@@ -38,7 +40,7 @@ interface Props {
 const nameOf = (m?: RoomMemberView) => (m ? m.displayName || m.organizationName || m.username || "Guest" : "Someone");
 
 /** Host and co-host view of the mic: who is asking, who is speaking. You can also give the mic to anyone from the member list. */
-export default function StagePanel({ members, stage, hands, voiceEnabled, canSwitchVoice, onSwitch, onStage, liveVideo, holder, liveAsks, canSwitchLive, onSwitchLive, onLive, holderAwayLeftMs, inTabs = false, speakerExtra }: Props) {
+export default function StagePanel({ members, stage, hands, voiceEnabled, canSwitchVoice, onSwitch, onStage, liveVideo, holder, liveAsks, canSwitchLive, onSwitchLive, onLive, holderAwayLeftMs, inTabs = false, hostInTabs = false, speakerExtra }: Props) {
   const byId = new Map(members.map((m) => [m.userId, m]));
   const speakers = stage.map((id) => byId.get(id)).filter(Boolean) as RoomMemberView[];
   const asking = hands.map((id) => byId.get(id)).filter(Boolean) as RoomMemberView[];
@@ -49,7 +51,7 @@ export default function StagePanel({ members, stage, hands, voiceEnabled, canSwi
       <div className="flex items-center justify-between gap-4">
         <div>
           <h2 className="text-sm font-semibold">Voice</h2>
-          <p className="text-xs text-muted-foreground">{voiceEnabled ? "The room can hear you. Give the mic to anyone you choose." : inTabs ? "Voice is off. The host can switch it on in Settings." : "Switch on to talk to the room."}</p>
+          <p className="text-xs text-muted-foreground">{voiceEnabled ? "The room can hear you. Give the mic to anyone you choose." : inTabs ? (hostInTabs ? "Voice is off. Switch it on in Settings." : "Voice is off. The host can switch it on in Settings.") : "Switch on to talk to the room."}</p>
         </div>
         {canSwitchVoice && !inTabs && <><Label htmlFor="voice-switch" className="sr-only">Voice</Label><Switch id="voice-switch" checked={voiceEnabled} onCheckedChange={onSwitch} data-testid="switch-voice" /></>}
       </div>
@@ -87,7 +89,7 @@ export default function StagePanel({ members, stage, hands, voiceEnabled, canSwi
             <div className="flex items-center justify-between gap-4">
               <div>
                 <h3 className="text-sm font-semibold">Live video</h3>
-                <p className="text-xs text-muted-foreground">{liveVideo ? "One person at a time can stream their camera and mic to the screen." : inTabs ? "Live video is off. The host can switch it on in Settings." : "Switch on to let someone stream to the room."}</p>
+                <p className="text-xs text-muted-foreground">{liveVideo ? "One person at a time can stream their camera and mic to the screen." : inTabs ? (hostInTabs ? "Live video is off. Switch it on in Settings." : "Live video is off. The host can switch it on in Settings.") : "Switch on to let someone stream to the room."}</p>
               </div>
               {canSwitchLive && !inTabs && <><Label htmlFor="live-switch" className="sr-only">Live video</Label><Switch id="live-switch" checked={liveVideo} onCheckedChange={onSwitchLive} data-testid="switch-live-video" /></>}
             </div>

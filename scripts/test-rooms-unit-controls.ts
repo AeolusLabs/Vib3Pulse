@@ -4,8 +4,10 @@ import { readFileSync } from "node:fs";
 import {
   CONTROLS_COPY, CONTROLS_TABS, DEFAULT_SETTINGS, PINNED_MAX, SLOW_MODE_OPTIONS, TAB_LABEL, canModerate, controlsFor, endRoomCopy, isEmptyPatch,
   mergeOptimistic, moneyPlaceholderVisible, normalizePinned, pendingSettled, personActions, readSettings, requestQueue, roleChange,
-  settingsErrorMessage, settingsPatch, slowModeLabel,
+  settingsErrorMessage, settingsPatch, settledKeys, slowModeLabel, withoutKeys,
 } from "../client/src/lib/hostControls";
+import { ROOM_LIMITS, SLOW_MODES } from "../shared/rooms";
+import { personReportErrorToast, reportErrorToast } from "../client/src/lib/roomShell";
 import { initialRoomState, roomReducer } from "../client/src/lib/roomReducer";
 import { fixtureControlsState, parseControlsFixture, parseFixtureQuery } from "../client/src/lib/roomFixtures";
 
@@ -158,6 +160,67 @@ test("controls fixture: parses host/cohost only, and seeds requests and settings
   assert.equal(requestQueue(h.hands, h.asks, h.liveVideo).length, 3);
   assert.deepEqual(readSettings(h.room), { pinnedMessage: "House rules: be kind, no spam.", slowModeSec: 5, locked: false });
   assert.equal(fixtureControlsState("cohost").you?.role, "cohost");
+});
+
+
+// ---------------------------------------------------------------- fix round (3f)
+const src = (f: string) => readFileSync(new URL(`../client/src/${f}`, import.meta.url), "utf8");
+test("limits are the shared ones, not copies", () => {
+  assert.deepEqual([...SLOW_MODE_OPTIONS], [...SLOW_MODES]);
+  assert.equal(PINNED_MAX, ROOM_LIMITS.pinned);
+  assert.ok(!/PINNED_MAX\s*(:\s*number\s*)?=\s*\d/.test(src("lib/hostControls.ts")), "no literal copy of the pinned limit");
+});
+test("lock copy says what the server does: rejoin window is 2 minutes", () => {
+  assert.equal(CONTROLS_COPY.lockNote, "No one new can join. People here now stay. Someone who left can come back within 2 minutes.");
+  assert.equal(CONTROLS_COPY.cohostSub, "Help the host with requests, the stage, people and the pinned message.");
+  assert.ok(src("components/rooms/shell/RoomMoreSheet.tsx").includes('"Requests, stage, people and the pinned message"'));
+});
+test("overlapping saves: a failed save drops only its own keys", () => {
+  assert.deepEqual(withoutKeys({ locked: true, slowModeSec: 5 }, ["locked"]), { slowModeSec: 5 });
+  assert.equal(withoutKeys({ locked: true }, ["locked"]), null);
+  assert.equal(withoutKeys(null, ["locked"]), null);
+  assert.deepEqual(settledKeys({ ...DEFAULT_SETTINGS, locked: true }, { locked: true, slowModeSec: 5 }), ["locked"]);
+  assert.deepEqual(settledKeys(DEFAULT_SETTINGS, null), []);
+  const panel = src("components/rooms/host/SettingsPanel.tsx");
+  assert.ok(panel.includes("latest.current[k] === id") && panel.includes("timers.current.forEach(clearTimeout)"), "per-save keys and timers cleared on unmount");
+  assert.ok(!panel.includes("setPending(null)"), "no save wipes everyone's pending fields");
+});
+test("a refusal is shown: the sheet watches the notice and brings the refused row back", () => {
+  const sheet = src("components/rooms/host/ControlsSheet.tsx");
+  assert.ok(sheet.includes("NOTICE_MESSAGE[state.notice?.code") && sheet.includes("CONTROLS_COPY.sendFailed"));
+  assert.ok(sheet.includes("|${noticeN}`"), "the notice counter is part of the list key, so hidden rows reset");
+  assert.ok(sheet.includes("requestQueue(state.hands, state.asks, state.liveVideo, acted)"), "the badge counts the same rows as the list");
+  const req = src("components/rooms/host/RequestsPanel.tsx");
+  assert.ok(req.includes("acted: ReadonlySet<string>") && !req.includes("useState"));
+});
+test("Make co-host is reachable from the People tab for the host only", () => {
+  const sheet = src("components/rooms/host/ControlsSheet.tsx");
+  assert.ok(sheet.includes("roleExtra={can.makeCohost ? roleButton : undefined}"));
+  assert.ok(src("components/rooms/host/PeoplePanel.tsx").includes("roleExtra(m)"));
+  assert.equal(roleChange("host", { userId: "g", role: "guest" }, "h"), "make-cohost");
+  assert.equal(roleChange("cohost", { userId: "g", role: "guest" }, "c"), null);
+});
+test("tabs keep Settings mounted, one focus mark, whole switch row is the target", () => {
+  const sheet = src("components/rooms/host/ControlsSheet.tsx");
+  assert.ok(/value="settings" forceMount/.test(sheet));
+  assert.ok(sheet.includes("focus-visible:ring-0"));
+  const panel = src("components/rooms/host/SettingsPanel.tsx");
+  assert.equal((panel.match(/<label htmlFor=/g) ?? []).length, 3, "lock, voice and live rows are labels");
+  assert.ok(panel.includes("cursor-pointer") && panel.includes("min-h-[56px]"));
+});
+test("ending the room refreshes the Rooms lists", () => {
+  assert.ok(src("components/rooms/host/EndRoomDialog.tsx").includes('invalidateQueries({ queryKey: ["/api/rooms"] })'));
+});
+test("stage tab voice-off copy: host is told Settings, co-host is told the host can", () => {
+  const stage = src("components/rooms/StagePanel.tsx");
+  assert.ok(stage.includes("Voice is off. Switch it on in Settings.") && stage.includes("Voice is off. The host can switch it on in Settings."));
+  assert.ok(src("components/rooms/host/ControlsSheet.tsx").includes('hostInTabs={role === "host"}'));
+});
+test("reporting a person has its own 409 copy; the room report is unchanged", () => {
+  assert.deepEqual(personReportErrorToast("You already reported this"), { title: "You already reported them." });
+  assert.deepEqual(personReportErrorToast("boom"), { title: "Couldn't send report", description: "boom" });
+  assert.deepEqual(reportErrorToast("You already reported this"), { title: "You already reported this room." });
+  assert.ok(src("components/rooms/host/PeoplePanel.tsx").includes("personReportErrorToast"));
 });
 
 // ---------------------------------------------------------------- copy and house rules

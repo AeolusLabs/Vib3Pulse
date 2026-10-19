@@ -1,11 +1,11 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import HostAvatar from "@/components/rooms/HostAvatar";
 import { ROOM_REPORT_REASONS } from "@/components/rooms/shell/RoomMoreSheet";
 import { BanIcon, ChevronDownIcon, FlagIcon, UserXIcon, VolumeXIcon } from "@/components/ui/icons";
 import { apiRequest } from "@/lib/queryClient";
-import { reportErrorToast, orderPeople } from "@/lib/roomShell";
+import { personReportErrorToast, orderPeople } from "@/lib/roomShell";
 import { CONTROLS_COPY, personActions, type ControlsRole } from "@/lib/hostControls";
 import type { ModAction } from "@/hooks/useRoomSocket";
 import type { RoomMemberView } from "@/lib/roomReducer";
@@ -22,6 +22,8 @@ export interface PeoplePanelProps {
   /** The existing moderation over the room socket (room:mod). False when the socket is down. */
   onMod(action: ModAction, targetId: string): boolean;
   onNotice(message: string): void;
+  /** Host only: Make co-host / Make guest for this person, whoever they are (not only people on the mic). */
+  roleExtra?: (m: RoomMemberView) => ReactNode;
 }
 
 const nameOf = (m: RoomMemberView) => m.displayName || m.organizationName || m.username || "Guest";
@@ -32,7 +34,7 @@ const ACTION = `flex min-h-[44px] w-full items-center gap-3 rounded-xl px-3 text
  * Moderation: mute in chat, remove for 10 minutes, ban, report. The same socket actions and report endpoint as the avatar
  * sheet; the server re-checks each one (a co-host can only act on guests, nobody on the host).
  */
-export default function PeoplePanel({ roomId, inviteToken, role, selfId, members, memberCount, stage, onMod, onNotice }: PeoplePanelProps) {
+export default function PeoplePanel({ roomId, inviteToken, role, selfId, members, memberCount, stage, onMod, onNotice, roleExtra }: PeoplePanelProps) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [reportingId, setReportingId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -55,7 +57,7 @@ export default function PeoplePanel({ roomId, inviteToken, role, selfId, members
       onNotice("Report sent. Thanks, our team will look at it.");
       setReportingId(null);
     } catch (e) {
-      onNotice(reportErrorToast((e as Error)?.message).title);
+      onNotice(personReportErrorToast((e as Error)?.message).title);
     } finally {
       setSending(false);
     }
@@ -91,6 +93,7 @@ export default function PeoplePanel({ roomId, inviteToken, role, selfId, members
               </button>
               {open && (
                 <div id={regionId} role="group" aria-label={`Actions for ${name}`} className="space-y-0.5 px-2 pb-2">
+                  {roleExtra && <div className="[&>button]:w-full [&>button]:justify-start">{roleExtra(m)}</div>}
                   {actions.includes("mute") && <button type="button" className={ACTION} onClick={() => mod("mute", m)} data-testid={`people-mute-${m.userId}`}><VolumeXIcon className="h-4 w-4" aria-hidden />Mute in chat</button>}
                   {actions.includes("unmute") && <button type="button" className={ACTION} onClick={() => mod("unmute", m)} data-testid={`people-unmute-${m.userId}`}><VolumeXIcon className="h-4 w-4" aria-hidden />Let them chat again</button>}
                   {actions.includes("kick") && <button type="button" className={ACTION} onClick={() => mod("kick", m)} data-testid={`people-kick-${m.userId}`}><UserXIcon className="h-4 w-4" aria-hidden />{CONTROLS_COPY.kick}</button>}
