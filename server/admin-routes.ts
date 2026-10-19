@@ -4,7 +4,7 @@ import crypto from "crypto";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import { Pool } from "pg";
-import { storage, pool } from "./storage";
+import { storage, pool, RoomMoneyRecordsError } from "./storage";
 import { toPublicUser, toPublicAdminUser } from "./auth";
 import { invalidateCache, postsCache, eventsCache, storiesCache } from "./cache";
 import { insertAdminUserSchema, adminRoles, type AdminRole } from "@shared/schema";
@@ -874,6 +874,8 @@ export function setupAdminRoutes(app: Express) {
 
       res.json({ message: "User deleted" });
     } catch (error) {
+      // Paid rooms: money records (room tickets, payouts) are never deleted; the admin is told why in plain words.
+      if (error instanceof RoomMoneyRecordsError) return res.status(409).json({ message: error.message, code: error.code });
       res.status(500).json({ message: "Failed to delete user" });
     }
   });

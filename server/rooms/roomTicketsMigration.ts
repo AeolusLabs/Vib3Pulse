@@ -5,8 +5,11 @@
 //
 // Money columns are integer kobo. A paid ticket is unique per (room, person) while it is paid; provider_ref (the payment
 // reference) is unique for ever, which is what makes issuing a ticket idempotent.
-// room_payouts keeps its room and host references WITHOUT cascade on purpose: a money record must never vanish because a
-// room or an account row was deleted.
+// room_payouts keeps its room and host references WITHOUT cascade on purpose, and room_tickets references its room and
+// buyer ON DELETE RESTRICT: a money record must never vanish because a room or an account row was deleted
+// (storage.deleteUser refuses first with RoomMoneyRecordsError). A database that already has room_tickets from the earlier
+// CASCADE draft (a scratch test database only; never applied for real) keeps its old foreign keys under CREATE TABLE IF NOT
+// EXISTS: rebuild it with drizzle-kit push (schema.ts says restrict) or drop the table before applying.
 
 export const ROOM_TICKETS_SCHEMA_SQL = `
 ALTER TABLE rooms ADD COLUMN IF NOT EXISTS ticket_price_kobo integer;
@@ -25,8 +28,8 @@ DO $$ BEGIN
 END $$;
 CREATE TABLE IF NOT EXISTS room_tickets (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  room_id varchar NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
-  user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  room_id varchar NOT NULL REFERENCES rooms(id) ON DELETE RESTRICT,
+  user_id varchar NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
   amount_kobo integer NOT NULL,
   vat_kobo integer NOT NULL,
   fee_kobo integer NOT NULL,

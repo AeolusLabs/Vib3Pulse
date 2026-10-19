@@ -1207,8 +1207,10 @@ export type RoomMember = typeof roomMembers.$inferSelect;
 // never from the client. Also created by migrations/add_room_tickets.sql and ensureSchema (same constraint names).
 export const roomTickets = pgTable("room_tickets", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  roomId: varchar("room_id").notNull().references(() => rooms.id, { onDelete: "cascade" }),
-  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  // RESTRICT, never cascade: a ticket is a money record and must outlive any attempt to hard-delete its room or buyer
+  // (storage.deleteUser refuses first with a clear error, see RoomMoneyRecordsError).
+  roomId: varchar("room_id").notNull().references(() => rooms.id, { onDelete: "restrict" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
   amountKobo: integer("amount_kobo").notNull(),
   vatKobo: integer("vat_kobo").notNull(),
   feeKobo: integer("fee_kobo").notNull(),
@@ -1339,7 +1341,9 @@ export type VenueTicket = typeof venueTickets.$inferSelect;
 // Previously these were only ever console.error'd (oversell auto-refunds,
 // event cancellations). This table makes them queryable so finance/admin
 // can find and resolve them instead of relying on someone reading server logs.
-export const paymentIssueReasons = ["refund_failed", "payout_failed"] as const; // payout_failed: room payouts (server/rooms/settlement.ts)
+// payout_failed: room payouts (server/rooms/settlement.ts). room_charge_unhandled: a paid room ticket charge that could not
+// become a ticket or an automatic refund (server/rooms/tickets.ts openRoomChargeIssue): a person settles it in Paystack.
+export const paymentIssueReasons = ["refund_failed", "payout_failed", "room_charge_unhandled"] as const;
 export type PaymentIssueReason = typeof paymentIssueReasons[number];
 
 export const paymentIssues = pgTable("payment_issues", {
@@ -2060,6 +2064,7 @@ export const paymentTransactionTypes = [
   "venue_promotion",
   "social_promotion",
   "refund",
+  "room_ticket",        // paid room ticket sold (server/rooms/tickets.ts issueRoomTicket)
   "room_ticket_refund", // paid room ticket refunded (server/rooms/refunds.ts)
   "room_payout",        // host paid for a ticketed room (server/rooms/settlement.ts)
 ] as const;

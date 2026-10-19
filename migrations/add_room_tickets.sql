@@ -19,8 +19,8 @@ DO $$ BEGIN
 END $$;
 CREATE TABLE IF NOT EXISTS room_tickets (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  room_id varchar NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
-  user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  room_id varchar NOT NULL REFERENCES rooms(id) ON DELETE RESTRICT,
+  user_id varchar NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
   amount_kobo integer NOT NULL,
   vat_kobo integer NOT NULL,
   fee_kobo integer NOT NULL,
