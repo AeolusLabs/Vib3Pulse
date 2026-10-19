@@ -24,12 +24,54 @@ export type SlowMode = (typeof SLOW_MODES)[number];
 export const PINNED_INPUT_MAX = 2000;
 
 /**
- * Cuts text to ROOM_LIMITS.pinned characters (whole code points, so an emoji is never split) and trims it.
- * Empty gives null (no pinned message). The server runs this AFTER stripping HTML; the client can use it for previews.
+ * The user-perceived characters of `text` (grapheme clusters: a flag, a skin-toned emoji or a family emoji is ONE).
+ * Falls back to code points where Intl.Segmenter is missing (older browsers): never splits a surrogate pair either way.
+ */
+let segmenter: { segment(s: string): Iterable<{ segment: string }> } | null = null;
+function graphemeSegmenter(): typeof segmenter {
+  const Seg = typeof Intl !== "undefined" ? (Intl as any).Segmenter : undefined;
+  if (typeof Seg !== "function") return null; // looked up each time, so a missing Segmenter is never cached as present
+  if (!segmenter) {
+    try { segmenter = new Seg(undefined, { granularity: "grapheme" }); } catch { return null; }
+  }
+  return segmenter;
+}
+export function graphemes(text: string): string[] {
+  const seg = graphemeSegmenter();
+  if (seg) {
+    try { return Array.from(seg.segment(text), (s) => s.segment); } catch { /* fall back below */ }
+  }
+  return Array.from(text);
+}
+
+/**
+ * Cuts text to ROOM_LIMITS.pinned user-perceived characters (grapheme clusters, so no emoji, flag or accented letter is
+ * ever split) and trims it. Empty gives null (no pinned message). The server runs this AFTER stripping HTML and invisible
+ * characters; the client can use it for previews and counters.
  */
 export function cutPinned(text: string): string | null {
-  const t = Array.from(text.trim()).slice(0, ROOM_LIMITS.pinned).join("").trim();
+  const t = graphemes(text.trim()).slice(0, ROOM_LIMITS.pinned).join("").trim();
   return t ? t : null;
+}
+
+// Invisible characters that can reorder or hide text (bidi overrides and isolates, zero-width marks, BOM) and control
+// characters (C0 except tab and newline, DEL, C1). Built with RegExp so the TS target never parses the pattern.
+const INVISIBLE = new RegExp("[\\u0000-\\u0008\\u000B-\\u001F\\u007F-\\u009F\\u200B\\u200C\\u200E\\u200F\\u202A-\\u202E\\u2060\\u2066-\\u2069\\uFEFF]", "g");
+// The zero-width joiner (U+200D) is also invisible, but it is what glues emoji sequences together (a family, a profession,
+// a rainbow flag): it is kept only between two pictographs and removed everywhere else. Null where the engine lacks
+// Unicode property escapes: ZWJ is then left in place (it cannot reorder text, only join).
+const ZWJ: RegExp | null = (() => {
+  try { return new RegExp("(\\p{Extended_Pictographic}[\\uFE0F\\u{1F3FB}-\\u{1F3FF}]*)?\\u200D(?=(\\p{Extended_Pictographic})?)", "gu"); } catch { return null; }
+})();
+
+/**
+ * Removes bidi controls (U+202A-202E, U+2066-2069), zero-width characters (U+200B-200F, U+2060, U+FEFF; a ZWJ inside an
+ * emoji sequence stays) and control characters (C0 except tab and newline, DEL, C1). Used on every room text a person
+ * types: title, description, pinned message and chat (the server's plainText runs it).
+ */
+export function stripInvisible(text: string): string {
+  const out = text.replace(INVISIBLE, "");
+  return ZWJ ? out.replace(ZWJ, (m: string, before?: string, after?: string) => (before && after ? m : before ?? "")) : out;
 }
 
 /** The three host settings as the room shows them (WS `room:settings` and inside `room:state.room`). */

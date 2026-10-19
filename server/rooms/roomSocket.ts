@@ -9,7 +9,8 @@ import { HOST_LEAVE_GRACE_MS, MINORS_ROOM_WARNING, ROOM_LIMITS, ROOM_REACTIONS, 
 import { canHostRoom, canInteract, canJoinRoom } from "@shared/roomRules";
 import type { Room, User } from "@shared/schema";
 import * as rs from "./roomStorage";
-import { mutualFollow, plainText, sha256, viewerRoom, viewRoom } from "./roomAccess";
+import { mutualFollow, plainText, viewerRoom, viewRoom } from "./roomAccess";
+import { lockAdmits } from "./roomLock";
 import { getInviteState, markHostRoomsMinors, minorsGate, NO_INVITE, revokeInvite } from "./minorsRoom";
 import { roomHub, type HubMember } from "./RoomHub";
 import { TokenBucket } from "./rateLimit";
@@ -32,8 +33,13 @@ export const tuning = {
   playback: { rate: 4, burst: 8 },   // host play / pause / seek, plus a heartbeat every 5 s
   sweepMs: 10_000,                   // how often LiveKit is compared with the room (0 = off, for tests)
   kickMs: 10 * 60_000,               // a kick keeps the person out this long (a ban is forever)
-  lockRejoinMs: HOST_LEAVE_GRACE_MS, // a locked room still takes back someone who left (or dropped) this recently
+  // A locked room still takes back someone who left (or dropped) this recently. Keep kickMs >= lockRejoinMs: a kick that
+  // has run out must never leave the kicked person inside the rejoin window (asserted in test-rooms-ws-hostsettings.ts).
+  lockRejoinMs: HOST_LEAVE_GRACE_MS,
 };
+
+/** Test seams only (never set in production): lets a suite hold a join right after its fresh re-read. */
+export const testHooks: { afterFreshRead?: (roomId: string, userId: string) => Promise<void> } = {};
 
 const OPEN = 1;
 
@@ -45,6 +51,8 @@ type Buckets = { chat: TokenBucket; react: TokenBucket; join: TokenBucket; stage
 // Not cleared on leave: otherwise leave + rejoin would hand a spammer a fresh burst every cycle. Pruned by age instead.
 const buckets = new Map<string, Buckets>();
 const kicked = new Map<string, number>(); // `${roomId}:${userId}` -> until (ms)
+/** Kicked from this room and the kick has not run out yet (also checked by the co-host PATCH route). */
+export const isKicked = (roomId: string, userId: string) => (kicked.get(`${roomId}:${userId}`) ?? 0) > Date.now();
 const joinLocks = new Map<string, Promise<void>>(); // one join at a time per user
 const endTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const awayTimers = new Map<string, ReturnType<typeof setTimeout>>(); // `${roomId}:${userId}` of a holder whose connection dropped
@@ -79,6 +87,12 @@ function rememberSettings(roomId: string, s: RoomSettings) {
   }
   roomSettings.set(roomId, s);
 }
+
+/** Read-only views for the test suites (memory checks): nothing here can change state. */
+export const roomSocketInternals = {
+  hasSettings: (roomId: string) => roomSettings.has(roomId),
+  hasSlowClock: (roomId: string) => slowChats.has(roomId),
+};
 
 /** Tells everyone in the room the current settings (and records them for the chat and join paths). Call after every committed change. */
 export function notifySettings(room: Pick<Room, "id" | "pinnedMessage" | "slowModeSec" | "locked">): void {
@@ -326,6 +340,21 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
   const gate = canJoinRoom({ age: ageFromDob(user.dateOfBirth) }, room as any);
   if (!gate.ok) return refuse(ws, JOIN_AGE_CODES[gate.code]);
 
+  // Lock pre-check, BEFORE the joiner is taken out of the room they are in: someone the lock refuses must stay where they
+  // are. Same rule and exemptions as the authoritative check at the hub insert below, which still decides from fresh reads.
+  // The live copy is the newest value when there is one (written right after every committed change), else this row read.
+  if (!roomHub.get(roomId, userId) && (roomSettings.get(roomId)?.locked ?? room.locked) === true) {
+    // If the hub knows the room became a minors' room after this row was read, the minors' gate below must speak first
+    // (the lock never answers in its place there), so the pre-check stands aside.
+    if (room.minorsRoom || !roomHub.isMinorsRoom(roomId)) {
+      const age = ageFromDob(user.dateOfBirth);
+      // In a minors' room, viewRoom above only lets an adult through with an acknowledged personal invite.
+      const invite = room.minorsRoom && age !== null && age >= 18 ? { invited: true, acknowledged: true } : NO_INVITE;
+      const admits = lockAdmits({ userId, room, member, minorsRoom: room.minorsRoom, age, invite, now: Date.now(), rejoinMs: tuning.lockRejoinMs });
+      if (!admits) return refuse(ws, "ROOM_LOCKED");
+    }
+  }
+
   const current = roomHub.roomOf(userId);
   if (current && current !== roomId) await leaveRoom(userId, current); // one room at a time
 
@@ -341,6 +370,7 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
     if (userId === room.hostId) await endForHostReview(roomId).catch((e2) => console.error("[rooms] closing a room after a host lookup failure failed:", e2));
     throw e;
   });
+  if (testHooks.afterFreshRead) await testHooks.afterFreshRead(roomId, userId);
   const freshAge = ageFromDob(freshUser?.dateOfBirth);
   if (ws.readyState !== OPEN) return; // the socket died while we were checking: do not create a ghost
   if (!fresh || fresh.status === "ended") return refuse(ws, "ROOM_ENDED");
@@ -383,15 +413,14 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
   // Room lock, decided here next to the minors' gate: still no await from here to the hub insert. Only NEW joiners are
   // stopped (someone already in the hub is a second tab or a reconnect). A lock that committed while we were awaiting is in
   // the fresh row or in the live copy (notifySettings runs right after the write), so either one saying "locked" locks.
+  // Who still gets in (roomLock.ts): host, co-hosts, an acknowledged adult invite to a minors' room, a member of this live
+  // session back within the rejoin window. NOT the invite link: in an invite-only room every joiner holds it.
   if (!roomHub.get(roomId, userId) && (fresh.locked || roomSettings.get(roomId)?.locked === true)) {
-    const leftAt = freshMember?.leftAt ?? null;
-    // A member of this live session: never left, or left (or dropped) so recently that this is a reconnect.
-    const currentMember = !!freshMember && !freshMember.banned && (leftAt === null || Date.now() - new Date(leftAt).getTime() < tuning.lockRejoinMs);
-    const holdsInviteLink = fresh.visibility === "invite" && !!token && !!fresh.inviteTokenHash && sha256(token) === fresh.inviteTokenHash;
-    // An adult with an acknowledged personal invite to a minors' room (the minors' gate above has already checked it is valid).
-    const invitedAdult = (fresh.minorsRoom || roomHub.isMinorsRoom(roomId)) && freshAge !== null && freshAge >= 18 && freshInvite.invited && freshInvite.acknowledged;
-    const lockAdmits = userId === fresh.hostId || freshMember?.role === "cohost" || currentMember || holdsInviteLink || invitedAdult;
-    if (!lockAdmits) return refuse(ws, "ROOM_LOCKED");
+    const admits = lockAdmits({
+      userId, room: fresh, member: freshMember, minorsRoom: fresh.minorsRoom || roomHub.isMinorsRoom(roomId),
+      age: freshAge, invite: freshInvite, now: Date.now(), rejoinMs: tuning.lockRejoinMs,
+    });
+    if (!admits) return refuse(ws, "ROOM_LOCKED");
   }
 
   const role = userId === fresh.hostId ? "host" : freshMember?.role === "cohost" ? "cohost" : "guest";
@@ -472,7 +501,12 @@ export async function applyMod(roomId: string, action: ModAction, targetId: stri
     // Even if they are not in the room right now: a token they still hold must not get them back into the audio.
     if (!tm) await getVoiceService()?.removeParticipant(roomId, targetId).catch((e) => console.error("[voice] removeParticipant failed:", e?.message ?? e));
   }
-  if (action === "kick") kicked.set(`${roomId}:${targetId}`, Date.now() + tuning.kickMs);
+  if (action === "kick") {
+    kicked.set(`${roomId}:${targetId}`, Date.now() + tuning.kickMs);
+    // A kicked co-host comes back (if ever) as a guest: no pinned-message edits, no co-host pass through a lock.
+    await dropCohostRole(roomId, targetId);
+    if (tm && tm.role === "cohost") tm.role = "guest";
+  }
   if (tm) {
     tm.send({ type: "room:mod", action, targetId }); // the target hears it before being removed
     roomHub.broadcast(roomId, { type: "room:mod", action, targetId }, targetId);

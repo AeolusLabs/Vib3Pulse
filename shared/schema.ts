@@ -1145,7 +1145,7 @@ export const rooms = pgTable("rooms", {
   // Phase 3 host settings. Pinned message is plain text, at most 200 characters (made so by the server, never HTML).
   pinnedMessage: text("pinned_message"),
   slowModeSec: integer("slow_mode_sec").notNull().default(0), // one of SLOW_MODES (shared/rooms.ts); host and co-hosts exempt
-  locked: boolean("locked").notNull().default(false),        // no NEW joiners (host, co-hosts, current members, invite holders still get in)
+  locked: boolean("locked").notNull().default(false),        // no NEW joiners (host, co-hosts, members back within the rejoin window, acknowledged adult invites still get in; the invite link does not)
   // Phase 3.7: claimed (set) once by the reminder job so two server instances cannot both send the 15-minute reminders.
   reminderNotifiedAt: timestamp("reminder_notified_at"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
@@ -1160,6 +1160,8 @@ export const roomReminders = pgTable("room_reminders", {
   notifiedAt: timestamp("notified_at"),
 }, (t) => ({
   pk: primaryKey({ columns: [t.roomId, t.userId] }),
+  // Also created by migrations/add_room_reminders.sql and ensureSchema; declared here so drizzle-kit push keeps it.
+  userIdx: index("room_reminders_user_idx").on(t.userId),
 }));
 
 // A minors' room host's personal invite to one adult. Never a link: a link could be forwarded. The adult must also

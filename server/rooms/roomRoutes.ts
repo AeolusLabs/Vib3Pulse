@@ -23,7 +23,7 @@ import * as mr from "./minorsRoom";
 import { TokenBucket } from "./rateLimit";
 import { getVoiceService } from "./voice/voiceService";
 import { afterRoleChange, canCameraNow, canPublishNow, shutdownVoice, stopAllLive } from "./stage";
-import { applyMod, endRoom, enforceAgeLimit, expectHost, interactionVerdict, notifyScreen, removeFromMinorsRoom, writeRoomSettings } from "./roomSocket";
+import { applyMod, endRoom, enforceAgeLimit, expectHost, interactionVerdict, isKicked, notifyScreen, removeFromMinorsRoom, writeRoomSettings } from "./roomSocket";
 import { roomHub } from "./RoomHub";
 import { roomFeatures } from "./features";
 import { clearReminder, hasReminder, setReminder } from "./reminders";
@@ -59,6 +59,17 @@ async function hostCheck(host: User, input: { visibility: Room["visibility"]; ag
     input as any,
     { minAccountAgeDays: await getConfig("min_account_age_days") },
   );
+}
+
+/**
+ * The caller's own account age in whole days, and the admin-set minimum for hosting a public room (the same setting
+ * hostCheck uses for ACCOUNT_TOO_NEW), so the wizard can explain it before the first refusal. Not sensitive.
+ */
+async function hostingInfo(userId: string): Promise<{ accountAgeDays: number; minAccountAgeDays: number }> {
+  const [u, minAccountAgeDays] = await Promise.all([storage.getUser(userId), getConfig("min_account_age_days")]);
+  const created = u?.createdAt ? new Date(u.createdAt).getTime() : NaN;
+  const accountAgeDays = Number.isNaN(created) ? 0 : Math.max(0, Math.floor((Date.now() - created) / DAY_MS));
+  return { accountAgeDays, minAccountAgeDays: Number(minAccountAgeDays) || 0 };
 }
 
 async function notifyFollowers(room: Room, host: User): Promise<void> {
@@ -174,14 +185,21 @@ export function registerRoomRoutes(app: Express): void {
   });
 
   // ------------------------------------------------------------ config (must stay above /api/rooms/:id)
-  // Public switches and limits for any signed-in user. Only these fields: never secrets or provider keys.
-  app.get("/api/rooms/config", requireAuth, (_req, res) => {
-    res.json({
-      features: { paidRooms: roomFeatures.paidRooms, spray: roomFeatures.spray },
-      limits: ROOM_LIMITS,
-      currency: "NGN",
-      region: "NG",
-    });
+  // Public switches and limits for any signed-in user, plus the caller's own hosting numbers (host). Only these fields:
+  // never secrets or provider keys.
+  app.get("/api/rooms/config", requireAuth, async (req, res) => {
+    try {
+      res.json({
+        features: { paidRooms: roomFeatures.paidRooms, spray: roomFeatures.spray },
+        limits: ROOM_LIMITS,
+        currency: "NGN",
+        region: "NG",
+        host: await hostingInfo(req.user!.id),
+      });
+    } catch (e) {
+      console.error("[rooms] config failed:", e);
+      res.status(500).json({ message: "Failed to load rooms settings" });
+    }
   });
 
   // ------------------------------------------------------------ get
@@ -257,7 +275,8 @@ export function registerRoomRoutes(app: Express): void {
         const m = await rs.getMember(found.id, uid);
         const keys = Object.keys(b);
         const onlyPinned = keys.length > 0 && keys.every((k) => k === "pinnedMessage");
-        if (!m || m.banned || m.role !== "cohost" || !onlyPinned) return res.status(403).json({ message: "Only the host can do that." });
+        // A kick also resets the role to guest; the kick check covers a role write that failed or has not landed yet.
+        if (!m || m.banned || m.role !== "cohost" || !onlyPinned || isKicked(found.id, uid)) return res.status(403).json({ message: "Only the host can do that." });
         const hostRow = await storage.getUser(found.hostId);
         if (!hostRow) return res.status(404).json({ message: "Room not found" });
         ctx = { room: found, host: hostRow };

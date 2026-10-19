@@ -7,7 +7,7 @@ import { toPublicUser } from "../auth";
 import { isBlockedEitherWay } from "../utils/blocks";
 import { follows, type Room, type User } from "@shared/schema";
 import { ageFromDob } from "@shared/age";
-import { cutPinned, type MinorsRoomCode } from "@shared/rooms";
+import { cutPinned, stripInvisible, type MinorsRoomCode } from "@shared/rooms";
 import * as rs from "./roomStorage";
 import { getInviteState, minorsGate, NO_INVITE } from "./minorsRoom";
 
@@ -15,10 +15,12 @@ export const sha256 = (s: string) => crypto.createHash("sha256").update(s).diges
 
 /**
  * User-typed text that React will render as text. sanitizeTextOnly strips tags but leaves entities escaped
- * (`R&B` -> `R&amp;B`), which would show literally, so decode the five it produces.
+ * (`R&B` -> `R&amp;B`), which would show literally, so decode the five it produces. Then bidi overrides, zero-width
+ * characters and control characters are removed (stripInvisible), so a title, description, pinned message or chat line
+ * can never reorder or hide text.
  */
 export function plainText(input: string): string {
-  return sanitizeTextOnly(input).replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&").trim();
+  return stripInvisible(sanitizeTextOnly(input).replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&")).trim();
 }
 
 export function hostSummary(u: User) {

@@ -120,7 +120,17 @@ export const NOTICE_MESSAGE: Record<string, string> = {
   BAD_STATE: "That isn't possible right now.",
   BAD_REQUEST: "That didn't work.",
   HOST_REVIEW: HOST_REVIEW_COPY,
+  // Fallback only: a SLOW_MODE notice carries retryMs, so prefer slowModeMessage(retryMs) for the exact wait.
+  SLOW_MODE: "Slow mode is on. Try again in a few seconds.",
+  ROOM_LOCKED: DENIED_MESSAGE.ROOM_LOCKED,
 };
+
+/** Copy for a SLOW_MODE notice: "Slow mode is on. Try again in N seconds." (N from the server's retryMs, at least 1). */
+export function slowModeMessage(retryMs: number | undefined): string {
+  if (typeof retryMs !== "number" || !Number.isFinite(retryMs) || retryMs <= 0) return NOTICE_MESSAGE.SLOW_MODE;
+  const n = Math.max(1, Math.ceil(retryMs / 1000));
+  return `Slow mode is on. Try again in ${n} ${n === 1 ? "second" : "seconds"}.`;
+}
 
 /** Public switches and limits from GET /api/rooms/config. */
 export interface RoomsConfig {
@@ -128,6 +138,11 @@ export interface RoomsConfig {
   limits: typeof ROOM_LIMITS;
   currency: "NGN";
   region: "NG";
+  /**
+   * The caller's own hosting numbers: account age in whole days and the admin-set minimum to host a public room
+   * (below it the server answers ACCOUNT_TOO_NEW). Optional so older fixtures still type-check.
+   */
+  host?: { accountAgeDays: number; minAccountAgeDays: number };
 }
 
 export async function fetchRoomsConfig(): Promise<RoomsConfig> {

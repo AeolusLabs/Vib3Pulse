@@ -1,13 +1,14 @@
 // Durable room data. Live presence is NOT here (see RoomHub). All visibility rules for listings live in listRooms.
 import { and, eq, gt, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
 import { db } from "../storage";
-import { follows, roomMembers, rooms, users, type Room, type RoomMember } from "@shared/schema";
+import { follows, roomMembers, roomReminders, rooms, users, type Room, type RoomMember } from "@shared/schema";
 import type { RoomInput } from "@shared/rooms";
 import type { Screen } from "@shared/screen";
 import type { NowPlaying } from "@shared/playback";
 import { ageFromDob } from "@shared/age";
 import { blockedWith } from "../utils/blocks";
 import { ackedRoomIdsFor } from "./minorsRoom";
+import { NEVER_JOINED } from "./roomLock";
 
 export type RoomStatus = "scheduled" | "live" | "ended";
 export type MemberRole = "host" | "cohost" | "guest";
@@ -48,8 +49,12 @@ export type RoomPatch = Partial<Pick<Room, "title" | "description" | "ageLimit" 
 export async function updateRoom(id: string, patch: RoomPatch): Promise<Room> {
   // A different screen is a different thing to play: bump the version (a late playback message for the old one is then
   // ignored) and forget the old playback state.
-  const set = patch.screen !== undefined ? { ...patch, screenVersion: sql`${rooms.screenVersion} + 1`, nowPlaying: null } : patch;
-  const [row] = await db.update(rooms).set(set).where(eq(rooms.id, id)).returning();
+  let set: Record<string, unknown> = patch.screen !== undefined ? { ...patch, screenVersion: sql`${rooms.screenVersion} + 1`, nowPlaying: null } : { ...patch };
+  // A new start time is a new reminder: the room is claimable again and everyone who asked is told again with the new time.
+  const rescheduled = patch.scheduledFor !== undefined;
+  if (rescheduled) set = { ...set, reminderNotifiedAt: null };
+  const [row] = await db.update(rooms).set(set as Partial<Room>).where(eq(rooms.id, id)).returning();
+  if (rescheduled && row) await db.update(roomReminders).set({ notifiedAt: null }).where(eq(roomReminders.roomId, id));
   return row;
 }
 
@@ -216,12 +221,16 @@ export async function markLeft(roomId: string, userId: string): Promise<void> {
     .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId), isNull(roomMembers.leftAt)));
 }
 
-/** Creates the row if the user never joined, so a host can ban someone before they arrive. */
+/**
+ * Creates the row if the user never joined, so a host can ban someone before they arrive. Such a row carries NEVER_JOINED
+ * as joined_at and left_at: it never counts as a member of the live session (no pass through a locked room), and a real
+ * join later (upsertMember) starts joined_at afresh because left_at is set.
+ */
 export async function setMemberFlag(roomId: string, userId: string, flags: { muted?: boolean; banned?: boolean }): Promise<RoomMember> {
   const set: Partial<RoomMember> = {};
   if (flags.muted !== undefined) set.muted = flags.muted;
   if (flags.banned !== undefined) set.banned = flags.banned;
-  const [row] = await db.insert(roomMembers).values({ roomId, userId, leftAt: new Date(), ...set })
+  const [row] = await db.insert(roomMembers).values({ roomId, userId, joinedAt: NEVER_JOINED, leftAt: NEVER_JOINED, ...set })
     .onConflictDoUpdate({ target: [roomMembers.roomId, roomMembers.userId], set: Object.keys(set).length ? set : { role: sql`${roomMembers.role}` } })
     .returning();
   return row;
