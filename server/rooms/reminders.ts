@@ -54,7 +54,7 @@ async function notifyRoom(room: Room, now: Date): Promise<number> {
   const rows = await db.select({ userId: roomReminders.userId }).from(roomReminders).where(eq(roomReminders.roomId, room.id));
   const ids = new Set<string>([room.hostId, ...rows.map((r) => r.userId)]);
   let sent = 0;
-  for (const userId of ids) {
+  for (const userId of Array.from(ids)) {
     try {
       // Checked now, not when the reminder was set: someone who lost access (blocked, ban, revoked invite, lost the
       // friendship) gets nothing, and in a minors' room an adult without an acknowledged invite never does. The title
