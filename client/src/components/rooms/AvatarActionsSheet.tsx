@@ -14,7 +14,8 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { ROOM_REACTIONS } from "@shared/rooms";
 import type { RoomMemberView } from "@/lib/roomReducer";
 import type { ModAction } from "@/hooks/useRoomSocket";
-import { BanIcon, FlagIcon, MessageCircleIcon, SendIcon, UserIcon, UserXIcon, VolumeXIcon } from "@/components/ui/icons";
+import { BanIcon, FlagIcon, MessageCircleIcon, SendIcon, SparklesIcon, UserIcon, UserXIcon, VolumeXIcon } from "@/components/ui/icons";
+import { AMBER } from "@/lib/roomTickets";
 
 export interface AvailableActions { interact: boolean; dm: boolean; invite: boolean; /** False when either of you has blocked the other. */ profile: boolean }
 
@@ -38,6 +39,11 @@ interface Props {
   canViewProfile?: boolean;
   /** Opened from another sheet (People): where focus goes when this closes. Null keeps Radix's default (the avatar tapped). */
   returnFocusTo?: () => HTMLElement | null;
+  /**
+   * Phase 5: spray this person. Given ONLY when the viewer has the room's spray block and this person is a current spray
+   * target (the host or someone on stage the server listed). The server checks everything again at payment.
+   */
+  onSpray?: () => void;
 }
 
 const REPORT_REASONS = ["Harassment or abuse", "Hate", "Sexual content", "Spam", "Seems underage", "Something else"];
@@ -47,7 +53,7 @@ const nameOf = (m: RoomMemberView) => m.displayName || m.organizationName || m.u
  * What you can do to someone in the room. The list of social actions comes from the server (it knows ages, follows and
  * privacy settings; the client doesn't and shouldn't), and the server re-checks every action again when it is used.
  */
-export default function AvatarActionsSheet({ open, onOpenChange, roomId, target, you, myRoomId, onInteract, onMod, locallyMuted, onToggleLocalMute, voiceOn, stage = [], onStage, canViewProfile = true, returnFocusTo }: Props) {
+export default function AvatarActionsSheet({ open, onOpenChange, roomId, target, you, myRoomId, onInteract, onMod, locallyMuted, onToggleLocalMute, voiceOn, stage = [], onStage, canViewProfile = true, returnFocusTo, onSpray }: Props) {
   const { toast } = useToast();
   const [, navigate] = useLocation();
   const [picking, setPicking] = useState(false);
@@ -122,6 +128,11 @@ export default function AvatarActionsSheet({ open, onOpenChange, roomId, target,
               </Button>
             )}
 
+            {!self && onSpray && (
+              <Button variant="ghost" className={rowCls} onClick={() => { close(); onSpray(); }} data-testid="action-spray">
+                <span className={`${AMBER.chip} h-6 w-6 justify-center p-0`} aria-hidden><SparklesIcon className="h-3.5 w-3.5" /></span>Spray {nameOf(target)}
+              </Button>
+            )}
             {!self && a?.interact && (
               <>
                 <Button variant="ghost" className={rowCls} onClick={() => { onInteract(target.userId, "wave"); close(); }} data-testid="action-wave"><span aria-hidden>👋</span>Wave</Button>
