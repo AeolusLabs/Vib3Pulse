@@ -19,6 +19,8 @@ const { redactSensitiveFields } = await import("../server/security");
 const { userToSessionUser } = await import("../server/auth");
 const { registerRoomRoutes } = await import("../server/rooms/roomRoutes");
 const { runReminderPass } = await import("../server/rooms/reminders");
+const rs = await import("../server/rooms/roomStorage");
+const { reminderTitle } = await import("../shared/roomReminders");
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const q = async (sql: string, p: any[] = []) => (await pool.query(sql, p)).rows;
@@ -70,11 +72,23 @@ const follow = (a: string, b: string) => q(`insert into follows (follower_id, fo
 const mutual = async (a: string, b: string) => { await follow(a, b); await follow(b, a); };
 const block = (a: string, b: string) => q(`insert into user_blocks (blocker_id, blocked_id) values ($1,$2) on conflict do nothing`, [a, b]);
 const starting = async (uid: string, roomId: string) => q(`select title, message, link from notifications where user_id=$1 and related_entity_id=$2 and type='room_starting'`, [uid, roomId]);
-/** A scheduled room whose start is 14.5 minutes away, i.e. inside the reminder window. */
-const mkRoom = async (host: string, title: string, visibility = "friends") => {
+/**
+ * scheduled_for is written from the JS clock (the same clock runReminderPass uses), as an ISO string: Postgres drops the
+ * "Z" for a timestamp without time zone, which is exactly how drizzle writes and reads it (a pg Date parameter would be
+ * sent in the process's local time instead).
+ */
+const startOf = new Map<string, Date>();
+const setStart = async (id: string, minutesAhead: number) => {
+  const at = new Date(Date.now() + minutesAhead * 60_000);
+  startOf.set(id, at);
+  await q(`update rooms set scheduled_for = $2::timestamp where id=$1`, [id, at.toISOString()]);
+  return at;
+};
+/** A scheduled room starting `minutesAhead` from now (default 14.5: inside the window, with margin for slow queries). */
+const mkRoom = async (host: string, title: string, visibility = "friends", minutesAhead = 14.5) => {
   const r = await http("POST", "/api/rooms", host, { title, kind: "party", visibility });
   const id = r.json?.room?.id as string;
-  await q(`update rooms set scheduled_for = now() + interval '14 minutes 30 seconds' where id=$1`, [id]);
+  await setStart(id, minutesAhead);
   return id;
 };
 
@@ -85,6 +99,10 @@ try {
   const S = await mk("stranger", yearsAgo(25)); // not a friend of the host
   for (const x of [U1, U2]) await mutual(H, x);
   const now = () => new Date();
+  // Rooms left behind by earlier runs (or other suites) in this scratch database that are due within the next hour would
+  // be claimed by our passes too and blur the "exactly one pass sent" checks: mark them claimed first. None of this run's
+  // rooms exist yet.
+  await q(`update rooms set reminder_notified_at = now() where status='scheduled' and reminder_notified_at is null and scheduled_for <= $1::timestamp`, [new Date(Date.now() + 3600_000).toISOString()]);
 
   // ---- set and clear
   const R1 = await mkRoom(H, `Reminder room ${stamp}`);
@@ -121,12 +139,15 @@ try {
   const R2 = await mkRoom(H, `Job room ${stamp}`);
   await http("PUT", `/api/rooms/${R2}/reminder`, U1);
   await http("PUT", `/api/rooms/${R2}/reminder`, U2);
-  const n1 = await runReminderPass(now());
+  const at1 = now();
+  const n1 = await runReminderPass(at1);
   const n2 = await runReminderPass(now());
   check("the first pass sent to U1, U2 and the host; the second sent nothing", n1 >= 3 && n2 === 0, `${n1} ${n2}`);
   check("each person has exactly one reminder", (await starting(U1, R2)).length === 1 && (await starting(U2, R2)).length === 1 && (await starting(H, R2)).length === 1);
   const sample = (await starting(U1, R2))[0];
-  check("copy is '<title> starts in 15 minutes' and links to the room", sample?.title === `Job room ${stamp} starts in 15 minutes` && sample.link === `/rooms/${R2}`, JSON.stringify(sample));
+  const want = reminderTitle(`Job room ${stamp}`, startOf.get(R2)!, at1);
+  check("copy says the real minutes left ('<title> starts in N minutes', N from the start time and the pass time) and links to the room",
+    sample?.title === want && /starts in (13|14|15) minutes$/.test(sample.title) && sample.link === `/rooms/${R2}`, `${JSON.stringify(sample)} want ${want}`);
   check("the claim is on the room, and notified_at is set on the reminder rows", (await q(`select reminder_notified_at from rooms where id=$1`, [R2]))[0].reminder_notified_at !== null && (await q(`select 1 from room_reminders where room_id=$1 and notified_at is null`, [R2])).length === 0);
   const [p1, p2] = await Promise.all([runReminderPass(now()), runReminderPass(now())]);
   check("two passes at the same moment on an already-claimed room send nothing", p1 === 0 && p2 === 0 && (await starting(U1, R2)).length === 1);
@@ -139,11 +160,44 @@ try {
 
   // ---- not claimed: wrong window, ended
   const RF = await mkRoom(H, `Far room ${stamp}`);
-  await q(`update rooms set scheduled_for = now() + interval '40 minutes' where id=$1`, [RF]);
+  await setStart(RF, 40);
   const RE = await mkRoom(H, `Ended room ${stamp}`);
   await q(`update rooms set status='ended', ended_at=now() where id=$1`, [RE]);
   await runReminderPass(now());
   check("rooms outside the window, or ended, are not claimed and nobody is told", (await q(`select id from rooms where id in ($1,$2) and reminder_notified_at is not null`, [RF, RE])).length === 0 && (await starting(H, RF)).length + (await starting(H, RE)).length === 0);
+
+  // ---- a room set up less than 15 minutes ahead is reminded at the next tick, with the real time left
+  const R9 = await mkRoom(H, `Soon room ${stamp}`, "friends", 9);
+  await http("PUT", `/api/rooms/${R9}/reminder`, U1);
+  const at9 = now();
+  await runReminderPass(at9);
+  const soon = await starting(U1, R9);
+  check("a room 9 minutes away is reminded at the next pass, saying 9 minutes (not 15)",
+    soon.length === 1 && soon[0].title === reminderTitle(`Soon room ${stamp}`, startOf.get(R9)!, at9) && /starts in (8|9) minutes$/.test(soon[0].title), JSON.stringify(soon));
+
+  // ---- a reschedule re-arms the reminder (rs.updateRoom with scheduledFor, the RoomPatch funnel)
+  const moved = new Date(Date.now() + 12 * 60_000);
+  startOf.set(R9, moved);
+  await rs.updateRoom(R9, { scheduledFor: moved });
+  const afterMove = await q(`select (select reminder_notified_at from rooms where id=$1) as claimed, (select count(*)::int from room_reminders where room_id=$1 and notified_at is not null) as notified`, [R9]);
+  check("rescheduling clears the room's claim and every reminder row's notified_at", afterMove[0].claimed === null && afterMove[0].notified === 0, JSON.stringify(afterMove));
+  const atMove = now();
+  await runReminderPass(atMove);
+  const again = await starting(U1, R9);
+  const newest = again.find((n: any) => n.title === reminderTitle(`Soon room ${stamp}`, moved, atMove));
+  check("...and the next pass reminds again with the new time", again.length === 2 && !!newest && /starts in (11|12) minutes$/.test(newest.title), JSON.stringify(again));
+  check("...once: a further pass sends nothing more", (await runReminderPass(now())) === 0 && (await starting(U1, R9)).length === 2);
+
+  // ---- moderation: a room taken down is never announced
+  const RM = await mkRoom(H, `Removed room ${stamp}`);
+  await http("PUT", `/api/rooms/${RM}/reminder`, U1);
+  await q(`update rooms set moderation_status='removed' where id=$1`, [RM]);
+  await runReminderPass(now());
+  check("a room whose moderation status is not approved is not claimed and nobody is told",
+    (await q(`select reminder_notified_at from rooms where id=$1`, [RM]))[0].reminder_notified_at === null && (await starting(U1, RM)).length === 0 && (await starting(H, RM)).length === 0);
+  await q(`update rooms set moderation_status='approved' where id=$1`, [RM]);
+  await runReminderPass(now());
+  check("approved again while still in the window: reminded at the next pass", (await starting(U1, RM)).length === 1);
 
   // ---- lost access before send time
   const R4 = await mkRoom(H, `Lost access ${stamp}`);

@@ -22,6 +22,7 @@ const { userToSessionUser } = await import("../server/auth");
 const { registerRoomRoutes } = await import("../server/rooms/roomRoutes");
 const { roomFeatures } = await import("../server/rooms/features");
 const { ROOM_LIMITS } = await import("../shared/rooms");
+const { getConfig } = await import("../server/services/moderationConfig");
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const q = async (sql: string, p: any[] = []) => (await pool.query(sql, p)).rows;
@@ -63,6 +64,11 @@ const yearsAgo = (y: number) => { const d = new Date(); d.setUTCFullYear(d.getUT
 const mk = async (name: string, dob: string | null) => (await q(
   `insert into users (email, username, user_type, password_hash, is_verified, onboarding_complete, date_of_birth)
    values ($1,$2,'social',$3,true,true,$4) returning id`, [`${name}${stamp}@t.dev`, `${name}${stamp}`, hash, dob]))[0].id as string;
+/** An account created `days` days ago (plus 12 hours, so clock skew between the DB and this process cannot round it down). */
+const mkAged = async (name: string, days: number) => (await q(
+  `insert into users (email, username, user_type, password_hash, is_verified, onboarding_complete, date_of_birth, created_at)
+   values ($1,$2,'social',$3,true,true,$4, now() - make_interval(days => $5::int, hours => 12)) returning id`,
+  [`${name}${stamp}@t.dev`, `${name}${stamp}`, hash, yearsAgo(30), days]))[0].id as string;
 const allKeys = (o: unknown): string[] => (o && typeof o === "object" ? Object.entries(o).flatMap(([k, v]) => [k, ...allKeys(v)]) : []);
 
 try {
@@ -70,11 +76,20 @@ try {
   const teen = await mk("cfg_teen", yearsAgo(14));
   const noDob = await mk("cfg_nodob", null);
 
+  // The same admin setting roomRoutes uses for ACCOUNT_TOO_NEW (min_account_age_days; default 7 unless set in this DB).
+  const minDays = Number(await getConfig("min_account_age_days")) || 0;
   const r = await http("GET", "/api/rooms/config", adult);
   check("config: signed-in adult gets 200", r.status === 200, JSON.stringify(r));
-  check("config: exact body shape with default flags off", JSON.stringify(r.json) === JSON.stringify({
+  check("config: exact body shape with default flags off, plus the caller's own host numbers (new account: 0 days)", JSON.stringify(r.json) === JSON.stringify({
     features: { paidRooms: false, spray: false }, limits: ROOM_LIMITS, currency: "NGN", region: "NG",
+    host: { accountAgeDays: 0, minAccountAgeDays: minDays },
   }), JSON.stringify(r.json));
+  check("config: host has exactly accountAgeDays and minAccountAgeDays, both whole numbers", JSON.stringify(Object.keys(r.json?.host ?? {})) === JSON.stringify(["accountAgeDays", "minAccountAgeDays"])
+    && Number.isInteger(r.json?.host?.accountAgeDays) && Number.isInteger(r.json?.host?.minAccountAgeDays), JSON.stringify(r.json?.host));
+  const old = await mkAged("cfg_old", 60);
+  const o = await http("GET", "/api/rooms/config", old);
+  check("config: host.accountAgeDays is the caller's own account age in whole days (60)", o.status === 200 && o.json?.host?.accountAgeDays === 60 && o.json.host.minAccountAgeDays === minDays, JSON.stringify(o.json?.host));
+  check("config: everything else is the same for every caller", JSON.stringify({ ...o.json, host: null }) === JSON.stringify({ ...r.json, host: null }));
   check("config: limits.capacityMax is 50", r.json?.limits?.capacityMax === 50);
   check("config: only the two public flags are exposed (no linkScreens, no anonymousJoin)", Object.keys(r.json?.features ?? {}).sort().join() === "paidRooms,spray");
   check("config: no key matching /secret|key|token/i anywhere in the response", !allKeys(r.json).some((k) => /secret|key|token/i.test(k)), allKeys(r.json).join());
