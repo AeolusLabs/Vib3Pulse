@@ -1,6 +1,6 @@
-// A ticket holder's own refund (task 4.5 route). A confirm dialog first; off, with the reason under it, once the window
-// has closed (1 hour before the start, or the host turned refunds off). The server decides; "already" and "not_allowed"
-// are shown as they are, never as a success.
+// A ticket holder's own refund (task 4.5 route). A confirm dialog first; off, with the reason under it, once the shared
+// rule (buyerRefundCheck) says the window has closed. The server decides; each refusal code gets its own plain line,
+// "already" is never shown as a fresh success, and a refund the provider has not confirmed yet is "on its way".
 import { useRef, useState } from "react";
 import {
   AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -8,19 +8,22 @@ import {
 import { Button } from "@/components/ui/button";
 import { Loader2Icon } from "@/components/ui/icons";
 import type { RoomView } from "@/lib/roomsApi";
-import { REFUND_COPY, formatNaira, refundWindow, ticketErrorMessage } from "@/lib/roomTickets";
+import { REFUND_COPY, formatNaira, refundOutcome, refundWindow, ticketErrorMessage } from "@/lib/roomTickets";
 import { refundMyTicket } from "./ticketsApi";
 
 interface Props {
+  /** refundBeforeStart comes from the ticket block (the viewer's room object does not carry it); undefined leaves it to the server. */
   room: Pick<RoomView, "id" | "status" | "scheduledFor" | "refundBeforeStart">;
   priceKobo: number;
+  /** The invite token (invite-only rooms): the refund route is gated on it like the room page. */
+  token?: string;
   /** Clock seam for the fixture; defaults to Date.now(). */
   now?: number;
-  /** Called after the server answered refunded or already, with the line to show, so the page can say it and reload the room. */
+  /** Called after the server answered refunded, already or pending, with the line to show, so the page can say it and reload the room. */
   onRefunded(message: string): void;
 }
 
-export default function RefundButton({ room, priceKobo, now, onRefunded }: Props) {
+export default function RefundButton({ room, priceKobo, token, now, onRefunded }: Props) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
@@ -31,11 +34,14 @@ export default function RefundButton({ room, priceKobo, now, onRefunded }: Props
   const refund = async () => {
     if (pending.current) return;
     pending.current = true; setBusy(true); setMessage(null);
-    const r = await refundMyTicket(room.id);
+    const r = await refundMyTicket(room.id, token);
     pending.current = false; setBusy(false); setOpen(false);
-    if (r.ok && r.body?.result === "refunded") { setMessage({ text: REFUND_COPY.done, error: false }); onRefunded(REFUND_COPY.done); return; }
-    if (r.ok && r.body?.result === "already") { setMessage({ text: REFUND_COPY.already, error: false }); onRefunded(REFUND_COPY.already); return; }
-    if (r.ok) { setMessage({ text: ticketErrorMessage({ status: 409, code: "NOT_ALLOWED" }, "refund"), error: true }); return; }
+    if (r.ok) {
+      const o = refundOutcome(r.body);
+      if (o) { setMessage({ text: o.text, error: false }); onRefunded(o.text); return; }
+      setMessage({ text: ticketErrorMessage({ status: 500 }, "refund"), error: true });
+      return;
+    }
     setMessage({ text: ticketErrorMessage(r, "refund"), error: true });
   };
 

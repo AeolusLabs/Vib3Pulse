@@ -8,8 +8,11 @@ import { TICKET_COPY, waitingClock, waitingTickMs } from "@/lib/roomTickets";
 import RefundButton from "./RefundButton";
 
 interface Props {
+  /** refundBeforeStart from the ticket block (the viewer's room object does not carry it); undefined leaves it to the server. */
   room: Pick<RoomView, "id" | "title" | "status" | "scheduledFor" | "refundBeforeStart">;
   hostName: string;
+  /** The invite token (invite-only rooms), passed on to the refund call. */
+  token?: string;
   priceKobo: number;
   /** Ask the page to load the room again (start time reached). */
   onRecheck(): void;
@@ -18,7 +21,7 @@ interface Props {
   nowFn?: () => number;
 }
 
-export default function WaitingRoom({ room, hostName, priceKobo, onRecheck, onRefunded, nowFn = Date.now }: Props) {
+export default function WaitingRoom({ room, hostName, token, priceKobo, onRecheck, onRefunded, nowFn = Date.now }: Props) {
   const [now, setNow] = useState(nowFn);
   const start = room.scheduledFor ? Date.parse(room.scheduledFor) : NaN;
   const left = Number.isNaN(start) ? null : start - now;
@@ -35,16 +38,17 @@ export default function WaitingRoom({ room, hostName, priceKobo, onRecheck, onRe
 
   const line = left === null ? TICKET_COPY.waitingNoTime(hostName) : left > 0 ? TICKET_COPY.waitingUntil(hostName) : TICKET_COPY.waitingSoon(hostName);
   return (
-    <section className="mx-auto max-w-md space-y-5 rounded-2xl border border-border p-6 text-center" aria-label={room.title} data-testid="ticket-waiting">
+    <section className="mx-auto max-w-md space-y-5 rounded-2xl border border-border p-6 text-center" aria-labelledby="ticket-waiting-title-h" data-testid="ticket-waiting">
       <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-3 py-1 text-xs font-semibold">
         <CheckIcon className="h-3.5 w-3.5" aria-hidden />{TICKET_COPY.waitingTag}
       </span>
+      <h1 className="font-serif text-2xl font-bold leading-tight" id="ticket-waiting-title-h" data-testid="ticket-waiting-title">{room.title}</h1>
       {left !== null && (
         // Not a live region: a ticking clock read out every second is noise. The line under it says what it means.
         <p className="font-serif text-6xl font-bold tabular-nums" data-testid="ticket-countdown" aria-live="off">{waitingClock(left)}</p>
       )}
       <p className="text-sm text-muted-foreground" data-testid="ticket-waiting-line">{line}</p>
-      <div className="flex justify-center"><RefundButton room={room} priceKobo={priceKobo} now={now} onRefunded={onRefunded} /></div>
+      <div className="flex justify-center"><RefundButton room={room} priceKobo={priceKobo} token={token} now={now} onRefunded={onRefunded} /></div>
     </section>
   );
 }
