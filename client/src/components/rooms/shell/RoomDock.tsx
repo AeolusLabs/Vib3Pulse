@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { CameraIcon, HeartIcon, MicIcon, SendIcon, XIcon } from "@/components/ui/icons";
+import { CameraIcon, HeartIcon, MicIcon, SendIcon, SparklesIcon, XIcon } from "@/components/ui/icons";
+import { AMBER } from "@/lib/roomTickets";
 import { useToast } from "@/hooks/use-toast";
 import { ROOM_LIMITS } from "@shared/rooms";
 import { DOCK_REACTIONS, isImeEnter } from "@/lib/roomShell";
@@ -59,6 +60,11 @@ export interface RoomDockProps {
   hype?: ReactNode;
   /** Task 1.4: the reaction tray, positioned by its own component (it scales in from the heart button). */
   tray?: ReactNode;
+  /**
+   * Phase 5: the Spray button. Given ONLY when the server sent the room's spray block to this viewer (an ID-verified adult
+   * in a live 18+ room that is not a minors' room) and someone can be sprayed. Absent: no button, no hint of spraying.
+   */
+  spray?: { onOpen(): void };
 }
 
 const HOVER = "[@media(hover:hover)_and_(pointer:fine)]:hover:border-primary";
@@ -66,7 +72,7 @@ const FOCUS = "focus-visible:outline focus-visible:outline-2 focus-visible:outli
 const PRESS = "motion-safe:transition-transform motion-safe:active:scale-[0.97]";
 
 /** Bottom of the room: reply chip, reactions, mic, camera, the composer and send. Sits above the safe-area inset. */
-export default function RoomDock({ muted, reply, replyName, onCancelReply, onSend, onReact, trayOpen, onToggleTray, voice, cam, immersive, slowModeSec, onWave, hype, tray }: RoomDockProps) {
+export default function RoomDock({ muted, reply, replyName, onCancelReply, onSend, onReact, trayOpen, onToggleTray, voice, cam, immersive, slowModeSec, onWave, hype, tray, spray }: RoomDockProps) {
   const { toast } = useToast();
   const [text, setText] = useState("");
   const [waitUntil, setWaitUntil] = useState(0);
@@ -131,6 +137,14 @@ export default function RoomDock({ muted, reply, replyName, onCancelReply, onSen
     </button>
   ) : null;
 
+  // Amber: spraying is a money moment. 44 px and labelled; the tap is also the gesture the sound engine waits for.
+  const sprayBtn = spray ? (
+    <button type="button" onClick={spray.onOpen} aria-label="Spray" aria-haspopup="dialog"
+      className={`flex shrink-0 items-center gap-1.5 rounded-full px-3.5 text-sm font-semibold ${immersive ? "h-11" : "min-h-[44px]"} ${AMBER.fill} ${FOCUS} ${PRESS}`} data-testid="dock-spray">
+      <SparklesIcon className="h-4 w-4" aria-hidden /><span className={immersive ? "sr-only" : undefined}>Spray</span>
+    </button>
+  ) : null;
+
   const placeholder = muted ? "You're muted" : waitLeft > 0 ? `Slow mode, wait ${waitLeft}s` : "Message the room";
 
   return (
@@ -141,6 +155,7 @@ export default function RoomDock({ muted, reply, replyName, onCancelReply, onSen
           {onWave && (
             <button type="button" onClick={onWave} className={`min-h-[44px] shrink-0 rounded-full border border-border bg-muted px-3.5 text-sm font-medium ${HOVER} ${FOCUS} ${PRESS}`} data-testid="dock-wave">Wave <span aria-hidden>👋</span></button>
           )}
+          {sprayBtn}
           {DOCK_REACTIONS.map((e) => (
             <button key={e} type="button" onClick={() => onReact(e)} aria-label={`React with ${e}`} className={`grid h-11 w-11 shrink-0 place-items-center rounded-full border border-border bg-muted text-[22px] ${HOVER} ${FOCUS} ${PRESS}`} data-testid={`react-${e}`}>{e}</button>
           ))}
@@ -174,6 +189,7 @@ export default function RoomDock({ muted, reply, replyName, onCancelReply, onSen
           className={`min-w-0 flex-1 rounded-full border px-[18px] text-base outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60 ${immersive ? "h-11 border-transparent bg-white/15 text-white placeholder:text-white/75" : "h-12 border-border bg-muted text-foreground placeholder:text-muted-foreground"}`}
           data-testid="dock-input"
         />
+        {immersive && !trimmed && sprayBtn}
         {immersive && !trimmed && (
           <button type="button" onClick={onToggleTray} aria-label="React" aria-expanded={trayOpen} className={`grid h-11 w-11 shrink-0 place-items-center rounded-full ${trayOpen ? rbOn : "bg-white/15 text-white"} ${FOCUS} ${PRESS}`} data-testid="dock-heart">
             <HeartIcon className="h-5 w-5" aria-hidden />

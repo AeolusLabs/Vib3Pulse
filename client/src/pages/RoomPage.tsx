@@ -29,6 +29,8 @@ import { kickRemainingAfter, stateForCode } from "@/lib/roomStates";
 import { ArrowLeftIcon } from "@/components/ui/icons";
 import { isAgeUnknownDenied, isMinorsDenied, isRoomDenial, listenOnlyHere, minorsCodeFor, parseRoomDenial, showListenLine, type RoomDenial } from "@/lib/minorsRoomUi";
 import type { AdultInvite } from "@/lib/minorsRoomApi";
+import { SprayReturn } from "@/components/rooms/spray/BankApproval";
+import { parseSprayBlock, searchWithoutSpray, sprayReturnId } from "@/lib/sprayUi";
 
 interface RoomDetail {
   room: Omit<RoomView, "host" | "memberCount">;
@@ -44,6 +46,11 @@ interface RoomDetail {
    * parseTicketBlock / ticketGate; when it is absent there is no price and no ticket UI, whatever else the room says.
    */
   ticket?: unknown;
+  /**
+   * Spraying (phase 5): sent ONLY to a viewer who passes payer eligibility in a live, money-eligible room. Read through
+   * parseSprayBlock; absent means no Spray button or row anywhere.
+   */
+  spray?: unknown;
 }
 
 /** sessionStorage, or null where the browser refuses it (private modes): the invite token then lives only in the URL. */
@@ -103,9 +110,16 @@ function RoomPageInner({ id }: { id: string }) {
   // The host (and anyone already a member, e.g. after a reload) goes straight in; everyone else sees the lobby and taps Join.
   const [joinTapped, setJoinTapped] = useState(false);
   const goesStraightIn = !!detail && (detail.room.hostId === me?.id || !!detail.you);
+  // The way back from the bank (/rooms/:id?spray=<sprayId>), usually in the tab the approval opened. That tab only reports
+  // how the payer's own spray went; it never joins the room (the payer's room tab is still in it).
+  const [sprayBack, setSprayBack] = useState(() => sprayReturnId(window.location.search));
+  const clearSprayBack = () => {
+    try { window.history.replaceState(window.history.state, "", `${window.location.pathname}${searchWithoutSpray(window.location.search)}${window.location.hash}`); } catch { /* harmless */ }
+    setSprayBack(null);
+  };
   useEffect(() => {
-    if (live && canJoin && state.phase === "idle" && (goesStraightIn || joinTapped)) sock.join();
-  }, [live, canJoin, state.phase, goesStraightIn, joinTapped]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!sprayBack && live && canJoin && state.phase === "idle" && (goesStraightIn || joinTapped)) sock.join();
+  }, [sprayBack, live, canJoin, state.phase, goesStraightIn, joinTapped]); // eslint-disable-line react-hooks/exhaustive-deps
   // Tapping Join was the gesture that lets the browser play sound: start room audio as soon as the room has voice, no second tap.
   useEffect(() => {
     if (joinTapped && state.phase === "live" && state.voiceEnabled && voice.status === "needs-tap") void voice.unlock();
@@ -162,7 +176,9 @@ function RoomPageInner({ id }: { id: string }) {
   // A failed refetch keeps the last details (react-query keeps data on error), so the live room stays; it says so in a line.
   const inRoom = showsShell({ isLoading, hasDetail: !!detail && !!room, roomStatus: room?.status ?? "", canJoin: detail?.canJoin.ok === true, phase: state.phase });
 
-  if (inRoom && detail && room) {
+  const sprayBlock = parseSprayBlock(detail?.spray, room, { listenOnly });
+
+  if (inRoom && detail && room && !sprayBack) {
     return (
       <RoomShell
         id={id}
@@ -186,6 +202,8 @@ function RoomPageInner({ id }: { id: string }) {
         detailsError={!!error}
         listenOnly={listenOnly}
         listenLine={listenLine}
+        spray={sprayBlock}
+        onSprayChanged={() => { void refetch(); }}
       />
     );
   }
@@ -193,7 +211,10 @@ function RoomPageInner({ id }: { id: string }) {
   // ---------------------------------------------------------------- everything before and after the room
   let content: React.ReactNode;
   let bare = false; // the ticket screens carry the title themselves: only a back button above them
-  if (confirmed) {
+  if (sprayBack) {
+    bare = true;
+    content = <SprayReturn roomId={id} sprayId={sprayBack} token={token} onBack={() => { clearSprayBack(); void refetch(); }} />;
+  } else if (confirmed) {
     // First: the return from Paystack verified a paid ticket. The room may still be loading (or unavailable); the
     // confirmation then shows the ticket without the room's details.
     bare = true;

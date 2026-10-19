@@ -8,6 +8,8 @@
 // &controls=host|cohost opens the Controls sheet as the host or a co-host (requests waiting, settings set; saves settle locally).
 // ?ticket=page|checkout|confirmed|waiting|hostsales|price|refund shows the paid room screens (task 4.7), every call answered here.
 // ?wizard=adult&paid=1 runs the wizard with paidRooms on and an ID-verified host, so the Paid room switch and price step show.
+// ?spray=tray|confirm|bank|declined|limit|quiet opens the spray flow (phase 5) in an 18+ room as a verified adult guest,
+// every spray endpoint answered here: a note or bundle lands after a moment, bag and rain go to a stand-in bank page.
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import RoomShell, { type RoomShellSocket } from "@/components/rooms/shell/RoomShell";
 import MinorsRoomWarning from "@/components/rooms/MinorsRoomWarning";
@@ -31,6 +33,9 @@ import HostSales, { HostSalesBody } from "@/components/rooms/tickets/HostSales";
 import StepPrice from "@/components/rooms/create/StepPrice";
 import { PRICE_COPY, defaultTicketDraft, parseSummary, type TicketDraft } from "@/lib/roomTickets";
 import type { RoomTicketView } from "@/lib/roomsApi";
+import { parseSprayFixture, type SprayScene } from "@/lib/sprayUi";
+import { FIXTURE_SPRAY_BLOCK, fixtureSprayMe, fixtureSprayStart } from "@/lib/sprayFixtures";
+import { SPRAY_CATALOGUE, isSprayTier, type SprayTier } from "@shared/money";
 
 type Ev = Parameters<typeof roomReducer>[1];
 
@@ -271,10 +276,11 @@ export default function RoomFixture() {
   const stateScene = new URLSearchParams(window.location.search).get("state");
   if (stateScene && (STATE_SCENES as readonly string[]).includes(stateScene)) return <StateFixture scene={stateScene as (typeof STATE_SCENES)[number]} theme={opts.theme} />;
   if (opts.minors && opts.minors !== "listen") return <MinorsFixture scene={opts.minors} theme={opts.theme} />;
-  return <ShellFixture opts={opts} />;
+  const sprayScene = parseSprayFixture(window.location.search);
+  return <ShellFixture opts={opts} spray={sprayScene} />;
 }
 
-function ShellFixture({ opts }: { opts: ReturnType<typeof parseFixtureQuery> }) {
+function ShellFixture({ opts, spray = null }: { opts: ReturnType<typeof parseFixtureQuery>; spray?: SprayScene | null }) {
   const controls = useMemo(() => parseControlsFixture(window.location.search), []);
   const [state, dispatch] = useReducer((s: RoomState, e: Ev) => roomReducer(s, e), undefined, () =>
     controls ? fixtureControlsState(controls) : fixtureLiveState(opts.scene, { as: opts.as, now: Date.now(), invite: opts.invite }));
@@ -317,6 +323,70 @@ function ShellFixture({ opts }: { opts: ReturnType<typeof parseFixtureQuery> }) 
   }, [opts.flood]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const self = state.selfId ?? FIXTURE_IDS.self;
+
+  // Spray scenes: every spray endpoint answered here, in a layout effect so it is in place before any child's request.
+  // A delivered spray arrives as the server would send it: room:spray plus a normal chat line.
+  const sprayStart = useMemo(() => (spray ? fixtureSprayStart(spray, Date.now(), window.location.origin) : null), [spray]);
+  const sprayMe = useRef(fixtureSprayMe());
+  const [sprayBlock, setSprayBlock] = useState(FIXTURE_SPRAY_BLOCK);
+  useLayoutEffect(() => {
+    if (!spray) return;
+    const real = window.fetch;
+    let n = 0;
+    const polls = new Map<string, { tier: SprayTier; polls: number; done: boolean }>([["fx-spray-bank", { tier: "bag", polls: 0, done: false }]]);
+    const land = (id: string, tier: SprayTier) => {
+      dispatch({ type: "room:spray", id, tier, v3c: SPRAY_CATALOGUE[tier].v3c, fromId: FIXTURE_IDS.self, toId: FIXTURE_IDS.host, at: Date.now() });
+      dispatch({ type: "room:chat", userId: FIXTURE_IDS.self, text: `sprayed Maya Okafor (${SPRAY_CATALOGUE[tier].label})`, at: Date.now() });
+    };
+    const json = (body: unknown, status = 200, delay = 250) => new Promise<Response>((res) =>
+      setTimeout(() => res(new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } })), delay));
+    window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const path = url.replace(window.location.origin, "");
+      const method = (init?.method ?? "GET").toUpperCase();
+      const base = "/api/rooms/fixture-room/spray";
+      if (path === "/api/csrf-token") return json({ csrfToken: "fixture" }, 200, 0);
+      if (path === "/api/users/me/spray" && method === "GET") return json(sprayMe.current);
+      if (path === "/api/users/me/spray/daily-limit" && method === "PUT") {
+        const k = Number(JSON.parse(String(init?.body ?? "{}")).kobo);
+        sprayMe.current = { ...sprayMe.current, dailyLimitKobo: k };
+        return json({ dailyLimitKobo: k });
+      }
+      if (path === "/api/users/me/spray/method" && method === "DELETE") { sprayMe.current = { ...sprayMe.current, method: null }; return json({ ok: true }); }
+      if (path === `${base}/limit` && method === "PUT") {
+        const k = Number(JSON.parse(String(init?.body ?? "{}")).kobo);
+        const next = { ...FIXTURE_SPRAY_BLOCK, roomLimitKobo: k };
+        setTimeout(() => setSprayBlock(next), 0);
+        return json({ limitKobo: k, spentKobo: 0 });
+      }
+      if (path === base && method === "POST") {
+        const b = JSON.parse(String(init?.body ?? "{}")) as { tier?: unknown };
+        const tier: SprayTier = isSprayTier(b.tier) ? b.tier : "note";
+        if (spray === "declined") return json({ code: "PAYMENT_DECLINED", message: "Declined" }, 402, 600);
+        const id = `fx-spray-${++n}`;
+        if (tier === "bag" || tier === "rain" || !sprayMe.current.method) {
+          polls.set(id, { tier, polls: 0, done: false });
+          return json({ status: "action_required", sprayId: id, authorizationUrl: `${window.location.origin}/dev/room-fixture?spray=tray` }, 200, 600);
+        }
+        setTimeout(() => land(id, tier), 1200);
+        return json({ status: "pending", sprayId: id }, 200, 600);
+      }
+      const m = path.match(/^\/api\/rooms\/fixture-room\/spray\/([^/?]+)$/);
+      if (m && method === "GET") {
+        const p = polls.get(m[1]);
+        if (!p) return json({ status: "delivered" });
+        p.polls++;
+        if (p.polls < 3) return json({ status: "action_required" });
+        if (!p.done) { p.done = true; land(m[1], p.tier); }
+        return json({ status: "delivered" });
+      }
+      return real(input, init);
+    }) as typeof window.fetch;
+    // Quiet effects: one spray from someone else arrives, shown as a chip instead of the animation.
+    const t = spray === "quiet" ? setTimeout(() => dispatch({ type: "room:spray", id: "fx-quiet-1", tier: "bundle", v3c: SPRAY_CATALOGUE.bundle.v3c, fromId: "fx-g1", toId: FIXTURE_IDS.host, at: Date.now() }), 900) : undefined;
+    return () => { window.fetch = real; clearTimeout(t); };
+  }, [spray]);
+
   const [audioOnly, setAudioOnly] = useState(opts.sound);
   const [micOn, setMicOn] = useState(false);
   const [status, setStatus] = useState<RoomVoice["status"]>(opts.tap ? "needs-tap" : "listening");
@@ -383,7 +453,7 @@ function ShellFixture({ opts }: { opts: ReturnType<typeof parseFixtureQuery> }) 
     <div className="font-sans" data-testid="room-fixture" data-scene={opts.scene}>
       <RoomShell
         id={FIXTURE_ROOM.id}
-        room={opts.minors === "listen" ? { ...FIXTURE_ROOM, minorsRoom: true } : FIXTURE_ROOM}
+        room={opts.minors === "listen" ? { ...FIXTURE_ROOM, minorsRoom: true } : spray ? { ...FIXTURE_ROOM, ageLimit: "18+" as const } : FIXTURE_ROOM}
         host={FIXTURE_HOST}
         fallbackCount={state.memberCount}
         isHost={controls ? controls === "host" : opts.as === "host"}
@@ -400,6 +470,8 @@ function ShellFixture({ opts }: { opts: ReturnType<typeof parseFixtureQuery> }) 
         startControlsOpen={!!controls}
         listenOnly={opts.minors === "listen"}
         listenLine={opts.minors === "listen"}
+        spray={spray ? sprayBlock : null}
+        sprayFixture={sprayStart ?? undefined}
       />
     </div>
   );

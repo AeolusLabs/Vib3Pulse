@@ -36,6 +36,10 @@ import { KIND_LABEL, LINK_SCREENS, NOTICE_MESSAGE, VISIBILITY_LABEL, ageLimitLab
 import type { ChatReply } from "@shared/rooms";
 import { LIVE_HOLD_MS } from "@shared/liveScreen";
 import type { ChatItem, RoomMemberView, RoomState } from "@/lib/roomReducer";
+import SprayFlow, { type Sub as SpraySub } from "@/components/rooms/spray/SprayFlow";
+import SprayEffects, { useSprayQuiet } from "@/components/rooms/spray/SprayEffects";
+import { snd } from "@/components/rooms/spray/sound";
+import { sprayTargets, type SprayBlock, type SprayFlow as SprayFlowState } from "@/lib/sprayUi";
 
 /** The socket actions the shell uses. RoomPage passes useRoomSocket(); the dev fixture passes fakes. */
 export type RoomShellSocket = Pick<ReturnType<typeof useRoomSocket>,
@@ -72,6 +76,15 @@ export interface RoomShellProps {
   listenLine?: boolean;
   /** Dev fixture only: open in this video view instead of the width's default. */
   startView?: VideoView;
+  /**
+   * Phase 5: the room's spray block, already parsed with parseSprayBlock (null for everyone the server did not send it to:
+   * teens, unverified adults, minors' rooms, listen-only viewers). Without it there is no Spray button or row anywhere.
+   */
+  spray?: SprayBlock | null;
+  /** Refetch the room details (spray limit, spent, targets). */
+  onSprayChanged?: () => void;
+  /** Dev fixture only: start the spray flow in this state. */
+  sprayFixture?: { flow: SprayFlowState; sub: SpraySub | null; tray: boolean; quiet: boolean };
 }
 
 function useViewportWidth() {
@@ -91,7 +104,7 @@ const byTestId = (id: string | null) => (id ? document.querySelector<HTMLElement
  * immersive). Crossing 1024 px or switching views only changes classes, so the picture, the camera choice, the composer
  * draft and the chat scroll survive. People are always addressed by RoomMemberView.userId, never by username.
  */
-export default function RoomShell({ id, token, room, host, fallbackCount, isHost, role, meId, state, sock, voice, myRoomId, nav, hostControls, onLeave, startView, startControlsOpen = false, detailsError = false, listenOnly = false, listenLine = false }: RoomShellProps) {
+export default function RoomShell({ id, token, room, host, fallbackCount, isHost, role, meId, state, sock, voice, myRoomId, nav, hostControls, onLeave, startView, startControlsOpen = false, detailsError = false, listenOnly = false, listenLine = false, spray = null, onSprayChanged, sprayFixture }: RoomShellProps) {
   const { toast } = useToast();
 
   const [hidden, setHidden] = useState<Set<string>>(new Set()); // people the viewer muted for themselves
@@ -165,6 +178,27 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
     const t = setTimeout(() => setIncomingShown(null), 4000);
     return () => clearTimeout(t);
   }, [incoming]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---------------------------------------------------------------- spraying (phase 5)
+  const [storedQuiet, setQuiet] = useSprayQuiet();
+  const quiet = storedQuiet || sprayFixture?.quiet === true;
+  const [sprayOpen, setSprayOpen] = useState(sprayFixture?.tray ?? false);
+  const [sprayPreset, setSprayPreset] = useState<string | null>(null);
+  const sprayBlock = listenOnly ? null : spray;
+  const sprayStage = [...state.stage, ...state.members.filter((m) => m.role === "cohost").map((m) => m.userId)];
+  const sprayTo = sprayTargets(sprayBlock ?? null, { hostId: room.hostId, stage: sprayStage, memberIds: state.members.map((m) => m.userId), selfId: meId });
+  // Who is on stage changed: ask the server again for the targets (it decides who is payable).
+  const stageKey = sprayBlock ? state.stage.join("|") : "";
+  const firstStage = useRef(true);
+  useEffect(() => {
+    if (firstStage.current) { firstStage.current = false; return; }
+    if (!sprayBlock || !onSprayChanged) return;
+    const t = setTimeout(onSprayChanged, 600);
+    return () => clearTimeout(t);
+  }, [stageKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const liveVideoRef = useRef(state.liveVideo);
+  liveVideoRef.current = state.liveVideo;
+  const videoActive = useCallback(() => liveVideoRef.current, []);
 
   const canControlScreen = role === "host" || role === "cohost";
   const muted = state.you?.muted ?? false;
@@ -343,6 +377,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
       immersive={immersive}
       hype={<HypeBar store={hype.store} />}
       tray={<ReactionTray emojis={TRAY_EMOJIS} open={trayOpen} onClose={() => setTrayOpen(false)} onPick={sendReaction} />}
+      spray={sprayBlock && sprayTo.length > 0 ? { onOpen: () => { snd.unlock(); setSprayPreset(null); setSprayOpen(true); } } : undefined}
     />
   );
 
@@ -350,6 +385,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
   const line = statusLine(incomingShown, noticeText, gateNotice);
   const floating = (
     <>
+      <SprayEffects sprays={state.sprays} nameOf={nameOf} quiet={quiet} serverOffsetMs={state.serverOffsetMs} videoActive={videoActive} />
       <HypeBurst burst={hype.burst} layout={layout} />
       <div role="status" aria-live="polite" className={`pointer-events-none absolute top-[calc(68px+env(safe-area-inset-top,0px))] z-[13] w-max -translate-x-1/2 ${layout === "rail" ? "left-[calc((100%-360px)/2)] max-w-[calc((100%-360px)*0.9)]" : "left-1/2 max-w-[90%]"}`} data-testid="room-status-line">
         {line && <p className="rounded-full bg-foreground px-4 py-2 text-center text-sm font-medium text-background shadow-lg">{line}</p>}
@@ -442,7 +478,17 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
         locallyMuted={!!picked && hidden.has(picked.userId)} onToggleLocalMute={toggleHidden}
         voiceOn={state.voiceEnabled} stage={state.stage} onStage={(action, target) => sock.stageAction(action, target)}
         returnFocusTo={() => byTestId(returnFocusTestId(actionsFrom))}
+        onSpray={picked && sprayBlock && sprayTo.includes(picked.userId) ? () => { snd.unlock(); setSprayPreset(picked.userId); after(() => setSprayOpen(true)); } : undefined}
       />
+      {sprayBlock && (
+        <SprayFlow
+          roomId={id} token={token} block={sprayBlock} targets={sprayTo} hostId={room.hostId} nameOf={nameOf} sprays={state.sprays}
+          trayOpen={sprayOpen} onTrayOpenChange={setSprayOpen} presetTarget={sprayPreset}
+          onSettled={() => onSprayChanged?.()} quiet={quiet} onQuiet={setQuiet}
+          returnFocusTo={() => byTestId("dock-spray")}
+          initial={sprayFixture ? { flow: sprayFixture.flow, sub: sprayFixture.sub } : undefined}
+        />
+      )}
     </div>
   );
 }
