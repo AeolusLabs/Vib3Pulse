@@ -167,7 +167,10 @@ export function registerRoomFinanceAdminRoutes(app: Express) {
               and ((i.reason in ('refund_failed', 'refund_overdue')
                     and (exists (select 1 from room_tickets t where t.id::text = i.ticket_id)
                          or (i.ticket_id is null and i.provider_payment_id ~ '^vib3rt_[0-9a-f]{24}_[0-9a-f]{32}$')))
-                or (i.reason = 'payout_failed' and i.provider_payment_id like 'room-payout-%'))
+                or (i.reason = 'payout_failed' and i.provider_payment_id like 'room-payout-%')
+                -- Spraying (phase 5): spray refunds that need a person, chargebacks to answer, dispute outcomes to check.
+                or (i.reason in ('refund_failed', 'refund_overdue', 'dispute', 'dispute_resolved')
+                    and i.provider_payment_id ~ '^vib3rs_[0-9a-f]{24}_[0-9a-f]{32}$'))
             order by i.created_at desc limit 100`,
         ),
         pool.query(

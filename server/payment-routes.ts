@@ -42,7 +42,8 @@ import { handleRoomRefundWebhook } from "./rooms/refunds.js";
 import { handleRoomTransferWebhook } from "./rooms/settlement.js";
 import { looksLikeSprayReference } from "./payments/sprayReference.js";
 import { finalizeSpray, handleSprayChargeWebhook, QueueFullError as SprayQueueFullError } from "./rooms/spray.js";
-import { disputeReference, handleSprayDispute } from "./rooms/clawbacks.js";
+import { disputeReference, handleSprayDispute, handleSprayDisputeResolved } from "./rooms/clawbacks.js";
+import { sanitizeMoneyError } from "@shared/roomRefunds";
 
 function requireAuth(req: Request, res: Response, next: Function) {
   if (!req.isAuthenticated() || !req.user) {
@@ -1078,9 +1079,10 @@ export function registerPaymentRoutes(app: Express): void {
         const ref = disputeReference(payload.data);
         if (ref && looksLikeSprayReference(ref)) await handleSprayDispute(ref);
       } else if (payload.event === "charge.dispute.resolve") {
+        // Spraying: closes the dispute issue; a dispute won on a delivered spray settles its dispute clawbacks; anything that
+        // needs money moved by hand opens a 'dispute_resolved' issue (server/rooms/clawbacks.ts). Idempotent.
         const ref = disputeReference(payload.data);
-        // What a resolution means for a clawback is an owner decision (lane report); a person follows up.
-        if (ref && looksLikeSprayReference(ref)) console.error(`[Paystack Webhook] ALERT spray dispute resolved (ref ${ref.slice(0, 12)}...); check the clawback by hand`);
+        if (ref && looksLikeSprayReference(ref)) await handleSprayDisputeResolved(ref, payload.data);
       }
 
       if (payload.event === "subscription.create") {
@@ -1091,7 +1093,9 @@ export function registerPaymentRoutes(app: Express): void {
 
       res.json({ received: true });
     } catch (err) {
-      console.error("[Paystack Webhook] Processing error:", err);
+      // Never the raw error object: a pg error prints its detail (key values such as references and ids), and a provider
+      // message could carry a card code. sanitizeMoneyError scrubs codes, emails and long numbers.
+      console.error("[Paystack Webhook] Processing error:", sanitizeMoneyError(err));
       res.status(500).json({ message: "Webhook processing failed" });
     }
   });

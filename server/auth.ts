@@ -139,6 +139,10 @@ export const SENSITIVE_RESPONSE_KEYS = new Set<string>([
   "signature",
   "authorizationCode",
   "authorization_code",
+  // The provider's whole card object (SplitVerifyResult.authorization, Paystack's data.authorization) carries the code: the
+  // key itself is stripped, so a body that ever includes a verify result loses the card with it. No response uses this key
+  // for anything else (authorizationUrl is a different key and is kept).
+  "authorization",
   "sprayDailyLimitKobo",
   "spray_daily_limit_kobo",
 ]);

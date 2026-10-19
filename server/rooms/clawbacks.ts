@@ -1,16 +1,33 @@
 // Spraying (phase 5, task 5.6, rule B10): chargebacks on sprays and the clawbacks they create.
 //
 //  - A dispute on a spray reference (Paystack charge.dispute.create / .remind, signature already checked by the webhook
-//    route): under the reference's advisory lock, ONE transaction moves the spray delivered -> disputed (conditional), writes
-//    the `chargeback` ledger row (once per reference) and one host_clawbacks row per beneficiary (the host's share, and the
-//    stage guest's share when there was one), idempotent through the unique (spray_id, beneficiary_id). Nothing is deleted.
-//    A second event for the same reference finds the spray already disputed and changes nothing.
+//    route), under the reference's advisory lock:
+//      * ALWAYS a payment_issues row (reason 'dispute', one open row per reference) so a person answers Paystack before its
+//        deadline (Paystack accepts an unanswered dispute for the customer).
+//      * delivered, paid, created, pending or failed: ONE transaction moves the spray to 'disputed' (conditional on the
+//        status read), writes the `chargeback` ledger row (once per reference) and one host_clawbacks row per beneficiary
+//        (origin 'dispute': the host's share, and the stage guest's share when there was one), idempotent through the unique
+//        (spray_id, beneficiary_id). A disputed spray is never delivered afterwards (finalize answers "already"), and a
+//        failed one is never refunded again as a late payment (the dispute is the payer's refund). The split went to the
+//        subaccounts at charge time, so money was taken from the platform whatever the spray's status.
+//      * reversing or reversed: the payer has (or is getting) a full refund. The issue tells the person to contest the
+//        dispute with the refund as evidence; the reversal already wrote its clawbacks (origin 'reversal').
+//    A second event for the same reference changes nothing.
+//  - A dispute resolved (charge.dispute.resolve): the open 'dispute' issue is closed and the outcome is handled:
+//      * resolution "declined" (the merchant declined the claim: the platform keeps the money; ON THE G3 CHECKLIST: confirm
+//        Paystack's words) on a spray that WAS delivered: its 'dispute' clawbacks are settled (status recovered,
+//        recovered_kobo = amount_kobo), and a 'dispute_resolved' issue is opened if any of it had already been taken from a
+//        payout (the host must be repaid by hand). On a spray that was NOT delivered: the payer paid for nothing, so a
+//        'dispute_resolved' issue asks a person to refund them; the clawbacks stay open.
+//      * any other resolution (the payer won, or words we do not know): clawbacks stay open; an unknown word opens a
+//        'dispute_resolved' issue.
+//    Reversal clawbacks are never touched by a dispute outcome.
 //  - applyClawbacks(beneficiaryId, availableKobo) is called by settlement (settlement.ts, queueDuePayout) INSIDE the payout
-//    transaction that holds the payout row lock: open clawbacks of that person are locked FOR UPDATE, applied oldest first
-//    as whole rows while they fit, and marked recovered in the same transaction. The payout is the available amount minus
-//    what was applied (never below 0). There is no partial-amount column, so a row larger than what is left stays open
-//    for the next payout (owner question in the lane report).
-//  - written_off only by an admin (finance roles), with a reason, audited in the admin activity log.
+//    transaction that holds the payout row lock: open clawbacks of that person are locked FOR UPDATE and applied oldest
+//    first, partially when needed (recovered_kobo), each row 'recovered' only once recovered_kobo equals amount_kobo, in
+//    the same transaction. The payout is the available amount minus what was applied (never below 0).
+//  - written_off only by an admin (finance roles): written_off_by is the admin's id (admin_users), with a reason, audited
+//    in the admin activity log.
 import type { Express, Request, Response } from "express";
 import type { PoolClient } from "pg";
 import { z } from "zod";
@@ -18,7 +35,7 @@ import { pool, storage } from "../storage";
 import { sanitizeMoneyError } from "@shared/roomRefunds";
 import { sprayReferenceForLog } from "../payments/sprayReference";
 import { requireRole } from "../services/adminSecurity";
-import { BUSY, withAdvisoryLock } from "./refunds";
+import { BUSY, openPaymentIssue, withAdvisoryLock } from "./refunds";
 import { LOCK_SPRAY, sprayClock } from "./spray";
 
 type Queryable = { query: (text: string, values?: any[]) => Promise<{ rows: any[]; rowCount?: number | null }> };
@@ -33,7 +50,28 @@ export function disputeReference(data: unknown): string | null {
   return (ref as string | undefined) ?? null;
 }
 
-export type DisputeOutcome = "disputed" | "already" | "not_delivered" | "unknown";
+/** Paystack's resolution word on a resolved dispute, lower case, or "" when there is none. */
+export function disputeResolution(data: unknown): string {
+  const d = (data && typeof data === "object" ? data : {}) as Record<string, any>;
+  const r = typeof d.resolution === "string" ? d.resolution : "";
+  return r.trim().toLowerCase().slice(0, 40);
+}
+
+export type DisputeOutcome = "disputed" | "already" | "refunded" | "unknown";
+
+type DisputeRow = {
+  id: string; status: string; room_id: string; host_id: string; payer_id: string; recipient_id: string; amount_kobo: number;
+  platform_kobo: number; host_kobo: number; guest_kobo: number | null; provider: string; delivered: boolean;
+};
+
+async function loadRow(c: PoolClient, reference: string): Promise<DisputeRow | undefined> {
+  return (await c.query(
+    `select id, status, room_id, host_id, payer_id, recipient_id, amount_kobo, platform_kobo, host_kobo, guest_kobo, provider,
+            (delivered_at is not null) as delivered
+       from spray_payments where provider_ref = $1`,
+    [reference],
+  )).rows[0] as DisputeRow | undefined;
+}
 
 /**
  * A chargeback on a spray. Idempotent. Throws when the reference is busy (the webhook answers 500 and Paystack retries).
@@ -45,29 +83,32 @@ export async function handleSprayDispute(reference: string): Promise<DisputeOutc
   return r;
 }
 
+/** Statuses a dispute moves to 'disputed' (money was taken: the split reached the subaccounts at charge time). */
+const DISPUTABLE = ["delivered", "paid", "created", "pending", "failed"] as const;
+
 async function disputeLocked(c: PoolClient, reference: string): Promise<DisputeOutcome> {
   const nowMs = sprayClock.now();
-  const row = (await c.query(
-    `select id, status, room_id, host_id, payer_id, recipient_id, amount_kobo, platform_kobo, host_kobo, guest_kobo, provider
-       from spray_payments where provider_ref = $1`,
-    [reference],
-  )).rows[0] as {
-    id: string; status: string; room_id: string; host_id: string; payer_id: string; recipient_id: string; amount_kobo: number;
-    platform_kobo: number; host_kobo: number; guest_kobo: number | null; provider: string;
-  } | undefined;
+  const row = await loadRow(c, reference);
   if (!row) { console.log(`[rooms:spray] dispute ref=${sprayReferenceForLog(reference)} ignored: no spray`); return "unknown"; }
-  if (row.status === "disputed") return "already";
-  if (row.status !== "delivered") {
-    // Never delivered (still in flight, reversed or failed): nothing reached anyone through us, so there is nothing to claw
-    // back. A person checks it in Paystack (a dispute on a refunded payment, for example).
-    console.error(`[rooms:spray] ALERT dispute ref=${sprayReferenceForLog(reference)} on a spray in status ${row.status}; nothing clawed back, check it in Paystack`);
-    return "not_delivered";
+  const issue = (error: string) => openPaymentIssue(c, { ticketId: null, providerRef: reference, provider: row.provider, reason: "dispute", error, now: new Date(nowMs) });
+
+  if (row.status === "reversing" || row.status === "reversed") {
+    await issue("SPRAY_DISPUTE_AFTER_REFUND: the payer was refunded in full (or the refund is in progress); contest the dispute in Paystack with the refund as evidence");
+    console.error(`[rooms:spray] ALERT dispute ref=${sprayReferenceForLog(reference)} on a refunded spray; answer it in Paystack`);
+    return "refunded";
   }
+  if (row.status === "disputed") {
+    await issue("SPRAY_DISPUTE: respond in Paystack before the deadline");
+    return "already";
+  }
+  if (!(DISPUTABLE as readonly string[]).includes(row.status)) return "unknown";
+
+  const delivered = row.status === "delivered";
   try {
     await c.query("BEGIN");
     const won = await c.query(
-      `update spray_payments set status = 'disputed', reason = 'DISPUTED' where id = $1 and status = 'delivered' returning id`,
-      [row.id],
+      `update spray_payments set status = 'disputed', reason = 'DISPUTED' where id = $1 and status = $2 returning id`,
+      [row.id, row.status],
     );
     if (!won.rowCount) { await c.query("ROLLBACK"); return "already"; }
     const hostKobo = Number(row.host_kobo);
@@ -80,36 +121,124 @@ async function disputeLocked(c: PoolClient, reference: string): Promise<DisputeO
       [row.provider, reference, row.payer_id, row.host_id, row.id, Number(row.amount_kobo), Number(row.platform_kobo), hostKobo + guestKobo, iso(nowMs)],
     );
     const claw = (beneficiary: string, amount: number) => c.query(
-      `insert into host_clawbacks (host_id, beneficiary_id, spray_id, amount_kobo, status, created_at)
-       values ($1, $2, $3::uuid, $4::int, 'open', $5::timestamp)
+      `insert into host_clawbacks (host_id, beneficiary_id, spray_id, amount_kobo, origin, status, created_at)
+       values ($1, $2, $3::uuid, $4::int, 'dispute', 'open', $5::timestamp)
        on conflict (spray_id, beneficiary_id) do nothing`,
       [row.host_id, beneficiary, row.id, amount, iso(nowMs)],
     );
     if (hostKobo > 0) await claw(row.host_id, hostKobo);
     // A stage guest spray: the guest's share is owed back by the guest (the recipient), never by the host.
     if (guestKobo > 0 && row.recipient_id !== row.host_id) await claw(row.recipient_id, guestKobo);
+    await openPaymentIssue(c, {
+      ticketId: null, providerRef: reference, provider: row.provider, reason: "dispute", now: new Date(nowMs),
+      error: delivered
+        ? "SPRAY_DISPUTE: a delivered spray was disputed; respond in Paystack before the deadline (clawbacks opened)"
+        : `SPRAY_DISPUTE_UNDELIVERED: the spray was never delivered (it was ${row.status}); respond in Paystack before the deadline (clawbacks opened, delivery blocked)`,
+    });
     await c.query("COMMIT");
   } catch (e) {
     await c.query("ROLLBACK").catch(() => {});
     throw e;
   }
-  console.error(`[rooms:spray] ALERT chargeback on spray ${row.id} (room ${row.room_id}); clawbacks opened`);
+  console.error(`[rooms:spray] ALERT chargeback on spray ${row.id} (room ${row.room_id}, was ${row.status}); clawbacks opened`);
   return "disputed";
 }
 
-export interface ClawbackApplication { appliedKobo: number; remainingOpen: number; recoveredIds: string[] }
+export type DisputeResolveOutcome = "settled" | "kept_open" | "needs_person" | "unknown";
+
+/** charge.dispute.resolve on a spray reference. Idempotent. Throws when the reference is busy (500, Paystack retries). */
+export async function handleSprayDisputeResolved(reference: string, data: unknown): Promise<DisputeResolveOutcome> {
+  const resolution = disputeResolution(data);
+  const r = await withAdvisoryLock(LOCK_SPRAY, reference, (c) => resolveLocked(c, reference, resolution), 8000);
+  if (r === BUSY) throw new Error("spray reference is busy; retry the dispute webhook");
+  return r;
+}
+
+async function resolveLocked(c: PoolClient, reference: string, resolution: string): Promise<DisputeResolveOutcome> {
+  const nowMs = sprayClock.now();
+  const row = await loadRow(c, reference);
+  if (!row) return "unknown";
+  const now = new Date(nowMs);
+  const issue = (error: string) => openPaymentIssue(c, { ticketId: null, providerRef: reference, provider: row.provider, reason: "dispute_resolved", error, now });
+  const merchantWon = resolution === "declined";
+  const customerWon = resolution === "merchant-accepted" || resolution === "accepted";
+  let outcome: DisputeResolveOutcome;
+  try {
+    await c.query("BEGIN");
+    // The dispute itself is over: nothing more to answer in Paystack.
+    await c.query(
+      `update payment_issues set resolved_at = $2::timestamp where provider_payment_id = $1 and reason = 'dispute' and resolved_at is null`,
+      [reference, iso(nowMs)],
+    );
+    if (merchantWon && row.delivered) {
+      // The money came back through the dispute: the dispute clawbacks are settled. Anything already taken from a payout
+      // for them was taken twice: a person repays it.
+      // Read BEFORE settling: what payouts already took for this dispute (rows recovered by settlement, and the partly
+      // recovered open ones). A repeated resolve event finds no open row and changes nothing.
+      const open = (await c.query(
+        `select id from host_clawbacks where spray_id = $1::uuid and origin = 'dispute' and status = 'open' for update`,
+        [row.id],
+      )).rows as { id: string }[];
+      let owedBack = 0;
+      if (open.length) {
+        const taken = (await c.query(
+          `select coalesce(sum(recovered_kobo), 0)::bigint as n from host_clawbacks
+            where spray_id = $1::uuid and origin = 'dispute' and status in ('open', 'recovered')`,
+          [row.id],
+        )).rows[0];
+        owedBack = Number(taken?.n ?? 0);
+        await c.query(
+          `update host_clawbacks set status = 'recovered', recovered_at = $2::timestamp, recovered_kobo = amount_kobo
+            where id = any($1::uuid[]) and status = 'open'`,
+          [open.map((o) => o.id), iso(nowMs)],
+        );
+      }
+      if (owedBack > 0) {
+        await issue(`SPRAY_DISPUTE_WON_REPAY: the dispute was won, but ${owedBack} kobo had already been recovered from payouts for it; repay the beneficiaries by hand`);
+        outcome = "needs_person";
+      } else {
+        outcome = "settled";
+      }
+    } else if (merchantWon) {
+      await issue("SPRAY_DISPUTE_WON_UNDELIVERED: the dispute was won, but the spray was never delivered; refund the payer by hand or record why not (clawbacks stay open)");
+      outcome = "needs_person";
+    } else if (customerWon) {
+      outcome = "kept_open"; // the chargeback stands: the clawbacks are the record of what is owed
+    } else {
+      await issue("SPRAY_DISPUTE_RESOLVED_UNKNOWN: the dispute was resolved with an outcome we do not recognise; check it in Paystack (clawbacks stay open)");
+      outcome = "needs_person";
+    }
+    await c.query("COMMIT");
+  } catch (e) {
+    await c.query("ROLLBACK").catch(() => {});
+    throw e;
+  }
+  console.error(`[rooms:spray] ALERT dispute resolved ref=${sprayReferenceForLog(reference)} outcome=${outcome}`);
+  return outcome;
+}
+
+export interface ClawbackApplication {
+  appliedKobo: number;
+  /** Rows still open after this (including rows only partly recovered now). */
+  remainingOpen: number;
+  /** Rows recovered in full by this call. */
+  recoveredIds: string[];
+  /** Rows partly recovered by this call (still open, recovered_kobo raised). */
+  partialIds: string[];
+}
 
 /**
  * Applies the open clawbacks a person owes against `availableKobo` they are about to be paid. Pass the caller's
- * transaction client (settlement's payout transaction) so the rows are locked and marked recovered in that same commit.
- * Whole rows, oldest first, skipping a row that does not fit. Never applies more than is available.
+ * transaction client (settlement's payout transaction) so the rows are locked and updated in that same commit.
+ * Oldest first; a row larger than what is left is recovered PARTLY (recovered_kobo), 'recovered' only when it reaches
+ * amount_kobo. Never applies more than is available.
  */
 export async function applyClawbacks(
   beneficiaryId: string, availableKobo: number, opts: { client?: Queryable; now?: Date } = {},
 ): Promise<ClawbackApplication> {
   const q: Queryable = opts.client ?? pool;
   const now = opts.now ?? new Date(sprayClock.now());
-  const out: ClawbackApplication = { appliedKobo: 0, remainingOpen: 0, recoveredIds: [] };
+  const out: ClawbackApplication = { appliedKobo: 0, remainingOpen: 0, recoveredIds: [], partialIds: [] };
   // Before the spray migration is applied there is nothing to apply. Checked without an error: a failing statement would
   // abort settlement's transaction and stop ticket payouts.
   const exists = (await q.query(`select to_regclass('public.host_clawbacks') is not null as ok`)).rows[0];
@@ -120,28 +249,33 @@ export async function applyClawbacks(
     return out;
   }
   const open = (await q.query(
-    `select id, amount_kobo from host_clawbacks where beneficiary_id = $1 and status = 'open' order by created_at, id for update`,
+    `select id, amount_kobo, recovered_kobo from host_clawbacks where beneficiary_id = $1 and status = 'open' order by created_at, id for update`,
     [beneficiaryId],
-  )).rows as { id: string; amount_kobo: number }[];
+  )).rows as { id: string; amount_kobo: number; recovered_kobo: number }[];
   let left = availableKobo;
   for (const r of open) {
     const amount = Number(r.amount_kobo);
-    if (Number.isSafeInteger(amount) && amount > 0 && amount <= left) {
-      left -= amount;
-      out.appliedKobo += amount;
-      out.recoveredIds.push(r.id);
-    } else {
-      out.remainingOpen++;
-    }
-  }
-  if (out.recoveredIds.length) {
-    const marked = await q.query(
-      `update host_clawbacks set status = 'recovered', recovered_at = $2::timestamp where id = any($1::uuid[]) and status = 'open' returning id`,
-      [out.recoveredIds, now.toISOString()],
+    const before = Number(r.recovered_kobo);
+    const owed = amount - before;
+    if (!Number.isSafeInteger(amount) || !Number.isSafeInteger(before) || owed <= 0 || left <= 0) { out.remainingOpen++; continue; }
+    const take = Math.min(owed, left);
+    const full = before + take === amount;
+    // Locked FOR UPDATE above, so the row is still open with the same recovered_kobo; if not, apply nothing (fail closed:
+    // never deducted twice).
+    const upd = await q.query(
+      `update host_clawbacks
+          set recovered_kobo = $2::int,
+              status = case when $3::boolean then 'recovered' else 'open' end,
+              recovered_at = case when $3::boolean then $4::timestamp else recovered_at end
+        where id = $1::uuid and status = 'open' and recovered_kobo = $5::int
+        returning id`,
+      [r.id, before + take, full, now.toISOString(), before],
     );
-    // Locked FOR UPDATE above, so every row is still open; if not, apply nothing (fail closed: the host is paid in full later
-    // only after a person looks, never twice deducted).
-    if ((marked.rowCount ?? 0) !== out.recoveredIds.length) throw new Error("clawbacks changed while they were being applied");
+    if ((upd.rowCount ?? 0) !== 1) throw new Error("clawbacks changed while they were being applied");
+    left -= take;
+    out.appliedKobo += take;
+    if (full) out.recoveredIds.push(r.id);
+    else { out.partialIds.push(r.id); out.remainingOpen++; }
   }
   return out;
 }
@@ -158,7 +292,8 @@ export function registerSprayClawbackAdminRoutes(app: Express): void {
       const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
       const offset = Math.max(Number(req.query.offset) || 0, 0);
       const rows = (await pool.query(
-        `select k.id, k.host_id, k.beneficiary_id, k.spray_id, k.amount_kobo, k.status, k.written_off_reason,
+        `select k.id, k.host_id, k.beneficiary_id, k.spray_id, k.amount_kobo, k.recovered_kobo, k.origin, k.status,
+                k.written_off_reason, k.written_off_by,
                 round(extract(epoch from k.created_at) * 1000)::float8 as created_ms,
                 round(extract(epoch from k.recovered_at) * 1000)::float8 as recovered_ms,
                 s.room_id, s.tier
@@ -172,7 +307,8 @@ export function registerSprayClawbackAdminRoutes(app: Express): void {
       res.json({
         clawbacks: rows.map((k) => ({
           id: k.id, hostId: k.host_id, beneficiaryId: k.beneficiary_id, sprayId: k.spray_id, roomId: k.room_id, tier: k.tier,
-          amountKobo: Number(k.amount_kobo), status: k.status, writtenOffReason: k.written_off_reason ?? null,
+          amountKobo: Number(k.amount_kobo), recoveredKobo: Number(k.recovered_kobo ?? 0), origin: k.origin, status: k.status,
+          writtenOffReason: k.written_off_reason ?? null, writtenOffBy: k.written_off_by ?? null,
           createdAt: ms(k.created_ms), recoveredAt: ms(k.recovered_ms),
         })),
       });
@@ -182,27 +318,32 @@ export function registerSprayClawbackAdminRoutes(app: Express): void {
     }
   });
 
-  // Write off one open clawback. Admin ids live in admin_users, while host_clawbacks.written_off_by references users, so the
-  // admin is recorded in the audit row (and the reason on the clawback); written_off_by stays null (see the lane report).
+  // Write off one open clawback (what is still owed of it). written_off_by is the admin (admin_users), plus the reason on the
+  // row and the audit row.
   app.post("/api/admin/room-clawbacks/:id/write-off", requireRole(...FINANCE), async (req: Request, res: Response) => {
     const parsed = writeOffBody.safeParse(req.body ?? {});
     if (!parsed.success) return res.status(400).json({ message: "A reason (3 to 300 characters) is required", code: "REASON_REQUIRED" });
     const id = String(req.params.id ?? "");
     if (!isUuid(id)) return res.status(404).json({ message: "Clawback not found", code: "NOT_FOUND" });
+    const adminId = req.session.adminId;
+    if (typeof adminId !== "string" || !adminId) return res.status(401).json({ message: "Admin session required" });
     try {
       const reason = sanitizeMoneyError(parsed.data.reason).slice(0, 300);
       const r = await pool.query(
-        `update host_clawbacks set status = 'written_off', written_off_reason = $2 where id = $1::uuid and status = 'open'
-          returning id, amount_kobo, beneficiary_id`,
-        [id, reason],
+        `update host_clawbacks set status = 'written_off', written_off_reason = $2, written_off_by = $3
+          where id = $1::uuid and status = 'open'
+          returning id, amount_kobo, recovered_kobo, beneficiary_id`,
+        [id, reason, adminId],
       );
       if (!r.rowCount) return res.status(409).json({ message: "This clawback is not open.", code: "NOT_OPEN" });
       await storage.logAdminActivity({
-        adminId: req.session.adminId!,
+        adminId,
         action: "room_clawback.write_off",
         targetType: "room_clawback",
         targetId: id,
-        details: JSON.stringify({ amountKobo: Number(r.rows[0].amount_kobo), beneficiaryId: r.rows[0].beneficiary_id }).slice(0, 1000),
+        details: JSON.stringify({
+          amountKobo: Number(r.rows[0].amount_kobo), recoveredKobo: Number(r.rows[0].recovered_kobo ?? 0), beneficiaryId: r.rows[0].beneficiary_id,
+        }).slice(0, 1000),
         reason,
         ipAddress: req.ip,
       }).catch((e) => console.error(`[ADMIN] ALERT clawback ${id} written off but the audit row failed:`, sanitizeMoneyError(e)));

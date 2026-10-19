@@ -195,8 +195,17 @@ export function returnedPaymentNotice(amountKobo: number, stage: "pending" | "pr
 /** The deterministic key stored in notifications.related_entity_id so a retry can never notify twice. */
 export const refundNoticeKey = (ticketId: string, stage: "pending" | "processed") => `${ticketRefundReference(ticketId)}:${stage}`;
 
-/** Errors stored in room_payouts.last_error / payment_issues: no digit runs that could be an account number, short. */
+/**
+ * Errors stored in room_payouts.last_error / payment_issues, and every money log line: no card authorization codes
+ * (AUTH_...), card signatures (SIG_...), emails, or digit runs that could be an account number; one line, short.
+ */
 export function sanitizeMoneyError(raw: unknown): string {
   const s = raw instanceof Error ? raw.message : typeof raw === "string" ? raw : "unknown error";
-  return s.replace(/\d{6,}/g, "[number]").replace(/[\r\n\t]+/g, " ").slice(0, 200);
+  return s
+    .replace(/AUTH_[A-Za-z0-9]+/g, "AUTH_[redacted]")
+    .replace(/SIG_[A-Za-z0-9]+/g, "SIG_[redacted]")
+    .replace(/[^\s@]+@[^\s@]+/g, "[email]")
+    .replace(/\d{6,}/g, "[number]")
+    .replace(/[\r\n\t]+/g, " ")
+    .slice(0, 200);
 }
