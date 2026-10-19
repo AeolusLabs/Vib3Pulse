@@ -27,6 +27,7 @@ import { applyMod, endRoom, enforceAgeLimit, expectHost, interactionVerdict, isK
 import { roomHub } from "./RoomHub";
 import { roomFeatures } from "./features";
 import { clearReminder, hasReminder, setReminder } from "./reminders";
+import { registerRoomTicketRoutes } from "./ticketRoutes";
 
 const MAX_SCHEDULED = 10;
 const MAX_LIVE = 1;
@@ -110,6 +111,7 @@ async function checkLink(res: Response, hostId: string, v: { eventId?: string; v
 }
 
 export function registerRoomRoutes(app: Express): void {
+  registerRoomTicketRoutes(app); // paid room tickets: checkout + verify (phase 4, task 4.3)
   // Loads the room and answers 404 (invisible) / 403 (not the host) itself; returns null when it has responded.
   async function loadHostRoom(req: Request, res: Response): Promise<{ room: Room; host: User } | null> {
     const room = await rs.getRoom(req.params.id);
