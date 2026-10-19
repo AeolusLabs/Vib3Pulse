@@ -239,7 +239,9 @@ export async function refundPaystackPayment(reference: string, opts: { merchantN
   // Omitting `amount` triggers a full refund of the original transaction amount.
   // merchant_note carries our own deterministic refund reference (Paystack's refund API has no idempotency key), so a
   // later lookup can tell whether this exact refund was already created.
-  await paystackRequest<unknown>("/refund", {
+  // paystackCall: an HTTP 5xx (even with a JSON body) or no answer throws "Paystack unavailable" (an outage: the room
+  // refund code retries after a lookup); a 4xx / status:false answer throws "Paystack error: ..." as before.
+  await paystackCall<unknown>("/refund", {
     method: "POST",
     body: JSON.stringify({ transaction: reference, ...(opts.merchantNote ? { merchant_note: opts.merchantNote } : {}) }),
   });
@@ -304,6 +306,7 @@ export async function createPaystackSubaccount(params: CreateSubaccountParams): 
   return { subaccountCode: data.subaccount_code };
 }
 
+
 // ============================================================
 // REFUND LOOKUP + TRANSFERS (paid rooms: refunds and host payouts, lane S3)
 // ============================================================
@@ -313,42 +316,127 @@ export async function createPaystackSubaccount(params: CreateSubaccountParams): 
 // statuses are pending | success | failed | reversed | otp | abandoned | blocked | rejected | received; the refund API has
 // no idempotency key, so the refund's merchant_note carries our own deterministic reference and is looked up before any
 // retry. Never log what these functions receive or return: they carry bank account numbers.
-
-/** One request that tells "not found" (HTTP 404) apart from an outage or another error. */
-async function paystackRaw<T>(path: string, options: RequestInit = {}): Promise<{ notFound: true } | { notFound: false; data: T }> {
-  const res = await fetch(`https://api.paystack.co${path}`, {
-    ...options,
-    headers: { Authorization: `Bearer ${getSecretKey()}`, "Content-Type": "application/json", ...options.headers },
-  });
-  if (res.status === 404) return { notFound: true };
-  // A server-side failure is "no answer" (an outage), not Paystack refusing something: callers retry without counting it.
-  if (res.status >= 500) throw new Error(`Paystack unavailable: HTTP ${res.status}`);
-  const body = await res.json().catch(() => null) as { status: boolean; data: T; message?: string } | null;
-  if (!body || !body.status) throw new Error(`Paystack error: ${body?.message ?? `HTTP ${res.status}`}`);
-  return { notFound: false, data: body.data };
-}
-
-export type ProviderRefundState = "none" | "in_progress" | "done" | "failed";
+//
+// MUST BE CONFIRMED WITH PAYSTACK TEST KEYS before selling (see the 4F-S2 report): the refund list filter
+// `GET /refund?transaction=<transaction id>`, the shape of a "transfer not found" answer (HTTP 404 or 400, and its
+// message), the subaccount fields that carry the bank (`bank_id` / `bank` / `settlement_bank`), and a second full refund.
 
 /**
- * Has this transaction already been refunded (by our deterministic note, or at all)? Throws when Paystack cannot answer:
- * the caller must then NOT create a refund (fail closed, retry later).
+ * Error classes, by message prefix (so the test mock can produce the same ones):
+ *  - "Paystack unavailable: ..." = no usable answer (network, HTTP 5xx even with a JSON body, an unreadable body).
+ *    Callers treat it as an OUTAGE: never counted as an attempt, retried, and money is never moved on it.
+ *  - "Paystack error: ..." = Paystack answered and refused (4xx / status false). Callers may count it.
+ */
+export const PAYSTACK_UNAVAILABLE = "Paystack unavailable";
+export function isPaystackOutage(e: unknown): boolean {
+  const m = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+  return m.startsWith(PAYSTACK_UNAVAILABLE);
+}
+
+type PaystackAnswer<T> = { httpStatus: number; ok: true; data: T } | { httpStatus: number; ok: false; message: string; code?: string };
+
+/** One request. Throws only "Paystack unavailable" (outage); every answer Paystack actually gave is returned. */
+async function paystackAnswer<T>(path: string, options: RequestInit = {}): Promise<PaystackAnswer<T>> {
+  let res: Response;
+  try {
+    res = await fetch(`https://api.paystack.co${path}`, {
+      ...options,
+      headers: { Authorization: `Bearer ${getSecretKey()}`, "Content-Type": "application/json", ...options.headers },
+    });
+  } catch (e) {
+    throw new Error(`${PAYSTACK_UNAVAILABLE}: ${e instanceof Error ? e.message : "network error"}`);
+  }
+  // M4: a 5xx is an outage even when Paystack sends a JSON error body with it.
+  if (res.status >= 500) throw new Error(`${PAYSTACK_UNAVAILABLE}: HTTP ${res.status}`);
+  const body = await res.json().catch(() => null) as { status?: boolean; data?: T; message?: string; code?: string } | null;
+  if (!body || typeof body !== "object") throw new Error(`${PAYSTACK_UNAVAILABLE}: HTTP ${res.status} without a JSON body`);
+  if (body.status === true && res.status < 400) return { httpStatus: res.status, ok: true, data: body.data as T };
+  return { httpStatus: res.status, ok: false, message: String(body.message ?? `HTTP ${res.status}`), code: typeof body.code === "string" ? body.code : undefined };
+}
+
+/** paystackAnswer, with a refusal thrown as "Paystack error: <message>". */
+async function paystackCall<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const a = await paystackAnswer<T>(path, options);
+  if (!a.ok) throw new Error(`Paystack error: ${a.message}`);
+  return a.data;
+}
+
+export type ProviderRefundState = "none" | "in_progress" | "needs_attention" | "done" | "failed";
+
+/** What a set of Paystack refund statuses means for one payment. Pure (exported for the unit tests). */
+export function refundStateFrom(statuses: string[]): ProviderRefundState {
+  const st = statuses.map((s) => (s ?? "").toLowerCase());
+  if (!st.length) return "none";
+  if (st.includes("processed")) return "done";
+  if (st.includes("needs-attention") || st.includes("needs_attention")) return "needs_attention";
+  if (st.some((s) => s !== "failed")) return "in_progress"; // pending, processing, unknown: exists, never create another
+  return "failed";
+}
+
+type PaystackRefundRow = { status?: string; merchant_note?: string | null; transaction?: unknown; transaction_reference?: string };
+
+/**
+ * Has this transaction already been refunded (by our deterministic note, or at all)? Throws when Paystack cannot answer
+ * (or answers the lookup with an error): the caller must then NOT create a refund (fail closed, retry later).
+ *  1. GET /transaction/verify/:reference gives the transaction id (and "reversed" = fully refunded already).
+ *  2. GET /refund?transaction=<id> (the documented filter). Only if THAT answers 4xx: a scan of /refund?reference=,
+ *     filtered here by our merchant note or the transaction reference/id.
  */
 export async function getPaystackRefundState(reference: string, merchantNote: string): Promise<ProviderRefundState> {
-  const tx = await paystackRaw<{ status: string }>(`/transaction/verify/${encodeURIComponent(reference)}`);
-  if (!tx.notFound && tx.data.status === "reversed") return "done";
-  const list = await paystackRequest<Array<{ status?: string; merchant_note?: string | null; transaction?: unknown }>>(
-    `/refund?reference=${encodeURIComponent(reference)}&perPage=100`,
-  );
-  const mine = (list ?? []).filter((r) => {
-    const txRef = r.transaction && typeof r.transaction === "object" ? (r.transaction as { reference?: string }).reference : undefined;
-    return r.merchant_note === merchantNote || txRef === reference;
+  const tx = await paystackAnswer<{ id?: number | string; status?: string; reference?: string }>(`/transaction/verify/${encodeURIComponent(reference)}`);
+  if (!tx.ok) throw new Error(`Paystack error: refund lookup could not find the transaction (${tx.message})`);
+  if ((tx.data?.status ?? "").toLowerCase() === "reversed") return "done";
+  const txId = tx.data?.id;
+  if (txId === undefined || txId === null || String(txId) === "") throw new Error("Paystack error: refund lookup got no transaction id");
+
+  const byTx = await paystackAnswer<PaystackRefundRow[]>(`/refund?transaction=${encodeURIComponent(String(txId))}&perPage=100`);
+  if (byTx.ok) {
+    // Filtered by Paystack to this transaction: every row is a refund of it (ours, or one made by hand in the dashboard).
+    const rows = (byTx.data ?? []).filter((r) => {
+      const t = r.transaction;
+      const id = t && typeof t === "object" ? (t as { id?: unknown }).id : t;
+      return id === undefined || id === null || String(id) === String(txId); // belt and braces if the filter were ignored
+    });
+    return refundStateFrom(rows.map((r) => r.status ?? ""));
+  }
+  if (byTx.httpStatus < 400 || byTx.httpStatus >= 500) throw new Error(`Paystack error: refund lookup failed (${byTx.message})`);
+
+  // Fallback (the documented filter was refused with a 4xx): scan by reference and filter ourselves.
+  const scan = await paystackCall<PaystackRefundRow[]>(`/refund?reference=${encodeURIComponent(reference)}&perPage=100`);
+  const mine = (scan ?? []).filter((r) => {
+    const t = r.transaction && typeof r.transaction === "object" ? (r.transaction as { reference?: string; id?: unknown }) : null;
+    return r.merchant_note === merchantNote || r.transaction_reference === reference || t?.reference === reference
+      || (t?.id !== undefined && String(t.id) === String(txId));
   });
-  if (!mine.length) return "none";
-  const st = mine.map((r) => (r.status ?? "").toLowerCase());
-  if (st.includes("processed")) return "done";
-  if (st.some((s) => s !== "failed")) return "in_progress"; // pending, processing, needs-attention: exists, do not create another
-  return "failed";
+  return refundStateFrom(mine.map((r) => r.status ?? ""));
+}
+
+/** Bank names as Paystack writes them differ in case, punctuation and suffixes ("Plc", "Limited"). */
+export function normaliseBankName(s: string): string {
+  return s.toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").replace(/\b(plc|limited|ltd|nigeria)\b/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Which bank of the list is the subaccount's? By the bank id or code the subaccount API returns when it has one; only
+ * otherwise by normalised name, and only when exactly one bank matches. null = unresolved (the caller alerts).
+ */
+export function matchSettlementBank(
+  sub: { bank_id?: unknown; bank?: unknown; settlement_bank?: unknown },
+  banks: Array<{ id?: number | string; code: string; name: string }>,
+): { code: string; name: string } | null {
+  const idOf = (v: unknown) => (typeof v === "number" || (typeof v === "string" && /^\d+$/.test(v)) ? String(v) : null);
+  const bankId = idOf(sub.bank_id) ?? idOf(sub.bank);
+  if (bankId) {
+    const byId = banks.filter((b) => b.id !== undefined && String(b.id) === bankId);
+    if (byId.length === 1) return byId[0];
+  }
+  const sb = typeof sub.settlement_bank === "string" ? sub.settlement_bank.trim() : "";
+  if (!sb) return null;
+  const byCode = banks.filter((b) => b.code === sb);
+  if (byCode.length === 1) return byCode[0];
+  const n = normaliseBankName(sb);
+  const byName = n ? banks.filter((b) => normaliseBankName(b.name) === n) : [];
+  return byName.length === 1 ? byName[0] : null;
 }
 
 /**
@@ -357,18 +445,20 @@ export async function getPaystackRefundState(reference: string, merchantNote: st
  * resolved again for the name Paystack wants.
  */
 export async function createPaystackTransferRecipient(params: { subaccountCode: string }): Promise<{ recipientCode: string }> {
-  const sub = await paystackRequest<{ settlement_bank?: string; account_number?: string; active?: boolean }>(
+  const sub = await paystackCall<{ settlement_bank?: string; account_number?: string; active?: boolean; bank_id?: number | string; bank?: unknown }>(
     `/subaccount/${encodeURIComponent(params.subaccountCode)}`,
   );
-  if (!sub.account_number || !sub.settlement_bank) throw new Error("PAYOUT_ACCOUNT_INCOMPLETE");
+  if (!sub.account_number || (!sub.settlement_bank && sub.bank_id === undefined && sub.bank === undefined)) throw new Error("PAYOUT_ACCOUNT_INCOMPLETE");
   if (sub.active === false) throw new Error("PAYOUT_ACCOUNT_INACTIVE");
-  const norm = (s: string) => s.trim().toLowerCase();
-  const banks = (await listPaystackBanks()).filter((b) => norm(b.name) === norm(sub.settlement_bank!));
-  if (banks.length !== 1) throw new Error("PAYOUT_BANK_UNRESOLVED");
-  const resolved = await resolvePaystackBankAccount(sub.account_number, banks[0].code);
-  const data = await paystackRequest<{ recipient_code: string }>("/transferrecipient", {
+  const banks = await paystackCall<Array<{ id?: number; name: string; code: string }>>("/bank?country=nigeria&currency=NGN");
+  const bank = matchSettlementBank(sub, banks ?? []);
+  if (!bank) throw new Error("PAYOUT_BANK_UNRESOLVED");
+  const resolved = await paystackCall<{ account_number: string; account_name: string }>(
+    `/bank/resolve?account_number=${encodeURIComponent(sub.account_number)}&bank_code=${encodeURIComponent(bank.code)}`,
+  );
+  const data = await paystackCall<{ recipient_code: string }>("/transferrecipient", {
     method: "POST",
-    body: JSON.stringify({ type: "nuban", name: resolved.accountName, account_number: sub.account_number, bank_code: banks[0].code, currency: "NGN" }),
+    body: JSON.stringify({ type: "nuban", name: resolved.account_name, account_number: sub.account_number, bank_code: bank.code, currency: "NGN" }),
   });
   if (!data?.recipient_code) throw new Error("PAYOUT_RECIPIENT_FAILED");
   return { recipientCode: data.recipient_code };
@@ -380,7 +470,7 @@ export interface TransferResult { status: string }
 export async function createPaystackTransfer(params: { amountKobo: number; recipientCode: string; reference: string; reason: string }): Promise<TransferResult> {
   if (!Number.isInteger(params.amountKobo) || params.amountKobo <= 0) throw new Error("BAD_AMOUNT");
   if (!/^[a-z0-9_-]{16,100}$/.test(params.reference)) throw new Error("BAD_REFERENCE");
-  const data = await paystackRequest<{ status: string }>("/transfer", {
+  const data = await paystackCall<{ status: string }>("/transfer", {
     method: "POST",
     body: JSON.stringify({
       source: "balance", amount: params.amountKobo, recipient: params.recipientCode,
@@ -390,8 +480,21 @@ export async function createPaystackTransfer(params: { amountKobo: number; recip
   return { status: data?.status ?? "pending" };
 }
 
-/** The transfer with this reference, or null when Paystack has none. Throws on an outage (the caller must not start a new one then). */
+/** Paystack's own words for "there is no transfer with this reference" (M4: anything else is not proof of absence). */
+export function isTransferNotFoundAnswer(a: { httpStatus: number; message?: string; code?: string }): boolean {
+  if (a.httpStatus !== 404 && a.httpStatus !== 400) return false;
+  const text = `${a.code ?? ""} ${a.message ?? ""}`.toLowerCase();
+  return /transfer[^a-z]*not[^a-z]*found|transfer_not_found|not_found|no transfer|transfer does not exist|reference not found/.test(text);
+}
+
+/**
+ * The transfer with this reference, or null when Paystack SAYS it has none (404 or 400 with a "not found" message).
+ * Any other answer it cannot be sure of (a 404 from a proxy, another 4xx, a 5xx, no answer) throws "Paystack unavailable":
+ * the caller must not start a new transfer then, and must not count an attempt.
+ */
 export async function verifyPaystackTransfer(reference: string): Promise<TransferResult | null> {
-  const r = await paystackRaw<{ status: string }>(`/transfer/verify/${encodeURIComponent(reference)}`);
-  return r.notFound ? null : { status: r.data?.status ?? "pending" };
+  const a = await paystackAnswer<{ status?: string }>(`/transfer/verify/${encodeURIComponent(reference)}`);
+  if (a.ok) return { status: a.data?.status ?? "pending" };
+  if (isTransferNotFoundAnswer(a)) return null;
+  throw new Error(`${PAYSTACK_UNAVAILABLE}: transfer verify answered HTTP ${a.httpStatus} (${a.message.slice(0, 80)})`);
 }

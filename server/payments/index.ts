@@ -2,7 +2,7 @@ import type { SupportedCurrency, PaymentProvider, CreateCheckoutParams, Checkout
 import { createStripeCheckout, verifyStripeSession, createStripePaymentIntent, verifyStripePaymentIntent, refundStripePayment } from "./stripe.js";
 import { createPaystackCheckout, verifyPaystackTransaction, createPaystackInlineSession, refundPaystackPayment } from "./paystack.js";
 import {
-  getPaystackRefundState, createPaystackTransferRecipient, createPaystackTransfer, verifyPaystackTransfer,
+  getPaystackRefundState, createPaystackTransferRecipient, createPaystackTransfer, verifyPaystackTransfer, isPaystackOutage,
   type ProviderRefundState, type TransferResult,
 } from "./paystack.js";
 
@@ -112,6 +112,15 @@ export async function refundPayment(providerPaymentId: string, provider: Payment
 // Behind this module so the room money code never calls Paystack directly and the tests can swap in a mock.
 
 export type { ProviderRefundState, TransferResult };
+
+/**
+ * True when a provider call failed WITHOUT a usable answer (network, HTTP 5xx, unreadable body): an outage. Money code
+ * never counts it as an attempt and never moves money on it. The mock signals the same with a message starting
+ * "Paystack unavailable" (or any error that is not "Paystack error: ..." / one of our PAYOUT_ / BAD_ codes, see callers).
+ */
+export function isProviderOutage(e: unknown): boolean {
+  return isPaystackOutage(e);
+}
 
 /** Was this payment already refunded (by our note, or at all)? Throws when the provider cannot answer: do NOT refund then. */
 export async function refundState(providerPaymentId: string, provider: PaymentProvider, note: string): Promise<ProviderRefundState> {
