@@ -16,7 +16,6 @@ import {
 } from "./payments/stripe.js";
 import {
   verifyPaystackWebhookSignature,
-  verifyPaystackTransaction,
 } from "./payments/paystack.js";
 import { insertTicketSchema } from "@shared/schema";
 import {
@@ -36,6 +35,7 @@ import type { OrganizerSplit } from "./payments/types.js";
 import { sendTicketPurchaseEmail } from "./emailService.js";
 import { MAX_GROUP_MEMBERS } from "./routes/messages-routes.js";
 import { deliverNotification } from "./notifications.js";
+import { handleRoomTicketCharge } from "./rooms/tickets.js";
 
 function requireAuth(req: Request, res: Response, next: Function) {
   if (!req.isAuthenticated() || !req.user) {
@@ -932,12 +932,22 @@ export function registerPaymentRoutes(app: Express): void {
       if (payload.event === "charge.success") {
         const reference = payload.data?.reference as string;
         if (reference) {
-          const verified = await verifyPaystackTransaction(reference);
+          // Through the payments index (same Paystack call) so tests can swap in the mock provider.
+          const verified = await verifyCheckoutSession(reference, "paystack");
+          // A room ticket charge we could not re-verify: answer 500 so Paystack retries, instead of 200 and losing it.
+          // The payload's itemType only decides "retry or not"; nothing in the payload is trusted for money.
+          if (!verified && payload.data?.metadata?.itemType === "room") {
+            throw new Error(`room ticket charge ${reference} could not be re-verified with Paystack`);
+          }
           if (verified && verified.paid) {
             const meta = verified.metadata;
 
             if (await handlePaystackCharge(payload.data, verified)) {
               // Social plan payment (first charge, renewal, or one-off) — handled.
+            } else if (meta.roomId) {
+              // Room ticket: signature checked above, re-verified with Paystack just now; issueRoomTicket uses the
+              // VERIFIED amount against the room's stored price and is idempotent with the client's verify call.
+              await handleRoomTicketCharge(reference, verified);
             } else if (meta.eventId) {
               await issueEventTickets({
                 eventId: meta.eventId,
