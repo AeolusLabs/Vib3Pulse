@@ -9,7 +9,7 @@ import type { SprayTier } from "@shared/money";
 import { sprayPrice } from "@shared/spray";
 import { formatNaira } from "@/lib/roomTickets";
 import { putRoomLimit } from "@/lib/sprayApi";
-import { SPRAY_COPY, limitAsk, limitChipText, limitChoices, parseLimitBody, type SprayBlock } from "@/lib/sprayUi";
+import { SPRAY_COPY, limitAsk, limitChipText, limitChoices, limitErrorText, parseLimitBody, type SprayBlock } from "@/lib/sprayUi";
 
 interface Props {
   roomId: string;
@@ -37,7 +37,7 @@ export default function RoomLimitSheet({ roomId, token, block, tier, verified, o
     setBusy(null);
     const saved = r.ok ? parseLimitBody(r.body) : null;
     if (saved) { onSaved(saved); return; }
-    setError(!r.ok && r.status === 0 ? "You're offline. Try again when you're back online." : "Couldn't change the limit. Try again.");
+    setError(limitErrorText(r.ok ? undefined : r.status, r.ok ? undefined : r.code, "Couldn't change the limit. Try again."));
   };
 
   return (

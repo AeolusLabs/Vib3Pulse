@@ -7,11 +7,11 @@ import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CreditCardIcon, Loader2Icon } from "@/components/ui/icons";
-import { SPRAY_COPY, cardLabel } from "@/lib/sprayUi";
+import { SPRAY_COPY, cardInSentence, cardLabel, type SprayCard } from "@/lib/sprayUi";
 
 interface Props {
   mode: "add" | "replace";
-  method: { last4: string; brand: string } | null;
+  method: SprayCard | null;
   saveCard: boolean;
   onSaveCard(on: boolean): void;
   onContinue(): void;
@@ -22,7 +22,8 @@ interface Props {
 }
 
 export default function CardSheet({ mode, method, saveCard, onSaveCard, onContinue, onCancel, busy = false, error = null }: Props) {
-  const card = cardLabel(method);
+  const label = cardLabel(method);
+  const card = label ? cardInSentence(label) : null; // mid-sentence: "we forget your saved Visa"
   const replacing = mode === "replace" && !!card;
   return (
     <div className="grid gap-4" data-testid="spray-card-sheet" data-mode={mode}>
@@ -36,9 +37,13 @@ export default function CardSheet({ mode, method, saveCard, onSaveCard, onContin
         <CreditCardIcon className="h-5 w-5 shrink-0" aria-hidden />
         <span className="text-sm font-medium">{replacing ? "A new card, added with your bank" : "Card details go to Paystack only"}</span>
       </div>
-      <div className="flex min-h-[44px] items-start gap-3">
-        <Checkbox id="spray-save-card" checked={saveCard} onCheckedChange={(v) => onSaveCard(v === true)} className="mt-0.5 h-5 w-5" data-testid="spray-save-card" />
-        <label htmlFor="spray-save-card" className="text-sm">{SPRAY_COPY.saveCard}</label>
+      {/* The whole 44 px row toggles the box (the box itself is 20 px), review M15. In "replace" mode the choice is kept
+          by the flow and applied to the new intent (review M5). */}
+      <div className="flex min-h-[44px] items-center gap-1">
+        <label htmlFor="spray-save-card" className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center">
+          <Checkbox id="spray-save-card" checked={saveCard} onCheckedChange={(v) => onSaveCard(v === true)} className="h-5 w-5" data-testid="spray-save-card" />
+        </label>
+        <label htmlFor="spray-save-card" className="flex min-h-[44px] flex-1 cursor-pointer items-center text-sm">{SPRAY_COPY.saveCard}</label>
       </div>
       {error && <p role="alert" className="text-sm text-destructive" data-testid="spray-card-error">{error}</p>}
       <Button className="min-h-[48px] rounded-full" onClick={onContinue} disabled={busy} data-testid="spray-card-continue">

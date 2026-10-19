@@ -51,7 +51,9 @@ export function defaultTarget(targets: readonly string[], hostId: string): strin
 
 // ---------------------------------------------------------------- the payer's own settings (GET /api/users/me/spray)
 
-export interface SprayMe { method: { last4: string; brand: string } | null; dailyLimitKobo: number; dailySpentKobo: number; verified: boolean }
+/** A saved card as shown: the last four digits when the server knows them (null when it does not), and the brand. */
+export interface SprayCard { last4: string | null; brand: string }
+export interface SprayMe { method: SprayCard | null; dailyLimitKobo: number; dailySpentKobo: number; verified: boolean }
 
 export function parseSprayMe(raw: unknown): SprayMe | null {
   if (!raw || typeof raw !== "object") return null;
@@ -61,17 +63,26 @@ export function parseSprayMe(raw: unknown): SprayMe | null {
   if (b.method && typeof b.method === "object") {
     const m = b.method as Record<string, unknown>;
     // Only the last four digits and the brand are ever shown. Anything else on the object is ignored, never rendered.
-    if (typeof m.last4 === "string" && /^\d{4}$/.test(m.last4)) method = { last4: m.last4, brand: typeof m.brand === "string" ? m.brand.slice(0, 24) : "" };
+    // A saved card whose last four the server does not have (empty or missing) is still a saved card: the server charges
+    // it in one tap, so the UI must never call it "no card" (review M4). Only a malformed last4 drops it.
+    const brand = typeof m.brand === "string" ? m.brand.slice(0, 24) : "";
+    if (typeof m.last4 === "string" && /^\d{4}$/.test(m.last4)) method = { last4: m.last4, brand };
+    else if (m.last4 === null || m.last4 === undefined || m.last4 === "") method = { last4: null, brand };
   }
   return { method, dailyLimitKobo: b.dailyLimitKobo, dailySpentKobo: b.dailySpentKobo, verified: b.verified };
 }
 
 const BRANDS: Record<string, string> = { visa: "Visa", mastercard: "Mastercard", verve: "Verve", amex: "Amex", "american express": "Amex" };
-/** "Visa ending 4242". An unknown brand is just "Card". */
-export function cardLabel(method: { last4: string; brand: string } | null): string | null {
+/** "Visa ending 4242", or "Your saved Visa" when the last four are unknown. An unknown brand is just "card". */
+export function cardLabel(method: SprayCard | null): string | null {
   if (!method) return null;
-  return `${BRANDS[method.brand.trim().toLowerCase()] ?? "Card"} ending ${method.last4}`;
+  const brand = BRANDS[method.brand.trim().toLowerCase()];
+  if (!method.last4) return brand ? `Your saved ${brand}` : "Your saved card";
+  return `${brand ?? "Card"} ending ${method.last4}`;
 }
+
+/** The card label inside a sentence: "Charged to your saved Visa", "Charged to Visa ending 4242". */
+export const cardInSentence = (label: string) => (label.startsWith("Your ") ? `y${label.slice(1)}` : label);
 
 /** PUT .../spray/limit answers `{ limitKobo, spentKobo }`. */
 export function parseLimitBody(raw: unknown): { limitKobo: number; spentKobo: number } | null {
@@ -145,17 +156,38 @@ export function dailyChoices(verified: boolean): LimitChoice[] {
 
 // ---------------------------------------------------------------- the pay flow (state machine)
 
-export interface SprayIntent { tier: SprayTier; targetId: string; key: string; saveCard: boolean }
+/**
+ * One spray the payer chose. `key` is the idempotency key, made once for this intent and sent on every attempt of it.
+ * `bankUrl` is the approval link once the server gave one (kept so the payer can reopen it while we keep checking).
+ */
+export interface SprayIntent { tier: SprayTier; targetId: string; key: string; saveCard: boolean; bankUrl?: string }
 
 export type SprayFailReason =
   | SprayReason
   | "REVERSED" | "FAILED" | "UNAVAILABLE" | "ROOM_LIMIT" | "DAILY_LIMIT" | "RATE_LIMITED" | "SIGNED_OUT"
-  | "OFFLINE" | "SERVER" | "BAD_REQUEST" | "MISMATCH" | "STILL_WAITING" | "BAD_LINK";
+  /** Offline when Pay was tapped: nothing was sent. */
+  | "NOT_SENT"
+  /** The server could not start the payment (our side, 402 NETWORK or a failed row with NETWORK): not charged. */
+  | "NOT_STARTED"
+  /** A bank approval that was never paid and ran out of time (failed + TIMEOUT): NOT charged, never "refunded". */
+  | "EXPIRED"
+  /** GET /spray/:id answered 404: not this payer's spray, or no such spray. */
+  | "NOT_FOUND"
+  | "BAD_REQUEST" | "MISMATCH" | "BAD_LINK"
+  /** The wait deadline passed while paying (the outcome is still unknown): "still checking", never a failure. */
+  | "STILL_CHECKING"
+  /** The wait deadline passed while the bank approval was open. */
+  | "STILL_WAITING";
 
 export type SprayFlow =
   | { kind: "idle" }
   | { kind: "confirming"; intent: SprayIntent }
-  | { kind: "paying"; intent: SprayIntent; sprayId: string | null; since: number }
+  /**
+   * The request is out or the server is delivering. `since` is when Pay was tapped (the wait deadline counts from it).
+   * `unknown`: the last attempt got no answer (network, timeout, 5xx). We say "checking, don't pay again" and replay the
+   * SAME key until the server answers or the deadline passes. Never shown as a failure.
+   */
+  | { kind: "paying"; intent: SprayIntent; sprayId: string | null; since: number; unknown?: boolean }
   | { kind: "action_required"; intent: SprayIntent; sprayId: string; url: string; since: number }
   | { kind: "delivered"; intent: SprayIntent; sprayId: string }
   | { kind: "failed"; intent: SprayIntent; reason: SprayFailReason; sameKey: boolean; sprayId: string | null; retryAfterSec?: number };
@@ -165,6 +197,8 @@ export type SprayOutcome =
   | { kind: "pending"; sprayId: string }
   | { kind: "action_required"; sprayId: string; url: string }
   | { kind: "failed"; reason: SprayFailReason; sprayId: string | null; retryAfterSec?: number }
+  /** No answer we can trust (network, timeout, 5xx, a garbled 200): the payment may or may not have happened. */
+  | { kind: "unknown" }
   /** A poll that changes nothing (still waiting, or a passing network blip while polling). */
   | { kind: "wait" };
 
@@ -177,6 +211,8 @@ export type SprayFlowEvent =
   | { type: "seen"; sprayId: string }
   /** `key` is a fresh key, used only when the failure was definitive. */
   | { type: "retry"; key: string }
+  /** After a reload: keep tracking a spray this tab started (sessionStorage), from idle only. */
+  | { type: "resume"; intent: SprayIntent; sprayId: string; since: number }
   | { type: "close" };
 
 export const IDLE: SprayFlow = { kind: "idle" };
@@ -185,7 +221,7 @@ export const IDLE: SprayFlow = { kind: "idle" };
  * Unknown outcomes keep the key (the request may have reached the server: a replay returns the first result and never
  * charges again). Everything else was a definitive answer, so trying again is a new intent.
  */
-export const SAME_KEY_REASONS: ReadonlySet<SprayFailReason> = new Set<SprayFailReason>(["OFFLINE", "SERVER", "RATE_LIMITED", "STILL_WAITING", "NETWORK"]);
+export const SAME_KEY_REASONS: ReadonlySet<SprayFailReason> = new Set<SprayFailReason>(["NOT_SENT", "RATE_LIMITED", "STILL_CHECKING", "STILL_WAITING"]);
 
 export function sprayFlow(s: SprayFlow, e: SprayFlowEvent): SprayFlow {
   switch (e.type) {
@@ -198,17 +234,24 @@ export function sprayFlow(s: SprayFlow, e: SprayFlowEvent): SprayFlow {
       return s.kind === "confirming" ? { ...s, intent: { ...s.intent, saveCard: e.on === true } } : s;
     case "pay":
       return s.kind === "confirming" ? { kind: "paying", intent: s.intent, sprayId: null, since: e.now } : s;
+    case "resume":
+      if (s.kind !== "idle" || !isSprayTier(e.intent.tier) || !idempotencyKeyShape(e.intent.key) || !sprayIdOk(e.sprayId) || !Number.isFinite(e.since)) return s;
+      return { kind: "paying", intent: { tier: e.intent.tier, targetId: e.intent.targetId, key: e.intent.key, saveCard: false }, sprayId: e.sprayId, since: e.since };
     case "outcome": {
       if (s.kind !== "paying" && s.kind !== "action_required") return s;
       const o = e.outcome;
       if (o.kind === "wait") return s;
+      // No answer: keep the same key and keep checking. Never a failure, never a new charge.
+      if (o.kind === "unknown") return s.kind === "paying" && !s.unknown ? { ...s, unknown: true } : s;
       const id = "sprayId" in o ? o.sprayId : null;
       // An answer about a different spray (a late reply crossing a new intent) changes nothing.
       if (s.sprayId && id && id !== s.sprayId) return s;
       switch (o.kind) {
         case "delivered": return { kind: "delivered", intent: s.intent, sprayId: o.sprayId };
-        case "pending": return s.kind === "paying" ? { ...s, sprayId: o.sprayId } : { kind: "paying", intent: s.intent, sprayId: o.sprayId, since: s.since };
-        case "action_required": return s.kind === "action_required" ? s : { kind: "action_required", intent: s.intent, sprayId: o.sprayId, url: o.url, since: e.now };
+        case "pending": return s.kind === "paying" ? { ...s, sprayId: o.sprayId, unknown: false } : { kind: "paying", intent: s.intent, sprayId: o.sprayId, since: s.since };
+        case "action_required":
+          // The deadline keeps counting from the Pay tap (rule: a wait deadline from the moment Pay is tapped).
+          return s.kind === "action_required" ? s : { kind: "action_required", intent: { ...s.intent, bankUrl: o.url }, sprayId: o.sprayId, url: o.url, since: s.since };
         case "failed": return {
           kind: "failed", intent: s.intent, reason: o.reason, sameKey: SAME_KEY_REASONS.has(o.reason), sprayId: o.sprayId ?? s.sprayId,
           ...(o.retryAfterSec ? { retryAfterSec: o.retryAfterSec } : {}),
@@ -221,10 +264,11 @@ export function sprayFlow(s: SprayFlow, e: SprayFlowEvent): SprayFlow {
     case "retry":
       if (s.kind !== "failed") return s;
       if (s.sameKey) return { kind: "confirming", intent: s.intent };
-      return idempotencyKeyShape(e.key) ? { kind: "confirming", intent: { ...s.intent, key: e.key } } : s;
+      return idempotencyKeyShape(e.key) ? { kind: "confirming", intent: { tier: s.intent.tier, targetId: s.intent.targetId, key: e.key, saveCard: s.intent.saveCard } } : s;
     case "close":
-      // While the request is out the flow cannot be dropped (the sheet can be hidden; the hook keeps watching).
-      return s.kind === "paying" ? s : IDLE;
+      // While the request is out or the bank page is open the flow is never dropped: the sheet is hidden, and the hook
+      // keeps watching (closing the bank sheet must not stop tracking, review M8).
+      return inFlight(s) ? s : IDLE;
   }
   return s;
 }
@@ -232,73 +276,124 @@ export function sprayFlow(s: SprayFlow, e: SprayFlowEvent): SprayFlow {
 /** The flow is waiting on the server or the bank. */
 export const inFlight = (s: SprayFlow) => s.kind === "paying" || s.kind === "action_required";
 
+/**
+ * The flow has money in motion or an outcome the payer has not read: the room keeps the last good spray block while this
+ * is true, so a reload that comes back without a block never unmounts the flow (review I7, ruling 2).
+ */
+export const holdsSprayBlock = (s: SprayFlow) => s.kind === "paying" || s.kind === "action_required" || s.kind === "failed";
+
 // ---------------------------------------------------------------- answers from the server
 
 const SERVER_REASONS: readonly string[] = SPRAY_REASONS;
-const reasonOf = (x: unknown, fallback: SprayFailReason): SprayFailReason => (typeof x === "string" && SERVER_REASONS.includes(x) ? (x as SprayReason) : fallback);
+const isServerReason = (x: unknown): x is SprayReason => typeof x === "string" && SERVER_REASONS.includes(x);
 const sprayIdOk = (x: unknown): x is string => typeof x === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(x);
 
+/** This build is a dev (or test) build. Vite turns `import.meta.env.DEV` into a literal; outside Vite (tsx) it is false. */
+export function isDevBuild(): boolean {
+  try { return (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV === true; } catch { return false; }
+}
+
+/** The mock split provider's checkout host (server/payments/mockSplitProvider.ts). Opened in dev and test builds only. */
+export const MOCK_CHECKOUT_HOST = "checkout.mock.test";
+
 /**
- * The provider's approval page, or null. Our own origin (the mock provider and the dev fixture) or https Paystack only;
- * anything else is never opened.
+ * The provider's approval page, or null. Production: https Paystack only (`paystack.com` / `paystack.co` and their
+ * subdomains), never our own origin and never anything else. Dev and test builds (`dev`, default from the build flag)
+ * also allow our own origin (the dev fixture) and the mock provider's https checkout host. No userinfo, ever.
  */
-export function safeAuthorizationUrl(url: unknown, origin: string): string | null {
+export function safeAuthorizationUrl(url: unknown, origin: string, opts: { dev?: boolean } = {}): string | null {
   if (typeof url !== "string" || !url || url.length > 2048) return null;
+  const dev = opts.dev ?? isDevBuild();
   try {
     const u = new URL(url, origin);
     if (u.username || u.password) return null;
-    if (u.origin === origin) return u.toString();
     const h = u.hostname;
     if (u.protocol === "https:" && (h === "paystack.com" || h.endsWith(".paystack.com") || h === "paystack.co" || h.endsWith(".paystack.co"))) return u.toString();
+    if (dev && u.origin === origin) return u.toString();
+    if (dev && u.protocol === "https:" && h === MOCK_CHECKOUT_HOST) return u.toString();
     return null;
   } catch {
     return null;
   }
 }
 
-type Answer = { ok: true; status: number; body: unknown } | { ok: false; status: number; code?: string; retryAfterSec?: number };
+type Answer =
+  | { ok: true; status: number; body: unknown }
+  | { ok: false; status: number; code?: string; reason?: string; sprayId?: string; retryAfterSec?: number };
+
+/** No answer we can act on: the request may or may not have reached the server. */
+export const unknownStatus = (status: number) => status === 0 || status === 408 || status >= 500;
+
+/** A failed row's stored reason in plain words. Never a "refunded" reason: a failed spray never took money. */
+function failedReason(reason: unknown): SprayFailReason {
+  if (reason === "TIMEOUT") return "EXPIRED";
+  if (reason === "NETWORK") return "NOT_STARTED";
+  if (reason === "DECLINED" || reason === "INSUFFICIENT_FUNDS" || reason === "NOT_REUSABLE") return reason as SprayFailReason;
+  return "FAILED";
+}
+
+/** A reversed row's reason. Only `status: "reversed"` ever reaches a "refunded" line. */
+function reversedReason(reason: unknown): SprayFailReason {
+  if (reason === "RECIPIENT_LEFT" || reason === "ROOM_ENDED" || reason === "TIMEOUT" || reason === "DISPUTED") return reason as SprayFailReason;
+  return "REVERSED";
+}
 
 /** POST /spray's answer as an outcome. */
-export function outcomeOfPost(r: Answer, origin: string): SprayOutcome {
+export function outcomeOfPost(r: Answer, origin: string, opts: { dev?: boolean } = {}): SprayOutcome {
   if (r.ok) {
     const b = r.body && typeof r.body === "object" ? (r.body as Record<string, unknown>) : {};
-    if (!sprayIdOk(b.sprayId)) return { kind: "failed", reason: "SERVER", sprayId: null };
+    // A 200 we can't read may still mean the payment started: check again with the same key, never "failed".
+    if (!sprayIdOk(b.sprayId)) return { kind: "unknown" };
     const sprayId = b.sprayId;
     switch (b.status) {
       case "delivered": return { kind: "delivered", sprayId };
       case "pending": return { kind: "pending", sprayId };
       case "action_required": {
-        const url = safeAuthorizationUrl(b.authorizationUrl, origin);
+        const url = safeAuthorizationUrl(b.authorizationUrl, origin, opts);
+        // A saved-card OTP/3DS answer may come without a link: keep checking (the poll and the room event still work).
+        if (b.authorizationUrl === undefined || b.authorizationUrl === null) return { kind: "pending", sprayId };
         return url ? { kind: "action_required", sprayId, url } : { kind: "failed", reason: "BAD_LINK", sprayId };
       }
-      case "reversed": return { kind: "failed", reason: reasonOf(b.reason, "REVERSED"), sprayId };
-      // NETWORK is an unknown outcome (lane B1): keep checking with the server, never call it failed.
-      case "failed": return b.reason === "NETWORK" ? { kind: "pending", sprayId } : { kind: "failed", reason: reasonOf(b.reason, "FAILED"), sprayId };
-      default: return { kind: "failed", reason: "SERVER", sprayId };
+      case "reversed": return { kind: "failed", reason: reversedReason(b.reason), sprayId };
+      case "failed": return { kind: "failed", reason: failedReason(b.reason), sprayId };
+      default: return { kind: "unknown" };
     }
   }
-  return { kind: "failed", reason: reasonOfRefusal(r.status, r.code), sprayId: null, ...(r.retryAfterSec ? { retryAfterSec: r.retryAfterSec } : {}) };
+  if (unknownStatus(r.status)) return { kind: "unknown" };
+  const sprayId = sprayIdOk(r.sprayId) ? r.sprayId : null;
+  return { kind: "failed", reason: reasonOfRefusal(r.status, r.code, r.reason), sprayId, ...(r.retryAfterSec ? { retryAfterSec: r.retryAfterSec } : {}) };
 }
 
-export function reasonOfRefusal(status: number, code?: string): SprayFailReason {
-  if (status === 0) return "OFFLINE";
+/**
+ * A definitive refusal in plain words. 402 PAYMENT_DECLINED carries the server's reason: the card's own answer
+ * (DECLINED, INSUFFICIENT_FUNDS, NOT_REUSABLE), NETWORK (our side could not start it: never "your bank said no"), or
+ * TIMEOUT (a replayed key whose bank approval expired unpaid).
+ */
+export function reasonOfRefusal(status: number, code?: string, reason?: unknown): SprayFailReason {
   if (status === 401) return "SIGNED_OUT";
-  if (status === 402) return "DECLINED";
+  if (status === 402) return isServerReason(reason) ? failedReason(reason) : "DECLINED";
   if (status === 400) return "BAD_REQUEST";
   if (status === 409) return code === "ROOM_LIMIT" ? "ROOM_LIMIT" : code === "DAILY_LIMIT" ? "DAILY_LIMIT" : code === "IDEMPOTENCY_MISMATCH" ? "MISMATCH" : "UNAVAILABLE";
   if (status === 429) return "RATE_LIMITED";
-  if (status >= 500) return "SERVER";
   return "UNAVAILABLE"; // 403 SPRAY_UNAVAILABLE, 404, anything else: the one plain line
 }
 
-/** GET /spray/:id's answer. A refused or failed poll changes nothing (the deadline ends the wait), except being signed out. */
+/**
+ * GET /spray/:id's answer. A network blip or a 5xx changes nothing (the deadline ends the wait); signed out and 404
+ * (not your spray, or none) are final.
+ */
 export function outcomeOfStatus(r: Answer, sprayId: string): SprayOutcome {
-  if (!r.ok) return r.status === 401 ? { kind: "failed", reason: "SIGNED_OUT", sprayId } : { kind: "wait" };
+  if (!r.ok) {
+    if (r.status === 401) return { kind: "failed", reason: "SIGNED_OUT", sprayId };
+    if (r.status === 404) return { kind: "failed", reason: "NOT_FOUND", sprayId };
+    return { kind: "wait" };
+  }
   const b = r.body && typeof r.body === "object" ? (r.body as Record<string, unknown>) : {};
   switch (b.status) {
     case "delivered": return { kind: "delivered", sprayId };
-    case "reversed": return { kind: "failed", reason: reasonOf(b.reason, "REVERSED"), sprayId };
-    case "failed": return b.reason === "NETWORK" ? { kind: "wait" } : { kind: "failed", reason: reasonOf(b.reason, "FAILED"), sprayId };
+    case "reversed": return { kind: "failed", reason: reversedReason(b.reason), sprayId };
+    // A failed row is final whatever its reason (the server never marks an unknown charge failed).
+    case "failed": return { kind: "failed", reason: failedReason(b.reason), sprayId };
     default: return { kind: "wait" }; // pending, action_required: keep waiting
   }
 }
@@ -306,12 +401,52 @@ export function outcomeOfStatus(r: Answer, sprayId: string): SprayOutcome {
 /** Ask the server again after this long (quick at first, slower after 30 seconds). */
 export const pollDelayMs = (elapsedMs: number) => (elapsedMs < 30_000 ? 2_000 : 4_000);
 
+/** Each request gives up after this long (it then counts as no answer, and the same key is tried again). */
+export const SPRAY_REQUEST_TIMEOUT_MS = 15_000;
+
 /**
- * When the client stops waiting and says so (never a spinner forever). Paid sprays are delivered or reversed by the server
- * within DELIVERY_DEADLINE_MS plus one sweep; a bank approval may take the payer a few minutes, the server re-checks after 10.
+ * When the client stops waiting and says so (never a spinner forever), counted from the Pay tap. Paid sprays are
+ * delivered or reversed by the server within DELIVERY_DEADLINE_MS plus one sweep; a bank approval may take the payer a
+ * few minutes, the server re-checks after 10.
  */
 export function waitDeadlineMs(kind: "paying" | "action_required"): number {
   return kind === "paying" ? DELIVERY_DEADLINE_MS + 45_000 : 11 * 60_000;
+}
+
+/** Retry-After as seconds: delta-seconds or an HTTP date, capped at an hour. Null when absent or unreadable. */
+export function parseRetryAfter(value: string | null | undefined, nowMs: number): number | null {
+  if (!value) return null;
+  const v = value.trim();
+  if (/^\d+$/.test(v)) { const n = Number(v); return n > 0 ? Math.min(3600, n) : null; }
+  const at = Date.parse(v);
+  if (!Number.isFinite(at)) return null;
+  const sec = Math.ceil((at - nowMs) / 1000);
+  return sec > 0 ? Math.min(3600, sec) : null;
+}
+
+// ---------------------------------------------------------------- tracking across a reload (sessionStorage)
+
+/** Per tab: only what is needed to keep asking the server about one spray. No card data, no amount, no reference. */
+export const SPRAY_TRACK_KEY = "vib3.rooms.sprayTrack";
+export interface SprayTrack { v: 1; roomId: string; key: string; sprayId: string; tier: SprayTier; targetId: string; since: number }
+
+export function encodeSprayTrack(roomId: string, s: SprayFlow): string | null {
+  if ((s.kind !== "paying" && s.kind !== "action_required") || !s.sprayId) return null;
+  const t: SprayTrack = { v: 1, roomId, key: s.intent.key, sprayId: s.sprayId, tier: s.intent.tier, targetId: s.intent.targetId, since: s.since };
+  return JSON.stringify(t);
+}
+
+/** The tracked spray for this room, or null (another room, too old, or anything malformed). */
+export function decodeSprayTrack(raw: string | null | undefined, roomId: string, now: number): SprayTrack | null {
+  if (!raw || raw.length > 1024) return null;
+  let t: unknown;
+  try { t = JSON.parse(raw); } catch { return null; }
+  if (!t || typeof t !== "object") return null;
+  const o = t as Record<string, unknown>;
+  if (o.v !== 1 || o.roomId !== roomId || typeof o.key !== "string" || !idempotencyKeyShape(o.key) || !sprayIdOk(o.sprayId)) return null;
+  if (!isSprayTier(o.tier) || typeof o.targetId !== "string" || !o.targetId || o.targetId.length > 128) return null;
+  if (typeof o.since !== "number" || !Number.isFinite(o.since) || o.since > now || now - o.since > waitDeadlineMs("action_required")) return null;
+  return { v: 1, roomId, key: o.key, sprayId: o.sprayId, tier: o.tier, targetId: o.targetId, since: o.since };
 }
 
 /** The bank always confirms bag and rain (3D Secure), even with a saved card. */
@@ -319,31 +454,42 @@ export const bankWillAsk = (tier: SprayTier, hasCard: boolean) => requiresThreeD
 
 // ---------------------------------------------------------------- copy
 
-export interface FailCopy { title: string; body: string; primary: "retry" | "check" | "limit" | "limits" | "signin" | null; anotherCard: boolean; refunded: boolean }
+/**
+ * `tone`: "fail" is a definitive failure (an alert), "refund" is money that came back (only ever for status "reversed"),
+ * "wait" is an outcome we don't know yet (a calm status line, never an alert), "info" is a plain refusal.
+ */
+export interface FailCopy {
+  title: string; body: string; primary: "retry" | "check" | "limit" | "limits" | "signin" | null; anotherCard: boolean; refunded: boolean;
+  tone: "fail" | "refund" | "wait" | "info";
+}
 
 export const SPRAY_FAIL_COPY: Record<SprayFailReason, FailCopy> = {
-  DECLINED: { title: "Payment declined", body: "Your bank said no. You were not charged and nothing was sent. Try again, or use another card.", primary: "retry", anotherCard: true, refunded: false },
-  INSUFFICIENT_FUNDS: { title: "Not enough on this card", body: "Your bank said there isn't enough on this card. You were not charged and nothing was sent.", primary: "retry", anotherCard: true, refunded: false },
-  NOT_REUSABLE: { title: "Your bank needs to approve this card again", body: "This card can't be charged in one tap any more. Add it again with your bank, or use another card. You were not charged.", primary: null, anotherCard: true, refunded: false },
-  // Never shown for a spray the server is still checking (that keeps waiting); only if NETWORK ever arrives some other way.
-  NETWORK: { title: "Still checking your payment", body: "We couldn't hear back from the card network yet. If you were charged, your spray arrives or you are refunded in full. You will never be charged twice for this spray.", primary: "check", anotherCard: false, refunded: false },
-  RECIPIENT_LEFT: { title: "Refunded in full", body: "They left the stage, so you were refunded in full.", primary: null, anotherCard: false, refunded: true },
-  ROOM_ENDED: { title: "Refunded in full", body: "The room ended before your spray arrived, so you were refunded in full.", primary: null, anotherCard: false, refunded: true },
-  TIMEOUT: { title: "Refunded in full", body: "Your spray couldn't be delivered in time, so you were refunded in full.", primary: "retry", anotherCard: false, refunded: true },
-  DISPUTED: { title: "This payment was disputed", body: "Your bank reversed this payment. Nothing more happens to it here.", primary: null, anotherCard: false, refunded: false },
-  REVERSED: { title: "Refunded in full", body: "Your spray couldn't be delivered, so you were refunded in full.", primary: null, anotherCard: false, refunded: true },
-  FAILED: { title: "The payment didn't go through", body: "Nothing was sent. If your bank shows a charge, it is returned in full.", primary: "retry", anotherCard: false, refunded: false },
-  UNAVAILABLE: { title: "Spraying isn't available", body: "Spraying is not available here.", primary: null, anotherCard: false, refunded: false },
-  ROOM_LIMIT: { title: "Over your room limit", body: "This spray is above your limit for this room. Raise it to continue.", primary: "limit", anotherCard: false, refunded: false },
-  DAILY_LIMIT: { title: "Over your daily limit", body: "This spray would go over your daily limit. You can change it in Spending limits.", primary: "limits", anotherCard: false, refunded: false },
-  RATE_LIMITED: { title: "Slow down a little", body: "You've sprayed a lot in a short time. Wait a moment, then try again.", primary: "retry", anotherCard: false, refunded: false },
-  SIGNED_OUT: { title: "Sign in to spray", body: "You were signed out. Sign in again, then come back to the room.", primary: "signin", anotherCard: false, refunded: false },
-  OFFLINE: { title: "You're offline", body: "We couldn't confirm the payment because the connection dropped. If anything was taken it is refunded in full automatically. Try again when you're back online: you will never be charged twice for this spray.", primary: "retry", anotherCard: false, refunded: false },
-  SERVER: { title: "Something went wrong", body: "We couldn't confirm the payment. Trying again is safe: you will never be charged twice for this spray.", primary: "retry", anotherCard: false, refunded: false },
-  BAD_REQUEST: { title: "That didn't work", body: "Nothing was sent. Close this and try again.", primary: null, anotherCard: false, refunded: false },
-  MISMATCH: { title: "That didn't work", body: "Nothing was sent. Close this and try again.", primary: "retry", anotherCard: false, refunded: false },
-  STILL_WAITING: { title: "Still waiting for your bank", body: "We haven't heard back yet. If the payment went through, your spray arrives or you are refunded in full. You will never be charged twice for this spray.", primary: "check", anotherCard: false, refunded: false },
-  BAD_LINK: { title: "Couldn't open your bank", body: "Something was wrong with the approval link, so we didn't open it. You were not charged.", primary: "retry", anotherCard: false, refunded: false },
+  DECLINED: { title: "Payment declined", body: "Your bank said no. You were not charged and nothing was sent. Try again, or use another card.", primary: "retry", anotherCard: true, refunded: false, tone: "fail" },
+  INSUFFICIENT_FUNDS: { title: "Not enough on this card", body: "Your bank said there isn't enough on this card. You were not charged and nothing was sent.", primary: "retry", anotherCard: true, refunded: false, tone: "fail" },
+  NOT_REUSABLE: { title: "Your bank needs to approve this card again", body: "This card can't be charged in one tap any more. Add it again with your bank, or use another card. You were not charged.", primary: null, anotherCard: true, refunded: false, tone: "fail" },
+  // Never reached from a server answer (a failed NETWORK row is NOT_STARTED); kept as the plain line for the reason itself.
+  NETWORK: { title: "The payment didn't start", body: "Something went wrong on our side, so you were not charged and nothing was sent. Try again in a moment.", primary: "retry", anotherCard: false, refunded: false, tone: "fail" },
+  NOT_STARTED: { title: "The payment didn't start", body: "Something went wrong on our side, so you were not charged and nothing was sent. Try again in a moment.", primary: "retry", anotherCard: false, refunded: false, tone: "fail" },
+  // The three below are only ever shown for status "reversed": money was taken and has been sent back.
+  RECIPIENT_LEFT: { title: "Refunded in full", body: "They left the stage, so you were refunded in full.", primary: null, anotherCard: false, refunded: true, tone: "refund" },
+  ROOM_ENDED: { title: "Refunded in full", body: "The room ended before your spray landed, so you were refunded in full.", primary: null, anotherCard: false, refunded: true, tone: "refund" },
+  TIMEOUT: { title: "Refunded in full", body: "Your spray took too long to land, so you were refunded in full.", primary: "retry", anotherCard: false, refunded: true, tone: "refund" },
+  REVERSED: { title: "Refunded in full", body: "Your spray couldn't be delivered, so you were refunded in full.", primary: null, anotherCard: false, refunded: true, tone: "refund" },
+  DISPUTED: { title: "This payment was disputed", body: "Your bank reversed this payment. Nothing more happens to it here.", primary: null, anotherCard: false, refunded: false, tone: "info" },
+  EXPIRED: { title: "The approval ran out of time", body: "The payment wasn't finished in time, so you were not charged and nothing was sent.", primary: "retry", anotherCard: false, refunded: false, tone: "fail" },
+  FAILED: { title: "The payment didn't go through", body: "Nothing was sent. If your bank shows a charge, it is returned in full.", primary: "retry", anotherCard: false, refunded: false, tone: "fail" },
+  NOT_FOUND: { title: "We can't find this payment", body: "This payment isn't on your account, or it doesn't exist.", primary: null, anotherCard: false, refunded: false, tone: "info" },
+  UNAVAILABLE: { title: "Spraying isn't available", body: "Spraying is not available here.", primary: null, anotherCard: false, refunded: false, tone: "info" },
+  ROOM_LIMIT: { title: "Over your room limit", body: "This spray is above your limit for this room. Raise it to continue.", primary: "limit", anotherCard: false, refunded: false, tone: "info" },
+  DAILY_LIMIT: { title: "Over your daily limit", body: "This spray would go over your daily limit. You can change it in Spending limits.", primary: "limits", anotherCard: false, refunded: false, tone: "info" },
+  RATE_LIMITED: { title: "Slow down a little", body: "You've sprayed a lot in a short time. Wait a moment, then try again.", primary: "retry", anotherCard: false, refunded: false, tone: "info" },
+  SIGNED_OUT: { title: "Sign in to spray", body: "You were signed out. Sign in again, then come back to the room.", primary: "signin", anotherCard: false, refunded: false, tone: "info" },
+  NOT_SENT: { title: "You're offline", body: "Nothing was sent and you were not charged. Try again when you're back online.", primary: "retry", anotherCard: false, refunded: false, tone: "info" },
+  BAD_REQUEST: { title: "That didn't work", body: "Nothing was sent. Close this and try again.", primary: null, anotherCard: false, refunded: false, tone: "fail" },
+  MISMATCH: { title: "That didn't work", body: "Nothing was sent. Close this and try again.", primary: "retry", anotherCard: false, refunded: false, tone: "fail" },
+  STILL_CHECKING: { title: "Still checking your payment", body: "We haven't had an answer yet. Don't pay again: if it went through, your spray lands, or you are refunded in full if it can't. You are never charged twice for this spray.", primary: "check", anotherCard: false, refunded: false, tone: "wait" },
+  STILL_WAITING: { title: "Still waiting for your bank", body: "We haven't heard back yet. If you approved it, your spray lands, or you are refunded in full if it can't. You are never charged twice for this spray.", primary: "check", anotherCard: false, refunded: false, tone: "wait" },
+  BAD_LINK: { title: "Couldn't open your bank", body: "Something was wrong with the approval link, so we didn't open it. You were not charged.", primary: "retry", anotherCard: false, refunded: false, tone: "fail" },
 };
 
 export const SPRAY_COPY = {
@@ -360,6 +506,13 @@ export const SPRAY_COPY = {
   bankDismissNote: "If you already approved it, your spray still goes through.",
   paying: "Paying",
   sending: "Checking your payment and sending your spray",
+  checking: "We're still checking your payment. Don't pay again: you are never charged twice for this spray.",
+  bankAgain: "Open my bank again",
+  slideAlt: "Pay with a button instead",
+  slideAltBack: "Use the slider",
+  confirmAgain: "Tap again to confirm",
+  thankYou: "Say thank you",
+  privateLine: "Only you can see this",
   sent: "Sprayed",
   limitTitle: "Room limit",
   limitNote: `Limits above ${formatNaira(ID_REQUIRED_ABOVE_KOBO)} need a verified account.`,
@@ -385,10 +538,21 @@ export const SPRAY_COPY = {
 } as const;
 
 /** "Charged to Visa ending 4242. Your bank will ask you to approve it." */
-export function chargeLine(tier: SprayTier, method: { last4: string; brand: string } | null): string {
-  const card = cardLabel(method);
+export function chargeLine(tier: SprayTier, method: SprayCard | null): string {
+  const label = cardLabel(method);
+  const card = label ? cardInSentence(label) : null;
   if (!card) return "Your bank will ask you to add and approve a card.";
   return requiresThreeDs(tier) ? `Charged to ${card}. Your bank will ask you to approve it.` : `Charged to ${card}.`;
+}
+
+/**
+ * Why a limit change was refused, in words. `ID_REQUIRED` (403) is the payer's own fact: a limit above the ID line needs
+ * a verified ID (review M17). `status` undefined means the answer came back but could not be read.
+ */
+export function limitErrorText(status: number | undefined, code: string | undefined, fallback: string): string {
+  if (status === 0) return "You're offline. Try again when you're back online.";
+  if (code === "ID_REQUIRED") return `Verify your ID to set a limit above ${formatNaira(ID_REQUIRED_ABOVE_KOBO)}.`;
+  return fallback;
 }
 
 /** "Room limit ₦2,000 · spent ₦0". */
@@ -411,15 +575,66 @@ export function sprayChipText(tier: SprayTier, from: string, to: string): string
   }
 }
 
+// ---------------------------------------------------------------- screen effects (notes.html: dim, banner, flash, bump)
+
+/**
+ * What the room does around the particles for each tier, from the prototype. Rain owns the room: a dim with a spotlight
+ * on the recipient, a banner from the dock with a live V3C counter, then the recipient is offered a thank-you. Never
+ * played under Quiet effects or reduced motion (the chip and the server's chat line say it instead).
+ */
+export const SPRAY_SCREEN_FX: Readonly<Record<SprayTier, Readonly<{ flash: number; dim: boolean; banner: boolean; thank: boolean }>>> = {
+  note: { flash: 0, dim: false, banner: false, thank: false },
+  bundle: { flash: 0.28, dim: false, banner: false, thank: false },
+  bag: { flash: 0.3, dim: false, banner: false, thank: true },
+  rain: { flash: 0.4, dim: true, banner: true, thank: true },
+};
+/** Rain timings (ms from the room:spray event), as in notes.html. */
+export const RAIN_FX = { dimOpacity: 0.7, dimOpacityVideo: 0.5, counterMs: 2200, offMs: 5600, thankMs: 5900 } as const;
+/** How long the recipient's thank-you offer stays. */
+export const THANK_OFFER_MS = 10_000;
+
+/** The banner's counter at `elapsedMs`: an integer from 0 to `total`, ease-out cubic, exactly `total` at the end. */
+export function counterAt(total: number, elapsedMs: number, durMs: number = RAIN_FX.counterMs): number {
+  if (!Number.isSafeInteger(total) || total <= 0) return 0;
+  if (!(durMs > 0) || !(elapsedMs < durMs)) return elapsedMs >= 0 ? total : 0;
+  if (!(elapsedMs > 0)) return 0;
+  const u = elapsedMs / durMs;
+  return Math.min(total, Math.round(total * (1 - Math.pow(1 - u, 3))));
+}
+
+/** The rain banner's words: "Ade is making it rain" (or "You are making it rain") over the recipient's name. */
+export function rainBannerText(fromName: string, toName: string, fromIsYou: boolean): { sub: string; who: string; label: string } {
+  const sub = fromIsYou ? "You are making it rain" : `${fromName} is making it rain`;
+  return { sub, who: toName, label: `${sub} on ${toName}` };
+}
+
+/** What the recipient sends when they tap "Say thank you": a real chat line from them, never one made for them. */
+export const thankYouText = (fromName: string) => `Thank you ${fromName.trim().slice(0, 40) || "for the spray"}!`;
+
+/**
+ * A server-made chat line in words (room:chat with `system`). The receipt reads "Ade sprayed Mara a note"; the private
+ * refund line is shown as is. These lines are never shown as something a person typed.
+ */
+export function systemChatText(system: string, text: string, who: string): string {
+  return system === "spray" ? `${who} ${text}` : text;
+}
+
 /** Every sentence these screens can show, so one test checks the copy rules over all of them. */
 export function allSprayCopy(): string[] {
   const out: string[] = [...Object.values(SPRAY_COPY), ...Object.values(TIER_LINE)];
   for (const c of Object.values(SPRAY_FAIL_COPY)) out.push(c.title, c.body);
   for (const t of SPRAY_TIERS) {
-    out.push(confirmTitle(t, "Mara"), priceLine(t), chargeLine(t, { last4: "4242", brand: "visa" }), chargeLine(t, null), bankAsk(t), sprayChipText(t, "Ade", "Mara"));
+    out.push(confirmTitle(t, "Mara"), priceLine(t), chargeLine(t, { last4: "4242", brand: "visa" }), chargeLine(t, { last4: null, brand: "visa" }), chargeLine(t, null), bankAsk(t), sprayChipText(t, "Ade", "Mara"));
   }
+  const rb = rainBannerText("Ade", "Mara", false);
+  out.push(rb.sub, rb.label, rainBannerText("Ade", "Mara", true).sub, thankYouText("Ade"), confirmAgainText("note"), slidePayLabel("bundle"));
   return out;
 }
+
+/** The second tap of the button path: "Tap again to pay ₦1,000". */
+export const confirmAgainText = (tier: SprayTier) => `Tap again to pay ${sprayPrice(tier).display}`;
+/** The slider's name and the button path's first label. */
+export const slidePayLabel = (tier: SprayTier) => `Slide to pay ${sprayPrice(tier).display}`;
 
 // ---------------------------------------------------------------- idempotency key, return address, effects
 
@@ -459,10 +674,4 @@ export function newSprays<T extends { id: string; at: number }>(list: readonly T
   return list.filter((s) => !seen.has(s.id) && now - s.at <= maxAgeMs);
 }
 
-/** Dev fixture scenes for /dev/room-fixture?spray=... */
-export const SPRAY_SCENES = ["tray", "confirm", "bank", "declined", "limit", "quiet"] as const;
-export type SprayScene = (typeof SPRAY_SCENES)[number];
-export function parseSprayFixture(search: string): SprayScene | null {
-  const v = new URLSearchParams(search).get("spray");
-  return v && (SPRAY_SCENES as readonly string[]).includes(v) ? (v as SprayScene) : null;
-}
+// The dev fixture scenes (/dev/room-fixture?spray=...) live in sprayFixtures.ts, imported only by the DEV-only fixture page.

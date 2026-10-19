@@ -21,7 +21,12 @@ export interface RoomMemberView {
   avatar?: unknown;
 }
 
-export interface ChatItem { id: string; userId: string; text: string; at: number; replyTo?: ChatReply }
+/**
+ * `system`: set ONLY from the server's own `room:chat` field (a spray receipt "spray", the payer-only refund line
+ * "spray_reversed"). A system line is never rendered as something a person typed, and offers no reply, heart or wave.
+ * Typed chat never carries it (the server builds every typed line itself).
+ */
+export interface ChatItem { id: string; userId: string; text: string; at: number; replyTo?: ChatReply; system?: string }
 export interface ReactionItem { id: string; userId: string; emoji: string; at: number }
 export interface InteractionItem { id: string; fromId: string; targetId: string; kind: "wave" | "reaction"; emoji?: string; at: number }
 /**
@@ -81,7 +86,7 @@ export type RoomServerMessage =
   | { type: "room:state"; room: { id: string }; members: RoomMemberView[]; memberCount: number; screen: Screen | null; you: { role: MemberRole; muted: boolean }; voiceEnabled?: boolean; stage?: string[]; hands?: string[]; holder?: string | null; asks?: string[]; away?: number | null; nowPlaying?: NowPlaying | null; serverNowMs?: number }
   | { type: "room:joined"; member: RoomMemberView }
   | { type: "room:left"; userId: string }
-  | { type: "room:chat"; userId: string; text: string; at: number; replyTo?: ChatReply }
+  | { type: "room:chat"; userId: string; text: string; at: number; replyTo?: ChatReply; system?: string }
   | { type: "room:react"; userId: string; emoji: string; at?: number }
   | { type: "room:interact"; fromId: string; targetId: string; kind: "wave" | "reaction"; emoji?: string }
   | { type: "room:spray"; id: string; tier: SprayTier; v3c: number; fromId: string; toId: string; at: number }
@@ -147,8 +152,10 @@ export function roomReducer(state: RoomState, event: RoomEvent, now: () => numbe
       // The list is capped by the server, so the leaver may not be in it; the count still drops.
       return { ...state, members: state.members.filter((m) => m.userId !== event.userId), memberCount: Math.max(0, state.memberCount - 1) };
     case "room:chat": {
-      const replyTo = validateChatReply(event.replyTo) ?? undefined;
-      const item: ChatItem = { id: `c${state.seq}`, userId: event.userId, text: event.text, at: event.at, ...(replyTo ? { replyTo } : {}) };
+      // A system line (server-made) is never a reply to anything; its kind is a short known-shape word, kept as is.
+      const system = typeof event.system === "string" && /^[a-z_]{1,32}$/.test(event.system) ? event.system : undefined;
+      const replyTo = system ? undefined : validateChatReply(event.replyTo) ?? undefined;
+      const item: ChatItem = { id: `c${state.seq}`, userId: event.userId, text: event.text, at: event.at, ...(replyTo ? { replyTo } : {}), ...(system ? { system } : {}) };
       return { ...state, seq: state.seq + 1, chat: cap([...state.chat, item], CHAT_CAP) };
     }
     case "room:react": {

@@ -1,35 +1,63 @@
 // Network for spraying (task 5.7). The client never sends an amount, a split, a currency, a payer or a reference: only the
 // tier, the recipient's user id and an idempotency key the client made once for this intent (retries reuse it).
-// Every call keeps the status, the server's code and Retry-After, so the screens word every refusal themselves.
-// Bodies are parsed by sprayUi.ts (parsePostResult, parseStatusBody, parseSprayMe, parseLimitBody); nothing here trusts them.
+// Every call keeps the status, the server's code, the 402 reason and spray id, and Retry-After, so the screens word every
+// refusal themselves. Every attempt gives up after SPRAY_REQUEST_TIMEOUT_MS (AbortController): a hung network becomes
+// status 0, an unknown outcome, never a spinner forever.
+// Bodies are parsed by sprayUi.ts (outcomeOfPost, outcomeOfStatus, parseSprayMe, parseLimitBody); nothing here trusts them.
 import { ensureCsrfToken, refreshCsrfToken } from "@/lib/queryClient";
 import type { SprayTier } from "@shared/money";
+import { SPRAY_REQUEST_TIMEOUT_MS, parseRetryAfter } from "@/lib/sprayUi";
 
 export type SprayCall<T> =
   | { ok: true; status: number; body: T }
-  | { ok: false; status: number; code?: string; retryAfterSec?: number };
+  | { ok: false; status: number; code?: string; reason?: string; sprayId?: string; retryAfterSec?: number };
 
 const roomBase = (roomId: string) => `/api/rooms/${encodeURIComponent(roomId)}`;
 const withToken = (token?: string) => (token ? `?token=${encodeURIComponent(token)}` : "");
+const short = (x: unknown, max: number) => (typeof x === "string" && x.length > 0 && x.length <= max ? x : undefined);
 
-/** One JSON call with the CSRF retry (same rule as createRoomApi.call). A network failure is status 0: the outcome is unknown. */
-export async function sprayCall<T>(method: string, url: string, data?: unknown): Promise<SprayCall<T>> {
+/** fetch with a hard time limit. A timeout rejects (AbortError), which the caller turns into status 0. */
+async function fetchWithTimeout(url: string, init: RequestInit, ms: number): Promise<Response> {
+  const ctl = typeof AbortController === "function" ? new AbortController() : null;
+  const timer = ctl ? setTimeout(() => ctl.abort(), ms) : undefined;
+  try {
+    return await fetch(url, ctl ? { ...init, signal: ctl.signal } : init);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/**
+ * One JSON call with the CSRF retry (same rule as createRoomApi.call). A network failure or a timeout is status 0: the
+ * outcome is unknown. The time limit covers each attempt, reading the body included.
+ */
+export async function sprayCall<T>(method: string, url: string, data?: unknown, timeoutMs: number = SPRAY_REQUEST_TIMEOUT_MS): Promise<SprayCall<T>> {
   try {
     for (let attempt = 0; ; attempt++) {
       const headers: Record<string, string> = {};
       if (method !== "GET") headers["x-csrf-token"] = attempt === 0 ? await ensureCsrfToken() : await refreshCsrfToken();
       if (data !== undefined) headers["Content-Type"] = "application/json";
-      const res = await fetch(url, { method, headers, credentials: "include", cache: "no-store", body: data === undefined ? undefined : JSON.stringify(data) });
-      const text = await res.text().catch(() => "");
+      const started = Date.now();
+      const res = await fetchWithTimeout(url, { method, headers, credentials: "include", cache: "no-store", body: data === undefined ? undefined : JSON.stringify(data) }, timeoutMs);
+      const left = Math.max(1, timeoutMs - (Date.now() - started));
+      let bodyTimer: ReturnType<typeof setTimeout> | undefined;
+      const text = await Promise.race([
+        res.text().catch(() => ""),
+        new Promise<null>((resolve) => { bodyTimer = setTimeout(() => resolve(null), left); }),
+      ]).finally(() => clearTimeout(bodyTimer));
+      // The headers came but the body hung: we can't read the answer, so it is unknown (status 0), even for a 200.
+      if (text === null) return { ok: false, status: 0 };
       let body: unknown = null;
       try { body = JSON.parse(text); } catch { /* no body */ }
       if (res.ok) return { ok: true, status: res.status, body: body as T };
       const b = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
-      const code = typeof b.code === "string" ? b.code : undefined;
+      const code = short(b.code, 64);
       // A stale CSRF token answers 403 with no code: fetch a fresh one and try once more. SPRAY_UNAVAILABLE carries a code.
       if (method !== "GET" && res.status === 403 && attempt === 0 && (!code || text.includes("CSRF"))) continue;
-      const ra = Number(res.headers.get("Retry-After"));
-      return { ok: false, status: res.status, code, ...(Number.isFinite(ra) && ra > 0 ? { retryAfterSec: Math.min(3600, Math.ceil(ra)) } : {}) };
+      const reason = short(b.reason, 32);
+      const sprayId = short(b.sprayId, 64);
+      const ra = parseRetryAfter(res.headers.get("Retry-After"), Date.now());
+      return { ok: false, status: res.status, ...(code ? { code } : {}), ...(reason ? { reason } : {}), ...(sprayId ? { sprayId } : {}), ...(ra ? { retryAfterSec: ra } : {}) };
     }
   } catch {
     return { ok: false, status: 0 };
