@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import type {
   CreateCheckoutParams,
   CheckoutResult,
@@ -46,7 +47,7 @@ interface PaystackVerifyData {
 }
 
 export async function createPaystackCheckout(params: CreateCheckoutParams): Promise<CheckoutResult> {
-  const reference = `vib3_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  const reference = params.reference ?? `vib3_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
   const split = params.organizerSplit;
 
   const data = await paystackRequest<PaystackInitData>("/transaction/initialize", {
@@ -58,6 +59,9 @@ export async function createPaystackCheckout(params: CreateCheckoutParams): Prom
       reference,
       callback_url: params.successUrl.replace("{CHECKOUT_SESSION_ID}", reference),
       metadata: {
+        // Caller extras first, so they can never overwrite the fixed keys below.
+        ...(params.metadata ?? {}),
+        ...(params.itemType === "room" ? { roomId: params.itemId } : {}),
         itemId: params.itemId,
         itemType: params.itemType,
         userId: params.userId,
@@ -85,9 +89,39 @@ export async function createPaystackCheckout(params: CreateCheckoutParams): Prom
   };
 }
 
+/**
+ * The metadata shape callers of verifyPaystackTransaction see. Pure and exported so the test mock provider
+ * (setPaymentProviderForTests) can produce exactly what the real verify call produces.
+ */
+export function normalizePaystackMetadata(meta: Record<string, string>): VerifiedSession["metadata"] {
+  return {
+    // Pass through everything the initializer attached (type, tier, billing,
+    // platforms, ...) — callers previously only saw the fixed fields below,
+    // so any new metadata key silently came back undefined. Known fields
+    // below still override.
+    ...meta,
+    // Two metadata shapes reach this function: checkout sessions (event
+    // tickets) use {itemId, itemType}; inline sessions (venue entry,
+    // promotions) set {venueEntryNightId} etc. directly. Recognize both —
+    // previously only the itemId/itemType shape was read, which meant
+    // verified.metadata.venueEntryNightId was always undefined for a
+    // Paystack venue-entry payment and silently broke the webhook's
+    // venue-entry branch (the client-driven /confirm call still worked
+    // since it doesn't rely on this field, which is why it went unnoticed).
+    eventId: meta.itemType === "event" ? meta.itemId : (meta.eventId as string | undefined),
+    venueEntryNightId: meta.itemType === "venue_entry" ? meta.itemId : (meta.venueEntryNightId as string | undefined),
+    // Room tickets: only from a room checkout (itemType "room"), never from a bare roomId key.
+    roomId: meta.itemType === "room" && typeof meta.itemId === "string" && meta.itemId ? meta.itemId : undefined,
+    ticketTierId: meta.ticketTierId || undefined,
+    platformFeeAmount: meta.platformFeeAmount || undefined,
+    quantity: meta.quantity || undefined,
+    userId: meta.userId,
+  };
+}
+
 export async function verifyPaystackTransaction(reference: string): Promise<VerifiedSession | null> {
   try {
-    const data = await paystackRequest<PaystackVerifyData>(`/transaction/verify/${reference}`);
+    const data = await paystackRequest<PaystackVerifyData>(`/transaction/verify/${encodeURIComponent(reference)}`);
     const paid = data.status === "success";
     const meta = data.metadata ?? {};
 
@@ -97,27 +131,7 @@ export async function verifyPaystackTransaction(reference: string): Promise<Veri
       provider: "paystack",
       currency: (data.currency?.toUpperCase() ?? "NGN") as "GBP" | "NGN",
       amountSmallestUnit: data.amount,
-      metadata: {
-        // Pass through everything the initializer attached (type, tier, billing,
-        // platforms, ...) — callers previously only saw the fixed fields below,
-        // so any new metadata key silently came back undefined. Known fields
-        // below still override.
-        ...(meta as Record<string, string>),
-        // Two metadata shapes reach this function: checkout sessions (event
-        // tickets) use {itemId, itemType}; inline sessions (venue entry,
-        // promotions) set {venueEntryNightId} etc. directly. Recognize both —
-        // previously only the itemId/itemType shape was read, which meant
-        // verified.metadata.venueEntryNightId was always undefined for a
-        // Paystack venue-entry payment and silently broke the webhook's
-        // venue-entry branch (the client-driven /confirm call still worked
-        // since it doesn't rely on this field, which is why it went unnoticed).
-        eventId: meta.itemType === "event" ? meta.itemId : (meta.eventId as string | undefined),
-        venueEntryNightId: meta.itemType === "venue_entry" ? meta.itemId : (meta.venueEntryNightId as string | undefined),
-        ticketTierId: meta.ticketTierId || undefined,
-        platformFeeAmount: meta.platformFeeAmount || undefined,
-        quantity: meta.quantity || undefined,
-        userId: meta.userId,
-      },
+      metadata: normalizePaystackMetadata(meta as Record<string, string>),
     };
   } catch {
     return null;
@@ -229,13 +243,15 @@ export async function refundPaystackPayment(reference: string): Promise<void> {
   });
 }
 
+// Was `require("crypto")` inside the function: this package is ESM ("type": "module", esbuild --format=esm), where a
+// bare require is not defined, so the call threw before any check ran. Now a static import, and a constant-time compare.
 export function verifyPaystackWebhookSignature(rawBody: string, signature: string): boolean {
   const secret = process.env.PAYSTACK_SECRET_KEY;
-  if (!secret) return false;
+  if (!secret || typeof signature !== "string" || !/^[0-9a-f]{128}$/i.test(signature)) return false;
 
-  const crypto = require("crypto") as typeof import("crypto");
-  const hash = crypto.createHmac("sha512", secret).update(rawBody).digest("hex");
-  return hash === signature;
+  const hash = crypto.createHmac("sha512", secret).update(rawBody).digest();
+  const given = Buffer.from(signature, "hex");
+  return given.length === hash.length && crypto.timingSafeEqual(given, hash);
 }
 
 // ============================================================

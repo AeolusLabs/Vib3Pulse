@@ -4,6 +4,20 @@ import { createPaystackCheckout, verifyPaystackTransaction, createPaystackInline
 
 export type { SupportedCurrency, PaymentProvider, CheckoutResult, VerifiedSession, VerifiedPaymentIntent };
 
+// ------------------------------------------------------------ test seam
+// Tests replace the provider calls below with a mock so nothing ever reaches Paystack or Stripe and no card is charged.
+// Each method is optional: a missing one falls through to the real provider. Refused in production.
+export interface PaymentProviderForTests {
+  createCheckout?: (params: CreateCheckoutParams) => Promise<CheckoutResult>;
+  verifyCheckoutSession?: (sessionId: string, provider: PaymentProvider) => Promise<VerifiedSession | null>;
+  refundPayment?: (providerPaymentId: string, provider: PaymentProvider) => Promise<void>;
+}
+let testProvider: PaymentProviderForTests | null = null;
+export function setPaymentProviderForTests(p: PaymentProviderForTests | null): void {
+  if (p && process.env.NODE_ENV === "production") throw new Error("setPaymentProviderForTests is not allowed in production");
+  testProvider = p;
+}
+
 // Currency is an explicit field the organizer chooses at event/venue creation
 // (events.currency / venues.currency) — it is never guessed from city text at
 // charge time. This just guards against a stored value outside the two
@@ -31,6 +45,7 @@ export function formatAmount(amountSmallestUnit: number, currency: SupportedCurr
 }
 
 export async function createCheckout(params: CreateCheckoutParams): Promise<CheckoutResult> {
+  if (testProvider?.createCheckout) return testProvider.createCheckout(params);
   if (!process.env.STRIPE_SECRET_KEY && !process.env.PAYSTACK_SECRET_KEY) {
     throw new Error("No payment provider configured. Set STRIPE_SECRET_KEY or PAYSTACK_SECRET_KEY.");
   }
@@ -52,6 +67,7 @@ export async function verifyCheckoutSession(
   sessionId: string,
   provider: PaymentProvider
 ): Promise<VerifiedSession | null> {
+  if (testProvider?.verifyCheckoutSession) return testProvider.verifyCheckoutSession(sessionId, provider);
   if (provider === "paystack") return verifyPaystackTransaction(sessionId);
   return verifyStripeSession(sessionId);
 }
@@ -74,6 +90,7 @@ export async function verifyPaymentIntent(
 }
 
 export async function refundPayment(providerPaymentId: string, provider: PaymentProvider): Promise<void> {
+  if (testProvider?.refundPayment) return testProvider.refundPayment(providerPaymentId, provider);
   if (provider === "paystack") return refundPaystackPayment(providerPaymentId);
   if (provider === "stripe") return refundStripePayment(providerPaymentId);
   // "free" provider (promotion credits, free RSVPs) never charged anything to refund.

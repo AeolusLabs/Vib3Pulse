@@ -14,8 +14,8 @@ export interface OrganizerSplit {
 }
 
 export interface CreateCheckoutParams {
-  itemId: string;        // eventId or venueEntryNightId
-  itemType: "event" | "venue_entry";
+  itemId: string;        // eventId, venueEntryNightId or roomId
+  itemType: "event" | "venue_entry" | "room";
   userId: string;
   email: string;
   title: string;
@@ -27,6 +27,11 @@ export interface CreateCheckoutParams {
   ticketTierId?: string; // set when itemType === "event" and a specific tier was purchased
   organizerSplit?: OrganizerSplit;
   quantity?: number; // number of tickets this single charge covers — defaults to 1
+  // Paystack only. A server-made reference (room tickets bind it to the room and the buyer, see
+  // server/rooms/ticketReference.ts). Absent: the provider module makes a random one as before.
+  reference?: string;
+  // Paystack only. Extra string metadata for the transaction. The fixed keys (itemId, itemType, userId, ...) always win.
+  metadata?: Record<string, string>;
 }
 
 export interface CheckoutResult {
@@ -63,6 +68,7 @@ export interface VerifiedSession {
     ticketTierId?: string;
     platformFeeAmount?: string;
     quantity?: string;
+    roomId?: string; // set only when the charge was made for a room ticket (itemType "room")
     userId: string;
   };
 }
