@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, integer, boolean, unique, primaryKey, doublePrecision, check, jsonb, numeric, index, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, integer, boolean, unique, primaryKey, doublePrecision, check, jsonb, numeric, index, uniqueIndex, uuid, bigint } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import type { AvatarConfig } from "./avatar";
@@ -83,8 +83,13 @@ export const users = pgTable("users", {
   // ID verification (see shared/ageVerification.ts). Only an admin or a provider sets these; cleared when the birthdate is corrected.
   ageVerifiedAt: timestamp("age_verified_at"),
   ageVerifiedMethod: text("age_verified_method"),
+  // Spraying (phase 5): the payer's own rolling 24 hour spray limit in kobo. Null = DAILY_DEFAULT_KOBO (shared/spray.ts).
+  // Never public (toPublicUser hides it); the owner reads it from GET /api/users/me/spray as dailyLimitKobo.
+  sprayDailyLimitKobo: integer("spray_daily_limit_kobo"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
-});
+}, (t) => ({
+  sprayDailyLimitCheck: check("users_spray_daily_limit_kobo_check", sql`${t.sprayDailyLimitKobo} IS NULL OR ${t.sprayDailyLimitKobo} > 0`),
+}));
 
 // avatar is typed loosely here on purpose: the PATCH route runs it through sanitizeAvatarConfig before storing.
 export const insertUserSchema = createInsertSchema(users, { avatar: z.custom<AvatarConfig>().nullable().optional(), roomPrivacy: z.custom<RoomPrivacy>().nullable().optional() }).omit({
@@ -1253,6 +1258,105 @@ export const roomPayouts = pgTable("room_payouts", {
 }));
 export type RoomPayout = typeof roomPayouts.$inferSelect;
 
+// Phase 5 (spraying). Also created by migrations/add_spray.sql and ensureSchema via server/rooms/sprayMigration.ts (same
+// constraint and index names). No wallet, no balance: one row = one real charge. Amounts are integer kobo from
+// sprayBreakdown (shared/money.ts), never from the client. Money rows reference rooms and users ON DELETE RESTRICT.
+
+// A saved card: a payment method, never a balance. auth_enc is the AES-256-GCM encrypted provider authorization code
+// (server/payments/tokenCrypto.ts); it is never logged and never returned (global redaction strips authEnc/auth_enc and
+// signature). Soft-deleted: deleted_at set and auth_enc wiped to ''.
+export const userPaymentMethods = pgTable("user_payment_methods", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull(),
+  authEnc: text("auth_enc").notNull(),
+  last4: text("last4"),
+  brand: text("brand"),
+  bank: text("bank"),
+  reusable: boolean("reusable").notNull().default(false),
+  signature: text("signature").notNull(),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  deletedAt: timestamp("deleted_at"),
+}, (t) => ({
+  userSignatureUnique: unique("user_payment_methods_user_signature_key").on(t.userId, t.signature),
+}));
+export type UserPaymentMethod = typeof userPaymentMethods.$inferSelect;
+
+export const sprayPayments = pgTable("spray_payments", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  idempotencyKey: text("idempotency_key").notNull(),
+  requestHash: text("request_hash").notNull(),           // sha256(roomId|tier|targetId): a replay with another body is refused
+  roomId: varchar("room_id").notNull().references(() => rooms.id, { onDelete: "restrict" }),
+  hostId: varchar("host_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  payerId: varchar("payer_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  recipientId: varchar("recipient_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  tier: text("tier").notNull(),
+  v3c: bigint("v3c", { mode: "number" }).notNull(),
+  amountKobo: integer("amount_kobo").notNull(),
+  vatKobo: integer("vat_kobo").notNull(),
+  feeKobo: integer("fee_kobo").notNull(),
+  reserveKobo: integer("reserve_kobo").notNull(),
+  platformKobo: integer("platform_kobo").notNull(),
+  hostKobo: integer("host_kobo").notNull(),
+  guestKobo: integer("guest_kobo"),
+  provider: text("provider").notNull(),
+  providerRef: text("provider_ref").notNull().unique("spray_payments_provider_ref_key"),
+  paymentMethodId: uuid("payment_method_id").references(() => userPaymentMethods.id, { onDelete: "restrict" }),
+  status: text("status").notNull().default("created"),
+  reason: text("reason"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  paidAt: timestamp("paid_at"),
+  deliveredAt: timestamp("delivered_at"),
+  reversedAt: timestamp("reversed_at"),
+  refundRequestedAt: timestamp("refund_requested_at"),
+}, (t) => ({
+  // Per payer, never global: one user can never squat or probe another's key.
+  payerKeyUnique: unique("spray_payments_payer_key_key").on(t.payerId, t.idempotencyKey),
+  roomStatusIdx: index("spray_payments_room_status_idx").on(t.roomId, t.status),
+  payerCreatedIdx: index("spray_payments_payer_created_idx").on(t.payerId, t.createdAt),
+  statusCreatedIdx: index("spray_payments_status_created_idx").on(t.status, t.createdAt),
+  statusCheck: check("spray_payments_status_check", sql`${t.status} IN ('created', 'pending', 'paid', 'delivered', 'reversing', 'reversed', 'failed', 'disputed')`),
+  tierCheck: check("spray_payments_tier_check", sql`${t.tier} IN ('note', 'bundle', 'bag', 'rain')`),
+  amountsCheck: check("spray_payments_amounts_check", sql`${t.amountKobo} >= 50000 AND ${t.v3c} = ${t.amountKobo} AND ${t.vatKobo} >= 0 AND ${t.feeKobo} >= 0 AND ${t.reserveKobo} >= 0 AND ${t.platformKobo} >= 0 AND ${t.hostKobo} >= 0 AND (${t.guestKobo} IS NULL OR ${t.guestKobo} >= 0) AND ${t.vatKobo} + ${t.feeKobo} + ${t.reserveKobo} + ${t.platformKobo} + ${t.hostKobo} + COALESCE(${t.guestKobo}, 0) = ${t.amountKobo}`),
+  notSelfCheck: check("spray_payments_not_self_check", sql`${t.payerId} <> ${t.recipientId}`),
+}));
+export type SprayPayment = typeof sprayPayments.$inferSelect;
+export type InsertSprayPayment = typeof sprayPayments.$inferInsert;
+
+// A payer's spend in one room against their own room limit. A reservation counter, not a money record (the money is in
+// spray_payments), so it goes with its room or user. Reserved before a charge starts, released when it fails or reverses.
+export const roomSpend = pgTable("room_spend", {
+  roomId: varchar("room_id").notNull().references(() => rooms.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  limitKobo: integer("limit_kobo").notNull(),
+  spentKobo: integer("spent_kobo").notNull().default(0),
+}, (t) => ({
+  pk: primaryKey({ name: "room_spend_pkey", columns: [t.roomId, t.userId] }),
+  spentCheck: check("room_spend_spent_check", sql`${t.spentKobo} >= 0 AND ${t.spentKobo} <= ${t.limitKobo}`),
+}));
+export type RoomSpend = typeof roomSpend.$inferSelect;
+
+// What a host (and a stage guest) owes back after a chargeback on a delivered spray. Never deleted; written_off only by an
+// admin with a reason. One row per (spray, beneficiary).
+export const hostClawbacks = pgTable("host_clawbacks", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  hostId: varchar("host_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  beneficiaryId: varchar("beneficiary_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  sprayId: uuid("spray_id").notNull().references(() => sprayPayments.id, { onDelete: "restrict" }),
+  amountKobo: integer("amount_kobo").notNull(),
+  status: text("status").notNull().default("open"),
+  writtenOffBy: varchar("written_off_by").references(() => users.id, { onDelete: "restrict" }),
+  writtenOffReason: text("written_off_reason"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  recoveredAt: timestamp("recovered_at"),
+}, (t) => ({
+  sprayBeneficiaryUnique: unique("host_clawbacks_spray_beneficiary_key").on(t.sprayId, t.beneficiaryId),
+  hostStatusIdx: index("host_clawbacks_host_status_idx").on(t.hostId, t.status),
+  statusCheck: check("host_clawbacks_status_check", sql`${t.status} IN ('open', 'recovered', 'written_off')`),
+  amountCheck: check("host_clawbacks_amount_check", sql`${t.amountKobo} > 0`),
+}));
+export type HostClawback = typeof hostClawbacks.$inferSelect;
+
 export const venueEntryNights = pgTable("venue_entry_nights", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   venueId: varchar("venue_id").notNull().references(() => venues.id, { onDelete: "cascade" }),
@@ -2068,6 +2172,9 @@ export const paymentTransactionTypes = [
   "room_ticket_refund", // paid room ticket refunded (server/rooms/refunds.ts)
   "room_payout",        // host paid for a ticketed room (server/rooms/settlement.ts)
   "room_payout_reversal", // a payout transfer that Paystack later reversed (server/rooms/settlement.ts)
+  "spray",              // a spray delivered (server/rooms/spray.ts finalizeSpray)
+  "spray_refund",       // a paid spray reversed in full (never delivered)
+  "chargeback",         // a dispute on a delivered spray (clawbacks in host_clawbacks)
 ] as const;
 export type PaymentTransactionType = typeof paymentTransactionTypes[number];
 

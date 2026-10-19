@@ -194,15 +194,15 @@ export const db = drizzle(pool);
  */
 export class RoomMoneyRecordsError extends Error {
   readonly code = "ROOM_MONEY_RECORDS";
-  constructor(readonly counts: { owed: number; tickets: number; hostedTickets: number; payouts: number }) {
+  constructor(readonly counts: { owed: number; tickets: number; hostedTickets: number; payouts: number; sprays?: number }) {
     super(counts.owed > 0
       ? `This account can't be deleted: it has ${counts.owed} room ticket payment(s) that are paid or still being refunded. Suspend the account instead.`
-      : "This account can't be deleted: it has room ticket payment records that must be kept. Suspend the account instead.");
+      : "This account can't be deleted: it has room ticket or spray payment records that must be kept. Suspend the account instead.");
     this.name = "RoomMoneyRecordsError";
   }
 }
 
-/** Throws RoomMoneyRecordsError when a hard delete of this user would touch any room ticket or payout row. */
+/** Throws RoomMoneyRecordsError when a hard delete of this user would touch any room ticket, payout, spray or clawback row. */
 export async function assertNoRoomMoneyRecords(userId: string): Promise<void> {
   let row: { owed: number; tickets: number; hosted: number; payouts: number } | undefined;
   try {
@@ -220,12 +220,27 @@ export async function assertNoRoomMoneyRecords(userId: string): Promise<void> {
     if (e?.code === "42P01") return; // the paid-rooms tables do not exist yet: nothing to protect
     throw e;
   }
-  const counts = { owed: Number(row?.owed ?? 0), tickets: Number(row?.tickets ?? 0), hostedTickets: Number(row?.hosted ?? 0), payouts: Number(row?.payouts ?? 0) };
-  if (counts.owed || counts.tickets || counts.hostedTickets || counts.payouts) throw new RoomMoneyRecordsError(counts);
+  const counts: { owed: number; tickets: number; hostedTickets: number; payouts: number; sprays?: number } =
+    { owed: Number(row?.owed ?? 0), tickets: Number(row?.tickets ?? 0), hostedTickets: Number(row?.hosted ?? 0), payouts: Number(row?.payouts ?? 0) };
+  // Spraying (phase 5): any spray (as payer, recipient or host of the room) or clawback is a money record that must be kept.
+  try {
+    const s = await pool.query(
+      `select
+         (select count(*)::int from spray_payments where payer_id = $1 or recipient_id = $1 or host_id = $1) +
+         (select count(*)::int from host_clawbacks where host_id = $1 or beneficiary_id = $1) +
+         (select count(*)::int from spray_payments p join rooms r on r.id = p.room_id where r.host_id = $1) as n`,
+      [userId],
+    );
+    counts.sprays = Number(s.rows[0]?.n ?? 0);
+  } catch (e: any) {
+    if (e?.code !== "42P01") throw e; // the spray tables do not exist yet: nothing to protect
+  }
+  if (counts.owed || counts.tickets || counts.hostedTickets || counts.payouts || counts.sprays) throw new RoomMoneyRecordsError(counts);
 }
 
 /** Ledger types of paid rooms whose buyer fields a host must never see (getOrganizerTransactions strips them). */
-const ROOM_LEDGER_TYPES: ReadonlySet<string> = new Set(["room_ticket", "room_ticket_refund", "room_payout", "room_payout_reversal"]);
+// Spraying (phase 5) rows too: a host never sees the payer or the spray's payment reference.
+const ROOM_LEDGER_TYPES: ReadonlySet<string> = new Set(["room_ticket", "room_ticket_refund", "room_payout", "room_payout_reversal", "spray", "spray_refund", "chargeback"]);
 
 // Idempotent schema migration — runs at server startup to add new columns safely
 export async function ensureSchema() {
@@ -422,6 +437,12 @@ CREATE TABLE IF NOT EXISTS room_members (
   {
     const { ROOM_TICKETS_SCHEMA_SQL } = await import("./rooms/roomTicketsMigration");
     await pool.query(ROOM_TICKETS_SCHEMA_SQL);
+  }
+  // Spraying (phase 5): users.spray_daily_limit_kobo, user_payment_methods, spray_payments, room_spend, host_clawbacks. One
+  // batch (= one transaction), same SQL as migrations/add_spray.sql; additive and idempotent. After the paid-rooms batch.
+  {
+    const { SPRAY_SCHEMA_SQL } = await import("./rooms/sprayMigration");
+    await pool.query(SPRAY_SCHEMA_SQL);
   }
   await pool.query(`
     ALTER TABLE venues ADD COLUMN IF NOT EXISTS building JSONB
