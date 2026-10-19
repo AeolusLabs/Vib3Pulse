@@ -34,6 +34,10 @@ export async function createRoom(hostId: string, input: CreateRoomInput): Promis
     minorsRoom: input.minorsRoom === true,
     pinnedMessage: input.pinnedMessage ?? null, // the route passes it through pinnedPlainText first
     slowModeSec: input.slowModeSec ?? 0,
+    // Paid rooms: the route has already checked the host may sell (canSellTickets). Both null = a free room.
+    ticketPriceKobo: input.ticketPriceKobo ?? null,
+    ticketCapacity: input.ticketCapacity ?? null,
+    refundBeforeStart: input.refundBeforeStart ?? true,
   }).returning();
   return row;
 }
@@ -44,16 +48,21 @@ export async function getRoom(id: string): Promise<Room | null> {
 }
 
 /** pinnedMessage must already be plain text cut to 200 (pinnedPlainText); slowModeSec one of SLOW_MODES. minorsRoom is never patchable. */
-export type RoomPatch = Partial<Pick<Room, "title" | "description" | "ageLimit" | "screen" | "noDirectInteractions" | "capacity" | "moderationStatus" | "scheduledFor" | "inviteTokenHash" | "pinnedMessage" | "slowModeSec" | "locked">>;
+export type RoomPatch = Partial<Pick<Room, "title" | "description" | "ageLimit" | "screen" | "noDirectInteractions" | "capacity" | "moderationStatus" | "scheduledFor" | "inviteTokenHash" | "pinnedMessage" | "slowModeSec" | "locked" | "ticketPriceKobo" | "ticketCapacity" | "refundBeforeStart">>;
 
-export async function updateRoom(id: string, patch: RoomPatch): Promise<Room> {
+/** The SET clause for a room patch (shared with the ticket-guarded write in ticketStorage.ts). */
+export function roomPatchSet(patch: RoomPatch): Record<string, unknown> {
   // A different screen is a different thing to play: bump the version (a late playback message for the old one is then
   // ignored) and forget the old playback state.
   let set: Record<string, unknown> = patch.screen !== undefined ? { ...patch, screenVersion: sql`${rooms.screenVersion} + 1`, nowPlaying: null } : { ...patch };
   // A new start time is a new reminder: the room is claimable again and everyone who asked is told again with the new time.
+  if (patch.scheduledFor !== undefined) set = { ...set, reminderNotifiedAt: null };
+  return set;
+}
+
+export async function updateRoom(id: string, patch: RoomPatch): Promise<Room> {
   const rescheduled = patch.scheduledFor !== undefined;
-  if (rescheduled) set = { ...set, reminderNotifiedAt: null };
-  const [row] = await db.update(rooms).set(set as Partial<Room>).where(eq(rooms.id, id)).returning();
+  const [row] = await db.update(rooms).set(roomPatchSet(patch) as Partial<Room>).where(eq(rooms.id, id)).returning();
   if (rescheduled && row) await db.update(roomReminders).set({ notifiedAt: null }).where(eq(roomReminders.roomId, id));
   return row;
 }

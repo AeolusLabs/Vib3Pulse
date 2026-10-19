@@ -41,13 +41,20 @@ export function pinnedPlainText(raw: string | null | undefined): string | null {
  * view the room: use viewerRoom there).
  */
 export function publicRoom(room: Room) {
-  const { inviteTokenHash, pinnedMessage, reminderNotifiedAt, ...rest } = room;
+  // Paid rooms: the price, ticket capacity and refund setting never ride on a room object. The price reaches only eligible
+  // viewers (GET /api/rooms/:id `ticket`, list `priceMinor`); the host gets all three through hostRoom.
+  const { inviteTokenHash, pinnedMessage, reminderNotifiedAt, ticketPriceKobo, ticketCapacity, refundBeforeStart, ...rest } = room;
   return rest;
 }
 
 /** For someone who may view the room (GET /api/rooms/:id after viewRoom, room:state, the host's own writes): adds the pinned message. */
 export function viewerRoom(room: Room) {
   return { ...publicRoom(room), pinnedMessage: room.pinnedMessage ?? null };
+}
+
+/** The host's own view of their room (create, PATCH and GET by the host): the viewer room plus the ticket settings. */
+export function hostRoom(room: Room) {
+  return { ...viewerRoom(room), ticketPriceKobo: room.ticketPriceKobo ?? null, ticketCapacity: room.ticketCapacity ?? null, refundBeforeStart: room.refundBeforeStart !== false };
 }
 
 export async function mutualFollow(a: string, b: string): Promise<boolean> {
