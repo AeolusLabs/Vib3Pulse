@@ -221,11 +221,13 @@ export async function cancelPaystackSocialSubscriptions(customerCode: string): P
   return cancelled;
 }
 
-export async function refundPaystackPayment(reference: string): Promise<void> {
+export async function refundPaystackPayment(reference: string, opts: { merchantNote?: string } = {}): Promise<void> {
   // Omitting `amount` triggers a full refund of the original transaction amount.
+  // merchant_note carries our own deterministic refund reference (Paystack's refund API has no idempotency key), so a
+  // later lookup can tell whether this exact refund was already created.
   await paystackRequest<unknown>("/refund", {
     method: "POST",
-    body: JSON.stringify({ transaction: reference }),
+    body: JSON.stringify({ transaction: reference, ...(opts.merchantNote ? { merchant_note: opts.merchantNote } : {}) }),
   });
 }
 
@@ -284,4 +286,96 @@ export async function createPaystackSubaccount(params: CreateSubaccountParams): 
     }),
   });
   return { subaccountCode: data.subaccount_code };
+}
+
+// ============================================================
+// REFUND LOOKUP + TRANSFERS (paid rooms: refunds and host payouts, lane S3)
+// ============================================================
+// Checked against the Paystack docs on 2026-10-19 (docs-v2.paystack.com "Single Transfers", "How Transfers Work", "Refund"
+// and the PaystackOSS OpenAPI TransferBase schema): a transfer reference is lowercase alphanumeric with only - and _,
+// at least 16 characters, and is the idempotency key (retry with the SAME reference; a new reference is a new transfer);
+// statuses are pending | success | failed | reversed | otp | abandoned | blocked | rejected | received; the refund API has
+// no idempotency key, so the refund's merchant_note carries our own deterministic reference and is looked up before any
+// retry. Never log what these functions receive or return: they carry bank account numbers.
+
+/** One request that tells "not found" (HTTP 404) apart from an outage or another error. */
+async function paystackRaw<T>(path: string, options: RequestInit = {}): Promise<{ notFound: true } | { notFound: false; data: T }> {
+  const res = await fetch(`https://api.paystack.co${path}`, {
+    ...options,
+    headers: { Authorization: `Bearer ${getSecretKey()}`, "Content-Type": "application/json", ...options.headers },
+  });
+  if (res.status === 404) return { notFound: true };
+  // A server-side failure is "no answer" (an outage), not Paystack refusing something: callers retry without counting it.
+  if (res.status >= 500) throw new Error(`Paystack unavailable: HTTP ${res.status}`);
+  const body = await res.json().catch(() => null) as { status: boolean; data: T; message?: string } | null;
+  if (!body || !body.status) throw new Error(`Paystack error: ${body?.message ?? `HTTP ${res.status}`}`);
+  return { notFound: false, data: body.data };
+}
+
+export type ProviderRefundState = "none" | "in_progress" | "done" | "failed";
+
+/**
+ * Has this transaction already been refunded (by our deterministic note, or at all)? Throws when Paystack cannot answer:
+ * the caller must then NOT create a refund (fail closed, retry later).
+ */
+export async function getPaystackRefundState(reference: string, merchantNote: string): Promise<ProviderRefundState> {
+  const tx = await paystackRaw<{ status: string }>(`/transaction/verify/${encodeURIComponent(reference)}`);
+  if (!tx.notFound && tx.data.status === "reversed") return "done";
+  const list = await paystackRequest<Array<{ status?: string; merchant_note?: string | null; transaction?: unknown }>>(
+    `/refund?reference=${encodeURIComponent(reference)}&perPage=100`,
+  );
+  const mine = (list ?? []).filter((r) => {
+    const txRef = r.transaction && typeof r.transaction === "object" ? (r.transaction as { reference?: string }).reference : undefined;
+    return r.merchant_note === merchantNote || txRef === reference;
+  });
+  if (!mine.length) return "none";
+  const st = mine.map((r) => (r.status ?? "").toLowerCase());
+  if (st.includes("processed")) return "done";
+  if (st.some((s) => s !== "failed")) return "in_progress"; // pending, processing, needs-attention: exists, do not create another
+  return "failed";
+}
+
+/**
+ * A transfer recipient for a host, built ONLY from their verified Paystack subaccount (organizer_payment_accounts), never
+ * from a request: the subaccount gives the account number and bank, the bank list gives the bank code, and the account is
+ * resolved again for the name Paystack wants.
+ */
+export async function createPaystackTransferRecipient(params: { subaccountCode: string }): Promise<{ recipientCode: string }> {
+  const sub = await paystackRequest<{ settlement_bank?: string; account_number?: string; active?: boolean }>(
+    `/subaccount/${encodeURIComponent(params.subaccountCode)}`,
+  );
+  if (!sub.account_number || !sub.settlement_bank) throw new Error("PAYOUT_ACCOUNT_INCOMPLETE");
+  if (sub.active === false) throw new Error("PAYOUT_ACCOUNT_INACTIVE");
+  const norm = (s: string) => s.trim().toLowerCase();
+  const banks = (await listPaystackBanks()).filter((b) => norm(b.name) === norm(sub.settlement_bank!));
+  if (banks.length !== 1) throw new Error("PAYOUT_BANK_UNRESOLVED");
+  const resolved = await resolvePaystackBankAccount(sub.account_number, banks[0].code);
+  const data = await paystackRequest<{ recipient_code: string }>("/transferrecipient", {
+    method: "POST",
+    body: JSON.stringify({ type: "nuban", name: resolved.accountName, account_number: sub.account_number, bank_code: banks[0].code, currency: "NGN" }),
+  });
+  if (!data?.recipient_code) throw new Error("PAYOUT_RECIPIENT_FAILED");
+  return { recipientCode: data.recipient_code };
+}
+
+export interface TransferResult { status: string }
+
+/** Starts a transfer from our Paystack balance. The reference is the idempotency key: callers always pass the same one per payout. */
+export async function createPaystackTransfer(params: { amountKobo: number; recipientCode: string; reference: string; reason: string }): Promise<TransferResult> {
+  if (!Number.isInteger(params.amountKobo) || params.amountKobo <= 0) throw new Error("BAD_AMOUNT");
+  if (!/^[a-z0-9_-]{16,100}$/.test(params.reference)) throw new Error("BAD_REFERENCE");
+  const data = await paystackRequest<{ status: string }>("/transfer", {
+    method: "POST",
+    body: JSON.stringify({
+      source: "balance", amount: params.amountKobo, recipient: params.recipientCode,
+      reference: params.reference, reason: params.reason.slice(0, 100), currency: "NGN",
+    }),
+  });
+  return { status: data?.status ?? "pending" };
+}
+
+/** The transfer with this reference, or null when Paystack has none. Throws on an outage (the caller must not start a new one then). */
+export async function verifyPaystackTransfer(reference: string): Promise<TransferResult | null> {
+  const r = await paystackRaw<{ status: string }>(`/transfer/verify/${encodeURIComponent(reference)}`);
+  return r.notFound ? null : { status: r.data?.status ?? "pending" };
 }
