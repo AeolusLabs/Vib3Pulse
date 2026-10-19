@@ -162,7 +162,7 @@ export default function AvatarActionsSheet({ open, onOpenChange, roomId, target,
                   ? <Button variant="ghost" className={rowCls} onClick={() => { onStage("remove", target.userId); close(); }} data-testid="action-take-mic"><VolumeXIcon className="h-4 w-4" />Take mic away</Button>
                   : <Button variant="ghost" className={rowCls} onClick={() => { onStage("accept", target.userId); close(); }} data-testid="action-give-mic"><span aria-hidden>🎤</span>Give speaking rights</Button>)}
                 <Button variant="ghost" className={rowCls} onClick={() => { onMod(target.muted ? "unmute" : "mute", target.userId); close(); }} data-testid="action-mod-mute"><VolumeXIcon className="h-4 w-4" />{target.muted ? "Let them chat again" : "Mute chat"}</Button>
-                <Button variant="ghost" className={rowCls} onClick={() => { onMod("kick", target.userId); close(); }} data-testid="action-mod-kick"><UserXIcon className="h-4 w-4" />Remove from room</Button>
+                <Button variant="ghost" className={rowCls} onClick={() => { onMod("kick", target.userId); close(); }} data-testid="action-mod-kick"><UserXIcon className="h-4 w-4" />Remove for 10 minutes</Button>
                 <Button variant="ghost" className={`${rowCls} text-destructive`} onClick={() => setConfirm("ban")} data-testid="action-mod-ban"><BanIcon className="h-4 w-4" />Ban from room</Button>
               </div>
             )}

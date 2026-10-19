@@ -21,9 +21,11 @@ interface Props {
   /** Invites taken back this session, kept by the page so they outlive this component (the Controls sheet unmounts on close). */
   revokedInvites: Map<string, AdultInvite>;
   onRevokedInvitesChange(next: Map<string, AdultInvite>): void;
+  /** Inside the live room's Controls sheet, which has its own End room confirmation: leave this block's End button out. */
+  endElsewhere?: boolean;
 }
 
-export default function HostControls({ room, onChanged, isHost, revokedInvites, onRevokedInvitesChange }: Props) {
+export default function HostControls({ room, onChanged, isHost, revokedInvites, onRevokedInvitesChange, endElsewhere = false }: Props) {
   const { toast } = useToast();
   const [adultsOpen, setAdultsOpen] = useState(false);
   const adultsBtn = useRef<HTMLButtonElement>(null);
@@ -64,7 +66,7 @@ export default function HostControls({ room, onChanged, isHost, revokedInvites, 
         {showAdultInvite({ isHost, minorsRoom: room.minorsRoom }) && room.status !== "ended" && (
           <Button ref={adultsBtn} variant="outline" className="min-h-[44px]" onClick={() => setAdultsOpen(true)} data-testid="button-invite-adult"><UserPlusIcon className="mr-2 h-4 w-4" aria-hidden />{INVITE_SHEET_TITLE}</Button>
         )}
-        {room.status !== "ended" && (
+        {room.status !== "ended" && !endElsewhere && (
           <AlertDialog>
             <AlertDialogTrigger asChild><Button variant="destructive" className="min-h-[44px]" data-testid="button-end-room">{room.status === "live" ? "End room" : "Cancel room"}</Button></AlertDialogTrigger>
             <AlertDialogContent>
