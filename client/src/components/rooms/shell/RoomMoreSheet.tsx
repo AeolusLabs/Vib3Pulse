@@ -51,7 +51,7 @@ export default function RoomMoreSheet({ open, onOpenChange, roomId, isHost, canS
           <SheetDescription>{subtitle ?? "What you can do here"}</SheetDescription>
         </SheetHeader>
         <div className="mt-3 grid gap-1.5">
-          {onControls && <Row icon={<SettingsIcon className={ic} />} label="Controls" sub={isHost ? "Requests, stage, people, settings, end the room" : "Requests, stage and people"} onClick={then(onControls)} testid="more-controls" />}
+          {onControls && <Row icon={<SettingsIcon className={ic} />} label="Controls" sub={isHost ? "Requests, stage, people, settings, end the room" : "Requests, stage, people and the pinned message"} onClick={then(onControls)} testid="more-controls" />}
           {canShare && <Row icon={<Share2Icon className={ic} />} label="Share room" sub="Copy the link to bring your crew" onClick={then(onShare)} testid="more-share" />}
           <Row icon={<ShieldIcon className={ic} />} label="Room safety" sub="Age rules and how to report" onClick={then(onSafety)} testid="more-safety" />
           {!isHost && <Row icon={<FlagIcon className={ic} />} label="Report this room" onClick={then(onReport)} warn testid="more-report" />}

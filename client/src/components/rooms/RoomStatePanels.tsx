@@ -36,7 +36,8 @@ interface CodeProps {
 export function RoomCodePanel({ code, kickRemainingMs, room, onRetry }: CodeProps) {
   const kind = stateForCode(code);
   if (!kind) return null;
-  const body = kind === "kicked" ? kickedBody(kickRemainingMs) : DENIED_MESSAGE[code];
+  // The ended title already says it; the recap follows.
+  const body = kind === "ended" ? undefined : kind === "kicked" ? kickedBody(kickRemainingMs) : DENIED_MESSAGE[code];
   const retry = <Button className="min-h-[44px]" onClick={onRetry}>Try again</Button>;
   const action = kind === "full" || kind === "locked" ? retry : back;
   if (kind === "ended") {
@@ -52,7 +53,7 @@ export function RoomCodePanel({ code, kickRemainingMs, room, onRetry }: CodeProp
 }
 
 /** A scheduled room: when it starts, a live countdown, Remind me (optimistic) and Share. */
-export function NotStartedPanel({ room, hostName, canRemind = true }: { room: { id: string; title: string; visibility: string; scheduledFor: string | null; reminder?: boolean }; hostName: string; canRemind?: boolean }) {
+export function NotStartedPanel({ room, hostName, canRemind = true, reminderSet = false }: { room: { id: string; title: string; visibility: string; scheduledFor: string | null }; hostName: string; canRemind?: boolean; reminderSet?: boolean }) {
   const { toast } = useToast();
   const [now, setNow] = useState(() => Date.now());
   const left = msUntil(room.scheduledFor, now);
@@ -62,7 +63,7 @@ export function NotStartedPanel({ room, hostName, canRemind = true }: { room: { 
     return () => clearInterval(t);
   }, [left === null ? null : countdownTickMs(left)]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const [rem, dispatch] = useReducer(reminderReducer, room.reminder === true, initialReminder);
+  const [rem, dispatch] = useReducer(reminderReducer, reminderSet, initialReminder);
   const toggle = async () => {
     if (rem.pending) return;
     const want = !rem.on;
@@ -95,7 +96,7 @@ export function NotStartedPanel({ room, hostName, canRemind = true }: { room: { 
         {canRemind && (
           <Button className="min-h-[44px]" variant={rem.on ? "outline" : "default"} aria-pressed={rem.on} onClick={toggle} data-testid="button-remind">
             {rem.on ? <CheckIcon className="mr-2 h-4 w-4" aria-hidden /> : <BellIcon className="mr-2 h-4 w-4" aria-hidden />}
-            {rem.on ? "Reminder on" : "Remind me"}
+            Remind me
           </Button>
         )}
         {shareUrl && <Button className="min-h-[44px]" variant="outline" onClick={share}><Share2Icon className="mr-2 h-4 w-4" aria-hidden />Share</Button>}

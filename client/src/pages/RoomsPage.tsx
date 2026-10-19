@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/hooks/useAuth";
 import { fetchRooms, useRoomsConfig, type RoomScope } from "@/lib/roomsApi";
-import { FIXTURE_FRIEND_IDS, NO_FILTERS, TAB_COPY, TAB_ORDER, activeFilterCount, applyFilters, fixtureHome, type HomeFilters, type HomeRoom } from "@/lib/roomsHome";
+import { FIXTURE_FRIEND_IDS, NO_FILTERS, TAB_COPY, TAB_ORDER, activeFilterCount, applyFilters, fixtureHome, nextTab, type HomeFilters, type HomeRoom } from "@/lib/roomsHome";
 
 // DEV only, no network for the lists: /rooms?home=live or ?home=empty.
 const FIXTURE = import.meta.env.DEV && typeof window !== "undefined" ? fixtureHome(new URLSearchParams(window.location.search).get("home")) : null;
@@ -32,7 +32,7 @@ export default function RoomsPage() {
   const { data: me } = useAuth();
   const { data: config } = useRoomsConfig();
   const paidRoomsOn = !FIXTURE && config?.features.paidRooms === true;
-  const { data: following } = useQuery<{ id: string }[]>({ queryKey: ["/api/follows/me/following"], enabled: !FIXTURE });
+  const { data: following } = useQuery<{ id: string }[]>({ queryKey: ["/api/follows/me/following"], enabled: !FIXTURE && !!me });
   const friendIds = useMemo<ReadonlySet<string>>(() => (FIXTURE ? FIXTURE_FRIEND_IDS : new Set((following ?? []).map((u) => u.id))), [following]);
   const selfId = (me as { id?: string } | undefined)?.id ?? null;
 
@@ -57,15 +57,16 @@ export default function RoomsPage() {
         </header>
 
         <div className="flex flex-wrap items-center gap-2">
-          <div role="tablist" aria-label="Room lists" className="flex min-w-0 flex-1 gap-1 rounded-full border border-border p-1 sm:flex-none">
+          <div role="tablist" aria-label="Room lists" className="flex min-w-0 flex-1 gap-1 overflow-x-auto rounded-full border border-border p-1 sm:flex-none"
+            onKeyDown={(e) => { const next = nextTab(scope, e.key); if (!next) return; e.preventDefault(); setScope(next); document.getElementById(`rooms-tab-${next}`)?.focus(); }}>
             {TAB_ORDER.map((s) => {
               const count = queries[s].data ? applyFilters(queries[s].data!, filters, { friendIds, selfId, paidRoomsOn }).length : undefined;
               const on = s === scope;
               return (
-                <button key={s} role="tab" aria-selected={on} onClick={() => setScope(s)} data-testid={`tab-rooms-${s}`}
+                <button key={s} id={`rooms-tab-${s}`} role="tab" aria-selected={on} aria-controls="rooms-panel" tabIndex={on ? 0 : -1} onClick={() => setScope(s)} data-testid={`tab-rooms-${s}`}
                   className={`flex min-h-[44px] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-2.5 text-sm transition-colors motion-reduce:transition-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary sm:flex-none sm:gap-2 sm:px-4 ${on ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
                   {TAB_COPY[s].label}
-                  {count !== undefined && <span className={`rounded-full px-1.5 text-xs ${on ? "bg-primary-foreground/20" : "bg-muted"}`}>{count}</span>}
+                  {count !== undefined && <span className={`hidden rounded-full px-1.5 text-xs min-[360px]:inline ${on ? "bg-primary-foreground/20" : "bg-muted"}`}>{count}</span>}
                 </button>
               );
             })}
@@ -76,7 +77,7 @@ export default function RoomsPage() {
         </div>
 
         <p role="status" className="sr-only" data-testid="rooms-count">{isLoading ? "Loading rooms" : `${rooms?.length ?? 0} ${rooms?.length === 1 ? "room" : "rooms"}`}</p>
-        <section role="tabpanel" aria-label={copy.label} aria-busy={isLoading} className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <section id="rooms-panel" role="tabpanel" aria-labelledby={`rooms-tab-${scope}`} aria-busy={isLoading} className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {isLoading ? (
             [0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-64 w-full rounded-2xl motion-reduce:animate-none" />)
           ) : isError ? (

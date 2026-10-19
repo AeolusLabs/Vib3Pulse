@@ -118,6 +118,12 @@ export function reportErrorToast(message: string | undefined): { title: string; 
   return { title: "Couldn't send report", description: message };
 }
 
+/** The same for a report about one person in the room. */
+export function personReportErrorToast(message: string | undefined): { title: string; description?: string } {
+  if (message && /already reported/i.test(message)) return { title: "You already reported them." };
+  return { title: "Couldn't send report", description: message };
+}
+
 /** What the page says when the unlock tap didn't get the room's audio going. */
 export const UNLOCK_FAILED = "Audio couldn't connect. Tap the mic to try again.";
 

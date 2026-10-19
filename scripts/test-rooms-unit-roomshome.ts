@@ -1,8 +1,11 @@
 // Pure helpers for the Rooms home (no database, no browser): npx tsx scripts/test-rooms-unit-roomshome.ts
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+
+// Paths are relative to the repo root, resolved from this file so the test runs from any folder.
+const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), "utf8");
 import {
-  NO_FILTERS, TAB_COPY, TAB_ORDER, activeFilterCount, ageTagLabel, applyFilters, cardLabel, coverColour, fixtureHome, friendsInside, hashId, peopleLabel, showPriceChip,
+  NO_FILTERS, TAB_COPY, TAB_ORDER, activeFilterCount, ageTagLabel, applyFilters, cardLabel, coverColour, fixtureHome, friendsInside, hashId, nextTab, peopleLabel, showPriceChip,
   type HomeRoom,
 } from "../client/src/lib/roomsHome";
 
@@ -78,10 +81,34 @@ test("card label names the whole card", () => {
   assert.equal(peopleLabel(2), "2 people");
   assert.match(cardLabel(room("b", { status: "scheduled" }), "Ada", "Party", []), /not started yet/);
 });
-test("tabs map to the three existing scopes, Following is the friends scope", () => {
+test("tabs map to the three existing scopes, Friends is the mutual-followers scope", () => {
   assert.deepEqual([...TAB_ORDER], ["live", "upcoming", "friends"]);
-  assert.equal(TAB_COPY.friends.label, "Following");
+  assert.equal(TAB_COPY.friends.label, "Friends");
+  assert.ok(!/follow back|people you follow/i.test(TAB_COPY.friends.empty + TAB_COPY.friends.emptyFiltered), "the tab copy must not claim the one-way meaning");
   assert.equal(TAB_COPY.live.empty, "Quiet right now");
+});
+test("card label carries the start time for a room that has not started", () => {
+  const l = cardLabel(room("b", { status: "scheduled", title: "Late set", ageLimit: "all" }), "Ada", "Party", [], "Fri 23 Oct, 19:00");
+  assert.equal(l, "Late set, hosted by Ada, Party, All ages, not started yet, starts Fri 23 Oct, 19:00");
+  assert.ok(!cardLabel(room("c"), "Ada", "Party", [], "ignored").includes("ignored"), "a live room never says a start time");
+  assert.ok(read("client/src/components/rooms/home/RoomCard.tsx").includes("formatWhen(room.scheduledFor)"));
+});
+test("tab keys: arrows wrap, Home and End jump, other keys do nothing", () => {
+  assert.equal(nextTab("live", "ArrowRight"), "upcoming");
+  assert.equal(nextTab("friends", "ArrowRight"), "live");
+  assert.equal(nextTab("live", "ArrowLeft"), "friends");
+  assert.equal(nextTab("upcoming", "Home"), "live");
+  assert.equal(nextTab("upcoming", "End"), "friends");
+  assert.equal(nextTab("live", "Tab"), null);
+});
+test("tablist is wired for assistive tech, the follow query waits for a signed-in viewer, filter says what it counts", () => {
+  const page = read("client/src/pages/RoomsPage.tsx");
+  assert.ok(page.includes('aria-controls="rooms-panel"') && page.includes('id="rooms-panel"') && page.includes("aria-labelledby"));
+  assert.ok(page.includes("enabled: !FIXTURE && !!me"));
+  assert.ok(page.includes("overflow-x-auto"), "the tab row scrolls rather than clipping at 320 px");
+  const sheet = read("client/src/components/rooms/home/FiltersSheet.tsx");
+  assert.ok(sheet.includes("People you follow inside") && !sheet.includes(">Friends inside<"));
+  assert.ok(/first (few|5)/i.test(read("client/src/lib/roomsHome.ts")) && /peek/i.test(read("client/src/lib/roomsHome.ts")));
 });
 test("fixture scenes", () => {
   assert.equal(fixtureHome(null), null);
@@ -90,16 +117,16 @@ test("fixture scenes", () => {
   assert.ok(fixtureHome("live")!.live.length > 0);
 });
 test("copy has no em dashes and never the word cash", () => {
-  const text = JSON.stringify(TAB_COPY) + readFileSync("client/src/lib/roomsHome.ts", "utf8") + ["RoomCard", "FiltersSheet", "StartRoomButton"].map((f) => readFileSync(`client/src/components/rooms/home/${f}.tsx`, "utf8")).join("") + readFileSync("client/src/pages/RoomsPage.tsx", "utf8");
+  const text = JSON.stringify(TAB_COPY) + read("client/src/lib/roomsHome.ts") + ["RoomCard", "FiltersSheet", "StartRoomButton"].map((f) => read(`client/src/components/rooms/home/${f}.tsx`)).join("") + read("client/src/pages/RoomsPage.tsx");
   assert.ok(!text.includes("—"));
   assert.ok(!/cash/i.test(text));
 });
 test("the page never reads a minors' flag or builds its own visibility rule (the server filters the lists)", () => {
-  const page = readFileSync("client/src/pages/RoomsPage.tsx", "utf8") + readFileSync("client/src/lib/roomsHome.ts", "utf8").replace(/showPriceChip[\s\S]*?\n}\n/, "");
+  const page = read("client/src/pages/RoomsPage.tsx") + read("client/src/lib/roomsHome.ts").replace(/showPriceChip[\s\S]*?\n}\n/, "");
   assert.ok(!/visibility\s*[!=]==/.test(page));
 });
 test("filters sheet gates price on the flag and uses the room sheet", () => {
-  const src = readFileSync("client/src/components/rooms/home/FiltersSheet.tsx", "utf8");
+  const src = read("client/src/components/rooms/home/FiltersSheet.tsx");
   assert.match(src, /paidRoomsOn && \(/);
   assert.match(src, /RoomSheetContent/);
 });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import Navigation from "@/components/Navigation";
@@ -18,7 +18,7 @@ import { useRoomSocket } from "@/hooks/useRoomSocket";
 import { useRoomVoice } from "@/hooks/useRoomVoice";
 import { showsShell } from "@/lib/roomIntegration";
 import { AGE_LIMIT_EVICTED_COPY, DENIED_MESSAGE, HOST_REVIEW_COPY, KIND_LABEL, type PeekMember, VISIBILITY_LABEL, ageLimitLabel, fetchRooms, hostName, type RoomHostSummary, type RoomView } from "@/lib/roomsApi";
-import { kickRemainingMs, stateForCode } from "@/lib/roomStates";
+import { kickRemainingAfter, stateForCode } from "@/lib/roomStates";
 import { ArrowLeftIcon } from "@/components/ui/icons";
 import { isAgeUnknownDenied, isMinorsDenied, isRoomDenial, listenOnlyHere, minorsCodeFor, parseRoomDenial, showListenLine, type RoomDenial } from "@/lib/minorsRoomUi";
 import type { AdultInvite } from "@/lib/minorsRoomApi";
@@ -29,6 +29,8 @@ interface RoomDetail {
   canJoin: { ok: true } | { ok: false; code: string };
   memberCount: number;
   peek?: PeekMember[];
+  /** Top-level sibling of `room` (not a field of it): whether the viewer has a reminder on this scheduled room. */
+  reminderSet?: boolean;
   you: { role: "host" | "cohost" | "guest" } | null;
 }
 
@@ -109,6 +111,10 @@ function RoomPageInner({ id }: { id: string }) {
     if ((voice.onAir || voice.cameraOn || voice.videoPaused) && state.phase === "live" && state.holder !== me?.id) void voice.stopCamera(); // not while reconnecting: the room state is only paused, not changed
   }, [voice.onAir, voice.cameraOn, voice.videoPaused, state.phase, state.holder, me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The server says nothing about how long a removal lasts, so the clock starts when the removal reaches us here.
+  const kickedAt = useRef<number | null>(null);
+  if (state.phase === "denied" && state.error === "KICKED") { if (kickedAt.current === null) kickedAt.current = Date.now(); } else kickedAt.current = null;
+
   const leave = () => { sock.leave(); navigate("/rooms"); };
   const back = <Button asChild variant="outline"><Link href="/rooms">Back to Rooms</Link></Button>;
 
@@ -167,17 +173,17 @@ function RoomPageInner({ id }: { id: string }) {
   } else if (!detail.canJoin.ok && !(detail.canJoin.code === "ROOM_NOT_LIVE" && room.status === "scheduled")) {
     const code = detail.canJoin.code;
     content = stateForCode(code)
-      ? <RoomCodePanel code={code} kickRemainingMs={kickRemainingMs(detail.canJoin, Date.now())} room={room} onRetry={() => { void refetch(); }} />
+      ? <RoomCodePanel code={code} room={room} onRetry={() => { void refetch(); }} />
       : <Panel title={code === "AGE_LIMIT" ? "This room has an age limit" : "You can't join this room"} body={DENIED_MESSAGE[code] ?? "You can't join this room."} action={back} />;
   } else if (state.phase === "denied" && stateForCode(state.error)) {
-    content = <RoomCodePanel code={state.error!} room={room} onRetry={() => { sock.leave(); void refetch(); }} />;
+    content = <RoomCodePanel code={state.error!} kickRemainingMs={state.error === "KICKED" ? kickRemainingAfter(kickedAt.current, Date.now()) : null} room={room} onRetry={() => { sock.leave(); void refetch(); }} />;
   } else if (state.phase === "denied") {
     const code = state.error ?? "NOT_FOUND";
-    content = <Panel title={code === "AGE_LIMIT" ? "This room has an age limit" : code === "KICKED" ? "You were removed" : "You can't join this room"} body={code === "AGE_LIMIT" && state.room ? AGE_LIMIT_EVICTED_COPY : DENIED_MESSAGE[code] ?? "You can't join this room."} action={back} />;
+    content = <Panel title={code === "AGE_LIMIT" ? "This room has an age limit" : "You can't join this room"} body={code === "AGE_LIMIT" && state.room ? AGE_LIMIT_EVICTED_COPY : DENIED_MESSAGE[code] ?? "You can't join this room."} action={back} />;
   } else if (room.status === "scheduled") {
     content = (
       <div className="space-y-4">
-        <NotStartedPanel room={room} hostName={hostName(detail.host)} canRemind={!isHost} />
+        <NotStartedPanel room={room} reminderSet={detail.reminderSet === true} hostName={hostName(detail.host)} canRemind={!isHost} />
         {isHost && <HostControls room={{ ...room, host: detail.host }} onChanged={() => refetch()} isHost={isHost} revokedInvites={revokedInvites} onRevokedInvitesChange={setRevokedInvites} />}
       </div>
     );

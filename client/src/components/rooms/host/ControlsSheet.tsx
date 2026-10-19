@@ -9,7 +9,7 @@ import RequestsPanel from "@/components/rooms/host/RequestsPanel";
 import PeoplePanel from "@/components/rooms/host/PeoplePanel";
 import SettingsPanel from "@/components/rooms/host/SettingsPanel";
 import EndRoomDialog from "@/components/rooms/host/EndRoomDialog";
-import { useRoomsConfig } from "@/lib/roomsApi";
+import { NOTICE_MESSAGE, useRoomsConfig } from "@/lib/roomsApi";
 import { CONTROLS_COPY, TAB_LABEL, controlsFor, moneyPlaceholderVisible, readSettings, requestQueue, roleChange, settingsErrorMessage, type ControlsRole, type ControlsTab } from "@/lib/hostControls";
 import type { useRoomSocket } from "@/hooks/useRoomSocket";
 import type { RoomMemberView, RoomState } from "@/lib/roomReducer";
@@ -53,7 +53,12 @@ export default function ControlsSheet({ open, onOpenChange, roomId, inviteToken,
   const { data: config } = useRoomsConfig();
   const settings = readSettings(state.room, room as unknown as Record<string, unknown>);
   const showMoney = moneyPlaceholderVisible({ role, flags: config?.features, ageLimit: room.ageLimit, minorsRoom: room.minorsRoom });
-  const requests = requestQueue(state.hands, state.asks, state.liveVideo).length;
+  // Requests already tapped are hidden here and in the badge alike, until the server's next list or a refusal (a notice) brings them back.
+  const [acted, setActed] = useState<Set<string>>(new Set());
+  const noticeN = state.notice?.n ?? 0;
+  const listKey = `${state.hands.join(",")}|${state.asks.join(",")}|${state.liveVideo}|${noticeN}`;
+  useEffect(() => { setActed(new Set()); }, [listKey]);
+  const requests = requestQueue(state.hands, state.asks, state.liveVideo, acted).length;
 
   // One plain line for anything that failed, read out politely and cleared after a few seconds.
   const [notice, setNotice] = useState<string | null>(null);
@@ -64,6 +69,14 @@ export default function ControlsSheet({ open, onOpenChange, roomId, inviteToken,
     clearTimeout(noticeTimer.current);
     noticeTimer.current = setTimeout(() => setNotice(null), 4000);
   };
+
+  // A refusal from the room (stage full, not allowed, slow down ...) is said out loud while the sheet is open. Older ones are not replayed on opening.
+  const seenNotice = useRef(noticeN);
+  useEffect(() => {
+    if (!open || noticeN === seenNotice.current) { seenNotice.current = noticeN; return; }
+    seenNotice.current = noticeN;
+    say(NOTICE_MESSAGE[state.notice?.code ?? ""] ?? CONTROLS_COPY.sendFailed);
+  }, [open, noticeN]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const changeRole = async (m: RoomMemberView, to: "cohost" | "guest") => {
     const err = await sock.setRole(m.userId, to);
@@ -81,7 +94,7 @@ export default function ControlsSheet({ open, onOpenChange, roomId, inviteToken,
   };
   const cohosts = state.members.filter((m) => m.role === "cohost");
 
-  const triggerCls = `min-h-[44px] rounded-full border px-4 text-sm font-semibold transition-none motion-safe:transition-colors data-[state=active]:border-primary data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-none data-[state=inactive]:bg-muted data-[state=inactive]:text-foreground ${FOCUS}`;
+  const triggerCls = `min-h-[44px] rounded-full border px-4 text-sm font-semibold transition-none motion-safe:transition-colors data-[state=active]:border-primary data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-none data-[state=inactive]:bg-muted data-[state=inactive]:text-foreground focus-visible:ring-0 focus-visible:ring-offset-0 ${FOCUS}`; // the tab primitive draws a ring; the outline is the one focus mark
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -108,6 +121,7 @@ export default function ControlsSheet({ open, onOpenChange, roomId, inviteToken,
           <TabsContent value="requests" className="mt-4">
             <RequestsPanel
               members={state.members} hands={state.hands} asks={state.asks} liveVideo={state.liveVideo}
+              acted={acted} onActed={(key) => setActed((s) => new Set(s).add(key))}
               onAccept={(i) => (i.kind === "hand" ? sock.stageAction("accept", i.userId) : sock.liveAction("grant", i.userId))}
               onDismiss={(i) => sock.stageAction("remove", i.userId)}
               onFailed={say}
@@ -116,7 +130,7 @@ export default function ControlsSheet({ open, onOpenChange, roomId, inviteToken,
 
           <TabsContent value="stage" className="mt-4 space-y-3">
             <StagePanel
-              inTabs
+              inTabs hostInTabs={role === "host"}
               members={state.members} stage={state.stage} hands={state.hands} voiceEnabled={state.voiceEnabled}
               canSwitchVoice={false} onSwitch={() => {}}
               onStage={(action, target) => { if (!sock.stageAction(action, target)) say(CONTROLS_COPY.sendFailed); }}
@@ -146,10 +160,12 @@ export default function ControlsSheet({ open, onOpenChange, roomId, inviteToken,
               members={state.members} memberCount={count} stage={state.voiceEnabled ? state.stage : []}
               onMod={(action, target) => sock.mod(action, target)}
               onNotice={say}
+              roleExtra={can.makeCohost ? roleButton : undefined}
             />
           </TabsContent>
 
-          <TabsContent value="settings" className="mt-4 space-y-5">
+          {/* Settings stays mounted (hidden) so an unsaved pinned message survives a tab switch. */}
+          <TabsContent value="settings" forceMount className="mt-4 space-y-5 data-[state=inactive]:hidden">
             <SettingsPanel
               role={role} settings={settings}
               onSave={(patch) => sock.saveSettings(patch)}

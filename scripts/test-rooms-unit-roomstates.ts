@@ -1,8 +1,9 @@
 // Pure rules and copy for the room state screens (no database, no browser): npx tsx scripts/test-rooms-unit-roomstates.ts
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { REMINDER_ERROR, STATE_TITLE, countdownTickMs, formatCountdown, initialReminder, kickRemainingMs, kickedBody, msUntil, recapLines, reminderFromResponse, reminderReducer, reminderRequest, stateForCode } from "../client/src/lib/roomStates";
+import { REMINDER_ERROR, STATE_TITLE, countdownTickMs, formatCountdown, initialReminder, kickRemainingAfter, kickedBody, msUntil, recapLines, reminderFromResponse, reminderReducer, reminderRequest, stateForCode } from "../client/src/lib/roomStates";
 import { DENIED_MESSAGE } from "../client/src/lib/roomsApi";
+import { acknowledgeErrorMessage } from "../client/src/lib/minorsRoomUi";
 
 const DASH = String.fromCharCode(8212);
 let passed = 0, failed = 0;
@@ -27,9 +28,11 @@ test("every state has a title and its codes have copy in the one DENIED_MESSAGE 
     assert.ok(DENIED_MESSAGE[code], code);
     assert.ok(STATE_TITLE[stateForCode(code)!], code);
   }
-  assert.equal(DENIED_MESSAGE.ROOM_LOCKED, "The host has locked this room. Ask them to let you in.");
+  assert.equal(DENIED_MESSAGE.ROOM_LOCKED, "The host has locked this room.");
   assert.equal(DENIED_MESSAGE.ROOM_ENDED, "This room has ended.");
-  assert.equal(DENIED_MESSAGE.BANNED, "You can't join this room.");
+  assert.notEqual(DENIED_MESSAGE.BANNED, STATE_TITLE.banned, "the banned body must not repeat its title");
+  assert.equal(DENIED_MESSAGE.BANNED, "The host has banned you from this room.");
+  assert.equal(acknowledgeErrorMessage(409, "ROOM_ENDED"), DENIED_MESSAGE.ROOM_ENDED, "one source for the ended copy");
 });
 test("entries other tasks use are still there", () => {
   for (const k of ["AGE_LIMIT", "AGE_UNKNOWN", "BLOCKED", "NOT_FOUND", "MINORS_ROOM", "MINORS_ROOM_ACK"]) assert.ok(k in DENIED_MESSAGE, k);
@@ -58,10 +61,13 @@ test("removed copy uses the remaining time when given, else ten minutes", () => 
   assert.match(kickedBody(9 * 60_000), /9 minutes/);
   assert.match(kickedBody(30_000), /1 minute\./);
   assert.match(kickedBody(0), /try again now/);
-  assert.equal(kickRemainingMs({ retryAfterSeconds: 120 }, 0), 120_000);
-  assert.equal(kickRemainingMs({ until: "2026-10-18T10:05:00.000Z" }, Date.parse("2026-10-18T10:00:00.000Z")), 300_000);
-  assert.equal(kickRemainingMs({ ok: false, code: "KICKED" }, 0), null);
-  assert.equal(kickRemainingMs(null, 0), null);
+  const t0 = Date.parse("2026-10-18T10:00:00.000Z");
+  assert.equal(kickRemainingAfter(t0, t0), 10 * 60_000);
+  assert.equal(kickRemainingAfter(t0, t0 + 4 * 60_000), 6 * 60_000);
+  assert.ok(kickRemainingAfter(t0, t0 + 11 * 60_000)! < 0);
+  assert.match(kickedBody(kickRemainingAfter(t0, t0 + 11 * 60_000)), /try again now/);
+  assert.equal(kickRemainingAfter(null, t0), null, "never seen arrive: generic copy");
+  assert.equal(kickRemainingAfter(undefined, t0), null);
 });
 test("recap shows length and peak only when the room already has them", () => {
   assert.deepEqual(recapLines({}), []);
@@ -91,14 +97,26 @@ test("reminder requests follow the contract", () => {
   assert.equal(reminderFromResponse(null, false), false);
 });
 test("the minors' warning and the age-unknown panel were not touched or rerouted", () => {
-  const page = readFileSync("client/src/pages/RoomPage.tsx", "utf8");
+  const page = readFileSync(new URL("../client/src/pages/RoomPage.tsx", import.meta.url), "utf8");
   assert.ok(page.includes("MinorsRoomWarning code={minorsCode}"));
   assert.ok(page.includes("DENIED_MESSAGE.AGE_UNKNOWN"));
   assert.ok(page.indexOf("<MinorsRoomWarning") < page.indexOf("<RoomCodePanel"), "warning branches come first");
 });
+test("RoomPage hands the scheduled panel the top-level reminderSet, and starts the removal clock client-side", () => {
+  const page = readFileSync(new URL("../client/src/pages/RoomPage.tsx", import.meta.url), "utf8");
+  assert.ok(/reminderSet\?: boolean/.test(page), "RoomDetail declares reminderSet");
+  assert.ok(page.includes("reminderSet={detail.reminderSet === true}"));
+  assert.ok(!page.includes("room.reminder"));
+  assert.ok(page.includes("kickRemainingAfter(kickedAt.current"));
+  assert.ok(!page.includes('"You were removed"'), "the dead legacy KICKED arm is gone");
+  const panels = readFileSync(new URL("../client/src/components/rooms/RoomStatePanels.tsx", import.meta.url), "utf8");
+  assert.ok(panels.includes("reminderSet, initialReminder"));
+  assert.ok(!/Reminder on/.test(panels), "the reminder button keeps one label and uses aria-pressed");
+  assert.ok(panels.includes("aria-pressed={rem.on}"));
+});
 test("copy has no em dash and never the word cash", () => {
   const files = ["client/src/lib/roomStates.ts", "client/src/components/rooms/RoomStatePanels.tsx", "client/src/components/rooms/RoomLobby.tsx"];
-  for (const f of files) { const t = readFileSync(f, "utf8"); assert.ok(!t.includes(DASH), f); assert.ok(!/cash/i.test(t), f); }
+  for (const f of files) { const t = readFileSync(new URL("../" + f, import.meta.url), "utf8"); assert.ok(!t.includes(DASH), f); assert.ok(!/cash/i.test(t), f); }
   for (const v of Object.values(DENIED_MESSAGE)) assert.ok(!v.includes(DASH) && !/cash/i.test(v));
 });
 

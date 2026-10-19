@@ -43,8 +43,8 @@ export default function FiltersSheet({ open, onOpenChange, value, onApply, paidR
             </div>
           </fieldset>
           <div>
-            <button type="button" aria-pressed={draft.friendsInside} onClick={() => setDraft((d) => ({ ...d, friendsInside: !d.friendsInside }))} className={`${chip} ${draft.friendsInside ? on : off}`} data-testid="filter-friends-inside">Friends inside</button>
-            <p className="mt-1 text-xs text-muted-foreground">Only rooms with someone you follow in them.</p>
+            <button type="button" aria-pressed={draft.friendsInside} onClick={() => setDraft((d) => ({ ...d, friendsInside: !d.friendsInside }))} className={`${chip} ${draft.friendsInside ? on : off}`} data-testid="filter-friends-inside">People you follow inside</button>
+            <p className="mt-1 text-xs text-muted-foreground">Only rooms where someone you follow is among the first few people in.</p>
           </div>
           {paidRoomsOn && (
             <fieldset>

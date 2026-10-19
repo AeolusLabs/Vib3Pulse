@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Loader2Icon } from "@/components/ui/icons";
@@ -15,6 +16,7 @@ const FOCUS = "focus-visible:outline focus-visible:outline-2 focus-visible:outli
 
 /** The End room button and its confirmation. Radix puts focus back on the button when the dialog closes. */
 export default function EndRoomDialog({ count, onEnd }: EndRoomDialogProps) {
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,6 +28,7 @@ export default function EndRoomDialog({ count, onEnd }: EndRoomDialogProps) {
     setBusy(false);
     if (err !== null) { setError(settingsErrorMessage(err, "Couldn't end the room. Try again.")); return; }
     setOpen(false);
+    void queryClient.invalidateQueries({ queryKey: ["/api/rooms"] }); // the room is gone from every Rooms list
   };
   return (
     <AlertDialog open={open} onOpenChange={(o) => { if (!busy) { setOpen(o); setError(null); } }}>

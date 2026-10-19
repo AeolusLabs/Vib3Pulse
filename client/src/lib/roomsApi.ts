@@ -49,8 +49,6 @@ export interface RoomView {
   /** Hosted by someone under 18 when it was made. Adults without access never receive a room object, so they never see this. */
   minorsRoom?: boolean;
   liveVideo?: boolean;
-  /** Only when the server already says so for this viewer; never assumed. */
-  reminder?: boolean;
   peakCount?: number | null;
   memberCount?: number;
   peek?: PeekMember[];
@@ -93,13 +91,13 @@ export const AGE_LIMIT_EVICTED_COPY = "You no longer meet this room's age limit.
 export const DENIED_MESSAGE: Record<string, string> = {
   AGE_LIMIT: "This room has an age limit.",
   AGE_UNKNOWN: "Add your date of birth in your profile to join rooms.",
-  BANNED: "You can't join this room.",
+  BANNED: "The host has banned you from this room.",
   BLOCKED: "You can't join this room.",
   KICKED: "The host removed you from this room. You can try again in 10 minutes.",
   NOT_FOUND: "This room isn't available.",
   ROOM_FULL: "This room is full right now. Try again in a moment.",
   ROOM_ENDED: "This room has ended.",
-  ROOM_LOCKED: "The host has locked this room. Ask them to let you in.",
+  ROOM_LOCKED: "The host has locked this room.",
   ROOM_NOT_LIVE: "This room hasn't started yet.",
   // Minors' rooms: even a path that falls back to this table shows the one warning, never a room name or a host.
   MINORS_ROOM: MINORS_ROOM_WARNING,
