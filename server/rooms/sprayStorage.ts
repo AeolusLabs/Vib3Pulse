@@ -36,8 +36,11 @@ export async function insertSprayIfNew(row: InsertSprayPayment, tx?: SprayExec):
   return { row: existing, created: false };
 }
 
+/** A strict 8-4-4-4-12 hex uuid (anything else would make Postgres throw "invalid input syntax for type uuid"). */
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function getSprayById(id: string, tx?: SprayExec): Promise<SprayPayment | null> {
-  if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) return null; // not a uuid: no row (and no SQL error)
+  if (typeof id !== "string" || !UUID_RE.test(id)) return null; // not a uuid: no row (and no SQL error, so 404 not 500)
   const [row] = await x(tx).select().from(sprayPayments).where(eq(sprayPayments.id, id)).limit(1);
   return row ?? null;
 }
@@ -94,18 +97,67 @@ export async function countPayerRecipientSprays(payerId: string, recipientId: st
 }
 
 /**
- * Sprays in one of `statuses` whose last state change is older than `olderThan`, oldest first, at most `limit`.
- * "Last state change" is refund_requested_at, else paid_at, else created_at (so a `paid` row ages from when payment was
- * detected and a `reversing` row from when its refund was asked for). For the sweep; it re-checks each row under its lock.
+ * Sprays in one of `statuses` whose last state change is older than `olderThan`, at most `limit`, for the sweep (it
+ * re-checks each row under its lock). "Last state change" is refund_requested_at, else paid_at, else created_at (so a
+ * `paid` row ages from when payment was detected and a `reversing` row from when its refund was asked for).
+ * Fair order: rows never checked first, then the least recently checked, so rows that are stuck for good (a refund the
+ * provider keeps refusing, a verify that keeps failing) can never fill every batch. With `opts.dueAt`, rows whose
+ * next_check_at (the backoff set by noteSprayChecked) is still in the future are skipped. With `opts.createdSince`, only
+ * rows created at or after it (the sweep's 24 hour late-payment window for failed rows).
  */
-export async function listStaleSprays(statuses: readonly SprayStatus[], olderThan: Date, limit: number, tx?: SprayExec): Promise<SprayPayment[]> {
+export async function listStaleSprays(
+  statuses: readonly SprayStatus[], olderThan: Date, limit: number,
+  opts: { dueAt?: Date; createdSince?: Date } = {}, tx?: SprayExec,
+): Promise<SprayPayment[]> {
   if (statuses.length === 0 || !statuses.every(isSprayStatus)) return [];
   const n = isPosInt(limit) ? Math.min(limit, 500) : 50;
   const since = sql`coalesce(${sprayPayments.refundRequestedAt}, ${sprayPayments.paidAt}, ${sprayPayments.createdAt})`;
   // Same Date mapping as drizzle's timestamp columns (ISO text cast to timestamp), so this agrees with gte() elsewhere.
+  const conds = [inArray(sprayPayments.status, [...statuses]), sql`${since} < ${olderThan.toISOString()}::timestamp`];
+  if (opts.dueAt) conds.push(sql`(${sprayPayments.nextCheckAt} is null or ${sprayPayments.nextCheckAt} <= ${opts.dueAt.toISOString()}::timestamp)`);
+  if (opts.createdSince) conds.push(gte(sprayPayments.createdAt, opts.createdSince));
   return await x(tx).select().from(sprayPayments)
-    .where(and(inArray(sprayPayments.status, [...statuses]), sql`${since} < ${olderThan.toISOString()}::timestamp`))
-    .orderBy(asc(sprayPayments.createdAt)).limit(n);
+    .where(and(...conds))
+    .orderBy(sql`${sprayPayments.lastCheckedAt} asc nulls first`, asc(sprayPayments.createdAt)).limit(n);
+}
+
+/**
+ * The sweep looked at this row: one more attempt, when, and the earliest time it is worth looking again (a backoff).
+ * Bookkeeping only (never a status), so it is unconditional and harmless if the row moved meanwhile.
+ */
+export async function noteSprayChecked(id: string, at: Date, nextCheckAt: Date, tx?: SprayExec): Promise<void> {
+  if (typeof id !== "string" || !UUID_RE.test(id)) return;
+  await x(tx).update(sprayPayments)
+    .set({ checkAttempts: sql`${sprayPayments.checkAttempts} + 1`, lastCheckedAt: at, nextCheckAt })
+    .where(eq(sprayPayments.id, id));
+}
+
+/** Another spray of this payer to this recipient still `created` or `pending`, started at or after `since`. */
+export async function payerRecipientInFlight(payerId: string, recipientId: string, since: Date, tx?: SprayExec): Promise<boolean> {
+  const [row] = await x(tx).select({ id: sprayPayments.id }).from(sprayPayments)
+    .where(and(eq(sprayPayments.payerId, payerId), eq(sprayPayments.recipientId, recipientId),
+      inArray(sprayPayments.status, ["created", "pending"]), sql`${sprayPayments.createdAt} > ${since.toISOString()}::timestamp`))
+    .limit(1);
+  return !!row;
+}
+
+/**
+ * Total amount_kobo of sprays this person received or hosted (recipient_id = them OR host_id = them) created at or after
+ * `since`, in one of `statuses`, optionally leaving one spray out. The new-host receive cap (sprayLimits.ts).
+ */
+export async function sumReceivedSince(
+  userId: string, since: Date, statuses: readonly SprayStatus[], exceptSprayId: string | null, tx?: SprayExec,
+): Promise<number> {
+  if (statuses.length === 0 || !statuses.every(isSprayStatus)) throw new RangeError("bad spray statuses");
+  const conds = [
+    or(eq(sprayPayments.recipientId, userId), eq(sprayPayments.hostId, userId)),
+    gte(sprayPayments.createdAt, since),
+    inArray(sprayPayments.status, [...statuses]),
+  ];
+  if (exceptSprayId) conds.push(sql`${sprayPayments.id} <> ${exceptSprayId}::uuid`);
+  const [row] = await x(tx).select({ n: sql<string>`coalesce(sum(${sprayPayments.amountKobo}), 0)::bigint` }).from(sprayPayments)
+    .where(and(...conds));
+  return Number(row?.n ?? 0);
 }
 
 // ---------------------------------------------------------------- room_spend (the payer's own room limit)
@@ -154,14 +206,18 @@ export async function setRoomLimit(roomId: string, userId: string, limitKobo: nu
 }
 
 // ---------------------------------------------------------------- host_clawbacks
-/** One clawback per (spray, beneficiary): a second dispute event for the same spray changes nothing. */
+/**
+ * One clawback per (spray, beneficiary): a second dispute event (or a dispute after a reversal) for the same spray changes
+ * nothing. origin: 'dispute' (a chargeback) or 'reversal' (a split charge refunded in full); default 'dispute'.
+ */
 export async function insertClawbackIfNew(
-  c: { hostId: string; beneficiaryId: string; sprayId: string; amountKobo: number }, tx?: SprayExec,
+  c: { hostId: string; beneficiaryId: string; sprayId: string; amountKobo: number; origin?: "dispute" | "reversal" }, tx?: SprayExec,
 ): Promise<{ row: HostClawback; created: boolean }> {
   if (!isPosInt(c.amountKobo)) throw new RangeError("clawback amount must be a positive integer of kobo");
+  const origin = c.origin === "reversal" ? "reversal" : "dispute";
   const ex = x(tx);
   const inserted = await ex.insert(hostClawbacks)
-    .values({ hostId: c.hostId, beneficiaryId: c.beneficiaryId, sprayId: c.sprayId, amountKobo: c.amountKobo })
+    .values({ hostId: c.hostId, beneficiaryId: c.beneficiaryId, sprayId: c.sprayId, amountKobo: c.amountKobo, origin })
     .onConflictDoNothing({ target: [hostClawbacks.sprayId, hostClawbacks.beneficiaryId] }).returning();
   if (inserted.length > 0) return { row: inserted[0], created: true };
   const [existing] = await ex.select().from(hostClawbacks)
@@ -181,11 +237,23 @@ export async function openClawbacksFor(hostId: string, tx?: SprayExec): Promise<
   return tx ? await q.for("update") : await q;
 }
 
-/** Marks these clawbacks recovered, only those still open. Returns the rows that changed. */
+/** Marks these clawbacks recovered in full (recovered_kobo = amount_kobo), only those still open. Returns the rows that changed. */
 export async function markClawbacksRecovered(ids: readonly string[], tx?: SprayExec): Promise<HostClawback[]> {
   if (ids.length === 0) return [];
-  return await x(tx).update(hostClawbacks).set({ status: "recovered", recoveredAt: new Date() })
+  return await x(tx).update(hostClawbacks).set({ status: "recovered", recoveredKobo: sql`${hostClawbacks.amountKobo}`, recoveredAt: new Date() })
     .where(and(inArray(hostClawbacks.id, [...ids]), eq(hostClawbacks.status, "open"))).returning();
+}
+
+/**
+ * Does any of these people owe an open clawback (as the beneficiary)? A debtor never receives another spray (host or
+ * recipient), so a reversal or chargeback can never be followed by more money to the same account.
+ */
+export async function hasOpenClawback(userIds: readonly string[], tx?: SprayExec): Promise<boolean> {
+  const ids = Array.from(new Set(userIds.filter((u) => typeof u === "string" && u.length > 0)));
+  if (ids.length === 0) return false;
+  const [row] = await x(tx).select({ id: hostClawbacks.id }).from(hostClawbacks)
+    .where(and(inArray(hostClawbacks.beneficiaryId, ids), eq(hostClawbacks.status, "open"))).limit(1);
+  return !!row;
 }
 
 // ---------------------------------------------------------------- saved card (a payment method, never a balance)

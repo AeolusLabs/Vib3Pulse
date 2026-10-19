@@ -88,7 +88,7 @@ export const users = pgTable("users", {
   sprayDailyLimitKobo: integer("spray_daily_limit_kobo"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 }, (t) => ({
-  sprayDailyLimitCheck: check("users_spray_daily_limit_kobo_check", sql`${t.sprayDailyLimitKobo} IS NULL OR ${t.sprayDailyLimitKobo} > 0`),
+  sprayDailyLimitCheck: check("users_spray_daily_limit_kobo_check", sql`${t.sprayDailyLimitKobo} IS NULL OR (${t.sprayDailyLimitKobo} > 0 AND ${t.sprayDailyLimitKobo} <= 10000000)`),
 }));
 
 // avatar is typed loosely here on purpose: the PATCH route runs it through sanitizeAvatarConfig before storing.
@@ -1309,12 +1309,19 @@ export const sprayPayments = pgTable("spray_payments", {
   deliveredAt: timestamp("delivered_at"),
   reversedAt: timestamp("reversed_at"),
   refundRequestedAt: timestamp("refund_requested_at"),
+  // The sweep's bookkeeping: least recently checked first, and a backoff for rows a check did not move (sprayJobs.ts).
+  checkAttempts: integer("check_attempts").notNull().default(0),
+  lastCheckedAt: timestamp("last_checked_at"),
+  nextCheckAt: timestamp("next_check_at"),
 }, (t) => ({
   // Per payer, never global: one user can never squat or probe another's key.
   payerKeyUnique: unique("spray_payments_payer_key_key").on(t.payerId, t.idempotencyKey),
   roomStatusIdx: index("spray_payments_room_status_idx").on(t.roomId, t.status),
   payerCreatedIdx: index("spray_payments_payer_created_idx").on(t.payerId, t.createdAt),
   statusCreatedIdx: index("spray_payments_status_created_idx").on(t.status, t.createdAt),
+  statusNextCheckIdx: index("spray_payments_status_next_check_idx").on(t.status, t.nextCheckAt),
+  recipientCreatedIdx: index("spray_payments_recipient_created_idx").on(t.recipientId, t.createdAt),
+  hostCreatedIdx: index("spray_payments_host_created_idx").on(t.hostId, t.createdAt),
   statusCheck: check("spray_payments_status_check", sql`${t.status} IN ('created', 'pending', 'paid', 'delivered', 'reversing', 'reversed', 'failed', 'disputed')`),
   tierCheck: check("spray_payments_tier_check", sql`${t.tier} IN ('note', 'bundle', 'bag', 'rain')`),
   amountsCheck: check("spray_payments_amounts_check", sql`${t.amountKobo} >= 50000 AND ${t.v3c} = ${t.amountKobo} AND ${t.vatKobo} >= 0 AND ${t.feeKobo} >= 0 AND ${t.reserveKobo} >= 0 AND ${t.platformKobo} >= 0 AND ${t.hostKobo} >= 0 AND (${t.guestKobo} IS NULL OR ${t.guestKobo} >= 0) AND ${t.vatKobo} + ${t.feeKobo} + ${t.reserveKobo} + ${t.platformKobo} + ${t.hostKobo} + COALESCE(${t.guestKobo}, 0) = ${t.amountKobo}`),
@@ -1333,27 +1340,36 @@ export const roomSpend = pgTable("room_spend", {
 }, (t) => ({
   pk: primaryKey({ name: "room_spend_pkey", columns: [t.roomId, t.userId] }),
   spentCheck: check("room_spend_spent_check", sql`${t.spentKobo} >= 0 AND ${t.spentKobo} <= ${t.limitKobo}`),
+  limitCheck: check("room_spend_limit_check", sql`${t.limitKobo} > 0`),
 }));
 export type RoomSpend = typeof roomSpend.$inferSelect;
 
-// What a host (and a stage guest) owes back after a chargeback on a delivered spray. Never deleted; written_off only by an
-// admin with a reason. One row per (spray, beneficiary).
+// What a host (and a stage guest) owes back: after a chargeback on a spray (origin 'dispute'), or after a taken payment was
+// refunded in full while its split shares had already gone to their subaccounts (origin 'reversal'). Never deleted;
+// recovered from payouts (partially: recovered_kobo; 'recovered' only when it equals amount_kobo), or written_off only by an
+// admin (admin_users) with a reason. One row per (spray, beneficiary).
 export const hostClawbacks = pgTable("host_clawbacks", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   hostId: varchar("host_id").notNull().references(() => users.id, { onDelete: "restrict" }),
   beneficiaryId: varchar("beneficiary_id").notNull().references(() => users.id, { onDelete: "restrict" }),
   sprayId: uuid("spray_id").notNull().references(() => sprayPayments.id, { onDelete: "restrict" }),
   amountKobo: integer("amount_kobo").notNull(),
+  recoveredKobo: integer("recovered_kobo").notNull().default(0),
+  origin: text("origin").notNull().default("dispute"),
   status: text("status").notNull().default("open"),
-  writtenOffBy: varchar("written_off_by").references(() => users.id, { onDelete: "restrict" }),
+  writtenOffBy: varchar("written_off_by").references(() => adminUsers.id, { onDelete: "restrict" }),
   writtenOffReason: text("written_off_reason"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
   recoveredAt: timestamp("recovered_at"),
 }, (t) => ({
   sprayBeneficiaryUnique: unique("host_clawbacks_spray_beneficiary_key").on(t.sprayId, t.beneficiaryId),
   hostStatusIdx: index("host_clawbacks_host_status_idx").on(t.hostId, t.status),
+  beneficiaryStatusIdx: index("host_clawbacks_beneficiary_status_idx").on(t.beneficiaryId, t.status),
   statusCheck: check("host_clawbacks_status_check", sql`${t.status} IN ('open', 'recovered', 'written_off')`),
+  originCheck: check("host_clawbacks_origin_check", sql`${t.origin} IN ('dispute', 'reversal')`),
   amountCheck: check("host_clawbacks_amount_check", sql`${t.amountKobo} > 0`),
+  recoveredCheck: check("host_clawbacks_recovered_check", sql`${t.recoveredKobo} >= 0 AND ${t.recoveredKobo} <= ${t.amountKobo} AND (${t.status} <> 'recovered' OR ${t.recoveredKobo} = ${t.amountKobo})`),
+  writtenOffCheck: check("host_clawbacks_written_off_check", sql`${t.status} <> 'written_off' OR (${t.writtenOffBy} IS NOT NULL AND ${t.writtenOffReason} IS NOT NULL)`),
 }));
 export type HostClawback = typeof hostClawbacks.$inferSelect;
 
