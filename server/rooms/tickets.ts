@@ -151,10 +151,20 @@ export async function replayRoomTicket(reference: string, roomId: string, userId
   return row ? outcomeOfRow(row, roomId, userId) : null;
 }
 
-/** Refund a refused charge. Called only by the call that inserted its 'refunded' row, so at most once per reference. */
+/**
+ * Refund a refused charge. Called only by the call that inserted its 'refunded' row, so at most once per reference.
+ * Under the ticket's advisory lock and with the deterministic note (lane S3's refund job / webhook take the same lock and
+ * look the note up first), so this and the job can never both send a refund for the row.
+ */
 async function refundRefusedCharge(row: RoomTicket, reference: string, outcome: string): Promise<void> {
   try {
-    await refundPayment(reference, "paystack");
+    const { withAdvisoryLock, LOCK_TICKET, BUSY } = await import("./refunds");
+    const { ticketRefundReference } = await import("@shared/roomRefunds");
+    const sent = await withAdvisoryLock(LOCK_TICKET, row.id, async () => {
+      await refundPayment(reference, "paystack", { note: ticketRefundReference(row.id) });
+      return true;
+    }, 8000);
+    if (sent === BUSY) { logOutcome(reference, row.roomId, row.userId, `refund_left_to_job:${outcome}`); return; } // the job holds it: it looks up, then refunds
   } catch (e) {
     logOutcome(reference, row.roomId, row.userId, `refund_failed:${outcome}`);
     await storage.createPaymentIssue({

@@ -82,11 +82,15 @@ export function registerAgeVerificationAdminRoute(app: Express) {
 }
 
 // ============================================
-// PAID ROOMS FINANCE (read-only; Finance Manager + Super Admin)
+// PAID ROOMS FINANCE (Finance Manager + Super Admin)
 // ============================================
-// Payouts to room hosts and ticket totals, plus the alerts finance must act on. No mutation endpoints, no buyer identities,
-// no bank details (they are never stored here). last_error is already sanitized when written (shared/roomRefunds.ts).
+// Payouts to room hosts and ticket totals, plus the alerts finance must act on, and four audited levers (hold, release,
+// requeue a failed payout, refund a whole room). No buyer identities, no bank details (they are never stored here).
+// last_error is already sanitized when written (shared/roomRefunds.ts). CSRF is enforced for every /api mutation in
+// server/index.ts; role checks are requireRole like every other admin route; the only inputs are the room id (uuid) and a
+// reason (3 to 300 characters, kept in the admin activity log). Never free-text SQL.
 const PAYOUT_STUCK_MS = 24 * 3600_000;
+const PAYOUT_HOLD_FROM_MS = Date.parse("9999-01-01T00:00:00.000Z"); // shared/roomRefunds PAYOUT_HOLD_SENTINEL (9999-12-31)
 const msToIso = (ms: unknown) => (ms === null || ms === undefined ? null : new Date(Number(ms)).toISOString());
 
 export function registerRoomFinanceAdminRoutes(app: Express) {
@@ -117,11 +121,14 @@ export function registerRoomFinanceAdminRoutes(app: Express) {
         payouts: (rows.rows as any[]).map((p) => {
           const releaseMs = p.release_ms === null ? null : Number(p.release_ms);
           const stuck = p.status === "queued" && releaseMs !== null && now - releaseMs > PAYOUT_STUCK_MS;
+          const onHold = p.status === "held" && releaseMs !== null && releaseMs >= PAYOUT_HOLD_FROM_MS;
           return {
             id: p.id, roomId: p.room_id, roomTitle: p.room_title, hostId: p.host_id, hostUsername: p.host_username ?? null,
             amountKobo: Number(p.amount_kobo), status: p.status, transferRef: p.transfer_ref, attempts: Number(p.attempts),
-            lastError: p.last_error, releaseAt: msToIso(p.release_ms), paidAt: msToIso(p.paid_ms), createdAt: msToIso(p.created_ms),
-            alert: p.status === "failed" || stuck || p.last_error === "NO_PAYOUT_ACCOUNT" || p.last_error === "TRANSFER_NEEDS_OTP",
+            lastError: p.last_error, releaseAt: onHold ? null : msToIso(p.release_ms), paidAt: msToIso(p.paid_ms), createdAt: msToIso(p.created_ms),
+            onHold,
+            alert: p.status === "failed" || stuck || p.last_error === "NO_PAYOUT_ACCOUNT" || p.last_error === "TRANSFER_NEEDS_OTP"
+              || (typeof p.last_error === "string" && p.last_error.startsWith("PAYOUT_BANK_UNRESOLVED")),
           };
         }),
         total: total.rows[0]?.n ?? 0,
@@ -134,24 +141,38 @@ export function registerRoomFinanceAdminRoutes(app: Express) {
 
   app.get("/api/admin/finance/room-tickets", requireRole(...FINANCE), async (_req: Request, res: Response) => {
     try {
-      const [tickets, owed, payouts, issues] = await Promise.all([
+      // Refused charges (lane S2 rows, refund_reason auto_*) are not tickets: excluded from the ticket buckets and from
+      // refundsAwaitingProvider, reported on their own as refusedCharges (count + gross, and how many are still owed).
+      const [tickets, owed, payouts, issues, refused] = await Promise.all([
         pool.query(
           `select status, count(*)::int as n,
                   coalesce(sum(amount_kobo), 0)::bigint as gross, coalesce(sum(vat_kobo), 0)::bigint as vat,
                   coalesce(sum(fee_kobo), 0)::bigint as fee, coalesce(sum(reserve_kobo), 0)::bigint as reserve,
                   coalesce(sum(platform_kobo), 0)::bigint as platform, coalesce(sum(host_kobo), 0)::bigint as host
-             from room_tickets group by status`,
+             from room_tickets where coalesce(left(refund_reason, 5), '') <> 'auto_' group by status`,
         ),
-        pool.query(`select count(*)::int as n, coalesce(sum(amount_kobo), 0)::bigint as amount from room_tickets where status = 'refunded' and refunded_at is null`),
+        pool.query(
+          `select count(*)::int as n, coalesce(sum(amount_kobo), 0)::bigint as amount from room_tickets
+            where status = 'refunded' and refunded_at is null and coalesce(left(refund_reason, 5), '') <> 'auto_'`,
+        ),
         pool.query(`select status, count(*)::int as n, coalesce(sum(amount_kobo), 0)::bigint as amount from room_payouts group by status`),
+        // Alerts: refund failures for a room ticket row OR for a room charge that never got a row (lane S2's no_row path:
+        // ticket_id NULL, the charge reference vib3rt_*), refunds owed > 24 h, payout failures. Never the refund_pending markers.
         pool.query(
           `select i.id, i.reason, i.ticket_id, i.provider_payment_id, i.error_message,
                   round(extract(epoch from i.created_at) * 1000)::float8 as created_ms
              from payment_issues i
             where i.resolved_at is null
-              and ((i.reason = 'refund_failed' and exists (select 1 from room_tickets t where t.id::text = i.ticket_id))
+              and ((i.reason in ('refund_failed', 'refund_overdue')
+                    and (exists (select 1 from room_tickets t where t.id::text = i.ticket_id)
+                         or (i.ticket_id is null and i.provider_payment_id ~ '^vib3rt_[0-9a-f]{24}_[0-9a-f]{32}$')))
                 or (i.reason = 'payout_failed' and i.provider_payment_id like 'room-payout-%'))
             order by i.created_at desc limit 100`,
+        ),
+        pool.query(
+          `select count(*)::int as n, coalesce(sum(amount_kobo), 0)::bigint as gross,
+                  (count(*) filter (where refunded_at is null))::int as owed
+             from room_tickets where coalesce(left(refund_reason, 5), '') = 'auto_'`,
         ),
       ]);
       const num = (v: unknown) => Number(v ?? 0);
@@ -161,6 +182,7 @@ export function registerRoomFinanceAdminRoutes(app: Express) {
           reserveKobo: num(r.reserve), platformKobo: num(r.platform), hostKobo: num(r.host),
         })),
         refundsAwaitingProvider: { count: owed.rows[0]?.n ?? 0, amountKobo: num(owed.rows[0]?.amount) },
+        refusedCharges: { count: refused.rows[0]?.n ?? 0, grossKobo: num(refused.rows[0]?.gross), awaitingProvider: refused.rows[0]?.owed ?? 0 },
         payouts: (payouts.rows as any[]).map((r) => ({ status: r.status, count: r.n, amountKobo: num(r.amount) })),
         alerts: (issues.rows as any[]).map((i) => ({
           id: i.id, kind: i.reason, ticketId: i.ticket_id, reference: i.provider_payment_id, error: i.error_message, since: msToIso(i.created_ms),
@@ -170,6 +192,56 @@ export function registerRoomFinanceAdminRoutes(app: Express) {
       console.error("[ADMIN] room tickets totals failed:", (error as Error)?.message);
       res.status(500).json({ message: "Failed to load room ticket totals" });
     }
+  });
+
+  // ---------------------------------------------------------------- levers (audited)
+  const leverBody = z.object({ reason: z.string().trim().min(3).max(300) });
+  type Lever = "hold" | "release" | "requeue" | "refund_all";
+  type LeverOutcome = { ok: true; [k: string]: unknown } | { ok: false; status: number; code: string; message: string };
+  const lever = (name: Lever, path: string, run: (roomId: string, reason: string) => Promise<LeverOutcome>) =>
+    app.post(path, requireRole(...FINANCE), async (req: Request, res: Response) => {
+      const parsed = leverBody.safeParse(req.body ?? {});
+      if (!parsed.success) return res.status(400).json({ message: "A reason (3 to 300 characters) is required", code: "REASON_REQUIRED" });
+      const roomId = String(req.params.roomId ?? "");
+      try {
+        const r = await run(roomId, parsed.data.reason);
+        if (r.ok === false) return res.status(r.status).json({ message: r.message, code: r.code });
+        const { ok: _ok, ...result } = r;
+        await storage.logAdminActivity({
+          adminId: req.session.adminId!,
+          action: `room_payout.${name}`,
+          targetType: "room",
+          targetId: roomId,
+          details: JSON.stringify(result).slice(0, 1000),
+          reason: parsed.data.reason,
+          ipAddress: req.ip,
+        }).catch((error) => console.error(`[ADMIN] ALERT room payout lever ${name} on ${roomId} succeeded but the audit row failed:`, error));
+        res.json(result);
+      } catch (error) {
+        console.error(`[ADMIN] room payout lever ${name} failed:`, (error as Error)?.message);
+        res.status(500).json({ message: "That did not work. Check the payout before trying again." });
+      }
+    });
+
+  // Hold: the payout is never sent until released (release_at pushed to 9999-12-31, reason in last_error).
+  lever("hold", "/api/admin/room-payouts/:roomId/hold", async (roomId, reason) => {
+    const { adminHoldPayout } = await import("./rooms/settlement");
+    return adminHoldPayout(roomId, reason) as Promise<LeverOutcome>;
+  });
+  // Release a hold: release_at = ended_at + 48 h again (due at once if that has passed).
+  lever("release", "/api/admin/room-payouts/:roomId/release", async (roomId) => {
+    const { adminReleasePayout } = await import("./rooms/settlement");
+    return adminReleasePayout(roomId) as Promise<LeverOutcome>;
+  });
+  // Requeue a failed payout (attempts 0) after Paystack is asked about its reference (never sent twice).
+  lever("requeue", "/api/admin/room-payouts/:roomId/requeue", async (roomId) => {
+    const { adminRequeuePayout } = await import("./rooms/settlement");
+    return adminRequeuePayout(roomId) as Promise<LeverOutcome>;
+  });
+  // Refund every paid ticket (host_cancelled) and remove the payout if it is still held.
+  lever("refund_all", "/api/admin/rooms/:roomId/refund-all", async (roomId) => {
+    const { adminRefundRoom } = await import("./rooms/settlement");
+    return adminRefundRoom(roomId) as Promise<LeverOutcome>;
   });
 }
 
