@@ -11,6 +11,7 @@ import { insertAdminUserSchema, adminRoles, type AdminRole } from "@shared/schem
 import { z } from "zod";
 import { getSocialPlanAdminStats } from "./services/socialAdminStats";
 import { requireAdmin, requireAdminPending, requireRole, requireSuperAdmin, isMfaEnrolled, mfaRequired } from "./services/adminSecurity";
+import { registerSprayClawbackAdminRoutes } from "./rooms/clawbacks";
 import { registerAdminSocialRoutes } from "./routes/admin-social-routes";
 import {
   authRateLimiter,
@@ -1238,6 +1239,7 @@ export function setupAdminRoutes(app: Express) {
   });
 
   registerRoomFinanceAdminRoutes(app); // paid rooms: payouts + ticket totals, read-only
+  registerSprayClawbackAdminRoutes(app); // spraying: chargeback clawbacks list + audited write-off (finance roles)
 
   // ============================================
   // UTILITIES (Super Admin only)
