@@ -252,9 +252,18 @@ async function rowByPayerKey(payerId: string, key: string, ex: ss.SprayExec = db
   return row ?? null;
 }
 
+/** The stored bank / checkout link, only while it can still be used: https, the spray still pending, not yet expired. */
+function resumableLink(row: SprayPayment, now: number): string | null {
+  const url = row.authorizationUrl;
+  if (row.status !== "pending" || typeof url !== "string" || !/^https:\/\/[^\s]+$/.test(url) || url.length > 2048) return null;
+  const created = new Date(row.createdAt).getTime();
+  return Number.isFinite(created) && now - created < UNPAID_EXPIRY_MS ? url : null;
+}
+
 /**
- * A key that was used before: the first result, read from the row. Never a second charge. (A replay of a spray that is
- * waiting for a bank page answers "pending" without the link: the link is not stored. The client keeps the link it got.)
+ * A key that was used before: the first result, read from the row. Never a second charge. A spray still waiting for the
+ * payer's bank approval answers action_required with the same link again (client M7), so a second tab or a reload can
+ * reopen the bank page; once it can no longer be used (expired, paid, failed) the answer comes from the status.
  */
 function replayOutcome(row: SprayPayment, requestHash: string): StartOutcome {
   if (row.requestHash !== requestHash) {
@@ -263,6 +272,8 @@ function replayOutcome(row: SprayPayment, requestHash: string): StartOutcome {
   const status = row.status as SprayStatus;
   if (status === "failed") return declined(row.id, shownReason(row.reason) ?? "DECLINED");
   if (status === "delivered") return { status: 200, body: { status: "delivered", sprayId: row.id } };
+  const link = resumableLink(row, sprayClock.now());
+  if (link) return { status: 200, body: { status: "action_required", sprayId: row.id, authorizationUrl: link } };
   const reason = shownReason(row.reason);
   return { status: 200, body: { status: "pending", sprayId: row.id, ...(reason ? { reason } : {}) } };
 }
@@ -447,7 +458,7 @@ async function chargeNewSpray(
       const { url } = await provider.startFirstPayment({
         reference, email: f.payer.email, amountKobo: row.amountKobo, split: { shares }, metadata, callbackUrl,
       });
-      await ss.markSprayStatus(row.id, ["created"], "pending");
+      await ss.markSprayStatus(row.id, ["created"], "pending", { authorizationUrl: url });
       logSpray(reference, "action_required");
       return { status: 200, body: { status: "action_required", sprayId: row.id, authorizationUrl: url } };
     } catch (e) {
@@ -474,7 +485,7 @@ async function chargeNewSpray(
 
   if (result.status === "action_required") {
     // The bank wants the payer (OTP, PIN, 3D Secure page): hand them the bank's link so they can approve it.
-    await ss.markSprayStatus(row.id, ["created"], "pending", { paymentMethodId: method?.id ?? null });
+    await ss.markSprayStatus(row.id, ["created"], "pending", { paymentMethodId: method?.id ?? null, authorizationUrl: result.authorizationUrl ?? null });
     logSpray(reference, "action_required");
     return result.authorizationUrl
       ? { status: 200, body: { status: "action_required", sprayId: row.id, authorizationUrl: result.authorizationUrl } }

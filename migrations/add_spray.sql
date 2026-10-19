@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS spray_payments (
   payment_method_id uuid REFERENCES user_payment_methods(id) ON DELETE RESTRICT,
   status text NOT NULL DEFAULT 'created',
   reason text,
+  authorization_url text,
   created_at timestamp NOT NULL DEFAULT now(),
   paid_at timestamp,
   delivered_at timestamp,

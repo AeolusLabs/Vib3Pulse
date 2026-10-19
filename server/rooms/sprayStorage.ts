@@ -52,7 +52,7 @@ export async function getSprayByRef(providerRef: string, tx?: SprayExec): Promis
 }
 
 export type SprayStatusPatch = Partial<Pick<SprayPayment,
-  "reason" | "paidAt" | "deliveredAt" | "reversedAt" | "refundRequestedAt" | "paymentMethodId">>;
+  "reason" | "paidAt" | "deliveredAt" | "reversedAt" | "refundRequestedAt" | "paymentMethodId" | "authorizationUrl">>;
 
 /**
  * Conditional status change: only when the row's current status is one of `from`. Returns the updated row, or null when
@@ -63,7 +63,7 @@ export async function markSprayStatus(
 ): Promise<SprayPayment | null> {
   if (!isSprayStatus(to) || from.length === 0 || !from.every(isSprayStatus)) throw new RangeError("bad spray status change");
   const set: Record<string, unknown> = { status: to };
-  for (const k of ["reason", "paidAt", "deliveredAt", "reversedAt", "refundRequestedAt", "paymentMethodId"] as const) {
+  for (const k of ["reason", "paidAt", "deliveredAt", "reversedAt", "refundRequestedAt", "paymentMethodId", "authorizationUrl"] as const) {
     if (k in patch) set[k] = patch[k];
   }
   const [row] = await x(tx).update(sprayPayments).set(set as Partial<SprayPayment>)

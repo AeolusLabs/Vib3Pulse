@@ -1304,6 +1304,9 @@ export const sprayPayments = pgTable("spray_payments", {
   paymentMethodId: uuid("payment_method_id").references(() => userPaymentMethods.id, { onDelete: "restrict" }),
   status: text("status").notNull().default("created"),
   reason: text("reason"),
+  // The bank / checkout page the payer was sent to while the spray waits for their approval (https, not a secret: it only
+  // lets someone pay). Kept so a replay of the same idempotency key can hand it back (client M7). Never logged.
+  authorizationUrl: text("authorization_url"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
   paidAt: timestamp("paid_at"),
   deliveredAt: timestamp("delivered_at"),
