@@ -12,7 +12,12 @@ export const ROOM_REACTIONS: readonly string[] = ["❤️", "🔥", "👏", "�
 /** How long a room stays open after its host leaves or drops, before it ends on its own (the server uses this; the client words it). */
 export const HOST_LEAVE_GRACE_MS = 120_000;
 
-export const ROOM_LIMITS = { capacityDefault: 50, capacityMax: 50, capacityMaxPaid: 150, liveVideoMax: 50, title: 80, description: 500, chat: 300, replyText: 120, pinned: 200 } as const;
+// Paid rooms (phase 4): a ticket costs ticketMinKobo to ticketMaxKobo (integer kobo: 1,000 to 100,000 naira) and a ticketed
+// room holds ticketCapacityMin to ticketCapacityMax ticket holders (its `capacity` column is not used for them).
+export const ROOM_LIMITS = {
+  capacityDefault: 50, capacityMax: 50, capacityMaxPaid: 150, liveVideoMax: 50, title: 80, description: 500, chat: 300, replyText: 120, pinned: 200,
+  ticketMinKobo: 100000, ticketMaxKobo: 10000000, ticketCapacityMin: 20, ticketCapacityMax: 150,
+} as const;
 const MAX_SCHEDULE_DAYS = 90;
 const MAX_URL = 2048;
 
@@ -155,6 +160,22 @@ export interface RoomInput {
   pinnedMessage?: string | null;
   /** Host setting: one of SLOW_MODES. undefined = not sent. */
   slowModeSec?: SlowMode;
+  /**
+   * Paid rooms. undefined = not sent; null = free. Price in integer kobo (ROOM_LIMITS.ticketMinKobo to ticketMaxKobo),
+   * capacity ROOM_LIMITS.ticketCapacityMin to ticketCapacityMax. Both set or both free, and only in 18+ / 21+ rooms.
+   * The validator checks shape only: whether this host may sell (flag, ID check, payout account) is the server's call.
+   */
+  ticketPriceKobo?: number | null;
+  ticketCapacity?: number | null;
+  /** Buyers may refund themselves before the start (default true). undefined = not sent. */
+  refundBeforeStart?: boolean;
+}
+
+/** A ticket field as sent: undefined (not sent), null (free) or an integer within [min, max]; false when invalid. */
+function ticketNumber(v: unknown, min: number, max: number): number | null | undefined | false {
+  if (v === undefined) return undefined;
+  if (v === null) return null;
+  return typeof v === "number" && Number.isInteger(v) && v >= min && v <= max ? v : false;
 }
 
 const optId = (v: unknown) => v === undefined || v === null || v === "" ? undefined : typeof v === "string" && v.length <= 64 ? v : null;
@@ -215,6 +236,18 @@ export function validateRoomInput(input: unknown, now = new Date()): Validated<R
     else pinnedMessage = input.pinnedMessage.trim() || null;
   }
 
+  // Paid rooms: exact integers in range (the string "100000", 1.5 or a negative are refused), price and capacity together
+  // or not at all, and never in a room open to under 18s.
+  const ticketPriceKobo = ticketNumber(input.ticketPriceKobo, ROOM_LIMITS.ticketMinKobo, ROOM_LIMITS.ticketMaxKobo);
+  if (ticketPriceKobo === false) return fail("ticketPriceKobo");
+  const ticketCapacity = ticketNumber(input.ticketCapacity, ROOM_LIMITS.ticketCapacityMin, ROOM_LIMITS.ticketCapacityMax);
+  if (ticketCapacity === false) return fail("ticketCapacity");
+  const priced = typeof ticketPriceKobo === "number", sized = typeof ticketCapacity === "number";
+  if (priced !== sized) return fail(priced ? "ticketCapacity" : "ticketPriceKobo");
+  if (priced && ageLimit !== "18+" && ageLimit !== "21+") return fail("ageLimit");
+  if (input.refundBeforeStart !== undefined && typeof input.refundBeforeStart !== "boolean") return fail("refundBeforeStart");
+  const refundBeforeStart = input.refundBeforeStart as boolean | undefined;
+
   return {
     ok: true,
     value: {
@@ -222,6 +255,9 @@ export function validateRoomInput(input: unknown, now = new Date()): Validated<R
       eventId, venueId, scheduledFor, noDirectInteractions: input.noDirectInteractions === true, screenUrl, capacity,
       ...(slowModeSec !== undefined ? { slowModeSec } : {}),
       ...(pinnedMessage !== undefined ? { pinnedMessage } : {}),
+      ...(ticketPriceKobo !== undefined ? { ticketPriceKobo } : {}),
+      ...(ticketCapacity !== undefined ? { ticketCapacity } : {}),
+      ...(refundBeforeStart !== undefined ? { refundBeforeStart } : {}),
     },
   };
 }

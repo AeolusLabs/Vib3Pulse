@@ -16,9 +16,11 @@ import { events, follows, users, venues, type Room, type User } from "@shared/sc
 import { ageFromDob, minAgeForLimit } from "@shared/age";
 import { resolveScreen } from "@shared/screen";
 import { ROOM_LIMITS, resolveRoomPrivacy, validateRoomInput, validateRoomPrivacy } from "@shared/rooms";
-import { canHostRoom, canJoinRoom, isMinorsRoomHost } from "@shared/roomRules";
+import { canHostRoom, canJoinRoom, canSellTickets, isMinorsRoomHost, isTicketedRoom, roomCapacity, ticketEligible, type TicketSaleCode } from "@shared/roomRules";
+import { isIdVerifiedAdult } from "@shared/ageVerification";
 import * as rs from "./roomStorage";
-import { canViewRoom, hostSummary, mutualFollow, pinnedPlainText, plainText, publicRoom, sha256, viewerRoom, viewRoom } from "./roomAccess";
+import { canViewRoom, hostRoom, hostSummary, mutualFollow, pinnedPlainText, plainText, publicRoom, sha256, viewerRoom, viewRoom } from "./roomAccess";
+import { countPaidTickets, hasPaidTicket, hasVerifiedPayoutAccount, TicketGuardError, updateRoomWithTicketGuard } from "./ticketStorage";
 import * as mr from "./minorsRoom";
 import { TokenBucket } from "./rateLimit";
 import { getVoiceService } from "./voice/voiceService";
@@ -51,6 +53,28 @@ const HOST_NOT_MINOR = { code: "HOST_NOT_MINOR" } as const;
 
 export function isHost(room: Room, userId: string) {
   return room.hostId === userId;
+}
+
+// Paid rooms: why this host may not sell tickets (403, with the code). Plain words, no prices.
+const TICKET_SALE_MESSAGES: Record<TicketSaleCode, string> = {
+  FEATURE_OFF: "Paid rooms aren't available yet.",
+  HOST_NOT_ADULT: "You need to be 18 or over to sell tickets.",
+  HOST_NOT_VERIFIED: "Verify your ID to sell tickets.",
+  NO_PAYOUT_ACCOUNT: "Add a payout account to sell tickets.",
+  ROOM_NOT_ADULT: "Tickets can only be sold for 18+ or 21+ rooms.",
+};
+const TICKET_GUARD_MESSAGES = {
+  TICKETS_SOLD: "Tickets have been sold for this room, so this can't be changed now.",
+  CAPACITY_BELOW_SOLD: "You can't set the number of tickets below the number already sold.",
+} as const;
+
+/**
+ * May this host sell tickets for a room like this? The switch first (no lookups while paid rooms are off), then the host's
+ * age, ID check (isIdVerifiedAdult) and a verified Paystack payout account from organizer_payment_accounts.
+ */
+async function sellCheck(host: User, room: { ageLimit: string; minorsRoom: boolean }) {
+  const hasPayoutAccount = roomFeatures.paidRooms ? await hasVerifiedPayoutAccount(host.id) : false;
+  return canSellTickets({ age: ageFromDob(host.dateOfBirth), idVerified: isIdVerifiedAdult(host), hasPayoutAccount }, room, roomFeatures);
 }
 
 async function hostCheck(host: User, input: { visibility: Room["visibility"]; ageLimit: Room["ageLimit"] }) {
@@ -133,6 +157,12 @@ export function registerRoomRoutes(app: Express): void {
 
       const hc = await hostCheck(host, v.value);
       if (!hc.ok) return res.status(403).json({ message: HOST_MESSAGES[hc.code], code: hc.code });
+      // Paid room: only an adult, ID-verified host with a payout account, only with paid rooms switched on.
+      const minorsRoom = isMinorsRoomHost(ageFromDob(host.dateOfBirth));
+      if (typeof v.value.ticketPriceKobo === "number") {
+        const sell = await sellCheck(host, { ageLimit: v.value.ageLimit, minorsRoom });
+        if (!sell.ok) return res.status(403).json({ message: TICKET_SALE_MESSAGES[sell.code], code: sell.code });
+      }
 
       let screen = null;
       if (v.value.screenUrl && !roomFeatures.linkScreens) return res.status(400).json({ message: "Link screens are switched off for now.", field: "screenUrl", reason: "disabled" });
@@ -155,10 +185,10 @@ export function registerRoomRoutes(app: Express): void {
         screen,
         inviteTokenHash: inviteToken ? sha256(inviteToken) : undefined,
         // Decided here from the host's age today, never from the request body; never changes afterwards.
-        minorsRoom: isMinorsRoomHost(ageFromDob(host.dateOfBirth)),
+        minorsRoom,
       });
       // Not named "inviteToken": the global response redaction strips that key from every body on purpose.
-      res.status(201).json({ room: { ...viewerRoom(room), host: hostSummary(host) }, ...(inviteToken ? { inviteLink: `/rooms/${room.id}?token=${inviteToken}` } : {}) });
+      res.status(201).json({ room: { ...hostRoom(room), host: hostSummary(host) }, ...(inviteToken ? { inviteLink: `/rooms/${room.id}?token=${inviteToken}` } : {}) });
     } catch (e) {
       console.error("[rooms] create failed:", e);
       res.status(500).json({ message: "Failed to create room" });
@@ -173,9 +203,15 @@ export function registerRoomRoutes(app: Express): void {
       const str = (x: unknown) => (typeof x === "string" && x.length <= 64 ? x : undefined);
       const list = await rs.listRooms({ scope, viewerId: req.user!.id, eventId: str(req.query.eventId), venueId: str(req.query.venueId) });
       const hostIds = Array.from(new Set(list.map((r) => r.hostId)));
-      const hosts = hostIds.length ? await db.select().from(users).where(inArray(users.id, hostIds)) : [];
+      const [hosts, viewer] = await Promise.all([
+        hostIds.length ? db.select().from(users).where(inArray(users.id, hostIds)) : Promise.resolve([] as User[]),
+        storage.getUser(req.user!.id),
+      ]);
       const byId = new Map(hosts.map((h) => [h.id, hostSummary(h)]));
-      const rooms = list.map((r) => ({ ...publicRoom(r), host: byId.get(r.hostId) ?? null, memberCount: roomHub.count(r.id), peek: peekOf(r.id, 5) }));
+      // A ticket price (priceMinor, kobo) only for a ticketed room and a viewer who may buy it (ID-verified adult, room
+      // 18+/21+ and not a minors' room, viewer meets its age limit). Everyone else gets no priceMinor key at all.
+      const priceFor = (r: Room) => (viewer && isTicketedRoom(r) && ticketEligible(viewer, r) ? { priceMinor: r.ticketPriceKobo } : {});
+      const rooms = list.map((r) => ({ ...publicRoom(r), ...priceFor(r), host: byId.get(r.hostId) ?? null, memberCount: roomHub.count(r.id), peek: peekOf(r.id, 5) }));
       rooms.sort((a, b) => (a.status === b.status && a.status === "live" ? b.memberCount - a.memberCount : 0)); // busiest live rooms first (stable otherwise)
       res.json({ rooms });
     } catch (e) {
@@ -217,10 +253,23 @@ export function registerRoomRoutes(app: Express): void {
       const [viewer, host, member] = await Promise.all([storage.getUser(req.user!.id), storage.getUser(room.hostId), rs.getMember(room.id, req.user!.id)]);
       const gate = canJoinRoom({ age: ageFromDob(viewer?.dateOfBirth) }, room as any);
       const canJoin = member?.banned ? { ok: false, code: "BANNED" } : gate;
+      const self = isHost(room, req.user!.id);
+      // Paid rooms: the ticket block exists ONLY for a viewer who may view the room (viewRoom passed above, so never someone
+      // the minors' gate refused) AND may buy (ticketEligible: ID-verified adult, 18+/21+ room that is not a minors' room,
+      // meets its age limit). Teens, unknown age and unverified people never get the key, so they never see a price.
+      // required: this viewer needs a ticket to get in (host and co-hosts never do). soldOut: paid tickets reached capacity.
+      let ticket: { required: boolean; priceKobo: number; held: boolean; soldOut: boolean } | null = null;
+      if (viewer && ticketEligible(viewer, room)) {
+        const ticketed = isTicketedRoom(room);
+        const exempt = self || (!!member && !member.banned && member.role === "cohost");
+        const [held, sold] = ticketed ? await Promise.all([hasPaidTicket(room.id, req.user!.id), countPaidTickets(room.id)]) : ([false, 0] as [boolean, number]);
+        ticket = { required: ticketed && !exempt, priceKobo: room.ticketPriceKobo ?? 0, held, soldOut: ticketed && sold >= roomCapacity(room) };
+      }
       res.json({
-        room: viewerRoom(room), host: host ? hostSummary(host) : null, canJoin, memberCount: roomHub.count(room.id), peek: peekOf(room.id, 8),
-        you: isHost(room, req.user!.id) ? { role: "host" } : member && !member.banned ? { role: member.role } : null,
+        room: self ? hostRoom(room) : viewerRoom(room), host: host ? hostSummary(host) : null, canJoin, memberCount: roomHub.count(room.id), peek: peekOf(room.id, 8),
+        you: self ? { role: "host" } : member && !member.banned ? { role: member.role } : null,
         reminderSet: await hasReminder(room.id, req.user!.id), // this viewer's own flag only
+        ...(ticket ? { ticket } : {}),
       });
     } catch (e) {
       console.error("[rooms] get failed:", e);
@@ -295,6 +344,10 @@ export function registerRoomRoutes(app: Express): void {
         screenUrl: "screenUrl" in b ? b.screenUrl : undefined,
         pinnedMessage: "pinnedMessage" in b ? b.pinnedMessage : undefined,
         slowModeSec: "slowModeSec" in b ? b.slowModeSec : undefined,
+        // Paid rooms: the stored values unless sent, so "both or neither" and "18+/21+ only" are checked on the result.
+        ticketPriceKobo: "ticketPriceKobo" in b ? b.ticketPriceKobo : room.ticketPriceKobo ?? null,
+        ticketCapacity: "ticketCapacity" in b ? b.ticketCapacity : room.ticketCapacity ?? null,
+        refundBeforeStart: "refundBeforeStart" in b ? b.refundBeforeStart : undefined,
       };
       const v = validateRoomInput(merged);
       if (!v.ok) return res.status(400).json({ message: `Invalid ${v.field}`, field: v.field });
@@ -320,6 +373,27 @@ export function registerRoomRoutes(app: Express): void {
         }
         patch.ageLimit = v.value.ageLimit;
       }
+      // Paid rooms. Selling (or changing a sale) needs the same host checks as creating. Once any ticket is sold the price,
+      // the free/paid switch, the age limit and the refund promise are fixed, and the ticket capacity never goes below the
+      // tickets sold. Those two are decided in the write itself, under the room row lock (updateRoomWithTicketGuard).
+      let ticketGuard: { lockedBySale: boolean; capacity: number | null } | null = null;
+      {
+        const newPrice = v.value.ticketPriceKobo ?? null, newCap = v.value.ticketCapacity ?? null;
+        const priceChange = "ticketPriceKobo" in b && newPrice !== (room.ticketPriceKobo ?? null);
+        const capChange = "ticketCapacity" in b && newCap !== (room.ticketCapacity ?? null);
+        const ageChange = "ageLimit" in b && v.value.ageLimit !== room.ageLimit && isTicketedRoom(room);
+        const refundOff = "refundBeforeStart" in b && v.value.refundBeforeStart === false && room.refundBeforeStart !== false;
+        if (newPrice !== null && (priceChange || capChange)) {
+          const sell = await sellCheck(host, { ageLimit: v.value.ageLimit, minorsRoom: room.minorsRoom });
+          if (!sell.ok) return res.status(403).json({ message: TICKET_SALE_MESSAGES[sell.code], code: sell.code });
+        }
+        if (priceChange) patch.ticketPriceKobo = newPrice;
+        if (capChange) patch.ticketCapacity = newCap;
+        if ("refundBeforeStart" in b && v.value.refundBeforeStart !== undefined) patch.refundBeforeStart = v.value.refundBeforeStart;
+        if (priceChange || capChange || ageChange || refundOff) {
+          ticketGuard = { lockedBySale: priceChange || ageChange || refundOff, capacity: capChange ? newCap : null };
+        }
+      }
       if ("screenUrl" in b) {
         if (b.screenUrl === null || b.screenUrl === "") patch.screen = null;
         else if (!roomFeatures.linkScreens) return res.status(400).json({ message: "Link screens are switched off for now.", field: "screenUrl", reason: "disabled" });
@@ -330,12 +404,21 @@ export function registerRoomRoutes(app: Express): void {
         }
       }
       // A settings change goes through the per-room queue, which also tells everyone in a live room (room:settings).
-      const updated = !Object.keys(patch).length ? room
-        : settingsChanged ? await writeRoomSettings(room.id, () => rs.updateRoom(room.id, patch))
-        : await rs.updateRoom(room.id, patch);
+      const guard = ticketGuard;
+      const write = () => (guard ? updateRoomWithTicketGuard(room.id, patch, guard) : rs.updateRoom(room.id, patch));
+      let updated: Room;
+      try {
+        updated = !Object.keys(patch).length ? room
+          : settingsChanged ? await writeRoomSettings(room.id, write)
+          : await write();
+      } catch (e) {
+        if (e instanceof TicketGuardError) return res.status(409).json({ message: TICKET_GUARD_MESSAGES[e.code], code: e.code });
+        throw e;
+      }
       if ("screen" in patch && updated.status === "live") notifyScreen(room.id, patch.screen ?? null, updated.screenVersion);
       if (patch.ageLimit && updated.status === "live") await enforceAgeLimit(room.id); // raised: send out anyone now under it
-      res.json({ room: { ...viewerRoom(updated), host: hostSummary(host) } });
+      // The ticket settings go back to the host only (a co-host editing the pinned message gets the viewer room).
+      res.json({ room: { ...(uid === room.hostId ? hostRoom(updated) : viewerRoom(updated)), host: hostSummary(host) } });
     } catch (e) {
       console.error("[rooms] patch failed:", e);
       res.status(500).json({ message: "Failed to update room" });
@@ -704,7 +787,7 @@ export function registerRoomRoutes(app: Express): void {
       if (enabled) {
         if (!ctx.room.voiceEnabled) return res.status(409).json({ message: "Turn voice on first.", code: "VOICE_OFF" });
         if (!getVoiceService()) return res.status(503).json({ message: "Live video isn't available right now.", code: "LIVE_UNAVAILABLE" });
-        if (ctx.room.capacity > ROOM_LIMITS.liveVideoMax) return res.status(400).json({ message: `Live video works in rooms of up to ${ROOM_LIMITS.liveVideoMax} people.`, field: "liveVideo", reason: "too_large" });
+        if (roomCapacity(ctx.room) > ROOM_LIMITS.liveVideoMax) return res.status(400).json({ message: `Live video works in rooms of up to ${ROOM_LIMITS.liveVideoMax} people.`, field: "liveVideo", reason: "too_large" });
       }
       const room = enabled ? await rs.enableLiveVideo(ctx.room.id) : await rs.setLiveVideo(ctx.room.id, false);
       if (!room) return res.status(409).json({ message: "Turn voice on first.", code: "VOICE_OFF" }); // voice went off since we looked
