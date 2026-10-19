@@ -5,8 +5,8 @@
 // Needs lane S1's schema (room_tickets, rooms.ticket_price_kobo / ticket_capacity).
 //
 // Remote database note: each query is about 200 ms. The last-seat race uses TC_TICKET_RACE_N buyers (default 30, set it
-// to 150 on a local database). Calls that lose the race for a connection or time out on the room lock answer 500, and are
-// retried the way Paystack retries a webhook, until every charge has its one row.
+// to 150 on a local database). Calls beyond the per-room issue queue (10) answer 503, calls that time out answer 500, and
+// both are retried the way Paystack retries a webhook, until every charge has its one row.
 import express from "express";
 import cookieParser from "cookie-parser";
 import bcrypt from "bcrypt";
@@ -49,7 +49,8 @@ const check = (name: string, ok: boolean, extra = "") => {
 };
 
 // ------------------------------------------------------------ mock provider
-type MockTx = { amount: number; currency: "NGN" | "GBP"; meta: Record<string, string>; paid: boolean };
+// rawMeta: Paystack can hand metadata back as a JSON string; when set, the mock verify returns that string to the normaliser.
+type MockTx = { amount: number; currency: "NGN" | "GBP"; meta: Record<string, string>; paid: boolean; rawMeta?: string };
 const txs = new Map<string, MockTx>();
 const checkouts: CreateCheckoutParams[] = [];
 const refunds: string[] = [];
@@ -65,7 +66,7 @@ setPaymentProviderForTests({
   verifyCheckoutSession: async (ref) => {
     const t = txs.get(ref);
     if (!t) return null;
-    return { paid: t.paid, providerPaymentId: ref, provider: "paystack", currency: t.currency, amountSmallestUnit: t.amount, metadata: normalizePaystackMetadata(t.meta) };
+    return { paid: t.paid, providerPaymentId: ref, provider: "paystack", currency: t.currency, amountSmallestUnit: t.amount, metadata: normalizePaystackMetadata(t.rawMeta ?? t.meta) };
   },
   refundPayment: async (ref) => { refunds.push(ref); },
 });
@@ -109,8 +110,8 @@ async function http(method: string, path: string, as: string | null, body?: unkn
 const checkout = (roomId: string, as: string, body: unknown = {}) => http("POST", `/api/rooms/${roomId}/tickets/checkout`, as, body);
 const verify = (roomId: string, as: string, reference: string) => http("POST", `/api/rooms/${roomId}/tickets/verify`, as, { reference });
 /** Paystack's webhook. The payload amount is deliberately wrong: the server must use the re-verified amount. */
-async function webhook(reference: string, sign: "valid" | "none" | "bad" = "valid") {
-  const body = JSON.stringify({ event: "charge.success", data: { reference, amount: 1, currency: "NGN", metadata: { itemType: "room" } } });
+async function webhook(reference: string, sign: "valid" | "none" | "bad" = "valid", payloadMetadata: unknown = { itemType: "room" }) {
+  const body = JSON.stringify({ event: "charge.success", data: { reference, amount: 1, currency: "NGN", metadata: payloadMetadata } });
   const sig = sign === "valid" ? crypto.createHmac("sha512", process.env.PAYSTACK_SECRET_KEY!).update(body).digest("hex")
     : sign === "bad" ? crypto.createHmac("sha512", "tc_wrong_key").update(body).digest("hex") : undefined;
   const res = await fetch(base + "/api/webhooks/paystack", { method: "POST", headers: { "content-type": "application/json", ...(sig ? { "x-paystack-signature": sig } : {}) }, body });
@@ -147,12 +148,19 @@ const fillSeats = async (roomId: string, n: number) => {
 };
 const rowsFor = (ref: string) => q(`select * from room_tickets where provider_ref = $1`, [ref]);
 const ledgerFor = (ref: string) => q(`select * from payment_transactions where provider_payment_id = $1 and type = 'room_ticket'`, [ref]);
+const issueRefs: string[] = []; // references whose payment issues this run opens (cleared at the end)
+const payoutAccount = (userId: string) => q(
+  `insert into organizer_payment_accounts (user_id, provider, paystack_subaccount_code, details_submitted, payouts_enabled) values ($1,'paystack',$2,true,true)`,
+  [userId, `ACCT_tc_${userId.slice(0, 8)}`]);
+const issuesFor = (ref: string) => q(`select * from payment_issues where provider_payment_id = $1 and reason = 'room_charge_unhandled' and resolved_at is null`, [ref]);
 const paidIn = async (roomId: string) => Number((await q(`select count(*)::int n from room_tickets where room_id = $1 and status = 'paid'`, [roomId]))[0].n);
 
 const savedFlags = { ...roomFeatures };
 try {
   const host = await mk("host", 30, true);
   const host2 = await mk("host2", 30, true);
+  // A host may sell only while ID-verified with a verified payout account (re-checked at checkout and at issue).
+  await payoutAccount(host); await payoutAccount(host2);
   const teenHost = await mk("teenhost", 15, false);
   const [a, b, c, d, e, f, g, h, i] = await Promise.all(["a", "b", "c", "d", "e", "f", "g", "h", "i"].map((n) => mk(`buyer_${n}`, 30, true)));
   const teen = await mk("teen", 16, false);
@@ -377,6 +385,76 @@ try {
   check("last seat: room has exactly 20 paid, one ledger row for the winner", (await paidIn(race)) === 20
     && Number((await q(`select count(*)::int n from payment_transactions where type = 'room_ticket' and provider_payment_id = any($1::text[])`, [refs]))[0].n) === 1);
 
+  // ------------------------------------------------------------ fix round 4F
+  // M2: a co-host never needs (or buys) a ticket.
+  const coBuyer = await mk("cohost", 30, true);
+  await q(`insert into room_members (room_id, user_id, role) values ($1,$2,'cohost') on conflict (room_id, user_id) do update set role = 'cohost'`, [room, coBuyer]);
+  const callsBefore = checkouts.length;
+  const coCo = await checkout(room, coBuyer);
+  check("co-host: checkout 409 IS_COHOST, no provider call", coCo.status === 409 && coCo.json?.code === "IS_COHOST" && checkouts.length === callsBefore, JSON.stringify(coCo.json));
+
+  // M7: a stored price outside the limits pauses sales (never "not ticketed", never a checkout).
+  const badPrice = await mkRoom(host, { price: 50000 });
+  const bp = await checkout(badPrice, g);
+  check("stored price below the limit: checkout 409 SALES_PAUSED, no provider call", bp.status === 409 && bp.json?.code === "SALES_PAUSED" && checkouts.length === callsBefore, JSON.stringify(bp.json));
+
+  // M1: the host loses eligibility while a buyer is on the Paystack page.
+  const host3 = await mk("host3", 30, true);
+  await payoutAccount(host3);
+  const room3 = await mkRoom(host3);
+  const [j, k] = await Promise.all([mk("buyer_j", 30, true), mk("buyer_k", 30, true)]);
+  const coJ = await checkout(room3, j);
+  check("eligible host: checkout 200", coJ.status === 200, JSON.stringify(coJ.json));
+  const refJ = coJ.json?.reference as string;
+  await q(`update organizer_payment_accounts set payouts_enabled = false where user_id = $1`, [host3]);
+  const coK = await checkout(room3, k);
+  check("host's payout account gone: checkout 409 SALES_PAUSED with plain words and no price", coK.status === 409 && coK.json?.code === "SALES_PAUSED" && !coK.text.includes(String(PRICE)) && !/—/.test(coK.text), JSON.stringify(coK.json));
+  pay(refJ);
+  const vJ = await verify(room3, j, refJ);
+  const rowsJ = await rowsFor(refJ);
+  check("in-flight charge after the host lost eligibility: 409 INELIGIBLE refunded, once", vJ.status === 409 && vJ.json?.code === "INELIGIBLE" && vJ.json?.refunded === true && refundsOf(refJ) === 1, JSON.stringify([vJ.json, refunds.length]));
+  check("in-flight charge: one refunded row with reason auto_host_ineligible, no paid ticket, no ledger row",
+    rowsJ.length === 1 && rowsJ[0].status === "refunded" && rowsJ[0].refund_reason === "auto_host_ineligible" && rowsJ[0].host_kobo === 0 && (await ledgerFor(refJ)).length === 0, JSON.stringify(rowsJ));
+  const vJ2 = await verify(room3, j, refJ);
+  const wJ = await webhook(refJ);
+  check("in-flight charge: replays answer the same and never refund again", vJ2.json?.code === "INELIGIBLE" && wJ.status === 200 && refundsOf(refJ) === 1, JSON.stringify(vJ2.json));
+  await q(`update organizer_payment_accounts set payouts_enabled = true where user_id = $1`, [host3]);
+  await q(`update users set age_verified_at = null where id = $1`, [host3]);
+  const coK2 = await checkout(room3, k);
+  check("host's ID verification revoked: checkout 409 SALES_PAUSED", coK2.status === 409 && coK2.json?.code === "SALES_PAUSED", JSON.stringify(coK2.json));
+  await q(`update users set age_verified_at = now() where id = $1`, [host3]);
+  const coK3 = await checkout(room3, k);
+  check("host eligible again: checkout 200", coK3.status === 200, JSON.stringify(coK3.json));
+
+  // M4: Paystack metadata as a JSON string (in the webhook payload and in the verify answer) still finishes the ticket.
+  const [sb1, sb2, sb3] = await Promise.all([mk("strmeta", 30, true), mk("nometa", 30, true), mk("zero", 30, true)]);
+  const refS = makeTicketReference(room2, sb1, process.env.ROOM_TICKET_REF_SECRET!);
+  txs.set(refS, { amount: PRICE, currency: "NGN", paid: true, meta: {}, rawMeta: JSON.stringify({ itemId: room2, itemType: "room", userId: sb1 }) });
+  const wS = await webhook(refS, "valid", JSON.stringify({ itemType: "room" }));
+  const rowsS = await rowsFor(refS);
+  check("string metadata: webhook 200 and one paid ticket", wS.status === 200 && rowsS.length === 1 && rowsS[0].status === "paid" && rowsS[0].user_id === sb1, JSON.stringify([wS, rowsS]));
+
+  // A paid charge with our reference shape whose verified metadata names no room: a payment issue for a person, 200, no
+  // refund guessed, no row; Paystack's retry does not add a second issue.
+  const refX = makeTicketReference(room2, sb2, process.env.ROOM_TICKET_REF_SECRET!);
+  txs.set(refX, { amount: PRICE, currency: "NGN", paid: true, meta: {} });
+  issueRefs.push(refX);
+  const wX = await webhook(refX, "valid", "not json at all");
+  const wX2 = await webhook(refX);
+  check("ticket reference without a room in the verified metadata: 200, no row, no refund", wX.status === 200 && wX2.status === 200 && (await rowsFor(refX)).length === 0 && refundsOf(refX) === 0, JSON.stringify([wX, wX2]));
+  check("... and exactly one open room_charge_unhandled payment issue", (await issuesFor(refX)).length === 1);
+
+  // M5: a verified amount of 0 can never be stored (CHECK amount_kobo > 0): payment issue and 200, never a 500 loop.
+  const refZ = makeTicketReference(room2, sb3, process.env.ROOM_TICKET_REF_SECRET!);
+  charge(refZ, room2, sb3, 0);
+  issueRefs.push(refZ);
+  const wZ = await webhook(refZ);
+  const wZ2 = await webhook(refZ);
+  check("zero amount: webhook 200 (twice), no row, no refund call", wZ.status === 200 && wZ2.status === 200 && (await rowsFor(refZ)).length === 0 && refundsOf(refZ) === 0, JSON.stringify([wZ, wZ2]));
+  check("zero amount: exactly one open payment issue", (await issuesFor(refZ)).length === 1);
+  const vZ = await verify(room2, sb3, refZ);
+  check("zero amount: the buyer's verify says payment not found (nothing to give), still one issue", vZ.status === 404 && vZ.json?.code === "PAYMENT_NOT_FOUND" && (await issuesFor(refZ)).length === 1, JSON.stringify(vZ.json));
+
   // ------------------------------------------------------------ ended room
   const ended = await mkRoom(host, { status: "ended" });
   const endedCo = await checkout(ended, b);
@@ -392,6 +470,9 @@ try {
   try {
     // Throwaway database, but leave it tidy: everything here is prefixed tc_.
     await q(`delete from payment_transactions where type = 'room_ticket' and buyer_user_id in (select id from users where username like $1)`, [`tc\\_%`]);
+    await q(`delete from payment_issues where provider_payment_id in (select provider_ref from room_tickets where room_id in (select id from rooms where title = $1)) or provider_payment_id = any($2::text[])`, [`tc_room_${stamp}`, issueRefs]);
+    // Tickets are money records (RESTRICT): a scratch database clears them explicitly before the rooms and users.
+    await q(`delete from room_tickets where room_id in (select id from rooms where title = $1)`, [`tc_room_${stamp}`]);
     await q(`delete from rooms where title = $1`, [`tc_room_${stamp}`]);
     await q(`delete from users where username like $1 and username like $2`, [`tc\\_%`, `%${stamp}%`]);
   } catch (err: any) { console.log(`cleanup: ${err.message}`); }
