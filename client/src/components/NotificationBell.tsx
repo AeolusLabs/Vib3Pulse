@@ -70,6 +70,8 @@ function getTypeIcon(type: string, className = "h-3 w-3") {
       return <TicketIcon className={`${className} text-amber-400`} />;
     case "ticket_refund":
       return <TicketIcon className={`${className} text-slate-400`} />;
+    case "room_refund":
+      return <TicketIcon className={`${className} text-destructive`} />;
     case "buddy_alert":
       return <AlertTriangleIcon className={`${className} text-rose-400`} />;
     case "buddy_request":
