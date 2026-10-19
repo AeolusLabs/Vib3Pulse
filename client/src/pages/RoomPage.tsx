@@ -130,7 +130,7 @@ function RoomPageInner({ id }: { id: string }) {
         voice={voice}
         myRoomId={myRoomId}
         nav={<Navigation />}
-        hostControls={<HostControls room={{ ...room, host: detail.host }} onChanged={() => refetch()} isHost={isHost} revokedInvites={revokedInvites} onRevokedInvitesChange={setRevokedInvites} />}
+        hostControls={<HostControls room={{ ...room, host: detail.host }} onChanged={() => refetch()} isHost={isHost} revokedInvites={revokedInvites} onRevokedInvitesChange={setRevokedInvites} endElsewhere />}
         onLeave={leave}
         detailsError={!!error}
         listenOnly={listenOnly}

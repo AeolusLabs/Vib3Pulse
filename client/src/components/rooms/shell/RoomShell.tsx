@@ -4,20 +4,18 @@ import RoomScene from "@/components/rooms/RoomScene";
 import { RoomChat, ReactionBar } from "@/components/rooms/RoomChat";
 import AvatarActionsSheet from "@/components/rooms/AvatarActionsSheet";
 import VoiceBar from "@/components/rooms/VoiceBar";
-import StagePanel from "@/components/rooms/StagePanel";
+import ControlsSheet from "@/components/rooms/host/ControlsSheet";
 import ScreenStage from "@/components/rooms/ScreenStage";
 import RoomFrame from "@/components/rooms/shell/RoomFrame";
 import RoomTopBar from "@/components/rooms/shell/RoomTopBar";
 import RoomDock from "@/components/rooms/shell/RoomDock";
 import PeopleSheet from "@/components/rooms/shell/PeopleSheet";
 import RoomMoreSheet, { RoomReportSheet, RoomSafetySheet } from "@/components/rooms/shell/RoomMoreSheet";
-import RoomSheetContent from "@/components/rooms/shell/RoomSheetContent";
 import ImmersiveRail from "@/components/rooms/shell/ImmersiveRail";
 import { ChatLog } from "@/components/rooms/chat/ChatLog";
 import { HypeBar, HypeBurst } from "@/components/rooms/chat/HypeBar";
 import { ReactionTray } from "@/components/rooms/chat/ReactionTray";
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { AlertTriangleIcon } from "@/components/ui/icons";
 import { useToast } from "@/hooks/use-toast";
 import { useHype } from "@/hooks/useHype";
@@ -41,7 +39,7 @@ import type { ChatItem, RoomMemberView, RoomState } from "@/lib/roomReducer";
 
 /** The socket actions the shell uses. RoomPage passes useRoomSocket(); the dev fixture passes fakes. */
 export type RoomShellSocket = Pick<ReturnType<typeof useRoomSocket>,
-  "chat" | "react" | "interact" | "setScreen" | "mod" | "stageAction" | "liveAction" | "sendPlayback" | "setVoice" | "setLiveVideo" | "dismissInvite">;
+  "chat" | "react" | "interact" | "setScreen" | "mod" | "stageAction" | "liveAction" | "sendPlayback" | "setVoice" | "setLiveVideo" | "dismissInvite" | "saveSettings" | "setRole" | "endRoom">;
 
 export interface RoomShellProps {
   id: string;
@@ -61,8 +59,10 @@ export interface RoomShellProps {
   myRoomId: string | null;
   /** The app's top navigation, shown in the desktop layout only. */
   nav?: ReactNode;
-  /** Host only: the room settings block inside the Controls sheet. */
+  /** Host only: the existing host block (invite link, Invite an adult, waves switch), shown under the Controls sheet's Settings tab. */
   hostControls?: ReactNode;
+  /** Dev fixture only: open the Controls sheet on load (on its Requests tab). */
+  startControlsOpen?: boolean;
   onLeave(): void;
   /** The last refetch of the room details failed. The room carries on with the details it has; a small line says so. */
   detailsError?: boolean;
@@ -91,7 +91,7 @@ const byTestId = (id: string | null) => (id ? document.querySelector<HTMLElement
  * immersive). Crossing 1024 px or switching views only changes classes, so the picture, the camera choice, the composer
  * draft and the chat scroll survive. People are always addressed by RoomMemberView.userId, never by username.
  */
-export default function RoomShell({ id, token, room, host, fallbackCount, isHost, role, meId, state, sock, voice, myRoomId, nav, hostControls, onLeave, startView, detailsError = false, listenOnly = false, listenLine = false }: RoomShellProps) {
+export default function RoomShell({ id, token, room, host, fallbackCount, isHost, role, meId, state, sock, voice, myRoomId, nav, hostControls, onLeave, startView, startControlsOpen = false, detailsError = false, listenOnly = false, listenLine = false }: RoomShellProps) {
   const { toast } = useToast();
 
   const [hidden, setHidden] = useState<Set<string>>(new Set()); // people the viewer muted for themselves
@@ -108,7 +108,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
   const [moreOpen, setMoreOpen] = useState(false);
   const [safetyOpen, setSafetyOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
-  const [controlsOpen, setControlsOpen] = useState(false);
+  const [controlsOpen, setControlsOpen] = useState(startControlsOpen);
   const [liveControlsOpen, setLiveControlsOpen] = useState(false);
   // Opening a sheet from another sheet: wait for the first one's close animation so focus return doesn't fight the new trap.
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
@@ -425,23 +425,14 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
       <RoomSafetySheet open={safetyOpen} onOpenChange={setSafetyOpen} ageLimit={room.ageLimit} ageLabel={ageLabel} returnFocusTo={() => byTestId("room-more")} />
       <RoomReportSheet open={reportOpen} onOpenChange={setReportOpen} roomId={id} inviteToken={token} returnFocusTo={() => byTestId("room-more")} />
       {isCoHostOrHost && (
-        <Sheet open={controlsOpen} onOpenChange={setControlsOpen}>
-          <RoomSheetContent side="bottom" returnFocusTo={() => byTestId(returnFocusTestId(controlsFrom))} className="max-h-[88dvh] overflow-y-auto rounded-t-3xl pb-[calc(20px+env(safe-area-inset-bottom,0px))] sm:mx-auto sm:max-w-lg" data-testid="room-controls-sheet">
-            <SheetHeader className="pr-10 text-left">
-              <SheetTitle className="font-sans text-lg font-semibold">Controls</SheetTitle>
-              <SheetDescription>{isHost ? "Run the room. If you close this page the room ends shortly after." : "Help the host run the mic and the screen."}</SheetDescription>
-            </SheetHeader>
-            <div className="mt-3 space-y-4">
-              <StagePanel members={state.members} stage={state.stage} hands={state.hands} voiceEnabled={state.voiceEnabled} canSwitchVoice={role === "host"}
-                onSwitch={async (on) => { if (!(await sock.setVoice(on))) setNoticeText(on ? "Voice isn't available right now." : "Couldn't switch voice off."); }}
-                onStage={(action, target) => sock.stageAction(action, target)}
-                liveVideo={state.liveVideo} holder={state.holder} liveAsks={state.asks} canSwitchLive={role === "host"}
-                onSwitchLive={async (on) => { if (!(await sock.setLiveVideo(on))) setNoticeText(on ? "Live video isn't available for this room." : "Couldn't switch live video off."); }}
-                onLive={(action, target) => sock.liveAction(action, target)} holderAwayLeftMs={holderAwayLeftMs} />
-              {isHost && hostControls}
-            </div>
-          </RoomSheetContent>
-        </Sheet>
+        <ControlsSheet
+          open={controlsOpen} onOpenChange={setControlsOpen}
+          roomId={id} inviteToken={token} role={role === "host" ? "host" : "cohost"}
+          room={room} state={state} count={count} selfId={meId} sock={sock}
+          holderAwayLeftMs={holderAwayLeftMs}
+          hostExtras={isHost ? hostControls : undefined}
+          returnFocusTo={() => byTestId(returnFocusTestId(controlsFrom))}
+        />
       )}
 
       <AvatarActionsSheet

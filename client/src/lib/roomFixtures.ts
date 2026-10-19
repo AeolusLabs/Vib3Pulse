@@ -133,6 +133,26 @@ export function fixtureStartView(scene: FixtureScene): "compact" | undefined {
   return scene === "live" ? "compact" : undefined;
 }
 
+// ---------------------------------------------------------------- the host Controls sheet (task 3.4)
+
+/** ?controls=host|cohost opens the Controls sheet as the host or the co-host. Separate from parseFixtureQuery so its shape stays put. */
+export type ControlsScene = "host" | "cohost";
+export function parseControlsFixture(search: string): ControlsScene | null {
+  const c = new URLSearchParams(search).get("controls");
+  return c === "host" || c === "cohost" ? c : null;
+}
+
+/** Two raised hands, one go-live ask, one guest on the mic, a co-host, and settings already set (pinned, slow mode 5 s). */
+export function fixtureControlsState(as: ControlsScene): RoomState {
+  let s = fixtureState("voice");
+  s = roomReducer(s, { type: "client:self", userId: as === "host" ? HOST : COHOST });
+  s = roomReducer(s, { type: "room:livevideo", enabled: true });
+  s = roomReducer(s, { type: "room:stage", stage: [STAGE_GUEST], hands: ["fx-g1", "fx-g2"] });
+  s = roomReducer(s, { type: "room:live", holder: null, asks: [STAGE_GUEST] });
+  s = roomReducer(s, { type: "room:settings", pinnedMessage: "House rules: be kind, no spam.", slowModeSec: 5, locked: false });
+  return { ...s, you: { role: as, muted: false }, serverOffsetMs: 0 };
+}
+
 /** A dropped holder's spot is held for about 100 s from now, so the slate shows a real countdown. */
 export function fixtureLiveState(scene: FixtureScene, opts: { as: FixtureOptions["as"]; now: number; invite?: boolean }): RoomState {
   let s = fixtureState(scene);
