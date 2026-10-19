@@ -5,7 +5,7 @@ import { ReviewLine } from "./parts";
 
 interface Props {
   state: WizardState;
-  /** The age option's long label ("18+ · Adults only"), from wizardOptions. */
+  /** The age option's label from wizardOptions ("All ages", "18+"); the raw limit while the options are still loading. */
   ageText: string;
   linkedText: string | null;
   error: string | null;

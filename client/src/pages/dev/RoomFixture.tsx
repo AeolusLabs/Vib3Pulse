@@ -6,7 +6,7 @@
 // &minors=refuse|ack|invites|listen|teennote shows the minors' room screens (listen is the room shell seen as an adult).
 // ?wizard=adult|teen shows the Start a room sheet and the create wizard for that host, with every endpoint answered here.
 // &controls=host|cohost opens the Controls sheet as the host or a co-host (requests waiting, settings set; saves settle locally).
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import RoomShell, { type RoomShellSocket } from "@/components/rooms/shell/RoomShell";
 import MinorsRoomWarning from "@/components/rooms/MinorsRoomWarning";
 import AdultInviteSheet from "@/components/rooms/AdultInviteSheet";
@@ -100,7 +100,9 @@ function MinorsFixture({ scene, theme }: { scene: "refuse" | "ack" | "invites" |
  * "created" room is the fixture room, so going live lands on /rooms/fixture-room (which is not faked).
  */
 function WizardFixture({ as, theme }: { as: "adult" | "teen"; theme: "dark" | "light" }) {
-  useEffect(() => {
+  // A layout effect, not a plain effect: it runs before any child's passive effects, and React Query only starts a
+  // request from those (its store subscription). With useEffect here the children's first requests reached the real server.
+  useLayoutEffect(() => {
     const real = window.fetch;
     const json = (body: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }));
     window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
@@ -110,7 +112,7 @@ function WizardFixture({ as, theme }: { as: "adult" | "teen"; theme: "dark" | "l
       if (path === "/api/csrf-token") return json({ csrfToken: "fixture" });
       if (path === "/api/users/me/room-privacy") return json({ roomPrivacy: {}, age: as === "teen" ? 15 : 25 });
       if (path === "/api/users/me/age-verification") return json({ verified: false, band: null, at: null, method: null });
-      if (path === "/api/rooms/config") return json({ features: { paidRooms: false, spray: false }, limits: {}, currency: "NGN", region: "NG" });
+      if (path === "/api/rooms/config") return json({ features: { paidRooms: false, spray: false }, limits: {}, currency: "NGN", region: "NG", host: { accountAgeDays: 400, minAccountAgeDays: 7 } });
       if (path === "/api/events/my-events" || path === "/api/my-venues") return json([]);
       if (path === "/api/rooms" && method === "POST") {
         const body = JSON.parse(String(init?.body ?? "{}")) as { visibility?: string };
@@ -128,11 +130,12 @@ function WizardFixture({ as, theme }: { as: "adult" | "teen"; theme: "dark" | "l
     return () => { root.classList.toggle("dark", was); };
   }, [theme]);
   const [open, setOpen] = useState(true);
+  const startBtn = useRef<HTMLButtonElement>(null);
   return (
     <div className="min-h-screen bg-background font-sans text-foreground" data-testid="room-fixture" data-scene={`wizard-${as}`}>
       <main className="mx-auto max-w-2xl px-4 py-4">
-        <button type="button" className="min-h-[44px] rounded-lg border px-4" onClick={() => setOpen(true)}>Start a room</button>
-        <StartRoomFlow open={open} onOpenChange={setOpen} />
+        <button ref={startBtn} type="button" className="min-h-[44px] rounded-lg border px-4" onClick={() => setOpen(true)}>Start a room</button>
+        <StartRoomFlow open={open} onOpenChange={setOpen} returnFocusTo={() => startBtn.current} />
       </main>
     </div>
   );

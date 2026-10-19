@@ -16,11 +16,11 @@ import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { queryClient } from "@/lib/queryClient";
 import { LINK_SCREENS } from "@/lib/roomsApi";
 import { showTeenHostNote } from "@/lib/minorsRoomUi";
-import { normalizeWizard, stepsFor, validateWizard, wizardOptions, type WizardState } from "@/lib/createRoomRules";
+import { accountTooNewFor, normalizeWizard, stepsFor, validateWizard, wizardOptions, type WizardState } from "@/lib/createRoomRules";
 import {
-  COPY, HOST_REFUSAL, KNOWN_STEPS, LAST_VISIBILITY_KEY, STEP_TITLE, TEEN_NOTE_KEY, createErrorMessage, defaultWizardState, fieldForFailure,
-  isKnownStep, linkChoiceOf, localProblem, parseLinkChoice, progressLine, roomShareUrl, ruleMessage, stepForFailure, stepOfField,
-  type RoomLink, type WizardStep,
+  COPY, DONE_COPY, HOST_REFUSAL, KNOWN_STEPS, LAST_VISIBILITY_KEY, STEP_TITLE, TEEN_NOTE_KEY, createErrorMessage, defaultWizardState, doneKind,
+  fieldForFailure, fieldSelectors, isKnownStep, linkChoiceOf, localProblem, parseLinkChoice, progressPrefix, roomShareUrl, ruleMessage, stepForFailure,
+  stepOfField, type DoneKind, type RoomLink, type WizardStep,
 } from "@/lib/createRoomWizardUi";
 import { createRoom, useWizardHost } from "./createRoomApi";
 import StepBasics, { type FieldError } from "./StepBasics";
@@ -36,17 +36,21 @@ export interface CreateRoomWizardProps {
   defaults?: Partial<WizardState>;
   /** Opened from an event or venue page: the room is attached to it (the owner can still change or clear it). */
   link?: RoomLink;
+  /** The button that started it all (Start a room). Focus goes back there when the wizard closes. */
+  returnFocusTo?: () => HTMLElement | null;
 }
 
 const noteSeen = () => { try { return localStorage.getItem(TEEN_NOTE_KEY) === "1"; } catch { return false; } };
 
-interface Done { roomId: string; url: string; live: boolean; inviteOnce: boolean }
+interface Done { roomId: string; url: string; kind: DoneKind; inviteOnce: boolean; note: string | null }
 
-export default function CreateRoomWizard({ open, onOpenChange, defaults, link }: CreateRoomWizardProps) {
+export default function CreateRoomWizard({ open, onOpenChange, defaults, link, returnFocusTo }: CreateRoomWizardProps) {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const [accountTooNew, setAccountTooNew] = useState(false);
-  const { host, flags, failed: hostFailed } = useWizardHost(open, accountTooNew);
+  const { host, flags, minAccountAgeDays, failed: hostFailed } = useWizardHost(open, accountTooNew);
+  // Public is closed when the account is younger than the server's minimum (known from the config, or from a refusal).
+  const publicBlocked = accountTooNew || (!!host && accountTooNewFor(host, minAccountAgeDays));
   const { data: myEvents = [] } = useQuery<{ id: string; title: string }[]>({ queryKey: ["/api/events/my-events"], enabled: open });
   const { data: myVenues = [] } = useQuery<{ id: string; name: string }[]>({ queryKey: ["/api/my-venues"], enabled: open });
 
@@ -62,25 +66,33 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link }:
   const [touched, setTouched] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
   const [noteGone, setNoteGone] = useState(noteSeen);
+  // A field to focus on the next step change instead of the heading (after a refusal sends the host back to fix it).
+  const [focusReq, setFocusReq] = useState<{ field: string; n: number } | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const keyboard = useKeyboardInset(open);
 
-  // A fresh wizard every time it opens.
+  /** The shared rules for this host, plus public closed for a new account. Never run on every keystroke (see below). */
+  const fit = (s: WizardState): WizardState => {
+    if (!host) return s;
+    const n = normalizeWizard(s, host);
+    return publicBlocked && n.visibility === "public" ? { ...n, visibility: "friends" } : n;
+  };
+
+  // A fresh wizard every time it opens. When the host is already known (reopening), the fresh state is fitted at once:
+  // the host effect below only runs when the host changes, so it would leave a default public pick in place.
   useEffect(() => {
     if (!open) return;
-    setState(defaultWizardState(defaults)); setLinkChoiceRaw(linkChoiceOf(link)); setDirectRaw(true); setScreenUrlRaw("");
-    setStepIdx(0); setError(null); setSubmitError(null); setBusy(false); setDone(null); setTouched(false); setConfirmClose(false);
+    const fresh = defaultWizardState(defaults);
+    setState(host ? fit(fresh) : fresh); setLinkChoiceRaw(linkChoiceOf(link)); setDirectRaw(true); setScreenUrlRaw("");
+    setStepIdx(0); setError(null); setSubmitError(null); setBusy(false); setDone(null); setTouched(false); setConfirmClose(false); setFocusReq(null);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Once we know who is hosting, force a legal combination (teen: no 18+/21+, no public). Not on every keystroke:
-  // normalizeWizard also clamps capacity, which would fight someone typing "15" (the "1" would become 2).
-  const hostKey = host ? `${host.age}:${accountTooNew}` : "";
+  // Once we know who is hosting, force a legal combination (no age limit above the host, teen: no public, new account: no
+  // public). Not on every keystroke: normalizeWizard also clamps capacity, which would fight someone typing "15".
+  const hostKey = host ? `${host.age}:${publicBlocked}` : "";
   useEffect(() => {
     if (!host) return;
-    setState((s) => {
-      const n = normalizeWizard(s, host);
-      return accountTooNew && n.visibility === "public" ? { ...n, visibility: "friends" } : n;
-    });
+    setState(fit);
   }, [hostKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (patch: Partial<WizardState>) => {
@@ -95,8 +107,12 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link }:
   const setDirect = (v: boolean) => { setDirectRaw(v); setTouched(true); };
   const setScreenUrl = (v: string) => { setScreenUrlRaw(v); setTouched(true); };
 
-  const options = useMemo(() => (host ? wizardOptions(host, flags, 0, state.ageLimit) : null), [host?.age, host?.idVerifiedAdult, flags.paidRooms, flags.spray, state.ageLimit]); // eslint-disable-line react-hooks/exhaustive-deps
-  // The server told us this account is too new for public rooms: never offer public again in this wizard.
+  const options = useMemo(
+    () => (host ? wizardOptions(host, flags, minAccountAgeDays, state.ageLimit) : null),
+    [host?.age, host?.idVerifiedAdult, host?.accountAgeDays, minAccountAgeDays, flags.paidRooms, flags.spray, state.ageLimit], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  // Fallback for when the config did not say the account age: the server told us this account is too new for public
+  // rooms, so never offer public again in this wizard.
   const visibilityOptions = useMemo(() => (options?.visibilityOptions ?? []).map((o) =>
     accountTooNew && o.value === "public" && !o.disabledReason ? { ...o, disabledReason: HOST_REFUSAL.ACCOUNT_TOO_NEW } : o), [options, accountTooNew]);
 
@@ -114,15 +130,21 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link }:
   const dismissNote = () => { setNoteGone(true); try { localStorage.setItem(TEEN_NOTE_KEY, "1"); } catch { /* shows again next time */ } };
   const moneyPlaceholder = (flags.paidRooms || flags.spray) && adultHost && (state.ageLimit === "18+" || state.ageLimit === "21+") && options?.moneyLocked === null;
 
-  const heading = done ? (done.live ? COPY.doneLiveTitle : COPY.doneScheduledTitle) : STEP_TITLE[current];
-  const announce = done ? heading : progressLine(idx, steps.length, heading);
+  const heading = done ? DONE_COPY[done.kind].title : STEP_TITLE[current];
 
-  // Focus the step heading on every step change, so keyboard and screen reader users start at the top of the new step.
+  // Step changes are announced once: focus moves to the step heading, which starts with "Step 2 of 5:" for screen readers
+  // (there is no separate live region). After a refusal the field in error takes focus instead, so the host lands on it.
   useEffect(() => {
     if (!open) return;
-    const t = requestAnimationFrame(() => headingRef.current?.focus());
+    const t = requestAnimationFrame(() => {
+      const el = focusReq
+        ? fieldSelectors(focusReq.field).map((sel) => document.querySelector<HTMLElement>(sel)).find((x) => !!x) ?? null
+        : null;
+      (el ?? headingRef.current)?.focus();
+    });
     return () => cancelAnimationFrame(t);
-  }, [open, idx, !!done]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, idx, !!done, focusReq?.n]); // eslint-disable-line react-hooks/exhaustive-deps
+  const focusField = (field: string) => setFocusReq((r) => ({ field, n: (r?.n ?? 0) + 1 }));
 
   const closeNow = () => { setConfirmClose(false); onOpenChange(false); };
   const requestClose = () => {
@@ -131,13 +153,16 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link }:
     else closeNow();
   };
 
-  /** The earliest step with a problem, from this file's own checks and from the shared rules. */
-  const firstProblem = (s: WizardState, now: Date): (FieldError & { step: number }) | null => {
+  /**
+   * The earliest step with a problem. This file's own checks look at what the host typed (`raw`), so a capacity that is
+   * empty or out of range is reported instead of silently replaced; the shared rules look at the fitted state `s`.
+   */
+  const firstProblem = (raw: WizardState, s: WizardState, now: Date): (FieldError & { step: number }) | null => {
     const found: Array<FieldError & { step: number }> = [];
-    const local = localProblem(s, now);
+    const local = localProblem(raw, now);
     if (local) found.push({ ...local, step: indexOf(local.field) });
     if (host) {
-      const r = validateWizard(s, host, now);
+      const r = validateWizard(s, host, now, minAccountAgeDays);
       if (!r.ok) found.push({ field: r.field, reason: ruleMessage(r.field, r.reason), step: indexOf(r.field) });
     }
     found.sort((a, b) => (a.step < 0 ? 99 : a.step) - (b.step < 0 ? 99 : b.step));
@@ -145,22 +170,27 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link }:
   };
   const indexOf = (field: string) => { const st = stepOfField(field); return st ? steps.indexOf(st) : -1; };
 
-  const goBack = () => { setError(null); setSubmitError(null); setStepIdx(Math.max(0, idx - 1)); };
+  const goBack = () => { setError(null); setSubmitError(null); setFocusReq(null); setStepIdx(Math.max(0, idx - 1)); };
 
   const goNext = () => {
     if (done) { const id = done.roomId; closeNow(); navigate(`/rooms/${id}`); return; }
     if (!host || ageUnknown || busy) return;
     const now = new Date();
-    const s = normalizeWizard(state, host);
-    if (s !== state) setState(s);
-    const p = firstProblem(s, now);
-    if (p && p.step >= 0 && p.step <= idx) { setError({ field: p.field, reason: p.reason }); setStepIdx(p.step); return; }
+    const s = fit(state);
+    const p = firstProblem(state, s, now);
+    if (p && p.step >= 0 && p.step <= idx) {
+      // Keep what they typed on screen (not the fitted copy) so they can see and fix it.
+      setError({ field: p.field, reason: p.reason });
+      setStepIdx(p.step); focusField(p.field);
+      return;
+    }
+    setState(s);
     if (current === "review") {
       if (p) { setSubmitError(p.reason); return; } // a problem no step owns: say it here, never send it
       void submit(s);
       return;
     }
-    setError(null);
+    setError(null); setFocusReq(null);
     setStepIdx(idx + 1);
   };
 
@@ -173,19 +203,26 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link }:
       const msg = createErrorMessage(res);
       const target = stepForFailure(res);
       const t = target ? steps.indexOf(target) : -1;
-      if (t >= 0 && t < idx) { setStepIdx(t); setError({ field: fieldForFailure(res), reason: msg }); }
+      const field = fieldForFailure(res);
+      if (t >= 0 && t < idx) { setStepIdx(t); setError({ field, reason: msg }); if (field) focusField(field); }
       else setSubmitError(msg);
       return;
     }
     queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
     if (adultHost) { try { localStorage.setItem(LAST_VISIBILITY_KEY, s.visibility); } catch { /* only a convenience */ } }
-    if (res.startFailure) toast({ title: COPY.startedLate, description: createErrorMessage(res.startFailure), variant: "destructive" });
-    else if (res.voiceFailed) toast({ title: COPY.voiceLate });
+    if (res.voiceFailed) toast({ title: COPY.voiceLate });
     else if (res.videoFailed) toast({ title: COPY.videoLate });
-    // "Go live now" goes straight in: the host has a short grace period to arrive before an empty room closes.
-    // An invite room stops at Done first, because its link is shown only once.
-    if (s.when === "now" && !res.inviteLink) { closeNow(); navigate(`/rooms/${res.roomId}`); return; }
-    setDone({ roomId: res.roomId, url: roomShareUrl(window.location.origin, res.roomId, res.inviteLink), live: res.live, inviteOnce: !!res.inviteLink });
+    // Intended: a live public or friends room skips Done and goes straight in, because the host has only a short grace
+    // period to arrive before an empty room closes and Done has nothing they need. An invite room stops at Done first (its
+    // link is shown only once), and so does a room that was made but did not start (Done says so, and why).
+    if (s.when === "now" && !res.inviteLink && !res.startFailure) { closeNow(); navigate(`/rooms/${res.roomId}`); return; }
+    setDone({
+      roomId: res.roomId,
+      url: roomShareUrl(window.location.origin, res.roomId, res.inviteLink),
+      kind: doneKind({ when: s.when, live: res.live, invite: !!res.inviteLink }),
+      inviteOnce: !!res.inviteLink,
+      note: res.startFailure ? createErrorMessage(res.startFailure) : null,
+    });
   };
 
   const linkedText = (() => {
@@ -206,6 +243,11 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link }:
         <DialogOverlay className="motion-reduce:animate-none" />
         <DialogPrimitive.Content
           onOpenAutoFocus={(e) => { e.preventDefault(); headingRef.current?.focus(); }}
+          onCloseAutoFocus={(e) => {
+            // Opened from the quick start sheet, the element Radix would return to is gone: go back to Start a room.
+            const el = returnFocusTo?.();
+            if (el && el.isConnected) { e.preventDefault(); el.focus(); }
+          }}
           className="fixed inset-x-0 top-0 z-50 flex h-[100dvh] flex-col bg-background text-foreground shadow-lg outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 motion-reduce:animate-none sm:inset-x-auto sm:left-1/2 sm:top-1/2 sm:h-auto sm:max-h-[90dvh] sm:w-full sm:max-w-lg sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:border sm:border-border"
           // With the on-screen keyboard open, shrink to the visible part of the screen so the footer sits right above it.
           style={keyboard > 0 ? { height: `calc(100dvh - ${keyboard}px)` } : undefined}
@@ -220,7 +262,7 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link }:
               <XIcon className="h-5 w-5" aria-hidden />
             </button>
             <DialogPrimitive.Title className="text-base font-semibold">{done ? heading : COPY.wizardTitle}</DialogPrimitive.Title>
-            <DialogPrimitive.Description className="sr-only">{announce}</DialogPrimitive.Description>
+            <DialogPrimitive.Description className="sr-only">{COPY.wizardDesc}</DialogPrimitive.Description>
           </header>
 
           {!done && (
@@ -228,11 +270,11 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link }:
               {steps.map((s, i) => <span key={s} className={`h-1 flex-1 rounded-full ${i <= idx ? "bg-primary" : "bg-muted"}`} />)}
             </div>
           )}
-          <p aria-live="polite" className="sr-only" data-testid="wizard-progress">{announce}</p>
 
           <form noValidate onSubmit={(e) => { e.preventDefault(); goNext(); }} className="flex min-h-0 flex-1 flex-col">
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-6">
               <h2 ref={headingRef} tabIndex={-1} className="mb-4 mt-3 font-serif text-3xl font-bold tracking-tight outline-none" data-testid="wizard-step-heading">
+                {!done && <span className="sr-only" data-testid="wizard-progress">{progressPrefix(idx, steps.length)}</span>}
                 {heading}
               </h2>
 
@@ -244,9 +286,12 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link }:
               )}
 
               {done ? (
-                <StepDone live={done.live} url={done.url} inviteOnce={done.inviteOnce} title={state.title.trim()} />
+                <StepDone body={DONE_COPY[done.kind].body} note={done.note} url={done.url} inviteOnce={done.inviteOnce} title={state.title.trim()} />
               ) : loadingOptions ? (
-                <div className="grid place-items-center py-10"><Loader2Icon className="h-6 w-6 animate-spin text-muted-foreground motion-reduce:animate-none" aria-label="Loading" /></div>
+                <div className="grid place-items-center py-10">
+                  {/* The animated icons drop aria props, so the wrapper carries the status. */}
+                  <span role="status" aria-label="Loading"><Loader2Icon className="h-6 w-6 animate-spin text-muted-foreground motion-reduce:animate-none" aria-hidden /></span>
+                </div>
               ) : current === "basics" ? (
                 <StepBasics state={state} set={set} error={error} linkChoice={linkChoice} setLinkChoice={setLinkChoice} myEvents={myEvents} myVenues={myVenues} />
               ) : current === "audience" && options ? (

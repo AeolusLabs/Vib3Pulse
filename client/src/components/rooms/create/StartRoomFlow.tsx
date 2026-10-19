@@ -11,19 +11,22 @@ interface Props {
   onOpenChange(o: boolean): void;
   /** Event and venue pages pass their id; such a room always goes through the full wizard so the link is visible. */
   link?: RoomLink;
+  /** The Start a room button. The sheet and the wizard both hand focus back to it when they close. */
+  returnFocusTo?: () => HTMLElement | null;
 }
 
-export default function StartRoomFlow({ open, onOpenChange, link }: Props) {
+export default function StartRoomFlow({ open, onOpenChange, link, returnFocusTo }: Props) {
   const [wizard, setWizard] = useState<{ defaults?: Partial<WizardState> } | null>(null);
   const linked = !!(link?.eventId || link?.venueId);
   return (
     <>
-      <QuickStartSheet open={open && !linked} onOpenChange={onOpenChange} onCustomize={(defaults) => setWizard({ defaults })} />
+      <QuickStartSheet open={open && !linked} onOpenChange={onOpenChange} onCustomize={(defaults) => setWizard({ defaults })} returnFocusTo={returnFocusTo} />
       <CreateRoomWizard
         open={!!wizard || (open && linked)}
         onOpenChange={(o) => { if (!o) { setWizard(null); if (linked) onOpenChange(false); } }}
         defaults={wizard?.defaults}
         link={link}
+        returnFocusTo={returnFocusTo}
       />
     </>
   );
