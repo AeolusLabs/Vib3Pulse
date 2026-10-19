@@ -289,12 +289,17 @@ registerAwayReleaser(releaseAwayMember);
 const JOIN_AGE_CODES = { AGE_UNKNOWN: "AGE_UNKNOWN", AGE_LIMIT: "AGE_LIMIT" } as const;
 
 /**
- * Is there room for one more guest? A free room counts everyone against its capacity (as before). A ticketed room counts
- * GUESTS against its ticket capacity (roomCapacity), so every paid seat is honoured: the host and co-hosts do not take one.
+ * Is there room for one more guest? A free room counts everyone against its capacity (as before).
+ * A ticketed room never refuses a ticket holder: every paid seat is honoured, whoever else is inside (a co-host made a
+ * guest, a guest whose refund is still being enforced). Paid tickets can never exceed the ticket capacity (the issue path
+ * counts them under the room row lock and the PATCH guard never lowers capacity below them), so holders alone cannot
+ * overfill it. A guest without a ticket never reaches this check in a ticketed room (TICKET_REQUIRED first); if one ever
+ * did, guests are counted against the ticket capacity (fail closed).
  * Synchronous (hub only), so it can sit between the door checks and the hub insert.
  */
-function roomIsFull(roomId: string, room: Room): boolean {
+export function roomIsFull(roomId: string, room: Room, holdsTicket: boolean): boolean {
   if (!isTicketedRoom(room)) return roomHub.count(roomId) >= room.capacity;
+  if (holdsTicket) return false;
   return roomHub.members(roomId).filter((m) => m.role === "guest").length >= roomCapacity(room);
 }
 
@@ -457,7 +462,7 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
   let me = roomHub.get(roomId, userId);
   const isNew = !me;
   if (!me) {
-    if (role === "guest" && roomIsFull(roomId, fresh)) return refuse(ws, "ROOM_FULL");
+    if (role === "guest" && roomIsFull(roomId, fresh, freshTicket)) return refuse(ws, "ROOM_FULL");
     me = { userId, role, muted: freshMember?.muted ?? false, joinedAt: Date.now(), send: (m) => fanout(userId, m), info: memberInfo(freshUser), age: freshAge };
     roomHub.join(roomId, me);
     if (fresh.minorsRoom) roomHub.markMinorsRoom(roomId); // before any stage decision for this room
