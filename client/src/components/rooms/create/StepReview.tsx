@@ -1,0 +1,43 @@
+import { KIND_LABEL, VISIBILITY_LABEL, ageLimitLabel, formatWhen } from "@/lib/roomsApi";
+import type { WizardState } from "@/lib/createRoomRules";
+import { COPY, slowModeLabel } from "@/lib/createRoomWizardUi";
+import { ReviewLine } from "./parts";
+
+interface Props {
+  state: WizardState;
+  /** The age option's long label ("18+ · Adults only"), from wizardOptions. */
+  ageText: string;
+  linkedText: string | null;
+  error: string | null;
+}
+
+export default function StepReview({ state, ageText, linkedText, error }: Props) {
+  const parsed = state.scheduledFor ? Date.parse(state.scheduledFor) : NaN;
+  const features = [state.voice ? COPY.voiceLabel : null, state.voice && state.liveVideo ? COPY.videoLabel : null].filter(Boolean).join(", ");
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-border p-4">
+        <p className="break-words text-base font-semibold">{state.title.trim()}</p>
+        {state.description.trim() && <p className="mt-1 break-words text-sm text-muted-foreground">{state.description.trim()}</p>}
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          <span className="rounded-full border border-primary/40 bg-primary/10 px-2.5 py-0.5 text-xs">{ageLimitLabel(state.ageLimit)}</span>
+          <span className="rounded-full border border-border px-2.5 py-0.5 text-xs text-muted-foreground">{KIND_LABEL[state.kind]}</span>
+        </div>
+      </div>
+
+      <dl className="divide-y divide-border rounded-2xl border border-border px-4 py-1">
+        <ReviewLine label={COPY.reviewAge} value={ageText} />
+        <ReviewLine label={COPY.reviewVisibility} value={VISIBILITY_LABEL[state.visibility]} />
+        <ReviewLine label={COPY.reviewPeople} value={`up to ${state.capacity}`} />
+        <ReviewLine label={COPY.reviewWhen} value={state.when === "now" ? COPY.reviewNow : Number.isNaN(parsed) ? "" : formatWhen(new Date(parsed).toISOString())} />
+        <ReviewLine label={COPY.reviewFeatures} value={state.when === "later" ? COPY.scheduledFeatures : features || COPY.reviewNone} />
+        <ReviewLine label={COPY.reviewSlow} value={slowModeLabel(state.slowModeSec)} />
+        {state.pinned.trim() && <ReviewLine label={COPY.reviewPinned} value={<span className="break-words">{state.pinned.trim()}</span>} />}
+        {linkedText && <ReviewLine label={COPY.reviewLinked} value={linkedText} />}
+      </dl>
+
+      <p className="text-sm text-muted-foreground">{COPY.reviewSafety}</p>
+      {error && <p role="alert" className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm" data-testid="text-create-room-error">{error}</p>}
+    </div>
+  );
+}

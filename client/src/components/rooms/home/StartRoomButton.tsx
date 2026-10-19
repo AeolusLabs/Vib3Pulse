@@ -1,11 +1,11 @@
 import { useState } from "react";
-import CreateRoomDialog from "@/components/rooms/CreateRoomDialog";
+import StartRoomFlow from "@/components/rooms/create/StartRoomFlow";
 import { Button } from "@/components/ui/button";
 import { PlusIcon } from "@/components/ui/icons";
 
 /**
  * THE create-room entry for the Rooms home. Prop-less on purpose: RoomsPage renders it and knows nothing about what opens.
- * Task 3.3 replaces the body of this file (dialog -> wizard) and nothing else needs to change.
+ * Opens the quick start sheet and the create-room wizard (task 3.3).
  */
 export default function StartRoomButton({ variant = "primary" }: { variant?: "primary" | "quiet" }) {
   const [open, setOpen] = useState(false);
@@ -16,7 +16,7 @@ export default function StartRoomButton({ variant = "primary" }: { variant?: "pr
       ) : (
         <Button variant="outline" onClick={() => setOpen(true)} className="h-11 rounded-full px-6" data-testid="button-new-room-empty">Start a room</Button>
       )}
-      <CreateRoomDialog open={open} onOpenChange={setOpen} />
+      <StartRoomFlow open={open} onOpenChange={setOpen} />
     </>
   );
 }
