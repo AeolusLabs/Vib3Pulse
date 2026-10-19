@@ -8,16 +8,23 @@ import RoomLobby from "@/components/rooms/RoomLobby";
 import { NotStartedPanel, RoomCodePanel } from "@/components/rooms/RoomStatePanels";
 import HostAvatar from "@/components/rooms/HostAvatar";
 import MinorsRoomWarning from "@/components/rooms/MinorsRoomWarning";
+import TicketPage from "@/components/rooms/tickets/TicketPage";
+import Checkout from "@/components/rooms/tickets/Checkout";
+import TicketConfirmed from "@/components/rooms/tickets/TicketConfirmed";
+import WaitingRoom from "@/components/rooms/tickets/WaitingRoom";
+import HostSales from "@/components/rooms/tickets/HostSales";
 import RoomShell from "@/components/rooms/shell/RoomShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
 import { useRoomSocket } from "@/hooks/useRoomSocket";
 import { useRoomVoice } from "@/hooks/useRoomVoice";
 import { showsShell } from "@/lib/roomIntegration";
-import { AGE_LIMIT_EVICTED_COPY, DENIED_MESSAGE, HOST_REVIEW_COPY, KIND_LABEL, type PeekMember, VISIBILITY_LABEL, ageLimitLabel, fetchRooms, hostName, type RoomHostSummary, type RoomView } from "@/lib/roomsApi";
+import { AGE_LIMIT_EVICTED_COPY, DENIED_MESSAGE, HOST_REVIEW_COPY, KIND_LABEL, type PeekMember, VISIBILITY_LABEL, ageLimitLabel, fetchRooms, hostName, type RoomHostSummary, type RoomTicketView, type RoomView } from "@/lib/roomsApi";
+import { parseTicketBlock, returnRef, searchWithoutRef, showsPrice, ticketGate } from "@/lib/roomTickets";
 import { kickRemainingAfter, stateForCode } from "@/lib/roomStates";
 import { ArrowLeftIcon } from "@/components/ui/icons";
 import { isAgeUnknownDenied, isMinorsDenied, isRoomDenial, listenOnlyHere, minorsCodeFor, parseRoomDenial, showListenLine, type RoomDenial } from "@/lib/minorsRoomUi";
@@ -32,6 +39,11 @@ interface RoomDetail {
   /** Top-level sibling of `room` (not a field of it): whether the viewer has a reminder on this scheduled room. */
   reminderSet?: boolean;
   you: { role: "host" | "cohost" | "guest" } | null;
+  /**
+   * Paid rooms (lane S1): sent ONLY to viewers who can view the room and are ticket-eligible adults. Read through
+   * parseTicketBlock / ticketGate; when it is absent there is no price and no ticket UI, whatever else the room says.
+   */
+  ticket?: unknown;
 }
 
 function Panel({ title, body, action }: { title: string; body?: string; action?: React.ReactNode }) {
@@ -53,6 +65,7 @@ export default function RoomPage() {
 function RoomPageInner({ id }: { id: string }) {
   const [, navigate] = useLocation();
   const { data: me } = useAuth();
+  const { toast } = useToast();
   const token = useMemo(() => new URLSearchParams(window.location.search).get("token") ?? undefined, []);
 
   const { data: raw, isLoading, error, refetch } = useQuery<RoomDetail | RoomDenial | null>({
@@ -103,6 +116,29 @@ function RoomPageInner({ id }: { id: string }) {
   const role = state.you?.role ?? detail?.you?.role ?? "guest";
   const isHost = detail?.you?.role === "host" || state.you?.role === "host";
 
+  // ---------------------------------------------------------------- paid rooms (task 4.7)
+  // The way back from Paystack carries the payment reference; it is verified once, then dropped from the address.
+  const [payRef, setPayRef] = useState(() => returnRef(window.location.search));
+  const [confirmed, setConfirmed] = useState<RoomTicketView | null>(null);
+  const clearPayRef = () => {
+    try { window.history.replaceState(window.history.state, "", `${window.location.pathname}${searchWithoutRef(window.location.search)}${window.location.hash}`); } catch { /* the reference stays; verify is idempotent */ }
+    setPayRef(null);
+  };
+  const ticketBlock = parseTicketBlock(detail?.ticket);
+  const viewerRole = isHost || (!!me && detail?.room.hostId === me.id) ? "host" : state.you?.role ?? detail?.you?.role ?? null;
+  const gate = ticketGate(detail?.ticket, viewerRole);
+  const ticketed = (isHost || (!!me && detail?.room.hostId === me.id)) && (!!ticketBlock?.required || (detail?.room.ticketCapacity ?? 0) > 0);
+  // A holder who waited for the start goes straight in when the room goes live (they already chose to come).
+  const waited = useRef(false);
+  if (gate === "held" && room?.status === "scheduled") waited.current = true;
+  useEffect(() => {
+    if (waited.current && live && gate === "held" && !joinTapped) setJoinTapped(true);
+  }, [live, gate]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The socket said TICKET_REQUIRED (a refunded ticket, or the page was stale): reload the room so the right screen shows.
+  const ticketRefused = state.phase === "denied" && state.error === "TICKET_REQUIRED";
+  useEffect(() => { if (ticketRefused) void refetch(); }, [ticketRefused]); // eslint-disable-line react-hooks/exhaustive-deps
+  const onRefunded = (message: string) => { toast({ title: message }); void refetch(); };
+
   const { data: myLive } = useQuery<RoomView[]>({ queryKey: ["/api/rooms", "live"], queryFn: () => fetchRooms("live"), staleTime: 15_000, enabled: !!me });
   const myRoomId = myLive?.find((r) => r.hostId === me?.id && r.id !== id && r.visibility !== "invite")?.id ?? null;
 
@@ -138,7 +174,10 @@ function RoomPageInner({ id }: { id: string }) {
         voice={voice}
         myRoomId={myRoomId}
         nav={<Navigation />}
-        hostControls={<HostControls room={{ ...room, host: detail.host }} onChanged={() => refetch()} isHost={isHost} revokedInvites={revokedInvites} onRevokedInvitesChange={setRevokedInvites} endElsewhere />}
+        hostControls={<>
+          <HostControls room={{ ...room, host: detail.host }} onChanged={() => refetch()} isHost={isHost} revokedInvites={revokedInvites} onRevokedInvitesChange={setRevokedInvites} endElsewhere ticketed={ticketed} />
+          {ticketed && <HostSales room={room} onChanged={() => { void refetch(); }} />}
+        </>}
         onLeave={leave}
         detailsError={!!error}
         listenOnly={listenOnly}
@@ -149,6 +188,7 @@ function RoomPageInner({ id }: { id: string }) {
 
   // ---------------------------------------------------------------- everything before and after the room
   let content: React.ReactNode;
+  let bare = false; // the ticket screens carry the title themselves: only a back button above them
   if (isLoading) {
     content = <div className="space-y-3"><Skeleton className="aspect-video w-full rounded-2xl" /><Skeleton className="h-40 w-full rounded-2xl" /></div>;
   } else if (minorsCode) {
@@ -166,10 +206,20 @@ function RoomPageInner({ id }: { id: string }) {
     content = <Panel title="Couldn't load this room" action={<Button onClick={() => refetch()}>Try again</Button>} />;
   } else if (!detail || !room) {
     content = <Panel title="This room isn't available" body="It may have been removed, or you may not have access." action={back} />;
+  } else if (confirmed) {
+    bare = true;
+    content = <TicketConfirmed ticket={confirmed} room={room} hostName={hostName(detail.host)} onContinue={() => { setConfirmed(null); void refetch(); }} />;
+  } else if (payRef) {
+    bare = true;
+    content = <Checkout roomId={id} reference={payRef} onVerified={(t) => { clearPayRef(); setConfirmed(t); void refetch(); }} onBack={() => { clearPayRef(); void refetch(); }} />;
   } else if (room.status === "ended" || state.phase === "ended") {
     content = state.notice?.code === "HOST_REVIEW"
       ? <Panel title="This room has closed" body={HOST_REVIEW_COPY} action={back} />
       : <RoomCodePanel code="ROOM_ENDED" room={room} onRetry={() => { void refetch(); }} />;
+  } else if (ticketBlock && showsPrice(gate)) {
+    bare = true;
+    // Only from the server's ticket block (an eligible adult who can view the room). Never inferred from anything else.
+    content = <TicketPage room={room} host={detail.host} ticket={ticketBlock} onAlreadyHeld={() => { void refetch(); }} />;
   } else if (!detail.canJoin.ok && !(detail.canJoin.code === "ROOM_NOT_LIVE" && room.status === "scheduled")) {
     const code = detail.canJoin.code;
     content = stateForCode(code)
@@ -180,11 +230,14 @@ function RoomPageInner({ id }: { id: string }) {
   } else if (state.phase === "denied") {
     const code = state.error ?? "NOT_FOUND";
     content = <Panel title={code === "AGE_LIMIT" ? "This room has an age limit" : "You can't join this room"} body={code === "AGE_LIMIT" && state.room ? AGE_LIMIT_EVICTED_COPY : DENIED_MESSAGE[code] ?? "You can't join this room."} action={back} />;
+  } else if (room.status === "scheduled" && gate === "held" && ticketBlock) {
+    content = <WaitingRoom room={{ ...room, id }} hostName={hostName(detail.host)} priceKobo={ticketBlock.priceKobo} onRecheck={() => { void refetch(); }} onRefunded={onRefunded} />;
   } else if (room.status === "scheduled") {
     content = (
       <div className="space-y-4">
         <NotStartedPanel room={room} reminderSet={detail.reminderSet === true} hostName={hostName(detail.host)} canRemind={!isHost} />
-        {isHost && <HostControls room={{ ...room, host: detail.host }} onChanged={() => refetch()} isHost={isHost} revokedInvites={revokedInvites} onRevokedInvitesChange={setRevokedInvites} />}
+        {isHost && <HostControls room={{ ...room, host: detail.host }} onChanged={() => refetch()} isHost={isHost} revokedInvites={revokedInvites} onRevokedInvitesChange={setRevokedInvites} ticketed={ticketed} />}
+        {ticketed && <HostSales room={room} onChanged={() => { void refetch(); }} />}
       </div>
     );
   } else {
@@ -194,7 +247,7 @@ function RoomPageInner({ id }: { id: string }) {
     );
   }
 
-  const showHeader = !!detail && !!room && !minorsCode; // never the title or host above a minors' room warning
+  const showHeader = !!detail && !!room && !minorsCode && !bare; // never the title or host above a minors' room warning
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
       <Navigation />
@@ -215,6 +268,9 @@ function RoomPageInner({ id }: { id: string }) {
               {room!.description && <p className="mt-1 text-sm">{room!.description}</p>}
             </div>
           </header>
+        )}
+        {bare && (
+          <Button asChild variant="ghost" size="icon" className="h-11 w-11" aria-label="Back to Rooms"><Link href="/rooms" onClick={() => sock.leave()}><ArrowLeftIcon className="h-5 w-5" /></Link></Button>
         )}
         {content}
       </main>
