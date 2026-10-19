@@ -8,7 +8,8 @@ import { buildCreatePayload, type ApiFailure, type RoomLink, type WizardExtras }
 
 export type Call<T> = { ok: true; body: T } | ({ ok: false } & ApiFailure);
 
-async function call<T>(method: string, url: string, data?: unknown): Promise<Call<T>> {
+/** One JSON call with the CSRF retry. Exported for the ticket screens (tickets/ticketsApi.ts), which word refusals the same way. */
+export async function call<T>(method: string, url: string, data?: unknown): Promise<Call<T>> {
   try {
     for (let attempt = 0; ; attempt++) {
       const headers: Record<string, string> = { "x-csrf-token": attempt === 0 ? await ensureCsrfToken() : await refreshCsrfToken() };

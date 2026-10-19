@@ -53,7 +53,23 @@ export interface RoomView {
   memberCount?: number;
   peek?: PeekMember[];
   host: RoomHostSummary | null;
+  /** Paid rooms (phase 4). Optional: older payloads and free rooms leave them out. Never read as a price for a viewer: see `ticket`. */
+  ticketCapacity?: number | null;
+  refundBeforeStart?: boolean;
 }
+
+/**
+ * The `ticket` block of GET /api/rooms/:id (lane S1). Sent ONLY to viewers who can view the room and are ticket-eligible
+ * adults; absent for everyone else, and absence means no price and no ticket UI. `left` and `capacity` are optional extras
+ * (the contract does not promise them); without them the page says "On sale".
+ */
+export interface RoomTicketBlock { required: boolean; priceKobo: number; held: boolean; soldOut: boolean; left?: number; capacity?: number }
+
+/** A buyer's ticket as the verify route returns it (lane S2). `code` is a short code derived from the ticket id. */
+export interface RoomTicketView { id: string; roomId: string; code: string; amountKobo: number; status: "paid" | "refunded"; createdAt: string }
+
+/** GET /api/rooms/:id/tickets/summary (host only, lane S3). Sums of ticketBreakdown over paid tickets, in kobo. */
+export interface RoomTicketSummary { sold: number; grossKobo: number; platformKobo: number; hostKobo: number; releaseAt: string | null; capacity: number; soldOut: boolean }
 
 export type RoomScope = "live" | "upcoming" | "friends";
 
@@ -99,6 +115,8 @@ export const DENIED_MESSAGE: Record<string, string> = {
   ROOM_ENDED: "This room has ended.",
   ROOM_LOCKED: "The host has locked this room.",
   ROOM_NOT_LIVE: "This room hasn't started yet.",
+  // Paid rooms: the plain line when the server sent no ticket block. Never a price.
+  TICKET_REQUIRED: "You need a ticket to join this room.",
   // Minors' rooms: even a path that falls back to this table shows the one warning, never a room name or a host.
   MINORS_ROOM: MINORS_ROOM_WARNING,
   MINORS_ROOM_ACK: MINORS_ROOM_WARNING,

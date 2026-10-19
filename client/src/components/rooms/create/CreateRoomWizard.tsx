@@ -1,4 +1,4 @@
-// The create-a-room wizard: Basics, Audience, Features, When, Review, then Done. Options come from the shared wizard rules
+// The create-a-room wizard: Basics, Audience, Features, (Price, paid rooms only), When, Review, then Done. Options come from the shared wizard rules
 // (createRoomRules, task 3.2), so it never offers what the server would refuse; the server still checks everything.
 // Full screen on phones (footer pinned above the keyboard and the home bar), a centred panel from the sm breakpoint.
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -18,15 +18,20 @@ import { LINK_SCREENS } from "@/lib/roomsApi";
 import { showTeenHostNote } from "@/lib/minorsRoomUi";
 import { accountTooNewFor, normalizeWizard, stepsFor, validateWizard, wizardOptions, type WizardState } from "@/lib/createRoomRules";
 import {
-  COPY, DONE_COPY, HOST_REFUSAL, KNOWN_STEPS, LAST_VISIBILITY_KEY, STEP_TITLE, TEEN_NOTE_KEY, createErrorMessage, defaultWizardState, doneKind,
-  fieldForFailure, fieldSelectors, isKnownStep, linkChoiceOf, localProblem, parseLinkChoice, progressPrefix, roomShareUrl, ruleMessage, stepForFailure,
-  stepOfField, type DoneKind, type RoomLink, type WizardStep,
+  COPY, DONE_COPY, HOST_REFUSAL, KNOWN_STEPS, LAST_VISIBILITY_KEY, TEEN_NOTE_KEY, createErrorMessage, defaultWizardState, doneKind,
+  fieldForFailure, fieldSelectors, linkChoiceOf, localProblem, parseLinkChoice, progressPrefix, roomShareUrl, ruleMessage, stepForFailure,
+  stepOfField, uiStepTitle, uiSteps, type DoneKind, type RoomLink, type UiStep,
 } from "@/lib/createRoomWizardUi";
+import {
+  PRICE_COPY, TICKET_FIELDS, defaultTicketDraft, formatNaira, isTicketFailure, priceKoboOf, priceStepAvailable, ticketCreateMessage,
+  ticketDraftProblem, ticketFieldSelectors, type TicketDraft,
+} from "@/lib/roomTickets";
 import { createRoom, useWizardHost } from "./createRoomApi";
 import StepBasics, { type FieldError } from "./StepBasics";
 import StepAudience from "./StepAudience";
 import StepFeatures from "./StepFeatures";
 import StepWhen from "./StepWhen";
+import StepPrice from "./StepPrice";
 import StepReview from "./StepReview";
 import StepDone from "./StepDone";
 
@@ -58,6 +63,8 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
   const [linkChoice, setLinkChoiceRaw] = useState(() => linkChoiceOf(link));
   const [direct, setDirectRaw] = useState(true);
   const [screenUrl, setScreenUrlRaw] = useState("");
+  // Paid room draft (price step). Kept beside WizardState, like the screen link: only sent when the price step is on.
+  const [ticket, setTicketRaw] = useState<TicketDraft>(defaultTicketDraft);
   const [stepIdx, setStepIdx] = useState(0);
   const [error, setError] = useState<FieldError | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -83,7 +90,7 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
   useEffect(() => {
     if (!open) return;
     const fresh = defaultWizardState(defaults);
-    setState(host ? fit(fresh) : fresh); setLinkChoiceRaw(linkChoiceOf(link)); setDirectRaw(true); setScreenUrlRaw("");
+    setState(host ? fit(fresh) : fresh); setLinkChoiceRaw(linkChoiceOf(link)); setDirectRaw(true); setScreenUrlRaw(""); setTicketRaw(defaultTicketDraft());
     setStepIdx(0); setError(null); setSubmitError(null); setBusy(false); setDone(null); setTouched(false); setConfirmClose(false); setFocusReq(null);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -106,6 +113,7 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
   const setLinkChoice = (v: string) => { setLinkChoiceRaw(v); setTouched(true); setError(null); };
   const setDirect = (v: boolean) => { setDirectRaw(v); setTouched(true); };
   const setScreenUrl = (v: string) => { setScreenUrlRaw(v); setTouched(true); };
+  const setTicket = (patch: Partial<TicketDraft>) => { setTicketRaw((t) => ({ ...t, ...patch })); setTouched(true); setError(null); setSubmitError(null); };
 
   const options = useMemo(
     () => (host ? wizardOptions(host, flags, minAccountAgeDays, state.ageLimit) : null),
@@ -116,11 +124,15 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
   const visibilityOptions = useMemo(() => (options?.visibilityOptions ?? []).map((o) =>
     accountTooNew && o.value === "public" && !o.disabledReason ? { ...o, disabledReason: HOST_REFUSAL.ACCOUNT_TOO_NEW } : o), [options, accountTooNew]);
 
-  const steps: WizardStep[] = useMemo(() => {
+  // Paid room: the switch shows only with the paidRooms flag on and money unlocked for this room (18+/21+, adult host);
+  // the price step only when it is also switched on. With the flag off none of it exists, and nothing is sent.
+  const priceAvailable = priceStepAvailable(flags.paidRooms, options?.moneyLocked);
+  const priceStepOn = priceAvailable && ticket.on;
+  const steps: UiStep[] = useMemo(() => {
     const raw: readonly string[] = host ? stepsFor(state, flags, host) : KNOWN_STEPS;
-    const known = raw.filter(isKnownStep);
+    const known = uiSteps(raw, priceStepOn);
     return known.length ? known : [...KNOWN_STEPS];
-  }, [state, flags.paidRooms, flags.spray, host?.age]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [state, flags.paidRooms, flags.spray, host?.age, priceStepOn]); // eslint-disable-line react-hooks/exhaustive-deps
   const idx = Math.min(stepIdx, steps.length - 1);
   const current = steps[idx];
 
@@ -130,7 +142,7 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
   const dismissNote = () => { setNoteGone(true); try { localStorage.setItem(TEEN_NOTE_KEY, "1"); } catch { /* shows again next time */ } };
   const moneyPlaceholder = (flags.paidRooms || flags.spray) && adultHost && (state.ageLimit === "18+" || state.ageLimit === "21+") && options?.moneyLocked === null;
 
-  const heading = done ? DONE_COPY[done.kind].title : STEP_TITLE[current];
+  const heading = done ? DONE_COPY[done.kind].title : uiStepTitle(current);
 
   // Step changes are announced once: focus moves to the step heading, which starts with "Step 2 of 5:" for screen readers
   // (there is no separate live region). After a refusal the field in error takes focus instead, so the host lands on it.
@@ -138,7 +150,7 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
     if (!open) return;
     const t = requestAnimationFrame(() => {
       const el = focusReq
-        ? fieldSelectors(focusReq.field).map((sel) => document.querySelector<HTMLElement>(sel)).find((x) => !!x) ?? null
+        ? [...ticketFieldSelectors(focusReq.field), ...fieldSelectors(focusReq.field)].map((sel) => document.querySelector<HTMLElement>(sel)).find((x) => !!x) ?? null
         : null;
       (el ?? headingRef.current)?.focus();
     });
@@ -161,6 +173,8 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
     const found: Array<FieldError & { step: number }> = [];
     const local = localProblem(raw, now);
     if (local) found.push({ ...local, step: indexOf(local.field) });
+    const priced = priceStepOn ? ticketDraftProblem(ticket) : null;
+    if (priced) found.push({ ...priced, step: indexOf(priced.field) });
     if (host) {
       const r = validateWizard(s, host, now, minAccountAgeDays);
       if (!r.ok) found.push({ field: r.field, reason: ruleMessage(r.field, r.reason), step: indexOf(r.field) });
@@ -168,7 +182,10 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
     found.sort((a, b) => (a.step < 0 ? 99 : a.step) - (b.step < 0 ? 99 : b.step));
     return found[0] ?? null;
   };
-  const indexOf = (field: string) => { const st = stepOfField(field); return st ? steps.indexOf(st) : -1; };
+  const indexOf = (field: string) => {
+    const st: UiStep | null = (TICKET_FIELDS as readonly string[]).includes(field) ? "money" : stepOfField(field);
+    return st ? steps.indexOf(st) : -1;
+  };
 
   const goBack = () => { setError(null); setSubmitError(null); setFocusReq(null); setStepIdx(Math.max(0, idx - 1)); };
 
@@ -196,12 +213,12 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
 
   const submit = async (s: WizardState) => {
     setBusy(true); setSubmitError(null);
-    const res = await createRoom(s, { noDirectInteractions: !direct, screenUrl: LINK_SCREENS ? screenUrl : undefined }, parseLinkChoice(linkChoice));
+    const res = await createRoom(s, { noDirectInteractions: !direct, screenUrl: LINK_SCREENS ? screenUrl : undefined, ticket, ticketsEnabled: priceStepOn }, parseLinkChoice(linkChoice));
     setBusy(false);
     if (!res.ok) {
       if (res.code === "ACCOUNT_TOO_NEW") setAccountTooNew(true);
-      const msg = createErrorMessage(res);
-      const target = stepForFailure(res);
+      const msg = ticketCreateMessage(res) ?? createErrorMessage(res);
+      const target: UiStep | null = isTicketFailure(res) ? (steps.includes("money") ? "money" : "features") : stepForFailure(res);
       const t = target ? steps.indexOf(target) : -1;
       const field = fieldForFailure(res);
       if (t >= 0 && t < idx) { setStepIdx(t); setError({ field, reason: msg }); if (field) focusField(field); }
@@ -232,6 +249,8 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
     return null;
   })();
   const ageText = options?.ageOptions.find((o) => o.value === state.ageLimit)?.label ?? state.ageLimit;
+  const ticketKobo = priceStepOn ? priceKoboOf(ticket.priceNaira) : null;
+  const ticketText = ticketKobo !== null ? `${formatNaira(ticketKobo)} · ${PRICE_COPY.reviewTickets(ticket.capacity)}` : null;
 
   const mainLabel = done ? COPY.goToRoom : current === "review" ? (state.when === "now" ? COPY.goLive : COPY.schedule) : COPY.next;
   const mainDisabled = !done && (busy || !host || ageUnknown);
@@ -302,12 +321,15 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
               ) : current === "features" ? (
                 <StepFeatures
                   state={state} set={set} error={error} directInteractions={direct} setDirectInteractions={setDirect}
-                  screenUrl={screenUrl} setScreenUrl={setScreenUrl} moneyPlaceholder={moneyPlaceholder}
+                  screenUrl={screenUrl} setScreenUrl={setScreenUrl} moneyPlaceholder={moneyPlaceholder && !priceAvailable}
+                  paid={priceAvailable ? { on: ticket.on, set: (on) => setTicket({ on }), needsId: !host?.idVerifiedAdult } : null}
                 />
+              ) : current === "money" && priceStepOn ? (
+                <StepPrice draft={ticket} set={setTicket} error={error} />
               ) : current === "when" ? (
                 <StepWhen state={state} set={set} error={error} now={new Date()} />
               ) : (
-                <StepReview state={state} ageText={ageText} linkedText={linkedText} error={submitError} />
+                <StepReview state={state} ageText={ageText} linkedText={linkedText} error={submitError} ticketText={ticketText} />
               )}
             </div>
 

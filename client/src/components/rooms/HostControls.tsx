@@ -23,9 +23,11 @@ interface Props {
   onRevokedInvitesChange(next: Map<string, AdultInvite>): void;
   /** Inside the live room's Controls sheet, which has its own End room confirmation: leave this block's End button out. */
   endElsewhere?: boolean;
+  /** A paid room: a scheduled one is cancelled from the Tickets sheet (POST /cancel refunds every ticket), not from here. */
+  ticketed?: boolean;
 }
 
-export default function HostControls({ room, onChanged, isHost, revokedInvites, onRevokedInvitesChange, endElsewhere = false }: Props) {
+export default function HostControls({ room, onChanged, isHost, revokedInvites, onRevokedInvitesChange, endElsewhere = false, ticketed = false }: Props) {
   const { toast } = useToast();
   const [adultsOpen, setAdultsOpen] = useState(false);
   const adultsBtn = useRef<HTMLButtonElement>(null);
@@ -66,7 +68,7 @@ export default function HostControls({ room, onChanged, isHost, revokedInvites, 
         {showAdultInvite({ isHost, minorsRoom: room.minorsRoom }) && room.status !== "ended" && (
           <Button ref={adultsBtn} variant="outline" className="min-h-[44px]" onClick={() => setAdultsOpen(true)} data-testid="button-invite-adult"><UserPlusIcon className="mr-2 h-4 w-4" aria-hidden />{INVITE_SHEET_TITLE}</Button>
         )}
-        {room.status !== "ended" && !endElsewhere && (
+        {room.status !== "ended" && !endElsewhere && !(ticketed && room.status === "scheduled") && (
           <AlertDialog>
             <AlertDialogTrigger asChild><Button variant="destructive" className="min-h-[44px]" data-testid="button-end-room">{room.status === "live" ? "End room" : "Cancel room"}</Button></AlertDialogTrigger>
             <AlertDialogContent>

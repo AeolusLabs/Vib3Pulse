@@ -1,6 +1,7 @@
 import { KIND_LABEL, VISIBILITY_LABEL, ageLimitLabel, formatWhen } from "@/lib/roomsApi";
 import type { WizardState } from "@/lib/createRoomRules";
 import { COPY, slowModeLabel } from "@/lib/createRoomWizardUi";
+import { AMBER, PRICE_COPY } from "@/lib/roomTickets";
 import { ReviewLine } from "./parts";
 
 interface Props {
@@ -9,9 +10,11 @@ interface Props {
   ageText: string;
   linkedText: string | null;
   error: string | null;
+  /** "₦5,000 · 100 tickets" for a paid room (price step on); null for a free room. */
+  ticketText?: string | null;
 }
 
-export default function StepReview({ state, ageText, linkedText, error }: Props) {
+export default function StepReview({ state, ageText, linkedText, error, ticketText = null }: Props) {
   const parsed = state.scheduledFor ? Date.parse(state.scheduledFor) : NaN;
   const features = [state.voice ? COPY.voiceLabel : null, state.voice && state.liveVideo ? COPY.videoLabel : null].filter(Boolean).join(", ");
   return (
@@ -22,6 +25,7 @@ export default function StepReview({ state, ageText, linkedText, error }: Props)
         <div className="mt-3 flex flex-wrap gap-1.5">
           <span className="rounded-full border border-primary/40 bg-primary/10 px-2.5 py-0.5 text-xs">{ageLimitLabel(state.ageLimit)}</span>
           <span className="rounded-full border border-border px-2.5 py-0.5 text-xs text-muted-foreground">{KIND_LABEL[state.kind]}</span>
+          {ticketText && <span className={AMBER.chip} data-testid="review-ticket-chip">{ticketText}</span>}
         </div>
       </div>
 
@@ -34,6 +38,7 @@ export default function StepReview({ state, ageText, linkedText, error }: Props)
         <ReviewLine label={COPY.reviewSlow} value={slowModeLabel(state.slowModeSec)} />
         {state.pinned.trim() && <ReviewLine label={COPY.reviewPinned} value={<span className="break-words">{state.pinned.trim()}</span>} />}
         {linkedText && <ReviewLine label={COPY.reviewLinked} value={linkedText} />}
+        {ticketText && <ReviewLine label={PRICE_COPY.reviewTicket} value={ticketText} />}
       </dl>
 
       <p className="text-sm text-muted-foreground">{COPY.reviewSafety}</p>
