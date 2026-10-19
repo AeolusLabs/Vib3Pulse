@@ -36,6 +36,8 @@ import { sendTicketPurchaseEmail } from "./emailService.js";
 import { MAX_GROUP_MEMBERS } from "./routes/messages-routes.js";
 import { deliverNotification } from "./notifications.js";
 import { handleRoomTicketCharge } from "./rooms/tickets.js";
+import { handleRoomRefundWebhook } from "./rooms/refunds.js";
+import { handleRoomTransferWebhook } from "./rooms/settlement.js";
 
 function requireAuth(req: Request, res: Response, next: Function) {
   if (!req.isAuthenticated() || !req.user) {
@@ -1010,6 +1012,16 @@ export function registerPaymentRoutes(app: Express): void {
             }
           }
         }
+      }
+
+      // Paid rooms: refunds and host payouts. The signature was checked above; each handler then RE-VERIFIES with Paystack
+      // (refund lookup / transfer verify) and acts only on what Paystack says, never on the body, so a replay is harmless.
+      // Room ones only (a ticket's payment reference / a room-payout-* transfer reference); anything else is left alone.
+      // A transfer Paystack cannot be asked about right now throws => 500 => Paystack sends the event again.
+      if (payload.event === "refund.processed" || payload.event === "refund.failed") {
+        await handleRoomRefundWebhook(payload.data);
+      } else if (payload.event === "transfer.success" || payload.event === "transfer.failed" || payload.event === "transfer.reversed") {
+        await handleRoomTransferWebhook(payload.data);
       }
 
       if (payload.event === "subscription.create") {

@@ -166,16 +166,17 @@ function memberInfo(u: User) {
 const memberPayload = (m: HubMember) => ({ userId: m.userId, role: m.role, muted: m.muted, joinedAt: m.joinedAt, ...m.info });
 
 // ---------------------------------------------------------------- end / grace
-export async function endRoom(roomId: string): Promise<void> {
+export async function endRoom(roomId: string, opts: { hostReview?: boolean } = {}): Promise<void> {
   clearTimeout(endTimers.get(roomId));
   endTimers.delete(roomId);
   Array.from(kicked.keys()).forEach((k) => { if (k.startsWith(`${roomId}:`)) kicked.delete(k); });
   Array.from(awayTimers.keys()).forEach((k) => { if (k.startsWith(`${roomId}:`)) { clearTimeout(awayTimers.get(k)); awayTimers.delete(k); } });
   const room = await rs.getRoom(roomId);
   if (room && room.status !== "ended") await rs.setStatus(roomId, "ended");
-  // Paid rooms: schedule the host's payout (room went live) or refund every ticket (it never started). Never throws;
-  // imported lazily so the money modules stay out of this module's import cycle.
-  if (room) await import("./settlement").then((m) => m.afterRoomEnded(roomId)).catch((e) => console.error("[rooms] after-end money step failed:", e?.message ?? e));
+  // Paid rooms: schedule the host's payout (room went live) or refund every ticket (it never started, or it was closed for
+  // a host review: opts.hostReview, never paid out). Never throws; imported lazily so the money modules stay out of this
+  // module's import cycle.
+  if (room) await import("./settlement").then((m) => m.afterRoomEnded(roomId, { hostReview: opts.hostReview === true })).catch((e) => console.error("[rooms] after-end money step failed:", e?.message ?? e));
   if (room?.voiceEnabled || roomHub.voiceOn(roomId)) {
     await rs.clearStage(roomId).catch(() => {});
     await getVoiceService()?.deleteRoom(roomId).catch((e) => console.error("[voice] deleteRoom failed:", e?.message ?? e));
@@ -707,7 +708,7 @@ async function evictFailClosed(roomId: string | null, userId: string): Promise<v
 /** Closes a room for a reviewed host with the neutral notice (no ages, no mention of under 18s). */
 async function endForHostReview(roomId: string): Promise<void> {
   roomHub.broadcast(roomId, { type: "room:notice", code: "HOST_REVIEW", message: HOST_REVIEW_MESSAGE });
-  await endRoom(roomId);
+  await endRoom(roomId, { hostReview: true }); // paid rooms: the host is not paid out; every ticket is refunded
 }
 
 /** Fail closed: when the host's rooms cannot be read or flagged, every room the hub knows this person hosts is closed neutrally. */
