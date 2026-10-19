@@ -24,7 +24,7 @@ import {
 } from "@/lib/createRoomWizardUi";
 import {
   PRICE_COPY, TICKET_FIELDS, defaultTicketDraft, formatNaira, isTicketFailure, priceKoboOf, priceStepAvailable, ticketCreateMessage,
-  ticketDraftProblem, ticketFieldSelectors, type TicketDraft,
+  ticketDraftProblem, ticketFieldSelectors, ticketsTooManyForVideo, type TicketDraft,
 } from "@/lib/roomTickets";
 import { createRoom, useWizardHost } from "./createRoomApi";
 import StepBasics, { type FieldError } from "./StepBasics";
@@ -128,6 +128,10 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
   // the price step only when it is also switched on. With the flag off none of it exists, and nothing is sent.
   const priceAvailable = priceStepAvailable(flags.paidRooms, options?.moneyLocked);
   const priceStepOn = priceAvailable && ticket.on;
+  // Live video is refused above ROOM_LIMITS.liveVideoMax people (lane S1): with more tickets than that, the switch is off
+  // with the reason, the price step says so, and live video is not asked for (review and create both drop it).
+  const videoOverTickets = priceStepOn && ticketsTooManyForVideo(ticket);
+  const withVideoRule = (s: WizardState): WizardState => (videoOverTickets && s.liveVideo ? { ...s, liveVideo: false } : s);
   const steps: UiStep[] = useMemo(() => {
     const raw: readonly string[] = host ? stepsFor(state, flags, host) : KNOWN_STEPS;
     const known = uiSteps(raw, priceStepOn);
@@ -213,7 +217,7 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
 
   const submit = async (s: WizardState) => {
     setBusy(true); setSubmitError(null);
-    const res = await createRoom(s, { noDirectInteractions: !direct, screenUrl: LINK_SCREENS ? screenUrl : undefined, ticket, ticketsEnabled: priceStepOn }, parseLinkChoice(linkChoice));
+    const res = await createRoom(withVideoRule(s), { noDirectInteractions: !direct, screenUrl: LINK_SCREENS ? screenUrl : undefined, ticket, ticketsEnabled: priceStepOn }, parseLinkChoice(linkChoice));
     setBusy(false);
     if (!res.ok) {
       if (res.code === "ACCOUNT_TOO_NEW") setAccountTooNew(true);
@@ -221,6 +225,8 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
       const target: UiStep | null = isTicketFailure(res) ? (steps.includes("money") ? "money" : "features") : stepForFailure(res);
       const t = target ? steps.indexOf(target) : -1;
       const field = fieldForFailure(res);
+      // A ticket code with no field (NO_PAYOUT_ACCOUNT, HOST_NOT_VERIFIED, ...) keeps field "": the price step shows it in
+      // its general alert box (StepPrice), so it is never invisible.
       if (t >= 0 && t < idx) { setStepIdx(t); setError({ field, reason: msg }); if (field) focusField(field); }
       else setSubmitError(msg);
       return;
@@ -323,13 +329,14 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
                   state={state} set={set} error={error} directInteractions={direct} setDirectInteractions={setDirect}
                   screenUrl={screenUrl} setScreenUrl={setScreenUrl} moneyPlaceholder={moneyPlaceholder && !priceAvailable}
                   paid={priceAvailable ? { on: ticket.on, set: (on) => setTicket({ on }), needsId: !host?.idVerifiedAdult } : null}
+                  videoBlocked={videoOverTickets ? PRICE_COPY.videoNeedsFewer : null}
                 />
               ) : current === "money" && priceStepOn ? (
-                <StepPrice draft={ticket} set={setTicket} error={error} />
+                <StepPrice draft={ticket} set={setTicket} error={error} liveVideo={state.voice && state.liveVideo} />
               ) : current === "when" ? (
                 <StepWhen state={state} set={set} error={error} now={new Date()} />
               ) : (
-                <StepReview state={state} ageText={ageText} linkedText={linkedText} error={submitError} ticketText={ticketText} />
+                <StepReview state={withVideoRule(state)} ageText={ageText} linkedText={linkedText} error={submitError} ticketText={ticketText} ticketCount={ticketKobo !== null ? ticket.capacity : null} />
               )}
             </div>
 

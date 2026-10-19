@@ -25,9 +25,11 @@ interface Props {
    * who is not ID-verified sees it off with the reason (the server refuses HOST_NOT_VERIFIED anyway).
    */
   paid?: { on: boolean; set(on: boolean): void; needsId: boolean } | null;
+  /** Why live video is off for this paid room (more tickets than ROOM_LIMITS.liveVideoMax), or null. */
+  videoBlocked?: string | null;
 }
 
-export default function StepFeatures({ state, set, error, directInteractions, setDirectInteractions, screenUrl, setScreenUrl, moneyPlaceholder, paid = null }: Props) {
+export default function StepFeatures({ state, set, error, directInteractions, setDirectInteractions, screenUrl, setScreenUrl, moneyPlaceholder, paid = null, videoBlocked = null }: Props) {
   const pinnedLen = Array.from(state.pinned).length;
   const screenPreview = useMemo(() => {
     if (!LINK_SCREENS || !screenUrl.trim()) return null;
@@ -47,8 +49,8 @@ export default function StepFeatures({ state, set, error, directInteractions, se
         onChange={(v) => set(v ? { voice: true } : { voice: false, liveVideo: false })} testId="switch-room-voice"
       />
       <SwitchRow
-        id="wiz-video" label={COPY.videoLabel} help={COPY.videoHelp} checked={state.liveVideo && state.voice}
-        onChange={(v) => set({ liveVideo: v })} disabledReason={state.voice ? undefined : COPY.videoNeedsVoice} testId="switch-room-live-video"
+        id="wiz-video" label={COPY.videoLabel} help={COPY.videoHelp} checked={state.liveVideo && state.voice && !videoBlocked}
+        onChange={(v) => set({ liveVideo: v })} disabledReason={!state.voice ? COPY.videoNeedsVoice : videoBlocked ?? undefined} testId="switch-room-live-video"
       />
 
       <ChipGroup<number>

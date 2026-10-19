@@ -12,9 +12,11 @@ interface Props {
   error: string | null;
   /** "₦5,000 · 100 tickets" for a paid room (price step on); null for a free room. */
   ticketText?: string | null;
+  /** The ticket count of a paid room: the people line shows it instead of the free room's "up to 50". */
+  ticketCount?: number | null;
 }
 
-export default function StepReview({ state, ageText, linkedText, error, ticketText = null }: Props) {
+export default function StepReview({ state, ageText, linkedText, error, ticketText = null, ticketCount = null }: Props) {
   const parsed = state.scheduledFor ? Date.parse(state.scheduledFor) : NaN;
   const features = [state.voice ? COPY.voiceLabel : null, state.voice && state.liveVideo ? COPY.videoLabel : null].filter(Boolean).join(", ");
   return (
@@ -32,7 +34,7 @@ export default function StepReview({ state, ageText, linkedText, error, ticketTe
       <dl className="divide-y divide-border rounded-2xl border border-border px-4 py-1">
         <ReviewLine label={COPY.reviewAge} value={ageText} />
         <ReviewLine label={COPY.reviewVisibility} value={VISIBILITY_LABEL[state.visibility]} />
-        <ReviewLine label={COPY.reviewPeople} value={`up to ${state.capacity}`} />
+        <ReviewLine label={COPY.reviewPeople} value={ticketCount !== null ? PRICE_COPY.reviewTickets(ticketCount) : `up to ${state.capacity}`} />
         <ReviewLine label={COPY.reviewWhen} value={state.when === "now" ? COPY.reviewNow : Number.isNaN(parsed) ? "" : formatWhen(new Date(parsed).toISOString())} />
         <ReviewLine label={COPY.reviewFeatures} value={state.when === "later" ? COPY.scheduledFeatures : features || COPY.reviewNone} />
         <ReviewLine label={COPY.reviewSlow} value={slowModeLabel(state.slowModeSec)} />
