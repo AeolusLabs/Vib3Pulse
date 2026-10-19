@@ -18,12 +18,12 @@ import { resolveScreen } from "@shared/screen";
 import { ROOM_LIMITS, resolveRoomPrivacy, validateRoomInput, validateRoomPrivacy } from "@shared/rooms";
 import { canHostRoom, canJoinRoom, isMinorsRoomHost } from "@shared/roomRules";
 import * as rs from "./roomStorage";
-import { canViewRoom, hostSummary, mutualFollow, plainText, publicRoom, sha256, viewRoom } from "./roomAccess";
+import { canViewRoom, hostSummary, mutualFollow, pinnedPlainText, plainText, publicRoom, sha256, viewerRoom, viewRoom } from "./roomAccess";
 import * as mr from "./minorsRoom";
 import { TokenBucket } from "./rateLimit";
 import { getVoiceService } from "./voice/voiceService";
 import { afterRoleChange, canCameraNow, canPublishNow, shutdownVoice, stopAllLive } from "./stage";
-import { applyMod, endRoom, enforceAgeLimit, expectHost, interactionVerdict, notifyScreen, removeFromMinorsRoom } from "./roomSocket";
+import { applyMod, endRoom, enforceAgeLimit, expectHost, interactionVerdict, notifyScreen, removeFromMinorsRoom, writeRoomSettings } from "./roomSocket";
 import { roomHub } from "./RoomHub";
 import { roomFeatures } from "./features";
 
@@ -139,13 +139,14 @@ export function registerRoomRoutes(app: Express): void {
         ...v.value,
         title: plainText(v.value.title),
         description: v.value.description ? plainText(v.value.description) : undefined,
+        pinnedMessage: pinnedPlainText(v.value.pinnedMessage), // plain text, cut to 200 after the tags are gone
         screen,
         inviteTokenHash: inviteToken ? sha256(inviteToken) : undefined,
         // Decided here from the host's age today, never from the request body; never changes afterwards.
         minorsRoom: isMinorsRoomHost(ageFromDob(host.dateOfBirth)),
       });
       // Not named "inviteToken": the global response redaction strips that key from every body on purpose.
-      res.status(201).json({ room: { ...publicRoom(room), host: hostSummary(host) }, ...(inviteToken ? { inviteLink: `/rooms/${room.id}?token=${inviteToken}` } : {}) });
+      res.status(201).json({ room: { ...viewerRoom(room), host: hostSummary(host) }, ...(inviteToken ? { inviteLink: `/rooms/${room.id}?token=${inviteToken}` } : {}) });
     } catch (e) {
       console.error("[rooms] create failed:", e);
       res.status(500).json({ message: "Failed to create room" });
@@ -198,7 +199,7 @@ export function registerRoomRoutes(app: Express): void {
       const gate = canJoinRoom({ age: ageFromDob(viewer?.dateOfBirth) }, room as any);
       const canJoin = member?.banned ? { ok: false, code: "BANNED" } : gate;
       res.json({
-        room: publicRoom(room), host: host ? hostSummary(host) : null, canJoin, memberCount: roomHub.count(room.id), peek: peekOf(room.id, 8),
+        room: viewerRoom(room), host: host ? hostSummary(host) : null, canJoin, memberCount: roomHub.count(room.id), peek: peekOf(room.id, 8),
         you: isHost(room, req.user!.id) ? { role: "host" } : member && !member.banned ? { role: member.role } : null,
       });
     } catch (e) {
@@ -210,12 +211,26 @@ export function registerRoomRoutes(app: Express): void {
   // ------------------------------------------------------------ patch
   app.patch("/api/rooms/:id", requireAuth, roomLimiter, async (req, res) => {
     try {
-      const ctx = await loadHostRoom(req, res);
+      const b = (req.body && typeof req.body === "object" ? req.body : {}) as Record<string, unknown>;
+      const uid = req.user!.id;
+      const found = await rs.getRoom(req.params.id);
+      let ctx: { room: Room; host: User } | null;
+      if (!found || found.hostId === uid) ctx = await loadHostRoom(req, res);
+      else {
+        // Not the host. A co-host may change the pinned message and nothing else; anyone else gets the old answer.
+        if (!(await canViewRoom(found, uid, typeof req.query.token === "string" ? req.query.token : undefined))) return res.status(404).json({ message: "Room not found" });
+        const m = await rs.getMember(found.id, uid);
+        const keys = Object.keys(b);
+        const onlyPinned = keys.length > 0 && keys.every((k) => k === "pinnedMessage");
+        if (!m || m.banned || m.role !== "cohost" || !onlyPinned) return res.status(403).json({ message: "Only the host can do that." });
+        const hostRow = await storage.getUser(found.hostId);
+        if (!hostRow) return res.status(404).json({ message: "Room not found" });
+        ctx = { room: found, host: hostRow };
+      }
       if (!ctx) return;
       const { room, host } = ctx;
       if (room.status === "ended") return res.status(409).json({ message: "This room has ended.", code: "ROOM_ENDED" });
 
-      const b = (req.body && typeof req.body === "object" ? req.body : {}) as Record<string, unknown>;
       const merged = {
         title: "title" in b ? b.title : room.title,
         description: "description" in b ? b.description : room.description ?? undefined,
@@ -224,11 +239,19 @@ export function registerRoomRoutes(app: Express): void {
         capacity: "capacity" in b ? b.capacity : room.capacity,
         noDirectInteractions: "noDirectInteractions" in b ? b.noDirectInteractions : room.noDirectInteractions,
         screenUrl: "screenUrl" in b ? b.screenUrl : undefined,
+        pinnedMessage: "pinnedMessage" in b ? b.pinnedMessage : undefined,
+        slowModeSec: "slowModeSec" in b ? b.slowModeSec : undefined,
       };
       const v = validateRoomInput(merged);
       if (!v.ok) return res.status(400).json({ message: `Invalid ${v.field}`, field: v.field });
+      if ("locked" in b && typeof b.locked !== "boolean") return res.status(400).json({ message: "Invalid locked", field: "locked" });
 
       const patch: rs.RoomPatch = {};
+      // Host settings. The pinned message is stored as plain text (never HTML), cut to 200 after the tags are stripped.
+      if ("pinnedMessage" in b) patch.pinnedMessage = pinnedPlainText(v.value.pinnedMessage);
+      if ("slowModeSec" in b && v.value.slowModeSec !== undefined) patch.slowModeSec = v.value.slowModeSec;
+      if ("locked" in b) patch.locked = b.locked === true;
+      const settingsChanged = "pinnedMessage" in patch || "slowModeSec" in patch || "locked" in patch;
       if ("title" in b) patch.title = plainText(v.value.title);
       if ("description" in b) patch.description = v.value.description ? plainText(v.value.description) : null;
       if ("capacity" in b) patch.capacity = v.value.capacity;
@@ -252,10 +275,13 @@ export function registerRoomRoutes(app: Express): void {
           patch.screen = r.screen;
         }
       }
-      const updated = Object.keys(patch).length ? await rs.updateRoom(room.id, patch) : room;
+      // A settings change goes through the per-room queue, which also tells everyone in a live room (room:settings).
+      const updated = !Object.keys(patch).length ? room
+        : settingsChanged ? await writeRoomSettings(room.id, () => rs.updateRoom(room.id, patch))
+        : await rs.updateRoom(room.id, patch);
       if ("screen" in patch && updated.status === "live") notifyScreen(room.id, patch.screen ?? null, updated.screenVersion);
       if (patch.ageLimit && updated.status === "live") await enforceAgeLimit(room.id); // raised: send out anyone now under it
-      res.json({ room: { ...publicRoom(updated), host: hostSummary(host) } });
+      res.json({ room: { ...viewerRoom(updated), host: hostSummary(host) } });
     } catch (e) {
       console.error("[rooms] patch failed:", e);
       res.status(500).json({ message: "Failed to update room" });
@@ -299,7 +325,7 @@ export function registerRoomRoutes(app: Express): void {
       if (live.minorsRoom) roomHub.markMinorsRoom(room.id);
       await rs.upsertMember(room.id, host.id, "host");
       await notifyFollowers(live, host).catch((e) => console.error("[rooms] notify failed:", e));
-      res.json({ room: { ...publicRoom(live), host: hostSummary(host) } });
+      res.json({ room: { ...viewerRoom(live), host: hostSummary(host) } });
     } catch (e) {
       console.error("[rooms] start failed:", e);
       // Fail closed: a room that went live must not stay live without a grace timer when a later step threw.
@@ -315,7 +341,7 @@ export function registerRoomRoutes(app: Express): void {
       if (ctx.room.status === "ended") return res.status(409).json({ message: "This room has already ended.", code: "BAD_STATE" });
       await endRoom(ctx.room.id); // sets status, tells everyone in the room, clears presence and timers
       const ended = (await rs.getRoom(ctx.room.id))!;
-      res.json({ room: { ...publicRoom(ended), host: hostSummary(ctx.host) } });
+      res.json({ room: { ...viewerRoom(ended), host: hostSummary(ctx.host) } });
     } catch (e) {
       console.error("[rooms] end failed:", e);
       res.status(500).json({ message: "Failed to end room" });
@@ -633,7 +659,7 @@ export function registerRoomRoutes(app: Express): void {
       roomHub.setLiveVideoOn(room.id, on);
       roomHub.broadcast(room.id, { type: "room:livevideo", enabled: on });
       if (!enabled) await stopAllLive(room.id);
-      res.json({ room: { ...publicRoom(room), host: hostSummary(ctx.host) } });
+      res.json({ room: { ...viewerRoom(room), host: hostSummary(ctx.host) } });
     } catch (e) {
       console.error("[rooms] live video switch failed:", e);
       res.status(500).json({ message: "Failed to change live video" });
@@ -652,7 +678,7 @@ export function registerRoomRoutes(app: Express): void {
       roomHub.setVoiceOn(room.id, enabled);
       if (!enabled) await shutdownVoice(room.id);
       roomHub.broadcast(room.id, { type: "room:voice", enabled });
-      res.json({ room: { ...publicRoom(room), host: hostSummary(ctx.host) } });
+      res.json({ room: { ...viewerRoom(room), host: hostSummary(ctx.host) } });
     } catch (e) {
       console.error("[rooms] voice switch failed:", e);
       res.status(500).json({ message: "Failed to change voice" });

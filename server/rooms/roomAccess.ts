@@ -7,7 +7,7 @@ import { toPublicUser } from "../auth";
 import { isBlockedEitherWay } from "../utils/blocks";
 import { follows, type Room, type User } from "@shared/schema";
 import { ageFromDob } from "@shared/age";
-import type { MinorsRoomCode } from "@shared/rooms";
+import { cutPinned, type MinorsRoomCode } from "@shared/rooms";
 import * as rs from "./roomStorage";
 import { getInviteState, minorsGate, NO_INVITE } from "./minorsRoom";
 
@@ -29,10 +29,23 @@ export function hostSummary(u: User) {
   };
 }
 
-/** A room row as the API shows it: never the invite hash. */
+/** A pinned message as stored: plain text (tags stripped, never HTML), cut to ROOM_LIMITS.pinned; null when empty. */
+export function pinnedPlainText(raw: string | null | undefined): string | null {
+  return typeof raw === "string" ? cutPinned(plainText(raw)) : null;
+}
+
+/**
+ * A room row as lists and cards show it: never the invite hash, and never the pinned message (that is for people who may
+ * view the room: use viewerRoom there).
+ */
 export function publicRoom(room: Room) {
-  const { inviteTokenHash, ...rest } = room;
+  const { inviteTokenHash, pinnedMessage, ...rest } = room;
   return rest;
+}
+
+/** For someone who may view the room (GET /api/rooms/:id after viewRoom, room:state, the host's own writes): adds the pinned message. */
+export function viewerRoom(room: Room) {
+  return { ...publicRoom(room), pinnedMessage: room.pinnedMessage ?? null };
 }
 
 export async function mutualFollow(a: string, b: string): Promise<boolean> {

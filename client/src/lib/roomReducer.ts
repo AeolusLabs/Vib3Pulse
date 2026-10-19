@@ -37,8 +37,8 @@ export interface RoomState {
   interactions: InteractionItem[];
   /** Terminal failure code (AGE_LIMIT, BANNED, KICKED, ROOM_FULL ...). */
   error: string | null;
-  /** Last non-terminal rejection (RATE_LIMITED, MUTED, PRIVACY ...); `n` changes on every notice so the UI can react to repeats. */
-  notice: { code: string; n: number } | null;
+  /** Last non-terminal rejection (RATE_LIMITED, MUTED, PRIVACY, SLOW_MODE ...); `n` changes on every notice so the UI can react to repeats. `retryMs` comes with SLOW_MODE. */
+  notice: { code: string; n: number; retryMs?: number } | null;
   seq: number;
   /** Part 3a: live voice. `stage` = guests given the mic, `hands` = guests asking for it. */
   voiceEnabled: boolean;
@@ -79,11 +79,12 @@ export type RoomServerMessage =
   | { type: "room:voice"; enabled: boolean }
   | { type: "room:live"; holder: string | null; asks: string[]; away?: number | null }
   | { type: "room:livevideo"; enabled: boolean }
+  | { type: "room:settings"; pinnedMessage: string | null; slowModeSec: number; locked: boolean }
   | { type: "room:playback"; nowPlaying: NowPlaying | null; serverNowMs: number }
   | { type: "room:mod"; action: "mute" | "unmute" | "kick" | "ban" | "role"; targetId: string; role?: MemberRole }
   | { type: "room:ended" }
   | { type: "room:error"; code: string }
-  | { type: "room:notice"; code: string };
+  | { type: "room:notice"; code: string; retryMs?: number };
 
 export type RoomClientEvent =
   | { type: "client:connecting" }
@@ -181,7 +182,18 @@ export function roomReducer(state: RoomState, event: RoomEvent, now: () => numbe
     }
     case "room:ended": return { ...state, phase: "ended" };
     case "room:error": return { ...state, phase: "denied", error: event.code };
-    case "room:notice": return { ...state, notice: { code: event.code, n: (state.notice?.n ?? 0) + 1 } };
+    case "room:settings": {
+      // Host settings live on the room object (room:state carries them there too). Before the first room:state there is no
+      // room to put them on: the room:state that follows carries the current values anyway.
+      if (!state.room) return state;
+      const pinnedMessage = typeof event.pinnedMessage === "string" && event.pinnedMessage ? event.pinnedMessage : null;
+      const slowModeSec = typeof event.slowModeSec === "number" && event.slowModeSec > 0 ? event.slowModeSec : 0;
+      return { ...state, room: { ...state.room, pinnedMessage, slowModeSec, locked: event.locked === true } };
+    }
+    case "room:notice": {
+      const retryMs = typeof event.retryMs === "number" && event.retryMs > 0 ? event.retryMs : undefined;
+      return { ...state, notice: { code: event.code, n: (state.notice?.n ?? 0) + 1, ...(retryMs !== undefined ? { retryMs } : {}) } };
+    }
   }
   return state;
 }

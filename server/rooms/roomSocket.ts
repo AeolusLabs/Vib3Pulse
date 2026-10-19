@@ -5,11 +5,11 @@ import { isBlockedEitherWay } from "../utils/blocks";
 import { ageFromDob } from "@shared/age";
 import { resolveScreen } from "@shared/screen";
 import { sanitizePlaybackInput, type NowPlaying } from "@shared/playback";
-import { HOST_LEAVE_GRACE_MS, MINORS_ROOM_WARNING, ROOM_LIMITS, ROOM_REACTIONS, resolveRoomPrivacy, resolveChatReply, validateChatReply, type MinorsRoomCode } from "@shared/rooms";
+import { HOST_LEAVE_GRACE_MS, MINORS_ROOM_WARNING, ROOM_LIMITS, ROOM_REACTIONS, resolveRoomPrivacy, resolveChatReply, validateChatReply, type MinorsRoomCode, type RoomSettings } from "@shared/rooms";
 import { canHostRoom, canInteract, canJoinRoom } from "@shared/roomRules";
 import type { Room, User } from "@shared/schema";
 import * as rs from "./roomStorage";
-import { mutualFollow, plainText, publicRoom, viewRoom } from "./roomAccess";
+import { mutualFollow, plainText, sha256, viewerRoom, viewRoom } from "./roomAccess";
 import { getInviteState, markHostRoomsMinors, minorsGate, NO_INVITE, revokeInvite } from "./minorsRoom";
 import { roomHub, type HubMember } from "./RoomHub";
 import { TokenBucket } from "./rateLimit";
@@ -32,6 +32,7 @@ export const tuning = {
   playback: { rate: 4, burst: 8 },   // host play / pause / seek, plus a heartbeat every 5 s
   sweepMs: 10_000,                   // how often LiveKit is compared with the room (0 = off, for tests)
   kickMs: 10 * 60_000,               // a kick keeps the person out this long (a ban is forever)
+  lockRejoinMs: HOST_LEAVE_GRACE_MS, // a locked room still takes back someone who left (or dropped) this recently
 };
 
 const OPEN = 1;
@@ -59,6 +60,72 @@ const notice = (ws: RoomClient, code: string) => direct(ws, { type: "room:notice
 const refuse = (ws: RoomClient, code: string) => direct(ws, { type: "room:error", code });
 /** Every minors' room refusal carries the one warning text (and nothing about the room). */
 const minorsError = (code: MinorsRoomCode) => ({ type: "room:error", code, warning: MINORS_ROOM_WARNING });
+
+// ---------------------------------------------------------------- host settings (pinned message, slow mode, lock)
+/**
+ * The live settings of each live room, so the chat path needs no query. Written by notifySettings after every committed
+ * change (empty room or not), and by the first join of a room that has no entry yet (set-if-absent, from that join's fresh
+ * row, so it can never overwrite a newer value). Kept while the room is live, removed when it ends.
+ */
+const roomSettings = new Map<string, RoomSettings>();
+const settingsFromRow = (r: Pick<Room, "pinnedMessage" | "slowModeSec" | "locked">): RoomSettings =>
+  ({ pinnedMessage: r.pinnedMessage ?? null, slowModeSec: r.slowModeSec ?? 0, locked: r.locked === true });
+/** The settings the room has now: the live copy if there is one, else the row. */
+const settingsOf = (room: Pick<Room, "id" | "pinnedMessage" | "slowModeSec" | "locked">): RoomSettings => roomSettings.get(room.id) ?? settingsFromRow(room);
+function rememberSettings(roomId: string, s: RoomSettings) {
+  if (roomSettings.size > 2000 && !roomSettings.has(roomId)) {
+    // Safety valve only (entries normally go when the room ends): forget rooms nobody is in; their next join reads the row.
+    Array.from(roomSettings.keys()).forEach((id) => { if (roomHub.count(id) === 0) roomSettings.delete(id); });
+  }
+  roomSettings.set(roomId, s);
+}
+
+/** Tells everyone in the room the current settings (and records them for the chat and join paths). Call after every committed change. */
+export function notifySettings(room: Pick<Room, "id" | "pinnedMessage" | "slowModeSec" | "locked">): void {
+  const s = settingsFromRow(room);
+  rememberSettings(room.id, s);
+  roomHub.broadcast(room.id, { type: "room:settings", ...s });
+}
+
+const settingsChains = new Map<string, Promise<void>>();
+/**
+ * Runs one settings write for a room at a time, and broadcasts the row it returned before the next write starts, so two
+ * quick changes can never be announced in the wrong order (the last one announced is always the last one committed).
+ */
+export async function writeRoomSettings(roomId: string, write: () => Promise<Room>): Promise<Room> {
+  const prev = settingsChains.get(roomId) ?? Promise.resolve();
+  const run = prev.then(write).then((row) => { if (row?.status === "live") notifySettings(row); return row; });
+  const tail = run.then(() => undefined, () => undefined);
+  settingsChains.set(roomId, tail);
+  try { return await run; } finally { if (settingsChains.get(roomId) === tail) settingsChains.delete(roomId); }
+}
+
+/**
+ * Slow mode: when each person last chatted, per room and per USER (all their tabs share it). Host and co-hosts are exempt.
+ * Dropped when the room empties or ends; old entries are pruned as a room's map grows, so nothing accumulates.
+ */
+const slowChats = new Map<string, Map<string, number>>();
+const SLOW_MAX_MS = 30_000; // the longest slow mode (SLOW_MODES): older entries can never refuse anything
+function forgetSlowIfEmpty(roomId: string) { if (roomHub.count(roomId) === 0) slowChats.delete(roomId); }
+
+/** Milliseconds this person must still wait before chatting (0 = may chat now). */
+function slowModeWait(roomId: string, userId: string, slowModeSec: number, now: number): number {
+  if (slowModeSec <= 0) return 0;
+  const last = slowChats.get(roomId)?.get(userId);
+  if (last === undefined) return 0;
+  const windowMs = slowModeSec * 1000;
+  const left = last + windowMs - now;
+  return left > 0 ? Math.min(windowMs, Math.max(1, Math.ceil(left))) : 0;
+}
+function recordSlowChat(roomId: string, userId: string, now: number) {
+  let m = slowChats.get(roomId);
+  if (!m) { m = new Map(); slowChats.set(roomId, m); }
+  if (m.size > 2 * ROOM_LIMITS.capacityMaxPaid) {
+    const cutoff = now - SLOW_MAX_MS;
+    Array.from(m.entries()).forEach(([k, at]) => { if (at < cutoff) m!.delete(k); });
+  }
+  m.set(userId, now);
+}
 
 const BUCKET_TTL_MS = 10 * 60_000;
 const bucketsFor = (userId: string) => {
@@ -98,6 +165,8 @@ export async function endRoom(roomId: string): Promise<void> {
   for (const m of roomHub.end(roomId)) {
     joinedSockets.delete(m.userId);
   }
+  roomSettings.delete(roomId);
+  slowChats.delete(roomId);
   await rs.markAllLeft(roomId).catch(() => {});
 }
 
@@ -148,6 +217,7 @@ async function leaveRoom(userId: string, roomId: string) {
   await dropFromVoice(roomId, userId, true); // leaving keeps the stage right for a reconnect; must run while the room's voice flag still exists
   const m = roomHub.leave(roomId, userId);
   joinedSockets.delete(userId);
+  forgetSlowIfEmpty(roomId);
   await rs.markLeft(roomId, userId).catch(() => {});
   if (!m) return;
   roomHub.broadcast(roomId, { type: "room:left", userId });
@@ -203,7 +273,8 @@ const JOIN_AGE_CODES = { AGE_UNKNOWN: "AGE_UNKNOWN", AGE_LIMIT: "AGE_LIMIT" } as
 async function sendState(ws: RoomClient, room: Room, you: HubMember) {
   direct(ws, {
     type: "room:state",
-    room: publicRoom(room),
+    // The settings as the room has them now (a change that landed during the join is already in the live copy).
+    room: { ...viewerRoom(room), ...settingsOf(room) },
     members: (() => {
       // A full free room is sent whole. Past that, the host must still see (and act on) everyone on stage or asking, and
       // everyone in the recent chat must resolve to a person, or their name would read "Someone" and could not be reported.
@@ -309,6 +380,19 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
   // room lives, so a row read that predates the correction cannot let an uninvited adult in. No await from here to the insert.
   const mg = minorsGate({ minorsRoom: fresh.minorsRoom || roomHub.isMinorsRoom(roomId), hostId: fresh.hostId }, userId, freshAge, freshInvite);
   if (!mg.ok) return direct(ws, minorsError(mg.code));
+  // Room lock, decided here next to the minors' gate: still no await from here to the hub insert. Only NEW joiners are
+  // stopped (someone already in the hub is a second tab or a reconnect). A lock that committed while we were awaiting is in
+  // the fresh row or in the live copy (notifySettings runs right after the write), so either one saying "locked" locks.
+  if (!roomHub.get(roomId, userId) && (fresh.locked || roomSettings.get(roomId)?.locked === true)) {
+    const leftAt = freshMember?.leftAt ?? null;
+    // A member of this live session: never left, or left (or dropped) so recently that this is a reconnect.
+    const currentMember = !!freshMember && !freshMember.banned && (leftAt === null || Date.now() - new Date(leftAt).getTime() < tuning.lockRejoinMs);
+    const holdsInviteLink = fresh.visibility === "invite" && !!token && !!fresh.inviteTokenHash && sha256(token) === fresh.inviteTokenHash;
+    // An adult with an acknowledged personal invite to a minors' room (the minors' gate above has already checked it is valid).
+    const invitedAdult = (fresh.minorsRoom || roomHub.isMinorsRoom(roomId)) && freshAge !== null && freshAge >= 18 && freshInvite.invited && freshInvite.acknowledged;
+    const lockAdmits = userId === fresh.hostId || freshMember?.role === "cohost" || currentMember || holdsInviteLink || invitedAdult;
+    if (!lockAdmits) return refuse(ws, "ROOM_LOCKED");
+  }
 
   const role = userId === fresh.hostId ? "host" : freshMember?.role === "cohost" ? "cohost" : "guest";
   let me = roomHub.get(roomId, userId);
@@ -326,6 +410,8 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
     }
     roomHub.broadcast(roomId, { type: "room:joined", member: memberPayload(me) }, userId);
   }
+  // Set only if absent: a newer value written by notifySettings is never replaced by this join's (possibly older) row.
+  if (!roomSettings.has(roomId)) rememberSettings(roomId, settingsFromRow(fresh));
   // Register the socket in the same synchronous block as the hub insert: a close during the awaits below must find it,
   // otherwise the member would stay in the room forever.
   let set = joinedSockets.get(userId);
@@ -363,6 +449,7 @@ async function evict(roomId: string, targetId: string) {
   await dropFromVoice(roomId, targetId, false); // removed: out of LiveKit and the stage right is gone (before the voice flag can vanish with the last member)
   roomHub.leave(roomId, targetId);
   joinedSockets.delete(targetId);
+  forgetSlowIfEmpty(roomId);
   await rs.markLeft(roomId, targetId).catch(() => {});
   roomHub.broadcast(roomId, { type: "room:left", userId: targetId });
   await reconcileVoice(roomId).catch((e) => console.error("[voice] reconcile failed:", e?.message ?? e));
@@ -707,9 +794,17 @@ export async function handleRoomMessage(ws: RoomClient, userId: string, msg: any
         const raw = typeof msg.text === "string" ? msg.text : "";
         if (raw.trim().length < 1 || raw.length > ROOM_LIMITS.chat) return;
         if (me.muted) return notice(ws, "MUTED");
+        // Slow mode: per person across all their tabs (keyed by user, not socket), host and co-hosts exempt. Checked before
+        // the rate limiter so a refused line does not use up a token. No await in this case: two tabs cannot interleave.
+        const now = Date.now();
+        const exempt = me.role === "host" || me.role === "cohost";
+        const slowSec = exempt ? 0 : (roomSettings.get(roomId)?.slowModeSec ?? 0);
+        const wait = slowModeWait(roomId, userId, slowSec, now);
+        if (wait > 0) return direct(ws, { type: "room:notice", code: "SLOW_MODE", retryMs: wait });
         if (!bucketsFor(userId).chat.take()) return notice(ws, "RATE_LIMITED");
         const text = plainText(raw);
         if (!text) return;
+        if (!exempt) recordSlowChat(roomId, userId, now);
         // The quote is only ever taken from the server's own record of the chat, never from client text or names.
         const replyTo = resolveChatReply(roomHub.recentChat(roomId), validateChatReply(msg.replyTo));
         const line = { userId, text, at: Date.now(), ...(replyTo ? { replyTo } : {}) };
