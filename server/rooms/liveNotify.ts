@@ -80,10 +80,15 @@ export async function notifyFollowersLive(room: Room, host: User): Promise<numbe
     after = page[page.length - 1].id;
     const ids = page.filter((f) => mayTellFollower(f, room, rules, now)).map((f) => f.id);
     if (ids.length) {
+      // Explicit casts: each parameter is used both as an insert value and in a comparison, and untyped Postgres would
+      // deduce text in one place and varchar in the other ("inconsistent types deduced"), failing every run.
+      // Dedupe only against an earlier GO-LIVE notice: the invite routes also write type 'room_live' rows for this room
+      // ("<name> invited you", "<name> invited you to a room"), and an invited follower must still be told it is live.
       const inserted = (await pool.query(
         `insert into notifications (user_id, type, title, message, link, related_user_id, related_entity_id, is_read)
-         select v.id, 'room_live', $2, $3, $4, $5, $6, false from unnest($1::varchar[]) as v(id)
-          where not exists (select 1 from notifications n where n.user_id = v.id and n.type = 'room_live' and n.related_entity_id = $6)
+         select v.id, 'room_live', $2::text, $3::text, $4::text, $5::varchar, $6::varchar, false from unnest($1::varchar[]) as v(id)
+          where not exists (select 1 from notifications n where n.user_id = v.id and n.type = 'room_live' and n.related_entity_id = $6::varchar
+                              and n.title like '%is live')
          returning user_id`,
         [ids, title, room.title, link, host.id, room.id],
       )).rows as { user_id: string }[];

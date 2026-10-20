@@ -150,8 +150,8 @@ export async function insertSprayNotice(recipientId: string, sprayId: string): P
   const key = sprayNoticeKey(sprayId);
   const r = await pool.query(
     `insert into notifications (user_id, type, title, message, link, related_entity_id, is_read)
-     select $1, 'spray_received', $2, $3, $4, $5, false
-      where not exists (select 1 from notifications where user_id = $1 and type = 'spray_received' and related_entity_id = $5)`,
+     select $1::varchar, 'spray_received', $2::text, $3::text, $4::text, $5::varchar, false
+      where not exists (select 1 from notifications where user_id = $1::varchar and type = 'spray_received' and related_entity_id = $5::varchar)`,
     [recipientId, copy.title, copy.message, link, key],
   );
   if (!r.rowCount) return "duplicate";
