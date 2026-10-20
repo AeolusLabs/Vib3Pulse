@@ -315,7 +315,8 @@ try {
   check("reversed transfer: failed + alert, no new transfer", (await payout(R8)).status === "failed" && /REVERSED/.test((await payout(R8)).last_error ?? "") && callsFor(ref(R8)).length === 0
     && (await q(`select 1 from payment_issues where provider_payment_id = $1 and reason = 'payout_failed' and resolved_at is null`, [ref(R8)])).length === 1);
 
-  // ---- no verified payout account at release: stays queued, alerted once, paid when the host adds one
+  // ---- no verified payout account at release: stays HELD (review r3 N1: 'queued' only when it can be paid now),
+  // alerted once, queued and paid when the host adds one
   const R9 = await mkRoom(HN);
   await mkTicket(R9, U[1]);
   await endRoom(R9);
@@ -323,11 +324,12 @@ try {
   await settlement.runSettlementPass(due9);
   await settlement.runSettlementPass(due9);
   const p9 = await payout(R9);
-  check("no payout account: queued, NO_PAYOUT_ACCOUNT, attempts untouched, nothing sent", p9.status === "queued" && p9.last_error === "NO_PAYOUT_ACCOUNT" && Number(p9.attempts) === 0 && callsFor(ref(R9)).length === 0, JSON.stringify(p9));
-  check("...one alert, not one per pass", (await q(`select 1 from payment_issues where provider_payment_id = $1 and reason = 'payout_failed' and resolved_at is null`, [ref(R9)])).length === 1);
+  const issues9 = await q(`select error_message from payment_issues where provider_payment_id = $1 and reason = 'payout_failed' and resolved_at is null`, [ref(R9)]);
+  check("no payout account: still held, NO_PAYOUT_ACCOUNT issue, attempts untouched, nothing sent", p9.status === "held" && issues9.length >= 1 && /^NO_PAYOUT_ACCOUNT/.test(issues9[0].error_message ?? "") && Number(p9.attempts) === 0 && callsFor(ref(R9)).length === 0, JSON.stringify({ p9, issues9 }));
+  check("...one alert, not one per pass", issues9.length === 1);
   await q(`insert into organizer_payment_accounts (user_id, provider, paystack_subaccount_code, details_submitted, payouts_enabled, room_verified_subaccount_code, name_matched_at) values ($1,'paystack',$2,true,false,$2,now())`, [HN, `ACCT_tr_unverified_${stamp}`]);
   await settlement.runSettlementPass(due9);
-  check("an account with payouts not enabled is not used", (await payout(R9)).status === "queued" && callsFor(ref(R9)).length === 0);
+  check("an account with payouts not enabled is not used", (await payout(R9)).status === "held" && callsFor(ref(R9)).length === 0);
   await q(`update organizer_payment_accounts set payouts_enabled = true where user_id = $1`, [HN]);
   await settlement.runSettlementPass(due9);
   check("...verified account added: paid once, alert resolved", (await payout(R9)).status === "paid" && callsFor(ref(R9)).length === 1

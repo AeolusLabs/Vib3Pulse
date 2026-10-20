@@ -106,8 +106,8 @@ export async function scheduleRoomPayout(roomId: string, opts: { hostReview?: bo
   const releaseAt = new Date(payoutReleaseAt(Number(room.ended_ms)));
   const r = await pool.query(
     `insert into room_payouts (room_id, host_id, amount_kobo, status, release_at)
-     select $1, $2, coalesce(sum(t.host_kobo), 0), 'held', $3::timestamp
-       from room_tickets t where t.room_id = $1 and t.status = 'paid'
+     select $1::varchar, $2::varchar, coalesce(sum(t.host_kobo), 0), 'held', $3::timestamp
+       from room_tickets t where t.room_id = $1::varchar and t.status = 'paid'
      having count(*) > 0
      on conflict (room_id) do update set amount_kobo = excluded.amount_kobo,
             release_at = case when room_payouts.release_at >= $4::timestamp then room_payouts.release_at else excluded.release_at end

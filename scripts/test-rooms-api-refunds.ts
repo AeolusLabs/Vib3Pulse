@@ -300,7 +300,12 @@ try {
   const issues = await q(`select * from payment_issues where provider_payment_id = $1 and reason = 'refund_failed' and resolved_at is null`, [kt.ref]);
   check("one open refund_failed issue for finance, nothing told to the buyer yet, no ledger row", issues.length === 1 && (await refundNotes(U3, RK)).length === 0 && (await ledgerRows(kt.id)).length === 0, JSON.stringify(issues));
   await refunds.runRoomRefundPass(new Date());
-  check("a retry while the provider still refuses keeps one issue (no duplicates)", (await q(`select 1 from payment_issues where provider_payment_id = $1 and resolved_at is null`, [kt.ref])).length === 1);
+  // One refund_failed alert, and no reason with two open rows. (The refund_pending "owed since" marker opened with the
+  // refund is bookkeeping, not an alert, so it is legitimately open beside the alert.)
+  const openK = await q(`select reason, count(*)::int as n from payment_issues where provider_payment_id = $1 and resolved_at is null group by reason`, [kt.ref]);
+  check("a retry while the provider still refuses keeps one issue (no duplicates)",
+    openK.filter((r) => r.reason === "refund_failed").length === 1 && openK.every((r) => r.n === 1)
+    && openK.every((r) => r.reason === "refund_failed" || r.reason === "refund_pending"), JSON.stringify(openK));
   check("asking again returns already", (await refunds.refundTicket(kt.id, "host_cancelled")) === "already");
   refuse.delete(kt.ref);
   const retry = await refunds.runRoomRefundPass(new Date());

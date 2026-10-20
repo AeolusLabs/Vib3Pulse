@@ -135,7 +135,7 @@ const mkSpray = async (o: { roomId: string; hostId: string; payerId: string; rec
   return (await q(
     `insert into spray_payments (idempotency_key, request_hash, room_id, host_id, payer_id, recipient_id, tier, v3c, amount_kobo, vat_kobo, fee_kobo,
        reserve_kobo, platform_kobo, host_kobo, guest_kobo, provider, provider_ref, payment_method_id, status, created_at, paid_at, delivered_at, reversed_at)
-     values ($1,'h',$2,$3,$4,$5,$6,$7,$7,$8,$9,$10,$11,$12,$13,'paystack',$14,$15,$16, now() - $17::interval, now() - $17::interval,
+     values ($1,'h',$2,$3,$4,$5,$6,$7::int,$7::int,$8,$9,$10,$11,$12,$13,'paystack',$14,$15,$16, now() - $17::interval, now() - $17::interval,
        case when $18 then now() - $17::interval end, case when $16 = 'reversed' then now() end) returning id`,
     [crypto.randomUUID(), o.roomId, o.hostId, o.payerId, o.recipientId, o.tier ?? "bundle", b.price, b.vat, b.fee, b.reserve, b.platform, b.host,
       stage ? b.guest : null, `ea_sp_${stamp}_${++seq}`, o.methodId ?? null, o.status, o.ago ?? "2 hours", delivered],
@@ -327,7 +327,8 @@ try {
     && Object.keys(r.json.banks[0]).sort().join() === "code,name", r.text);
 
   check("no log line carries an account number or a bank account name",
-    !logged.some((l) => /0123456789|1111111111|2222222222|3333333333|OKAFOR|SOMEONE ELSE/i.test(l)));
+    // This test's own PASS/FAIL lines are not server logs (one check name says "someone else's account").
+    !logged.some((l) => !/^(PASS|FAIL) /.test(l) && /0123456789|1111111111|2222222222|3333333333|OKAFOR|SOMEONE ELSE/i.test(l)));
 
   // =============================================================== review r3 N1: an unpayable host's payout is never stranded
   // Transfers are mocked (no Paystack): no transfer exists for a reference until we "create" it, and it succeeds at once.

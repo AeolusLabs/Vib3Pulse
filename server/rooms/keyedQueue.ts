@@ -32,13 +32,16 @@ export function createKeyedQueue(opts: { maxPending: number }): KeyedQueue {
       if (n >= opts.maxPending) return Promise.reject(new QueueFullError(key, n));
       counts.set(key, n + 1);
       const prev = tails.get(key) ?? Promise.resolve();
-      const result = prev.then(() => fn());
-      // The next task waits for this one to settle either way; a failure never blocks the queue.
-      const tail = result.then(() => undefined, () => undefined).then(() => {
+      // The count drops BEFORE the caller's promise settles, so a caller that has its answer never still counts as pending
+      // (and a follow-up request is not refused as "full" by a task that already finished).
+      const settle = () => {
         const left = (counts.get(key) ?? 1) - 1;
         if (left <= 0) counts.delete(key); else counts.set(key, left);
         if (tails.get(key) === tail) tails.delete(key);
-      });
+      };
+      const result = prev.then(() => fn()).then((v) => { settle(); return v; }, (e) => { settle(); throw e; });
+      // The next task waits for this one to settle either way; a failure never blocks the queue.
+      const tail: Promise<void> = result.then(() => undefined, () => undefined);
       tails.set(key, tail);
       return result;
     },

@@ -178,7 +178,9 @@ test("statuses: the eight, terminal ones, spend statuses", () => {
     assert.equal(norm(file), `BEGIN; ${norm(SPRAY_SCHEMA_SQL)} COMMIT;`);
   });
   test("migration is additive: no DROP, no DELETE, no UPDATE, no TRUNCATE", () => {
-    assert.doesNotMatch(SPRAY_SCHEMA_SQL, /\bDROP\b|\bDELETE\b|\bUPDATE\b|\bTRUNCATE\b/i);
+    // A foreign key's referential action ("ON DELETE RESTRICT") is DDL, not a statement that removes or changes rows.
+    const statements = SPRAY_SCHEMA_SQL.replace(/\bON (DELETE|UPDATE) (RESTRICT|CASCADE|SET NULL|SET DEFAULT|NO ACTION)\b/gi, "");
+    assert.doesNotMatch(statements, /\bDROP\b|\bDELETE\b|\bUPDATE\b|\bTRUNCATE\b/i);
   });
   test("every CREATE / ADD COLUMN / ADD CONSTRAINT is guarded: re-running is a no-op", () => {
     const creates = SPRAY_SCHEMA_SQL.match(/CREATE (UNIQUE )?(TABLE|INDEX)/g) ?? [];

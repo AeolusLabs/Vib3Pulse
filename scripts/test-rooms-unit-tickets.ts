@@ -146,7 +146,9 @@ test("free room capacity is unchanged by ticketing (still 2..50, 51 refused)", (
     assert.equal(norm(file), `BEGIN; ${norm(ROOM_TICKETS_SCHEMA_SQL)} COMMIT;`);
   });
   test("migration is additive: no DROP, no DELETE, no UPDATE of existing rows", () => {
-    assert.doesNotMatch(ROOM_TICKETS_SCHEMA_SQL, /\bDROP\b|\bDELETE\b|\bUPDATE\b|\bTRUNCATE\b/i);
+    // A foreign key's referential action ("ON DELETE RESTRICT", fix round I5) is DDL, not a statement that removes or changes rows.
+    const statements = ROOM_TICKETS_SCHEMA_SQL.replace(/\bON (DELETE|UPDATE) (RESTRICT|CASCADE|SET NULL|SET DEFAULT|NO ACTION)\b/gi, "");
+    assert.doesNotMatch(statements, /\bDROP\b|\bDELETE\b|\bUPDATE\b|\bTRUNCATE\b/i);
   });
   test("migration: partial unique paid ticket, unique provider_ref, status checks, 20..150 capacity", () => {
     assert.match(ROOM_TICKETS_SCHEMA_SQL, /CREATE UNIQUE INDEX IF NOT EXISTS room_tickets_paid_uniq ON room_tickets \(room_id, user_id\) WHERE status = 'paid'/);
@@ -180,7 +182,8 @@ test("free room capacity is unchanged by ticketing (still 2..50, 51 refused)", (
   test("shared/schema.ts: room_tickets room_id and user_id are onDelete restrict (same as the SQL)", () => {
     const src = readFileSync(new URL("../shared/schema.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
     const start = src.indexOf('export const roomTickets = pgTable("room_tickets"');
-    const block = src.slice(start, src.indexOf("}));", start));
+    // Code only: the block's own comment says "RESTRICT, never cascade".
+    const block = src.slice(start, src.indexOf("}));", start)).replace(/\/\/.*$/gm, "");
     assert.match(block, /roomId: varchar\("room_id"\)\.notNull\(\)\.references\(\(\) => rooms\.id, \{ onDelete: "restrict" \}\)/);
     assert.match(block, /userId: varchar\("user_id"\)\.notNull\(\)\.references\(\(\) => users\.id, \{ onDelete: "restrict" \}\)/);
     assert.doesNotMatch(block, /cascade/);
@@ -236,7 +239,8 @@ test("joinOnce: the fresh ticket check sits after the minors' gate and the lock,
   const ticket = body.indexOf("!freshTicket) return refuse(ws, \"TICKET_REQUIRED\")");
   const insert = body.indexOf("roomHub.join(roomId, me)");
   assert.ok(mg > 0 && lock > mg && ticket > lock && insert > ticket, `${mg} ${lock} ${ticket} ${insert}`);
-  assert.doesNotMatch(body.slice(mg, insert), /\bawait\b/, "no await between the minors' gate and the hub insert");
+  // Code only: the comments there say "no await from here to the hub insert".
+  assert.doesNotMatch(body.slice(mg, insert).replace(/\/\/.*$/gm, ""), /\bawait\b/, "no await between the minors' gate and the hub insert");
   // the pre-check comes after the age gate and the lock pre-check, before leaving the current room
   const pre = body.indexOf("!(await hasPaidTicket(roomId, userId))");
   const age = body.indexOf("JOIN_AGE_CODES[gate.code]");

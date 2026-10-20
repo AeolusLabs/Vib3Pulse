@@ -565,7 +565,11 @@ test("every 'can be paid' read goes through one name-checked helper (fix round C
   assert.doesNotMatch(spray, /getOrganizerPaymentAccount|hasVerifiedPayoutAccount/);
   const settle = src("server/rooms/settlement.ts");
   assert.match(settle, /await payableSubaccountOf\(p\.host_id, c\)/);
-  assert.doesNotMatch(settle, /from organizer_payment_accounts/);
+  // Review r3 N1 orders due payouts payable-hosts-first in SQL: any direct read of the table must use the ONE shared
+  // predicate (PAYABLE_ACCOUNT_SQL), never its own idea of "payable".
+  for (const m of settle.matchAll(/from organizer_payment_accounts/g)) {
+    assert.match(settle.slice(m.index!, m.index! + 160), /^from organizer_payment_accounts a where a\.user_id = [\w.]+ and \$\{PAYABLE_ACCOUNT_SQL\}\)/, "a direct read without the shared predicate");
+  }
   const routes = src("server/rooms/roomRoutes.ts");
   assert.match(routes, /roomFeatures\.paidRooms \? await hostPayoutReady\(host\.id\) : false/);
   const ts = src("server/rooms/ticketStorage.ts");

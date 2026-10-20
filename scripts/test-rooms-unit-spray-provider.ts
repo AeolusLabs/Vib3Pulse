@@ -199,8 +199,10 @@ test("body: refuses non-NGN, sub-minimum, fractional, bad shares, bad reference,
     [{ subaccountCode: HOST_ACCT, amountKobo: 1 }, { subaccountCode: GUEST_ACCT, amountKobo: 1 }, { subaccountCode: "ACCT_third001", amountKobo: 1 }],
   ];
   for (const shares of bad) assert.throws(() => buildChargeBody(body({ split: { shares }, splitCode: shares.length === 2 ? "SPL_abcdef12" : undefined })), RangeError, JSON.stringify(shares));
-  // shares summing to exactly the price are allowed (at most price)
-  assert.doesNotThrow(() => buildChargeBody(body({ split: { shares: [{ subaccountCode: HOST_ACCT, amountKobo: 100000 }] } })));
+  // Two shares summing to exactly the price are allowed (at most price). One share equal to the price is NOT: it would
+  // make transaction_charge 0, which Paystack may read as "not set" (fix round: transaction_charge never 0).
+  assert.doesNotThrow(() => buildChargeBody(body({ split: { shares: [{ subaccountCode: HOST_ACCT, amountKobo: 60000 }, { subaccountCode: GUEST_ACCT, amountKobo: 40000 }] }, splitCode: "SPL_abcdef12" })));
+  assert.throws(() => buildChargeBody(body({ split: { shares: [{ subaccountCode: HOST_ACCT, amountKobo: 100000 }] } })), /transaction_charge/);
   for (const r of ["vib3_123", makeTicketReference(ROOM, PAYER, SECRET), ""]) assert.throws(() => buildChargeBody(body({ reference: r })), /reference/);
   assert.throws(() => buildChargeBody(body({ authorizationCode: "nope" })), /authorizationCode/);
   assert.throws(() => buildChargeBody(body({ email: "not-an-email" })), /email/);
@@ -287,7 +289,9 @@ test("mappers: verify needs success + NGN + our reference; abandoned is pending,
 
 test("scrub: provider messages lose codes, emails and long numbers", () => {
   const s = scrubProviderMessage(`Card ${AUTH} for ${EMAIL} account 0123456789 SIG_xyz failed`);
-  assertNoSecrets(s, "scrubbed");
+  // The scrubber keeps the bare "SIG_" / "AUTH_" prefix as a marker ("SIG_[redacted]"); the VALUES must be gone.
+  for (const x of [AUTH, EMAIL, "SIG_xyz", "xyz", "secretcode42"]) assert.ok(!s.includes(x), `scrubbed contains a secret (${x.slice(0, 5)}...)`);
+  assert.doesNotMatch(s, /SIG_(?!\[redacted\])|AUTH_(?!\[redacted\])/, "a signature or code prefix not followed by [redacted]");
   assert.ok(!s.includes("0123456789"));
   assert.ok(scrubProviderMessage("x".repeat(500)).length <= 120);
 });
