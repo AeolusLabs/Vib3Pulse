@@ -134,6 +134,12 @@ function RoomPageInner({ id }: { id: string }) {
 
   const role = state.you?.role ?? detail?.you?.role ?? "guest";
   const isHost = detail?.you?.role === "host" || state.you?.role === "host";
+  // "See your recap" only for people who were in the room. The recap route is the one that knows (it answers 404 to
+  // everyone else), so ask it once the room has ended; the recap page reuses this cache entry.
+  const roomEnded = room?.status === "ended" || state.phase === "ended";
+  const { data: recapProbe } = useQuery<unknown>({
+    queryKey: [`/api/rooms/${encodeURIComponent(id)}/recap`], enabled: !!me && roomEnded, retry: false, staleTime: 0,
+  });
 
   // ---------------------------------------------------------------- paid rooms (task 4.7)
   // The way back from Paystack carries the payment reference; it is verified once, then dropped from the address.
@@ -252,7 +258,7 @@ function RoomPageInner({ id }: { id: string }) {
   } else if (room.status === "ended" || state.phase === "ended") {
     content = state.notice?.code === "HOST_REVIEW"
       ? <Panel title="This room has closed" body={HOST_REVIEW_COPY} action={back} />
-      : <RoomCodePanel code="ROOM_ENDED" room={room} recapHref={`/rooms/${encodeURIComponent(id)}/recap`} onRetry={() => { void refetch(); }} />;
+      : <RoomCodePanel code="ROOM_ENDED" room={room} recapHref={recapProbe ? `/rooms/${encodeURIComponent(id)}/recap` : undefined} onRetry={() => { void refetch(); }} />;
   } else if (ticketBlock && showsPrice(gate)) {
     bare = true;
     // Only from the server's ticket block (an eligible adult who can view the room). Never inferred from anything else.

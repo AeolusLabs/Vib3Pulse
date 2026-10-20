@@ -1,9 +1,11 @@
-// Seeded money screens for /dev/room-fixture?earn=empty|week|clawback|noaccount|mismatch (&page=earnings|payouts|payments).
+// Seeded money screens for /dev/room-fixture?earn=empty|week|clawback|noaccount|mismatch|organiser|soon
+// (&page=earnings|payouts|payments). "organiser": set up through organiser payouts (no account here, subaccount ready).
+// "soon": no account and linking not open on this page yet (canLinkAccount false).
 // Pure data in the routes' real shapes (the unit test runs each through the parsers). Imported only by the DEV-only
 // fixture page and the unit test, so none of this reaches the production bundle. The week matches flows.html board 8:
 // settled 88,435 + on its way 12,200 + held for tickets 142,965 = 243,600 naira.
 
-export const EARN_SCENES = ["empty", "week", "clawback", "noaccount", "mismatch"] as const;
+export const EARN_SCENES = ["empty", "week", "clawback", "noaccount", "mismatch", "organiser", "soon"] as const;
 export type EarnScene = (typeof EARN_SCENES)[number];
 export const EARN_PAGES = ["earnings", "payouts", "payments"] as const;
 export type EarnPage = (typeof EARN_PAGES)[number];
@@ -14,20 +16,22 @@ export function parseEarnFixture(search: string): { scene: EarnScene; page: Earn
   if (!v || !(EARN_SCENES as readonly string[]).includes(v)) return null;
   const scene = v as EarnScene;
   const p = q.get("page");
-  const page: EarnPage = p && (EARN_PAGES as readonly string[]).includes(p) ? (p as EarnPage) : scene === "mismatch" ? "payouts" : "earnings";
+  const page: EarnPage = p && (EARN_PAGES as readonly string[]).includes(p) ? (p as EarnPage) : scene === "mismatch" || scene === "soon" ? "payouts" : "earnings";
   return { scene, page };
 }
 
 export function fixturePayoutStatus(scene: EarnScene) {
   switch (scene) {
-    case "noaccount": return { verifiedAdult: true, account: null, subaccountReady: false };
-    case "mismatch": return { verifiedAdult: true, account: { bankName: "GTBank", last4: "4821", nameMatches: false }, subaccountReady: false };
-    default: return { verifiedAdult: true, account: { bankName: "GTBank", last4: "4821", nameMatches: true }, subaccountReady: true };
+    case "noaccount": return { verifiedAdult: true, account: null, subaccountReady: false, canLinkAccount: true };
+    case "mismatch": return { verifiedAdult: true, account: { bankName: "GTBank", last4: "4821", nameMatches: false }, subaccountReady: false, canLinkAccount: true };
+    case "organiser": return { verifiedAdult: true, account: null, subaccountReady: true, canLinkAccount: false };
+    case "soon": return { verifiedAdult: true, account: null, subaccountReady: false, canLinkAccount: false };
+    default: return { verifiedAdult: true, account: { bankName: "GTBank", last4: "4821", nameMatches: true }, subaccountReady: true, canLinkAccount: true };
   }
 }
 
 /** After a fixture save that the bank accepted: the new account, last four only. */
-export const FIXTURE_SAVED_STATUS = { verifiedAdult: true, account: { bankName: "Access Bank", last4: "0137", nameMatches: true }, subaccountReady: true };
+export const FIXTURE_SAVED_STATUS = { verifiedAdult: true, account: { bankName: "Access Bank", last4: "0137", nameMatches: true }, subaccountReady: true, canLinkAccount: true };
 
 export const FIXTURE_BANKS = {
   banks: [

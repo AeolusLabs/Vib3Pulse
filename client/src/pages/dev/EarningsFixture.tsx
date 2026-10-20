@@ -1,4 +1,4 @@
-// Dev-only: the room money screens (phase 6) with no network. ?earn=empty|week|clawback|noaccount|mismatch picks the data,
+// Dev-only: the room money screens (phase 6) with no network. ?earn=empty|week|clawback|noaccount|mismatch|organiser|soon picks the data,
 // &page=earnings|payouts|payments the screen (mismatch opens on payouts), &theme=dark|light. Rendered from RoomFixture,
 // which App.tsx loads only in development builds. A fake fetch is installed in a layout effect, before any child's
 // effects start a request, and answers every money route; a save on the mismatch scene is refused with NAME_MISMATCH,
@@ -18,6 +18,10 @@ const PAGE_LABEL: Record<EarnPage, string> = { earnings: "Earnings", payouts: "G
 export default function EarningsFixture({ scene, page: first, theme }: { scene: EarnScene; page: EarnPage; theme: "dark" | "light" }) {
   const qc = useQueryClient();
   useLayoutEffect(() => {
+    // Drop anything the real app already cached for these routes (the rooms config is cached for 5 minutes), so every
+    // screen here reads the fake answers below.
+    const keys = [payoutStatusKey, banksKey, paymentsKey, ["/api/users/me/room-earnings"], ["/api/rooms/config"]];
+    for (const key of keys) qc.removeQueries({ queryKey: key });
     const real = window.fetch;
     let status: unknown = fixturePayoutStatus(scene);
     const json = (body: unknown, code = 200, delay = 250) => new Promise<Response>((res) =>
@@ -28,6 +32,7 @@ export default function EarningsFixture({ scene, page: first, theme }: { scene: 
       const method = (init?.method ?? "GET").toUpperCase();
       const now = Date.now();
       if (u.pathname === "/api/csrf-token") return json({ csrfToken: "fixture" }, 200, 0);
+      if (u.pathname === "/api/rooms/config") return json({ features: { paidRooms: true, spray: true }, limits: {}, currency: "NGN", region: "NG" }, 200, 0);
       if (u.pathname === "/api/rooms/payouts/status") return json(status);
       if (u.pathname === "/api/rooms/payouts/banks") return json(FIXTURE_BANKS);
       if (u.pathname === "/api/rooms/payouts/account" && method === "POST") {
@@ -42,7 +47,7 @@ export default function EarningsFixture({ scene, page: first, theme }: { scene: 
     return () => {
       window.fetch = real;
       // The fixture's answers must not linger in the cache for the real pages.
-      for (const key of [payoutStatusKey, banksKey, paymentsKey, ["/api/users/me/room-earnings"]]) qc.removeQueries({ queryKey: key });
+      for (const key of keys) qc.removeQueries({ queryKey: key });
     };
   }, [scene, qc]);
   useEffect(() => {

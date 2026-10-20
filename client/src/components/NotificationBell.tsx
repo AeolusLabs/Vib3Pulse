@@ -38,6 +38,7 @@ import {
   RefreshCwIcon,
 } from "@/components/ui/icons";
 import { isRoomMoneyNotificationType, safeRoomMoneyLink } from "@shared/roomNotifications";
+import { AMBER } from "@/lib/roomTickets";
 
 // Ease-out quart — fast start, smooth settle. Matches DESIGN.md motion spec.
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
@@ -76,13 +77,14 @@ function getTypeIcon(type: string, className = "h-3 w-3") {
       return <TicketIcon className={`${className} text-slate-400`} />;
     case "room_refund":
       return <TicketIcon className={`${className} text-destructive`} />;
-    // Room money (phase 6). Amber marks a money moment: amber-700 on light, amber-400 on dark (both above 4.5:1).
+    // Room money (phase 6). The badge behind these is the shared amber fill (typeBadgeClass), so the icon takes its text
+    // colour from it (4.5:1 on both themes, tested with AMBER). One row per spray: spray_received is never grouped.
     case "room_ticket":
-      return <TicketIcon className={`${className} text-amber-700 dark:text-amber-400`} />;
+      return <TicketIcon className={className} />;
     case "spray_received":
-      return <SparklesIcon className={`${className} text-amber-700 dark:text-amber-400`} />;
+      return <SparklesIcon className={className} />;
     case "payout_paid":
-      return <CheckCircle2Icon className={`${className} text-amber-700 dark:text-amber-400`} />;
+      return <CheckCircle2Icon className={className} />;
     case "spray_reversed":
       return <RefreshCwIcon className={`${className} text-muted-foreground`} />;
     case "buddy_alert":
@@ -97,6 +99,12 @@ function getTypeIcon(type: string, className = "h-3 w-3") {
     default:
       return <BellIcon className={`${className} text-muted-foreground`} />;
   }
+}
+
+/** Money moments get the shared amber fill behind their icon; everything else the plain badge. */
+const AMBER_BADGE_TYPES = new Set(["room_ticket", "spray_received", "payout_paid"]);
+export function typeBadgeClass(type: string): string {
+  return AMBER_BADGE_TYPES.has(type) ? AMBER.fill : "bg-background";
 }
 
 // --- Links ---
@@ -277,7 +285,7 @@ function NotificationItem({
               </AvatarFallback>
             </Avatar>
             {/* Type icon — absolute bottom-right */}
-            <div className="absolute -bottom-1 -right-1 h-[18px] w-[18px] rounded-full bg-background border border-border/50 flex items-center justify-center shadow-sm">
+            <div className={`absolute -bottom-1 -right-1 h-[18px] w-[18px] rounded-full ${typeBadgeClass(group.type)} border border-border/50 flex items-center justify-center shadow-sm`}>
               {getTypeIcon(group.type, "h-2.5 w-2.5")}
             </div>
           </div>
