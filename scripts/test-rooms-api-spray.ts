@@ -99,8 +99,9 @@ const mock = {
     if (this.verifyThrows) throw new Error("Paystack unavailable: verify");
     const t = this.txs.get(ref);
     if (!t) return null;
+    // Same contract as the real provider (fix round): paid = success, the currency and amount passed through as they are.
     return {
-      paid: t.paidFlag ?? (t.state === "paid" && t.currency === "NGN"), state: t.state, amountKobo: t.amountKobo, currency: t.currency,
+      paid: t.paidFlag ?? t.state === "paid", state: t.state, amountKobo: t.amountKobo, currency: t.currency,
       metadata: t.metadata, ...(t.authorization ? { authorization: t.authorization } : {}),
     };
   },
@@ -124,7 +125,7 @@ const mock = {
     if (o.amountKobo !== undefined) t.amountKobo = o.amountKobo;
     if (o.currency !== undefined) t.currency = o.currency;
     if (o.paidFlag !== undefined) t.paidFlag = o.paidFlag;
-    t.authorization = { code: SECRET_CODE, last4: "4242", brand: "visa", bank: "TEST BANK", reusable: o.reusable !== false, signature: SECRET_SIG };
+    t.authorization = { authorizationCode: SECRET_CODE, last4: "4242", brand: "visa", bank: "TEST BANK", reusable: o.reusable !== false, signature: SECRET_SIG };
   },
   chargesFor(ref: string) { return this.calls.charge.filter((c) => c.reference === ref).length + this.calls.start.filter((c) => c.reference === ref).length; },
 };
@@ -238,6 +239,17 @@ async function mkRoom(hostId: string, ageLimit = "18+") {
 }
 const isGeneric403 = (r: { status: number; json: any }) =>
   r.status === 403 && JSON.stringify(r.json) === JSON.stringify(SPRAY_UNAVAILABLE);
+// Fix round helpers. Every reversal of a taken payment now writes clawbacks (owner ruling C1), and anyone owing an open
+// clawback cannot receive sprays: after checking them, a case settles them so the shared host/guest stay sprayable.
+const clawbacksOf = (sprayId: string) => q(`select * from host_clawbacks where spray_id = $1 order by amount_kobo`, [sprayId]);
+const settleClawbacks = (sprayId: string) => q(`update host_clawbacks set status = 'recovered', recovered_kobo = amount_kobo, recovered_at = now() where spray_id = $1 and status = 'open'`, [sprayId]);
+/** The sweep backs off rows it checked; a test that drives passes by hand makes the row due again. */
+const due = (sprayId: string) => q(`update spray_payments set next_check_at = null where id = $1`, [sprayId]);
+const realNow = sprayClock.now;
+/** Moves the spray clock past the 60 s delivery deadline (restored with clockBack). */
+const clockAhead = (ms = 2 * 60_000) => { sprayClock.now = () => Date.now() + ms; };
+const clockBack = () => { sprayClock.now = realNow; };
+const issues = (ref: string, reason: string) => q(`select * from payment_issues where provider_payment_id = $1 and reason = $2`, [ref, reason]);
 
 tuning.join = { rate: 1000, burst: 1000 };
 tuning.sweepMs = 0;
@@ -312,6 +324,10 @@ try {
   const BLK = await payer("blocker");
   await q(`insert into user_blocks (blocker_id, blocked_id) values ($1,$2)`, [G, BLK.id]);
   await refused("blocked pair (the recipient blocked the payer)", BLK.id, R, body(G));
+  // Fix round (R1 M2): on a stage spray the host takes a cut, so a block between the payer and the HOST refuses it too.
+  const HBLK = await payer("hostblocked");
+  await q(`insert into user_blocks (blocker_id, blocked_id) values ($1,$2)`, [H, HBLK.id]);
+  await refused("the host blocked the payer (spraying a stage guest)", HBLK.id, R, body(G));
   await refused("unknown target id", P.id, R, body("00000000-0000-4000-8000-000000000000"));
   // A free all-ages room is never a money room.
   const H2 = await mk("host_allages", { payout: true });
@@ -408,9 +424,15 @@ try {
 
   // =============================================================== first payment (no card), saveCard, 3D Secure
   const PF = await payer("p_first", { card: false });
-  const f1 = await spray(PF.id, R, { tier: "note", targetId: H, idempotencyKey: key(), saveCard: true });
+  const kf1 = key();
+  const f1 = await spray(PF.id, R, { tier: "note", targetId: H, idempotencyKey: kf1, saveCard: true });
   const f1row = (await sprayRows(PF.id))[0];
   check("no saved card: action_required with an authorization URL", f1.status === 200 && f1.json?.status === "action_required" && typeof f1.json?.authorizationUrl === "string", JSON.stringify(f1.json));
+  // Client M7: a replay of the same key while the bank page is still open hands the same link back (one charge only).
+  const f1again = await spray(PF.id, R, { tier: "note", targetId: H, idempotencyKey: kf1, saveCard: true });
+  check("M7: replay while waiting for the bank answers action_required with the same link, no second checkout",
+    f1again.status === 200 && f1again.json?.status === "action_required" && f1again.json?.authorizationUrl === f1.json?.authorizationUrl
+    && f1again.json?.sprayId === f1row.id && mock.calls.start.filter((s) => s.reference === f1row.provider_ref).length === 1, JSON.stringify(f1again.json));
   check("first payment: callback is /rooms/:id?spray=<sprayId> on our origin", mock.calls.start.find((s) => s.reference === f1row.provider_ref)?.callbackUrl === `${base}/rooms/${R}?spray=${f1row.id}`);
   check("first payment: row pending, no charge of a saved card", f1row.status === "pending" && !mock.calls.charge.some((c) => c.reference === f1row.provider_ref));
   mock.pay(f1row.provider_ref);
@@ -470,15 +492,17 @@ try {
   check("forged reference: no row was created", (await q(`select 1 from spray_payments where provider_ref = $1`, [forged])).length === 0);
   check("junk reference with metadata type spray (string metadata): 200, nothing", (await webhook("charge.success", { reference: "made_up_ref_123", metadata: JSON.stringify({ type: "spray", roomId: R, payerId: P.id }) })) === 200);
   check("bad signature: 400", (await webhook("charge.success", { reference: rrow.provider_ref }, "bad")) === 400);
-  // A stored row moved to another payer (a database tamper): the MAC no longer matches; never delivered.
-  const PT = await payer("p_tamper", { card: false });
+  // Fix round (R1 I4, owner ruling): a stored row is trusted by itself, so rotating the reference secret can never strand a
+  // paid spray. (The MAC only gates references we have no row for: see the forged case above.)
+  const PT = await payer("p_rotate", { card: false });
   await spray(PT.id, R, body(H));
   const trow = (await sprayRows(PT.id))[0];
-  await q(`update spray_payments set payer_id = $2 where id = $1`, [trow.id, P2.id]);
-  mock.pay(trow.provider_ref);
-  await webhook("charge.success", { reference: trow.provider_ref });
-  check("reference for another payer: MAC mismatch, not delivered", (await rowById(trow.id)).status === "pending");
-  await q(`update spray_payments set payer_id = $2 where id = $1`, [trow.id, PT.id]);
+  process.env.SPRAY_REF_SECRET = "rotated-after-an-incident";
+  try {
+    mock.pay(trow.provider_ref);
+    await webhook("charge.success", { reference: trow.provider_ref });
+    check("secret rotated between checkout and payment: still delivered once", (await rowById(trow.id)).status === "delivered" && (await ledger(trow.provider_ref, "spray")).length === 1);
+  } finally { delete process.env.SPRAY_REF_SECRET; }
   // String metadata on a real spray reference: routed by the reference, processed normally.
   const PS = await payer("p_strmeta", { card: false });
   await spray(PS.id, R, body(H));
@@ -494,6 +518,12 @@ try {
   await webhook("charge.success", { reference: wrow.provider_ref });
   const wnow = await rowById(wrow.id);
   check("wrong amount: never delivered, refunded in full, reversed AMOUNT_MISMATCH", wnow.status === "reversed" && wnow.reason === "AMOUNT_MISMATCH" && mock.calls.refund.includes(wrow.provider_ref) && (await ledger(wrow.provider_ref, "spray")).length === 0, JSON.stringify(wnow));
+  const wclaw = await clawbacksOf(wrow.id);
+  check("C1: a reversal of a taken payment writes the host's clawback (origin reversal, the stored host share)",
+    wclaw.length === 1 && wclaw[0].beneficiary_id === H && Number(wclaw[0].amount_kobo) === Number(wrow.host_kobo) && wclaw[0].origin === "reversal" && wclaw[0].status === "open", JSON.stringify(wclaw));
+  const PDEBT = await payer("p_debt");
+  await refused("I2: the host owes an open clawback, so nobody can spray them", PDEBT.id, R, body(H));
+  await settleClawbacks(wrow.id);
   // Wrong currency, reported paid (defensive) and reported as the provider does (not paid, pending).
   const PCUR = await payer("p_currency", { card: false });
   await spray(PCUR.id, R, body(H));
@@ -501,12 +531,18 @@ try {
   mock.pay(crow.provider_ref, { currency: "USD", paidFlag: true });
   await webhook("charge.success", { reference: crow.provider_ref });
   check("wrong currency (reported paid): reversed, never delivered", (await rowById(crow.id)).status === "reversed");
+  await settleClawbacks(crow.id);
+  // Fix round (R2 I2 / ruling 4): the provider reports a wrong-currency success as paid with its currency, so it is refunded
+  // in full; it is never marked failed and kept (not by the webhook, not by the sweep's expiry).
   const PCUR2 = await payer("p_currency2", { card: false });
   await spray(PCUR2.id, R, body(H));
   const c2row = (await sprayRows(PCUR2.id))[0];
   mock.pay(c2row.provider_ref, { currency: "USD" });
-  await webhook("charge.success", { reference: c2row.provider_ref });
-  check("wrong currency (provider says not paid): never delivered", (await rowById(c2row.id)).status !== "delivered");
+  await q(`update spray_payments set created_at = now() - interval '11 minutes' where id = $1`, [c2row.id]); // the sweep would expire it
+  await sweepPendingSprays(sprayClock.now());
+  const c2now = await rowById(c2row.id);
+  check("wrong currency: refunded in full (AMOUNT_MISMATCH), never failed, never delivered", c2now.status === "reversed" && c2now.reason === "AMOUNT_MISMATCH" && mock.calls.refund.includes(c2row.provider_ref), JSON.stringify(c2now));
+  await settleClawbacks(c2row.id);
 
   // =============================================================== recipient leaves between payment and finalize
   const GL = await mk("guest_leaves", { payout: true });
@@ -520,6 +556,11 @@ try {
   mock.pay(lrow.provider_ref);
   h.c.msgs = [];
   await webhook("charge.success", { reference: lrow.provider_ref });
+  // Fix round (ruling 6): a recipient this process's hub does not see is waited for until the 60 s deadline (a deploy
+  // overlap looks exactly like this), so the spray stays paid; then the sweep reverses it.
+  check("recipient not seen: still paid before the deadline (not reversed yet)", (await rowById(lrow.id)).status === "paid" && mock.calls.refund.filter((r) => r === lrow.provider_ref).length === 0);
+  clockAhead();
+  try { await due(lrow.id); await sweepPendingSprays(sprayClock.now()); } finally { clockBack(); }
   const lnow = await rowById(lrow.id);
   check("recipient left: reversed RECIPIENT_LEFT", lnow.status === "reversed" && lnow.reason === "RECIPIENT_LEFT", JSON.stringify(lnow));
   check("recipient left: one refund call, spend released, refund ledger once, no spray ledger",
@@ -530,6 +571,12 @@ try {
     && !h.c.all((m) => m.system === "spray_reversed").length);
   check("recipient left: a spray_reversed notification", (await q(`select 1 from notifications where user_id = $1 and type = 'spray_reversed'`, [PL.id])).length === 1);
   check("recipient left: status poll says reversed with the reason", (await rest("GET", `/api/rooms/${R}/spray/${lrow.id}`, PL.id)).json?.reason === "RECIPIENT_LEFT");
+  const lclaw = await clawbacksOf(lrow.id);
+  check("C1: a stage spray reversal writes the host's cut AND the guest's share as clawbacks", lclaw.length === 2
+    && lclaw.some((c: any) => c.beneficiary_id === H && Number(c.amount_kobo) === Number(lrow.host_kobo))
+    && lclaw.some((c: any) => c.beneficiary_id === GL && Number(c.amount_kobo) === Number(lrow.guest_kobo))
+    && lclaw.every((c: any) => c.origin === "reversal"), JSON.stringify(lclaw));
+  await settleClawbacks(lrow.id);
 
   // =============================================================== server restart between payment and finalize (the sweep)
   const PRS = await payer("p_restart", { card: false });
@@ -546,6 +593,8 @@ try {
   await q(`update spray_payments set status = 'paid', paid_at = now() - interval '2 minutes' where id = $1`, [rs2.id]);
   await sweepPendingSprays(sprayClock.now());
   check("restart: a paid spray past the 60 s deadline is reversed (TIMEOUT)", (await rowById(rs2.id)).status === "reversed" && (await rowById(rs2.id)).reason === "TIMEOUT");
+  check("restart: the TIMEOUT reversal wrote its clawback too", (await clawbacksOf(rs2.id)).length === 1);
+  await settleClawbacks(rs2.id);
   // Unpaid and stale: failed, spend released. Then the payment lands late: refunded, never delivered, spend not given twice.
   const PU = await payer("p_unpaid", { card: false });
   await spray(PU.id, R, body(H));
@@ -558,6 +607,21 @@ try {
   const late = await rowById(urow.id);
   check("late payment after failed: refunded (reversed LATE_PAYMENT), never delivered", late.status === "reversed" && late.reason === "LATE_PAYMENT" && mock.calls.refund.includes(urow.provider_ref));
   check("late payment: spend not released twice", (await spentIn(R, PU.id)) === 0);
+  await settleClawbacks(urow.id);
+  // Fix round (R1 I5 / ruling 10): a late payment with NO webhook is still found: the sweep re-checks failed rows.
+  const PU2 = await payer("p_unpaid_nohook", { card: false });
+  await spray(PU2.id, R, body(H));
+  const u2 = (await sprayRows(PU2.id))[0];
+  await q(`update spray_payments set created_at = now() - interval '11 minutes' where id = $1`, [u2.id]);
+  await sweepPendingSprays(sprayClock.now());
+  check("setup: expired to failed", (await rowById(u2.id)).status === "failed");
+  mock.pay(u2.provider_ref); // no webhook ever arrives
+  await due(u2.id);
+  await sweepPendingSprays(sprayClock.now());
+  const u2now = await rowById(u2.id);
+  check("late payment without a webhook: the sweep refunds it (LATE_PAYMENT)", u2now.status === "reversed" && u2now.reason === "LATE_PAYMENT" && mock.calls.refund.includes(u2.provider_ref), JSON.stringify(u2now));
+  check("the sweep recorded its checks (attempts, backoff)", Number(u2now.check_attempts) >= 2 && !!u2now.last_checked_at);
+  await settleClawbacks(u2.id);
 
   // =============================================================== refund fails: stays reversing, retried, never silently reversed
   const GF = await mk("guest_refundfail", { payout: true });
@@ -571,22 +635,33 @@ try {
   mock.pay(rfrow.provider_ref);
   mock.refundMode = "outage";
   await webhook("charge.success", { reference: rfrow.provider_ref });
+  clockAhead(); // past the delivery deadline: the absent recipient now means a reversal
+  try { await due(rfrow.id); await sweepPendingSprays(sprayClock.now()); } finally { clockBack(); }
   check("refund outage: stays reversing", (await rowById(rfrow.id)).status === "reversing");
+  await due(rfrow.id);
   await sweepPendingSprays(sprayClock.now());
   check("refund outage: the sweep retried, still reversing (never silently reversed)", (await rowById(rfrow.id)).status === "reversing" && mock.calls.refund.filter((r) => r === rfrow.provider_ref).length >= 2);
+  // The sweep backs off a row it could not finish: not due again at once.
+  const refundCalls = mock.calls.refund.filter((r) => r === rfrow.provider_ref).length;
+  await sweepPendingSprays(sprayClock.now());
+  check("I3: a row in backoff is not retried on the very next pass", mock.calls.refund.filter((r) => r === rfrow.provider_ref).length === refundCalls);
   mock.refundMode = "refusal";
+  await due(rfrow.id);
   await sweepPendingSprays(sprayClock.now());
   check("refund refused: still reversing, a refund_failed issue for a person", (await rowById(rfrow.id)).status === "reversing"
     && (await q(`select 1 from payment_issues where provider_payment_id = $1 and reason = 'refund_failed' and resolved_at is null`, [rfrow.provider_ref])).length === 1);
   mock.refundLookupThrows = true; mock.refundMode = "ok";
   const refundsBefore = mock.calls.refund.length;
+  await due(rfrow.id);
   await sweepPendingSprays(sprayClock.now());
   check("refund lookup down: nothing sent (fail closed)", mock.calls.refund.length === refundsBefore && (await rowById(rfrow.id)).status === "reversing");
   mock.refundLookupThrows = false;
+  await due(rfrow.id);
   await sweepPendingSprays(sprayClock.now());
   check("provider back: reversed, issues resolved, one refund ledger row", (await rowById(rfrow.id)).status === "reversed"
     && (await ledger(rfrow.provider_ref, "spray_refund")).length === 1
     && (await q(`select 1 from payment_issues where provider_payment_id = $1 and resolved_at is null`, [rfrow.provider_ref])).length === 0);
+  await settleClawbacks(rfrow.id);
 
   // =============================================================== chargeback after delivery: clawbacks, idempotent
   const dref = drows[0].provider_ref; // the double-tap spray to the stage guest G (delivered)
@@ -600,10 +675,14 @@ try {
   await webhook("charge.dispute.create", { transaction: { reference: dref } });
   await webhook("charge.dispute.remind", { transaction: { reference: dref } });
   check("dispute again: no-op (same rows, one ledger row)", (await q(`select 1 from host_clawbacks where spray_id = $1`, [disp[0].id])).length === 2 && (await ledger(dref, "chargeback")).length === 1);
-  check("dispute on a reversed spray: nothing clawed back", (await webhook("charge.dispute.create", { transaction: { reference: lrow.provider_ref } })) === 200
-    && (await q(`select 1 from host_clawbacks where spray_id = $1`, [lrow.id])).length === 0 && (await rowById(lrow.id)).status === "reversed");
+  check("I1: every dispute opens ONE 'dispute' issue for a person to answer in Paystack", (await issues(dref, "dispute")).filter((i: any) => !i.resolved_at).length === 1);
+  check("dispute clawbacks are origin dispute", claws.every((c: any) => c.origin === "dispute"));
+  const lclawBefore = (await clawbacksOf(lrow.id)).length;
+  check("dispute on a reversed spray: no new clawback (the reversal's stay), still reversed, an issue says contest with the refund",
+    (await webhook("charge.dispute.create", { transaction: { reference: lrow.provider_ref } })) === 200
+    && (await clawbacksOf(lrow.id)).length === lclawBefore && (await rowById(lrow.id)).status === "reversed"
+    && (await issues(lrow.provider_ref, "dispute")).some((i: any) => /AFTER_REFUND/.test(i.error_message ?? "")));
   check("dispute: status poll for the payer says DISPUTED", (await rest("GET", `/api/rooms/${R}/spray/${disp[0].id}`, PD.id)).json?.reason === "DISPUTED");
-
   // ---- settlement deducts open clawbacks (host H owes gsp.hostKobo)
   const PRICE = 500000;
   const TB = ticketBreakdown(PRICE);
@@ -625,6 +704,32 @@ try {
   check("settlement: pays max(0, amount - open clawbacks)", Number(pay1.amount_kobo) === TB.host - gsp.hostKobo, JSON.stringify(pay1));
   check("settlement: the host's clawback is recovered, the guest's stays open (the guest owes it)", (await q(`select status from host_clawbacks where spray_id = $1 and beneficiary_id = $2`, [disp[0].id, H]))[0]?.status === "recovered"
     && (await q(`select status from host_clawbacks where spray_id = $1 and beneficiary_id = $2`, [disp[0].id, G]))[0]?.status === "open");
+  // I7: the dispute is resolved in the platform's favour ("declined"): the open dispute clawback (the guest's) is settled;
+  // the host's share was already taken from a payout, so a person must repay it (a dispute_resolved issue).
+  check("dispute resolved: 200", (await webhook("charge.dispute.resolve", { transaction: { reference: dref }, resolution: "declined" })) === 200);
+  check("dispute won: the guest's open dispute clawback is settled (recovered in full)", (await q(`select status, recovered_kobo, amount_kobo from host_clawbacks where spray_id = $1 and beneficiary_id = $2`, [disp[0].id, G]))
+    .every((c: any) => c.status === "recovered" && Number(c.recovered_kobo) === Number(c.amount_kobo)));
+  check("dispute won: the dispute issue is closed and a person is asked to repay what a payout already took",
+    (await issues(dref, "dispute")).every((i: any) => !!i.resolved_at) && (await issues(dref, "dispute_resolved")).some((i: any) => /REPAY/.test(i.error_message ?? "")));
+  // I1: a dispute on a spray that was never delivered (H and G owe nothing now): disputed (delivery blocked for good),
+  // clawbacks (the split went at charge time), an issue. A later charge.success never delivers it, and it is never refunded
+  // again as a late payment.
+  const PDP = await payer("p_dispute_pending", { card: false });
+  const dpStart = await spray(PDP.id, R, body(H));
+  const dprow = (await sprayRows(PDP.id))[0];
+  check("setup: an undelivered spray waiting for the bank page", dpStart.json?.status === "action_required" && dprow?.status === "pending", JSON.stringify(dpStart.json));
+  check("undelivered dispute: 200", (await webhook("charge.dispute.create", { transaction: { reference: dprow.provider_ref } })) === 200);
+  check("undelivered dispute: disputed, host clawback opened, issue opened", (await rowById(dprow.id)).status === "disputed"
+    && (await clawbacksOf(dprow.id)).length === 1 && (await issues(dprow.provider_ref, "dispute")).some((i: any) => /UNDELIVERED/.test(i.error_message ?? "")));
+  mock.pay(dprow.provider_ref);
+  await webhook("charge.success", { reference: dprow.provider_ref });
+  check("undelivered dispute: a later payment never delivers it", (await rowById(dprow.id)).status === "disputed" && (await ledger(dprow.provider_ref, "spray")).length === 0
+    && !mock.calls.refund.includes(dprow.provider_ref));
+  check("undelivered dispute won: a person is asked to refund the payer, clawbacks stay open",
+    (await webhook("charge.dispute.resolve", { transaction: { reference: dprow.provider_ref }, resolution: "declined" })) === 200
+    && (await issues(dprow.provider_ref, "dispute_resolved")).some((i: any) => /UNDELIVERED/.test(i.error_message ?? ""))
+    && (await clawbacksOf(dprow.id)).every((c: any) => c.status === "open"));
+  await settleClawbacks(dprow.id);
   // A clawback bigger than the payout: closed at 0, nothing sent.
   const H3 = await mk("host_bigclaw", { payout: true });
   await q(`insert into host_clawbacks (host_id, beneficiary_id, spray_id, amount_kobo) values ($1,$1,$2,$3)`, [H3, hrow.id, TB.host]);
@@ -637,7 +742,12 @@ try {
   await q(`insert into host_clawbacks (host_id, beneficiary_id, spray_id, amount_kobo) values ($1,$1,$2,100)`, [H4, hrow.id]);
   await q(`insert into host_clawbacks (host_id, beneficiary_id, spray_id, amount_kobo) values ($1,$1,$2,500)`, [H4, rrow.id]);
   const ap = await applyClawbacks(H4, 300);
-  check("applyClawbacks: whole rows that fit (100 of 300), the 500 stays open", ap.appliedKobo === 100 && ap.remainingOpen === 1);
+  check("applyClawbacks: oldest first, the 100 in full and 200 of the 500 (partial recovery), the 500 stays open",
+    ap.appliedKobo === 300 && ap.remainingOpen === 1 && ap.recoveredIds.length === 1 && ap.partialIds.length === 1, JSON.stringify(ap));
+  check("partial recovery is recorded (recovered_kobo 200, still open)", (await q(`select status, recovered_kobo from host_clawbacks where beneficiary_id = $1 and amount_kobo = 500`, [H4]))
+    .every((c: any) => c.status === "open" && Number(c.recovered_kobo) === 200));
+  const ap2 = await applyClawbacks(H4, 1000);
+  check("the next payout takes only what is still owed (300), then it is recovered", ap2.appliedKobo === 300 && ap2.remainingOpen === 0);
 
   // =============================================================== limits (task 5.5)
   const PLIM = await payer("p_limits");
@@ -656,6 +766,12 @@ try {
   check("room limit boundary: equal to the limit is allowed", (await spray(PLIM.id, R, body(H, "bundle"))).json?.status === "delivered");
   const over = await spray(PLIM.id, R, body(G));
   check("room limit boundary: one more note is 409 ROOM_LIMIT, no charge", over.status === 409 && over.json?.code === "ROOM_LIMIT" && (await sprayRows(PLIM.id)).length === 1);
+  // Fix round (R1 M1 / ruling 5): the payer's own limits are answered BEFORE anything about the target, so the answer is
+  // the same whoever they name: a plain guest, someone without a payout account, an unknown id. No oracle.
+  for (const [n, t] of [["a plain guest", PLAIN], ["a stage person without a payout account", NOPAY], ["an unknown id", "00000000-0000-4000-8000-000000000000"]] as const) {
+    const r = await spray(PLIM.id, R, body(t));
+    check(`M1: at their own room limit, spraying ${n} is the same 409 ROOM_LIMIT`, r.status === 409 && r.json?.code === "ROOM_LIMIT", `${r.status} ${JSON.stringify(r.json)}`);
+  }
   // Daily total across rooms.
   const PDAY = await payer("p_daily");
   await rest("PUT", "/api/users/me/spray/daily-limit", PDAY.id, { kobo: 100000 });
@@ -703,6 +819,15 @@ try {
   process.env.NEW_HOST_RECEIVE_CAP_KOBO = "100000";
   check("new host cap: up to the cap is fine", (await spray(PNH.id, RN, body(HN, "bundle"))).json?.status === "delivered");
   await refused("new host cap: over it at start", PNH.id, RN, body(HN));
+  // Fix round (R1 C2): the cap applies to the RECIPIENT too. A brand new account on the stage of an established host's room.
+  const GN = await mk("guest_new", { payout: true, newAccount: true });
+  await joinRoom(GN, R);
+  roomHub.setStage(R, { stage: [G, NOPAY, UNVSTAGE, GN], hands: [], invited: [] });
+  const PGN = await payer("p_newguest");
+  process.env.NEW_HOST_RECEIVE_CAP_KOBO = "50000";
+  check("C2: a new stage guest can receive up to the cap", (await spray(PGN.id, R, body(GN))).json?.status === "delivered");
+  await refused("C2: a new stage guest over the cap at start (the host is established)", PGN.id, R, body(GN));
+  check("C2: the established host is not capped", (await spray(PGN.id, R, body(H))).json?.status === "delivered");
   delete process.env.NEW_HOST_RECEIVE_CAP_KOBO;
 
   // =============================================================== the room's spray block (GET /api/rooms/:id)
@@ -731,8 +856,8 @@ try {
     let sent: any = null;
     const res: any = { json: (b: any) => { sent = b; return res; } };
     redactSensitiveFields({} as any, res, () => {});
-    res.json({ a: { authorizationCode: "x", authorization_code: "x", authEnc: "x", auth_enc: "x", signature: "x", last4: "4242" } });
-    return sent && !("authorizationCode" in sent.a) && !("authEnc" in sent.a) && !("signature" in sent.a) && sent.a.last4 === "4242";
+    res.json({ a: { authorizationCode: "x", authorization_code: "x", authEnc: "x", auth_enc: "x", signature: "x", last4: "4242", authorization: { authorizationCode: "x" } } });
+    return sent && !("authorizationCode" in sent.a) && !("authEnc" in sent.a) && !("signature" in sent.a) && !("authorization" in sent.a) && sent.a.last4 === "4242";
   })());
 
   // =============================================================== boot: production with the flag off and no key still boots

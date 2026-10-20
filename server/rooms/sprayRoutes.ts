@@ -28,12 +28,26 @@ export const sprayIpLimiter = rateLimit({
   keyGenerator: (req) => ipKeyGenerator(req.ip ?? ""),
 });
 
+// Per-user buckets for finalize-on-poll. Bounded by evicting the OLDEST bucket (a Map keeps insertion order), never by
+// clearing them all: clearing would hand every user a fresh budget at once and amplify provider verify calls.
 const buckets = new Map<string, TokenBucket>();
+const MAX_BUCKETS = 5000;
 const take = (key: string, rate: number, burst: number) => {
   let b = buckets.get(key);
-  if (!b) { if (buckets.size > 5000) buckets.clear(); b = new TokenBucket(rate, burst); buckets.set(key, b); }
+  if (!b) {
+    while (buckets.size >= MAX_BUCKETS) {
+      const oldest = buckets.keys().next();
+      if (oldest.done) break;
+      buckets.delete(oldest.value);
+    }
+    b = new TokenBucket(rate, burst);
+    buckets.set(key, b);
+  }
   return b.take();
 };
+
+/** A failed spray this recent is still re-checked on the payer's poll: a payment that landed late is refunded at once. */
+const POLL_FAILED_RECHECK_MS = 60 * 60_000;
 
 const unavailable = (res: Response) => res.status(403).json({ ...SPRAY_UNAVAILABLE });
 const isAdult = (u: { dateOfBirth: string | null }) => { const a = ageFromDob(u.dateOfBirth); return a !== null && a >= 18; };
@@ -64,7 +78,8 @@ export function registerSprayRoutes(app: Express): void {
     try {
       let row = await getOwnSpray(String(req.params.id ?? ""), String(req.params.sprayId ?? ""), req.user!.id);
       if (!row) return res.status(404).json({ message: "Not found" });
-      if ((row.status === "created" || row.status === "pending" || row.status === "paid") && take(`sprayfin:${req.user!.id}`, 1 / 3, 3)) {
+      const recentFailure = row.status === "failed" && Date.now() - new Date(row.createdAt).getTime() < POLL_FAILED_RECHECK_MS;
+      if ((row.status === "created" || row.status === "pending" || row.status === "paid" || recentFailure) && take(`sprayfin:${req.user!.id}`, 1 / 3, 3)) {
         await finalizeSpray(row.providerRef, { waitMs: 0 }).catch((e) => console.error("[rooms:spray] finalize on poll failed:", sanitizeMoneyError(e)));
         row = (await ss.getSprayById(row.id)) ?? row;
       }

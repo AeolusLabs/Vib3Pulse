@@ -11,7 +11,10 @@ import { makeTicketReference, looksLikeTicketReference } from "../server/rooms/t
 import {
   buildChargeBody, buildSplitBody, redactChargeBody, splitNameFor, splitMatches, classifyDecline, mapChargeData, mapVerifyData,
   isTransactionNotFound, scrubProviderMessage, sprayMetadata, createPaystackSplitProvider, THREE_DS_FLOOR_KOBO, type ChargeBodyInput,
+  callbackUrlAllowed, interactiveWithoutLink,
 } from "../server/payments/paystackSplit";
+import { THREE_DS_AT_KOBO } from "../shared/spray";
+import { sanitizeMoneyError } from "../shared/roomRefunds";
 import { MockSplitProvider } from "../server/payments/mockSplitProvider";
 import { getSplitProvider, setSplitProviderForTests } from "../server/payments/splitProvider";
 
@@ -136,6 +139,8 @@ test("reference: secret rule fails closed; refund note and log prefix", () => {
   assert.throws(() => sprayReferenceSecret({} as NodeJS.ProcessEnv), /must be set/);
   assert.equal(sprayReferenceSecret({ SESSION_SECRET: "s" } as NodeJS.ProcessEnv), "s");
   assert.equal(sprayReferenceSecret({ SESSION_SECRET: "s", ROOM_SPRAY_REF_SECRET: "r" } as NodeJS.ProcessEnv), "r");
+  // fix round (ruling I4): the dedicated SPRAY_REF_SECRET wins over everything.
+  assert.equal(sprayReferenceSecret({ SESSION_SECRET: "s", ROOM_SPRAY_REF_SECRET: "r", SPRAY_REF_SECRET: "d" } as NodeJS.ProcessEnv), "d");
   const r = ref();
   assert.equal(sprayRefundNote(r), `spray-refund-${r}`);
   assert.ok(sprayReferenceForLog(r).length < 20 && !sprayReferenceForLog(r).includes(r.slice(-10)));
@@ -239,6 +244,15 @@ test("mappers: charge answers; only success is success, unknown is NETWORK", () 
   assert.equal(mapChargeData(r, { status: "failed", reference: r, gateway_response: "Declined" }).failure, "DECLINED");
   assert.equal(mapChargeData(r, { status: "failed", reference: r, gateway_response: "Authorization is not reusable" }).failure, "NOT_REUSABLE");
   for (const st of ["send_otp", "pending", "open_url", "", undefined]) assert.equal(mapChargeData(r, { status: st, reference: r }).failure, "NETWORK", String(st));
+  // fix round (R1 I8 / ruling 12): a bank step WITH an https link is action_required carrying the link.
+  assert.deepEqual(mapChargeData(r, { status: "open_url", reference: r, url: "https://bank.example/otp/1" }), { status: "action_required", reference: r, authorizationUrl: "https://bank.example/otp/1" });
+  assert.equal(mapChargeData(r, { status: "send_otp", reference: r, authorization_url: "https://bank.example/otp/2" }).authorizationUrl, "https://bank.example/otp/2");
+  assert.equal(mapChargeData(r, { status: "pending", paused: true, reference: r, authorization_url: "https://bank.example/p" }).status, "action_required");
+  assert.equal(mapChargeData(r, { status: "open_url", reference: r, url: "http://bank.example/otp" }).failure, "NETWORK", "never an http link");
+  assert.equal(mapChargeData(r, { status: "pending", reference: r, url: "https://bank.example/x" }).failure, "NETWORK", "a link without a bank step is not one");
+  assert.ok(interactiveWithoutLink(r, { status: "send_otp", reference: r }));
+  assert.ok(!interactiveWithoutLink(r, { status: "send_otp", reference: r, url: "https://bank.example/o" }));
+  assert.ok(!interactiveWithoutLink(r, { status: "pending", reference: r }));
   assert.equal(mapChargeData(r, { status: "success", reference: ref() }).failure, "NETWORK", "someone else's reference");
   assert.equal(mapChargeData(r, null).failure, "NETWORK");
   assert.equal(classifyDecline(undefined), "DECLINED");
@@ -251,10 +265,16 @@ test("mappers: verify needs success + NGN + our reference; abandoned is pending,
   assert.equal(ok.paid, true); assert.equal(ok.state, "paid"); assert.equal(ok.amountKobo, 100000); assert.equal(ok.currency, "NGN");
   assert.deepEqual(ok.metadata, { type: "spray", roomId: ROOM }, "string metadata parsed, non-string values dropped");
   assert.equal(ok.authorization?.reusable, true); assert.equal(ok.authorization?.last4, "4081");
+  // fix round (ruling 4 / R2 I2): a success in another currency, or with an amount that is not whole kobo, IS paid (money was
+  // taken) with the real currency and amount, so the caller refunds it in full instead of marking it failed and keeping it.
   const ghs = mapVerifyData(r, { status: "success", reference: r, amount: 100000, currency: "GHS" });
-  assert.equal(ghs.paid, false); assert.equal(ghs.state, "pending"); assert.equal(ghs.authorization, undefined);
+  assert.equal(ghs.paid, true); assert.equal(ghs.state, "paid"); assert.equal(ghs.currency, "GHS"); assert.equal(ghs.amountKobo, 100000);
   assert.equal(mapVerifyData(r, { status: "success", reference: ref(), amount: 100000, currency: "NGN" }).paid, false);
-  assert.equal(mapVerifyData(r, { status: "success", reference: r, amount: "100000", currency: "NGN" }).paid, false);
+  const oddAmount = mapVerifyData(r, { status: "success", reference: r, amount: "100000", currency: "NGN" });
+  assert.equal(oddAmount.paid, true); assert.equal(oddAmount.amountKobo, 0, "never equal to a stored price, so it is refunded");
+  assert.equal(mapVerifyData(r, { status: "success", reference: r, amount: 100000.5, currency: "NGN" }).amountKobo, 0);
+  assert.equal(ok.authorization?.authorizationCode, AUTH, "the code travels as authorizationCode (a redacted key), never `code`");
+  assert.ok(!("code" in (ok.authorization ?? {})));
   assert.equal(mapVerifyData(r, { status: "abandoned", reference: r, amount: 100000, currency: "NGN" }).state, "pending");
   assert.equal(mapVerifyData(r, { status: "failed", reference: r, amount: 100000, currency: "NGN" }).state, "failed");
   assert.equal(mapVerifyData(r, { status: "reversed", reference: r, amount: 100000, currency: "NGN" }).state, "failed");
@@ -334,7 +354,9 @@ test("mock: tampered currency / amount and foreign payments", async () => {
   const r = ref();
   await firstPay(m, "bundle", r); m.completeCheckout(r);
   m.tamper(r, { currency: "GHS" });
-  assert.equal((await m.verify(r))?.paid, false);
+  // Same contract as Paystack (fix round): paid with the real currency; the caller compares and refunds.
+  assert.equal((await m.verify(r))?.paid, true);
+  assert.equal((await m.verify(r))?.currency, "GHS");
   m.tamper(r, { currency: "NGN", amountKobo: 1 });
   assert.equal((await m.verify(r))?.amountKobo, 1, "the caller compares with the stored row");
   const forged = ref().replace(/_[0-9a-f]{32}$/, "_" + "0".repeat(32));
@@ -484,6 +506,64 @@ test("paystack: refund looks up first and never refunds twice", async () => {
   assert.equal(await p.refundState(r), "in_progress");
   refundStatus = "processed";
   assert.equal(await p.refundState(r), "done");
+});
+
+// ---------------------------------------------------------------- fix round
+test("fix round: one 3D Secure constant; transaction_charge never 0; https callback only", () => {
+  assert.equal(THREE_DS_FLOOR_KOBO, THREE_DS_AT_KOBO);
+  const price = SPRAY_CATALOGUE.bundle.kobo;
+  assert.throws(() => buildChargeBody(body({ split: { shares: [{ subaccountCode: HOST_ACCT, amountKobo: price }] } })), /transaction_charge/);
+  assert.ok(callbackUrlAllowed("https://vib3pulse.test/rooms/r?spray=s"));
+  assert.ok(!callbackUrlAllowed("http://vib3pulse.test/rooms/r"), "plain http to a public host");
+  assert.ok(callbackUrlAllowed("http://127.0.0.1:5000/rooms/r", { NODE_ENV: "test" } as NodeJS.ProcessEnv), "local dev and the test server");
+  assert.ok(!callbackUrlAllowed("http://127.0.0.1:5000/rooms/r", { NODE_ENV: "production" } as NodeJS.ProcessEnv));
+  assert.ok(!callbackUrlAllowed("javascript:alert(1)"));
+  assert.throws(() => buildChargeBody(body({ kind: "initialize", authorizationCode: undefined, callbackUrl: "http://evil.example/x" })), /callbackUrl/);
+});
+
+test("fix round: sanitizeMoneyError scrubs card codes, signatures and emails", () => {
+  const s = sanitizeMoneyError(new Error(`charge ${AUTH} SIG_abc123 for ${EMAIL} acct 0123456789`));
+  for (const x of [AUTH, "SIG_abc123", EMAIL, "0123456789"]) assert.ok(!s.includes(x), x.slice(0, 5));
+  assert.match(s, /AUTH_\[redacted\]/);
+});
+
+test("paystack: a saved-card charge that needs an OTP page answers action_required with the bank link", async () => {
+  process.env.PAYSTACK_SECRET_KEY = "sk_test_fake_never_real";
+  const r = ref("note");
+  withFetch((url) => url.endsWith("/transaction/charge_authorization")
+    ? { status: 200, body: { status: true, data: { status: "open_url", reference: r, url: "https://bank.example/3ds/abc" } } }
+    : { status: 404, body: { status: false, message: "no" } });
+  const res = await createPaystackSplitProvider().chargeSaved({ reference: r, email: EMAIL, amountKobo: SPRAY_CATALOGUE.note.kobo, authorizationCode: AUTH, split: hostSplit("note"), metadata: {}, force3ds: false });
+  assert.deepEqual(res, { status: "action_required", reference: r, authorizationUrl: "https://bank.example/3ds/abc" });
+});
+
+test("paystack: an OTP step without a link is NOT_REUSABLE once verify shows nothing final", async () => {
+  process.env.PAYSTACK_SECRET_KEY = "sk_test_fake_never_real";
+  const r = ref("note");
+  withFetch((url) => url.endsWith("/transaction/charge_authorization")
+    ? { status: 200, body: { status: true, data: { status: "send_otp", reference: r } } }
+    : url.includes("/transaction/verify/") ? { status: 200, body: { status: true, data: { status: "ongoing", reference: r, amount: 50000, currency: "NGN" } } }
+    : { status: 404, body: { status: false, message: "no" } });
+  const res = await createPaystackSplitProvider().chargeSaved({ reference: r, email: EMAIL, amountKobo: SPRAY_CATALOGUE.note.kobo, authorizationCode: AUTH, split: hostSplit("note"), metadata: {}, force3ds: false });
+  assert.equal(res.status, "failed"); assert.equal(res.failure, "NOT_REUSABLE");
+});
+
+test("paystack: a processed refund for less than the full amount is needs_attention, never done (R1 M3)", async () => {
+  process.env.PAYSTACK_SECRET_KEY = "sk_test_fake_never_real";
+  const r = ref();
+  let rows: unknown[] = [{ status: "processed", transaction: 77, amount: 40000 }];
+  withFetch((url) => {
+    if (url.includes("/transaction/verify/")) return { status: 200, body: { status: true, data: { id: 77, status: "success", reference: r } } };
+    if (url.includes("/refund?transaction=")) return { status: 200, body: { status: true, data: rows } };
+    return { status: 404, body: { status: false, message: "no" } };
+  });
+  const p = createPaystackSplitProvider();
+  assert.equal(await p.refundState(r, 100000), "needs_attention");
+  rows = [{ status: "processed", transaction: 77, amount: 40000 }, { status: "processed", transaction: 77, amount: 60000 }];
+  assert.equal(await p.refundState(r, 100000), "done");
+  rows = [{ status: "processed", transaction: 77 }];
+  assert.equal(await p.refundState(r, 100000), "needs_attention", "no amount reported: a person checks");
+  assert.equal(await p.refundState(r), "done", "without the full amount: the phase 4 behaviour");
 });
 
 test("logs: no provider call wrote an authorization code, signature or email to the console", () => {

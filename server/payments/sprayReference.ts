@@ -12,10 +12,15 @@ const NONCE_HEX = 24; // 12 random bytes
 const MAC_HEX = 32;   // 128 bits of HMAC-SHA256
 const SHAPE = new RegExp(`^${PREFIX}_([0-9a-f]{${NONCE_HEX}})_([0-9a-f]{${MAC_HEX}})$`);
 
-/** The secret for the MAC. ROOM_SPRAY_REF_SECRET if set, else SESSION_SECRET. Throws when neither is set (fail closed). */
+/**
+ * The secret for the MAC: the dedicated SPRAY_REF_SECRET if set (ROOM_SPRAY_REF_SECRET is read as an older name for it),
+ * else SESSION_SECRET. Throws when none is set (fail closed).
+ * The MAC only gates references that have NO stored row (owner ruling I4): a reference we stored is trusted by its row
+ * (provider_ref is unique and only the spray endpoint writes it), so rotating this secret can never strand a paid spray.
+ */
 export function sprayReferenceSecret(env: NodeJS.ProcessEnv = process.env): string {
-  const s = env.ROOM_SPRAY_REF_SECRET || env.SESSION_SECRET;
-  if (!s) throw new Error("ROOM_SPRAY_REF_SECRET or SESSION_SECRET must be set to take sprays");
+  const s = env.SPRAY_REF_SECRET || env.ROOM_SPRAY_REF_SECRET || env.SESSION_SECRET;
+  if (!s) throw new Error("SPRAY_REF_SECRET or SESSION_SECRET must be set to take sprays");
   return s;
 }
 

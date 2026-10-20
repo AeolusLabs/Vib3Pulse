@@ -387,7 +387,25 @@ export function refundStateFrom(statuses: string[]): ProviderRefundState {
   return "failed";
 }
 
-type PaystackRefundRow = { status?: string; merchant_note?: string | null; transaction?: unknown; transaction_reference?: string };
+type PaystackRefundRow = { status?: string; merchant_note?: string | null; transaction?: unknown; transaction_reference?: string; amount?: unknown };
+
+/**
+ * "done" only when the processed refunds add up to at least fullKobo (spraying passes the spray's amount). A processed
+ * refund for less (a partial refund made by hand in the dashboard), or one whose amount Paystack did not report, is
+ * needs_attention: a person looks, and nothing is marked fully refunded. Without fullKobo: refundStateFrom as before.
+ */
+function refundStateFor(rows: PaystackRefundRow[], fullKobo: number | undefined): ProviderRefundState {
+  const state = refundStateFrom(rows.map((r) => r.status ?? ""));
+  if (state !== "done" || fullKobo === undefined) return state;
+  let processed = 0;
+  for (const r of rows) {
+    if ((r.status ?? "").toLowerCase() !== "processed") continue;
+    const a = typeof r.amount === "number" ? r.amount : typeof r.amount === "string" && /^\d+$/.test(r.amount) ? Number(r.amount) : NaN;
+    if (!Number.isSafeInteger(a) || a <= 0) return "needs_attention";
+    processed += a;
+  }
+  return processed >= fullKobo ? "done" : "needs_attention";
+}
 
 /**
  * Has this transaction already been refunded (by our deterministic note, or at all)? Throws when Paystack cannot answer
@@ -396,7 +414,7 @@ type PaystackRefundRow = { status?: string; merchant_note?: string | null; trans
  *  2. GET /refund?transaction=<id> (the documented filter). Only if THAT answers 4xx: a scan of /refund?reference=,
  *     filtered here by our merchant note or the transaction reference/id.
  */
-export async function getPaystackRefundState(reference: string, merchantNote: string): Promise<ProviderRefundState> {
+export async function getPaystackRefundState(reference: string, merchantNote: string, opts: { fullKobo?: number } = {}): Promise<ProviderRefundState> {
   const tx = await paystackAnswer<{ id?: number | string; status?: string; reference?: string }>(`/transaction/verify/${encodeURIComponent(reference)}`);
   if (!tx.ok) throw new Error(`Paystack error: refund lookup could not find the transaction (${tx.message})`);
   if ((tx.data?.status ?? "").toLowerCase() === "reversed") return "done";
@@ -411,7 +429,7 @@ export async function getPaystackRefundState(reference: string, merchantNote: st
       const id = t && typeof t === "object" ? (t as { id?: unknown }).id : t;
       return id === undefined || id === null || String(id) === String(txId); // belt and braces if the filter were ignored
     });
-    return refundStateFrom(rows.map((r) => r.status ?? ""));
+    return refundStateFor(rows, opts.fullKobo);
   }
   if (byTx.httpStatus < 400 || byTx.httpStatus >= 500) throw new Error(`Paystack error: refund lookup failed (${byTx.message})`);
 
@@ -422,7 +440,7 @@ export async function getPaystackRefundState(reference: string, merchantNote: st
     return r.merchant_note === merchantNote || r.transaction_reference === reference || t?.reference === reference
       || (t?.id !== undefined && String(t.id) === String(txId));
   });
-  return refundStateFrom(mine.map((r) => r.status ?? ""));
+  return refundStateFor(mine, opts.fullKobo);
 }
 
 /** Bank names as Paystack writes them differ in case, punctuation and suffixes ("Plc", "Limited"). */

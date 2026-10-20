@@ -106,7 +106,9 @@ export async function withAdvisoryLock<T>(ns: number, key: string, fn: (c: PoolC
  * list); refund_pending is a bookkeeping marker ("owed since"), never shown as an alert by itself.
  */
 type Queryable = { query: (text: string, values?: any[]) => Promise<unknown> };
-export type MoneyIssueReason = "refund_failed" | "payout_failed" | "refund_overdue" | "refund_pending";
+// "dispute" / "dispute_resolved" (spraying, server/rooms/clawbacks.ts): a chargeback a person must answer in Paystack, and a
+// resolution a person must check. ALERTS, never auto-resolved by a refund confirmation.
+export type MoneyIssueReason = "refund_failed" | "payout_failed" | "refund_overdue" | "refund_pending" | "dispute" | "dispute_resolved";
 export async function openPaymentIssue(c: Queryable, issue: {
   ticketId: string | null; providerRef: string; provider: string; reason: MoneyIssueReason; error: string; now: Date;
 }): Promise<boolean> {

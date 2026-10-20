@@ -6,7 +6,7 @@ BEGIN;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS spray_daily_limit_kobo integer;
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_spray_daily_limit_kobo_check') THEN
-    ALTER TABLE users ADD CONSTRAINT users_spray_daily_limit_kobo_check CHECK (spray_daily_limit_kobo IS NULL OR spray_daily_limit_kobo > 0);
+    ALTER TABLE users ADD CONSTRAINT users_spray_daily_limit_kobo_check CHECK (spray_daily_limit_kobo IS NULL OR (spray_daily_limit_kobo > 0 AND spray_daily_limit_kobo <= 10000000));
   END IF;
 END $$;
 CREATE TABLE IF NOT EXISTS user_payment_methods (
@@ -45,11 +45,15 @@ CREATE TABLE IF NOT EXISTS spray_payments (
   payment_method_id uuid REFERENCES user_payment_methods(id) ON DELETE RESTRICT,
   status text NOT NULL DEFAULT 'created',
   reason text,
+  authorization_url text,
   created_at timestamp NOT NULL DEFAULT now(),
   paid_at timestamp,
   delivered_at timestamp,
   reversed_at timestamp,
   refund_requested_at timestamp,
+  check_attempts integer NOT NULL DEFAULT 0,
+  last_checked_at timestamp,
+  next_check_at timestamp,
   CONSTRAINT spray_payments_provider_ref_key UNIQUE (provider_ref),
   CONSTRAINT spray_payments_payer_key_key UNIQUE (payer_id, idempotency_key),
   CONSTRAINT spray_payments_status_check CHECK (status IN ('created', 'pending', 'paid', 'delivered', 'reversing', 'reversed', 'failed', 'disputed')),
@@ -60,13 +64,17 @@ CREATE TABLE IF NOT EXISTS spray_payments (
 CREATE INDEX IF NOT EXISTS spray_payments_room_status_idx ON spray_payments (room_id, status);
 CREATE INDEX IF NOT EXISTS spray_payments_payer_created_idx ON spray_payments (payer_id, created_at);
 CREATE INDEX IF NOT EXISTS spray_payments_status_created_idx ON spray_payments (status, created_at);
+CREATE INDEX IF NOT EXISTS spray_payments_status_next_check_idx ON spray_payments (status, next_check_at);
+CREATE INDEX IF NOT EXISTS spray_payments_recipient_created_idx ON spray_payments (recipient_id, created_at);
+CREATE INDEX IF NOT EXISTS spray_payments_host_created_idx ON spray_payments (host_id, created_at);
 CREATE TABLE IF NOT EXISTS room_spend (
   room_id varchar NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
   user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   limit_kobo integer NOT NULL,
   spent_kobo integer NOT NULL DEFAULT 0,
   CONSTRAINT room_spend_pkey PRIMARY KEY (room_id, user_id),
-  CONSTRAINT room_spend_spent_check CHECK (spent_kobo >= 0 AND spent_kobo <= limit_kobo)
+  CONSTRAINT room_spend_spent_check CHECK (spent_kobo >= 0 AND spent_kobo <= limit_kobo),
+  CONSTRAINT room_spend_limit_check CHECK (limit_kobo > 0)
 );
 CREATE TABLE IF NOT EXISTS host_clawbacks (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -74,14 +82,20 @@ CREATE TABLE IF NOT EXISTS host_clawbacks (
   beneficiary_id varchar NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
   spray_id uuid NOT NULL REFERENCES spray_payments(id) ON DELETE RESTRICT,
   amount_kobo integer NOT NULL,
+  recovered_kobo integer NOT NULL DEFAULT 0,
+  origin text NOT NULL DEFAULT 'dispute',
   status text NOT NULL DEFAULT 'open',
-  written_off_by varchar REFERENCES users(id) ON DELETE RESTRICT,
+  written_off_by varchar REFERENCES admin_users(id) ON DELETE RESTRICT,
   written_off_reason text,
   created_at timestamp NOT NULL DEFAULT now(),
   recovered_at timestamp,
   CONSTRAINT host_clawbacks_spray_beneficiary_key UNIQUE (spray_id, beneficiary_id),
   CONSTRAINT host_clawbacks_status_check CHECK (status IN ('open', 'recovered', 'written_off')),
-  CONSTRAINT host_clawbacks_amount_check CHECK (amount_kobo > 0)
+  CONSTRAINT host_clawbacks_origin_check CHECK (origin IN ('dispute', 'reversal')),
+  CONSTRAINT host_clawbacks_amount_check CHECK (amount_kobo > 0),
+  CONSTRAINT host_clawbacks_recovered_check CHECK (recovered_kobo >= 0 AND recovered_kobo <= amount_kobo AND (status <> 'recovered' OR recovered_kobo = amount_kobo)),
+  CONSTRAINT host_clawbacks_written_off_check CHECK (status <> 'written_off' OR (written_off_by IS NOT NULL AND written_off_reason IS NOT NULL))
 );
 CREATE INDEX IF NOT EXISTS host_clawbacks_host_status_idx ON host_clawbacks (host_id, status);
+CREATE INDEX IF NOT EXISTS host_clawbacks_beneficiary_status_idx ON host_clawbacks (beneficiary_id, status);
 COMMIT;

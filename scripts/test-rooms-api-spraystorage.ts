@@ -60,10 +60,14 @@ try {
   const names = new Map(cons.map((c: any) => [c.conname, c.n]));
   const want = ["users_spray_daily_limit_kobo_check", "user_payment_methods_user_signature_key", "spray_payments_provider_ref_key", "spray_payments_payer_key_key",
     "spray_payments_status_check", "spray_payments_tier_check", "spray_payments_amounts_check", "spray_payments_not_self_check", "room_spend_pkey",
-    "room_spend_spent_check", "host_clawbacks_spray_beneficiary_key", "host_clawbacks_status_check", "host_clawbacks_amount_check"];
+    "room_spend_spent_check", "host_clawbacks_spray_beneficiary_key", "host_clawbacks_status_check", "host_clawbacks_amount_check",
+    "room_spend_limit_check", "host_clawbacks_origin_check", "host_clawbacks_recovered_check", "host_clawbacks_written_off_check"];
   check("every named constraint exists exactly once", want.every((n) => names.get(n) === 1), JSON.stringify(Object.fromEntries(names)));
   const fk = await q(`select conrelid::regclass::text t, confdeltype from pg_constraint where contype = 'f' and conrelid in ('spray_payments'::regclass, 'host_clawbacks'::regclass)`);
   check("spray_payments and host_clawbacks foreign keys are all RESTRICT ('r')", fk.length >= 8 && fk.every((x: any) => x.confdeltype === "r"), JSON.stringify(fk));
+  const wob = await q(`select confrelid::regclass::text as t from pg_constraint where contype = 'f' and conrelid = 'host_clawbacks'::regclass
+                        and conkey = array[(select attnum from pg_attribute where attrelid = 'host_clawbacks'::regclass and attname = 'written_off_by')]::smallint[]`);
+  check("fix round: host_clawbacks.written_off_by references admin_users", wob.length === 1 && wob[0].t === "admin_users", JSON.stringify(wob));
 
   const H = await mk("host"), P = await mk("payer"), P2 = await mk("payer2"), G = await mk("guest");
   const R = await mkRoom(H);
@@ -96,6 +100,8 @@ try {
   const sp = ins[0].row;
   check("getSprayById / getSprayByRef", (await S.getSprayById(sp.id))?.id === sp.id && (await S.getSprayByRef(sp.providerRef))?.id === sp.id);
   check("getSprayById with a non-uuid is null, not an error", (await S.getSprayById("not-a-uuid")) === null);
+  check("getSprayById with 36 dashes / misplaced dashes is null, not a SQL error (strict uuid)",
+    (await S.getSprayById("-".repeat(36))) === null && (await S.getSprayById("0000000000000000000000000000000000-0")) === null);
   check("self spray refused by the database", (await pgCode(() => S.insertSprayIfNew(sprayRow(R, H, P, P)))) === "23514");
   check("a wrong split is refused by the database", (await pgCode(() => S.insertSprayIfNew({ ...sprayRow(R, H, P, H), hostKobo: 1 }))) === "23514");
   check("an amount under 50,000 is refused by the database", (await pgCode(() => S.insertSprayIfNew({ ...sprayRow(R, H, P, H), amountKobo: 2000, v3c: 2000 }))) === "23514");
@@ -113,12 +119,32 @@ try {
   const stale = await S.insertSprayIfNew(sprayRow(R, H, P2, H));
   check("listStaleSprays finds an old created row", (await S.listStaleSprays(["created"], new Date(Date.now() + 60000), 50)).some((r) => r.id === stale.row.id));
   check("listStaleSprays ignores a fresh row with an old cut-off", !(await S.listStaleSprays(["created"], new Date(Date.now() - 3600000), 50)).some((r) => r.id === stale.row.id));
+  // fix round: fair order and backoff
+  const stale2 = await S.insertSprayIfNew(sprayRow(R, H, P2, G));
+  await S.noteSprayChecked(stale.row.id, new Date(), new Date(Date.now() + 10 * 60_000));
+  const due = await S.listStaleSprays(["created"], new Date(Date.now() + 60000), 50, { dueAt: new Date() });
+  check("noteSprayChecked: a row in backoff is skipped while it is not due", !due.some((r) => r.id === stale.row.id) && due.some((r) => r.id === stale2.row.id));
+  const later = await S.listStaleSprays(["created"], new Date(Date.now() + 60000), 50, { dueAt: new Date(Date.now() + 11 * 60_000) });
+  check("listStaleSprays: never-checked rows come before checked ones", later.findIndex((r) => r.id === stale2.row.id) < later.findIndex((r) => r.id === stale.row.id) && later.some((r) => r.id === stale.row.id));
+  check("noteSprayChecked counts attempts", Number((await q(`select check_attempts from spray_payments where id = $1`, [stale.row.id]))[0]?.check_attempts) === 1);
+  check("listStaleSprays createdSince filters old rows out", !(await S.listStaleSprays(["created"], new Date(Date.now() + 60000), 50, { createdSince: new Date(Date.now() + 60000) })).length);
+  check("payerRecipientInFlight sees a created row of that pair only", await S.payerRecipientInFlight(P2, G, new Date(Date.now() - 60000)) && !(await S.payerRecipientInFlight(P2, P, new Date(Date.now() - 60000))));
+  check("sumReceivedSince counts sprays a person hosted or received", (await S.sumReceivedSince(G, since, ["created"], null)) >= stale2.row.amountKobo
+    && (await S.sumReceivedSince(G, since, ["created"], stale2.row.id)) === 0);
 
   // ---- clawbacks
   const cb = await Promise.all([1, 2].map(() => S.insertClawbackIfNew({ hostId: H, beneficiaryId: H, sprayId: sp.id, amountKobo: sp.hostKobo })));
   check("clawback idempotent per (spray, beneficiary)", cb.filter((c) => c.created).length === 1);
   check("openClawbacksFor the beneficiary", (await S.openClawbacksFor(H)).length === 1 && (await S.openClawbacksFor(G)).length === 0);
+  check("hasOpenClawback for the beneficiary only", (await S.hasOpenClawback([H])) && !(await S.hasOpenClawback([G, P])) && !(await S.hasOpenClawback([])));
   check("markClawbacksRecovered once", (await S.markClawbacksRecovered([cb[0].row.id])).length === 1 && (await S.markClawbacksRecovered([cb[0].row.id])).length === 0);
+  check("recovered means recovered_kobo = amount_kobo", (await q(`select recovered_kobo, amount_kobo from host_clawbacks where id = $1`, [cb[0].row.id])).every((r: any) => Number(r.recovered_kobo) === Number(r.amount_kobo)));
+  check("hasOpenClawback is false once recovered", !(await S.hasOpenClawback([H])));
+  const rc = await S.insertClawbackIfNew({ hostId: H, beneficiaryId: G, sprayId: sp.id, amountKobo: 1000, origin: "reversal" });
+  check("insertClawbackIfNew stores the origin", rc.created && rc.row.origin === "reversal");
+  check("the database refuses 'recovered' with less than the full amount", (await pgCode(() => q(`update host_clawbacks set status = 'recovered', recovered_kobo = 1 where id = $1`, [rc.row.id]))) === "23514");
+  check("the database refuses a write-off without the admin", (await pgCode(() => q(`update host_clawbacks set status = 'written_off', written_off_reason = 'x' where id = $1`, [rc.row.id]))) === "23514");
+  check("the database refuses written_off_by that is not an admin", (await pgCode(() => q(`update host_clawbacks set status = 'written_off', written_off_reason = 'x', written_off_by = $2 where id = $1`, [rc.row.id, H]))) === "23503");
 
   // ---- saved card
   check("a non-reusable card is never stored", (await S.saveMethod({ userId: P, provider: "mock", authEnc: "v1:x", last4: "4081", brand: "visa", bank: null, reusable: false, signature: "SIG_a" })) === null);
