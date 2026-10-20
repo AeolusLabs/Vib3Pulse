@@ -10,8 +10,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AlertTriangleIcon, CheckCircleIcon, ChevronRightIcon, ClockIcon, Loader2Icon, ShieldCheckIcon } from "@/components/ui/icons";
 import { banksKey, fetchBanks, fetchPayoutStatus, payoutStatusKey, savePayoutAccount } from "@/lib/earningsApi";
+import { useRoomsConfig } from "@/lib/roomsApi";
 import {
-  PAYOUT_COPY, accountNeedsRefetch, accountNumberValid, payoutErrorMessage, payoutStage, readFailureMessage, savedAccountOf,
+  PAYOUT_COPY, accountNeedsRefetch, accountNumberValid, canLinkHere, payoutErrorMessage, payoutStage, readFailureMessage, savedAccountOf,
   type PayoutStatus,
 } from "./earningsUi";
 
@@ -131,6 +132,10 @@ export function AccountForm({ onSaved, onCancel, autoFocus = false }: FormProps)
 /** The whole "Get paid" body (the page adds the app's navigation; the dev fixture draws this on its own). */
 export default function PayoutAccountView() {
   const q = useQuery({ queryKey: payoutStatusKey, queryFn: fetchPayoutStatus, staleTime: 0 });
+  // Linking is offered only while paid rooms or spray is switched on (the server checks the same flags). Until the config
+  // has loaded, it counts as off: the form never shows on a guess.
+  const config = useRoomsConfig();
+  const moneyOn = config.data?.features.paidRooms === true || config.data?.features.spray === true;
   const [changing, setChanging] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
   const changeBtn = useRef<HTMLButtonElement>(null);
@@ -152,7 +157,7 @@ export default function PayoutAccountView() {
         </div>
       ) : (
         <PayoutBody
-          status={res.data} changing={changing}
+          status={res.data} moneyOn={moneyOn} changing={changing}
           onChange={() => { setSaved(null); setChanging(true); }}
           onCancel={() => { setChanging(false); requestAnimationFrame(() => changeBtn.current?.focus()); }}
           onSaved={(last4) => { setChanging(false); setSaved(last4 ? PAYOUT_COPY.saved(last4) : PAYOUT_COPY.savedPlain); }}
@@ -167,11 +172,12 @@ export default function PayoutAccountView() {
   );
 }
 
-function PayoutBody({ status, changing, onChange, onCancel, onSaved, changeBtn }: {
-  status: PayoutStatus; changing: boolean; onChange(): void; onCancel(): void; onSaved(last4: string | null): void;
+function PayoutBody({ status, moneyOn, changing, onChange, onCancel, onSaved, changeBtn }: {
+  status: PayoutStatus; moneyOn: boolean; changing: boolean; onChange(): void; onCancel(): void; onSaved(last4: string | null): void;
   changeBtn: RefObject<HTMLButtonElement>;
 }) {
-  const stage = payoutStage(status);
+  const stage = payoutStage(status, moneyOn);
+  const canLink = canLinkHere(status, moneyOn);
   const a = status.account;
   return (
     <div className="space-y-5" data-stage={stage} data-testid="payout-stage">
@@ -179,6 +185,9 @@ function PayoutBody({ status, changing, onChange, onCancel, onSaved, changeBtn }
         {a && (
           <CheckRow ok={a.nameMatches} label={PAYOUT_COPY.bankRow} line={PAYOUT_COPY.bankLine(a.bankName, a.last4, a.nameMatches)}
             word={a.nameMatches ? PAYOUT_COPY.verified : PAYOUT_COPY.notVerified} testId="payout-row-bank" />
+        )}
+        {stage === "organiser" && (
+          <CheckRow ok label={PAYOUT_COPY.bankRow} line={PAYOUT_COPY.organiserLine} word={PAYOUT_COPY.verified} testId="payout-row-bank" />
         )}
         <CheckRow ok={status.verifiedAdult} label={PAYOUT_COPY.idRow} line={status.verifiedAdult ? PAYOUT_COPY.idVerified : PAYOUT_COPY.idMissing}
           word={status.verifiedAdult ? PAYOUT_COPY.verified : PAYOUT_COPY.notVerified} testId="payout-row-id" />
@@ -207,7 +216,22 @@ function PayoutBody({ status, changing, onChange, onCancel, onSaved, changeBtn }
 
       {stage === "ready" && !changing && <p className="text-sm text-muted-foreground" data-testid="payout-ready">{PAYOUT_COPY.readyBody}</p>}
 
-      {stage !== "unverified" && (
+      {stage === "organiser" && (
+        <div className="space-y-2" data-testid="payout-organiser">
+          <p className="text-sm text-muted-foreground">{PAYOUT_COPY.organiserBody}</p>
+          <p className="text-sm text-muted-foreground">{PAYOUT_COPY.readyBody}</p>
+        </div>
+      )}
+
+      {(stage === "soon" || (stage === "mismatch" && !canLink)) && (
+        <div role="status" className="space-y-2 rounded-2xl border border-border p-4" data-testid="payout-soon">
+          <h2 className="flex items-center gap-2 font-semibold"><ClockIcon className="h-5 w-5 text-primary" aria-hidden />{PAYOUT_COPY.soonTitle}</h2>
+          <p className="text-sm text-muted-foreground">{PAYOUT_COPY.soonBody}</p>
+        </div>
+      )}
+
+      {/* The form only when the server takes an account from this page now; never for an organiser-set account. */}
+      {canLink && (stage === "none" || stage === "mismatch" || stage === "pending" || stage === "ready") && (
         stage === "none" || stage === "mismatch" ? (
           <div className="space-y-3">
             {stage === "none" && (

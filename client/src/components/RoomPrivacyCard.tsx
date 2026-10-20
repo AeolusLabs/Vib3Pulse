@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -19,7 +20,7 @@ const MODES: { value: InteractionMode; label: string; help: string }[] = [
 /** Who may wave at you / react to you / invite you from inside a room. Saves on every change; applies at once, even mid-room. */
 export default function RoomPrivacyCard() {
   const { toast } = useToast();
-  const { data, isLoading } = useQuery<{ roomPrivacy: RoomPrivacy }>({ queryKey: ["/api/users/me/room-privacy"] });
+  const { data, isLoading, isError, refetch } = useQuery<{ roomPrivacy: RoomPrivacy }>({ queryKey: ["/api/users/me/room-privacy"] });
   const [value, setValue] = useState<RoomPrivacy>(DEFAULT_ROOM_PRIVACY);
   useEffect(() => { if (data) setValue(data.roomPrivacy); }, [data]);
 
@@ -32,7 +33,8 @@ export default function RoomPrivacyCard() {
     },
     onError: (e: any) => { if (data) setValue(data.roomPrivacy); toast({ title: "Couldn't save", description: e?.message, variant: "destructive" }); },
   });
-  const change = (patch: Partial<RoomPrivacy>) => { const next = { ...value, ...patch }; setValue(next); save.mutate(next); };
+  // Never save from defaults: until the stored settings have loaded, a toggle would send them over the stored values.
+  const change = (patch: Partial<RoomPrivacy>) => { if (!data) return; const next = { ...value, ...patch }; setValue(next); save.mutate(next); };
 
   return (
     <Card data-testid="card-room-privacy">
@@ -41,7 +43,12 @@ export default function RoomPrivacyCard() {
         <CardDescription>Control who can reach you from inside a virtual room, and whether adults and under-18s can message each other. Waves, reactions and invites never cross age groups.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
-        {isLoading ? <Skeleton className="h-24 w-full" /> : (
+        {isLoading ? <Skeleton className="h-24 w-full" /> : isError || !data ? (
+          <div className="space-y-3" data-testid="room-privacy-error">
+            <p role="alert" className="text-sm text-muted-foreground">We could not load your room settings, so nothing here can be changed right now.</p>
+            <Button variant="outline" className="min-h-[44px]" onClick={() => { void refetch(); }}>Try again</Button>
+          </div>
+        ) : (
           <>
             <fieldset className="space-y-2">
               <legend className="text-sm font-medium">Who can wave at you, react to you or message you from a room</legend>
@@ -72,7 +79,7 @@ export default function RoomPrivacyCard() {
               <Switch id="rp-invites" checked={value.allowInvites} onCheckedChange={(v) => change({ allowInvites: v })} data-testid="switch-allow-invites" />
             </div>
             <div className="flex items-start justify-between gap-4">
-              <div><Label htmlFor="rp-live">Tell my followers when I go live</Label><p className="text-xs text-muted-foreground">Off: nobody gets a notification when you start a room. People you invite are still told.</p></div>
+              <div><Label htmlFor="rp-live">Tell my followers when I go live</Label><p className="text-xs text-muted-foreground">Off: your followers are not told when you go live. People you invite, and people who asked for a reminder, still are.</p></div>
               <Switch id="rp-live" checked={value.notifyFriendsLive} onCheckedChange={(v) => change({ notifyFriendsLive: v })} data-testid="switch-notify-friends-live" />
             </div>
           </>

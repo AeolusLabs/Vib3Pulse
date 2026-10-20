@@ -9,10 +9,10 @@ import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { AlertTriangleIcon, ChevronRightIcon, Loader2Icon, SparklesIcon } from "@/components/ui/icons";
 import { AMBER, formatDeduction, formatNairaWhole } from "@/lib/roomTickets";
-import { formatWhen } from "@/lib/roomsApi";
+import { formatWhen, useRoomsConfig } from "@/lib/roomsApi";
 import { earningsKey, fetchEarnings, fetchPayoutStatus, payoutStatusKey } from "@/lib/earningsApi";
 import {
-  EARNINGS_COPY, EARNINGS_RANGES, earningsEmpty, earningsHeadline, payoutReady, readFailureMessage, roomKindLine,
+  EARNINGS_COPY, EARNINGS_RANGES, canLinkHere, earningsEmpty, earningsHeadline, payoutStage, readFailureMessage, roomKindLine,
   type Earnings, type EarningsRange,
 } from "./earningsUi";
 
@@ -51,7 +51,12 @@ export function EarningsBody({ e, range }: { e: Earnings; range: EarningsRange }
 
       <dl className="rounded-2xl bg-muted/60 px-4 py-3 text-sm">
         <Row label={EARNINGS_COPY.settled} value={money(e.settledKobo)} testId="earnings-settled" />
-        <Row label={EARNINGS_COPY.onItsWay} help={EARNINGS_COPY.onItsWayHelp} value={money(e.onItsWayKobo)} testId="earnings-on-its-way" />
+        {/* Month and all time hold older spray money that is often already in the bank: never "next business day" for it. */}
+        <Row
+          label={range === "week" ? EARNINGS_COPY.onItsWay : EARNINGS_COPY.onItsWayLong}
+          help={range === "week" ? EARNINGS_COPY.onItsWayHelp : EARNINGS_COPY.onItsWayLongHelp}
+          value={money(e.onItsWayKobo)} testId="earnings-on-its-way"
+        />
         <Row
           label={EARNINGS_COPY.held}
           help={e.nextTicketReleaseAt ? EARNINGS_COPY.nextRelease(formatWhen(e.nextTicketReleaseAt)) : null}
@@ -103,7 +108,13 @@ export default function EarningsView({ initialRange = "week" }: { initialRange?:
   const q = useQuery({ queryKey: earningsKey(range), queryFn: () => fetchEarnings(range), staleTime: 0 });
   const status = useQuery({ queryKey: payoutStatusKey, queryFn: fetchPayoutStatus, staleTime: 0 });
   const res = q.data;
-  const needsAccount = status.data?.ok === true && !payoutReady(status.data.data);
+  const config = useRoomsConfig();
+  const moneyOn = config.data?.features.paidRooms === true || config.data?.features.spray === true;
+  // Only when the server says this person cannot be paid yet. A host set up through organiser payouts ("organiser") and
+  // an account Paystack is still finishing ("pending") are never told to add one.
+  const stage = status.data?.ok === true ? payoutStage(status.data.data, moneyOn) : null;
+  const needsAccount = stage === "unverified" || stage === "none" || stage === "soon" || stage === "mismatch";
+  const canLink = status.data?.ok === true && canLinkHere(status.data.data, moneyOn);
 
   const onKey = (ev: KeyboardEvent) => {
     const i = EARNINGS_RANGES.indexOf(range);
@@ -125,7 +136,7 @@ export default function EarningsView({ initialRange = "week" }: { initialRange?:
       {needsAccount && (
         <div className="space-y-2 rounded-2xl border border-border p-4" data-testid="earnings-no-account">
           <h2 className="font-semibold">{EARNINGS_COPY.noAccountTitle}</h2>
-          <p className="text-sm text-muted-foreground">{EARNINGS_COPY.noAccountBody}</p>
+          <p className="text-sm text-muted-foreground">{canLink ? EARNINGS_COPY.noAccountBody : EARNINGS_COPY.noAccountSoonBody}</p>
           <Button asChild className="min-h-[44px] rounded-full"><Link href="/rooms/payouts" data-testid="link-setup-payouts">{EARNINGS_COPY.noAccountCta}</Link></Button>
         </div>
       )}

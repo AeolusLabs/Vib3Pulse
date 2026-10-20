@@ -11,6 +11,8 @@
 //   GET  /api/users/me/room-payments/:id/receipt  printable HTML (opened in a new tab, never parsed here)
 // Added by this lane (not in the plan, see the lane report): GET /api/rooms/payouts/banks  { banks: [{ name, code }] }.
 
+import { BANK_CODE_RE } from "@shared/roomEarnings";
+
 // ---------------------------------------------------------------- small readers
 const isInt = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v);
 const isNonNegInt = (v: unknown): v is number => isInt(v) && v >= 0;
@@ -22,7 +24,11 @@ const text = (v: unknown, max: number): string | null =>
 
 // ---------------------------------------------------------------- payout account (6.1)
 export interface PayoutAccountView { bankName: string; last4: string; nameMatches: boolean }
-export interface PayoutStatus { verifiedAdult: boolean; account: PayoutAccountView | null; subaccountReady: boolean }
+export interface PayoutStatus {
+  verifiedAdult: boolean; account: PayoutAccountView | null; subaccountReady: boolean;
+  /** The server would accept an account from this page now (fix round: false until verified legal names exist). Default false. */
+  canLinkAccount: boolean;
+}
 
 /**
  * The account block. Only four digits are ever kept: anything that is not exactly four digits fails the whole status, so
@@ -44,25 +50,32 @@ export function parsePayoutStatus(body: unknown): PayoutStatus | null {
   if (!b || typeof b.verifiedAdult !== "boolean" || typeof b.subaccountReady !== "boolean") return null;
   const account = parsePayoutAccount(b.account === undefined ? null : b.account);
   if (account === undefined) return null;
-  return { verifiedAdult: b.verifiedAdult, account, subaccountReady: b.subaccountReady };
+  // Read defensively: anything but a real true means the form stays hidden (an older server never sends it).
+  return { verifiedAdult: b.verifiedAdult, account, subaccountReady: b.subaccountReady, canLinkAccount: b.canLinkAccount === true };
 }
 
 /**
  * Which payout screen to show:
  * - "unverified": not an ID-verified adult (payouts paused; an older account, if any, is shown by its last four only)
- * - "none": verified, no account yet (the form)
- * - "mismatch": an account whose name does not match the ID (the form again, with the reason)
+ * - "organiser": no account saved on this page, but the server says payouts are set up (a host onboarded through
+ *   organiser payouts). They can be paid; we just cannot show its last four here. Never told to add an account.
+ * - "none": verified, no account yet, and the server takes one from this page now (the form)
+ * - "soon": verified, no account yet, but linking a bank here is not open yet (no form, says so honestly)
+ * - "mismatch": an account whose name does not match the ID (the form again only when linking is open)
  * - "pending": account matches but Paystack has not finished setting it up
- * - "ready": verified, matching, set up. Only this one can receive money.
+ * - "ready": verified, matching, set up.
+ * `moneyOn` is false while paid rooms and spray are both switched off: linking is then "soon" too.
  */
-export type PayoutStage = "unverified" | "none" | "mismatch" | "pending" | "ready";
-export function payoutStage(s: PayoutStatus): PayoutStage {
+export type PayoutStage = "unverified" | "organiser" | "none" | "soon" | "mismatch" | "pending" | "ready";
+export const canLinkHere = (s: PayoutStatus, moneyOn = true) => s.canLinkAccount && moneyOn;
+export function payoutStage(s: PayoutStatus, moneyOn = true): PayoutStage {
   if (!s.verifiedAdult) return "unverified";
-  if (!s.account) return "none";
+  if (!s.account) return s.subaccountReady ? "organiser" : canLinkHere(s, moneyOn) ? "none" : "soon";
   if (!s.account.nameMatches) return "mismatch";
   return s.subaccountReady ? "ready" : "pending";
 }
-export const payoutReady = (s: PayoutStatus | null | undefined) => !!s && payoutStage(s) === "ready";
+/** Can receive money now, as far as the server says: set up here, or set up through organiser payouts. */
+export const payoutReady = (s: PayoutStatus | null | undefined) => !!s && ["ready", "organiser"].includes(payoutStage(s));
 
 export interface Bank { name: string; code: string }
 /** GET /api/rooms/payouts/banks: `{ banks: [{ name, code }] }`. Bad rows are dropped; a bad body is null. Sorted by name. */
@@ -74,7 +87,7 @@ export function parseBanks(body: unknown): Bank[] | null {
   for (const row of b.banks.slice(0, 1000)) {
     const r = rec(row);
     const name = r && text(r.name, 120);
-    const code = r && typeof r.code === "string" && /^[A-Za-z0-9]{1,12}$/.test(r.code) ? r.code : null;
+    const code = r && typeof r.code === "string" && BANK_CODE_RE.test(r.code) ? r.code : null; // the server's own rule
     if (!name || !code || seen.has(code)) continue;
     seen.add(code);
     out.push({ name, code });
@@ -95,6 +108,8 @@ export const PAYOUT_ERROR = {
   nameMismatch: "The name on this bank account does not match the name on your ID. Use an account in your own name.",
   noVerifiedName: "We do not have the name from your ID yet, so we cannot check this account. Contact support and we will sort it out.",
   notFound: "We could not find that account. Check the bank and the 10 digit account number.",
+  badBank: "Choose your bank from the list.",
+  reload: "That did not go through. Reload the page and try again.",
   rateLimited: "Too many tries. Wait a while and try again.",
   rateLimitedFor: (min: number) => `Too many tries. Try again in ${min} ${min === 1 ? "minute" : "minutes"}.`,
   inFlight: "A payout to your current account is being sent. You can change your account once it has gone through.",
@@ -115,7 +130,9 @@ export function payoutErrorMessage(f: AccountFailure): string {
     return f.retryAfterSec && f.retryAfterSec > 0 ? PAYOUT_ERROR.rateLimitedFor(Math.max(1, Math.ceil(f.retryAfterSec / 60))) : PAYOUT_ERROR.rateLimited;
   }
   if (f.status === 401) return PAYOUT_ERROR.signIn;
-  if (f.status === 403) return PAYOUT_ERROR.unverified;
+  // Only the server's own NOT_VERIFIED code means "verify your ID"; any other 403 (a stale CSRF token after the retry) is not about the person.
+  if (f.status === 403) return c === "NOT_VERIFIED" ? PAYOUT_ERROR.unverified : PAYOUT_ERROR.reload;
+  if (c === "BAD_BANK") return PAYOUT_ERROR.badBank;
   if (f.status === 422) return PAYOUT_ERROR.nameMismatch; // the plan's only 422 is the name check
   if (f.status === 409) return /PAYOUT|IN_FLIGHT|QUEUED|HELD/.test(c) ? PAYOUT_ERROR.inFlight : PAYOUT_ERROR.busy;
   if (f.status === 400 || f.status === 404 || /ACCOUNT_NOT_FOUND|INVALID_ACCOUNT|RESOLVE_FAILED|BAD_REQUEST|INVALID/.test(c)) return PAYOUT_ERROR.notFound;
@@ -156,6 +173,10 @@ export const PAYOUT_COPY = {
   noneBody: "Add the account you want sprays and ticket money paid into. It must be in your own name.",
   mismatchTitle: "The name does not match your ID",
   mismatchBody: "The name on this account does not match the name on your ID, so we cannot pay into it. Add an account in your own name.",
+  soonTitle: "Adding a bank account here opens soon",
+  soonBody: "You cannot add or change a bank account on this page yet. We will let you know when it opens. Nothing you have earned is lost.",
+  organiserLine: "Set up through organiser payouts. We cannot show the last four digits here.",
+  organiserBody: "Your payout account is set up, so you can get paid. To change it, contact support.",
   pendingTitle: "Almost ready",
   pendingBody: "Your account checks out. Paystack is finishing the set up. This usually takes a few minutes.",
   readyBody: "Sprays settle to your bank the next business day. Ticket money is released 48 hours after the room ends. We never hold your spray money in our own account.",
@@ -243,7 +264,10 @@ export const EARNINGS_COPY = {
   retry: "Try again",
   settled: "Settled to your bank",
   onItsWay: "On its way to your bank",
-  onItsWayHelp: "Sprays usually arrive the next business day.",
+  onItsWayHelp: "Sprays usually arrive the next business day. We show money as settled only when your bank confirms it.",
+  /** Month and all time: older spray money is often already in the bank, so never "next business day" for it. */
+  onItsWayLong: "On its way or already in your bank",
+  onItsWayLongHelp: "We show money as settled only when your bank confirms it, so some of this may already be in your account.",
   held: "Ticket money, released 48 hours after the room ends",
   nextRelease: (when: string) => `Next release ${when}`,
   clawbackTitle: "A payment was reversed",
@@ -259,6 +283,7 @@ export const EARNINGS_COPY = {
   emptyBody: "When people spray you or buy tickets to your rooms, it shows up here.",
   noAccountTitle: "Add a bank account to get paid",
   noAccountBody: "You need a verified bank account in your own name before anyone can spray you or buy tickets to your rooms.",
+  noAccountSoonBody: "You need a verified bank account before anyone can spray you or buy tickets to your rooms. Adding one in the app opens soon.",
   noAccountCta: "Set up payouts",
   payoutLink: "Payout account",
   paymentsLink: "Your payments and receipts",
@@ -317,10 +342,15 @@ export function paymentStatusWord(kind: PaymentKind, status: string): string {
     return "";
   }
   if (["paid", "succeeded", "success", "delivered", "captured"].includes(status)) return "Paid";
-  if (["pending", "processing", "action_required", "charging", "initialized"].includes(status)) return "Waiting for your bank";
-  if (status === "refunded") return "Refunded";
+  // The card was charged; the spray has not landed in the room yet.
+  if (status === "processing") return "Paid, on its way to the room";
+  if (["pending", "action_required", "charging", "initialized"].includes(status)) return "Waiting for your bank";
+  // Being refunded but not done yet: never "Refunded" before the refund line says it is back on the card.
+  if (status === "reversing") return "Refund on its way";
+  if (status === "refunded" || status === "reversed") return "Refunded";
   if (status === "partially_refunded") return "Partly refunded";
-  if (["reversed", "chargeback", "disputed"].includes(status)) return "Reversed by your bank";
+  if (status === "disputed") return "Disputed with your bank";
+  if (status === "chargeback") return "Reversed by your bank";
   if (["failed", "declined", "abandoned"].includes(status)) return "Did not go through";
   return "";
 }
@@ -359,6 +389,6 @@ const filled = (v: unknown): string[] => {
 export const EARNINGS_UI_COPY: readonly string[] = [
   ...filled(PAYOUT_ERROR), ...filled(PAYOUT_COPY), ...filled(EARNINGS_COPY), ...filled(PAYMENTS_COPY), ...filled(PAYMENT_KIND_LABEL),
   PAYOUT_COPY.bankLine("GTBank", "4821", true), PAYOUT_COPY.bankLine("GTBank", "4821", false),
-  ...["paid", "pending", "refunded", "partially_refunded", "reversed", "failed", "processed"].flatMap((s) => [paymentStatusWord("ticket", s), paymentStatusWord("refund", s)]),
+  ...["paid", "pending", "processing", "reversing", "disputed", "chargeback", "refunded", "partially_refunded", "reversed", "failed", "processed"].flatMap((s) => [paymentStatusWord("ticket", s), paymentStatusWord("refund", s)]),
   readFailureMessage(0, ""), readFailureMessage(401, ""), readFailureMessage(429, ""),
 ];
