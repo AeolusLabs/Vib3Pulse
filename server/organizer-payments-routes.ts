@@ -13,6 +13,8 @@ import {
   createStripeAccountLink,
   getStripeConnectStatus,
 } from "./payments/stripe.js";
+import { maskAccountName, takeBankLookupAttempt } from "./rooms/payouts";
+import { sanitizeMoneyError } from "@shared/roomRefunds";
 
 // ============================================================
 // ORGANIZER PAYOUT ONBOARDING (Phase 2, Stripe added Phase 4)
@@ -21,6 +23,12 @@ import {
 // Nothing here touches the checkout/charge flow — this only lets an
 // organizer register where their money should go and see its real status;
 // see the scope note on the Stripe Connect functions in payments/stripe.ts.
+
+/** The shared per-user bank-lookup limit was reached (same body as the rooms payout page). */
+function lookupLimited(res: Response, retryAfterSec: number) {
+  res.setHeader("Retry-After", String(retryAfterSec));
+  return res.status(429).json({ code: "RATE_LIMITED", message: "Too many tries. Please wait an hour and try again." });
+}
 
 function baseUrlFor(req: Request): string {
   return process.env.APP_URL || `${req.protocol}://${req.headers.host}`;
@@ -144,13 +152,19 @@ export function registerOrganizerPaymentsRoutes(app: Express): void {
         bankCode: z.string().min(1),
       }).parse(req.body);
 
+      // Fix round I1 (owner decision): this lookup stays (organiser onboarding shows the holder's name), but it shares the
+      // durable per-user limit of the rooms payout page (5 bank lookups an hour, in the database, across instances).
+      const wait = await takeBankLookupAttempt(req.user!.id, "organizer_resolve", bankCode.slice(0, 20), null);
+      if (wait > 0) return lookupLimited(res, wait);
       const resolved = await resolvePaystackBankAccount(accountNumber, bankCode);
       res.json(resolved);
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "accountNumber and bankCode are required" });
       }
-      console.error("[OrganizerPayments] resolve account error:", error);
+      // One answer for every failure (not found, refused, outage): never says which. Never the raw error (it can carry
+      // the account number or the holder's name).
+      console.error("[OrganizerPayments] resolve account error:", sanitizeMoneyError(error));
       res.status(400).json({ message: "Could not verify that account — double check the account number and bank." });
     }
   });
@@ -163,6 +177,8 @@ export function registerOrganizerPaymentsRoutes(app: Express): void {
         businessName: z.string().min(1).max(255),
       }).parse(req.body);
 
+      const wait = await takeBankLookupAttempt(req.user!.id, "organizer_onboard", bankCode.slice(0, 20), null);
+      if (wait > 0) return lookupLimited(res, wait);
       // Re-resolve server-side — never trust a client-supplied account name.
       const resolved = await resolvePaystackBankAccount(accountNumber, bankCode);
 
@@ -186,14 +202,15 @@ export function registerOrganizerPaymentsRoutes(app: Express): void {
 
       res.json({
         message: "Payout account connected",
-        accountName: resolved.accountName,
+        // Fix round I1: masked ("A***** O*****"); the full holder name is never echoed by the onboarding answer.
+        accountName: maskAccountName(resolved.accountName),
         payoutsEnabled: account.payoutsEnabled,
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "accountNumber, bankCode, and businessName are required" });
       }
-      console.error("[OrganizerPayments] onboarding error:", error);
+      console.error("[OrganizerPayments] onboarding error:", sanitizeMoneyError(error));
       res.status(400).json({ message: "Could not connect your payout account — check your bank details and try again." });
     }
   });

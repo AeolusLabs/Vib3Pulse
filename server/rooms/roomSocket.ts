@@ -905,8 +905,8 @@ export async function handleRoomMessage(ws: RoomClient, userId: string, msg: any
         const line = { userId, text, at: Date.now(), ...(replyTo ? { replyTo } : {}) };
         roomHub.recordChat(roomId, line);
         roomHub.broadcast(roomId, { type: "room:chat", ...line });
-        // Phase 6 recap: the sender's own count. Fire-and-forget (no await here, see above).
-        void rs.countChatLine(roomId, userId).catch(() => {});
+        // Phase 6 recap: the sender's own count, in memory only (batched to the database, review r2 I1).
+        rs.countChatLine(roomId, userId);
         return;
       }
       case "room:react": {

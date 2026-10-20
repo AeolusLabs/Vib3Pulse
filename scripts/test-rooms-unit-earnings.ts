@@ -30,7 +30,8 @@ const all = (i: EarningsInput) => computeEarnings(i, { range: "all", nowMs: NOW 
 const tk = (id: string, roomId: string, hostId: string, hostKobo: number, at: number, status = "paid"): EarningsTicketRow =>
   ({ id, roomId, hostId, hostKobo, status, createdAtMs: at });
 const balanced = (e: RoomEarnings) =>
-  e.settledKobo + e.onItsWayKobo + e.heldTicketKobo === e.totals.sprayKobo + e.totals.ticketKobo - e.clawbackAppliedKobo;
+  e.settledKobo + e.onItsWayKobo + e.heldTicketKobo === e.totals.sprayKobo + e.totals.ticketKobo + e.sprayReturnedKobo - e.clawbackAppliedKobo
+  && e.onItsWayKobo === e.sprayDirectKobo + e.ticketSendingKobo + e.needsAttentionKobo;
 
 // ---------------------------------------------------------------- ranges
 test("rangeStartMs: week starts Monday 00:00 UTC, month on the 1st, all is null", () => {
@@ -45,7 +46,10 @@ test("rangeStartMs: week starts Monday 00:00 UTC, month on the 1st, all is null"
 // ---------------------------------------------------------------- computeEarnings: cases
 test("empty: all zero, no rooms, no release", () => {
   const e = all(empty());
-  assert.deepEqual(e, { totals: { sprayKobo: 0, ticketKobo: 0 }, settledKobo: 0, onItsWayKobo: 0, heldTicketKobo: 0, clawbackOpenKobo: 0, clawbackAppliedKobo: 0, byRoom: [], nextTicketReleaseAt: null });
+  assert.deepEqual(e, {
+    totals: { sprayKobo: 0, ticketKobo: 0 }, settledKobo: 0, onItsWayKobo: 0, sprayDirectKobo: 0, ticketSendingKobo: 0, needsAttentionKobo: 0,
+    sprayReturnedKobo: 0, heldTicketKobo: 0, clawbackOpenKobo: 0, clawbackAppliedKobo: 0, byRoom: [], nextTicketReleaseAt: null,
+  });
 });
 
 test("tickets: no payout = held; refunded tickets never count", () => {
@@ -131,6 +135,43 @@ test("sprays: host share and stage-guest share only for the viewer; reversed / f
   assert.deepEqual(e.byRoom.map((r) => r.roomId).sort(), ["r1", "r2"]);
 });
 
+test("fix round I2: a reversed spray's split share is received AND clawed back, never counted against the host twice", () => {
+  // Review r1 I2 scenario: N10,000 of ticket host share; a N2,000 host share split to the subaccount from a spray that was
+  // then reversed; settlement recovered the N2,000 clawback from the ticket payout (paid N8,000).
+  const i = empty();
+  i.tickets.push(tk("a", "r1", "v", 1_000_000, NOW - 3 * H));
+  i.payouts.push({ roomId: "r1", hostId: "v", status: "paid", amountKobo: 800_000, releaseAtMs: NOW - H });
+  i.sprays.push({ id: "s1", roomId: "r1", hostId: "v", recipientId: "v", hostKobo: 200_000, guestKobo: null, status: "reversed", deliveredAtMs: null, paidAtMs: NOW - 4 * H });
+  i.clawbacks.push({ beneficiaryId: "v", amountKobo: 200_000, recoveredKobo: 200_000, status: "recovered" });
+  const e = all(i);
+  assert.equal(e.totals.sprayKobo, 0, "a reversed spray is not earnings");
+  assert.equal(e.sprayReturnedKobo, 200_000, "but its split share did reach the bank");
+  assert.equal(e.settledKobo, 800_000);
+  assert.equal(e.clawbackAppliedKobo, 200_000);
+  // What reached the bank (8,000 payout + 2,000 split) equals what was earned (10,000 tickets): nothing counted twice.
+  assert.equal(e.settledKobo + e.sprayDirectKobo, e.totals.ticketKobo + e.totals.sprayKobo);
+  assert.ok(balanced(e));
+  // The same while the clawback is still open: owed 2,000 against 2,000 received.
+  const j = empty();
+  j.sprays.push({ id: "s2", roomId: "r1", hostId: "v", recipientId: "v", hostKobo: 200_000, guestKobo: null, status: "disputed", deliveredAtMs: null, paidAtMs: NOW - H });
+  j.clawbacks.push({ beneficiaryId: "v", amountKobo: 200_000, recoveredKobo: 0, status: "open" });
+  const f = all(j);
+  assert.equal(f.sprayReturnedKobo - f.clawbackOpenKobo, 0, "received and owed back cancel out");
+  assert.ok(balanced(f));
+});
+
+test("fix round: queued payouts are 'sending', failed ones 'need attention', sprays are 'paid out by Paystack'", () => {
+  const i = empty();
+  i.tickets.push(tk("a", "r1", "v", 1000, NOW - H), tk("b", "r2", "v", 2000, NOW - H));
+  i.payouts.push({ roomId: "r1", hostId: "v", status: "queued", amountKobo: 1000, releaseAtMs: NOW }, { roomId: "r2", hostId: "v", status: "failed", amountKobo: 2000, releaseAtMs: NOW });
+  i.sprays.push({ id: "s", roomId: "r1", hostId: "v", recipientId: "v", hostKobo: 500, guestKobo: null, status: "delivered", deliveredAtMs: NOW - H });
+  const e = all(i);
+  assert.equal(e.ticketSendingKobo, 1000);
+  assert.equal(e.needsAttentionKobo, 2000);
+  assert.equal(e.sprayDirectKobo, 500);
+  assert.equal(e.onItsWayKobo, 3500);
+});
+
 test("rows of other people are ignored even when passed in", () => {
   const i = empty();
   i.tickets.push(tk("x", "r9", "other", 9999, NOW - H));
@@ -183,7 +224,7 @@ function prng(seed: number) {
 
 type RoomState = "open" | "closed" | "held" | "queued" | "paid" | "failed";
 type Claw = EarningsClawbackRow & { seq: number; sprayId: string; origin: "dispute" | "reversal" };
-interface Truth { sprays: Array<{ share: number; at: number }>; applied: number }
+interface Truth { sprays: Array<{ share: number; at: number }>; returned: Array<{ share: number; at: number }>; applied: number }
 interface History {
   input: Omit<EarningsInput, "viewerId">;
   nowMs: number;
@@ -213,7 +254,7 @@ function generate(seed: number, steps: number): History {
   const sprays: EarningsSprayRow[] = [];
   const payouts = new Map<string, EarningsPayoutRow>();
   const claws: Claw[] = [];
-  const truth: Record<string, Truth> = Object.fromEntries(USERS.map((u) => [u, { sprays: [], applied: 0 }]));
+  const truth: Record<string, Truth> = Object.fromEntries(USERS.map((u) => [u, { sprays: [], returned: [], applied: 0 }]));
   let t = NOW - 70 * D;
   let seq = 0;
 
@@ -258,7 +299,13 @@ function generate(seed: number, steps: number): History {
       sprays.push({
         id, roomId: room.id, hostId: host, recipientId: recipient, hostKobo: b.host, guestKobo: stage ? b.guest : null,
         status: status.startsWith("disputed") ? "disputed" : status, deliveredAtMs: delivered ? t : null,
+        paidAtMs: status === "failed" ? null : t, // every other outcome was charged and split at t
       });
+      if (status === "reversed" || status === "reversing" || status === "disputed_u") {
+        // Fix round I2: split to the subaccount, then refunded / charged back before delivery: received, and clawed back.
+        truth[host].returned.push({ share: b.host, at: t });
+        if (stage) truth[recipient].returned.push({ share: b.guest as number, at: t });
+      }
       if (delivered) {
         truth[host].sprays.push({ share: b.host, at: t });
         if (stage) truth[recipient].sprays.push({ share: b.guest as number, at: t });
@@ -346,6 +393,9 @@ test("property: generated histories add up for every person and every range (400
       const truthTicket = myTickets.reduce((n, x) => n + x.hostKobo, 0);
       const truthSpray = h.truth[u].sprays.reduce((n, x) => n + x.share, 0);
       const truthApplied = h.truth[u].applied;
+      const truthReturned = h.truth[u].returned.reduce((n, x) => n + x.share, 0);
+      const truthFailed = h.input.payouts.filter((p) => p.hostId === u && p.status === "failed").reduce((n, p) => n + p.amountKobo, 0);
+      const truthSending = h.input.payouts.filter((p) => p.hostId === u && p.status === "queued").reduce((n, p) => n + p.amountKobo, 0);
       const truthOpen = h.claws.filter((c) => c.beneficiaryId === u && c.status === "open").reduce((n, c) => n + c.amountKobo - c.recoveredKobo, 0);
       const truthPaid = h.input.payouts.filter((p) => p.hostId === u && p.status === "paid").reduce((n, p) => n + p.amountKobo, 0);
       const truthHeld = myTickets.filter((x) => { const s = h.roomState.get(x.roomId); return s === "open" || s === "held"; }).reduce((n, x) => n + x.hostKobo, 0);
@@ -356,11 +406,17 @@ test("property: generated histories add up for every person and every range (400
       assert.equal(e.heldTicketKobo, truthHeld, `${ctx} held`);
       assert.equal(e.clawbackAppliedKobo, truthApplied, `${ctx} clawbacks taken from payouts`);
       assert.equal(e.clawbackOpenKobo, truthOpen, `${ctx} clawbacks still owed`);
-      // The plan's identity: settled + on its way + held - open clawbacks = earned (refunds and reversals already out)
-      // minus everything clawed back (taken from payouts, or still owed).
+      assert.equal(e.sprayReturnedKobo, truthReturned, `${ctx} returned split shares (fix round I2)`);
+      assert.equal(e.needsAttentionKobo, truthFailed, `${ctx} failed payouts need attention`);
+      assert.equal(e.ticketSendingKobo, truthSending, `${ctx} queued payouts are being sent`);
+      assert.equal(e.sprayDirectKobo, truthSpray + truthReturned, `${ctx} spray money paid straight to the bank`);
+      // The identity: settled + on its way + held - open clawbacks = earned (refunds and reversals out of the totals)
+      // + the returned split shares (they did reach the subaccount) - everything clawed back (taken from payouts, or owed).
+      // Each returned share has a matching clawback, so it is never both excluded and clawed back.
       assert.equal(e.settledKobo + e.onItsWayKobo + e.heldTicketKobo - e.clawbackOpenKobo,
-        truthSpray + truthTicket - truthApplied - truthOpen, `${ctx} identity`);
-      for (const k of ["settledKobo", "onItsWayKobo", "heldTicketKobo", "clawbackOpenKobo", "clawbackAppliedKobo"] as const) {
+        truthSpray + truthTicket + truthReturned - truthApplied - truthOpen, `${ctx} identity`);
+      assert.ok(balanced(e), `${ctx} balance`);
+      for (const k of ["settledKobo", "onItsWayKobo", "heldTicketKobo", "clawbackOpenKobo", "clawbackAppliedKobo", "sprayReturnedKobo", "sprayDirectKobo", "ticketSendingKobo", "needsAttentionKobo"] as const) {
         assert.ok(Number.isSafeInteger(e[k]) && e[k] >= 0, `${ctx} ${k} is a non-negative integer`);
       }
       assert.ok(e.byRoom.every((b) => b.sprayKobo > 0 || b.ticketKobo > 0), `${ctx} byRoom only rooms with earnings`);
@@ -495,17 +551,46 @@ test("redaction strips raw bank fields (snake case) and leaves the organiser rou
 });
 
 // ---------------------------------------------------------------- one helper, route order, no leaks (source checks)
-test("every 'can be paid' read goes through hostPayoutReady", () => {
+test("every 'can be paid' read goes through one name-checked helper (fix round C1)", () => {
+  const p = src("server/rooms/payouts.ts");
+  assert.match(p, /room_verified_subaccount_code = paystack_subaccount_code/);
+  assert.match(p, /name_matched_at is not null/);
+  assert.match(p, /export async function hostPayoutReady\(userId: string\): Promise<boolean> \{\n\s+return \(await payableSubaccountOf\(userId\)\) !== null;/);
   const spray = src("server/rooms/spray.ts");
-  assert.match(spray, /import \{ hostPayoutReady \} from "\.\/payouts";/);
-  assert.doesNotMatch(spray, /hasVerifiedPayoutAccount/);
-  assert.equal((spray.match(/hostPayoutReady\(/g) ?? []).length, 2);
+  assert.match(spray, /import \{ payableSubaccountOf \} from "\.\/payouts";/);
+  assert.match(spray, /const subaccountOf = \(userId: string\): Promise<string \| null> => payableSubaccountOf\(userId\);/);
+  assert.doesNotMatch(spray, /getOrganizerPaymentAccount|hasVerifiedPayoutAccount/);
+  const settle = src("server/rooms/settlement.ts");
+  assert.match(settle, /await payableSubaccountOf\(p\.host_id, c\)/);
+  assert.doesNotMatch(settle, /from organizer_payment_accounts/);
   const routes = src("server/rooms/roomRoutes.ts");
   assert.match(routes, /roomFeatures\.paidRooms \? await hostPayoutReady\(host\.id\) : false/);
-  assert.doesNotMatch(routes, /hasVerifiedPayoutAccount/);
   const ts = src("server/rooms/ticketStorage.ts");
-  assert.match(ts, /export async function hasVerifiedPayoutAccount\(userId: string\): Promise<boolean> \{\n\s+return hostPayoutReady\(userId\);\n\}/);
-  assert.match(ts, /return hasVerifiedPayoutAccount\(hostId\);/); // hostCanSellNow
+  assert.match(ts, /return hostPayoutReady\(userId\);/);
+});
+
+test("fix round I3: no transaction across the Paystack call; settlement waits for an account change", () => {
+  const p = src("server/rooms/payouts.ts");
+  const fn = p.slice(p.indexOf("async function changeLocked"));
+  assert.doesNotMatch(fn, /BEGIN|for update/i, "the change holds no transaction or row lock around the provider call");
+  assert.match(p, /withAdvisoryLock\(LOCK_ACCOUNT_CHANGE, userId,/);
+  assert.ok(fn.indexOf("hasQueuedPayout(c, userId)") < fn.indexOf("provider().updateSubaccount("), "409 decided before Paystack is touched");
+  assert.ok(fn.indexOf("room_verified_subaccount_code = null") < fn.indexOf("provider().updateSubaccount("), "unpayable while changing");
+  const settle = src("server/rooms/settlement.ts");
+  assert.match(settle, /pg_try_advisory_xact_lock_shared\(\$1::int, hashtext\(\$2::text\)\)/);
+  assert.equal((settle.match(/await accountChangeIdle\(c, p\.host_id\)/g) ?? []).length, 2, "queue and admin requeue both check");
+  const ps = src("server/payments/paystack.ts");
+  assert.equal((ps.match(/signal: AbortSignal\.timeout\(PAYSTACK_TIMEOUT_MS\)/g) ?? []).length, 2);
+  assert.match(ps, /PAYSTACK_TIMEOUT_MS = 15_000/);
+});
+
+test("fix round I1: organiser lookups share the durable per-user limit; onboarding masks the name", () => {
+  const o = src("server/organizer-payments-routes.ts");
+  assert.match(o, /takeBankLookupAttempt\(req\.user!\.id, "organizer_resolve"/);
+  assert.match(o, /takeBankLookupAttempt\(req\.user!\.id, "organizer_onboard"/);
+  assert.match(o, /accountName: maskAccountName\(resolved\.accountName\)/);
+  const bankRoutes = o.slice(o.indexOf("/api/organizer/payments/paystack/resolve-account"));
+  assert.doesNotMatch(bankRoutes, /console\.error\([^)]*, error\)/, "raw errors (account numbers, names) are never logged");
 });
 
 test("payout and earnings routes are registered before any /api/rooms/:id route", () => {
@@ -523,15 +608,17 @@ test("the payout code never returns or logs the account name or the full number"
   const r = src("server/rooms/payoutRoutes.ts");
   assert.doesNotMatch(r, /accountName|accountNumber/);
   for (const line of p.split("\n").filter((l) => /console\.(log|error|warn)/.test(l))) {
-    assert.doesNotMatch(line, /accountNumber|resolvedName|verifiedName|accountName|bank\.name/, line.trim());
+    assert.doesNotMatch(line, /accountNumber|resolvedName|verifiedName|accountName|bankName/, line.trim());
   }
-  assert.doesNotMatch(p, /body: \{[^}]*accountName/);
   assert.match(p, /namesMatch\(verifiedName, resolvedName\)/);
-  // NO_VERIFIED_NAME is decided before the lookup and before an attempt is spent.
-  assert.ok(p.indexOf(`refuse("NO_VERIFIED_NAME")`) < p.indexOf("await takeAttempt(userId"));
-  assert.ok(p.indexOf("await takeAttempt(userId") < p.indexOf("provider().resolve("));
-  // The in-flight check runs under the payout row locks, before the provider changes anything.
-  assert.ok(p.indexOf("for update`") > 0 && p.indexOf(`p.status === "queued"`) < p.indexOf("provider().updateSubaccount("));
+  // Decided before any lookup, no attempt spent: no verified name, an unknown bank (review r1 m3).
+  const lookup = p.indexOf("await takeBankLookupAttempt(userId");
+  assert.ok(p.indexOf('refuse("NO_VERIFIED_NAME")') < lookup && p.indexOf('refuse("BAD_BANK")') < lookup);
+  assert.ok(lookup < p.indexOf("provider().resolve("));
+  // An empty bank list is never cached (review r1 m3).
+  assert.match(p, /if \(banks\.length > 0\) bankCache =/);
+  // canLinkAccount is in the status (fix round contract).
+  assert.match(p, /canLinkAccount: canLinkAccountFor\(user\)/);
 });
 
 test("receipt route sends the exact safety headers", () => {

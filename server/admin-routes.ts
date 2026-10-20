@@ -12,6 +12,7 @@ import { z } from "zod";
 import { getSocialPlanAdminStats } from "./services/socialAdminStats";
 import { requireAdmin, requireAdminPending, requireRole, requireSuperAdmin, isMfaEnrolled, mfaRequired } from "./services/adminSecurity";
 import { registerSprayClawbackAdminRoutes } from "./rooms/clawbacks";
+import { registerRoomRecapAdminRoute } from "./rooms/recap";
 import { registerAdminSocialRoutes } from "./routes/admin-social-routes";
 import {
   authRateLimiter,
@@ -839,6 +840,9 @@ export function setupAdminRoutes(app: Express) {
       res.status(500).json({ message: "Failed to load reported rooms" });
     }
   });
+
+  // Room recap, read-only, the host's view (owner decision, fix round). Admin session + moderator roles; audited.
+  registerRoomRecapAdminRoute(app);
 
   app.post("/api/admin/rooms/:id/end", requireRole("super_admin", "content_moderator"), async (req: Request, res: Response) => {
     try {

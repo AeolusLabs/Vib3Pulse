@@ -1,4 +1,4 @@
-// Room money notifications (phase 6, task 6.4): copy, links and the spray batching rule. Pure; shared by the server
+// Room money notifications (phase 6, task 6.4): copy, links and the spray notice key. Pure; shared by the server
 // (server/rooms/notify.ts) and the client bell (NotificationBell.tsx).
 //
 // Rules: plain words, no em dashes, never "cash", never the payer. Amounts are integer kobo read from stored rows by the
@@ -45,13 +45,13 @@ function titleOf(roomTitle: string | null | undefined): string {
 export interface NoticeCopy { title: string; message: string }
 
 /**
- * Sprays a person received in one room, as ONE notification (see sprayBatchDecision). totalKobo is their share of every
- * spray delivered to them in that room so far, summed from spray_payments. Never who sprayed.
+ * ONE spray a person received (owner decision, fix round: every spray notifies). kobo is that person's share of THAT spray,
+ * read from the stored row. Never a running total, never who sprayed.
  */
-export function sprayReceivedNotice(totalKobo: number, roomTitle: string): NoticeCopy {
+export function sprayReceivedNotice(kobo: number, roomTitle: string): NoticeCopy {
   return {
-    title: `You received ${nairaText(totalKobo)} in ${titleOf(roomTitle)}`,
-    message: "From sprays in this room. Tap to see your earnings.",
+    title: `You received ${nairaText(kobo)} in ${titleOf(roomTitle)}`,
+    message: "From a spray in this room. Tap to see your earnings.",
   };
 }
 
@@ -75,33 +75,6 @@ export function payoutPaidNotice(amountKobo: number, roomTitle: string): NoticeC
   };
 }
 
-// ---------------------------------------------------------------- spray batching
-/** One spray notification per (recipient, room) is changed at most this often. */
-export const SPRAY_BATCH_WINDOW_MS = 60_000;
-
-/** notifications.related_entity_id of the batch for a room (the recipient is notifications.user_id). */
-export const sprayBatchKey = (roomId: string) => `spray-received:${roomId}`;
-
-export type SprayBatchDecision =
-  | { action: "insert" }
-  | { action: "update" }
-  | { action: "unchanged" }
-  | { action: "wait"; retryInMs: number };
-
-/**
- * existing: the recipient's UNREAD batch notification for this room (null when there is none, or it was read or removed),
- * with when it was last written and its title. title: the copy the current total would give.
- *  - none: insert a new one.
- *  - same title: nothing new to say.
- *  - written less than SPRAY_BATCH_WINDOW_MS ago: wait (retryInMs until the window opens; the caller tries once more then).
- *  - else: update it in place.
- * A clock that went backwards (lastAtMs in the future) waits a full window rather than updating early.
- */
-export function sprayBatchDecision(existing: { lastAtMs: number; title: string } | null, title: string, nowMs: number): SprayBatchDecision {
-  if (!existing) return { action: "insert" };
-  if (existing.title === title) return { action: "unchanged" };
-  const age = nowMs - existing.lastAtMs;
-  if (!Number.isFinite(age) || age < 0) return { action: "wait", retryInMs: SPRAY_BATCH_WINDOW_MS };
-  if (age < SPRAY_BATCH_WINDOW_MS) return { action: "wait", retryInMs: SPRAY_BATCH_WINDOW_MS - age };
-  return { action: "update" };
-}
+// ---------------------------------------------------------------- one notification per spray
+/** notifications.related_entity_id of the notice for one spray (the person is notifications.user_id): the de-duplication key. */
+export const sprayNoticeKey = (sprayId: string) => `spray-received:${sprayId}`;

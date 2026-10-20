@@ -220,7 +220,7 @@ const mk = async (name: string, o: { dob?: string | null; verified?: boolean; pa
       o.verified === false ? null : new Date(), o.verified === false ? null : "admin", o.newAccount === true],
   ))[0].id as string;
   created.push(id);
-  if (o.payout) await q(`insert into organizer_payment_accounts (user_id, provider, paystack_subaccount_code, details_submitted, payouts_enabled) values ($1,'paystack',$2,true,true)`, [id, `ACCT_sp_${++seq}`]);
+  if (o.payout) await q(`insert into organizer_payment_accounts (user_id, provider, paystack_subaccount_code, details_submitted, payouts_enabled, room_verified_subaccount_code, name_matched_at) values ($1,'paystack',$2,true,true,$2,now())`, [id, `ACCT_sp_${++seq}`]);
   return id;
 };
 const emailOf = async (id: string) => (await q(`select email from users where id = $1`, [id]))[0].email as string;

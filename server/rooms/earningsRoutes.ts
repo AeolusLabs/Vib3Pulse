@@ -21,7 +21,7 @@ export const RECEIPT_HEADERS: Readonly<Record<string, string>> = Object.freeze({
 });
 
 export function registerRoomEarningsRoutes(app: Express): void {
-  app.get("/api/users/me/room-earnings", requireAuth, async (req: Request, res: Response) => {
+  app.get("/api/users/me/room-earnings", requireAuth, roomLimiter, async (req: Request, res: Response) => {
     const range = req.query.range === undefined ? "week" : req.query.range;
     if (!isEarningsRange(range)) return res.status(400).json({ code: "BAD_RANGE", message: "range must be week, month or all" });
     try {

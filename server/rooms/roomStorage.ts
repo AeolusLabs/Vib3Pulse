@@ -1,6 +1,6 @@
 // Durable room data. Live presence is NOT here (see RoomHub). All visibility rules for listings live in listRooms.
 import { and, eq, gt, inArray, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm";
-import { db } from "../storage";
+import { db, pool } from "../storage";
 import { follows, roomMembers, roomReminders, rooms, users, type Room, type RoomMember } from "@shared/schema";
 import type { RoomInput } from "@shared/rooms";
 import type { Screen } from "@shared/screen";
@@ -233,15 +233,65 @@ const addVisitSeconds = () =>
   sql`${roomMembers.secondsIn} + least(86400, greatest(0, floor(extract(epoch from (now()::timestamp - ${roomMembers.joinedAt})))))::int`;
 
 export async function markLeft(roomId: string, userId: string): Promise<void> {
+  await flushChatCounts([chatKey(roomId, userId)]).catch(() => {});
   await db.update(roomMembers).set({ leftAt: new Date(), secondsIn: addVisitSeconds() })
     .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId), isNull(roomMembers.leftAt)));
 }
 
-/** Phase 6 recap: one chat line sent (fire-and-forget from the chat path; a lost increment only under-counts). */
-export async function countChatLine(roomId: string, userId: string): Promise<void> {
-  await db.update(roomMembers).set({ messagesSent: sql`${roomMembers.messagesSent} + 1` })
-    .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)));
+// ---------------------------------------------------------------- recap chat counts (review r2 I1)
+// A chat line never touches the database: the count is kept in memory per (room, sender) and written in ONE batched UPDATE
+// every CHAT_FLUSH_MS, when the sender leaves, and when the room ends. A crash loses at most one interval of counts (the
+// recap only ever under-counts). The map is bounded: past MAX_PENDING_CHAT keys, new senders are not counted until the
+// next flush (memory never grows without limit). Per-process, so several instances each write their own share.
+export const CHAT_FLUSH_MS = 60_000;
+const MAX_PENDING_CHAT = 50_000;
+const FLUSH_BATCH = 2_000;
+type PendingChat = { roomId: string; userId: string; n: number };
+const pendingChat = new Map<string, PendingChat>();
+const chatKey = (roomId: string, userId: string) => `${roomId}|${userId}`;
+let chatTimer: ReturnType<typeof setInterval> | null = null;
+
+/** Phase 6 recap: one chat line sent. Synchronous, in memory only; written later by flushChatCounts. */
+export function countChatLine(roomId: string, userId: string): void {
+  const k = chatKey(roomId, userId);
+  const e = pendingChat.get(k);
+  if (e) { e.n++; return; }
+  if (pendingChat.size >= MAX_PENDING_CHAT) return;
+  pendingChat.set(k, { roomId, userId, n: 1 });
+  if (!chatTimer) {
+    chatTimer = setInterval(() => { void flushChatCounts().catch((err) => console.error("[rooms] chat count flush failed:", err?.message ?? err)); }, CHAT_FLUSH_MS);
+    chatTimer.unref();
+  }
 }
+
+/**
+ * Writes the pending counts (all of them, or only these keys) in batched UPDATEs, and forgets them first (a failed write
+ * only under-counts; it is never retried into a double count).
+ */
+export async function flushChatCounts(keys?: string[]): Promise<void> {
+  const batch: PendingChat[] = [];
+  for (const k of keys ?? Array.from(pendingChat.keys())) {
+    const e = pendingChat.get(k);
+    if (!e) continue;
+    pendingChat.delete(k);
+    batch.push(e);
+  }
+  for (let i = 0; i < batch.length; i += FLUSH_BATCH) {
+    const part = batch.slice(i, i + FLUSH_BATCH);
+    await pool.query(
+      `update room_members m set messages_sent = m.messages_sent + v.n
+         from unnest($1::varchar[], $2::varchar[], $3::int[]) as v(room_id, user_id, n)
+        where m.room_id = v.room_id and m.user_id = v.user_id`,
+      [part.map((e) => e.roomId), part.map((e) => e.userId), part.map((e) => e.n)],
+    );
+  }
+}
+
+/** The keys of one room's pending counts (room end). */
+const chatKeysOfRoom = (roomId: string) => Array.from(pendingChat.values()).filter((e) => e.roomId === roomId).map((e) => chatKey(e.roomId, e.userId));
+
+/** Tests only: how many lines are waiting to be written for this sender. */
+export const pendingChatCount = (roomId: string, userId: string): number => pendingChat.get(chatKey(roomId, userId))?.n ?? 0;
 
 /** Phase 6 recap: raise rooms.peak_members to n, never lower it (conditional, so any order of calls is safe). */
 export async function raisePeak(roomId: string, n: number): Promise<void> {
@@ -275,6 +325,7 @@ export const countLiveRoomsByHost = (hostId: string) => countBy(hostId, "live");
 export const countScheduledByHost = (hostId: string) => countBy(hostId, "scheduled");
 
 export async function markAllLeft(roomId: string): Promise<void> {
+  await flushChatCounts(chatKeysOfRoom(roomId)).catch(() => {});
   await db.update(roomMembers).set({ leftAt: new Date(), secondsIn: addVisitSeconds() }).where(and(eq(roomMembers.roomId, roomId), isNull(roomMembers.leftAt)));
 }
 

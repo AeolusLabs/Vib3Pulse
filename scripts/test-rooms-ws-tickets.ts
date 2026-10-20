@@ -132,7 +132,7 @@ tuning.graceMs = 10 * 60_000; // a host who leaves must not end the room behind 
 try {
   roomFeatures.paidRooms = true;
   const H = await mk("host");
-  await q(`insert into organizer_payment_accounts (user_id, provider, paystack_subaccount_code, details_submitted, payouts_enabled) values ($1,'paystack','ACCT_tw',true,true)`, [H]);
+  await q(`insert into organizer_payment_accounts (user_id, provider, paystack_subaccount_code, details_submitted, payouts_enabled, room_verified_subaccount_code, name_matched_at) values ($1,'paystack','ACCT_tw',true,true,'ACCT_tw',now())`, [H]);
   const H2 = await mk("freehost");
   const CO = await mk("cohost"), HOLD = await mk("holder"), NON = await mk("nonholder"), REF = await mk("refunded");
   const HOLD2 = await mk("holder2"), HOLD3 = await mk("holder3"), UNV = await mk("unverified", yearsAgo(30), false);

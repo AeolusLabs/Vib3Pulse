@@ -29,7 +29,7 @@ export function receiptBusinessDetails(env: NodeJS.ProcessEnv = process.env): Re
   };
 }
 
-const SPRAY_STATUS_SQL = `case s.status when 'paid' then 'processing' when 'delivered' then 'delivered' when 'reversing' then 'refunded'
+const SPRAY_STATUS_SQL = `case s.status when 'paid' then 'processing' when 'delivered' then 'delivered' when 'reversing' then 'pending'
   when 'reversed' then 'refunded' when 'disputed' then 'disputed' else 'failed' end`;
 
 /** All four kinds of line for one payer, as one ordered set. $1 = viewer. */
@@ -172,7 +172,7 @@ export async function receiptFor(viewerId: string, itemId: unknown): Promise<Rec
     };
   }
   const status: RoomPaymentStatus = s.status === "paid" ? "processing" : s.status === "delivered" ? "delivered"
-    : s.status === "reversing" || s.status === "reversed" ? "refunded" : s.status === "disputed" ? "disputed" : "failed";
+    : s.status === "reversing" ? "pending" : s.status === "reversed" ? "refunded" : s.status === "disputed" ? "disputed" : "failed";
   return {
     itemId: `sp_${p.rowId}`, kind: "spray", itemLabel: `Spray: ${label}`, roomTitle: s.title ?? "",
     amountKobo: Number(s.amount_kobo), vatKobo: Number(s.vat_kobo), atMs: Number(s.paid_ms), status, cardLast4: last4, business,

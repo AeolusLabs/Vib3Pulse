@@ -1,5 +1,6 @@
-// Phase 6 lane A over a throwaway database: recap access and fields, the spray notification batch (multi-call, injected
-// clock), the money notifications, and notifyFriendsLive.   npm run test:rooms
+// Phase 6 over a throwaway database: recap access and fields (members only, moderation, untracked rooms, the admin read
+// path), one notification per spray (fix round owner decision), the money notifications, notifyFriendsLive and the
+// all-followers go-live notice.   npm run test:rooms
 //   DATABASE_URL=<scratch db> SESSION_SECRET=x npx tsx scripts/test-rooms-api-recap.ts
 // Refuses to run unless the database name contains "test", because it creates users. Usernames use the prefix rc_.
 import express from "express";
@@ -20,9 +21,11 @@ const { storage } = await import("../server/storage");
 const { redactSensitiveFields } = await import("../server/security");
 const { userToSessionUser } = await import("../server/auth");
 const { registerRoomRoutes } = await import("../server/rooms/roomRoutes");
+const { registerRoomRecapAdminRoute } = await import("../server/rooms/recap");
+const { liveNoticeSettled, LIVE_NOTIFY_CHUNK } = await import("../server/rooms/liveNotify");
 const notify = await import("../server/rooms/notify");
 const rs = await import("../server/rooms/roomStorage");
-const { SPRAY_BATCH_WINDOW_MS, sprayBatchKey } = await import("../shared/roomNotifications");
+const { sprayNoticeKey } = await import("../shared/roomNotifications");
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const q = async (sql: string, p: any[] = []) => (await pool.query(sql, p)).rows;
@@ -43,20 +46,27 @@ app.use(async (req: any, _res, next) => {
     const u = await storage.getUser(id);
     req.user = u ? userToSessionUser(u) : undefined;
   }
+  // Admin session stand-in (the real gate reads req.session.adminId and re-reads the admin row).
+  const adminId = req.header("x-test-admin");
+  req.session = adminId ? { adminId, destroy: (cb: any) => cb?.() } : { destroy: (cb: any) => cb?.() };
   req.isAuthenticated = () => !!req.user;
   req.login = (_u: unknown, cb: (e?: unknown) => void) => cb();
   next();
 });
 app.use(redactSensitiveFields);
 registerRoomRoutes(app);
+registerRoomRecapAdminRoute(app);
 const server = app.listen(0);
 const base = `http://127.0.0.1:${(server.address() as any).port}`;
 
 let ipSeq = 1;
-async function http(method: string, path: string, as: string | null, body?: unknown) {
+async function http(method: string, path: string, as: string | null, body?: unknown, admin?: string) {
   const res = await fetch(base + path, {
     method,
-    headers: { "content-type": "application/json", "x-forwarded-for": `10.14.${(ipSeq >> 8) & 255}.${ipSeq++ & 255}`, ...(as ? { "x-test-user": as } : {}) },
+    headers: {
+      "content-type": "application/json", "x-forwarded-for": `10.14.${(ipSeq >> 8) & 255}.${ipSeq++ & 255}`,
+      ...(as ? { "x-test-user": as } : {}), ...(admin ? { "x-test-admin": admin } : {}),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await res.text();
@@ -89,18 +99,22 @@ const member = (roomId: string, userId: string, role: string, secondsIn: number,
 
 let refSeq = 0;
 /** A delivered spray: tier note, 500 naira. host share 40000, a stage guest's 10000 when recipient is not the host. */
-async function delivered(roomId: string, hostId: string, payerId: string, recipientId: string): Promise<void> {
+async function delivered(roomId: string, hostId: string, payerId: string, recipientId: string): Promise<string> {
   const stage = recipientId !== hostId;
   const [host, guest, platform] = stage ? [30000, 10000, 10000] : [40000, null, 10000];
-  await q(
+  return (await q(
     `insert into spray_payments (idempotency_key, request_hash, room_id, host_id, payer_id, recipient_id, tier, v3c, amount_kobo,
-                                 vat_kobo, fee_kobo, reserve_kobo, platform_kobo, host_kobo, guest_kobo, provider, provider_ref, status, delivered_at)
-     values ($1, 'h', $2, $3, $4, $5, 'note', 50000, 50000, 0, 0, 0, $6, $7, $8, 'paystack', $9, 'delivered', now())`,
+                                 vat_kobo, fee_kobo, reserve_kobo, platform_kobo, host_kobo, guest_kobo, provider, provider_ref, status, paid_at, delivered_at)
+     values ($1, 'h', $2, $3, $4, $5, 'note', 50000, 50000, 0, 0, 0, $6, $7, $8, 'paystack', $9, 'delivered', now(), now()) returning id`,
     [crypto.randomUUID(), roomId, hostId, payerId, recipientId, platform, host, guest, `rc-test-${stamp}-${refSeq++}`],
-  );
+  ))[0].id as string;
 }
+/** Every spray notice this person has for sprays in this room. */
 const sprayNotes = (uid: string, roomId: string) =>
-  q(`select id, title, message, link, related_user_id, is_read from notifications where user_id=$1 and type='spray_received' and related_entity_id=$2`, [uid, sprayBatchKey(roomId)]);
+  q(`select n.id, n.title, n.message, n.link, n.related_user_id, n.related_entity_id, n.is_read
+       from notifications n
+      where n.user_id = $1 and n.type = 'spray_received'
+        and n.related_entity_id in (select 'spray-received:' || s.id::text from spray_payments s where s.room_id = $2)`, [uid, roomId]);
 
 try {
   const H = await mk("host"), G = await mk("guest"), N = await mk("never"), B = await mk("banned"), K = await mk("blocked"), P = await mk("payer"), S = await mk("stage");
@@ -163,60 +177,80 @@ try {
   const rv = await http("GET", `/api/rooms/${R}`, G);
   check("GET /api/rooms/:id never carries peakMembers", rv.status === 200 && !("peakMembers" in (rv.json?.room ?? {})), rv.text.slice(0, 200));
 
-  // ------------------------------------------------------------------ spray batching
-  notify.notifyTestHooks.noTrailing = true;
-  const R2 = await mkRoom(H, "live", "Batch Room");
-  let now = Date.UTC(2026, 9, 20, 12, 0, 0);
-  notify.notifyClock.now = () => now;
-  await delivered(R2, H, P, H);
-  await notify.notifySprayReceived(H, R2, 40000);
+  // ------------------------------------------------------------------ recap: fix round (moderation, untracked rooms, admin)
+  const M = await mkRoom(H, "ended", "Taken down");
+  await member(M, H, "host", 600, 1); await member(M, G, "guest", 600, 2);
+  await q(`update rooms set peak_members = 3, moderation_status = 'removed' where id = $1`, [M]);
+  check("a room taken down by moderation: no recap for the host or a guest (r2 m4)",
+    (await http("GET", `/api/rooms/${M}/recap`, H)).status === 404 && (await http("GET", `/api/rooms/${M}/recap`, G)).status === 404);
+  const OLD = await mkRoom(H, "ended", "Before tracking");
+  await member(OLD, G, "guest", 0, 0); // peak_members stays NULL: ended before the counters existed
+  const old = await http("GET", `/api/rooms/${OLD}/recap`, G);
+  check("a room that ended before tracking: minutesIn and messages are null, never a false 0 (r2 I5)",
+    old.status === 200 && old.json?.recap?.minutesIn === null && old.json?.recap?.messages === null, JSON.stringify(old.json?.recap));
+  const oldHost = await http("GET", `/api/rooms/${OLD}/recap`, H);
+  check("... and the host's peak is null too", oldHost.json?.recap?.peak === null && oldHost.json?.recap?.minutesIn === null, JSON.stringify(oldHost.json?.recap));
+
+  const admin = (await q(`insert into admin_users (username, email, password_hash, display_name, role) values ($1,$2,$3,'A','content_moderator') returning id`,
+    [`rc_adm${stamp}`, `rc_adm${stamp}@t.dev`, hash]))[0].id as string;
+  const support = (await q(`insert into admin_users (username, email, password_hash, display_name, role) values ($1,$2,$3,'A','user_support') returning id`,
+    [`rc_sup${stamp}`, `rc_sup${stamp}@t.dev`, hash]))[0].id as string;
+  const ad = await http("GET", `/api/admin/rooms/${R}/recap`, null, undefined, admin);
+  check("admin read path: the host's view (host-only fields), marked adminView", ad.status === 200 && ad.json?.adminView === true
+    && ad.json?.recap?.earnedKobo === 170000 + 40000 + 30000 && ad.json?.recap?.peak === 12, ad.text);
+  check("admin read path: audited", (await q(`select 1 from admin_activity_logs where admin_id = $1 and action = 'room.recap_viewed' and target_id = $2`, [admin, R])).length === 1);
+  check("admin read path: a taken-down room is still readable by an admin", (await http("GET", `/api/admin/rooms/${M}/recap`, null, undefined, admin)).status === 200);
+  check("admin read path: a user session (even the host) never reaches it", [401, 403].includes((await http("GET", `/api/admin/rooms/${R}/recap`, H)).status));
+  check("admin read path: an admin without a moderator role gets 403", (await http("GET", `/api/admin/rooms/${R}/recap`, null, undefined, support)).status === 403);
+  check("admin read path: a user id presented as an admin id is refused", [401, 403].includes((await http("GET", `/api/admin/rooms/${R}/recap`, null, undefined, H)).status));
+  check("admin read path: a live room has no recap (404)", (await http("GET", `/api/admin/rooms/${L}/recap`, null, undefined, admin)).status === 404);
+
+  // ------------------------------------------------------------------ one notification per spray (owner decision)
+  const R2 = await mkRoom(H, "live", "Spray Room");
+  const s1 = await delivered(R2, H, P, H);
+  await notify.notifySprayReceived(H, R2, 40000, s1);
   let notes = await sprayNotes(H, R2);
-  check("first spray: one notification", notes.length === 1 && /₦400/.test(notes[0].title), JSON.stringify(notes));
+  check("a spray: one notification with THAT spray's amount", notes.length === 1 && /₦400\b/.test(notes[0].title) && notes[0].related_entity_id === sprayNoticeKey(s1), JSON.stringify(notes));
   check("spray notification never carries the payer", notes.every((n: any) => n.related_user_id === null && !/Payer|rc_payer/.test(`${n.title} ${n.message}`)));
   check("spray notification links to earnings", notes[0]?.link === "/rooms/earnings");
+  await notify.notifySprayReceived(H, R2, 40000, s1);
+  check("a retried finalize for the same spray never notifies twice", (await sprayNotes(H, R2)).length === 1);
 
-  // 300 deliveries in under a minute, calls fired concurrently: still ONE notification, unchanged inside the window
-  for (let i = 0; i < 300; i++) await delivered(R2, H, P, H);
-  const burst: Promise<void>[] = [];
-  for (let i = 0; i < 300; i++) { now += 150; burst.push(notify.notifySprayReceived(H, R2, 40000)); }
-  await Promise.all(burst);
+  // 300 sprays: 300 notifications, each with its own amount (never a running total); concurrency is capped, nothing lost.
+  const ids: string[] = [];
+  for (let i = 0; i < 300; i++) ids.push(await delivered(R2, H, P, H));
+  await Promise.all(ids.map((id) => notify.notifySprayReceived(H, R2, 40000, id)));
   notes = await sprayNotes(H, R2);
-  check("300 sprays in a minute: still one notification", notes.length === 1, String(notes.length));
-  check("inside the minute the batch was not rewritten", /₦400\b/.test(notes[0]?.title ?? ""), notes[0]?.title);
-  // Also from a second "process": a direct flush (same SQL path) inside the window does not insert a second row.
-  const f2 = await notify.flushSprayBatch(H, R2);
-  check("a second flush inside the window waits (multi-process safe by the row, not memory)", f2.outcome === "wait" && (await sprayNotes(H, R2)).length === 1, JSON.stringify(f2));
-  now += SPRAY_BATCH_WINDOW_MS;
-  await notify.notifySprayReceived(H, R2, 40000);
-  notes = await sprayNotes(H, R2);
-  check("after the window: the same notification updated to the stored total (301 x 400 naira)", notes.length === 1 && notes[0].title.includes("₦120,400"), notes[0]?.title);
+  check("300 sprays: 300 notifications (one each)", notes.length === 301, String(notes.length));
+  check("every one states only its own spray's amount", notes.every((n: any) => /You received ₦400 in /.test(n.title)), notes.find((n: any) => !/₦400 in/.test(n.title))?.title);
+  // A burst of the same ids again (retries): still 301.
+  await Promise.all(ids.slice(0, 50).map((id) => notify.notifySprayReceived(H, R2, 40000, id)));
+  check("retries of the burst add nothing", (await sprayNotes(H, R2)).length === 301);
 
   // stage guest gets their share, the host their cut, separately
-  await delivered(R2, H, P, S);
-  await notify.notifySprayReceived(S, R2, 10000);
+  const s2 = await delivered(R2, H, P, S);
+  await notify.notifySprayReceived(S, R2, 10000, s2);
+  await notify.notifySprayReceived(H, R2, 30000, s2);
   const sn = await sprayNotes(S, R2);
   check("a stage guest is told their own share only", sn.length === 1 && sn[0].title.includes("₦100") && !sn[0].title.includes("₦300"), JSON.stringify(sn));
+  check("the host is told their cut of that spray", (await q(`select title from notifications where user_id=$1 and related_entity_id=$2`, [H, sprayNoticeKey(s2)]))[0]?.title?.includes("₦300"));
 
-  // read -> next spray starts a new batch
-  await q(`update notifications set is_read = true where user_id = $1 and type = 'spray_received'`, [H]);
-  await delivered(R2, H, P, H);
-  now += 1000;
-  await notify.notifySprayReceived(H, R2, 40000);
-  check("once read, the next spray makes a fresh unread notification", (await sprayNotes(H, R2)).filter((n: any) => !n.is_read).length === 1);
-
-  // a refused / undelivered spray is never counted
-  await q(`update spray_payments set status = 'reversed' where room_id = $1 and recipient_id = $2`, [R2, S]);
-  check("reversed sprays add nothing (flush has nothing to say)", (await notify.flushSprayBatch(S, R2)).outcome !== "insert");
+  // a refused / undelivered spray is never announced
+  const s3 = await delivered(R2, H, P, S);
+  await q(`update spray_payments set status = 'reversed', delivered_at = null where id = $1`, [s3]);
+  check("a reversed spray says nothing", (await notify.insertSprayNotice(S, s3)) === "nothing");
+  check("someone the spray did not reach is never told", (await notify.insertSprayNotice(G, s1)) === "nothing");
 
   // ------------------------------------------------------------------ fire-and-forget
   notify.notifyTestHooks.fail = () => true;
   let threw = false;
-  try { await notify.notifySprayReceived(H, R2, 40000); await notify.notifyTicketIssued(G, R); await notify.notifyPayoutPaid(H, R, 1000); }
+  try { await notify.notifySprayReceived(H, R2, 40000, s1); await notify.notifyTicketIssued(G, R); await notify.notifyPayoutPaid(H, R, 1000); }
   catch { threw = true; }
   check("a failing notification never rejects (money paths are unaffected)", !threw);
   notify.notifyTestHooks.fail = undefined;
   check("bad input is ignored, never thrown", await notify.notifyPayoutPaid(H, R, -5).then(() => true, () => false)
-    && await notify.notifySprayReceived("x' or 1=1", R, 1).then(() => true, () => false));
+    && await notify.notifySprayReceived("x' or 1=1", R, 1, s1).then(() => true, () => false)
+    && await notify.notifySprayReceived(H, R2, 1, "x' or 1=1").then(() => true, () => false));
 
   await notify.notifyTicketIssued(G, R);
   const tk = await q(`select title, message, link from notifications where user_id=$1 and type='room_ticket'`, [G]);
@@ -237,14 +271,58 @@ try {
   check("an old client's PUT (field omitted) keeps the opt-out", oldClient.json?.roomPrivacy?.notifyFriendsLive === false, oldClient.text);
   const S2 = (await q(`insert into rooms (host_id, title, kind, visibility, age_limit, status) values ($1,'Quiet','party','public','18+','scheduled') returning id`, [H2]))[0].id;
   const st = await http("POST", `/api/rooms/${S2}/start`, H2);
+  await (await import("../server/rooms/liveNotify")).liveNoticeSettled(S2);
   check("start works", st.status === 200, st.text);
   check("opted-out host: followers are NOT told it is live", (await q(`select 1 from notifications where user_id=$1 and type='room_live' and related_entity_id=$2`, [F, S2])).length === 0);
   await http("POST", `/api/rooms/${S2}/end`, H2);
   await http("PUT", "/api/users/me/room-privacy", H2, { interactions: "mutuals", appearInLists: true, allowInvites: true, notifyFriendsLive: true });
   const S3 = (await q(`insert into rooms (host_id, title, kind, visibility, age_limit, status) values ($1,'Loud','party','public','18+','scheduled') returning id`, [H2]))[0].id;
   await http("POST", `/api/rooms/${S3}/start`, H2);
+  await (await import("../server/rooms/liveNotify")).liveNoticeSettled(S3);
   check("opted-in host: followers are told", (await q(`select 1 from notifications where user_id=$1 and type='room_live' and related_entity_id=$2`, [F, S3])).length === 1);
   await http("POST", `/api/rooms/${S3}/end`, H2);
+
+  // ------------------------------------------------------------------ go-live notice: ALL eligible followers (owner decision)
+  const H3 = await mk("bighost");
+  const many = LIVE_NOTIFY_CHUNK + 60; // more than one chunk, and more than the old cap of 200
+  const fans = (await q(
+    `insert into users (email, username, user_type, password_hash, is_verified, onboarding_complete, date_of_birth, created_at)
+     select 'rc_fan' || g || '_' || $1 || '@t.dev', 'rc_fan' || g || '_' || $1, 'social', $2, true, true, $3::date, now() - interval '60 days'
+       from generate_series(1, $4::int) g returning id`,
+    [stamp, hash, yearsAgo(30), many],
+  )).map((r: any) => r.id as string);
+  await q(`insert into follows (follower_id, following_id) select unnest($1::varchar[]), $2 on conflict do nothing`, [fans, H3]);
+  const teenFan = (await q(`insert into users (email, username, user_type, password_hash, is_verified, onboarding_complete, date_of_birth)
+    values ($1,$2,'social',$3,true,true,$4) returning id`, [`rc_teenfan${stamp}@t.dev`, `rc_teenfan${stamp}`, hash, yearsAgo(15)]))[0].id as string;
+  const blockedFan = await mk("blockedfan");
+  const goneFan = await mk("gonefan");
+  for (const f of [teenFan, blockedFan, goneFan]) await follow(f, H3);
+  await block(H3, blockedFan);
+  await q(`update users set deleted_at = now() where id = $1`, [goneFan]);
+  const BIG = (await q(`insert into rooms (host_id, title, kind, visibility, age_limit, status) values ($1,'Big','party','public','18+','scheduled') returning id`, [H3]))[0].id;
+  const t0 = Date.now();
+  const bst = await http("POST", `/api/rooms/${BIG}/start`, H3);
+  check("start answers without waiting for the notice", bst.status === 200, bst.text);
+  const told = await liveNoticeSettled(BIG);
+  const live = await q(`select user_id from notifications where type='room_live' and related_entity_id=$1`, [BIG]);
+  const liveSet = new Set(live.map((r: any) => r.user_id as string));
+  check(`every eligible follower is told (${many}, more than one chunk and the old cap)`, fans.every((f) => liveSet.has(f)) && live.length === many, `${live.length} told=${told} in ${Date.now() - t0} ms`);
+  check("never a teen follower of an 18+ room, a blocked follower, or a deleted account", !liveSet.has(teenFan) && !liveSet.has(blockedFan) && !liveSet.has(goneFan));
+  // friends-only: only mutual follows
+  const mutualFan = fans[0];
+  await follow(H3, mutualFan);
+  await http("POST", `/api/rooms/${BIG}/end`, H3);
+  const FR = (await q(`insert into rooms (host_id, title, kind, visibility, age_limit, status) values ($1,'Friends','party','friends','18+','scheduled') returning id`, [H3]))[0].id;
+  await http("POST", `/api/rooms/${FR}/start`, H3);
+  await liveNoticeSettled(FR);
+  const fr = await q(`select user_id from notifications where type='room_live' and related_entity_id=$1`, [FR]);
+  check("a friends-only room tells mutual follows only", fr.length === 1 && fr[0].user_id === mutualFan, JSON.stringify(fr));
+  await http("POST", `/api/rooms/${FR}/end`, H3);
+  const INV = (await q(`insert into rooms (host_id, title, kind, visibility, age_limit, status) values ($1,'Invite','party','invite','18+','scheduled') returning id`, [H3]))[0].id;
+  await http("POST", `/api/rooms/${INV}/start`, H3);
+  await liveNoticeSettled(INV);
+  check("an invite-only room tells no follower", (await q(`select 1 from notifications where type='room_live' and related_entity_id=$1 and title like '%is live'`, [INV])).length === 0);
+  await http("POST", `/api/rooms/${INV}/end`, H3);
 } catch (e: any) {
   failed++; console.log(`FAIL uncaught: ${e.stack || e}`);
 } finally {

@@ -14,8 +14,12 @@ function getSecretKey(): string {
   return key;
 }
 
+/** Every Paystack call gives up after this long (fix round I3): a hung provider never holds a request or a connection. */
+export const PAYSTACK_TIMEOUT_MS = 15_000;
+
 async function paystackRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`https://api.paystack.co${path}`, {
+    signal: AbortSignal.timeout(PAYSTACK_TIMEOUT_MS),
     ...options,
     headers: {
       Authorization: `Bearer ${getSecretKey()}`,
@@ -396,6 +400,7 @@ async function paystackAnswer<T>(path: string, options: RequestInit = {}): Promi
   let res: Response;
   try {
     res = await fetch(`https://api.paystack.co${path}`, {
+      signal: AbortSignal.timeout(PAYSTACK_TIMEOUT_MS), // a timeout lands in the catch below: "Paystack unavailable"
       ...options,
       headers: { Authorization: `Bearer ${getSecretKey()}`, "Content-Type": "application/json", ...options.headers },
     });

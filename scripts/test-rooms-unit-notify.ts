@@ -1,10 +1,10 @@
-// Room money notifications: copy, links and the spray batching rule (no database):
+// Room money notifications: copy, links and the one-notice-per-spray key (no database):
 //   npx tsx scripts/test-rooms-unit-notify.ts   (or npm run test:rooms)
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  EARNINGS_LINK, ROOM_MONEY_NOTIFICATION_TYPES, SPRAY_BATCH_WINDOW_MS, notificationLinkFor, payoutPaidNotice, refundIssuedNotice,
-  safeRoomMoneyLink, sprayBatchDecision, sprayBatchKey, sprayReceivedNotice, ticketIssuedNotice,
+  EARNINGS_LINK, ROOM_MONEY_NOTIFICATION_TYPES, notificationLinkFor, payoutPaidNotice, refundIssuedNotice,
+  safeRoomMoneyLink, sprayNoticeKey, sprayReceivedNotice, ticketIssuedNotice,
 } from "../shared/roomNotifications";
 import { notificationTypes } from "../shared/schema";
 
@@ -74,53 +74,22 @@ test("room titles in copy are one line and cut to 80 characters", () => {
   assert.ok(t.length <= "You received ₦1 in ".length + 80, String(t.length));
 });
 
-test("batching: no unread batch -> insert; same total -> unchanged", () => {
-  assert.deepEqual(sprayBatchDecision(null, "A", 0), { action: "insert" });
-  assert.deepEqual(sprayBatchDecision({ lastAtMs: 0, title: "A" }, "A", 10 * SPRAY_BATCH_WINDOW_MS), { action: "unchanged" });
+test("one notice per spray (owner decision): the key is the spray id, the copy is that spray's amount", () => {
+  const SPRAY = "9a0c1d2e-0000-4000-8000-000000000002";
+  assert.equal(sprayNoticeKey(SPRAY), `spray-received:${SPRAY}`);
+  assert.equal(sprayReceivedNotice(40000, "Room").title, "You received ₦400 in Room");
+  assert.match(sprayReceivedNotice(40000, "Room").message, /a spray/);
+  assert.doesNotMatch(sprayReceivedNotice(40000, "Room").title, /so far|total/i, "never a running total");
 });
 
-test("batching: a change inside the window waits until it opens; after it, updates", () => {
-  assert.deepEqual(sprayBatchDecision({ lastAtMs: 1000, title: "A" }, "B", 1000 + 15_000), { action: "wait", retryInMs: SPRAY_BATCH_WINDOW_MS - 15_000 });
-  assert.deepEqual(sprayBatchDecision({ lastAtMs: 1000, title: "A" }, "B", 1000 + SPRAY_BATCH_WINDOW_MS), { action: "update" });
-  // A clock that went backwards waits a full window, never updates early.
-  assert.deepEqual(sprayBatchDecision({ lastAtMs: 5000, title: "A" }, "B", 1000), { action: "wait", retryInMs: SPRAY_BATCH_WINDOW_MS });
-});
-
-test("storm: 300 sprays in one minute make ONE notification and no update inside that minute (injected clock)", () => {
-  // Simulates the stored row the way notify.ts writes it: insert/update set lastAtMs = now.
-  let row: { lastAtMs: number; title: string } | null = null;
-  let inserts = 0, updates = 0;
-  let total = 0;
-  const t0 = 1_700_000_000_000;
-  for (let i = 0; i < 300; i++) {
-    const now = t0 + i * 200; // 300 sprays over 60 s minus one step
-    total += 40000;
-    const title = sprayReceivedNotice(total, "Room").title;
-    const d = sprayBatchDecision(row, title, now);
-    if (d.action === "insert") { inserts++; row = { lastAtMs: now, title }; }
-    if (d.action === "update") { updates++; row = { lastAtMs: now, title }; }
-  }
-  assert.equal(inserts, 1);
-  assert.equal(updates, 0);
-  // The trailing pass when the window opens brings the total up to date, once.
-  const late = sprayBatchDecision(row, sprayReceivedNotice(total, "Room").title, t0 + SPRAY_BATCH_WINDOW_MS);
-  assert.equal(late.action, "update");
-});
-
-test("at most one update a minute over a long burst (10 minutes, a spray a second)", () => {
-  let row: { lastAtMs: number; title: string } | null = null;
-  let writes = 0;
-  const t0 = 0;
-  for (let s = 0; s < 600; s++) {
-    const title = sprayReceivedNotice((s + 1) * 1000, "Room").title;
-    const d = sprayBatchDecision(row, title, t0 + s * 1000);
-    if (d.action === "insert" || d.action === "update") { writes++; row = { lastAtMs: t0 + s * 1000, title }; }
-  }
-  assert.ok(writes <= 11, String(writes)); // the insert + one per full minute
-});
-
-test("the batch key is per room (the recipient is the notification's user)", () => {
-  assert.equal(sprayBatchKey(ROOM), `spray-received:${ROOM}`);
+test("notify.ts: de-duplicated by spray, read from the stored row, bounded concurrency, no batching left", () => {
+  const src = readFileSync(new URL("../server/rooms/notify.ts", import.meta.url), "utf8");
+  assert.match(src, /where not exists \(select 1 from notifications where user_id = \$1 and type = 'spray_received' and related_entity_id = \$5\)/);
+  assert.match(src, /where s\.id = \$1::uuid and s\.status = 'delivered'/);
+  assert.match(src, /SPRAY_NOTIFY_CONCURRENCY = 4/);
+  assert.doesNotMatch(src, /sprayBatchDecision|SPRAY_BATCH_WINDOW_MS|BEGIN|pg_advisory/, "no batching transaction or lock remains");
+  const spray = readFileSync(new URL("../server/rooms/spray.ts", import.meta.url), "utf8");
+  assert.match(spray, /void notifySprayReceived\(row\.hostId, row\.roomId, row\.hostKobo, row\.id\)/);
 });
 
 test("notify.ts: spray_received rows never carry a related user, and every hook site uses void (fire-and-forget)", () => {

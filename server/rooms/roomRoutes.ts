@@ -22,6 +22,7 @@ import * as rs from "./roomStorage";
 import { canViewRoom, hostRoom, hostSummary, mutualFollow, pinnedPlainText, plainText, publicRoom, sha256, viewerRoom, viewRoom } from "./roomAccess";
 import { countPaidTickets, hasPaidTicket, hostCanSellNow, TicketGuardError, updateRoomWithTicketGuard } from "./ticketStorage";
 import { hostPayoutReady } from "./payouts";
+import { startLiveNotice } from "./liveNotify";
 import { registerRoomPayoutRoutes } from "./payoutRoutes";
 import { registerRoomEarningsRoutes } from "./earningsRoutes";
 import { isSellablePrice } from "@shared/roomTickets";
@@ -119,29 +120,12 @@ async function hostingInfo(userId: string): Promise<{ accountAgeDays: number; mi
   return { accountAgeDays, minAccountAgeDays: Number(minAccountAgeDays) || 0 };
 }
 
-/** The "is live" notice to the host's followers. Phase 6.6: never when the host turned "Tell my friends" off. */
-async function notifyFollowers(room: Room, host: User): Promise<void> {
-  if (room.visibility === "invite") return;
-  if (!resolveRoomPrivacy(host.roomPrivacy).notifyFriendsLive) return;
-  const rows = await db.select({ id: users.id, dob: users.dateOfBirth }).from(follows)
-    .innerJoin(users, eq(users.id, follows.followerId)).where(eq(follows.followingId, host.id)).limit(2000);
-  if (!rows.length) return;
-  const blocked = await blockedWith(host.id);
-  let audience = rows.filter((r) => !blocked.has(r.id) && canJoinRoom({ age: ageFromDob(r.dob) }, room as any).ok);
-  if (room.minorsRoom) {
-    // A minors' room is only announced to teens, and to adults who already hold an acknowledged personal invite.
-    const acked = await mr.ackedInviteesOf(room.id);
-    audience = audience.filter((r) => isTeen(ageFromDob(r.dob)) || acked.has(r.id));
-  }
-  if (room.visibility === "friends") {
-    const back = new Set((await db.select({ id: follows.followingId }).from(follows).where(eq(follows.followerId, host.id))).map((r) => r.id));
-    audience = audience.filter((r) => back.has(r.id));
-  }
-  const name = host.displayName || host.organizationName || host.username;
-  await Promise.allSettled(audience.slice(0, MAX_NOTIFY).map((r) => deliverNotification({
-    userId: r.id, type: "room_live", title: `${name} is live`, message: room.title,
-    link: `/rooms/${room.id}`, relatedUserId: host.id, relatedEntityId: room.id,
-  })));
+/**
+ * The "is live" notice to the host's followers (fix round, owner decision: ALL eligible followers, chunked, in the
+ * background; the rules are in liveNotify.ts). Never when the host turned "Tell my followers" off. Never throws.
+ */
+function notifyFollowers(room: Room, host: User): void {
+  startLiveNotice(room, host);
 }
 
 async function checkLink(res: Response, hostId: string, v: { eventId?: string; venueId?: string }): Promise<boolean> {
@@ -514,7 +498,7 @@ export function registerRoomRoutes(app: Express): void {
       }
       if (live.minorsRoom) roomHub.markMinorsRoom(room.id);
       await rs.upsertMember(room.id, host.id, "host");
-      await notifyFollowers(live, host).catch((e) => console.error("[rooms] notify failed:", e));
+      notifyFollowers(live, host); // background (never delays the answer)
       res.json({ room: { ...viewerRoom(live), host: hostSummary(host) } });
     } catch (e) {
       console.error("[rooms] start failed:", e);

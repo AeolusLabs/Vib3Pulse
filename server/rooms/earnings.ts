@@ -27,9 +27,12 @@ export async function loadEarningsInput(viewerId: string): Promise<EarningsInput
     ),
     rowsOrNone(
       `select id, room_id, host_id, recipient_id, host_kobo, guest_kobo, status,
-              round(extract(epoch from delivered_at) * 1000)::float8 as delivered_ms
+              round(extract(epoch from delivered_at) * 1000)::float8 as delivered_ms,
+              round(extract(epoch from coalesce(paid_at, created_at)) * 1000)::float8 as paid_ms
          from spray_payments
-        where (host_id = $1 or recipient_id = $1) and delivered_at is not null and status in ('delivered', 'disputed')`,
+        where (host_id = $1 or recipient_id = $1)
+          and ((delivered_at is not null and status in ('delivered', 'disputed'))
+               or status in ('reversing', 'reversed', 'disputed'))`,
       [viewerId],
     ),
     rowsOrNone(
@@ -55,6 +58,9 @@ export async function loadEarningsInput(viewerId: string): Promise<EarningsInput
     sprays: sprays.map((s) => ({
       id: String(s.id), roomId: s.room_id, hostId: s.host_id, recipientId: s.recipient_id, hostKobo: num(s.host_kobo),
       guestKobo: s.guest_kobo === null || s.guest_kobo === undefined ? null : num(s.guest_kobo), status: s.status, deliveredAtMs: msOrNull(s.delivered_ms),
+      // A charged spray (refunded or disputed) was split at charge time; a dispute can arrive without our paid_at, so the
+      // row's created_at stands in for it.
+      paidAtMs: msOrNull(s.paid_ms),
     })),
     payouts: payouts.map((p) => ({ roomId: p.room_id, hostId: p.host_id, status: p.status, amountKobo: num(p.amount_kobo), releaseAtMs: num(p.release_ms) })),
     clawbacks: clawbacks.map((c) => ({ beneficiaryId: c.beneficiary_id, amountKobo: num(c.amount_kobo), recoveredKobo: num(c.recovered_kobo), status: c.status })),

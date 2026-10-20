@@ -231,7 +231,8 @@ try {
     const FBLK = await mk("rt_fb", yearsAgo(30));        // follower blocked by A
     const FNON = await mk("rt_fn", yearsAgo(30));        // not a follower
     const follow = (a: string, b: string) => q(`insert into follows (follower_id, following_id) values ($1,$2) on conflict do nothing`, [a, b]);
-    const notified = async (roomId: string) => (await q(`select user_id from notifications where type='room_live' and related_entity_id=$1`, [roomId])).map((r: any) => r.user_id as string);
+    // The go-live notice runs in the background (fix round): wait for this room's run before reading.
+    const notified = async (roomId: string) => { await (await import("../server/rooms/liveNotify")).liveNoticeSettled(roomId); return (await q(`select user_id from notifications where type='room_live' and related_entity_id=$1`, [roomId])).map((r: any) => r.user_id as string); };
     const NOROOM = "00000000-0000-0000-0000-000000000000";
 
     // ---- create

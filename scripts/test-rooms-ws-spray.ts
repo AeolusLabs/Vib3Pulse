@@ -135,7 +135,7 @@ const mk = async (name: string, o: { payout?: boolean; card?: boolean } = {}) =>
      values ($1,$2,'social',$3,true,true,$4, now() - interval '60 days', now(), 'admin') returning id`,
     [`sw_${name}${stamp}@t.dev`, `sw_${name}${stamp}`, hash, yearsAgo(30)]))[0].id as string;
   created.push(id);
-  if (o.payout) await q(`insert into organizer_payment_accounts (user_id, provider, paystack_subaccount_code, details_submitted, payouts_enabled) values ($1,'paystack',$2,true,true)`, [id, `ACCT_sw_${++seq}`]);
+  if (o.payout) await q(`insert into organizer_payment_accounts (user_id, provider, paystack_subaccount_code, details_submitted, payouts_enabled, room_verified_subaccount_code, name_matched_at) values ($1,'paystack',$2,true,true,$2,now())`, [id, `ACCT_sw_${++seq}`]);
   if (o.card) await ss.saveMethod({ userId: id, provider: "paystack", authEnc: encryptToken("AUTH_sw_secret"), last4: "4242", brand: "visa", bank: null, reusable: true, signature: `SIG_sw_${id}` });
   return id;
 };

@@ -30,7 +30,8 @@ const { storage } = await import("../server/storage");
 const { redactSensitiveFields } = await import("../server/security");
 const { userToSessionUser } = await import("../server/auth");
 const { registerRoomRoutes } = await import("../server/rooms/roomRoutes");
-const { setPayoutProviderForTests, payoutTestHooks, hostPayoutReady, ROOMS_ACCOUNT_ATTEMPTS_PER_HOUR } = await import("../server/rooms/payouts");
+const { setPayoutProviderForTests, payoutTestHooks, hostPayoutReady, payableSubaccountOf, maskAccountName, ROOMS_ACCOUNT_ATTEMPTS_PER_HOUR } = await import("../server/rooms/payouts");
+const { registerOrganizerPaymentsRoutes } = await import("../server/organizer-payments-routes");
 const { hasVerifiedPayoutAccount } = await import("../server/rooms/ticketStorage");
 const { ticketBreakdown, sprayBreakdown } = await import("../shared/money");
 const { setVoiceServiceForTests } = await import("../server/rooms/voice/voiceService");
@@ -78,6 +79,7 @@ app.use(async (req: any, _res, next) => {
 });
 app.use(redactSensitiveFields);
 registerRoomRoutes(app);
+registerOrganizerPaymentsRoutes(app);
 setVoiceServiceForTests(null);
 const server = http.createServer(app);
 await new Promise<void>((r) => server.listen(0, r));
@@ -159,7 +161,10 @@ try {
   const HO = await mk("organiser");
 
   let r = await rest("GET", "/api/rooms/payouts/status", U0);
-  check("status unverified: verifiedAdult false, no account", r.status === 200 && r.json.verifiedAdult === false && r.json.account === null && r.json.subaccountReady === false, r.text);
+  check("status unverified: verifiedAdult false, no account, cannot link", r.status === 200 && r.json.verifiedAdult === false && r.json.account === null
+    && r.json.subaccountReady === false && r.json.canLinkAccount === false, r.text);
+  r = await rest("GET", "/api/rooms/payouts/status", H1);
+  check("verified adult WITHOUT a verified legal name: canLinkAccount false (the page says to contact support)", r.json?.verifiedAdult === true && r.json?.canLinkAccount === false, r.text);
   r = await rest("POST", "/api/rooms/payouts/account", U0, { bankCode: "058", accountNumber: "0123456789" });
   check("unverified user: 403 NOT_VERIFIED, no lookup", r.status === 403 && r.json?.code === "NOT_VERIFIED" && mock.calls.resolve.length === 0, r.text);
 
@@ -196,6 +201,7 @@ try {
   check("response never carries the full number or the account name", !ok1.text.includes("0123456789") && !/OKAFOR/i.test(ok1.text) && !/accountName|account_name/.test(ok1.text));
   check("one subaccount created, business name = the verified name", mock.calls.create.length === 1 && mock.calls.create[0].businessName === "Adébáyọ̀ Okafor");
   r = await rest("GET", "/api/rooms/payouts/status", H1);
+  check("with a verified legal name: canLinkAccount true", r.json?.canLinkAccount === true, r.text);
   check("status after linking: bank name, last four, name matches, ready", r.status === 200 && r.json.verifiedAdult === true && r.json.account?.bankName === "Test Bank Plc"
     && r.json.account?.last4 === "6789" && r.json.account?.nameMatches === true && r.json.subaccountReady === true && !r.text.includes("0123456789"), r.text);
   check("hostPayoutReady and hasVerifiedPayoutAccount agree (one helper)", (await hostPayoutReady(H1)) === true && (await hasVerifiedPayoutAccount(H1)) === true
@@ -207,7 +213,19 @@ try {
     && mock.calls.update.length === 1 && rows1.length === 1 && mock.calls.update[0].code === rows1[0].paystack_subaccount_code
     && rows1[0].account_last4 === "2222" && rows1[0].bank_code === "044" && rows1[0].bank_name === "Other Bank", JSON.stringify(rows1));
   const audit1 = await q(`select action, outcome from room_payout_account_events where user_id = $1 order by created_at, id`, [H1]);
-  check("an audit row for every attempt and every outcome", audit1.filter((a) => a.action === "account_set").length === 2 && audit1.filter((a) => a.action === "account_refused").length >= 3, JSON.stringify(audit1));
+  check("an audit row for every lookup outcome; refusals before any lookup write nothing (review r1 m6)",
+    audit1.filter((a) => a.action === "account_set").length === 2 && audit1.filter((a) => a.action === "account_refused").length === 2
+    && !audit1.some((a) => a.outcome === "NO_VERIFIED_NAME" || a.outcome === "BAD_BANK"), JSON.stringify(audit1));
+  check("an unknown bank spends no attempt (review r1 m3)", audit1.filter((a) => a.action === "attempt").length === 4, JSON.stringify(audit1));
+
+  // ---- C1: an organiser re-onboarding replaces the code with an UNCHECKED one: no longer payable in rooms.
+  const goodCode = rows1[0].paystack_subaccount_code;
+  await q(`update organizer_payment_accounts set paystack_subaccount_code = $2 where user_id = $1`, [H1, `ACCT_ea_reonboard_${stamp}`]);
+  r = await rest("GET", "/api/rooms/payouts/status", H1);
+  check("C1: a replaced (unchecked) subaccount is not payable, not shown, not ready", (await hostPayoutReady(H1)) === false && (await payableSubaccountOf(H1)) === null
+    && r.json?.account === null && r.json?.subaccountReady === false, r.text);
+  await q(`update organizer_payment_accounts set paystack_subaccount_code = $2 where user_id = $1`, [H1, goodCode]);
+  check("C1: back to the checked code: payable again", (await payableSubaccountOf(H1)) === goodCode);
 
   // Rate limit: per user, in the database.
   const before = mock.calls.resolve.length;
@@ -237,10 +255,70 @@ try {
   r = await rest("POST", "/api/rooms/payouts/account", HF, { bankCode: "058", accountNumber: "3333333333" });
   check("a queued payout: 409 PAYOUT_IN_FLIGHT, the subaccount is not touched", r.status === 409 && r.json?.code === "PAYOUT_IN_FLIGHT" && mock.calls.update.length === updBefore, r.text);
   r = await rest("GET", "/api/rooms/payouts/status", HF);
-  check("organiser-made account (never name-checked): account null, still ready", r.json?.account === null && r.json?.subaccountReady === true, r.text);
+  check("C1: organiser-made account (never name-checked): account null, NOT ready, not payable",
+    r.json?.account === null && r.json?.subaccountReady === false && (await hostPayoutReady(HF)) === false, r.text);
   await q(`update room_payouts set status = 'held' where room_id = $1`, [roomF]);
   r = await rest("POST", "/api/rooms/payouts/account", HF, { bankCode: "058", accountNumber: "3333333333" });
   check("a held payout does not block: 200, updates the organiser subaccount", r.status === 200 && r.json?.updated === true && mock.calls.update.length === updBefore + 1, r.text);
+  check("after the rooms name check the same subaccount is payable", (await hostPayoutReady(HF)) === true);
+
+  // I3: Paystack clearly refuses an update: the old verification is restored (still payable); an outage leaves it cleared.
+  const { setPayoutProviderForTests: setProv } = await import("../server/rooms/payouts");
+  const keep = { listBanks: async () => BANKS, resolve: async (n: string) => ({ accountNumber: n, accountName: OWNER.get(n) ?? "" }) };
+  await q(`update room_payouts set status = 'paid' where room_id = $1`, [roomF]);
+  setProv({ ...keep, updateSubaccount: async () => { throw new Error("Paystack error: Account details invalid"); } });
+  r = await rest("POST", "/api/rooms/payouts/account", HF, { bankCode: "058", accountNumber: "3333333333" });
+  check("I3: a clear Paystack refusal: 503 and the account stays payable", r.status === 503 && (await hostPayoutReady(HF)) === true, r.text);
+  setProv({ ...keep, updateSubaccount: async () => { throw new Error("Paystack unavailable: The operation was aborted due to timeout"); } });
+  r = await rest("POST", "/api/rooms/payouts/account", HF, { bankCode: "058", accountNumber: "3333333333" });
+  check("I3: an unclear answer (timeout): 503 and the account is NOT payable until saved again (fail closed)", r.status === 503 && (await hostPayoutReady(HF)) === false, r.text);
+  setProv({ ...keep, updateSubaccount: async () => {} });
+  r = await rest("POST", "/api/rooms/payouts/account", HF, { bankCode: "058", accountNumber: "3333333333" });
+  check("I3: saving again restores it", r.status === 200 && (await hostPayoutReady(HF)) === true, r.text);
+  // I3: while a change holds the lock, settlement may not queue (the shared lock is refused).
+  const lockC = await pool.connect();
+  try {
+    await lockC.query("select pg_advisory_lock(41004, hashtext($1::text))", [HF]);
+    const probe = await pool.connect();
+    try {
+      await probe.query("BEGIN");
+      const ok = (await probe.query("select pg_try_advisory_xact_lock_shared(41004, hashtext($1::text)) as ok", [HF])).rows[0].ok;
+      await probe.query("ROLLBACK");
+      check("I3: a change in progress refuses settlement's shared lock (no queueing meanwhile)", ok === false);
+    } finally { probe.release(); }
+  } finally {
+    await lockC.query("select pg_advisory_unlock(41004, hashtext($1::text))", [HF]).catch(() => {});
+    lockC.release();
+  }
+  setPayoutProviderForTests({
+    listBanks: async () => { mock.calls.banks++; return BANKS; },
+    resolve: async (n, b) => {
+      mock.calls.resolve.push(`${b}:${n}`);
+      if (mock.outage) throw new Error("Paystack unavailable: HTTP 502");
+      const name = OWNER.get(n);
+      if (!name) throw new Error("Paystack error: Could not resolve account name");
+      return { accountNumber: n, accountName: name };
+    },
+    createSubaccount: async (p) => { mock.calls.create.push(p); return { subaccountCode: `ACCT_ea_${mock.calls.create.length}_${Date.now()}` }; },
+    updateSubaccount: async (code, p) => { mock.calls.update.push({ code, ...p }); },
+  });
+
+  // ---- I1: the organiser lookup routes share the durable per-user limit; onboarding masks the holder's name.
+  const ORG = (await q(
+    `insert into users (email, username, user_type, password_hash, is_verified, onboarding_complete, date_of_birth)
+     values ($1,$2,'organizer',$3,true,true,$4) returning id`,
+    [`ea_org${stamp}@t.dev`, `ea_org${stamp}`, hash, yearsAgo(30)],
+  ))[0].id as string;
+  created.push(ORG);
+  for (let i = 0; i < ROOMS_ACCOUNT_ATTEMPTS_PER_HOUR; i++) {
+    await q(`insert into room_payout_account_events (user_id, action, outcome) values ($1, 'attempt', 'organizer_resolve')`, [ORG]);
+  }
+  const orgResolve = await rest("POST", "/api/organizer/payments/paystack/resolve-account", ORG, { accountNumber: "0123456789", bankCode: "058" });
+  check("I1: organiser resolve-account past 5 lookups an hour: 429, no lookup made", orgResolve.status === 429 && orgResolve.json?.code === "RATE_LIMITED"
+    && Number(orgResolve.headers.get("retry-after")) > 0, orgResolve.text);
+  const orgOnboard = await rest("POST", "/api/organizer/payments/paystack/onboard", ORG, { accountNumber: "0123456789", bankCode: "058", businessName: "X" });
+  check("I1: organiser onboard shares the same limit: 429", orgOnboard.status === 429, orgOnboard.text);
+  check("I1: the onboarding name is masked", maskAccountName("ADEBAYO OKAFOR") === "A****** O*****" && maskAccountName(null) === "");
 
   r = await rest("GET", "/api/rooms/payouts/banks", HO);
   check("banks: any signed-in user (no organiser role), names and codes only", r.status === 200 && Array.isArray(r.json?.banks) && r.json.banks.length === 2
@@ -279,10 +357,12 @@ try {
   check("earnings: own spray shares only (host share + stage share elsewhere)", e.totals.sprayKobo === bHost + (bStage.guest as number), r.text);
   check("settled = the payout Paystack confirmed (net of the clawback taken)", e.settledKobo === 2 * tb5 - 1000 && e.clawbackAppliedKobo === 1000, r.text);
   check("held = tickets of the room with no payout yet", e.heldTicketKobo === tb25, r.text);
-  check("sprays are on their way, never settled", e.onItsWayKobo === bHost + (bStage.guest as number), r.text);
+  check("sprays are paid straight to the bank by Paystack, never 'settled' (r2 I4)",
+    e.sprayDirectKobo === bHost + (bStage.guest as number) + bHost && e.onItsWayKobo === e.sprayDirectKobo + e.ticketSendingKobo + e.needsAttentionKobo, r.text);
+  check("I2: the reversed spray's split share is returned (received, then clawed back), not earnings", e.sprayReturnedKobo === bHost && e.totals.sprayKobo === bHost + (bStage.guest as number), r.text);
   check("open clawback = amount minus recovered", e.clawbackOpenKobo === 2000, r.text);
-  check("balance: settled + on its way + held = totals - applied",
-    e.settledKobo + e.onItsWayKobo + e.heldTicketKobo === e.totals.sprayKobo + e.totals.ticketKobo - e.clawbackAppliedKobo, r.text);
+  check("balance: settled + on its way + held = totals + returned - applied",
+    e.settledKobo + e.onItsWayKobo + e.heldTicketKobo === e.totals.sprayKobo + e.totals.ticketKobo + e.sprayReturnedKobo - e.clawbackAppliedKobo, r.text);
   check("byRoom: the viewer's rooms and the room where they were sprayed on stage, titles only",
     e.byRoom.length === 3 && e.byRoom.some((b: any) => b.roomId === ro && b.ticketKobo === 0 && b.sprayKobo === bStage.guest), r.text);
   check("no payer identity anywhere in the earnings answer", ![P, P2, G, "ea_payer"].some((s) => r.text.includes(s)));

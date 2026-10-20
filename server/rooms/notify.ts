@@ -5,25 +5,14 @@
 // Copy and links: shared/roomNotifications.ts. Amounts come from stored rows only. A notification never names or points to
 // a payer (spray_received has no related_user_id, and its copy says only how much and where).
 //
-// Spray batching (review focus "notification storm"): ONE unread spray_received notification per (recipient, room), whose
-// title carries the recipient's total share of the sprays delivered to them in that room (summed from spray_payments, so a
-// retry or a lost call can never make it wrong). It is changed at most once per SPRAY_BATCH_WINDOW_MS:
-//  - across processes: the read-decide-write runs in one transaction under pg_advisory_xact_lock('spray-notify:<user>:<room>'),
-//    and the "last written" time is the row's created_at (set from notifyClock), so two servers can never both insert, and
-//    neither updates inside the window;
-//  - inside a process: calls for one key are coalesced (one connection at most per key; a call that arrives while one is
-//    running only marks "run once more"), so 300 sprays in a minute use a handful of short transactions, not 300 waiting
-//    connections;
-//  - the last sprays of a burst are not lost: a call refused by the window arms ONE timer per key for when the window
-//    opens (in memory, best effort; a restart loses only the wait, the next spray brings the total up to date).
+// Sprays: ONE notification per delivered spray per person it reached (owner decision, fix round; see the section below).
 import { pool } from "../storage";
 import { deliverNotification } from "../notifications";
 import { wsManager } from "../websocket";
 import { sendPushNotification } from "../pushService";
 import { sanitizeMoneyError } from "@shared/roomRefunds";
 import {
-  notificationLinkFor, payoutPaidNotice, refundIssuedNotice, sprayBatchDecision, sprayBatchKey, sprayReceivedNotice,
-  ticketIssuedNotice, type SprayBatchDecision,
+  notificationLinkFor, payoutPaidNotice, refundIssuedNotice, sprayNoticeKey, sprayReceivedNotice, ticketIssuedNotice,
 } from "@shared/roomNotifications";
 
 /** The one clock for room notifications. Tests replace now(); production never does. */
@@ -33,12 +22,9 @@ export const notifyClock = { now: (): number => Date.now() };
 export const notifyTestHooks: {
   /** Throw inside a notify call, to prove the money path that called it is unaffected. */
   fail?: (kind: string) => boolean;
-  /** Arm no trailing timer (a suite drives the window with the clock and calls again itself). */
-  noTrailing?: boolean;
 } = {};
 const testing = () => process.env.NODE_ENV !== "production";
 
-const iso = (ms: number) => new Date(ms).toISOString();
 const UUIDISH = /^[A-Za-z0-9-]{1,64}$/;
 const validId = (s: unknown): s is string => typeof s === "string" && UUIDISH.test(s);
 const validKobo = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n > 0;
@@ -110,121 +96,84 @@ export function notifyPayoutPaid(hostId: string, roomId: string, kobo: number): 
   });
 }
 
-// ---------------------------------------------------------------- spray batching
-/** The recipient's share of every spray DELIVERED to them in the room: host_kobo as the host, guest_kobo as a stage guest. */
-const SPRAY_TOTAL_SQL = `
-  select (coalesce(sum(case when host_id = $2 then host_kobo else 0 end), 0)
-        + coalesce(sum(case when recipient_id = $2 and recipient_id <> host_id then coalesce(guest_kobo, 0) else 0 end), 0))::bigint as total
-    from spray_payments
-   where room_id = $1 and status = 'delivered' and (host_id = $2 or recipient_id = $2)`;
+// ---------------------------------------------------------------- one notification per spray (owner decision, fix round)
+// Each delivered spray notifies the person it reached (the host for their share, a stage guest for theirs): "You received
+// N in <room>", N being THAT spray's share read from the stored row (never a running total, never the payer). Cost: one
+// notification row (and one push) per spray per person; a host sprayed 300 times gets 300 notifications.
+//  - De-duplicated by spray: related_entity_id = sprayNoticeKey(sprayId), inserted only if no row with that key exists for
+//    the person, so a retried finalize can never notify twice. (Only the call that won the delivery transition calls this;
+//    the guard covers retries and replays.)
+//  - Pool-safe: at most SPRAY_NOTIFY_CONCURRENCY run at once in this process, each two short autocommit statements (no
+//    transaction, no lock); beyond SPRAY_NOTIFY_QUEUE_MAX waiting, new ones are dropped and logged (a notification is never
+//    worth starving a money path; the money is already delivered and recorded).
+export const SPRAY_NOTIFY_CONCURRENCY = 4;
+export const SPRAY_NOTIFY_QUEUE_MAX = 2000;
+let running = 0;
+const waiting: Array<() => void> = [];
 
-export type SprayFlushOutcome = SprayBatchDecision["action"] | "nothing";
-
-/**
- * One read-decide-write for (recipient, room), in one transaction under the advisory lock. Exported for the tests;
- * production calls go through notifySprayReceived. Throws on a database error (the caller swallows it).
- */
-export async function flushSprayBatch(recipientId: string, roomId: string): Promise<{ outcome: SprayFlushOutcome; retryInMs?: number }> {
-  const nowMs = notifyClock.now();
-  const key = sprayBatchKey(roomId);
-  const c = await pool.connect();
-  let decision: SprayBatchDecision | null = null;
-  let copy: { title: string; message: string } | null = null;
-  try {
-    await c.query("BEGIN");
-    await c.query("select pg_advisory_xact_lock(hashtext($1::text))", [`spray-notify:${recipientId}:${roomId}`]);
-    const room = (await c.query(`select title from rooms where id = $1`, [roomId])).rows[0] as { title: string } | undefined;
-    const total = room ? Number((await c.query(SPRAY_TOTAL_SQL, [roomId, recipientId])).rows[0]?.total ?? 0) : 0;
-    if (!room || !Number.isSafeInteger(total) || total <= 0) { await c.query("ROLLBACK"); return { outcome: "nothing" }; }
-    copy = sprayReceivedNotice(total, room.title);
-    const existing = (await c.query(
-      `select id, title, round(extract(epoch from created_at) * 1000)::float8 as at_ms
-         from notifications
-        where user_id = $1 and type = 'spray_received' and related_entity_id = $2 and is_read = false
-        order by created_at desc limit 1`,
-      [recipientId, key],
-    )).rows[0] as { id: string; title: string; at_ms: number } | undefined;
-    decision = sprayBatchDecision(existing ? { lastAtMs: Number(existing.at_ms), title: existing.title } : null, copy.title, nowMs);
-    if (decision.action === "insert") {
-      await c.query(
-        `insert into notifications (user_id, type, title, message, link, related_entity_id, is_read, created_at)
-         values ($1, 'spray_received', $2, $3, $4, $5, false, $6::timestamp)`,
-        [recipientId, copy.title, copy.message, notificationLinkFor("spray_received", roomId), key, iso(nowMs)],
-      );
-    } else if (decision.action === "update" && existing) {
-      // Still unread (checked in the write): a row read meanwhile is left alone and the next call inserts a fresh one.
-      const r = await c.query(
-        `update notifications set title = $2, message = $3, created_at = $4::timestamp where id = $1 and is_read = false`,
-        [existing.id, copy.title, copy.message, iso(nowMs)],
-      );
-      if (!r.rowCount) decision = { action: "wait", retryInMs: 0 };
-    }
-    await c.query("COMMIT");
-  } catch (e) {
-    await c.query("ROLLBACK").catch(() => {});
-    throw e;
-  } finally {
-    c.release();
+async function withSlot<T>(fn: () => Promise<T>): Promise<T | null> {
+  if (running >= SPRAY_NOTIFY_CONCURRENCY) {
+    if (waiting.length >= SPRAY_NOTIFY_QUEUE_MAX) { console.error("[rooms:notify] spray notification queue full; one dropped"); return null; }
+    await new Promise<void>((resolve) => waiting.push(resolve));
   }
-  if (!decision) return { outcome: "nothing" };
-  if (decision.action === "insert" || decision.action === "update") {
-    // After the commit, best effort: the bell refreshes; a phone is pinged only for a NEW batch (an update is quiet).
-    try { wsManager.sendToUser(recipientId, { type: "notification", data: { type: "spray_received" } }); } catch { /* best effort */ }
-    if (decision.action === "insert" && copy) {
-      sendPushNotification(recipientId, { title: copy.title, body: copy.message, url: notificationLinkFor("spray_received", roomId), tag: key })
-        .catch(() => {});
-    }
+  running++;
+  try { return await fn(); }
+  finally {
+    running--;
+    const next = waiting.shift();
+    if (next) next();
   }
-  return decision.action === "wait" ? { outcome: "wait", retryInMs: decision.retryInMs } : { outcome: decision.action };
 }
 
-/** In this process: one flush per key at a time; a call during a flush only asks for one more pass. */
-const inflight = new Map<string, { again: boolean }>();
-/** In this process: at most one trailing timer per key. */
-const trailing = new Map<string, ReturnType<typeof setTimeout>>();
-const MAX_TRAILING = 5000;
+/** This person's share of ONE delivered spray, and the room title, from the stored rows. null: nothing to say. */
+async function sprayShareOf(sprayId: string, userId: string): Promise<{ kobo: number; roomId: string; title: string } | null> {
+  const r = (await pool.query(
+    `select s.room_id, r.title,
+            (case when s.host_id = $2 then s.host_kobo else 0 end
+             + case when s.recipient_id = $2 and s.recipient_id <> s.host_id then coalesce(s.guest_kobo, 0) else 0 end)::bigint as share
+       from spray_payments s join rooms r on r.id = s.room_id
+      where s.id = $1::uuid and s.status = 'delivered' and (s.host_id = $2 or s.recipient_id = $2)`,
+    [sprayId, userId],
+  )).rows[0] as { room_id: string; title: string; share: string | number } | undefined;
+  const kobo = r ? Number(r.share) : 0;
+  return r && Number.isSafeInteger(kobo) && kobo > 0 ? { kobo, roomId: r.room_id, title: r.title } : null;
+}
 
-function armTrailing(recipientId: string, roomId: string, inMs: number): void {
-  if (testing() && notifyTestHooks.noTrailing) return;
-  const k = `${recipientId}|${roomId}`;
-  if (trailing.has(k) || trailing.size >= MAX_TRAILING) return;
-  const t = setTimeout(() => {
-    trailing.delete(k);
-    void notifySprayReceived(recipientId, roomId, 1);
-  }, Math.max(0, Math.min(inMs, 2 * 60_000)) + 250);
-  t.unref?.();
-  trailing.set(k, t);
+export type SprayNotifyOutcome = "inserted" | "duplicate" | "nothing";
+
+/** One spray, one person: the insert (de-duplicated by spray id). Exported for the tests. Throws on a database error. */
+export async function insertSprayNotice(recipientId: string, sprayId: string): Promise<SprayNotifyOutcome> {
+  const share = await sprayShareOf(sprayId, recipientId);
+  if (!share) return "nothing";
+  const copy = sprayReceivedNotice(share.kobo, share.title);
+  const link = notificationLinkFor("spray_received", share.roomId);
+  const key = sprayNoticeKey(sprayId);
+  const r = await pool.query(
+    `insert into notifications (user_id, type, title, message, link, related_entity_id, is_read)
+     select $1, 'spray_received', $2, $3, $4, $5, false
+      where not exists (select 1 from notifications where user_id = $1 and type = 'spray_received' and related_entity_id = $5)`,
+    [recipientId, copy.title, copy.message, link, key],
+  );
+  if (!r.rowCount) return "duplicate";
+  // After the insert, best effort: the bell refreshes and the phone is pinged.
+  try { wsManager.sendToUser(recipientId, { type: "notification", data: { type: "spray_received" } }); } catch { /* best effort */ }
+  sendPushNotification(recipientId, { title: copy.title, body: copy.message, url: link, tag: key }).catch(() => {});
+  return "inserted";
 }
 
 /**
- * Sprays delivered to recipientId in roomId (called after each delivery commits, once per person the money reached). kobo
- * is this delivery's share; it only gates the call (> 0): the notification shows the stored total, never a passed-in sum.
+ * A spray was delivered and reached recipientId (called after the delivery commits, once per person the money reached).
+ * kobo only gates the call (> 0); the notification shows the stored share of THIS spray. Fire-and-forget safe.
  */
-export function notifySprayReceived(recipientId: string, roomId: string, kobo: number): Promise<void> {
+export function notifySprayReceived(recipientId: string, roomId: string, kobo: number, sprayId: string): Promise<void> {
   return safely("spray", `user=${recipientId} room=${roomId}`, async () => {
-    if (!validId(recipientId) || !validId(roomId) || !validKobo(kobo)) return;
-    const k = `${recipientId}|${roomId}`;
-    const cur = inflight.get(k);
-    if (cur) { cur.again = true; return; }
-    const st = { again: false };
-    inflight.set(k, st);
-    try {
-      let passes = 0;
-      do {
-        st.again = false;
-        const r = await flushSprayBatch(recipientId, roomId);
-        if (r.outcome === "wait") armTrailing(recipientId, roomId, r.retryInMs ?? 0);
-        passes++;
-      } while (st.again && passes < 50);
-    } finally {
-      inflight.delete(k);
-    }
+    if (!validId(recipientId) || !validId(roomId) || !validKobo(kobo) || !validId(sprayId)) return;
+    await withSlot(() => insertSprayNotice(recipientId, sprayId));
   });
 }
 
-/** Test-only: forget timers and in-flight markers (a suite between scenarios). */
+/** Test-only: release the slot counters (a suite between scenarios). */
 export function resetNotifyStateForTests(): void {
-  trailing.forEach((t) => clearTimeout(t));
-  trailing.clear();
-  inflight.clear();
+  running = 0;
+  waiting.splice(0).forEach((w) => w());
 }

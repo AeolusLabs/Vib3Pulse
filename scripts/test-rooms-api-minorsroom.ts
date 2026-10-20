@@ -148,6 +148,7 @@ try {
   // ---- start: live notifications go to teens and acknowledged invitees only
   await follow(A, T); await follow(B, T); await follow(T2, T); await follow(N, T); await follow(C, T);
   const st = await http("POST", `/api/rooms/${R}/start`, T);
+  await (await import("../server/rooms/liveNotify")).liveNoticeSettled(R); // the go-live notice runs in the background
   check("teen host starts the room", st.status === 200 && st.json?.room?.status === "live", JSON.stringify(st.json));
   const liveNote = async (u: string) => (await notes(u, R)).filter((n: any) => /is live/.test(n.title));
   check("room_live notification: the teen follower gets it", (await liveNote(T2)).length === 1);

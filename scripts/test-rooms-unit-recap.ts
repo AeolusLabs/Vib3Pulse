@@ -112,9 +112,41 @@ test("privacy: an omitted notifyFriendsLive keeps the stored choice (an old clie
 });
 
 test("privacy: the room_live followers job reads the host's notifyFriendsLive", () => {
-  const src = readFileSync(new URL("../server/rooms/roomRoutes.ts", import.meta.url), "utf8");
-  const fn = src.slice(src.indexOf("async function notifyFollowers"), src.indexOf("async function checkLink"));
-  assert.match(fn, /resolveRoomPrivacy\(host\.roomPrivacy\)\.notifyFriendsLive\) return/);
+  // Fix round: the job moved to liveNotify.ts (all followers, chunked, in the background).
+  const src = readFileSync(new URL("../server/rooms/liveNotify.ts", import.meta.url), "utf8");
+  const fn = src.slice(src.indexOf("export async function notifyFollowersLive"), src.indexOf("const runs = new Map"));
+  assert.match(fn, /resolveRoomPrivacy\(host\.roomPrivacy\)\.notifyFriendsLive\) return 0/);
+  assert.match(fn, /room\.visibility === "invite"\) return 0/);
+  assert.doesNotMatch(fn, /MAX_NOTIFY|\.slice\(0, \d+\)/); // never capped
+  const routes = readFileSync(new URL("../server/rooms/roomRoutes.ts", import.meta.url), "utf8");
+  assert.match(routes, /notifyFollowers\(live, host\); \/\/ background/);
+});
+
+test("fix round r2 I5: an untracked room keeps minutesIn / messages null (never a false 0), for guest and host", () => {
+  const untracked = { ...all, minutesIn: null, messages: null, peak: null };
+  const g = shapeRecap(untracked, false);
+  assert.equal(g.minutesIn, null); assert.equal(g.messages, null);
+  const h = shapeRecap(untracked, true);
+  assert.equal(h.minutesIn, null); assert.equal(h.messages, null); assert.equal(h.peak, null);
+  const src = readFileSync(new URL("../server/rooms/recap.ts", import.meta.url), "utf8");
+  assert.match(src, /const tracked = room\.peakMembers !== null && room\.peakMembers !== undefined;/);
+  assert.match(src, /if \(!opts\.admin && room\.moderationStatus !== "approved"\) return null;/);
+  assert.match(src, /"\/api\/rooms\/:id\/recap", requireAuth, roomLimiter,/);
+  assert.match(src, /"\/api\/admin\/rooms\/:id\/recap", requireRole\("super_admin", "content_moderator"\)/);
+  assert.match(src, /action: "room\.recap_viewed"/);
+  // Earnings and recap agree on which sprays count (r2 m6).
+  assert.match(src, /delivered_at is not null and status in \('delivered', 'disputed'\)/);
+});
+
+test("fix round r2 I1: a chat line never writes to the database (counts batched in memory)", () => {
+  const sock = readFileSync(new URL("../server/rooms/roomSocket.ts", import.meta.url), "utf8");
+  assert.match(sock, /\n\s+rs\.countChatLine\(roomId, userId\);/);
+  const st = readFileSync(new URL("../server/rooms/roomStorage.ts", import.meta.url), "utf8");
+  const fn = st.slice(st.indexOf("export function countChatLine"), st.indexOf("export async function flushChatCounts"));
+  assert.doesNotMatch(fn, /await|db\.|pool\./, "countChatLine is synchronous and in memory");
+  assert.match(st, /export async function markLeft[\s\S]{0,120}flushChatCounts\(\[chatKey\(roomId, userId\)\]\)/);
+  assert.match(st, /export async function markAllLeft[\s\S]{0,120}flushChatCounts\(chatKeysOfRoom\(roomId\)\)/);
+  assert.match(st, /unnest\(\$1::varchar\[\], \$2::varchar\[\], \$3::int\[\]\)/);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -70,10 +70,13 @@ export default function RoomRecapPage() {
           {!data.isHost && <p className="text-sm text-muted-foreground">Hosted by {hostName}</p>}
         </header>
 
-        <section aria-label="Your time in the room" className="grid grid-cols-2 gap-3">
-          <Stat label="You were in for" value={mins(r.minutesIn)} testId="recap-minutes-in" />
-          <Stat label="Messages you sent" value={String(r.messages)} testId="recap-messages" />
-        </section>
+        {/* null = the room ended before these were tracked (server fix round): no number rather than a false 0. */}
+        {r.minutesIn !== null && r.messages !== null && (
+          <section aria-label="Your time in the room" className="grid grid-cols-2 gap-3">
+            <Stat label="You were in for" value={mins(r.minutesIn)} testId="recap-minutes-in" />
+            <Stat label="Messages you sent" value={String(r.messages)} testId="recap-messages" />
+          </section>
+        )}
 
         {data.isHost && (
           <section aria-label="How your room went" className="space-y-3" data-testid="recap-host">
