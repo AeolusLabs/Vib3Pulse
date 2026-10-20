@@ -186,8 +186,8 @@ function PayoutBody({ status, moneyOn, changing, onChange, onCancel, onSaved, ch
           <CheckRow ok={a.nameMatches} label={PAYOUT_COPY.bankRow} line={PAYOUT_COPY.bankLine(a.bankName, a.last4, a.nameMatches)}
             word={a.nameMatches ? PAYOUT_COPY.verified : PAYOUT_COPY.notVerified} testId="payout-row-bank" />
         )}
-        {stage === "organiser" && (
-          <CheckRow ok label={PAYOUT_COPY.bankRow} line={PAYOUT_COPY.organiserLine} word={PAYOUT_COPY.verified} testId="payout-row-bank" />
+        {stage === "setup" && (
+          <CheckRow ok label={PAYOUT_COPY.bankRow} line={PAYOUT_COPY.setupLine} word={PAYOUT_COPY.verified} testId="payout-row-bank" />
         )}
         <CheckRow ok={status.verifiedAdult} label={PAYOUT_COPY.idRow} line={status.verifiedAdult ? PAYOUT_COPY.idVerified : PAYOUT_COPY.idMissing}
           word={status.verifiedAdult ? PAYOUT_COPY.verified : PAYOUT_COPY.notVerified} testId="payout-row-id" />
@@ -216,9 +216,9 @@ function PayoutBody({ status, moneyOn, changing, onChange, onCancel, onSaved, ch
 
       {stage === "ready" && !changing && <p className="text-sm text-muted-foreground" data-testid="payout-ready">{PAYOUT_COPY.readyBody}</p>}
 
-      {stage === "organiser" && (
-        <div className="space-y-2" data-testid="payout-organiser">
-          <p className="text-sm text-muted-foreground">{PAYOUT_COPY.organiserBody}</p>
+      {stage === "setup" && (
+        <div className="space-y-2" data-testid="payout-setup">
+          <p className="text-sm text-muted-foreground">{PAYOUT_COPY.setupBody}</p>
           <p className="text-sm text-muted-foreground">{PAYOUT_COPY.readyBody}</p>
         </div>
       )}
@@ -230,7 +230,7 @@ function PayoutBody({ status, moneyOn, changing, onChange, onCancel, onSaved, ch
         </div>
       )}
 
-      {/* The form only when the server takes an account from this page now; never for an organiser-set account. */}
+      {/* The form only when the server takes an account from this page now; never in "setup" (no details to replace). */}
       {canLink && (stage === "none" || stage === "mismatch" || stage === "pending" || stage === "ready") && (
         stage === "none" || stage === "mismatch" ? (
           <div className="space-y-3">

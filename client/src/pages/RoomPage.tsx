@@ -25,7 +25,7 @@ import { useRoomVoice } from "@/hooks/useRoomVoice";
 import { showsShell } from "@/lib/roomIntegration";
 import { AGE_LIMIT_EVICTED_COPY, DENIED_MESSAGE, HOST_REVIEW_COPY, KIND_LABEL, type PeekMember, VISIBILITY_LABEL, ageLimitLabel, fetchRooms, hostName, type RoomHostSummary, type RoomTicketView, type RoomView } from "@/lib/roomsApi";
 import { inviteTokenFor, parseTicketBlock, returnRef, searchWithoutRef, showsPrice, ticketGate } from "@/lib/roomTickets";
-import { kickRemainingAfter, stateForCode } from "@/lib/roomStates";
+import { kickRemainingAfter, recapProbeDelayMs, stateForCode } from "@/lib/roomStates";
 import { ArrowLeftIcon } from "@/components/ui/icons";
 import { isAgeUnknownDenied, isMinorsDenied, isRoomDenial, listenOnlyHere, minorsCodeFor, parseRoomDenial, showListenLine, type RoomDenial } from "@/lib/minorsRoomUi";
 import type { AdultInvite } from "@/lib/minorsRoomApi";
@@ -136,9 +136,17 @@ function RoomPageInner({ id }: { id: string }) {
   const isHost = detail?.you?.role === "host" || state.you?.role === "host";
   // "See your recap" only for people who were in the room. The recap route is the one that knows (it answers 404 to
   // everyone else), so ask it once the room has ended; the recap page reuses this cache entry.
+  // A room that ends while everyone is watching would send every client at once: each waits a random 0 to 5 s first.
   const roomEnded = room?.status === "ended" || state.phase === "ended";
+  const signedIn = !!me;
+  const [recapAskReady, setRecapAskReady] = useState(false);
+  useEffect(() => {
+    if (!roomEnded || !signedIn || recapAskReady) return;
+    const t = setTimeout(() => setRecapAskReady(true), recapProbeDelayMs(state.phase === "ended", Math.random()));
+    return () => clearTimeout(t);
+  }, [roomEnded, signedIn, recapAskReady]); // eslint-disable-line react-hooks/exhaustive-deps
   const { data: recapProbe } = useQuery<unknown>({
-    queryKey: [`/api/rooms/${encodeURIComponent(id)}/recap`], enabled: !!me && roomEnded, retry: false, staleTime: 0,
+    queryKey: [`/api/rooms/${encodeURIComponent(id)}/recap`], enabled: signedIn && roomEnded && recapAskReady, retry: false, staleTime: 0,
   });
 
   // ---------------------------------------------------------------- paid rooms (task 4.7)

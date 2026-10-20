@@ -57,8 +57,9 @@ export function parsePayoutStatus(body: unknown): PayoutStatus | null {
 /**
  * Which payout screen to show:
  * - "unverified": not an ID-verified adult (payouts paused; an older account, if any, is shown by its last four only)
- * - "organiser": no account saved on this page, but the server says payouts are set up (a host onboarded through
- *   organiser payouts). They can be paid; we just cannot show its last four here. Never told to add an account.
+ * - "setup": the server says payouts are set up (subaccountReady, which it now reports only for a name-checked account)
+ *   but sent no account details to show (only possible with malformed stored display data). Ready; no claim about
+ *   how it was set up, and no form, so a working account is never re-pointed from here.
  * - "none": verified, no account yet, and the server takes one from this page now (the form)
  * - "soon": verified, no account yet, but linking a bank here is not open yet (no form, says so honestly)
  * - "mismatch": an account whose name does not match the ID (the form again only when linking is open)
@@ -66,16 +67,16 @@ export function parsePayoutStatus(body: unknown): PayoutStatus | null {
  * - "ready": verified, matching, set up.
  * `moneyOn` is false while paid rooms and spray are both switched off: linking is then "soon" too.
  */
-export type PayoutStage = "unverified" | "organiser" | "none" | "soon" | "mismatch" | "pending" | "ready";
+export type PayoutStage = "unverified" | "setup" | "none" | "soon" | "mismatch" | "pending" | "ready";
 export const canLinkHere = (s: PayoutStatus, moneyOn = true) => s.canLinkAccount && moneyOn;
 export function payoutStage(s: PayoutStatus, moneyOn = true): PayoutStage {
   if (!s.verifiedAdult) return "unverified";
-  if (!s.account) return s.subaccountReady ? "organiser" : canLinkHere(s, moneyOn) ? "none" : "soon";
+  if (!s.account) return s.subaccountReady ? "setup" : canLinkHere(s, moneyOn) ? "none" : "soon";
   if (!s.account.nameMatches) return "mismatch";
   return s.subaccountReady ? "ready" : "pending";
 }
-/** Can receive money now, as far as the server says: set up here, or set up through organiser payouts. */
-export const payoutReady = (s: PayoutStatus | null | undefined) => !!s && ["ready", "organiser"].includes(payoutStage(s));
+/** Can receive money now, exactly as the server's subaccountReady says (for a verified adult). */
+export const payoutReady = (s: PayoutStatus | null | undefined) => !!s && ["ready", "setup"].includes(payoutStage(s));
 
 export interface Bank { name: string; code: string }
 /** GET /api/rooms/payouts/banks: `{ banks: [{ name, code }] }`. Bad rows are dropped; a bad body is null. Sorted by name. */
@@ -175,8 +176,8 @@ export const PAYOUT_COPY = {
   mismatchBody: "The name on this account does not match the name on your ID, so we cannot pay into it. Add an account in your own name.",
   soonTitle: "Adding a bank account here opens soon",
   soonBody: "You cannot add or change a bank account on this page yet. We will let you know when it opens. Nothing you have earned is lost.",
-  organiserLine: "Set up through organiser payouts. We cannot show the last four digits here.",
-  organiserBody: "Your payout account is set up, so you can get paid. To change it, contact support.",
+  setupLine: "Your payout account is set up. We cannot show its details right now.",
+  setupBody: "You can get paid. To change your account, contact support.",
   pendingTitle: "Almost ready",
   pendingBody: "Your account checks out. Paystack is finishing the set up. This usually takes a few minutes.",
   readyBody: "Sprays settle to your bank the next business day. Ticket money is released 48 hours after the room ends. We never hold your spray money in our own account.",
@@ -204,9 +205,16 @@ export type EarningsRange = (typeof EARNINGS_RANGES)[number];
 export const isEarningsRange = (v: unknown): v is EarningsRange => typeof v === "string" && (EARNINGS_RANGES as readonly string[]).includes(v);
 
 export interface EarningsRoom { roomId: string; title: string; sprayKobo: number; ticketKobo: number; at: string }
+/**
+ * The server's split of onItsWayKobo (fix round 6G): sprayDirect + ticketSending + needsAttention = onItsWay, and
+ * sprayReturned is the part of sprayDirect that was split to the viewer for sprays refunded or charged back before they
+ * landed (clawed back). null when an older server sends no split: the single "on its way" row is shown then.
+ */
+export interface EarningsSplit { sprayDirectKobo: number; ticketSendingKobo: number; needsAttentionKobo: number; sprayReturnedKobo: number }
 export interface Earnings {
   totals: { sprayKobo: number; ticketKobo: number };
   settledKobo: number; onItsWayKobo: number; heldTicketKobo: number; clawbackOpenKobo: number;
+  split: EarningsSplit | null;
   byRoom: EarningsRoom[];
   nextTicketReleaseAt: string | null;
 }
@@ -232,13 +240,36 @@ export function parseEarnings(body: unknown): Earnings | null {
   }
   const next = b.nextTicketReleaseAt;
   if (next !== null && next !== undefined && !isIso(next)) return null;
+  const split = parseEarningsSplit(b);
+  if (split === undefined) return null;
   return {
     totals: { sprayKobo: t.sprayKobo, ticketKobo: t.ticketKobo },
     settledKobo: b.settledKobo as number, onItsWayKobo: b.onItsWayKobo as number,
     heldTicketKobo: b.heldTicketKobo as number, clawbackOpenKobo: b.clawbackOpenKobo as number,
-    byRoom, nextTicketReleaseAt: isIso(next) ? next : null,
+    split, byRoom, nextTicketReleaseAt: isIso(next) ? next : null,
   };
 }
+
+const SPLIT_KEYS = ["sprayDirectKobo", "ticketSendingKobo", "needsAttentionKobo", "sprayReturnedKobo"] as const;
+/**
+ * The split fields: all absent is an older server (null); any present must all be whole kobo at or above zero, the three
+ * parts must add up to onItsWayKobo and the returned shares sit inside sprayDirect. Anything else fails the whole body
+ * (undefined), so a row is never drawn from numbers that do not add up.
+ */
+export function parseEarningsSplit(b: Record<string, unknown>): EarningsSplit | null | undefined {
+  if (SPLIT_KEYS.every((k) => b[k] === undefined)) return null;
+  if (!SPLIT_KEYS.every((k) => isNonNegInt(b[k]))) return undefined;
+  const s: EarningsSplit = {
+    sprayDirectKobo: b.sprayDirectKobo as number, ticketSendingKobo: b.ticketSendingKobo as number,
+    needsAttentionKobo: b.needsAttentionKobo as number, sprayReturnedKobo: b.sprayReturnedKobo as number,
+  };
+  if (s.sprayDirectKobo + s.ticketSendingKobo + s.needsAttentionKobo !== b.onItsWayKobo) return undefined;
+  if (s.sprayReturnedKobo > s.sprayDirectKobo) return undefined;
+  return s;
+}
+
+/** Spray money paid out by Paystack that stays with the viewer: the direct split minus the shares being taken back. */
+export const sprayKeptKobo = (s: EarningsSplit) => s.sprayDirectKobo - s.sprayReturnedKobo;
 
 /** The big number: the range's spray and ticket totals as the server sent them (no other sum is made here). */
 export const earningsHeadline = (e: Earnings) => e.totals.sprayKobo + e.totals.ticketKobo;
@@ -270,6 +301,16 @@ export const EARNINGS_COPY = {
   onItsWayLongHelp: "We show money as settled only when your bank confirms it, so some of this may already be in your account.",
   held: "Ticket money, released 48 hours after the room ends",
   nextRelease: (when: string) => `Next release ${when}`,
+  /** With the server's split (fix round 6G): sprays, ticket money being sent, and what needs attention, each on its own row. */
+  sprayDirect: "Sprays, paid out by Paystack to your bank",
+  sprayDirectHelp: "Paystack sends your share straight to your bank, usually the next business day.",
+  sprayDirectLong: "Sprays, on their way or already in your bank",
+  sprayDirectLongHelp: "Paystack sends your share straight to your bank. We show money as settled only when your bank confirms it.",
+  ticketSending: "Ticket money being sent to your bank",
+  needsAttention: "Needs attention, we are on it",
+  needsAttentionHelp: "A ticket payout did not go through or came back. Our team is following it up. Your money is safe.",
+  sprayReturned: "Sprays refunded before they landed",
+  sprayReturnedHelp: "Your share of these goes back, taken from your next settlement.",
   clawbackTitle: "A payment was reversed",
   clawbackBody: (amount: string) => `A bank reversed a payment you received. ${amount} will be taken from your next settlement. Nothing else changes.`,
   clawbackLabel: "To be taken off",

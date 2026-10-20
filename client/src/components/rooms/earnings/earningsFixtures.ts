@@ -1,11 +1,11 @@
-// Seeded money screens for /dev/room-fixture?earn=empty|week|clawback|noaccount|mismatch|organiser|soon
-// (&page=earnings|payouts|payments). "organiser": set up through organiser payouts (no account here, subaccount ready).
-// "soon": no account and linking not open on this page yet (canLinkAccount false).
+// Seeded money screens for /dev/room-fixture?earn=empty|week|clawback|noaccount|mismatch|soon|attention
+// (&page=earnings|payouts|payments). "soon": no account and linking not open on this page yet (canLinkAccount false).
+// "attention": a failed ticket payout and a spray refunded before it landed, so every split row shows.
 // Pure data in the routes' real shapes (the unit test runs each through the parsers). Imported only by the DEV-only
 // fixture page and the unit test, so none of this reaches the production bundle. The week matches flows.html board 8:
 // settled 88,435 + on its way 12,200 + held for tickets 142,965 = 243,600 naira.
 
-export const EARN_SCENES = ["empty", "week", "clawback", "noaccount", "mismatch", "organiser", "soon"] as const;
+export const EARN_SCENES = ["empty", "week", "clawback", "noaccount", "mismatch", "soon", "attention"] as const;
 export type EarnScene = (typeof EARN_SCENES)[number];
 export const EARN_PAGES = ["earnings", "payouts", "payments"] as const;
 export type EarnPage = (typeof EARN_PAGES)[number];
@@ -24,7 +24,6 @@ export function fixturePayoutStatus(scene: EarnScene) {
   switch (scene) {
     case "noaccount": return { verifiedAdult: true, account: null, subaccountReady: false, canLinkAccount: true };
     case "mismatch": return { verifiedAdult: true, account: { bankName: "GTBank", last4: "4821", nameMatches: false }, subaccountReady: false, canLinkAccount: true };
-    case "organiser": return { verifiedAdult: true, account: null, subaccountReady: true, canLinkAccount: false };
     case "soon": return { verifiedAdult: true, account: null, subaccountReady: false, canLinkAccount: false };
     default: return { verifiedAdult: true, account: { bankName: "GTBank", last4: "4821", nameMatches: true }, subaccountReady: true, canLinkAccount: true };
   }
@@ -44,16 +43,26 @@ const iso = (now: number, hoursAgo: number) => new Date(now - hoursAgo * 3_600_0
 
 export function fixtureEarnings(scene: EarnScene, range: string, now: number) {
   if (scene === "empty") {
-    return { totals: { sprayKobo: 0, ticketKobo: 0 }, settledKobo: 0, onItsWayKobo: 0, heldTicketKobo: 0, clawbackOpenKobo: 0, byRoom: [], nextTicketReleaseAt: null };
+    return {
+      totals: { sprayKobo: 0, ticketKobo: 0 }, settledKobo: 0, onItsWayKobo: 0, heldTicketKobo: 0, clawbackOpenKobo: 0,
+      sprayDirectKobo: 0, ticketSendingKobo: 0, needsAttentionKobo: 0, sprayReturnedKobo: 0, clawbackAppliedKobo: 0, byRoom: [], nextTicketReleaseAt: null,
+    };
   }
   // "all" and "month" show a little more than the week, so switching the period visibly changes the numbers.
   const k = range === "all" ? 3 : range === "month" ? 2 : 1;
+  // "attention": 50,000 of ticket money failed and is being followed up, and a 7,584 spray share is being taken back.
+  const attention = scene === "attention";
+  const sprayReturnedKobo = attention ? 758_400 : 0;
+  const needsAttentionKobo = attention ? 5_000_000 : 0;
+  const ticketSendingKobo = attention ? 2_000_000 : 0;
+  const sprayDirectKobo = 1_220_000 + sprayReturnedKobo;
   return {
     totals: { sprayKobo: 10_063_500 * k, ticketKobo: 14_296_500 },
     settledKobo: 8_843_500 + 10_063_500 * (k - 1),
-    onItsWayKobo: 1_220_000,
-    heldTicketKobo: 14_296_500,
-    clawbackOpenKobo: scene === "clawback" ? 758_400 : 0,
+    onItsWayKobo: sprayDirectKobo + ticketSendingKobo + needsAttentionKobo,
+    sprayDirectKobo, ticketSendingKobo, needsAttentionKobo, sprayReturnedKobo, clawbackAppliedKobo: 0,
+    heldTicketKobo: 14_296_500 - ticketSendingKobo - needsAttentionKobo,
+    clawbackOpenKobo: scene === "clawback" || attention ? 758_400 : 0,
     byRoom: [
       { roomId: "fixture-paid-room", title: "Amapiano Sunday Session", sprayKobo: 6_763_500, ticketKobo: 14_296_500, at: iso(now, 30) },
       { roomId: "fixture-room", title: "Friday Pre-Drinks, Lagos to London", sprayKobo: 3_300_000 + 10_063_500 * (k - 1), ticketKobo: 0, at: iso(now, 72) },

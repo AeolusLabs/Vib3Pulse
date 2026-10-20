@@ -56,6 +56,18 @@ export function kickedBody(remainingMs: number | null | undefined): string {
 /** How long a removal lasts (the server's standard 10 minutes). */
 export const KICK_WINDOW_MS = 10 * 60_000;
 
+/**
+ * When a room ends with everyone watching, every client asks for its recap at once (about 8 queries each). Each one
+ * waits a random 0 to 5 seconds first (review r3 m9), so a 300-person room spreads over 5 s instead of one burst.
+ * Opening an already ended room needs no wait (there is no crowd). `rand` is Math.random in the page, fixed in tests.
+ */
+export const RECAP_PROBE_JITTER_MS = 5_000;
+export function recapProbeDelayMs(endedWhileWatching: boolean, rand: number): number {
+  if (!endedWhileWatching) return 0;
+  const r = Number.isFinite(rand) ? Math.min(Math.max(rand, 0), 1) : 0;
+  return Math.min(RECAP_PROBE_JITTER_MS, Math.floor(r * RECAP_PROBE_JITTER_MS));
+}
+
 /** Time left on a removal that reached this client at `kickedAt` (the server sends none). Null when we never saw it arrive: the copy then says the generic 10 minutes. */
 export function kickRemainingAfter(kickedAt: number | null | undefined, now: number): number | null {
   if (typeof kickedAt !== "number" || !Number.isFinite(kickedAt)) return null;
