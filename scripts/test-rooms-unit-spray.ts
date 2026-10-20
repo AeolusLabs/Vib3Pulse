@@ -461,6 +461,41 @@ test("statuses: the eight, terminal ones, spend statuses", () => {
     assert.match(spray.slice(i, spray.indexOf("\n}\n", i)), /capLockKey\(id\)/);
     assert.match(claw, /pg_advisory_xact_lock\(hashtext\(\$1::text\)\)", \[capLockKey\(id\)\]/);
   });
+  test("r5 I1/I2/I3/m2: resolve locks the dispute rows, reports changed outcomes, lets outcome issues land", () => {
+    const i = claw.indexOf("async function resolveLocked(");
+    const body = claw.slice(i, claw.indexOf("\n}\n", i));
+    // I1: rows locked FOR UPDATE before the sum; the old aggregate is gone.
+    assert.match(body, /from host_clawbacks where spray_id = \$1::uuid and origin = 'dispute' order by id for update/);
+    assert.doesNotMatch(body, /select coalesce\(sum\(recovered_kobo\)/);
+    assert.ok(body.indexOf("for update") < body.indexOf("set status = 'recovered'"));
+    // I2: a changed outcome is reported; the dispute issue closes only when something was acted on.
+    assert.match(body, /SPRAY_DISPUTE_OUTCOME_CHANGED/);
+    assert.match(body, /if \(acted\) \{\s*await c\.query\(\s*`update payment_issues set resolved_at = \$2::timestamp where provider_payment_id = \$1 and reason = 'dispute'/);
+    assert.ok(body.indexOf("if (acted)") > body.indexOf("SPRAY_DISPUTE_RESOLVED_UNEXPECTED"), "closing happens after every branch");
+    // I3: outcome issues close an older open dispute_resolved issue first; owedBack is logged.
+    for (const k of ["SPRAY_DISPUTE_WON_REPAY", "SPRAY_DISPUTE_LOST_AFTER_REFUND", "SPRAY_DISPUTE_WON_UNDELIVERED"]) {
+      assert.match(body, new RegExp(`await outcomeIssue\\([^)]*${k}`), k);
+    }
+    assert.match(body, /owed_back_kobo=\$\{owedBack\}/);
+    // m2: LOST_AFTER_REFUND once per reference, open or closed.
+    assert.match(body, /error_message like 'SPRAY_DISPUTE_LOST_AFTER_REFUND%'/);
+  });
+  test("r5 m6: the receive ban and the new-host cap have their own log labels (same 403)", () => {
+    assert.match(spray, /return \{ kind: "ban" \}/);
+    assert.match(spray, /code=RECEIVE_BAN/);
+    assert.match(spray, /code=NEW_HOST_CAP`/);
+  });
+  const { paymentTransactionStatuses } = await import("../shared/schema");
+  test("r5 m4: ledger statuses typed; organizer page never shows a chargeback as 'refund failed'; summary splits outcomes", () => {
+    for (const s of ["disputed", "chargeback_won", "chargeback_lost"]) assert.ok((paymentTransactionStatuses as readonly string[]).includes(s), s);
+    const page = src("client/src/pages/OrganizerPayoutsPage.tsx");
+    assert.match(page, /if \(tx\.type === "chargeback"\) \{\s*return tx\.status === "chargeback_won" \? "dispute won" : tx\.status === "chargeback_lost" \? "dispute lost" : "disputed";/);
+    assert.doesNotMatch(page, /tx\.status === "refunded" \? "refunded" : "refund failed"/);
+    assert.match(page, /tx\.type === "chargeback" && tx\.status !== "chargeback_won"/);
+    const st = src("server/storage.ts");
+    assert.match(st, /type\} = 'chargeback' and \$\{paymentTransactions\.status\} in \('chargeback_won', 'chargeback_lost'\)/);
+    assert.match(st, /\.groupBy\(typeKey, paymentTransactions\.currency\)/);
+  });
   test("r4 N1/N2/N3: dispute resolve looks at the status and flips the chargeback ledger row once", () => {
     const i = claw.indexOf("async function resolveLocked(");
     const body = claw.slice(i, claw.indexOf("\n}\n", i));

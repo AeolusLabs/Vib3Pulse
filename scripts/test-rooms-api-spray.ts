@@ -772,6 +772,36 @@ try {
   await q(`update payment_issues set resolved_at = now() where provider_payment_id = $1 and reason = 'dispute_resolved'`, [dref2]); // a person handled it
   await webhook("charge.dispute.resolve", { transaction: { reference: dref2 }, resolution: "declined" });
   check("N3: a repeated resolve event changes nothing (no new issue)", (await issues(dref2, "dispute_resolved")).length === issuesBefore);
+  // r5 I2: a second dispute cycle that ends the OTHER way is never swallowed as "already", and its dispute issue stays open.
+  await webhook("charge.dispute.create", { transaction: { reference: dref2 } }); // pre-arbitration: a new dispute issue
+  const clawsBeforeI2 = JSON.stringify(await clawbacksOf(hrow.id));
+  await webhook("charge.dispute.resolve", { transaction: { reference: dref2 }, resolution: "merchant-accepted" });
+  check("r5 I2: an outcome that differs from the ledger opens an OUTCOME_CHANGED issue",
+    (await issues(dref2, "dispute_resolved")).some((i: any) => !i.resolved_at && /OUTCOME_CHANGED/.test(i.error_message ?? "")));
+  check("r5 I2: nothing acted, so the new dispute issue stays open and the clawbacks are unchanged",
+    (await issues(dref2, "dispute")).some((i: any) => !i.resolved_at) && JSON.stringify(await clawbacksOf(hrow.id)) === clawsBeforeI2
+    && (await ledger(dref2, "chargeback"))[0]?.status === "chargeback_won");
+  // r5 I3: an unknown resolution word first, then "declined": the REPAY issue (with the amount) still lands.
+  const orow = await rowById(other.json.sprayId);
+  await webhook("charge.dispute.create", { transaction: { reference: orow.provider_ref } });
+  await q(`update host_clawbacks set recovered_kobo = 100 where spray_id = $1 and origin = 'dispute'`, [orow.id]); // a payout took 100 kobo
+  await webhook("charge.dispute.resolve", { transaction: { reference: orow.provider_ref }, resolution: "under-review-new-word" });
+  check("r5 I3 setup: unknown word: an UNKNOWN issue, the dispute issue stays open, nothing flipped",
+    (await issues(orow.provider_ref, "dispute_resolved")).some((i: any) => !i.resolved_at && /UNKNOWN/.test(i.error_message ?? ""))
+    && (await issues(orow.provider_ref, "dispute")).some((i: any) => !i.resolved_at) && (await ledger(orow.provider_ref, "chargeback"))[0]?.status === "disputed");
+  await webhook("charge.dispute.resolve", { transaction: { reference: orow.provider_ref }, resolution: "declined" });
+  const oIssues = await issues(orow.provider_ref, "dispute_resolved");
+  check("r5 I3: the REPAY issue for 100 kobo is open; the superseded UNKNOWN issue is closed",
+    oIssues.some((i: any) => !i.resolved_at && /REPAY/.test(i.error_message ?? "") && /\b100 kobo\b/.test(i.error_message ?? ""))
+    && oIssues.filter((i: any) => /UNKNOWN/.test(i.error_message ?? "")).every((i: any) => !!i.resolved_at), JSON.stringify(oIssues));
+  check("r5 I3: the dispute clawbacks are settled and the dispute issue closed", (await clawbacksOf(orow.id)).filter((c: any) => c.origin === "dispute").every((c: any) => c.status === "recovered")
+    && (await issues(orow.provider_ref, "dispute")).every((i: any) => !!i.resolved_at));
+  check("r5 I3: the amount owed back is also in the log line", logged.some((l) => l.includes(`outcome=needs_person`) && l.includes("owed_back_kobo=100")));
+  // r5 m2: a refunded spray whose LOST_AFTER_REFUND issue a person already closed: a redelivered event adds nothing.
+  await q(`update payment_issues set resolved_at = now() where provider_payment_id = $1 and reason = 'dispute_resolved'`, [lrow.provider_ref]);
+  const lostBefore = (await issues(lrow.provider_ref, "dispute_resolved")).length;
+  await webhook("charge.dispute.resolve", { transaction: { reference: lrow.provider_ref }, resolution: "merchant-accepted" });
+  check("r5 m2: no duplicate LOST_AFTER_REFUND issue", (await issues(lrow.provider_ref, "dispute_resolved")).length === lostBefore);
   // A clawback bigger than the payout: closed at 0, nothing sent.
   const H3 = await mk("host_bigclaw", { payout: true });
   await q(`insert into host_clawbacks (host_id, beneficiary_id, spray_id, amount_kobo) values ($1,$1,$2,$3)`, [H3, hrow.id, TB.host]);
