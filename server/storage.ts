@@ -450,6 +450,12 @@ CREATE TABLE IF NOT EXISTS room_members (
     const { ROOM_PAYOUT_ACCOUNT_SCHEMA_SQL } = await import("./rooms/payoutsMigration");
     await pool.query(ROOM_PAYOUT_ACCOUNT_SCHEMA_SQL);
   }
+  // Recaps (phase 6): rooms.peak_members, room_members.seconds_in / messages_sent. One batch, same SQL as
+  // migrations/add_room_peak.sql; additive and idempotent.
+  {
+    const { ROOM_PEAK_SCHEMA_SQL } = await import("./rooms/roomPeakMigration");
+    await pool.query(ROOM_PEAK_SCHEMA_SQL);
+  }
   await pool.query(`
     ALTER TABLE venues ADD COLUMN IF NOT EXISTS building JSONB
   `);
