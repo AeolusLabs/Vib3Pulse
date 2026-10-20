@@ -362,7 +362,7 @@ test("statuses: the eight, terminal ones, spend statuses", () => {
     for (const n of ["insertSprayIfNew", "getSprayById", "getSprayByRef", "addSpend", "releaseSpend", "getRoomSpend", "sumPayerKoboSince",
       "countPayerSprays", "countPayerRecipientSprays", "listStaleSprays", "markSprayStatus", "insertClawbackIfNew", "openClawbacksFor",
       "markClawbacksRecovered", "getSavedMethod", "saveMethod", "deleteMethod", "setDailyLimit",
-      "noteSprayChecked", "payerRecipientInFlight", "sumReceivedSince", "hasOpenClawback"]) {
+      "noteSprayChecked", "payerRecipientInFlight", "sumReceivedSince", "hasOpenClawback", "receiveBlocked"]) {
       assert.match(s, new RegExp(`export async function ${n}\\(`), n);
     }
   });
@@ -432,13 +432,64 @@ test("statuses: the eight, terminal ones, spend statuses", () => {
     const i = spray.indexOf("function announceDelivery(");
     assert.doesNotMatch(spray.slice(i, spray.indexOf("\n}\n", i)), /recordChat/);
   });
-  test("ruling 10: the sweep is bounded per pass and re-checks failed rows", () => {
-    assert.match(jobs, /queue\.slice\(0, t\.maxRowsPerPass\)/);
-    assert.match(jobs, /listStaleSprays\(\["failed"\]/);
+  test("ruling 10 / r4 m2: the sweep has a quota per category (no starvation) and re-checks failed rows", () => {
+    // Source text only (importing sprayJobs would load the whole room server).
+    const m = /quota: \{ paid: (\d+), reversing: (\d+), unpaid: (\d+), failed: (\d+) \}/.exec(jobs);
+    assert.ok(m, "quota object");
+    const n = m!.slice(1).map(Number);
+    assert.ok(n.every((x) => x > 0), "every category gets rows each pass");
+    assert.ok(n.reduce((a, b) => a + b, 0) <= 40, "bounded per pass");
+    assert.doesNotMatch(jobs, /maxRowsPerPass/);
+    assert.match(jobs, /listStaleSprays\(\["failed"\][^\n]*t\.quota\.failed/);
+    assert.match(jobs, /listStaleSprays\(\["created", "pending"\][^\n]*t\.quota\.unpaid/);
     assert.match(jobs, /noteSprayChecked/);
   });
   test("ruling 14: a write-off records the admin", () => {
     assert.match(claw, /written_off_by = \$3/);
+  });
+  test("r4 N4: delivery never reverses for a debt; the receive ban is start-only", () => {
+    const i = spray.indexOf("async function deliverOrReverse(");
+    const body = spray.slice(i, spray.indexOf("\n}\n", i));
+    assert.doesNotMatch(body, /host_clawbacks/);
+    assert.doesNotMatch(spray, /"CLAWBACK_OPEN"/);
+    assert.match(spray, /phase === "start" && await ss\.receiveBlocked\(/);
+    const r = spray.indexOf("db.transaction(async (tx): Promise<Reservation>");
+    assert.match(spray.slice(r, spray.indexOf("}));", r)), /receiveBlocked\(people\.map\(\(u\) => u\.id\), clawbackBlockThresholdKobo\(\), tx\)/);
+  });
+  test("r4 m1: clawbacks are written under the spray-recv locks (toReversing and disputes)", () => {
+    const i = spray.indexOf("async function toReversing(");
+    assert.match(spray.slice(i, spray.indexOf("\n}\n", i)), /capLockKey\(id\)/);
+    assert.match(claw, /pg_advisory_xact_lock\(hashtext\(\$1::text\)\)", \[capLockKey\(id\)\]/);
+  });
+  test("r4 N1/N2/N3: dispute resolve looks at the status and flips the chargeback ledger row once", () => {
+    const i = claw.indexOf("async function resolveLocked(");
+    const body = claw.slice(i, claw.indexOf("\n}\n", i));
+    assert.match(body, /row\.status === "reversing" \|\| row\.status === "reversed"/);
+    assert.match(body, /SPRAY_DISPUTE_LOST_AFTER_REFUND/);
+    assert.match(body, /type = 'chargeback' and provider_payment_id = \$1 and status = 'disputed' returning id/);
+    assert.doesNotMatch(body, /if \(open\.length\)/);
+    // "refund the payer by hand" only for a spray that is disputed (never refunded)
+    assert.ok(body.indexOf("SPRAY_DISPUTE_WON_UNDELIVERED") > body.indexOf('row.status === "disputed"'));
+  });
+}
+
+// ---------------------------------------------------------------- r4 N5: the receive-ban threshold (owner decision)
+{
+  const { clawbackBlockThresholdKobo, CLAWBACK_BLOCK_THRESHOLD_KOBO_DEFAULT } = await import("../server/rooms/sprayLimits");
+  test("r4 N5: CLAWBACK_BLOCK_THRESHOLD_KOBO defaults to 1,000,000 kobo and reads a whole number from the environment", () => {
+    assert.equal(CLAWBACK_BLOCK_THRESHOLD_KOBO_DEFAULT, 1_000_000);
+    assert.equal(clawbackBlockThresholdKobo({} as NodeJS.ProcessEnv), 1_000_000);
+    assert.equal(clawbackBlockThresholdKobo({ CLAWBACK_BLOCK_THRESHOLD_KOBO: "0" } as NodeJS.ProcessEnv), 0);
+    assert.equal(clawbackBlockThresholdKobo({ CLAWBACK_BLOCK_THRESHOLD_KOBO: "250000" } as NodeJS.ProcessEnv), 250000);
+    for (const bad of ["-1", "1.5", "abc", ""]) assert.equal(clawbackBlockThresholdKobo({ CLAWBACK_BLOCK_THRESHOLD_KOBO: bad } as NodeJS.ProcessEnv), 1_000_000, bad);
+  });
+  test("r4 N5: the ban is 'owed > threshold OR any open dispute clawback'", () => {
+    const s = src("server/rooms/sprayStorage.ts");
+    const i = s.indexOf("export async function receiveBlocked(");
+    const body = s.slice(i, s.indexOf("\n}\n", i));
+    assert.match(body, /Number\(r\.disputes\) > 0 \|\| Number\(r\.owed\) > limit/);
+    assert.match(body, /amountKobo\} - \$\{hostClawbacks\.recoveredKobo\}/);
+    assert.match(body, /eq\(hostClawbacks\.status, "open"\)/);
   });
 }
 

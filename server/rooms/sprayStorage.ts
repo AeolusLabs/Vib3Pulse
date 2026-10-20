@@ -256,6 +256,26 @@ export async function hasOpenClawback(userIds: readonly string[], tx?: SprayExec
   return !!row;
 }
 
+/**
+ * The receive ban (OWNER DECISION, review r4 N5): is any of these people barred from receiving NEW sprays? Yes when they
+ * owe an open clawback with origin 'dispute' (a chargeback), or when what they still owe on open clawbacks of any origin
+ * (amount_kobo - recovered_kobo) is MORE than `thresholdKobo`. Small reversal debts alone (a late payment, a timeout, a
+ * guest taken off stage) never bar anyone, so a griefer cannot ban an innocent host with one cheap reversal.
+ */
+export async function receiveBlocked(userIds: readonly string[], thresholdKobo: number, tx?: SprayExec): Promise<boolean> {
+  const ids = Array.from(new Set(userIds.filter((u) => typeof u === "string" && u.length > 0)));
+  if (ids.length === 0) return false;
+  const limit = Number.isSafeInteger(thresholdKobo) && thresholdKobo >= 0 ? thresholdKobo : 0; // fail closed
+  const rows = await x(tx).select({
+    beneficiaryId: hostClawbacks.beneficiaryId,
+    owed: sql<string>`coalesce(sum(${hostClawbacks.amountKobo} - ${hostClawbacks.recoveredKobo}), 0)::bigint`,
+    disputes: sql<number>`count(*) filter (where ${hostClawbacks.origin} = 'dispute')::int`,
+  }).from(hostClawbacks)
+    .where(and(inArray(hostClawbacks.beneficiaryId, ids), eq(hostClawbacks.status, "open")))
+    .groupBy(hostClawbacks.beneficiaryId);
+  return rows.some((r) => Number(r.disputes) > 0 || Number(r.owed) > limit);
+}
+
 // ---------------------------------------------------------------- saved card (a payment method, never a balance)
 /**
  * The payer's current saved reusable card, or null. The row holds auth_enc (encrypted): pass it to decryptToken only at

@@ -132,6 +132,20 @@ export function newHostReceiveCapKobo(env: NodeJS.ProcessEnv = process.env): num
   return Number.isSafeInteger(n) && n > 0 ? n : NEW_HOST_RECEIVE_CAP_KOBO_DEFAULT;
 }
 
+/**
+ * OWNER DECISION (review r4 N5, 2026-10-20): reversals ALWAYS write clawbacks (money safety), but a person is refused as a
+ * spray recipient (or as the host of a stage spray) only when what they still owe on open clawbacks is MORE than this, or
+ * when they owe any open clawback from a chargeback (origin 'dispute'). Checked only when a spray STARTS (review r4 N4: a
+ * paid spray is never reversed for a debt, the split already happened). CLAWBACK_BLOCK_THRESHOLD_KOBO when it is a
+ * non-negative whole number of kobo, else 1,000,000 (10,000 naira).
+ */
+export const CLAWBACK_BLOCK_THRESHOLD_KOBO_DEFAULT = 1_000_000;
+export function clawbackBlockThresholdKobo(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = (env.CLAWBACK_BLOCK_THRESHOLD_KOBO ?? "").trim();
+  const n = /^\d+$/.test(raw) ? Number(raw) : NaN;
+  return Number.isSafeInteger(n) && n >= 0 ? n : CLAWBACK_BLOCK_THRESHOLD_KOBO_DEFAULT;
+}
+
 /** Is this account still inside its new account window? Unknown creation time counts as new (fail closed). */
 export function isNewHost(user: { createdAt: Date | string | null | undefined }, now: number): boolean {
   const created = user.createdAt ? new Date(user.createdAt).getTime() : NaN;

@@ -13,14 +13,14 @@
 //      * reversing or reversed: the payer has (or is getting) a full refund. The issue tells the person to contest the
 //        dispute with the refund as evidence; the reversal already wrote its clawbacks (origin 'reversal').
 //    A second event for the same reference changes nothing.
-//  - A dispute resolved (charge.dispute.resolve): the open 'dispute' issue is closed and the outcome is handled:
-//      * resolution "declined" (the merchant declined the claim: the platform keeps the money; ON THE G3 CHECKLIST: confirm
-//        Paystack's words) on a spray that WAS delivered: its 'dispute' clawbacks are settled (status recovered,
-//        recovered_kobo = amount_kobo), and a 'dispute_resolved' issue is opened if any of it had already been taken from a
-//        payout (the host must be repaid by hand). On a spray that was NOT delivered: the payer paid for nothing, so a
-//        'dispute_resolved' issue asks a person to refund them; the clawbacks stay open.
-//      * any other resolution (the payer won, or words we do not know): clawbacks stay open; an unknown word opens a
-//        'dispute_resolved' issue.
+//  - A dispute resolved (charge.dispute.resolve): the open 'dispute' issue is closed and the outcome is handled
+//    ("declined" = the merchant won, "merchant-accepted" = the payer won; ON THE G3 CHECKLIST: confirm Paystack's words):
+//      * on a REFUNDED spray (reversing / reversed): the payer won = a 'dispute_resolved' issue (paid back twice); the
+//        merchant won = nothing to do (never "refund the payer by hand": they were refunded).
+//      * on a DISPUTED spray, once only (the chargeback ledger row flips from 'disputed' to chargeback_won / _lost):
+//        merchant won + delivered = the dispute clawbacks are settled and a REPAY issue is opened for whatever payouts had
+//        already taken (open or fully recovered rows alike); merchant won + never delivered = an issue to refund the payer;
+//        payer won = clawbacks stay open. An unknown word opens an issue and flips nothing.
 //    Reversal clawbacks are never touched by a dispute outcome.
 //  - applyClawbacks(beneficiaryId, availableKobo) is called by settlement (settlement.ts, queueDuePayout) INSIDE the payout
 //    transaction that holds the payout row lock: open clawbacks of that person are locked FOR UPDATE and applied oldest
@@ -37,6 +37,7 @@ import { sprayReferenceForLog } from "../payments/sprayReference";
 import { requireRole } from "../services/adminSecurity";
 import { BUSY, openPaymentIssue, withAdvisoryLock } from "./refunds";
 import { LOCK_SPRAY, sprayClock } from "./spray";
+import { capLockKey } from "./sprayLimits";
 
 type Queryable = { query: (text: string, values?: any[]) => Promise<{ rows: any[]; rowCount?: number | null }> };
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -106,11 +107,24 @@ async function disputeLocked(c: PoolClient, reference: string): Promise<DisputeO
   const delivered = row.status === "delivered";
   try {
     await c.query("BEGIN");
+    // Review r4 m1: clawbacks are written under the 'spray-recv' locks (id order), like toReversing and the reservation's
+    // receive-ban check.
+    for (const id of Array.from(new Set([row.host_id, row.recipient_id])).sort()) {
+      await c.query("select pg_advisory_xact_lock(hashtext($1::text))", [capLockKey(id)]);
+    }
     const won = await c.query(
       `update spray_payments set status = 'disputed', reason = 'DISPUTED' where id = $1 and status = $2 returning id`,
       [row.id, row.status],
     );
     if (!won.rowCount) { await c.query("ROLLBACK"); return "already"; }
+    // Review r4 m3: a spray that was still holding the payer's room-limit reservation (created, pending, paid) gives it
+    // back: it will never be delivered. (failed already released it; delivered spent it for real.)
+    if (row.status === "created" || row.status === "pending" || row.status === "paid") {
+      await c.query(
+        `update room_spend set spent_kobo = greatest(spent_kobo - $3::int, 0) where room_id = $1 and user_id = $2`,
+        [row.room_id, row.payer_id, Number(row.amount_kobo)],
+      );
+    }
     const hostKobo = Number(row.host_kobo);
     const guestKobo = row.guest_kobo === null ? 0 : Number(row.guest_kobo);
     await c.query(
@@ -144,7 +158,7 @@ async function disputeLocked(c: PoolClient, reference: string): Promise<DisputeO
   return "disputed";
 }
 
-export type DisputeResolveOutcome = "settled" | "kept_open" | "needs_person" | "unknown";
+export type DisputeResolveOutcome = "settled" | "kept_open" | "needs_person" | "already" | "unknown";
 
 /** charge.dispute.resolve on a spray reference. Idempotent. Throws when the reference is busy (500, Paystack retries). */
 export async function handleSprayDisputeResolved(reference: string, data: unknown): Promise<DisputeResolveOutcome> {
@@ -170,42 +184,63 @@ async function resolveLocked(c: PoolClient, reference: string, resolution: strin
       `update payment_issues set resolved_at = $2::timestamp where provider_payment_id = $1 and reason = 'dispute' and resolved_at is null`,
       [reference, iso(nowMs)],
     );
-    if (merchantWon && row.delivered) {
-      // The money came back through the dispute: the dispute clawbacks are settled. Anything already taken from a payout
-      // for them was taken twice: a person repays it.
-      // Read BEFORE settling: what payouts already took for this dispute (rows recovered by settlement, and the partly
-      // recovered open ones). A repeated resolve event finds no open row and changes nothing.
-      const open = (await c.query(
-        `select id from host_clawbacks where spray_id = $1::uuid and origin = 'dispute' and status = 'open' for update`,
-        [row.id],
-      )).rows as { id: string }[];
-      let owedBack = 0;
-      if (open.length) {
-        const taken = (await c.query(
-          `select coalesce(sum(recovered_kobo), 0)::bigint as n from host_clawbacks
-            where spray_id = $1::uuid and origin = 'dispute' and status in ('open', 'recovered')`,
-          [row.id],
-        )).rows[0];
-        owedBack = Number(taken?.n ?? 0);
-        await c.query(
-          `update host_clawbacks set status = 'recovered', recovered_at = $2::timestamp, recovered_kobo = amount_kobo
-            where id = any($1::uuid[]) and status = 'open'`,
-          [open.map((o) => o.id), iso(nowMs)],
-        );
+    if (row.status === "reversing" || row.status === "reversed") {
+      // Review r4 N1 / N2: the payer was already refunded in full (by us). Never "refund the payer by hand".
+      if (customerWon) {
+        await issue("SPRAY_DISPUTE_LOST_AFTER_REFUND: the payer won a chargeback on a spray we had already refunded in full; they were paid back twice. Recover it through Paystack or from the payer");
+        outcome = "needs_person";
+      } else if (merchantWon) {
+        outcome = "settled"; // no money moves: the refund stands, the reversal clawbacks are untouched
+      } else {
+        await issue("SPRAY_DISPUTE_RESOLVED_UNKNOWN: a dispute on a refunded spray was resolved with an outcome we do not recognise; check it in Paystack (no money action taken)");
+        outcome = "needs_person";
       }
-      if (owedBack > 0) {
-        await issue(`SPRAY_DISPUTE_WON_REPAY: the dispute was won, but ${owedBack} kobo had already been recovered from payouts for it; repay the beneficiaries by hand`);
+    } else if (row.status === "disputed") {
+      if (!merchantWon && !customerWon) {
+        // Not acted on and not marked done, so a later event with a known word can still settle it.
+        await issue("SPRAY_DISPUTE_RESOLVED_UNKNOWN: the dispute was resolved with an outcome we do not recognise; check it in Paystack (clawbacks stay open)");
         outcome = "needs_person";
       } else {
-        outcome = "settled";
+        // Review r4 N3: idempotent on the chargeback ledger row (flipped once, by code only), NOT on whether open clawbacks
+        // remain: a payout may already have recovered them all, and the host must then be repaid.
+        const flip = await c.query(
+          `update payment_transactions set status = $2 where type = 'chargeback' and provider_payment_id = $1 and status = 'disputed' returning id`,
+          [reference, merchantWon ? "chargeback_won" : "chargeback_lost"],
+        );
+        if (!flip.rowCount) {
+          outcome = "already";
+        } else if (customerWon) {
+          outcome = "kept_open"; // the chargeback stands: the clawbacks are the record of what is owed
+        } else if (row.delivered) {
+          // Won on a delivered spray: the money came back through the dispute, so the dispute clawbacks are settled, and
+          // whatever payouts had already taken for them (from EVERY dispute row, read before anything changes) is repaid.
+          const taken = (await c.query(
+            `select coalesce(sum(recovered_kobo), 0)::bigint as n from host_clawbacks where spray_id = $1::uuid and origin = 'dispute'`,
+            [row.id],
+          )).rows[0];
+          const owedBack = Number(taken?.n ?? 0);
+          // Settled rows read recovered_kobo = amount_kobo (the table's rule for 'recovered'); what payouts really took is
+          // in the REPAY issue below (review r4 m4, schema frozen).
+          await c.query(
+            `update host_clawbacks set status = 'recovered', recovered_at = $2::timestamp, recovered_kobo = amount_kobo
+              where spray_id = $1::uuid and origin = 'dispute' and status = 'open'`,
+            [row.id, iso(nowMs)],
+          );
+          if (owedBack > 0) {
+            await issue(`SPRAY_DISPUTE_WON_REPAY: the dispute was won, but ${owedBack} kobo had already been recovered from payouts for it; repay the beneficiaries by hand`);
+            outcome = "needs_person";
+          } else {
+            outcome = "settled";
+          }
+        } else {
+          // Won on a spray that was never delivered AND never refunded (disputed straight from created / pending / paid /
+          // failed): the payer paid for nothing.
+          await issue("SPRAY_DISPUTE_WON_UNDELIVERED: the dispute was won, but the spray was never delivered or refunded; refund the payer by hand or record why not (clawbacks stay open)");
+          outcome = "needs_person";
+        }
       }
-    } else if (merchantWon) {
-      await issue("SPRAY_DISPUTE_WON_UNDELIVERED: the dispute was won, but the spray was never delivered; refund the payer by hand or record why not (clawbacks stay open)");
-      outcome = "needs_person";
-    } else if (customerWon) {
-      outcome = "kept_open"; // the chargeback stands: the clawbacks are the record of what is owed
     } else {
-      await issue("SPRAY_DISPUTE_RESOLVED_UNKNOWN: the dispute was resolved with an outcome we do not recognise; check it in Paystack (clawbacks stay open)");
+      await issue(`SPRAY_DISPUTE_RESOLVED_UNEXPECTED: a dispute was resolved on a spray in status ${row.status}; check it in Paystack`);
       outcome = "needs_person";
     }
     await c.query("COMMIT");

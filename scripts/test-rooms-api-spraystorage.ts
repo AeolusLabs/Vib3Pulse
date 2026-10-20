@@ -144,6 +144,12 @@ try {
   check("insertClawbackIfNew stores the origin", rc.created && rc.row.origin === "reversal");
   check("the database refuses 'recovered' with less than the full amount", (await pgCode(() => q(`update host_clawbacks set status = 'recovered', recovered_kobo = 1 where id = $1`, [rc.row.id]))) === "23514");
   check("the database refuses a write-off without the admin", (await pgCode(() => q(`update host_clawbacks set status = 'written_off', written_off_reason = 'x' where id = $1`, [rc.row.id]))) === "23514");
+  // r4 N5 (owner decision): a small reversal debt alone never bars receiving; more than the threshold, or any chargeback, does.
+  check("receiveBlocked: 1,000 kobo of reversal debt is under a 1,000 threshold (not blocked)", !(await S.receiveBlocked([G], 1000)));
+  check("receiveBlocked: owed MORE than the threshold blocks", await S.receiveBlocked([G], 999));
+  check("receiveBlocked: someone who owes nothing is never blocked", !(await S.receiveBlocked([P2], 0)));
+  await S.insertClawbackIfNew({ hostId: H, beneficiaryId: P, sprayId: sp.id, amountKobo: 5, origin: "dispute" });
+  check("receiveBlocked: any open chargeback clawback blocks, however small", await S.receiveBlocked([P], 1_000_000));
   check("the database refuses written_off_by that is not an admin", (await pgCode(() => q(`update host_clawbacks set status = 'written_off', written_off_reason = 'x', written_off_by = $2 where id = $1`, [rc.row.id, H]))) === "23503");
 
   // ---- saved card
