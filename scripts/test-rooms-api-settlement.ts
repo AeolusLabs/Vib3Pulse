@@ -139,8 +139,8 @@ const mk = async (name: string) => {
 const payoutAccount = async (userId: string) => {
   const code = `ACCT_tr${stamp}_${++seq}`;
   await q(
-    `insert into organizer_payment_accounts (user_id, provider, paystack_subaccount_code, details_submitted, payouts_enabled)
-     values ($1, 'paystack', $2, true, true) on conflict do nothing`, [userId, code]);
+    `insert into organizer_payment_accounts (user_id, provider, paystack_subaccount_code, details_submitted, payouts_enabled, room_verified_subaccount_code, name_matched_at)
+     values ($1, 'paystack', $2, true, true, $2, now()) on conflict do nothing`, [userId, code]);
   return code;
 };
 const mkAdmin = async (role: string) => {
@@ -325,7 +325,7 @@ try {
   const p9 = await payout(R9);
   check("no payout account: queued, NO_PAYOUT_ACCOUNT, attempts untouched, nothing sent", p9.status === "queued" && p9.last_error === "NO_PAYOUT_ACCOUNT" && Number(p9.attempts) === 0 && callsFor(ref(R9)).length === 0, JSON.stringify(p9));
   check("...one alert, not one per pass", (await q(`select 1 from payment_issues where provider_payment_id = $1 and reason = 'payout_failed' and resolved_at is null`, [ref(R9)])).length === 1);
-  await q(`insert into organizer_payment_accounts (user_id, provider, paystack_subaccount_code, details_submitted, payouts_enabled) values ($1,'paystack',$2,true,false)`, [HN, `ACCT_tr_unverified_${stamp}`]);
+  await q(`insert into organizer_payment_accounts (user_id, provider, paystack_subaccount_code, details_submitted, payouts_enabled, room_verified_subaccount_code, name_matched_at) values ($1,'paystack',$2,true,false,$2,now())`, [HN, `ACCT_tr_unverified_${stamp}`]);
   await settlement.runSettlementPass(due9);
   check("an account with payouts not enabled is not used", (await payout(R9)).status === "queued" && callsFor(ref(R9)).length === 0);
   await q(`update organizer_payment_accounts set payouts_enabled = true where user_id = $1`, [HN]);

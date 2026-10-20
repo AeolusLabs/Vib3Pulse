@@ -112,9 +112,14 @@ test("privacy: an omitted notifyFriendsLive keeps the stored choice (an old clie
 });
 
 test("privacy: the room_live followers job reads the host's notifyFriendsLive", () => {
-  const src = readFileSync(new URL("../server/rooms/roomRoutes.ts", import.meta.url), "utf8");
-  const fn = src.slice(src.indexOf("async function notifyFollowers"), src.indexOf("async function checkLink"));
-  assert.match(fn, /resolveRoomPrivacy\(host\.roomPrivacy\)\.notifyFriendsLive\) return/);
+  // Fix round: the job moved to liveNotify.ts (all followers, chunked, in the background).
+  const src = readFileSync(new URL("../server/rooms/liveNotify.ts", import.meta.url), "utf8");
+  const fn = src.slice(src.indexOf("export async function notifyFollowersLive"), src.indexOf("const runs = new Map"));
+  assert.match(fn, /resolveRoomPrivacy\(host\.roomPrivacy\)\.notifyFriendsLive\) return 0/);
+  assert.match(fn, /room\.visibility === "invite"\) return 0/);
+  assert.doesNotMatch(fn, /MAX_NOTIFY|\.slice\(0, \d+\)/); // never capped
+  const routes = readFileSync(new URL("../server/rooms/roomRoutes.ts", import.meta.url), "utf8");
+  assert.match(routes, /notifyFollowers\(live, host\); \/\/ background/);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

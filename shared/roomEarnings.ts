@@ -31,8 +31,17 @@ export interface RoomPayoutStatus {
     /** Always true for an account shown here (a mismatched account is never stored). */
     nameMatches: boolean;
   } | null;
-  /** A Paystack subaccount exists with payouts enabled (hostPayoutReady). */
+  /**
+   * Rooms can pay this person: a NAME-CHECKED Paystack subaccount with payouts enabled (hostPayoutReady, fix round C1).
+   * An organiser-made account alone is false (it was never name-checked).
+   */
   subaccountReady: boolean;
+  /**
+   * Fix round contract addition: linking an account through rooms can work for this person in this deployment (an
+   * ID-verified adult with a verified legal name on file). false for everyone until the ID provider (G2) stores names; the
+   * page should then say that adding an account needs support instead of showing a form that will always refuse.
+   */
+  canLinkAccount: boolean;
 }
 
 /** Codes POST /api/rooms/payouts/account answers with (besides 200). */
@@ -114,9 +123,15 @@ export function rangeStartMs(range: EarningsRange, nowMs: number): number | null
 export interface EarningsRoomRow { id: string; title: string }
 /** room_tickets joined with rooms.host_id. Every status is passed; only 'paid' counts. */
 export interface EarningsTicketRow { id: string; roomId: string; hostId: string; hostKobo: number; status: string; createdAtMs: number }
-/** spray_payments where the viewer is the host or the recipient. Only delivered shares count. */
+/**
+ * spray_payments where the viewer is the host or the recipient. Delivered shares are earnings; the shares of a spray that
+ * was charged and then refunded or charged back BEFORE delivery are "returned" (see computeEarnings).
+ */
 export interface EarningsSprayRow {
-  id: string; roomId: string; hostId: string; recipientId: string; hostKobo: number; guestKobo: number | null; status: string; deliveredAtMs: number | null;
+  id: string; roomId: string; hostId: string; recipientId: string; hostKobo: number; guestKobo: number | null; status: string;
+  deliveredAtMs: number | null;
+  /** When the payer was charged (the split reached the subaccounts). null for a spray never charged. */
+  paidAtMs?: number | null;
 }
 /** room_payouts of the viewer. */
 export interface EarningsPayoutRow { roomId: string; hostId: string; status: string; amountKobo: number; releaseAtMs: number }
@@ -135,9 +150,10 @@ export interface EarningsInput {
 export interface RoomEarningsByRoom { roomId: string; title: string; sprayKobo: number; ticketKobo: number; at: string }
 
 /**
- * GET /api/users/me/room-earnings?range=week|month|all. The plan's shape plus one additive field, clawbackAppliedKobo.
+ * GET /api/users/me/room-earnings?range=week|month|all. The plan's shape plus additive fields.
  * Always true (any range):  settledKobo + onItsWayKobo + heldTicketKobo
- *                             = totals.sprayKobo + totals.ticketKobo - clawbackAppliedKobo
+ *                             = totals.sprayKobo + totals.ticketKobo + sprayReturnedKobo - clawbackAppliedKobo
+ *                           onItsWayKobo = sprayDirectKobo + ticketSendingKobo + needsAttentionKobo
  * clawbackOpenKobo is what is still owed now (not range filtered).
  */
 export interface RoomEarnings {
@@ -145,8 +161,23 @@ export interface RoomEarnings {
   totals: { sprayKobo: number; ticketKobo: number };
   /** Ticket money Paystack confirmed transferred (room payout 'paid'), net of clawbacks taken from it. */
   settledKobo: number;
-  /** Spray shares (split at charge time, no provider settlement report), and ticket payouts being sent (or failed, waiting for finance). */
+  /** The sum of the three parts below (kept for the plan's contract). */
   onItsWayKobo: number;
+  /**
+   * Additive (review r2 I4): spray money Paystack pays straight to the bank (split at charge time; we store no settlement
+   * report, so it is never called "settled"). Includes sprayReturnedKobo. Not "late" money: say "paid out by Paystack".
+   */
+  sprayDirectKobo: number;
+  /** Additive: ticket payouts Paystack is sending now (payout 'queued'). */
+  ticketSendingKobo: number;
+  /** Additive (review r1 m8): ticket payouts that failed or came back (payout 'failed'); finance follows up. */
+  needsAttentionKobo: number;
+  /**
+   * Additive (fix round I2): shares Paystack split to the viewer for sprays that were then refunded or charged back BEFORE
+   * delivery. Not earnings (not in totals), but the money did reach the subaccount, and the matching clawback takes it
+   * back (clawbackAppliedKobo / clawbackOpenKobo). Counting both keeps the same money from being excluded AND clawed back.
+   */
+  sprayReturnedKobo: number;
   /** Ticket money still held (room not ended, inside the 48 hour hold, or on an admin hold). */
   heldTicketKobo: number;
   /** Clawbacks the viewer still owes (amount minus recovered, open rows only). */
@@ -172,6 +203,8 @@ const kobo = (n: unknown, what: string): number => {
 const PAYOUT_STATUSES = new Set(["held", "queued", "paid", "failed"]);
 /** Spray statuses whose delivered share counts as earned. A disputed spray that WAS delivered stays earned; its chargeback is a clawback. */
 const EARNED_SPRAY = new Set(["delivered", "disputed"]);
+/** Charged, split, then refunded (reversing / reversed) or charged back before delivery (disputed, never delivered). */
+const RETURNED_SPRAY = new Set(["reversing", "reversed", "disputed"]);
 export const BY_ROOM_MAX = 100;
 
 /**
@@ -206,7 +239,8 @@ export function computeEarnings(input: EarningsInput, opts: { range: EarningsRan
 
   const out: RoomEarnings = {
     totals: { sprayKobo: 0, ticketKobo: 0 },
-    settledKobo: 0, onItsWayKobo: 0, heldTicketKobo: 0, clawbackOpenKobo: 0, clawbackAppliedKobo: 0,
+    settledKobo: 0, onItsWayKobo: 0, sprayDirectKobo: 0, ticketSendingKobo: 0, needsAttentionKobo: 0, sprayReturnedKobo: 0,
+    heldTicketKobo: 0, clawbackOpenKobo: 0, clawbackAppliedKobo: 0,
     byRoom: [], nextTicketReleaseAt: nextRelease === null ? null : new Date(nextRelease).toISOString(),
   };
   const rooms = new Map<string, { sprayKobo: number; ticketKobo: number; atMs: number }>();
@@ -241,22 +275,34 @@ export function computeEarnings(input: EarningsInput, opts: { range: EarningsRan
       out.clawbackAppliedKobo += taken;
       if (!p || p.status === "held") out.heldTicketKobo += net;
       else if (p.status === "paid") out.settledKobo += net;
-      else out.onItsWayKobo += net; // queued (being sent) or failed (finance follows up): never "settled"
+      else if (p.status === "queued") out.ticketSendingKobo += net; // being sent: never "settled"
+      else out.needsAttentionKobo += net; // failed or reversed by the bank: finance follows up
       touch(roomId, t.createdAtMs).ticketKobo += t.hostKobo;
     }
   }
 
-  // ---- sprays: the viewer's share of each delivered spray
+  // ---- sprays: the viewer's share of each delivered spray (earned), and of each spray refunded / charged back before
+  //      delivery (returned: the split reached the subaccount, the clawback takes it back)
   for (const s of input.sprays) {
-    if (!EARNED_SPRAY.has(s.status) || s.deliveredAtMs === null) continue;
+    const delivered = EARNED_SPRAY.has(s.status) && s.deliveredAtMs !== null;
+    const returned = !delivered && RETURNED_SPRAY.has(s.status);
+    if (!delivered && !returned) continue;
     let share = 0;
     if (s.hostId === viewer) share += kobo(s.hostKobo, "spray host share");
     if (s.recipientId === viewer && s.recipientId !== s.hostId && s.guestKobo !== null) share += kobo(s.guestKobo, "spray guest share");
-    if (share <= 0 || !inRange(s.deliveredAtMs)) continue;
-    out.totals.sprayKobo += share;
-    out.onItsWayKobo += share;
-    touch(s.roomId, s.deliveredAtMs).sprayKobo += share;
+    if (share <= 0) continue;
+    if (delivered) {
+      if (!inRange(s.deliveredAtMs)) continue;
+      out.totals.sprayKobo += share;
+      out.sprayDirectKobo += share;
+      touch(s.roomId, s.deliveredAtMs as number).sprayKobo += share;
+    } else {
+      if (!inRange(s.paidAtMs ?? null)) continue; // when the split happened; never charged (no paid_at) = nothing received
+      out.sprayReturnedKobo += share;
+      out.sprayDirectKobo += share;
+    }
   }
+  out.onItsWayKobo = out.sprayDirectKobo + out.ticketSendingKobo + out.needsAttentionKobo;
 
   // ---- clawbacks still owed (current, not range filtered)
   for (const c of input.clawbacks) {

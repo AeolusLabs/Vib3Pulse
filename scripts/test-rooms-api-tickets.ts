@@ -71,7 +71,7 @@ const mk = async (name: string, dob: string | null, verified: boolean) => {
   return id;
 };
 const payout = (userId: string, enabled = true) => q(
-  `insert into organizer_payment_accounts (user_id, provider, paystack_subaccount_code, details_submitted, payouts_enabled) values ($1,'paystack',$2,true,$3)`,
+  `insert into organizer_payment_accounts (user_id, provider, paystack_subaccount_code, details_submitted, payouts_enabled, room_verified_subaccount_code, name_matched_at) values ($1,'paystack',$2,true,$3,$2,now())`,
   [userId, `ACCT_tk_${userId.slice(0, 8)}`, enabled]);
 const follow = (a: string, b: string) => q(`insert into follows (follower_id, following_id) values ($1,$2) on conflict do nothing`, [a, b]);
 const mutual = async (a: string, b: string) => { await follow(a, b); await follow(b, a); };

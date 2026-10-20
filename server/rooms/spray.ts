@@ -60,7 +60,7 @@ import * as ss from "./sprayStorage";
 import { roomHub } from "./RoomHub";
 import { isKicked } from "./roomSocket";
 import { roomFeatures } from "./features";
-import { hostPayoutReady } from "./payouts";
+import { payableSubaccountOf } from "./payouts";
 import { ticketCheckoutBaseUrl } from "./checkoutUrl";
 import { createKeyedQueue, QueueFullError } from "./keyedQueue";
 import { BUSY, openPaymentIssue, withAdvisoryLock } from "./refunds";
@@ -141,10 +141,8 @@ export type GateResult =
    */
   | { ok: false; code: GateCode; absentOnly: boolean };
 
-async function subaccountOf(userId: string): Promise<string | null> {
-  const acct = await storage.getOrganizerPaymentAccount(userId, "paystack");
-  return acct && acct.payoutsEnabled === true && acct.paystackSubaccountCode ? acct.paystackSubaccountCode : null;
-}
+/** The split target: only a name-checked payable account (payouts.ts payableSubaccountOf, fix round C1), else null. */
+const subaccountOf = (userId: string): Promise<string | null> => payableSubaccountOf(userId);
 
 const accountUsable = async (u: User | undefined): Promise<boolean> =>
   !!u && !u.deletedAt && !(await storage.getActiveSuspension(u.id));
@@ -170,9 +168,8 @@ export async function sprayGate(roomId: string, payerId: string, recipientId: st
     isBlockedEitherWay(payerId, recipientId),
     // On a stage spray the host takes a cut: a block between the payer and the host refuses it too (owner ruling 5 / M2).
     recipientId === room.hostId ? Promise.resolve(false) : isBlockedEitherWay(payerId, room.hostId),
-    hostPayoutReady(room.hostId).then((ok) => (ok ? subaccountOf(room.hostId) : null)),
-    recipientId === room.hostId ? Promise.resolve<string | null>(null)
-      : hostPayoutReady(recipientId).then((ok) => (ok ? subaccountOf(recipientId) : null)),
+    subaccountOf(room.hostId),
+    recipientId === room.hostId ? Promise.resolve<string | null>(null) : subaccountOf(recipientId),
   ]);
   const recipientHub = roomHub.get(roomId, recipientId);
   const stage = roomHub.stageOf(roomId).stage;
@@ -696,8 +693,8 @@ async function deliverOrReverse(c: PoolClient, row: SprayPayment): Promise<Final
   announceDelivery(row, f);
   // Phase 6: the people the money reached (the host's share; a stage guest's share). Batched per (person, room), never names
   // the payer, fire-and-forget (notify never rejects, so a notification failure never touches the delivered spray).
-  void notifySprayReceived(row.hostId, row.roomId, row.hostKobo);
-  if (row.recipientId !== row.hostId && (row.guestKobo ?? 0) > 0) void notifySprayReceived(row.recipientId, row.roomId, row.guestKobo as number);
+  void notifySprayReceived(row.hostId, row.roomId, row.hostKobo, row.id);
+  if (row.recipientId !== row.hostId && (row.guestKobo ?? 0) > 0) void notifySprayReceived(row.recipientId, row.roomId, row.guestKobo as number, row.id);
   return "delivered";
 }
 

@@ -150,7 +150,7 @@ const rowsFor = (ref: string) => q(`select * from room_tickets where provider_re
 const ledgerFor = (ref: string) => q(`select * from payment_transactions where provider_payment_id = $1 and type = 'room_ticket'`, [ref]);
 const issueRefs: string[] = []; // references whose payment issues this run opens (cleared at the end)
 const payoutAccount = (userId: string) => q(
-  `insert into organizer_payment_accounts (user_id, provider, paystack_subaccount_code, details_submitted, payouts_enabled) values ($1,'paystack',$2,true,true)`,
+  `insert into organizer_payment_accounts (user_id, provider, paystack_subaccount_code, details_submitted, payouts_enabled, room_verified_subaccount_code, name_matched_at) values ($1,'paystack',$2,true,true,$2,now())`,
   [userId, `ACCT_tc_${userId.slice(0, 8)}`]);
 const issuesFor = (ref: string) => q(`select * from payment_issues where provider_payment_id = $1 and reason = 'room_charge_unhandled' and resolved_at is null`, [ref]);
 const paidIn = async (roomId: string) => Number((await q(`select count(*)::int n from room_tickets where room_id = $1 and status = 'paid'`, [roomId]))[0].n);

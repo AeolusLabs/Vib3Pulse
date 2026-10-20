@@ -44,8 +44,19 @@ import {
 } from "@shared/roomRefunds";
 import { BUSY, LOCK_PAYOUT, iso, isUuid, moneyClock, openPaymentIssue, refundAllForRoom, withAdvisoryLock, type RoomRefundTally } from "./refunds";
 import { notifyPayoutPaid } from "./notify";
+import { LOCK_ACCOUNT_CHANGE, payableSubaccountOf } from "./payouts";
 
 const isMissingTable = (e: unknown) => (e as { code?: string })?.code === "42P01";
+
+/**
+ * Inside an open transaction: takes the SHARED transaction advisory lock on (LOCK_ACCOUNT_CHANGE, hostId), which conflicts
+ * only with a payout account change in progress (payouts.ts holds it exclusively). false = a change is running: do not
+ * queue now. The lock is released at COMMIT / ROLLBACK.
+ */
+async function accountChangeIdle(c: Queryable, hostId: string): Promise<boolean> {
+  const r = (await c.query("select pg_try_advisory_xact_lock_shared($1::int, hashtext($2::text)) as ok", [LOCK_ACCOUNT_CHANGE, hostId])).rows[0] as { ok: boolean } | undefined;
+  return r?.ok === true;
+}
 type Queryable = { query: (text: string, values?: any[]) => Promise<{ rows: any[]; rowCount?: number | null }> };
 
 export interface PayoutRow {
@@ -148,6 +159,9 @@ async function queueDuePayout(payoutId: string, now: Date): Promise<"queued" | "
     if (!p || p.status !== "held" || p.release_ms === null || isAdminHold(Number(p.release_ms)) || Number(p.release_ms) > now.getTime()) {
       await c.query("ROLLBACK"); return null;
     }
+    // Fix round I3: never queue while the host's payout account is being changed (payouts.ts holds the exclusive lock on
+    // this key for the change). The shared lock is held to COMMIT, so a change that starts now waits and then sees 'queued'.
+    if (!(await accountChangeIdle(c, p.host_id))) { await c.query("ROLLBACK"); return null; } // next pass
     const block = await payoutBlockFor(c, p.room_id);
     if (block) {
       // Moderation (or the host's status) changed during the hold: never pay; refund after this lock is released.
@@ -303,14 +317,10 @@ async function payQueued(c: PoolClient, payoutId: string, now: Date): Promise<Pa
   }
   if (existing) return applyTransferStatus(c, p, existing.status, now);
 
-  // 2) The recipient, only from the host's verified Paystack payout account.
-  const acct = (await c.query(
-    `select paystack_subaccount_code from organizer_payment_accounts
-      where user_id = $1 and provider = 'paystack' and payouts_enabled = true and details_submitted = true
-        and paystack_subaccount_code is not null
-      limit 1`,
-    [p.host_id],
-  )).rows[0] as { paystack_subaccount_code: string } | undefined;
+  // 2) The recipient, only from the host's NAME-CHECKED payable account (payouts.ts PAYABLE_ACCOUNT_SQL, fix round C1). An
+  //    account replaced through organiser onboarding (a new, unchecked code) is not payable: the payout waits.
+  const acctCode = await payableSubaccountOf(p.host_id, c);
+  const acct = acctCode ? { paystack_subaccount_code: acctCode } : undefined;
   if (!acct) {
     await setNote(c, p.id, "NO_PAYOUT_ACCOUNT");
     await openPaymentIssue(c, { ticketId: null, providerRef: ref, provider: "paystack", reason: "payout_failed", error: "NO_PAYOUT_ACCOUNT", now }).catch(() => {});
@@ -605,6 +615,11 @@ export async function adminRequeuePayout(roomId: string, now: Date = moneyClock.
       if (kind === "final_failure") nextRef = payoutReference(p.room_id, gen + 1);
     }
     await c.query("BEGIN");
+    // Fix round I3: not while the host's payout account is being changed (held to COMMIT, see queueDuePayout).
+    if (!(await accountChangeIdle(c, p.host_id))) {
+      await c.query("ROLLBACK");
+      return fail(409, "ACCOUNT_CHANGING", "The host is changing their payout account right now. Try again in a minute.");
+    }
     const moved = await c.query(
       `update room_payouts set status = 'queued', attempts = 0, last_error = null, transfer_ref = $2 where id = $1 and status = 'failed' returning id`,
       [p.id, nextRef],

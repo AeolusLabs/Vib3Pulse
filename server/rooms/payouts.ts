@@ -1,27 +1,34 @@
 // Rooms phase 6, task 6.1: the host's payout account for rooms (tickets and sprays).
 //
 // SECURITY RULES (read before changing anything here)
-//  1. hostPayoutReady(userId) is the ONE source for "this person can be paid": canSellTickets' input (roomRoutes sellCheck),
-//     hostCanSellNow (ticketStorage, through hasVerifiedPayoutAccount) and the spray gate (spray.ts) all read it. Behaviour
-//     is identical to phase 4/5: a Paystack row with a subaccount code and payouts enabled.
+//  1. payableSubaccountOf(userId) is the ONE source for "this person can be paid" (fix round C1). It returns the Paystack
+//     subaccount code ONLY when the account was name-checked through rooms and is still that same subaccount:
+//     payouts_enabled, details_submitted, a code, room_verified_subaccount_code = paystack_subaccount_code and
+//     name_matched_at set (PAYABLE_ACCOUNT_SQL). hostPayoutReady (canSellTickets' input, hostCanSellNow), the spray gate
+//     (spray.ts subaccountOf) and the payout recipient (settlement.ts payQueued, same SQL) all read it. An organiser
+//     onboarding writes a new code that is NOT verified, so it can never be paid in rooms, and a queued room payout then
+//     waits with NO_PAYOUT_ACCOUNT instead of going to the new account.
 //  2. The account lookup is an oracle on third parties' bank details. Linking an account therefore needs: signed in, an
-//     ID-verified adult, a verified legal name on file, at most ROOMS_ACCOUNT_ATTEMPTS_PER_HOUR attempts per user per hour
-//     (counted in the database, so it holds across server instances), plus a per-IP limit on the route. The bank's account
-//     name is NEVER returned or logged: the answer is only whether it matches. "Not found" and "not your name" are ONE answer
-//     (NAME_MISMATCH), so the endpoint never says whether a number exists.
+//     ID-verified adult, a verified legal name on file, at most ROOMS_ACCOUNT_ATTEMPTS_PER_HOUR bank lookups per user per
+//     hour (counted in the database and shared with the organiser resolve / onboard routes, so it holds across server
+//     instances and both doors), plus a per-IP limit on the route. The bank's account name is NEVER returned or logged
+//     here: the answer is only whether it matches. "Not found" and "not your name" are ONE answer (NAME_MISMATCH).
 //  3. Name match is strict (shared/roomEarnings.ts namesMatch). No verified legal name is stored anywhere in the repo yet
-//     (the ID provider is gate G2): verifiedLegalNameOf returns null and linking refuses with NO_VERIFIED_NAME, before any
-//     lookup. Owner item.
-//  4. In-flight transfers are never redirected. settlement.ts reads the subaccount from Paystack when it STARTS a transfer
-//     (createTransferRecipient in payQueued), so changing the subaccount's bank while a payout is 'queued' would redirect it.
-//     We BLOCK the change while any payout of this host is queued (409 PAYOUT_IN_FLIGHT). The check runs in the same
-//     transaction as the change, holding FOR UPDATE locks on the host's held / queued / failed payout rows, so no held
-//     payout can be queued (queueDuePayout locks the row) and no failed payout requeued (its UPDATE waits) until the new
-//     account is committed. A payout already handed to Paystack keeps the recipient it was created with.
+//     (the ID provider is gate G2): verifiedLegalNameOf returns null, canLinkAccount is false, and linking refuses with
+//     NO_VERIFIED_NAME before any lookup. Owner item.
+//  4. In-flight transfers are never redirected, and no transaction is held open across a Paystack call (fix round I3):
+//      - the change runs under a SESSION advisory lock (LOCK_ACCOUNT_CHANGE, user id) with no transaction open;
+//      - settlement takes the SHARED transaction lock on the same key before it moves a payout held -> queued or an admin
+//        requeues failed -> queued, and skips (stays held / answers busy) while a change holds it;
+//      - under the lock: 409 PAYOUT_IN_FLIGHT if any payout of the host is queued (none can become queued meanwhile);
+//      - before an update, the row's verification is cleared (the account is not payable while Paystack is being changed:
+//        fail closed). It is restored when Paystack clearly refused; on an unclear answer it stays cleared and the person
+//        retries. The new verification is written in one short statement right after Paystack answered;
+//      - every Paystack call has a 15 second timeout (paystack.ts).
 //  5. Idempotent: a second call updates the existing subaccount (same code) instead of creating another.
-//  6. Every attempt and every outcome writes a room_payout_account_events row (the audit log) and one log line with the user
-//     id and the outcome code only. Never the account number, the account name, the bank's answer or an email.
-import type { PoolClient } from "pg";
+//  6. Every lookup attempt and every outcome after it writes a room_payout_account_events row (the audit log) and one log
+//     line with the user id and the outcome code only. Refusals decided before any lookup (no verified name, a payout in
+//     flight, an unknown bank) are logged but not written, so the table only grows with the rate-limited attempts.
 import { pool, storage } from "../storage";
 import type { User } from "@shared/schema";
 import { isIdVerifiedAdult } from "@shared/ageVerification";
@@ -34,21 +41,37 @@ import {
   createPaystackSubaccountChecked, isPaystackOutage, listPaystackBanksChecked, resolvePaystackBankAccountChecked, updatePaystackSubaccount,
   type PaystackBank,
 } from "../payments/paystack";
+import { BUSY, withAdvisoryLock } from "./refunds";
 
 export const ROOMS_ACCOUNT_ATTEMPTS_PER_HOUR = 5;
 const HOUR_MS = 60 * 60_000;
 const lockKey = (userId: string) => `room-payout-acct:${userId}`;
 const testing = () => process.env.NODE_ENV !== "production";
 
+/** Advisory lock namespace for a payout account change (refunds.ts 41001 / 41002, spray.ts 41003). Key: the user id. */
+export const LOCK_ACCOUNT_CHANGE = 41004;
+
 // ---------------------------------------------------------------- the single "can be paid" helper
 
-/**
- * The host (or stage guest) can be paid: a Paystack row in organizer_payment_accounts with a subaccount code and payouts
- * enabled. Never reads or returns bank details. Same rule phase 4 (hasVerifiedPayoutAccount) and phase 5 used.
- */
+/** SQL predicate on organizer_payment_accounts (no alias): a rooms-payable, name-checked account. */
+export const PAYABLE_ACCOUNT_SQL = `provider = 'paystack' and payouts_enabled = true and details_submitted = true
+  and paystack_subaccount_code is not null and room_verified_subaccount_code = paystack_subaccount_code
+  and name_matched_at is not null`;
+
+type Q = { query: (text: string, values?: any[]) => Promise<{ rows: any[]; rowCount?: number | null }> };
+
+/** The Paystack subaccount rooms may pay this person through, or null (rule 1). Never reads bank details. */
+export async function payableSubaccountOf(userId: string, q: Q = pool): Promise<string | null> {
+  const row = (await q.query(
+    `select paystack_subaccount_code from organizer_payment_accounts where user_id = $1 and ${PAYABLE_ACCOUNT_SQL} limit 1`,
+    [userId],
+  )).rows[0] as { paystack_subaccount_code: string } | undefined;
+  return row?.paystack_subaccount_code ?? null;
+}
+
+/** The person can be paid in rooms (a name-checked payable account). */
 export async function hostPayoutReady(userId: string): Promise<boolean> {
-  const acct = await storage.getOrganizerPaymentAccount(userId, "paystack");
-  return !!acct && acct.payoutsEnabled === true && !!acct.paystackSubaccountCode;
+  return (await payableSubaccountOf(userId)) !== null;
 }
 
 // ---------------------------------------------------------------- provider seam (tests replace it; refused in production)
@@ -90,29 +113,34 @@ export function verifiedLegalNameOf(user: User): string | null {
 const isOutage = (e: unknown) => isPaystackOutage(e) || !(e instanceof Error && e.message.startsWith("Paystack error"));
 
 let bankCache: { at: number; banks: PaystackBank[] } | null = null;
-/** Paystack's Nigerian bank list, cached for an hour. Throws on an outage. */
+/** Paystack's Nigerian bank list, cached for an hour (never an empty list: that is retried). Throws on an outage. */
 export async function payoutBanks(): Promise<PaystackBank[]> {
   if (bankCache && Date.now() - bankCache.at < HOUR_MS) return bankCache.banks;
   const banks = (await provider().listBanks()).filter((b) => BANK_CODE_RE.test(b.code) && b.name.length > 0);
-  bankCache = { at: Date.now(), banks };
+  if (banks.length > 0) bankCache = { at: Date.now(), banks };
   return banks;
 }
 
 // ---------------------------------------------------------------- GET /api/rooms/payouts/status
 
+/** Can this person link a bank account through rooms in this deployment (a verified adult with a verified legal name)? */
+export function canLinkAccountFor(user: User | undefined | null): boolean {
+  return !!user && !user.deletedAt && isIdVerifiedAdult(user) && !!verifiedLegalNameOf(user);
+}
+
 export async function payoutStatusFor(userId: string): Promise<RoomPayoutStatus> {
   const [user, acct] = await Promise.all([storage.getUser(userId), storage.getOrganizerPaymentAccount(userId, "paystack")]);
   const verifiedAdult = !!user && !user.deletedAt && isIdVerifiedAdult(user);
-  const subaccountReady = !!acct && acct.payoutsEnabled === true && !!acct.paystackSubaccountCode;
-  // Shown only when it is the name-checked account rooms saved AND still the row's subaccount (an organiser re-onboarding
-  // makes a new code). Otherwise null: the page asks for an account (organiser-made accounts were never name-checked).
+  // The same rule as payableSubaccountOf (rule 1), read from the row already loaded.
+  const checked = !!acct && !!acct.paystackSubaccountCode && !!acct.nameMatchedAt && acct.roomVerifiedSubaccountCode === acct.paystackSubaccountCode;
+  const subaccountReady = !!acct && checked && acct.payoutsEnabled === true && acct.detailsSubmitted === true;
+  // Shown only when it is the name-checked account rooms saved AND still the row's subaccount. Otherwise null.
   let account: RoomPayoutStatus["account"] = null;
   const last4 = acct?.accountLast4 ?? "";
-  if (acct?.paystackSubaccountCode && acct.nameMatchedAt && acct.roomVerifiedSubaccountCode === acct.paystackSubaccountCode
-    && /^\d{4}$/.test(last4) && acct.bankName) {
+  if (acct && checked && /^\d{4}$/.test(last4) && acct.bankName) {
     account = { bankName: acct.bankName, last4, nameMatches: true };
   }
-  return { verifiedAdult, account, subaccountReady };
+  return { verifiedAdult, account, subaccountReady, canLinkAccount: canLinkAccountFor(user) };
 }
 
 // ---------------------------------------------------------------- POST /api/rooms/payouts/account
@@ -146,7 +174,6 @@ function logAccount(userId: string, outcome: string): void {
   console.log(`[rooms:payouts] user=${userId} account_change outcome=${outcome}`);
 }
 
-type Q = { query: (text: string, values?: any[]) => Promise<{ rows: any[]; rowCount?: number | null }> };
 async function audit(q: Q, userId: string, action: "attempt" | "account_set" | "account_refused", outcome: string, bankCode: string | null, last4: string | null): Promise<void> {
   await q.query(
     `insert into room_payout_account_events (user_id, action, outcome, bank_code, account_last4) values ($1, $2, $3, $4, $5)`,
@@ -162,11 +189,16 @@ async function hasQueuedPayout(q: Q, userId: string): Promise<boolean> {
   return ((await q.query(`select 1 from room_payouts where host_id = $1 and status = 'queued' limit 1`, [userId])).rowCount ?? 0) > 0;
 }
 
+export type LookupSource = "rooms" | "organizer_resolve" | "organizer_onboard";
+
 /**
- * Counts this attempt against the per-user hourly limit, durably and serialised per user (advisory transaction lock), and
- * records it. Returns the seconds to wait when the limit is reached (nothing recorded then), else 0.
+ * One bank lookup against the per-user hourly limit (ROOMS_ACCOUNT_ATTEMPTS_PER_HOUR, shared by the rooms page and the
+ * organiser routes), durably and serialised per user (advisory transaction lock), and recorded as an 'attempt' row.
+ * Returns the seconds to wait when the limit is reached (nothing recorded then), else 0.
  */
-async function takeAttempt(userId: string, bankCode: string, last4: string, nowMs: number): Promise<number> {
+export async function takeBankLookupAttempt(
+  userId: string, source: LookupSource, bankCode: string | null, last4: string | null, nowMs: number = Date.now(),
+): Promise<number> {
   const c = await pool.connect();
   try {
     await c.query("BEGIN");
@@ -183,8 +215,8 @@ async function takeAttempt(userId: string, bankCode: string, last4: string, nowM
       return Math.max(1, Math.ceil((oldest + HOUR_MS - nowMs) / 1000));
     }
     await c.query(
-      `insert into room_payout_account_events (user_id, action, outcome, bank_code, account_last4, created_at) values ($1, 'attempt', 'started', $2, $3, $4::timestamp)`,
-      [userId, bankCode, last4, new Date(nowMs).toISOString()],
+      `insert into room_payout_account_events (user_id, action, outcome, bank_code, account_last4, created_at) values ($1, 'attempt', $2, $3, $4, $5::timestamp)`,
+      [userId, source === "rooms" ? "started" : source, bankCode, last4, new Date(nowMs).toISOString()],
     );
     await c.query("COMMIT");
     return 0;
@@ -195,6 +227,17 @@ async function takeAttempt(userId: string, bankCode: string, last4: string, nowM
     c.release();
   }
 }
+
+/** "ADEBAYO OKAFOR" -> "A***** O*****": what the organiser onboarding answer shows instead of the bank's name (fix round I1). */
+export function maskAccountName(name: unknown): string {
+  if (typeof name !== "string") return "";
+  return name.trim().split(/\s+/).filter(Boolean).slice(0, 6)
+    .map((w) => `${w.charAt(0).toUpperCase()}${"*".repeat(Math.min(Math.max(w.length - 1, 1), 8))}`).join(" ");
+}
+
+const ACCOUNT_SQL = `select paystack_subaccount_code, room_verified_subaccount_code,
+    round(extract(epoch from name_matched_at) * 1000)::float8 as matched_ms
+  from organizer_payment_accounts where user_id = $1 and provider = 'paystack'`;
 
 /**
  * Connect (or change) the payout account rooms pay into. See the rules at the top. The account number never leaves this
@@ -210,27 +253,20 @@ export async function setPayoutAccount(userId: string, body: unknown, nowMs: num
   if (!BANK_CODE_RE.test(bankCode) || !ACCOUNT_NUMBER_RE.test(accountNumber)) return refuse("BAD_INPUT");
   const last4 = last4Of(accountNumber);
 
-  // Before any lookup: nothing to compare against means no lookup at all (no oracle, no attempt spent).
+  // Before any lookup: nothing to compare against means no lookup at all (no oracle, no attempt spent, no row written).
   const verifiedName = verifiedLegalNameOf(user);
-  if (!verifiedName) {
-    logAccount(userId, "NO_VERIFIED_NAME");
-    await auditQuiet(userId, "account_refused", "NO_VERIFIED_NAME", bankCode, last4);
-    return refuse("NO_VERIFIED_NAME");
-  }
-  // Cheap early answer (re-checked under the locks below).
-  if (await hasQueuedPayout(pool, userId)) {
-    logAccount(userId, "PAYOUT_IN_FLIGHT");
-    await auditQuiet(userId, "account_refused", "PAYOUT_IN_FLIGHT", bankCode, last4);
-    return refuse("PAYOUT_IN_FLIGHT");
-  }
+  if (!verifiedName) { logAccount(userId, "NO_VERIFIED_NAME"); return refuse("NO_VERIFIED_NAME"); }
+  // Cheap early answer (re-checked under the lock below).
+  if (await hasQueuedPayout(pool, userId)) { logAccount(userId, "PAYOUT_IN_FLIGHT"); return refuse("PAYOUT_IN_FLIGHT"); }
 
-  const wait = await takeAttempt(userId, bankCode, last4, nowMs);
-  if (wait > 0) { logAccount(userId, "RATE_LIMITED"); return refuse("RATE_LIMITED", wait); }
-
+  // The bank is checked against the public list BEFORE an attempt is spent (review r1 m3).
   let bank: PaystackBank | undefined;
   try { bank = (await payoutBanks()).find((x) => x.code === bankCode); }
   catch { logAccount(userId, "PROVIDER_UNAVAILABLE:banks"); return refuse("PROVIDER_UNAVAILABLE"); }
-  if (!bank) { await auditQuiet(userId, "account_refused", "BAD_BANK", bankCode, last4); return refuse("BAD_BANK"); }
+  if (!bank) { logAccount(userId, "BAD_BANK"); return refuse("BAD_BANK"); }
+
+  const wait = await takeBankLookupAttempt(userId, "rooms", bankCode, last4, nowMs);
+  if (wait > 0) { logAccount(userId, "RATE_LIMITED"); return refuse("RATE_LIMITED", wait); }
 
   let resolvedName: string;
   try {
@@ -250,45 +286,60 @@ export async function setPayoutAccount(userId: string, body: unknown, nowMs: num
   }
 
   const commissionBps = await storage.getPlatformCommissionBps();
-  const c: PoolClient = await pool.connect();
-  let updated = false;
-  let providerChanged = false;
+  const bankName = bank.name.slice(0, 200);
+  const out = await withAdvisoryLock(LOCK_ACCOUNT_CHANGE, userId, (c) => changeLocked(c, {
+    userId, verifiedName, bankCode, accountNumber, last4, bankName, commissionBps, nowMs,
+  }), 8000);
+  if (out === BUSY) { logAccount(userId, "BUSY"); return refuse("PAYOUT_IN_FLIGHT"); }
+  return out;
+}
+
+interface ChangeInput {
+  userId: string; verifiedName: string; bankCode: string; accountNumber: string; last4: string; bankName: string; commissionBps: number; nowMs: number;
+}
+
+/** Under the session lock (rule 4), with NO transaction open around the provider call. */
+async function changeLocked(c: Q, i: ChangeInput): Promise<PayoutAccountOutcome> {
+  const { userId, bankCode, last4 } = i;
+  // No payout can become queued while we hold the lock (settlement takes the shared lock to queue), so this answer holds.
+  if (await hasQueuedPayout(c, userId)) {
+    logAccount(userId, "PAYOUT_IN_FLIGHT");
+    await auditQuiet(userId, "account_refused", "PAYOUT_IN_FLIGHT", bankCode, last4);
+    return refuse("PAYOUT_IN_FLIGHT");
+  }
+  const existing = (await c.query(ACCOUNT_SQL, [userId])).rows[0] as
+    { paystack_subaccount_code: string | null; room_verified_subaccount_code: string | null; matched_ms: number | null } | undefined;
+
+  let code = existing?.paystack_subaccount_code ?? "";
+  const updating = !!code;
+  if (updating) {
+    // Fail closed while Paystack is being changed: the account is not payable until the new verification is written.
+    await c.query(
+      `update organizer_payment_accounts set room_verified_subaccount_code = null, name_matched_at = null where user_id = $1 and provider = 'paystack'`,
+      [userId],
+    );
+  }
   try {
-    await c.query("BEGIN");
-    await c.query("select pg_advisory_xact_lock(hashtext($1::text))", [lockKey(userId)]);
-    // Rule 4: lock every payout of this host that could still move money, then refuse while one is being sent.
-    const payouts = (await c.query(
-      `select id, status from room_payouts where host_id = $1 and status in ('held', 'queued', 'failed') order by id for update`,
-      [userId],
-    )).rows as { id: string; status: string }[];
-    if (payouts.some((p) => p.status === "queued")) {
-      await c.query("ROLLBACK");
-      logAccount(userId, "PAYOUT_IN_FLIGHT");
-      await auditQuiet(userId, "account_refused", "PAYOUT_IN_FLIGHT", bankCode, last4);
-      return refuse("PAYOUT_IN_FLIGHT");
+    if (updating) await provider().updateSubaccount(code, { bankCode, accountNumber: i.accountNumber });
+    else code = (await provider().createSubaccount({ businessName: i.verifiedName, bankCode, accountNumber: i.accountNumber, percentageCharge: i.commissionBps / 100 })).subaccountCode;
+  } catch (e) {
+    const outage = isOutage(e);
+    if (updating && !outage && existing?.room_verified_subaccount_code && existing.matched_ms !== null) {
+      // Paystack clearly refused: nothing changed there, so the old verification stands again.
+      await c.query(
+        `update organizer_payment_accounts set room_verified_subaccount_code = $2, name_matched_at = $3::timestamp
+          where user_id = $1 and provider = 'paystack' and paystack_subaccount_code = $2`,
+        [userId, existing.room_verified_subaccount_code, new Date(Number(existing.matched_ms)).toISOString()],
+      ).catch((err) => console.error(`[rooms:payouts] user=${userId} restoring the verification failed:`, sanitizeMoneyError(err)));
     }
-    const existing = (await c.query(
-      `select paystack_subaccount_code from organizer_payment_accounts where user_id = $1 and provider = 'paystack' for update`,
-      [userId],
-    )).rows[0] as { paystack_subaccount_code: string | null } | undefined;
+    logAccount(userId, `PROVIDER_REFUSED_SUBACCOUNT:${outage ? "outage" : "refusal"}`);
+    await auditQuiet(userId, "account_refused", "PROVIDER_UNAVAILABLE", bankCode, last4);
+    return refuse("PROVIDER_UNAVAILABLE");
+  }
 
-    let code = "";
-    try {
-      if (existing?.paystack_subaccount_code) {
-        code = existing.paystack_subaccount_code;
-        await provider().updateSubaccount(code, { bankCode, accountNumber });
-        updated = true;
-      } else {
-        code = (await provider().createSubaccount({ businessName: verifiedName, bankCode, accountNumber, percentageCharge: commissionBps / 100 })).subaccountCode;
-      }
-      providerChanged = true;
-    } catch (e) {
-      await c.query("ROLLBACK");
-      logAccount(userId, `PROVIDER_REFUSED_SUBACCOUNT:${isOutage(e) ? "outage" : "refusal"}`);
-      await auditQuiet(userId, "account_refused", "PROVIDER_UNAVAILABLE", bankCode, last4);
-      return refuse("PROVIDER_UNAVAILABLE");
-    }
-
+  // One short autocommit statement straight after Paystack answered (review r1 m4): the code is never lost silently.
+  const at = new Date(i.nowMs).toISOString();
+  try {
     await c.query(
       `insert into organizer_payment_accounts
          (user_id, provider, paystack_subaccount_code, details_submitted, payouts_enabled, bank_code, bank_name, account_last4,
@@ -299,26 +350,18 @@ export async function setPayoutAccount(userId: string, body: unknown, nowMs: num
          bank_code = excluded.bank_code, bank_name = excluded.bank_name, account_last4 = excluded.account_last4,
          room_verified_subaccount_code = excluded.room_verified_subaccount_code, name_matched_at = excluded.name_matched_at,
          updated_at = excluded.updated_at`,
-      [userId, code, bankCode, bank.name.slice(0, 200), last4, new Date(nowMs).toISOString()],
+      [userId, code, bankCode, i.bankName, last4, at],
     );
-    await audit(c, userId, "account_set", updated ? "updated" : "created", bankCode, last4);
-    await c.query("COMMIT");
   } catch (e) {
-    await c.query("ROLLBACK").catch(() => {});
-    if (providerChanged) {
-      // Paystack has the new account but our row does not say so. Payouts read the subaccount from Paystack, so money goes
-      // to the new (name-checked) account; only our display is stale. The next call fixes it.
-      console.error(`[rooms:payouts] ALERT user=${userId} subaccount ${updated ? "updated" : "created"} at Paystack but saving it failed:`, sanitizeMoneyError(e));
-    } else {
-      console.error(`[rooms:payouts] user=${userId} account change failed:`, sanitizeMoneyError(e));
-    }
+    // Paystack has the new account but our row does not. The account stays unpayable (fail closed); the code is in this
+    // alert so a person can attach it (a subaccount code is not a secret).
+    console.error(`[rooms:payouts] ALERT user=${userId} subaccount ${updating ? "updated" : "created"} at Paystack (code ${code}) but saving it failed:`, sanitizeMoneyError(e));
     return refuse("SERVER_ERROR");
-  } finally {
-    c.release();
   }
-  logAccount(userId, updated ? "updated" : "created");
+  await auditQuiet(userId, "account_set", updating ? "updated" : "created", bankCode, last4);
+  logAccount(userId, updating ? "updated" : "created");
   return {
     status: 200,
-    body: { account: { bankName: bank.name, last4, nameMatches: true }, subaccountReady: true, updated },
+    body: { account: { bankName: i.bankName, last4, nameMatches: true }, subaccountReady: true, updated: updating },
   };
 }

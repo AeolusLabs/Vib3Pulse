@@ -237,12 +237,14 @@ try {
   check("an old client's PUT (field omitted) keeps the opt-out", oldClient.json?.roomPrivacy?.notifyFriendsLive === false, oldClient.text);
   const S2 = (await q(`insert into rooms (host_id, title, kind, visibility, age_limit, status) values ($1,'Quiet','party','public','18+','scheduled') returning id`, [H2]))[0].id;
   const st = await http("POST", `/api/rooms/${S2}/start`, H2);
+  await (await import("../server/rooms/liveNotify")).liveNoticeSettled(S2);
   check("start works", st.status === 200, st.text);
   check("opted-out host: followers are NOT told it is live", (await q(`select 1 from notifications where user_id=$1 and type='room_live' and related_entity_id=$2`, [F, S2])).length === 0);
   await http("POST", `/api/rooms/${S2}/end`, H2);
   await http("PUT", "/api/users/me/room-privacy", H2, { interactions: "mutuals", appearInLists: true, allowInvites: true, notifyFriendsLive: true });
   const S3 = (await q(`insert into rooms (host_id, title, kind, visibility, age_limit, status) values ($1,'Loud','party','public','18+','scheduled') returning id`, [H2]))[0].id;
   await http("POST", `/api/rooms/${S3}/start`, H2);
+  await (await import("../server/rooms/liveNotify")).liveNoticeSettled(S3);
   check("opted-in host: followers are told", (await q(`select 1 from notifications where user_id=$1 and type='room_live' and related_entity_id=$2`, [F, S3])).length === 1);
   await http("POST", `/api/rooms/${S3}/end`, H2);
 } catch (e: any) {
