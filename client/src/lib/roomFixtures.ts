@@ -169,6 +169,18 @@ export function fixtureLiveState(scene: FixtureScene, opts: { as: FixtureOptions
   };
 }
 
+// ---------------------------------------------------------------- edge states (task 6.7, flows board 11)
+// ?edge=micdenied|micbusy|micmissing|camdenied|cambusy|cammissing|reconnecting. The first six open the real room shell with the
+// hook's inline line set, so the real sheet appears. Spray edges are ?spray=unavailable|offline; weak signal is ?scene=weak;
+// full, removed, banned and ended are ?state=...
+
+export const EDGE_SCENES = ["micdenied", "micbusy", "micmissing", "camdenied", "cambusy", "cammissing", "reconnecting"] as const;
+export type EdgeScene = (typeof EDGE_SCENES)[number];
+export function parseEdgeFixture(search: string): EdgeScene | null {
+  const v = new URLSearchParams(search).get("edge");
+  return v && (EDGE_SCENES as readonly string[]).includes(v) ? (v as EdgeScene) : null;
+}
+
 // ---------------------------------------------------------------- paid room screens (task 4.7)
 // ?ticket=page|confirmed|waiting|hostsales|price|refund. Sample data only; the numbers come from ticketBreakdown like the
 // server's summary does, so the host sheet reads like the real thing (38 of 100 at 5,000 naira, as in img/f-hostsales).

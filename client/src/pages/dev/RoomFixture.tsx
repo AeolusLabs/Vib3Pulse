@@ -6,6 +6,8 @@
 // &minors=refuse|ack|invites|listen|teennote shows the minors' room screens (listen is the room shell seen as an adult).
 // ?wizard=adult|teen shows the Start a room sheet and the create wizard for that host, with every endpoint answered here.
 // &controls=host|cohost opens the Controls sheet as the host or a co-host (requests waiting, settings set; saves settle locally).
+// ?edge=micdenied|micbusy|micmissing|camdenied|cambusy|cammissing|reconnecting shows the edge states of flows board 11 in the shell;
+// ?spray=unavailable|offline are the spray ones. Weak signal is ?scene=weak, the room-full / removed / banned / ended panels are ?state=...
 // ?ticket=page|checkout|confirmed|waiting|hostsales|price|refund shows the paid room screens (task 4.7), every call answered here.
 // ?wizard=adult&paid=1 runs the wizard with paidRooms on and an ID-verified host, so the Paid room switch and price step show.
 // ?spray=tray|confirm|bank|declined|limit|quiet opens the spray flow (phase 5) in an 18+ room as a verified adult guest,
@@ -20,7 +22,7 @@ import { NotStartedPanel, RoomCodePanel } from "@/components/rooms/RoomStatePane
 import type { AdultInvite } from "@/lib/minorsRoomApi";
 import type { RoomVoice, ScreenTrack } from "@/hooks/useRoomVoice";
 import { roomReducer, type RoomState } from "@/lib/roomReducer";
-import { FIXTURE_HOST, FIXTURE_INVITES, FIXTURE_IDS, FIXTURE_NAMES, FIXTURE_ROOM, fixtureControlsState, fixtureLiveState, fixtureStartView, parseControlsFixture, parseFixtureQuery } from "@/lib/roomFixtures";
+import { FIXTURE_HOST, FIXTURE_INVITES, FIXTURE_IDS, FIXTURE_NAMES, FIXTURE_ROOM, fixtureControlsState, fixtureLiveState, fixtureStartView, parseControlsFixture, parseEdgeFixture, parseFixtureQuery, type EdgeScene } from "@/lib/roomFixtures";
 import {
   FIXTURE_TICKET, FIXTURE_TICKET_BLOCK, FIXTURE_TICKET_PRICE_KOBO, FIXTURE_TICKET_REF, fixtureTicketRoom, fixtureTicketSummary, parseTicketFixture, type TicketScene,
 } from "@/lib/roomFixtures";
@@ -34,6 +36,7 @@ import StepPrice from "@/components/rooms/create/StepPrice";
 import { PRICE_COPY, defaultTicketDraft, parseSummary, type TicketDraft } from "@/lib/roomTickets";
 import type { RoomTicketView } from "@/lib/roomsApi";
 import { FIXTURE_SPRAY_BLOCK, fixtureSprayChatText, fixtureSprayMe, fixtureSprayStart, parseSprayFixture, type SprayScene } from "@/lib/sprayFixtures";
+import { mediaLineFor } from "@/lib/mediaIssues";
 import { SPRAY_CATALOGUE, isSprayTier, type SprayTier } from "@shared/money";
 
 type Ev = Parameters<typeof roomReducer>[1];
@@ -276,10 +279,13 @@ export default function RoomFixture() {
   if (stateScene && (STATE_SCENES as readonly string[]).includes(stateScene)) return <StateFixture scene={stateScene as (typeof STATE_SCENES)[number]} theme={opts.theme} />;
   if (opts.minors && opts.minors !== "listen") return <MinorsFixture scene={opts.minors} theme={opts.theme} />;
   const sprayScene = parseSprayFixture(window.location.search);
-  return <ShellFixture opts={opts} spray={sprayScene} />;
+  const edge = parseEdgeFixture(window.location.search);
+  // The camera sheets need the live-video room; every other edge scene keeps the scene the query asked for.
+  const shellOpts = edge?.startsWith("cam") && opts.scene === "voice" ? { ...opts, scene: "live" as const } : opts;
+  return <ShellFixture opts={shellOpts} spray={sprayScene} edge={edge} />;
 }
 
-function ShellFixture({ opts, spray = null }: { opts: ReturnType<typeof parseFixtureQuery>; spray?: SprayScene | null }) {
+function ShellFixture({ opts, spray = null, edge = null }: { opts: ReturnType<typeof parseFixtureQuery>; spray?: SprayScene | null; edge?: EdgeScene | null }) {
   const controls = useMemo(() => parseControlsFixture(window.location.search), []);
   const [state, dispatch] = useReducer((s: RoomState, e: Ev) => roomReducer(s, e), undefined, () =>
     controls ? fixtureControlsState(controls) : fixtureLiveState(opts.scene, { as: opts.as, now: Date.now(), invite: opts.invite }));
@@ -322,6 +328,10 @@ function ShellFixture({ opts, spray = null }: { opts: ReturnType<typeof parseFix
   }, [opts.flood]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const self = state.selfId ?? FIXTURE_IDS.self;
+
+  // Edge states: the connection drop is the reducer's own event; the media ones are the hook's own inline lines.
+  useEffect(() => { if (edge === "reconnecting") dispatch({ type: "client:reconnecting" }); }, [edge]);
+  const edgeLine = edge && edge !== "reconnecting" ? mediaLineFor(edge.startsWith("mic") ? "mic" : "camera", edge.endsWith("denied") ? "denied" : edge.endsWith("busy") ? "busy" : "missing") : null;
 
   // Spray scenes: every spray endpoint answered here, in a layout effect so it is in place before any child's request.
   // A delivered spray arrives as the server would send it: room:spray plus a normal chat line.
@@ -398,11 +408,11 @@ function ShellFixture({ opts, spray = null }: { opts: ReturnType<typeof parseFix
     micOn,
     toggleMic: async () => setMicOn((m) => !m),
     activeSpeakers: state.stage,
-    error: null, micError: null,
+    error: null, micError: edge?.startsWith("mic") ? edgeLine : null,
     video: isHolder || audioOnly ? null : track,
     localVideo: isHolder ? track : null,
     cameraOn: isHolder && !!track,
-    cameraError: null,
+    cameraError: edge?.startsWith("cam") ? edgeLine : null,
     reconnecting: false, comingBack: false,
     startCamera: async () => true, stopCamera: async () => {},
     onAir: isHolder, videoPaused: false, pauseVideo: async () => {}, resumeVideo: async () => {},
