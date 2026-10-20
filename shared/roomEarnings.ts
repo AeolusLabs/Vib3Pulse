@@ -73,10 +73,10 @@ export function personNameTokens(name: unknown): string[] {
   if (typeof name !== "string") return [];
   return name
     .normalize("NFKD")
-    .replace(/\p{M}+/gu, "")
+    .replace(/[\u0300-\u036f]+/g, "")
     .toLowerCase()
     .replace(/['’`\-]/g, "")
-    .replace(/[^\p{L}]+/gu, " ")
+    .replace(/[^a-z\u00aa-\uffff]+/g, " ")
     .trim()
     .split(/\s+/)
     .filter((t) => t.length > 0)
