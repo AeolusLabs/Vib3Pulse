@@ -1,4 +1,4 @@
-// Room money screens on the client (phase 6, tasks 6.1 to 6.3, lane P6-BC, plus fix round FC6): parsers, outcome
+// Room money screens on the client (phase 6, tasks 6.1 to 6.3, lane P6-BC, plus fix rounds FC6 and 6G): parsers, outcome
 // words, fixtures and source checks (no database, no browser):
 //   npx tsx scripts/test-rooms-unit-earningsui.ts
 // Written, not run (owner's no-testing rule for phase 6). Runs under npm run test:rooms with the other unit suites.
@@ -7,8 +7,9 @@ import { readFileSync } from "node:fs";
 import {
   EARNINGS_COPY, EARNINGS_UI_COPY, PAYOUT_ERROR, accountNeedsRefetch, canLinkHere, accountNumberValid, cleanAccountNumber, earningsEmpty, earningsHeadline,
   isEarningsRange, mergePayments, parseBanks, parseEarnings, parsePaymentsPage, parsePayoutStatus, paymentStatusWord, payoutErrorMessage,
-  payoutReady, payoutStage, receiptIdOk, receiptUrl, roomKindLine, savedAccountOf,
+  payoutReady, payoutStage, receiptIdOk, receiptUrl, roomKindLine, savedAccountOf, sprayKeptKobo,
 } from "../client/src/components/rooms/earnings/earningsUi";
+import { RECAP_PROBE_JITTER_MS, recapProbeDelayMs } from "../client/src/lib/roomStates";
 import {
   EARN_SCENES, FIXTURE_BANKS, FIXTURE_SAVED_STATUS, fixtureEarnings, fixturePayments, fixturePayoutStatus, parseEarnFixture,
 } from "../client/src/components/rooms/earnings/earningsFixtures";
@@ -48,11 +49,13 @@ test("canLinkAccount (fix round I2): only a real true opens the form; missing or
   assert.equal(parsePayoutStatus({ ...base, canLinkAccount: true })?.canLinkAccount, true);
   assert.ok(parsePayoutStatus({ ...base, canLinkAccount: "yes" }), "an odd value never fails the whole status");
 });
-test("stage (fix round I2): organiser-set hosts are ready and never asked for an account; no form unless linking is open", () => {
-  const organiser = { ...READY, account: null, subaccountReady: true, canLinkAccount: false };
-  assert.equal(payoutStage(organiser), "organiser");
-  assert.equal(payoutStage({ ...organiser, canLinkAccount: true }), "organiser", "an organiser-set account is never re-pointed from here");
-  assert.equal(payoutReady(organiser), true);
+test("stage (fix rounds I2, 6G): set up exactly when the server says so, with no claim about organiser payouts; no form unless linking is open", () => {
+  // The server reports subaccountReady only for a name-checked account (r3 m1); with no details to show it is "setup".
+  const setup = { ...READY, account: null, subaccountReady: true, canLinkAccount: false };
+  assert.equal(payoutStage(setup), "setup");
+  assert.equal(payoutStage({ ...setup, canLinkAccount: true }), "setup", "a working account is never re-pointed from here");
+  assert.equal(payoutReady(setup), true, "the same answer as the server's subaccountReady");
+  assert.equal(payoutReady({ ...setup, subaccountReady: false }), false);
   const none = { ...READY, account: null, subaccountReady: false };
   assert.equal(payoutStage(none), "none");
   assert.equal(payoutStage({ ...none, canLinkAccount: false }), "soon");
@@ -63,10 +66,14 @@ test("stage (fix round I2): organiser-set hosts are ready and never asked for an
   assert.equal(canLinkHere({ ...READY, canLinkAccount: false }), false);
   const view = src("../client/src/components/rooms/earnings/PayoutAccountView.tsx");
   assert.ok(view.includes("{canLink && (stage ==="), "the form and the change button sit behind canLink");
-  assert.ok(view.includes('data-testid="payout-soon"') && view.includes('data-testid="payout-organiser"'));
+  assert.ok(view.includes('data-testid="payout-soon"') && view.includes('data-testid="payout-setup"'));
+  const ui = src("../client/src/components/rooms/earnings/earningsUi.ts");
+  for (const f of [ui, view, src("../client/src/components/rooms/earnings/earningsFixtures.ts")]) {
+    assert.ok(!/organiser payouts|"organiser"/i.test(f), "no stage, copy or scene claims organiser payouts (r3 m1)");
+  }
   assert.ok(view.includes("config.data?.features.paidRooms === true || config.data?.features.spray === true"), "no form while both flags are off");
   const ev = src("../client/src/components/rooms/earnings/EarningsView.tsx");
-  assert.ok(ev.includes('stage === "unverified" || stage === "none" || stage === "soon" || stage === "mismatch"'), "organiser and pending never see the add-an-account card");
+  assert.ok(ev.includes('stage === "unverified" || stage === "none" || stage === "soon" || stage === "mismatch"'), "setup, ready and pending never see the add-an-account card");
 });
 test("stage: unverified first, then none, mismatch, pending, ready", () => {
   assert.equal(payoutStage({ ...READY, verifiedAdult: false }), "unverified");
@@ -149,6 +156,52 @@ test("earnings: totals may be negative (a week of refunds); the four balances ma
   assert.equal(parseEarnings({ ...WEEK, nextTicketReleaseAt: "later" }), null);
   assert.equal(parseEarnings({ ...WEEK, byRoom: "x" }), null);
 });
+// ---------------------------------------------------------------- earnings split (fix round 6G, r3 m2)
+const SPLIT = { sprayDirectKobo: 2_000_000, ticketSendingKobo: 300_000, needsAttentionKobo: 500_000, sprayReturnedKobo: 758_400 };
+test("split: absent is an older server (null); present it must be whole, add up to onItsWay, and returned sits inside direct", () => {
+  assert.equal(parseEarnings(WEEK)!.split, null);
+  const ok = parseEarnings({ ...WEEK, ...SPLIT, onItsWayKobo: 2_800_000, clawbackAppliedKobo: 0 })!;
+  assert.deepEqual(ok.split, SPLIT);
+  assert.equal(sprayKeptKobo(ok.split!), 1_241_600, "the shares being taken back are not shown as on their way or in the bank");
+  assert.equal(parseEarnings({ ...WEEK, ...SPLIT, onItsWayKobo: 2_800_001 }), null, "parts that do not add up fail the body");
+  assert.equal(parseEarnings({ ...WEEK, ...SPLIT, onItsWayKobo: 2_800_000, needsAttentionKobo: -1 }), null);
+  assert.equal(parseEarnings({ ...WEEK, ...SPLIT, onItsWayKobo: 2_800_000, ticketSendingKobo: 1.5 }), null);
+  assert.equal(parseEarnings({ ...WEEK, sprayDirectKobo: 1_220_000 }), null, "half a split is not an older server");
+  assert.equal(parseEarnings({ ...WEEK, ...SPLIT, sprayReturnedKobo: 3_000_000, onItsWayKobo: 2_800_000 }), null);
+});
+test("split rows: failed payouts get a needs-attention line, never 'on its way or in your bank'; clawed shares their own row", () => {
+  const ev = src("../client/src/components/rooms/earnings/EarningsView.tsx");
+  assert.ok(ev.includes("money(sprayKeptKobo(e.split))"), "the spray row excludes returned shares");
+  assert.ok(ev.includes("e.split && e.split.needsAttentionKobo > 0") && ev.includes('data-testid="earnings-needs-attention"'));
+  assert.ok(ev.includes('data-testid="earnings-spray-returned"') && ev.includes('data-testid="earnings-ticket-sending"'));
+  const sprayRow = ev.slice(ev.indexOf("{e.split ? ("), ev.indexOf('testId="earnings-spray-direct"'));
+  assert.ok(!sprayRow.includes("onItsWayKobo") && !sprayRow.includes("needsAttention"), "failed payouts never sit in the spray row");
+  assert.ok(/needs attention/i.test(EARNINGS_COPY.needsAttention) && !/next business day/.test(EARNINGS_COPY.sprayDirectLong + EARNINGS_COPY.sprayDirectLongHelp));
+  for (const r of ["week", "month", "all"]) {
+    const e = parseEarnings(fixtureEarnings("attention", r, 0))!;
+    assert.ok(e && e.split && e.split.needsAttentionKobo > 0 && e.split.sprayReturnedKobo > 0, r);
+    // the server's identity: settled + onItsWay + held = totals + returned - applied (applied is 0 in the fixture)
+    assert.equal(e.settledKobo + e.onItsWayKobo + e.heldTicketKobo, earningsHeadline(e) + e.split!.sprayReturnedKobo, r);
+  }
+});
+
+// ---------------------------------------------------------------- recap probe jitter (fix round 6G, r3 m9)
+test("recap probe: 0 to 5 s random wait only when the room ended while watching; the query waits for it", () => {
+  assert.equal(RECAP_PROBE_JITTER_MS, 5_000);
+  assert.equal(recapProbeDelayMs(false, 0.9), 0, "opening an already ended room has no crowd");
+  assert.equal(recapProbeDelayMs(true, 0), 0);
+  assert.equal(recapProbeDelayMs(true, 0.5), 2_500);
+  assert.equal(recapProbeDelayMs(true, 0.9999), 4_999);
+  assert.equal(recapProbeDelayMs(true, 1), 5_000);
+  assert.equal(recapProbeDelayMs(true, 7), 5_000);
+  assert.equal(recapProbeDelayMs(true, -1), 0);
+  assert.equal(recapProbeDelayMs(true, Number.NaN), 0);
+  const page = src("../client/src/pages/RoomPage.tsx");
+  assert.ok(page.includes('recapProbeDelayMs(state.phase === "ended", Math.random())'));
+  assert.ok(page.includes("enabled: signedIn && roomEnded && recapAskReady"));
+  assert.ok(page.includes("return () => clearTimeout(t);"));
+});
+
 test("earnings: room lines and the empty state", () => {
   assert.equal(roomKindLine({ sprayKobo: 1, ticketKobo: 1 }), "Tickets and sprays");
   assert.equal(roomKindLine({ sprayKobo: 0, ticketKobo: 1 }), "Tickets");
@@ -196,7 +249,8 @@ test("fixture scenes parse and every scene's data has the routes' real shape", (
   assert.deepEqual(parseEarnFixture("?earn=week"), { scene: "week", page: "earnings" });
   assert.deepEqual(parseEarnFixture("?earn=mismatch"), { scene: "mismatch", page: "payouts" });
   assert.deepEqual(parseEarnFixture("?earn=soon"), { scene: "soon", page: "payouts" });
-  assert.deepEqual(parseEarnFixture("?earn=organiser"), { scene: "organiser", page: "earnings" });
+  assert.deepEqual(parseEarnFixture("?earn=attention"), { scene: "attention", page: "earnings" });
+  assert.equal(parseEarnFixture("?earn=organiser"), null, "the organiser scene is gone (r3 m1)");
   assert.deepEqual(parseEarnFixture("?earn=empty&page=payments"), { scene: "empty", page: "payments" });
   assert.equal(parseEarnFixture("?earn=nope"), null);
   assert.equal(parseEarnFixture(""), null);
@@ -210,7 +264,6 @@ test("fixture scenes parse and every scene's data has the routes' real shape", (
   }
   assert.equal(payoutStage(parsePayoutStatus(fixturePayoutStatus("noaccount"))!), "none");
   assert.equal(payoutStage(parsePayoutStatus(fixturePayoutStatus("mismatch"))!), "mismatch");
-  assert.equal(payoutStage(parsePayoutStatus(fixturePayoutStatus("organiser"))!), "organiser");
   assert.equal(payoutStage(parsePayoutStatus(fixturePayoutStatus("soon"))!), "soon");
   assert.equal(payoutStage(parsePayoutStatus(FIXTURE_SAVED_STATUS)!), "ready");
   assert.ok(parseBanks(FIXTURE_BANKS)!.length >= 5);
@@ -254,7 +307,7 @@ test("recap (I5, m7, m8): untracked numbers show --, money uses the AMBER fill, 
 test("see your recap (m5): only when the recap route answered for this viewer", () => {
   const page = src("../client/src/pages/RoomPage.tsx");
   assert.ok(page.includes("recapHref={recapProbe ? `/rooms/${encodeURIComponent(id)}/recap` : undefined}"));
-  assert.ok(page.includes("enabled: !!me && roomEnded, retry: false"));
+  assert.ok(page.includes("enabled: signedIn && roomEnded && recapAskReady, retry: false"));
 });
 test("bell (m7, owner: one per spray): money badges use the AMBER fill, no raw amber on room money, spray rows never grouped", () => {
   const b = src("../client/src/components/NotificationBell.tsx");
