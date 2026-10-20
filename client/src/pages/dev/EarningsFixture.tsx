@@ -1,4 +1,4 @@
-// Dev-only: the room money screens (phase 6) with no network. ?earn=empty|week|clawback|noaccount|mismatch|organiser|soon picks the data,
+// Dev-only: the room money screens (phase 6) with no network. ?earn=empty|week|clawback|noaccount|mismatch|soon|attention picks the data,
 // &page=earnings|payouts|payments the screen (mismatch opens on payouts), &theme=dark|light. Rendered from RoomFixture,
 // which App.tsx loads only in development builds. A fake fetch is installed in a layout effect, before any child's
 // effects start a request, and answers every money route; a save on the mismatch scene is refused with NAME_MISMATCH,

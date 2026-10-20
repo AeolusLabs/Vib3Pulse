@@ -12,7 +12,7 @@ import { AMBER, formatDeduction, formatNairaWhole } from "@/lib/roomTickets";
 import { formatWhen, useRoomsConfig } from "@/lib/roomsApi";
 import { earningsKey, fetchEarnings, fetchPayoutStatus, payoutStatusKey } from "@/lib/earningsApi";
 import {
-  EARNINGS_COPY, EARNINGS_RANGES, canLinkHere, earningsEmpty, earningsHeadline, payoutStage, readFailureMessage, roomKindLine,
+  EARNINGS_COPY, EARNINGS_RANGES, canLinkHere, sprayKeptKobo, earningsEmpty, earningsHeadline, payoutStage, readFailureMessage, roomKindLine,
   type Earnings, type EarningsRange,
 } from "./earningsUi";
 
@@ -51,18 +51,41 @@ export function EarningsBody({ e, range }: { e: Earnings; range: EarningsRange }
 
       <dl className="rounded-2xl bg-muted/60 px-4 py-3 text-sm">
         <Row label={EARNINGS_COPY.settled} value={money(e.settledKobo)} testId="earnings-settled" />
-        {/* Month and all time hold older spray money that is often already in the bank: never "next business day" for it. */}
-        <Row
-          label={range === "week" ? EARNINGS_COPY.onItsWay : EARNINGS_COPY.onItsWayLong}
-          help={range === "week" ? EARNINGS_COPY.onItsWayHelp : EARNINGS_COPY.onItsWayLongHelp}
-          value={money(e.onItsWayKobo)} testId="earnings-on-its-way"
-        />
+        {e.split ? (
+          <>
+            {/* The server's split: failed payouts and clawed shares are never counted as on their way or in the bank. */}
+            <Row
+              label={range === "week" ? EARNINGS_COPY.sprayDirect : EARNINGS_COPY.sprayDirectLong}
+              help={range === "week" ? EARNINGS_COPY.sprayDirectHelp : EARNINGS_COPY.sprayDirectLongHelp}
+              value={money(sprayKeptKobo(e.split))} testId="earnings-spray-direct"
+            />
+            {e.split.ticketSendingKobo > 0 && <Row label={EARNINGS_COPY.ticketSending} value={money(e.split.ticketSendingKobo)} testId="earnings-ticket-sending" />}
+            {e.split.sprayReturnedKobo > 0 && (
+              <Row label={EARNINGS_COPY.sprayReturned} help={EARNINGS_COPY.sprayReturnedHelp} value={money(e.split.sprayReturnedKobo)} testId="earnings-spray-returned" />
+            )}
+          </>
+        ) : (
+          // An older server with no split. Month and all time hold older spray money that is often already in the bank:
+          // never "next business day" for it.
+          <Row
+            label={range === "week" ? EARNINGS_COPY.onItsWay : EARNINGS_COPY.onItsWayLong}
+            help={range === "week" ? EARNINGS_COPY.onItsWayHelp : EARNINGS_COPY.onItsWayLongHelp}
+            value={money(e.onItsWayKobo)} testId="earnings-on-its-way"
+          />
+        )}
         <Row
           label={EARNINGS_COPY.held}
           help={e.nextTicketReleaseAt ? EARNINGS_COPY.nextRelease(formatWhen(e.nextTicketReleaseAt)) : null}
           value={money(e.heldTicketKobo)} testId="earnings-held"
         />
       </dl>
+
+      {e.split && e.split.needsAttentionKobo > 0 && (
+        <div role="status" className="space-y-1 rounded-2xl border border-destructive/60 p-4" data-testid="earnings-needs-attention">
+          <dl className="text-sm"><Row label={EARNINGS_COPY.needsAttention} value={money(e.split.needsAttentionKobo)} testId="earnings-needs-attention-amount" /></dl>
+          <p className="text-sm">{EARNINGS_COPY.needsAttentionHelp}</p>
+        </div>
+      )}
 
       {e.clawbackOpenKobo > 0 && (
         <div role="status" className="space-y-2 rounded-2xl border border-destructive/60 p-4" data-testid="earnings-clawback">
@@ -110,8 +133,8 @@ export default function EarningsView({ initialRange = "week" }: { initialRange?:
   const res = q.data;
   const config = useRoomsConfig();
   const moneyOn = config.data?.features.paidRooms === true || config.data?.features.spray === true;
-  // Only when the server says this person cannot be paid yet. A host set up through organiser payouts ("organiser") and
-  // an account Paystack is still finishing ("pending") are never told to add one.
+  // Only when the server says this person cannot be paid yet. A set-up account ("setup", "ready") and one Paystack is still
+  // finishing ("pending") are never told to add one.
   const stage = status.data?.ok === true ? payoutStage(status.data.data, moneyOn) : null;
   const needsAccount = stage === "unverified" || stage === "none" || stage === "soon" || stage === "mismatch";
   const canLink = status.data?.ok === true && canLinkHere(status.data.data, moneyOn);

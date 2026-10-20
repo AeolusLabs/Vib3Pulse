@@ -12,7 +12,7 @@
 // ?wizard=adult&paid=1 runs the wizard with paidRooms on and an ID-verified host, so the Paid room switch and price step show.
 // ?spray=tray|confirm|bank|declined|limit|quiet opens the spray flow (phase 5) in an 18+ room as a verified adult guest,
 // every spray endpoint answered here: a note or bundle lands after a moment, bag and rain go to a stand-in bank page.
-// ?earn=empty|week|clawback|noaccount|mismatch|organiser|soon &page=earnings|payouts|payments shows the room money screens (phase 6).
+// ?earn=empty|week|clawback|noaccount|mismatch|soon|attention &page=earnings|payouts|payments shows the room money screens (phase 6).
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import RoomShell, { type RoomShellSocket } from "@/components/rooms/shell/RoomShell";
 import MinorsRoomWarning from "@/components/rooms/MinorsRoomWarning";
