@@ -351,9 +351,9 @@ try {
   de = await delErr(OWED);
   check("deleteUser of a buyer owed a refund (refunded, refunded_at null): refused, owed 1", de instanceof RoomMoneyRecordsError && (de as any).counts.owed === 1, String(de));
   const delUserCode = await pgCode(() => q(`delete from users where id = $1`, [E]));
-  check("the database itself refuses: raw DELETE of a ticket holder is a foreign key violation (RESTRICT)", delUserCode === "23503", String(delUserCode));
+  check("the database itself refuses: raw DELETE of a ticket holder is a restrict_violation (23001: ON DELETE RESTRICT, not NO ACTION)", delUserCode === "23001", String(delUserCode));
   const delRoomCode = await pgCode(() => q(`delete from rooms where id = $1`, [R]));
-  check("the database itself refuses: raw DELETE of a room with tickets is a foreign key violation (RESTRICT)", delRoomCode === "23503", String(delRoomCode));
+  check("the database itself refuses: raw DELETE of a room with tickets is a restrict_violation (23001: ON DELETE RESTRICT, not NO ACTION)", delRoomCode === "23001", String(delRoomCode));
   check("tickets survived both attempts", (await countPaidTickets(R)) >= 1);
   const NOBODY = await mk("nothing", yearsAgo(30), true);
   check("deleteUser of an account with no room money records still works", (await delErr(NOBODY)) === null && !(await storage.getUser(NOBODY)));
