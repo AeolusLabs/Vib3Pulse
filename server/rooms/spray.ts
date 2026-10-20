@@ -26,10 +26,14 @@
 // The split is made AT SOURCE: Paystack routes the host's (and a stage guest's) share to their subaccount when the card is
 // charged. Nobody has confirmed whose balance funds a refund of a split charge, or whether the subaccount's settled share is
 // pulled back. Until G3 answers it, EVERY reversal of a taken payment (RECIPIENT_LEFT, ROOM_ENDED, TIMEOUT, HOST_CAP,
-// NOT_DELIVERABLE, AMOUNT_MISMATCH, LATE_PAYMENT, CLAWBACK_OPEN) writes host_clawbacks rows (origin 'reversal') for the host
-// share and the guest share, in the same transaction that moves the spray to 'reversing'. Anyone with an open clawback can
-// never receive another spray (as recipient or as host), and reversed sprays count toward the new-host cap. The spray flag
-// must stay OFF until G3 answers this.
+// NOT_DELIVERABLE, AMOUNT_MISMATCH, LATE_PAYMENT) writes host_clawbacks rows (origin 'reversal') for the host share and the
+// guest share, in the same transaction that moves the spray to 'reversing' (under the 'spray-recv' locks). Reversed sprays
+// count toward the new-host cap. OWNER DECISION (review r4 N4/N5): the receive ban is checked ONLY when a spray starts, and
+// only bites when the person owes more than CLAWBACK_BLOCK_THRESHOLD_KOBO on open clawbacks or owes any chargeback
+// clawback (sprayLimits.ts); a paid spray is never reversed because of a debt. G3 ACCEPTANCE CRITERION (review r4 N6): a
+// burst of checkouts started before the first clawback is still refunded while the split stays with the subaccount; G3
+// must confirm Paystack pulls the share back on refund, or the design moves to charge-then-transfer. The spray flag must
+// stay OFF until G3 answers this.
 import crypto from "crypto";
 import type { PoolClient } from "pg";
 import { and, eq, sql } from "drizzle-orm";
@@ -60,7 +64,7 @@ import { ticketCheckoutBaseUrl } from "./checkoutUrl";
 import { createKeyedQueue, QueueFullError } from "./keyedQueue";
 import { BUSY, openPaymentIssue, withAdvisoryLock } from "./refunds";
 import {
-  capLockKey, capUsers, checkVelocity, dailyWindowStart, effectiveDailyLimit, hasSprayInFlight, overNewHostCapAtDelivery,
+  capLockKey, capUsers, checkVelocity, clawbackBlockThresholdKobo, dailyWindowStart, effectiveDailyLimit, hasSprayInFlight, overNewHostCapAtDelivery,
   overNewHostCapAtStart, payerPrecheck, roomLimitFor,
 } from "./sprayLimits";
 
@@ -102,7 +106,7 @@ export function sprayRequestHash(roomId: string, tier: string, targetId: string)
 }
 
 // Reasons stored on the row. Only SPRAY_REASONS are ever shown to the payer; the others are for finance and logs.
-type InternalReason = "AMOUNT_MISMATCH" | "NOT_DELIVERABLE" | "HOST_CAP" | "LATE_PAYMENT" | "CLAWBACK_OPEN";
+type InternalReason = "AMOUNT_MISMATCH" | "NOT_DELIVERABLE" | "HOST_CAP" | "LATE_PAYMENT";
 type StoredReason = (typeof SPRAY_REASONS)[number] | InternalReason;
 const shownReason = (r: string | null | undefined): string | undefined =>
   r && (SPRAY_REASONS as readonly string[]).includes(r) ? r : undefined;
@@ -147,7 +151,7 @@ const accountUsable = async (u: User | undefined): Promise<boolean> =>
 /**
  * Loads everything the rule needs from the database and the hub (never from the request) and runs sprayEligibility, plus
  * the server-only checks the pure rule cannot see (accounts banned or deleted, kicked, blocks either way between the payer
- * and the recipient AND between the payer and the host, an open clawback owed by the host or the recipient, an empty room).
+ * and the recipient AND between the payer and the host, at start a receive ban on the host or the recipient, an empty room).
  *  - phase "start": the payer must be in the room now, and the spray switch must be on.
  *  - phase "deliver" (inside finalize): a payment was already taken, so the switch no longer matters and the payer may have
  *    left (a bank approval page takes them out of the room); a banned, deleted or suspended payer still stops delivery.
@@ -210,8 +214,10 @@ export async function sprayGate(roomId: string, payerId: string, recipientId: st
   // The hub's minors' flag can be newer than the row: never money in a room the hub knows is a minors' room.
   if (roomHub.isMinorsRoom(roomId) || !moneyEligibleRoom(room)) return fail("ROOM_NOT_ELIGIBLE");
   if (!payer || !host || !recipient || !hostSub) return fail("SERVER_RULE");
-  // Owner ruling C1 / I2: someone who owes an open clawback (as host or recipient) never receives another spray.
-  if (await ss.hasOpenClawback([room.hostId, recipientId])) return fail("OPEN_CLAWBACK");
+  // OWNER DECISION (review r4 N4/N5): the receive ban, at START only (re-checked in the reservation under the 'spray-recv'
+  // locks). Never at delivery: the split already happened at charge time, so reversing a paid spray for a debt only adds a
+  // loss. Bites only above CLAWBACK_BLOCK_THRESHOLD_KOBO owed, or with any chargeback clawback (sprayLimits.ts).
+  if (phase === "start" && await ss.receiveBlocked([room.hostId, recipientId], clawbackBlockThresholdKobo())) return fail("OPEN_CLAWBACK");
   const kind = recipientId === room.hostId ? "host" : "stage";
   return {
     ok: true,
@@ -223,8 +229,7 @@ export async function sprayGate(roomId: string, payerId: string, recipientId: st
 function reversalReasonFor(code: GateCode): StoredReason {
   if (code === "ROOM_NOT_LIVE" || code === "ROOM_NOT_ELIGIBLE") return "ROOM_ENDED";
   if (code === "RECIPIENT_NOT_ALLOWED" || code === "RECIPIENT_NOT_PAYABLE") return "RECIPIENT_LEFT";
-  if (code === "OPEN_CLAWBACK") return "CLAWBACK_OPEN";
-  return "NOT_DELIVERABLE";
+  return "NOT_DELIVERABLE"; // (OPEN_CLAWBACK never happens at delivery: the debt rule is start-only)
 }
 
 // ---------------------------------------------------------------- start (POST /api/rooms/:id/spray)
@@ -379,6 +384,8 @@ export async function startSpray(input: StartInput): Promise<StartOutcome> {
       // takes the same locks in the same order, so the two can never deadlock).
       for (const u of people) await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${capLockKey(u.id)}))`);
       if (await overNewHostCapAtStart(people, price, now, tx)) return { kind: "cap" };
+      // The receive ban again, now serialised with toReversing / disputes (they write clawbacks under the same locks).
+      if (await ss.receiveBlocked(people.map((u) => u.id), clawbackBlockThresholdKobo(), tx)) return { kind: "cap" };
       if (!(await ss.addSpend(roomId, payerId, price, limit.limitKobo, tx))) return { kind: "room" };
       const ins = await ss.insertSprayIfNew({
         idempotencyKey, requestHash, roomId, hostId: f.room.hostId, payerId, recipientId: targetId, tier,
@@ -401,7 +408,7 @@ export async function startSpray(input: StartInput): Promise<StartOutcome> {
     case "daily": return dailyLimit();
     case "room": return roomLimit();
     case "cap":
-      console.log(`[rooms:spray] start refused room=${roomId} payer=${payerId} code=NEW_HOST_CAP`);
+      console.log(`[rooms:spray] start refused room=${roomId} payer=${payerId} code=NEW_HOST_CAP_OR_RECEIVE_BAN`);
       return unavailable();
     case "created": break;
   }
@@ -636,7 +643,7 @@ async function deliverOrReverse(c: PoolClient, row: SprayPayment): Promise<Final
   if (!gate.ok) {
     // Owner ruling 6: the recipient merely LOOKS absent (this process's hub may not know the room yet, for example during a
     // deploy overlap): keep it paid and look again (the sweep, every pass) until the deadline. Anything the database says
-    // (banned, unverified, no payout account, room ended, blocked, a debt) reverses at once.
+    // (banned, unverified, no payout account, room ended, blocked) reverses at once. A debt never does (review r4 N4).
     if (gate.absentOnly && !pastDeadline) { logSpray(row.providerRef, "waiting:recipient_not_seen"); return "pending"; }
     return reverse(c, row, reversalReasonFor(gate.code));
   }
@@ -651,13 +658,10 @@ async function deliverOrReverse(c: PoolClient, row: SprayPayment): Promise<Final
     await c.query("select pg_advisory_xact_lock(hashtext($1::text))", [`spray-ref:${row.providerRef}`]);
     const people = capUsers(f.host, f.recipient);
     for (const u of people) await c.query("select pg_advisory_xact_lock(hashtext($1::text))", [capLockKey(u.id)]);
-    // Under the locks: a clawback opened since the gate looked (another spray to them was just reversed or disputed).
-    const debt = await c.query(
-      `select 1 from host_clawbacks where beneficiary_id = any($1::varchar[]) and status = 'open' limit 1`,
-      [people.map((u) => u.id)],
-    );
-    if (debt.rowCount) refused = "CLAWBACK_OPEN";
-    else if (await overNewHostCapAtDelivery(c, people, row.id, row.amountKobo, nowMs)) refused = "HOST_CAP";
+    // Review r4 N4: NO debt check here. The money is already split to the subaccounts; reversing a paid spray because its
+    // host or recipient owes a clawback would refund the payer and add another unrecoverable clawback. The receive ban is
+    // enforced only when a spray starts.
+    if (await overNewHostCapAtDelivery(c, people, row.id, row.amountKobo, nowMs)) refused = "HOST_CAP";
     if (refused) {
       await c.query("ROLLBACK");
     } else {
@@ -716,6 +720,10 @@ async function toReversing(
   row: SprayPayment, from: SprayStatus[], reason: StoredReason, patch: ss.SprayStatusPatch = {},
 ): Promise<SprayPayment | null> {
   return db.transaction(async (tx) => {
+    // Review r4 m1: the clawbacks are written under the same 'spray-recv' locks (same id order) the reservation takes before
+    // its receive-ban check, so a start can never miss a debt being written at the same moment.
+    const ids = Array.from(new Set([row.hostId, row.recipientId])).sort();
+    for (const id of ids) await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${capLockKey(id)}))`);
     const won = await ss.markSprayStatus(row.id, from, "reversing", { ...patch, reason }, tx);
     if (!won) return null;
     if (won.hostKobo > 0) {

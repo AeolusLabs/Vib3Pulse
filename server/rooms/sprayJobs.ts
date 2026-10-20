@@ -10,7 +10,8 @@
 //     (LATE_PAYMENT) even when its webhook never arrives.
 // Fairness (review I3 / owner ruling 10): each category lists the least recently checked rows first and skips rows whose
 // backoff (next_check_at) has not passed, so rows stuck for good can never fill every batch; each check records an attempt
-// and a backoff. The whole pass is bounded (maxRowsPerPass), so a pile-up never turns into a burst of provider calls.
+// and a backoff. Each category has its own quota (40 rows per pass in all), so a pile-up never turns into a burst of provider
+// calls and one category can never starve another.
 // Runs whatever the spray flag says: money already taken must still be delivered or given back.
 import { sanitizeMoneyError } from "@shared/roomRefunds";
 import type { SprayPayment } from "@shared/schema";
@@ -19,10 +20,11 @@ import { finalizeSpray, sprayClock, UNPAID_EXPIRY_MS, type FinalizeOutcome } fro
 
 export const sprayJobTuning = {
   everyMs: 15_000,
-  /** Rows listed per category per pass. */
-  batch: 20,
-  /** At most this many rows finalized per pass, all categories together (each can mean one to three provider calls). */
-  maxRowsPerPass: 40,
+  /**
+   * Rows per category per pass (review r4 m2: each category has its OWN quota, so a pile of paid or reversing rows can
+   * never starve the expiries and the late-payment re-checks). The total, 40 rows, bounds provider calls per pass.
+   */
+  quota: { paid: 15, reversing: 10, unpaid: 10, failed: 5 },
   /** Backoff for created / pending / reversing rows a check did not finish: 15 s doubling per attempt, at most 10 minutes. */
   baseBackoffMs: 15_000,
   maxBackoffMs: 10 * 60_000,
@@ -54,10 +56,10 @@ export async function sweepPendingSprays(now: number = sprayClock.now()): Promis
     const dueAt = new Date(now);
     // listStaleSprays ages a row by refund_requested_at, else paid_at, else created_at.
     const [paid, reversing, unpaid, failed] = await Promise.all([
-      ss.listStaleSprays(["paid"], new Date(now + 1000), t.batch, { dueAt }),                 // every paid row
-      ss.listStaleSprays(["reversing"], new Date(now + 1000), t.batch, { dueAt }),            // every unfinished refund
-      ss.listStaleSprays(["created", "pending"], new Date(now - UNPAID_EXPIRY_MS), t.batch, { dueAt }),
-      ss.listStaleSprays(["failed"], new Date(now - t.failedMinAgeMs), t.batch, { dueAt, createdSince: new Date(now - t.failedWindowMs) }),
+      ss.listStaleSprays(["paid"], new Date(now + 1000), t.quota.paid, { dueAt }),                 // every paid row
+      ss.listStaleSprays(["reversing"], new Date(now + 1000), t.quota.reversing, { dueAt }),       // every unfinished refund
+      ss.listStaleSprays(["created", "pending"], new Date(now - UNPAID_EXPIRY_MS), t.quota.unpaid, { dueAt }),
+      ss.listStaleSprays(["failed"], new Date(now - t.failedMinAgeMs), t.quota.failed, { dueAt, createdSince: new Date(now - t.failedWindowMs) }),
     ]);
     const run = async (row: SprayPayment, expireUnpaid: boolean) => {
       const ref = row.providerRef;
@@ -79,7 +81,7 @@ export async function sweepPendingSprays(now: number = sprayClock.now()): Promis
       ...unpaid.map((r): [SprayPayment, boolean] => [r, true]),
       ...failed.map((r): [SprayPayment, boolean] => [r, false]),
     ];
-    for (const [row, expire] of queue.slice(0, t.maxRowsPerPass)) await run(row, expire);
+    for (const [row, expire] of queue) await run(row, expire); // already bounded by the per-category quotas
   } catch (e) {
     if (isMissingTable(e)) {
       if (!warnedMissing) { warnedMissing = true; console.warn("[rooms:spray] sweep: spray tables are not there yet (migration not applied); skipping"); }
