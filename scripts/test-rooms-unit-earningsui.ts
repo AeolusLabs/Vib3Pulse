@@ -1,11 +1,11 @@
-// Room money screens on the client (phase 6, tasks 6.1 to 6.3, lane P6-BC): parsers, outcome words, fixtures and
-// source checks (no database, no browser):
+// Room money screens on the client (phase 6, tasks 6.1 to 6.3, lane P6-BC, plus fix round FC6): parsers, outcome
+// words, fixtures and source checks (no database, no browser):
 //   npx tsx scripts/test-rooms-unit-earningsui.ts
 // Written, not run (owner's no-testing rule for phase 6). Runs under npm run test:rooms with the other unit suites.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  EARNINGS_UI_COPY, PAYOUT_ERROR, accountNeedsRefetch, accountNumberValid, cleanAccountNumber, earningsEmpty, earningsHeadline,
+  EARNINGS_COPY, EARNINGS_UI_COPY, PAYOUT_ERROR, accountNeedsRefetch, canLinkHere, accountNumberValid, cleanAccountNumber, earningsEmpty, earningsHeadline,
   isEarningsRange, mergePayments, parseBanks, parseEarnings, parsePaymentsPage, parsePayoutStatus, paymentStatusWord, payoutErrorMessage,
   payoutReady, payoutStage, receiptIdOk, receiptUrl, roomKindLine, savedAccountOf,
 } from "../client/src/components/rooms/earnings/earningsUi";
@@ -20,7 +20,7 @@ function test(name: string, fn: () => void) {
   try { fn(); passed++; console.log(`PASS ${name}`); } catch (e: any) { failed++; console.log(`FAIL ${name}\n  ${e.message}`); }
 }
 
-const READY = { verifiedAdult: true, account: { bankName: "GTBank", last4: "4821", nameMatches: true }, subaccountReady: true };
+const READY = { verifiedAdult: true, account: { bankName: "GTBank", last4: "4821", nameMatches: true }, subaccountReady: true, canLinkAccount: true };
 
 // ---------------------------------------------------------------- payout status
 test("status: the plan's shape parses; extra fields (a name, a full number) are never kept", () => {
@@ -28,7 +28,7 @@ test("status: the plan's shape parses; extra fields (a name, a full number) are 
   assert.deepEqual(s, READY);
   assert.equal(JSON.stringify(s).includes("ADA"), false);
   assert.equal(JSON.stringify(s).includes("0123454821"), false);
-  assert.deepEqual(parsePayoutStatus({ verifiedAdult: false, account: null, subaccountReady: false }), { verifiedAdult: false, account: null, subaccountReady: false });
+  assert.deepEqual(parsePayoutStatus({ verifiedAdult: false, account: null, subaccountReady: false }), { verifiedAdult: false, account: null, subaccountReady: false, canLinkAccount: false });
   assert.deepEqual(parsePayoutStatus({ verifiedAdult: true, subaccountReady: false })?.account, null, "a missing account is no account");
 });
 test("status: last4 that is not exactly four digits fails the whole status (a full number is never drawn)", () => {
@@ -41,9 +41,36 @@ test("status: last4 that is not exactly four digits fails the whole status (a fu
   assert.equal(parsePayoutStatus(null), null);
   assert.equal(parsePayoutStatus([]), null);
 });
-test("stage: unverified first, then none, mismatch, pending, ready; only ready can receive", () => {
+test("canLinkAccount (fix round I2): only a real true opens the form; missing or odd values mean no", () => {
+  const base = { verifiedAdult: true, account: null, subaccountReady: false };
+  assert.equal(parsePayoutStatus(base)?.canLinkAccount, false, "an older server never sends it");
+  for (const v of ["true", 1, null, {}]) assert.equal(parsePayoutStatus({ ...base, canLinkAccount: v })?.canLinkAccount, false, String(v));
+  assert.equal(parsePayoutStatus({ ...base, canLinkAccount: true })?.canLinkAccount, true);
+  assert.ok(parsePayoutStatus({ ...base, canLinkAccount: "yes" }), "an odd value never fails the whole status");
+});
+test("stage (fix round I2): organiser-set hosts are ready and never asked for an account; no form unless linking is open", () => {
+  const organiser = { ...READY, account: null, subaccountReady: true, canLinkAccount: false };
+  assert.equal(payoutStage(organiser), "organiser");
+  assert.equal(payoutStage({ ...organiser, canLinkAccount: true }), "organiser", "an organiser-set account is never re-pointed from here");
+  assert.equal(payoutReady(organiser), true);
+  const none = { ...READY, account: null, subaccountReady: false };
+  assert.equal(payoutStage(none), "none");
+  assert.equal(payoutStage({ ...none, canLinkAccount: false }), "soon");
+  assert.equal(payoutStage(none, false), "soon", "both money flags off: linking is not open");
+  assert.equal(payoutReady({ ...none, canLinkAccount: false }), false);
+  assert.equal(canLinkHere(READY), true);
+  assert.equal(canLinkHere(READY, false), false);
+  assert.equal(canLinkHere({ ...READY, canLinkAccount: false }), false);
+  const view = src("../client/src/components/rooms/earnings/PayoutAccountView.tsx");
+  assert.ok(view.includes("{canLink && (stage ==="), "the form and the change button sit behind canLink");
+  assert.ok(view.includes('data-testid="payout-soon"') && view.includes('data-testid="payout-organiser"'));
+  assert.ok(view.includes("config.data?.features.paidRooms === true || config.data?.features.spray === true"), "no form while both flags are off");
+  const ev = src("../client/src/components/rooms/earnings/EarningsView.tsx");
+  assert.ok(ev.includes('stage === "unverified" || stage === "none" || stage === "soon" || stage === "mismatch"'), "organiser and pending never see the add-an-account card");
+});
+test("stage: unverified first, then none, mismatch, pending, ready", () => {
   assert.equal(payoutStage({ ...READY, verifiedAdult: false }), "unverified");
-  assert.equal(payoutStage({ ...READY, account: null }), "none");
+  assert.equal(payoutStage({ ...READY, account: null, subaccountReady: false }), "none");
   assert.equal(payoutStage({ ...READY, account: { ...READY.account, nameMatches: false } }), "mismatch");
   assert.equal(payoutStage({ ...READY, subaccountReady: false }), "pending");
   assert.equal(payoutStage(READY), "ready");
@@ -60,7 +87,10 @@ test("account number: ten digits after spaces and dashes come out", () => {
 test("save refusals in plain words; NO_VERIFIED_NAME and NAME_MISMATCH by code; the server's text never shown", () => {
   assert.equal(payoutErrorMessage({ status: 0 }), PAYOUT_ERROR.offline);
   assert.equal(payoutErrorMessage({ status: 401 }), PAYOUT_ERROR.signIn);
-  assert.equal(payoutErrorMessage({ status: 403 }), PAYOUT_ERROR.unverified);
+  assert.equal(payoutErrorMessage({ status: 403, code: "NOT_VERIFIED" }), PAYOUT_ERROR.unverified);
+  assert.equal(payoutErrorMessage({ status: 403 }), PAYOUT_ERROR.reload, "a CSRF 403 is not 'verify your ID' (fix round m11)");
+  assert.equal(payoutErrorMessage({ status: 403, code: "FEATURE_OFF" }), PAYOUT_ERROR.featureOff);
+  assert.equal(payoutErrorMessage({ status: 400, code: "BAD_BANK" }), PAYOUT_ERROR.badBank);
   assert.equal(payoutErrorMessage({ status: 422, code: "NAME_MISMATCH" }), PAYOUT_ERROR.nameMismatch);
   assert.equal(payoutErrorMessage({ status: 422 }), PAYOUT_ERROR.nameMismatch);
   assert.equal(payoutErrorMessage({ status: 422, code: "NO_VERIFIED_NAME" }), PAYOUT_ERROR.noVerifiedName);
@@ -84,7 +114,9 @@ test("save answer: last four from the status shape or { account }; nothing else 
   assert.equal(savedAccountOf({ ok: true }), null);
   assert.equal(savedAccountOf({ account: { ...READY.account, last4: "0123454821" } }), null);
 });
-test("banks: bad rows dropped, duplicates once, sorted by name; a bad body is null", () => {
+test("banks: the server's code rule (dashes, up to 20); bad rows dropped, duplicates once, sorted by name; a bad body is null", () => {
+  assert.equal(parseBanks({ banks: [{ name: "Long", code: "A1-B2-C3-D4-E5" }] })![0]?.code, "A1-B2-C3-D4-E5");
+  assert.equal(parseBanks({ banks: [{ name: "One", code: "1" }] })!.length, 0, "one character is below the server's minimum");
   const b = parseBanks({ banks: [{ name: "Zenith", code: "057" }, { name: "Access", code: "044" }, { name: "x", code: "<script>" }, { name: "Dup", code: "057" }, null] })!;
   assert.deepEqual(b.map((x) => x.code), ["044", "057"]);
   assert.equal(parseBanks({}), null);
@@ -151,12 +183,20 @@ test("payments: pages merge in order with each row once; the receipt URL is the 
   assert.equal(paymentStatusWord("ticket", "paid"), "Paid");
   assert.equal(paymentStatusWord("refund", "pending"), "On its way back to your card");
   assert.equal(paymentStatusWord("ticket", "whatever"), "");
+  // fix round m10: no status contradicts another
+  assert.equal(paymentStatusWord("spray", "processing"), "Paid, on its way to the room");
+  assert.equal(paymentStatusWord("spray", "disputed"), "Disputed with your bank");
+  assert.equal(paymentStatusWord("spray", "reversing"), "Refund on its way");
+  assert.equal(paymentStatusWord("spray", "reversed"), "Refunded");
+  assert.equal(paymentStatusWord("refund", "processing"), "On its way back to your card");
 });
 
 // ---------------------------------------------------------------- fixtures
 test("fixture scenes parse and every scene's data has the routes' real shape", () => {
   assert.deepEqual(parseEarnFixture("?earn=week"), { scene: "week", page: "earnings" });
   assert.deepEqual(parseEarnFixture("?earn=mismatch"), { scene: "mismatch", page: "payouts" });
+  assert.deepEqual(parseEarnFixture("?earn=soon"), { scene: "soon", page: "payouts" });
+  assert.deepEqual(parseEarnFixture("?earn=organiser"), { scene: "organiser", page: "earnings" });
   assert.deepEqual(parseEarnFixture("?earn=empty&page=payments"), { scene: "empty", page: "payments" });
   assert.equal(parseEarnFixture("?earn=nope"), null);
   assert.equal(parseEarnFixture(""), null);
@@ -170,6 +210,8 @@ test("fixture scenes parse and every scene's data has the routes' real shape", (
   }
   assert.equal(payoutStage(parsePayoutStatus(fixturePayoutStatus("noaccount"))!), "none");
   assert.equal(payoutStage(parsePayoutStatus(fixturePayoutStatus("mismatch"))!), "mismatch");
+  assert.equal(payoutStage(parsePayoutStatus(fixturePayoutStatus("organiser"))!), "organiser");
+  assert.equal(payoutStage(parsePayoutStatus(fixturePayoutStatus("soon"))!), "soon");
   assert.equal(payoutStage(parsePayoutStatus(FIXTURE_SAVED_STATUS)!), "ready");
   assert.ok(parseBanks(FIXTURE_BANKS)!.length >= 5);
   assert.equal(parseEarnings(fixtureEarnings("clawback", "week", now))!.clawbackOpenKobo > 0, true);
@@ -185,10 +227,49 @@ test("fixture: wired into the dev-only room fixture, fake fetch before children 
   assert.ok(fx.includes("parseEarnFixture(window.location.search)") && fx.includes("<EarningsFixture"));
   const ef = src("../client/src/pages/dev/EarningsFixture.tsx");
   assert.ok(/useLayoutEffect\(\(\) => \{\s*const real = window\.fetch/.test(ef));
-  for (const p of ["/api/rooms/payouts/status", "/api/rooms/payouts/banks", "/api/rooms/payouts/account", "/api/users/me/room-earnings", "/api/users/me/room-payments", "/api/csrf-token"]) assert.ok(ef.includes(p), p);
+  for (const p of ["/api/rooms/config", "/api/rooms/payouts/status", "/api/rooms/payouts/banks", "/api/rooms/payouts/account", "/api/users/me/room-earnings", "/api/users/me/room-payments", "/api/csrf-token"]) assert.ok(ef.includes(p), p);
   assert.ok(ef.includes("removeQueries"));
   const app = src("../client/src/App.tsx");
   assert.ok(!/import .*EarningsFixture/.test(app), "the fixture is reached only through the DEV-only RoomFixture chunk");
+});
+
+test("earnings copy (fix round I4): month and all time never promise next business day", () => {
+  assert.ok(/next business day/.test(EARNINGS_COPY.onItsWayHelp));
+  assert.ok(!/next business day/.test(EARNINGS_COPY.onItsWayLong + EARNINGS_COPY.onItsWayLongHelp));
+  assert.ok(/settled only when your bank confirms/.test(EARNINGS_COPY.onItsWayLongHelp));
+  const ev = src("../client/src/components/rooms/earnings/EarningsView.tsx");
+  assert.ok(ev.includes('range === "week" ? EARNINGS_COPY.onItsWayHelp : EARNINGS_COPY.onItsWayLongHelp'));
+});
+
+// ---------------------------------------------------------------- fix round FC6: recap, bell, privacy
+test("recap (I5, m7, m8): untracked numbers show --, money uses the AMBER fill, fresh data, follow refreshes the list", () => {
+  const p = src("../client/src/pages/RoomRecapPage.tsx");
+  assert.ok(p.includes('export const NOT_TRACKED = "--"'));
+  for (const f of ["statText(r.minutesIn, mins)", "statText(r.messages, String)", "statText(r.minutes, mins)"]) assert.ok(p.includes(f), f);
+  assert.ok(!/mins\(r\.minutesIn\)|String\(r\.messages\)|r\.minutes \?\? 0/.test(p), "no made-up 0");
+  assert.ok(p.includes("AMBER.fill") && !/amber-\d/.test(p));
+  assert.ok(p.includes("retry: false, staleTime: 0"));
+  assert.ok(p.includes('invalidateQueries({ queryKey: ["/api/follows/me/following"] })'));
+});
+test("see your recap (m5): only when the recap route answered for this viewer", () => {
+  const page = src("../client/src/pages/RoomPage.tsx");
+  assert.ok(page.includes("recapHref={recapProbe ? `/rooms/${encodeURIComponent(id)}/recap` : undefined}"));
+  assert.ok(page.includes("enabled: !!me && roomEnded, retry: false"));
+});
+test("bell (m7, owner: one per spray): money badges use the AMBER fill, no raw amber on room money, spray rows never grouped", () => {
+  const b = src("../client/src/components/NotificationBell.tsx");
+  const money = b.slice(b.indexOf('case "room_ticket":'), b.indexOf('case "spray_reversed":'));
+  assert.ok(money.length > 0 && !/amber-\d/.test(money), money);
+  assert.ok(b.includes("AMBER_BADGE_TYPES.has(type) ? AMBER.fill") && b.includes("${typeBadgeClass(group.type)}"));
+  const grouped = /GROUPABLE_TYPES = new Set\(\[([^\]]*)\]\)/.exec(b)?.[1] ?? "";
+  assert.ok(grouped && !grouped.includes("spray_received"), "each spray is its own row");
+});
+test("privacy card (m13, m14): no controls and no save without the stored settings; honest go-live copy", () => {
+  const c = src("../client/src/components/RoomPrivacyCard.tsx");
+  assert.ok(c.includes("if (!data) return;"), "a toggle never saves defaults over stored values");
+  assert.ok(c.includes("isError || !data ?") && c.includes('data-testid="room-privacy-error"'));
+  assert.ok(!c.includes("nobody gets a notification"));
+  assert.ok(c.includes("people who asked for a reminder, still are"));
 });
 
 // ---------------------------------------------------------------- routes, safety, copy, amber
