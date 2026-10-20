@@ -27,6 +27,7 @@ import * as rs from "./roomStorage";
 import { ticketReferenceBelongsTo, ticketReferenceSecret } from "./ticketReference";
 import { hostCanSellNow } from "./ticketStorage";
 import { createKeyedQueue } from "./keyedQueue";
+import { notifyTicketIssued } from "./notify";
 
 export { QueueFullError as IssueQueueFullError } from "./keyedQueue";
 
@@ -281,6 +282,9 @@ export async function issueRoomTicket(opts: IssueRoomTicketOpts): Promise<IssueR
       return outcomeOfRow(decision.row, roomId, userId);
     case "issued":
       logOutcome(reference, roomId, userId, "issued");
+      // Only the call that inserted the ticket gets here (replays answer from the row), so the buyer is told once.
+      // Fire-and-forget: notify never rejects, and its failure never touches the ticket.
+      void notifyTicketIssued(userId, roomId);
       return { ticket: decision.ticket };
     case "no_row":
       // No row can be written (foreign keys), so nothing records this refund: a replay would try again. The provider

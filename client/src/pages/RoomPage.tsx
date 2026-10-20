@@ -252,7 +252,7 @@ function RoomPageInner({ id }: { id: string }) {
   } else if (room.status === "ended" || state.phase === "ended") {
     content = state.notice?.code === "HOST_REVIEW"
       ? <Panel title="This room has closed" body={HOST_REVIEW_COPY} action={back} />
-      : <RoomCodePanel code="ROOM_ENDED" room={room} onRetry={() => { void refetch(); }} />;
+      : <RoomCodePanel code="ROOM_ENDED" room={room} recapHref={`/rooms/${encodeURIComponent(id)}/recap`} onRetry={() => { void refetch(); }} />;
   } else if (ticketBlock && showsPrice(gate)) {
     bare = true;
     // Only from the server's ticket block (an eligible adult who can view the room). Never inferred from anything else.

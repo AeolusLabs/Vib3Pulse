@@ -33,7 +33,11 @@ import {
   AlertTriangleIcon,
   ShieldIcon,
   XIcon,
+  SparklesIcon,
+  CheckCircle2Icon,
+  RefreshCwIcon,
 } from "@/components/ui/icons";
+import { isRoomMoneyNotificationType, safeRoomMoneyLink } from "@shared/roomNotifications";
 
 // Ease-out quart — fast start, smooth settle. Matches DESIGN.md motion spec.
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
@@ -72,6 +76,15 @@ function getTypeIcon(type: string, className = "h-3 w-3") {
       return <TicketIcon className={`${className} text-slate-400`} />;
     case "room_refund":
       return <TicketIcon className={`${className} text-destructive`} />;
+    // Room money (phase 6). Amber marks a money moment: amber-700 on light, amber-400 on dark (both above 4.5:1).
+    case "room_ticket":
+      return <TicketIcon className={`${className} text-amber-700 dark:text-amber-400`} />;
+    case "spray_received":
+      return <SparklesIcon className={`${className} text-amber-700 dark:text-amber-400`} />;
+    case "payout_paid":
+      return <CheckCircle2Icon className={`${className} text-amber-700 dark:text-amber-400`} />;
+    case "spray_reversed":
+      return <RefreshCwIcon className={`${className} text-muted-foreground`} />;
     case "buddy_alert":
       return <AlertTriangleIcon className={`${className} text-rose-400`} />;
     case "buddy_request":
@@ -84,6 +97,16 @@ function getTypeIcon(type: string, className = "h-3 w-3") {
     default:
       return <BellIcon className={`${className} text-muted-foreground`} />;
   }
+}
+
+// --- Links ---
+
+/**
+ * Room money notifications only follow an in-app room or earnings path (shared/roomNotifications.ts); anything else stored
+ * on such a row shows without navigating. Other types keep their stored link.
+ */
+function linkFor(n: NotificationWithUser): string | null {
+  return isRoomMoneyNotificationType(n.type) ? safeRoomMoneyLink(n.link) : n.link;
 }
 
 // --- Grouping ---
@@ -112,7 +135,7 @@ function groupNotifications(items: NotificationWithUser[]): NotificationGroup[] 
         type: n.type,
         notifications: [n],
         isRead: n.isRead,
-        link: n.link,
+        link: linkFor(n),
         createdAt: new Date(n.createdAt),
       };
       map.set(key, g);

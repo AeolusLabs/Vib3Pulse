@@ -53,6 +53,7 @@ import {
   looksLikeSprayReference, makeSprayReference, sprayReferenceBelongsTo, sprayReferenceForLog, sprayReferenceSecret,
 } from "../payments/sprayReference";
 import { deliverNotification } from "../notifications";
+import { notifySprayReceived } from "./notify";
 import { isBlockedEitherWay } from "../utils/blocks";
 import * as rs from "./roomStorage";
 import * as ss from "./sprayStorage";
@@ -693,6 +694,10 @@ async function deliverOrReverse(c: PoolClient, row: SprayPayment): Promise<Final
   if (refused) return reverse(c, row, refused);
   logSpray(row.providerRef, "delivered");
   announceDelivery(row, f);
+  // Phase 6: the people the money reached (the host's share; a stage guest's share). Batched per (person, room), never names
+  // the payer, fire-and-forget (notify never rejects, so a notification failure never touches the delivered spray).
+  void notifySprayReceived(row.hostId, row.roomId, row.hostKobo);
+  if (row.recipientId !== row.hostId && (row.guestKobo ?? 0) > 0) void notifySprayReceived(row.recipientId, row.roomId, row.guestKobo as number);
   return "delivered";
 }
 

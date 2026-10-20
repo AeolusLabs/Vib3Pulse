@@ -1,5 +1,5 @@
 // Durable room data. Live presence is NOT here (see RoomHub). All visibility rules for listings live in listRooms.
-import { and, eq, gt, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm";
 import { db } from "../storage";
 import { follows, roomMembers, roomReminders, rooms, users, type Room, type RoomMember } from "@shared/schema";
 import type { RoomInput } from "@shared/rooms";
@@ -225,9 +225,29 @@ export async function upsertMember(roomId: string, userId: string, role: MemberR
   return row;
 }
 
+/**
+ * Phase 6 recap: the visit that is ending, added to seconds_in in the same write that sets left_at. Database clock on both
+ * ends (joined_at is written by now()), clamped to 0..24 h per visit so a clock oddity can never add a silly number.
+ */
+const addVisitSeconds = () =>
+  sql`${roomMembers.secondsIn} + least(86400, greatest(0, floor(extract(epoch from (now()::timestamp - ${roomMembers.joinedAt})))))::int`;
+
 export async function markLeft(roomId: string, userId: string): Promise<void> {
-  await db.update(roomMembers).set({ leftAt: new Date() })
+  await db.update(roomMembers).set({ leftAt: new Date(), secondsIn: addVisitSeconds() })
     .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId), isNull(roomMembers.leftAt)));
+}
+
+/** Phase 6 recap: one chat line sent (fire-and-forget from the chat path; a lost increment only under-counts). */
+export async function countChatLine(roomId: string, userId: string): Promise<void> {
+  await db.update(roomMembers).set({ messagesSent: sql`${roomMembers.messagesSent} + 1` })
+    .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)));
+}
+
+/** Phase 6 recap: raise rooms.peak_members to n, never lower it (conditional, so any order of calls is safe). */
+export async function raisePeak(roomId: string, n: number): Promise<void> {
+  if (!Number.isSafeInteger(n) || n < 1) return;
+  await db.update(rooms).set({ peakMembers: n })
+    .where(and(eq(rooms.id, roomId), or(isNull(rooms.peakMembers), lt(rooms.peakMembers, n))));
 }
 
 /**
@@ -255,7 +275,7 @@ export const countLiveRoomsByHost = (hostId: string) => countBy(hostId, "live");
 export const countScheduledByHost = (hostId: string) => countBy(hostId, "scheduled");
 
 export async function markAllLeft(roomId: string): Promise<void> {
-  await db.update(roomMembers).set({ leftAt: new Date() }).where(and(eq(roomMembers.roomId, roomId), isNull(roomMembers.leftAt)));
+  await db.update(roomMembers).set({ leftAt: new Date(), secondsIn: addVisitSeconds() }).where(and(eq(roomMembers.roomId, roomId), isNull(roomMembers.leftAt)));
 }
 
 /** A host's rooms that have not ended (live and scheduled). */
