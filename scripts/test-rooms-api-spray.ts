@@ -521,8 +521,23 @@ try {
   const wclaw = await clawbacksOf(wrow.id);
   check("C1: a reversal of a taken payment writes the host's clawback (origin reversal, the stored host share)",
     wclaw.length === 1 && wclaw[0].beneficiary_id === H && Number(wclaw[0].amount_kobo) === Number(wrow.host_kobo) && wclaw[0].origin === "reversal" && wclaw[0].status === "open", JSON.stringify(wclaw));
+  // r4 N5 (owner decision): a small reversal debt alone does not bar receiving (default threshold 10,000 naira)...
   const PDEBT = await payer("p_debt");
-  await refused("I2: the host owes an open clawback, so nobody can spray them", PDEBT.id, R, body(H));
+  check("N5: one small reversal debt does not bar the host (under the threshold)", (await spray(PDEBT.id, R, body(H))).json?.status === "delivered");
+  // ...but owing more than the threshold does (threshold set to 0 here, so this one debt is over it).
+  const PDEBT2 = await payer("p_debt2");
+  process.env.CLAWBACK_BLOCK_THRESHOLD_KOBO = "0";
+  try { await refused("I2/N5: the host owes more than the threshold, so nobody can start a spray to them", PDEBT2.id, R, body(H)); }
+  finally { delete process.env.CLAWBACK_BLOCK_THRESHOLD_KOBO; }
+  // r4 N4: a debt that appears AFTER a spray started never reverses it at delivery (the split already happened).
+  const PN4 = await payer("p_debt_late", { card: false });
+  await spray(PN4.id, R, body(H));
+  const n4 = (await sprayRows(PN4.id))[0];
+  await q(`insert into host_clawbacks (host_id, beneficiary_id, spray_id, amount_kobo, origin) values ($1,$1,$2,1000,'dispute')`, [H, n4.id]);
+  mock.pay(n4.provider_ref);
+  await webhook("charge.success", { reference: n4.provider_ref });
+  check("N4: a paid spray is delivered even though the host now owes a chargeback clawback", (await rowById(n4.id)).status === "delivered" && !mock.calls.refund.includes(n4.provider_ref));
+  await settleClawbacks(n4.id);
   await settleClawbacks(wrow.id);
   // Wrong currency, reported paid (defensive) and reported as the provider does (not paid, pending).
   const PCUR = await payer("p_currency", { card: false });
@@ -682,6 +697,17 @@ try {
     (await webhook("charge.dispute.create", { transaction: { reference: lrow.provider_ref } })) === 200
     && (await clawbacksOf(lrow.id)).length === lclawBefore && (await rowById(lrow.id)).status === "reversed"
     && (await issues(lrow.provider_ref, "dispute")).some((i: any) => /AFTER_REFUND/.test(i.error_message ?? "")));
+  // r4 N1: the payer then WINS that chargeback: they were paid back twice; a person is told.
+  check("N1: payer wins a dispute on a refunded spray: a LOST_AFTER_REFUND issue (never silent)",
+    (await webhook("charge.dispute.resolve", { transaction: { reference: lrow.provider_ref }, resolution: "merchant-accepted" })) === 200
+    && (await issues(lrow.provider_ref, "dispute_resolved")).some((i: any) => /LOST_AFTER_REFUND/.test(i.error_message ?? "") && !i.resolved_at)
+    && (await issues(lrow.provider_ref, "dispute")).every((i: any) => !!i.resolved_at));
+  // r4 N2: the merchant wins on a refunded spray: never "refund the payer by hand" (they were refunded already).
+  await webhook("charge.dispute.create", { transaction: { reference: wrow.provider_ref } });
+  check("N2: merchant wins a dispute on a refunded spray: no refund-by-hand issue, no money action",
+    (await webhook("charge.dispute.resolve", { transaction: { reference: wrow.provider_ref }, resolution: "declined" })) === 200
+    && !(await issues(wrow.provider_ref, "dispute_resolved")).some((i: any) => /UNDELIVERED|REPAY/.test(i.error_message ?? ""))
+    && (await rowById(wrow.id)).status === "reversed");
   check("dispute: status poll for the payer says DISPUTED", (await rest("GET", `/api/rooms/${R}/spray/${disp[0].id}`, PD.id)).json?.reason === "DISPUTED");
   // ---- settlement deducts open clawbacks (host H owes gsp.hostKobo)
   const PRICE = 500000;
@@ -718,7 +744,9 @@ try {
   const dpStart = await spray(PDP.id, R, body(H));
   const dprow = (await sprayRows(PDP.id))[0];
   check("setup: an undelivered spray waiting for the bank page", dpStart.json?.status === "action_required" && dprow?.status === "pending", JSON.stringify(dpStart.json));
+  check("setup: the room spend is reserved", (await spentIn(R, PDP.id)) === SPRAY_CATALOGUE.note.kobo);
   check("undelivered dispute: 200", (await webhook("charge.dispute.create", { transaction: { reference: dprow.provider_ref } })) === 200);
+  check("r4 m3: the disputed spray gives the payer's room spend back (it will never be delivered)", (await spentIn(R, PDP.id)) === 0);
   check("undelivered dispute: disputed, host clawback opened, issue opened", (await rowById(dprow.id)).status === "disputed"
     && (await clawbacksOf(dprow.id)).length === 1 && (await issues(dprow.provider_ref, "dispute")).some((i: any) => /UNDELIVERED/.test(i.error_message ?? "")));
   mock.pay(dprow.provider_ref);
@@ -730,6 +758,20 @@ try {
     && (await issues(dprow.provider_ref, "dispute_resolved")).some((i: any) => /UNDELIVERED/.test(i.error_message ?? ""))
     && (await clawbacksOf(dprow.id)).every((c: any) => c.status === "open"));
   await settleClawbacks(dprow.id);
+  // r4 N3: the dispute clawbacks were ALL recovered by payouts before the dispute was won: the host is still repaid
+  // (a REPAY issue), and a repeated resolve event changes nothing (the chargeback ledger row flips once).
+  const dref2 = hrow.provider_ref; // the happy-path note to H (delivered)
+  await webhook("charge.dispute.create", { transaction: { reference: dref2 } });
+  await q(`update host_clawbacks set status = 'recovered', recovered_kobo = amount_kobo, recovered_at = now() where spray_id = $1 and origin = 'dispute'`, [hrow.id]); // a payout took it
+  check("N3: setup: disputed, its dispute clawback fully recovered", (await rowById(hrow.id)).status === "disputed" && (await clawbacksOf(hrow.id)).every((c: any) => c.status === "recovered"));
+  await webhook("charge.dispute.resolve", { transaction: { reference: dref2 }, resolution: "declined" });
+  check("N3: dispute won after a payout recovered everything: a REPAY issue for the full amount taken",
+    (await issues(dref2, "dispute_resolved")).some((i: any) => /REPAY/.test(i.error_message ?? "") && (i.error_message ?? "").includes(String(hrow.host_kobo))));
+  check("N3: the chargeback ledger row flipped once to chargeback_won", (await ledger(dref2, "chargeback"))[0]?.status === "chargeback_won");
+  const issuesBefore = (await issues(dref2, "dispute_resolved")).length;
+  await q(`update payment_issues set resolved_at = now() where provider_payment_id = $1 and reason = 'dispute_resolved'`, [dref2]); // a person handled it
+  await webhook("charge.dispute.resolve", { transaction: { reference: dref2 }, resolution: "declined" });
+  check("N3: a repeated resolve event changes nothing (no new issue)", (await issues(dref2, "dispute_resolved")).length === issuesBefore);
   // A clawback bigger than the payout: closed at 0, nothing sent.
   const H3 = await mk("host_bigclaw", { payout: true });
   await q(`insert into host_clawbacks (host_id, beneficiary_id, spray_id, amount_kobo) values ($1,$1,$2,$3)`, [H3, hrow.id, TB.host]);
