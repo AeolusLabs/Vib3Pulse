@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import {
   EARNINGS_COPY, EARNINGS_UI_COPY, PAYOUT_ERROR, accountNeedsRefetch, canLinkHere, accountNumberValid, cleanAccountNumber, earningsEmpty, earningsHeadline,
   isEarningsRange, mergePayments, parseBanks, parseEarnings, parsePaymentsPage, parsePayoutStatus, paymentStatusWord, payoutErrorMessage,
-  payoutReady, payoutStage, receiptIdOk, receiptUrl, roomKindLine, savedAccountOf, sprayKeptKobo,
+  payoutReady, payoutStage, receiptIdOk, receiptUrl, roomKindLine, savedAccountOf,
 } from "../client/src/components/rooms/earnings/earningsUi";
 import { RECAP_PROBE_JITTER_MS, recapProbeDelayMs } from "../client/src/lib/roomStates";
 import {
@@ -157,21 +157,36 @@ test("earnings: totals may be negative (a week of refunds); the four balances ma
   assert.equal(parseEarnings({ ...WEEK, byRoom: "x" }), null);
 });
 // ---------------------------------------------------------------- earnings split (fix round 6G, r3 m2)
-const SPLIT = { sprayDirectKobo: 2_000_000, ticketSendingKobo: 300_000, needsAttentionKobo: 500_000, sprayReturnedKobo: 758_400 };
-test("split: absent is an older server (null); present it must be whole, add up to onItsWay, and returned sits inside direct", () => {
+const SPLIT = { sprayDirectKobo: 2_000_000, ticketSendingKobo: 300_000, needsAttentionKobo: 500_000, sprayReturnedKobo: 758_400 }; // onItsWay 2,300,000
+test("split (fix round 6H): the server's identity onItsWay = sprayDirect + ticketSending; needsAttention and returned are separate", () => {
   assert.equal(parseEarnings(WEEK)!.split, null);
-  const ok = parseEarnings({ ...WEEK, ...SPLIT, onItsWayKobo: 2_800_000, clawbackAppliedKobo: 0 })!;
+  const ok = parseEarnings({ ...WEEK, ...SPLIT, onItsWayKobo: 2_300_000, clawbackAppliedKobo: 0 })!;
   assert.deepEqual(ok.split, SPLIT);
-  assert.equal(sprayKeptKobo(ok.split!), 1_241_600, "the shares being taken back are not shown as on their way or in the bank");
-  assert.equal(parseEarnings({ ...WEEK, ...SPLIT, onItsWayKobo: 2_800_001 }), null, "parts that do not add up fail the body");
-  assert.equal(parseEarnings({ ...WEEK, ...SPLIT, onItsWayKobo: 2_800_000, needsAttentionKobo: -1 }), null);
-  assert.equal(parseEarnings({ ...WEEK, ...SPLIT, onItsWayKobo: 2_800_000, ticketSendingKobo: 1.5 }), null);
+  // A failed payout never makes the whole body fail (the 6G parser rejected every body with needsAttention above 0).
+  assert.ok(parseEarnings({ ...WEEK, ...SPLIT, onItsWayKobo: 2_300_000, needsAttentionKobo: 9_000_000 }));
+  assert.equal(parseEarnings({ ...WEEK, ...SPLIT, onItsWayKobo: 2_800_000 }), null, "needsAttention is NOT part of onItsWay");
+  assert.equal(parseEarnings({ ...WEEK, ...SPLIT, onItsWayKobo: 2_300_001 }), null, "parts that do not add up fail the body");
+  assert.equal(parseEarnings({ ...WEEK, ...SPLIT, onItsWayKobo: 2_300_000, needsAttentionKobo: -1 }), null);
+  assert.equal(parseEarnings({ ...WEEK, ...SPLIT, onItsWayKobo: 2_300_000, sprayReturnedKobo: -1 }), null);
+  assert.equal(parseEarnings({ ...WEEK, ...SPLIT, onItsWayKobo: 2_300_000, ticketSendingKobo: 1.5 }), null);
   assert.equal(parseEarnings({ ...WEEK, sprayDirectKobo: 1_220_000 }), null, "half a split is not an older server");
-  assert.equal(parseEarnings({ ...WEEK, ...SPLIT, sprayReturnedKobo: 3_000_000, onItsWayKobo: 2_800_000 }), null);
+  // Returned shares are outside sprayDirect on the server, so they may be larger than it.
+  assert.ok(parseEarnings({ ...WEEK, ...SPLIT, sprayReturnedKobo: 3_000_000, onItsWayKobo: 2_300_000 }));
+  // Nothing at all but a failed payout is not "empty": it must be seen.
+  const onlyFailed = { ...WEEK, totals: { sprayKobo: 0, ticketKobo: 0 }, settledKobo: 0, onItsWayKobo: 0, heldTicketKobo: 0, byRoom: [],
+    sprayDirectKobo: 0, ticketSendingKobo: 0, needsAttentionKobo: 100, sprayReturnedKobo: 0 };
+  assert.equal(earningsEmpty(parseEarnings(onlyFailed)!), false);
+  assert.equal(earningsEmpty(parseEarnings({ ...onlyFailed, needsAttentionKobo: 0 })!), true);
+});
+test("split matches the server's computeEarnings field for field (source check of shared/roomEarnings.ts)", () => {
+  const shared = src("../shared/roomEarnings.ts");
+  assert.ok(shared.includes("out.onItsWayKobo = out.sprayDirectKobo + out.ticketSendingKobo;"));
+  assert.ok(/out\.sprayReturnedKobo \+= share;/.test(shared) && !/out\.sprayReturnedKobo \+= share;\s*out\.sprayDirectKobo/.test(shared), "returned is not added to direct");
 });
 test("split rows: failed payouts get a needs-attention line, never 'on its way or in your bank'; clawed shares their own row", () => {
   const ev = src("../client/src/components/rooms/earnings/EarningsView.tsx");
-  assert.ok(ev.includes("money(sprayKeptKobo(e.split))"), "the spray row excludes returned shares");
+  assert.ok(ev.includes("money(e.split.sprayDirectKobo)"), "the spray row is the server's earned direct shares (returned ones are not in it)");
+  assert.ok(!ev.includes("sprayKeptKobo"));
   assert.ok(ev.includes("e.split && e.split.needsAttentionKobo > 0") && ev.includes('data-testid="earnings-needs-attention"'));
   assert.ok(ev.includes('data-testid="earnings-spray-returned"') && ev.includes('data-testid="earnings-ticket-sending"'));
   const sprayRow = ev.slice(ev.indexOf("{e.split ? ("), ev.indexOf('testId="earnings-spray-direct"'));
@@ -180,8 +195,10 @@ test("split rows: failed payouts get a needs-attention line, never 'on its way o
   for (const r of ["week", "month", "all"]) {
     const e = parseEarnings(fixtureEarnings("attention", r, 0))!;
     assert.ok(e && e.split && e.split.needsAttentionKobo > 0 && e.split.sprayReturnedKobo > 0, r);
-    // the server's identity: settled + onItsWay + held = totals + returned - applied (applied is 0 in the fixture)
-    assert.equal(e.settledKobo + e.onItsWayKobo + e.heldTicketKobo, earningsHeadline(e) + e.split!.sprayReturnedKobo, r);
+    // the server's identities (applied is 0 in the fixture)
+    assert.equal(e.onItsWayKobo, e.split!.sprayDirectKobo + e.split!.ticketSendingKobo, r);
+    assert.equal(e.settledKobo + e.onItsWayKobo + e.split!.needsAttentionKobo + e.heldTicketKobo, earningsHeadline(e), r);
+    assert.equal(e.split!.sprayDirectKobo, e.totals.sprayKobo, r); // the server puts every delivered share in sprayDirect
   }
 });
 
