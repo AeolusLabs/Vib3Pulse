@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "wouter";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import RoomCard from "@/components/rooms/home/RoomCard";
@@ -32,6 +33,8 @@ export default function RoomsPage() {
   const { data: me } = useAuth();
   const { data: config } = useRoomsConfig();
   const paidRoomsOn = !FIXTURE && config?.features.paidRooms === true;
+  // Earnings and payments links only once paid rooms or spray are switched on (phase 6).
+  const moneyOn = !FIXTURE && (config?.features.paidRooms === true || config?.features.spray === true);
   const { data: following } = useQuery<{ id: string }[]>({ queryKey: ["/api/follows/me/following"], enabled: !FIXTURE && !!me });
   const friendIds = useMemo<ReadonlySet<string>>(() => (FIXTURE ? FIXTURE_FRIEND_IDS : new Set((following ?? []).map((u) => u.id))), [following]);
   const selfId = (me as { id?: string } | undefined)?.id ?? null;
@@ -53,7 +56,15 @@ export default function RoomsPage() {
             <h1 className="mt-1 font-serif text-4xl font-bold tracking-tight">Rooms</h1>
             <p className="mt-1 text-sm text-muted-foreground">Drop into a room and hang out as your avatar.</p>
           </div>
-          <StartRoomButton />
+          <div className="flex flex-wrap items-center gap-2">
+            {moneyOn && (
+              <nav aria-label="Money" className="flex gap-2">
+                <Button asChild variant="outline" className="h-11 rounded-full px-4"><Link href="/rooms/earnings" data-testid="link-rooms-earnings">Earnings</Link></Button>
+                <Button asChild variant="outline" className="h-11 rounded-full px-4"><Link href="/rooms/payments" data-testid="link-rooms-payments">Payments</Link></Button>
+              </nav>
+            )}
+            <StartRoomButton />
+          </div>
         </header>
 
         <div className="flex flex-wrap items-center gap-2">

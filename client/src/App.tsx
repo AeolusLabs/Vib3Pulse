@@ -35,6 +35,9 @@ import AvatarEditorPage from "@/pages/AvatarEditorPage";
 import RoomsPage from "@/pages/RoomsPage";
 import RoomPage from "@/pages/RoomPage";
 import RoomRecapPage from "@/pages/RoomRecapPage";
+import RoomEarningsPage from "@/pages/RoomEarningsPage";
+import RoomPayoutsPage from "@/pages/RoomPayoutsPage";
+import RoomPaymentsPage from "@/pages/RoomPaymentsPage";
 import DistressAlertsPage from "@/pages/DistressAlertsPage";
 import AccountSettingsPage from "@/pages/AccountSettingsPage";
 import ManageVenuesPage from "@/pages/ManageVenuesPage";
@@ -227,6 +230,23 @@ function Router() {
       <Route path="/rooms/:id/recap">
         <AuthenticatedLayout>
           <RoomRecapPage />
+        </AuthenticatedLayout>
+      </Route>
+
+      {/* Room money pages (phase 6). Above /rooms/:id, or "earnings" would be read as a room id. */}
+      <Route path="/rooms/earnings">
+        <AuthenticatedLayout>
+          <RoomEarningsPage />
+        </AuthenticatedLayout>
+      </Route>
+      <Route path="/rooms/payouts">
+        <AuthenticatedLayout>
+          <RoomPayoutsPage />
+        </AuthenticatedLayout>
+      </Route>
+      <Route path="/rooms/payments">
+        <AuthenticatedLayout>
+          <RoomPaymentsPage />
         </AuthenticatedLayout>
       </Route>
 

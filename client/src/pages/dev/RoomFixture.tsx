@@ -10,6 +10,7 @@
 // ?wizard=adult&paid=1 runs the wizard with paidRooms on and an ID-verified host, so the Paid room switch and price step show.
 // ?spray=tray|confirm|bank|declined|limit|quiet opens the spray flow (phase 5) in an 18+ room as a verified adult guest,
 // every spray endpoint answered here: a note or bundle lands after a moment, bag and rain go to a stand-in bank page.
+// ?earn=empty|week|clawback|noaccount|mismatch &page=earnings|payouts|payments shows the room money screens (phase 6).
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import RoomShell, { type RoomShellSocket } from "@/components/rooms/shell/RoomShell";
 import MinorsRoomWarning from "@/components/rooms/MinorsRoomWarning";
@@ -35,6 +36,8 @@ import { PRICE_COPY, defaultTicketDraft, parseSummary, type TicketDraft } from "
 import type { RoomTicketView } from "@/lib/roomsApi";
 import { FIXTURE_SPRAY_BLOCK, fixtureSprayChatText, fixtureSprayMe, fixtureSprayStart, parseSprayFixture, type SprayScene } from "@/lib/sprayFixtures";
 import { SPRAY_CATALOGUE, isSprayTier, type SprayTier } from "@shared/money";
+import EarningsFixture from "./EarningsFixture";
+import { parseEarnFixture } from "@/components/rooms/earnings/earningsFixtures";
 
 type Ev = Parameters<typeof roomReducer>[1];
 
@@ -270,6 +273,8 @@ export default function RoomFixture() {
   const opts = useMemo(() => parseFixtureQuery(window.location.search), []);
   const wizard = new URLSearchParams(window.location.search).get("wizard");
   if (wizard === "adult" || wizard === "teen") return <WizardFixture as={wizard} theme={opts.theme} paid={new URLSearchParams(window.location.search).get("paid") === "1"} />;
+  const earn = parseEarnFixture(window.location.search);
+  if (earn) return <EarningsFixture scene={earn.scene} page={earn.page} theme={opts.theme} />;
   const ticketScene = parseTicketFixture(window.location.search);
   if (ticketScene) return <TicketFixture scene={ticketScene} theme={opts.theme} />;
   const stateScene = new URLSearchParams(window.location.search).get("state");
