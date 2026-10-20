@@ -60,7 +60,7 @@ import * as ss from "./sprayStorage";
 import { roomHub } from "./RoomHub";
 import { isKicked } from "./roomSocket";
 import { roomFeatures } from "./features";
-import { hasVerifiedPayoutAccount } from "./ticketStorage";
+import { hostPayoutReady } from "./payouts";
 import { ticketCheckoutBaseUrl } from "./checkoutUrl";
 import { createKeyedQueue, QueueFullError } from "./keyedQueue";
 import { BUSY, openPaymentIssue, withAdvisoryLock } from "./refunds";
@@ -170,9 +170,9 @@ export async function sprayGate(roomId: string, payerId: string, recipientId: st
     isBlockedEitherWay(payerId, recipientId),
     // On a stage spray the host takes a cut: a block between the payer and the host refuses it too (owner ruling 5 / M2).
     recipientId === room.hostId ? Promise.resolve(false) : isBlockedEitherWay(payerId, room.hostId),
-    hasVerifiedPayoutAccount(room.hostId).then((ok) => (ok ? subaccountOf(room.hostId) : null)),
+    hostPayoutReady(room.hostId).then((ok) => (ok ? subaccountOf(room.hostId) : null)),
     recipientId === room.hostId ? Promise.resolve<string | null>(null)
-      : hasVerifiedPayoutAccount(recipientId).then((ok) => (ok ? subaccountOf(recipientId) : null)),
+      : hostPayoutReady(recipientId).then((ok) => (ok ? subaccountOf(recipientId) : null)),
   ]);
   const recipientHub = roomHub.get(roomId, recipientId);
   const stage = roomHub.stageOf(roomId).stage;

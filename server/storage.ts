@@ -444,6 +444,12 @@ CREATE TABLE IF NOT EXISTS room_members (
     const { SPRAY_SCHEMA_SQL } = await import("./rooms/sprayMigration");
     await pool.query(SPRAY_SCHEMA_SQL);
   }
+  // Rooms payout account (phase 6, task 6.1): display columns on organizer_payment_accounts, room_payout_account_events, a
+  // room_payouts index. One batch, same SQL as migrations/add_room_payout_account.sql; additive and idempotent. After paid rooms.
+  {
+    const { ROOM_PAYOUT_ACCOUNT_SCHEMA_SQL } = await import("./rooms/payoutsMigration");
+    await pool.query(ROOM_PAYOUT_ACCOUNT_SCHEMA_SQL);
+  }
   await pool.query(`
     ALTER TABLE venues ADD COLUMN IF NOT EXISTS building JSONB
   `);
