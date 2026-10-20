@@ -7,12 +7,16 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
 import pg from "pg";
+import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync } from "node:fs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const adminUrl = process.env.TEST_ADMIN_DATABASE_URL || process.env.DATABASE_URL;
 if (!adminUrl) { console.error("DATABASE_URL is not set"); process.exit(2); }
+// --reuse: keep ONE scratch DB across calls (name kept in .superpowers/scratch-db.txt, schema pushed once). --drop: drop it and exit.
+const REUSE = process.argv.includes("--reuse");
+const DROP = process.argv.includes("--drop");
 const files = process.argv.slice(2).filter((a) => !a.startsWith("--"));
-if (files.length === 0) { console.error("usage: run-one-room-test.mjs <scripts/test-rooms-*.ts> [...]"); process.exit(2); }
+if (files.length === 0 && !DROP) { console.error("usage: run-one-room-test.mjs <scripts/test-rooms-*.ts> [...]"); process.exit(2); }
 for (const f of files) if (!/^scripts\/test-rooms-[a-z0-9-]+\.ts$/.test(f.replaceAll("\\", "/"))) { console.error(`refusing ${f}`); process.exit(2); }
 
 const SCRATCH = /^vib3_rooms_test_[0-9a-f]{8}$/;
@@ -28,16 +32,27 @@ const admin = async (sql) => { const c = new pg.Client({ connectionString: admin
 const clean = (s) => s.trim().split("\n").filter((l) => !/DEP0190|trace-deprecation/.test(l)).join("\n");
 
 let ok = true;
-const dbName = `vib3_rooms_test_${crypto.randomBytes(4).toString("hex")}`;
+const STATE = join(root, ".superpowers", "scratch-db.txt");
+const stored = existsSync(STATE) ? readFileSync(STATE, "utf8").trim() : "";
+const dbName = (REUSE || DROP) && SCRATCH.test(stored) ? stored : `vib3_rooms_test_${crypto.randomBytes(4).toString("hex")}`;
+const reusing = (REUSE || DROP) && SCRATCH.test(stored);
 let created = false;
+if (DROP) {
+  if (SCRATCH.test(stored)) { await admin(`DROP DATABASE IF EXISTS ${stored} WITH (FORCE)`); try { unlinkSync(STATE); } catch {} console.log(`dropped ${stored}`); }
+  else console.log("no reusable scratch database recorded");
+  process.exit(0);
+}
 try {
   const needDb = files.filter((f) => !/test-rooms-unit/.test(f));
   let url = null;
   if (needDb.length) {
-    await admin(`CREATE DATABASE ${dbName}`); created = true;
     url = withDb(adminUrl, dbName);
-    const push = await run("npx", ["drizzle-kit", "push", "--force"], { DATABASE_URL: url });
-    if (push.code !== 0) throw new Error(`drizzle-kit push failed:\n${push.out.slice(-600)}`);
+    if (!reusing) {
+      await admin(`CREATE DATABASE ${dbName}`); created = true;
+      const push = await run("npx", ["drizzle-kit", "push", "--force"], { DATABASE_URL: url });
+      if (push.code !== 0) throw new Error(`drizzle-kit push failed:\n${push.out.slice(-600)}`);
+      if (REUSE) { mkdirSync(dirname(STATE), { recursive: true }); writeFileSync(STATE, dbName); created = false; console.log(`created reusable scratch database ${dbName}`); }
+    }
   }
   for (const f of files) {
     const env = /test-rooms-unit/.test(f) ? {} : { DATABASE_URL: url, SESSION_SECRET: "test", DISABLE_GEOCODING: "1", RESEND_API_KEY: "re_dummy_not_real", LIVEKIT_URL: "", LIVEKIT_API_KEY: "", LIVEKIT_API_SECRET: "" };
