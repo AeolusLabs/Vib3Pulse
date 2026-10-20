@@ -182,8 +182,12 @@ export async function endRoom(roomId: string, opts: { hostReview?: boolean } = {
     await getVoiceService()?.deleteRoom(roomId).catch((e) => console.error("[voice] deleteRoom failed:", e?.message ?? e));
   }
   // Phase 6 recap: persist the busiest moment this process saw before the hub forgets the room (never lowers the column).
+  // Review r3 m8: a room that went live always gets a peak of at least 1 (its host was in it), even when this process's hub
+  // saw nobody (auto-ended after a restart, or ended by another instance). peak_members IS NULL then means only "ended
+  // before tracking existed" (the recap's untracked marker). raisePeak never lowers a bigger value another process wrote.
   const peak = roomHub.peakOf(roomId);
-  if (room && peak > 0) await rs.raisePeak(roomId, peak).catch((e) => console.error("[rooms] peak write on end failed:", roomId, e?.message ?? e));
+  const floor = room?.startedAt ? Math.max(peak, 1) : peak;
+  if (room && floor > 0) await rs.raisePeak(roomId, floor).catch((e) => console.error("[rooms] peak write on end failed:", roomId, e?.message ?? e));
   for (const m of roomHub.end(roomId)) {
     joinedSockets.delete(m.userId);
   }

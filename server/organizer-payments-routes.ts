@@ -13,7 +13,8 @@ import {
   createStripeAccountLink,
   getStripeConnectStatus,
 } from "./payments/stripe.js";
-import { maskAccountName, takeBankLookupAttempt } from "./rooms/payouts";
+import { LOCK_ACCOUNT_CHANGE, maskAccountName, takeBankLookupAttempt } from "./rooms/payouts";
+import { BUSY, withAdvisoryLock } from "./rooms/refunds";
 import { sanitizeMoneyError } from "@shared/roomRefunds";
 
 // ============================================================
@@ -183,22 +184,29 @@ export function registerOrganizerPaymentsRoutes(app: Express): void {
       const resolved = await resolvePaystackBankAccount(accountNumber, bankCode);
 
       const commissionBps = await storage.getPlatformCommissionBps();
-      const { subaccountCode } = await createPaystackSubaccount({
-        businessName,
-        bankCode,
-        accountNumber,
-        percentageCharge: commissionBps / 100,
-      });
-
-      const account = await storage.upsertOrganizerPaymentAccount({
-        userId: req.user!.id,
-        provider: "paystack",
-        paystackSubaccountCode: subaccountCode,
-        detailsSubmitted: true,
-        // Paystack subaccounts are usable immediately — no review step like
-        // Stripe Connect Express, so payouts are enabled as soon as it's created.
-        payoutsEnabled: true,
-      });
+      // Review r3 m5: serialised with a rooms payout account change (the same session lock, LOCK_ACCOUNT_CHANGE + user id),
+      // taken BEFORE Paystack is asked, so neither can overwrite the other's subaccount code. Busy: a rooms save is running.
+      const locked = await withAdvisoryLock(LOCK_ACCOUNT_CHANGE, req.user!.id, async () => {
+        const { subaccountCode } = await createPaystackSubaccount({
+          businessName,
+          bankCode,
+          accountNumber,
+          percentageCharge: commissionBps / 100,
+        });
+        return storage.upsertOrganizerPaymentAccount({
+          userId: req.user!.id,
+          provider: "paystack",
+          paystackSubaccountCode: subaccountCode,
+          detailsSubmitted: true,
+          // Paystack subaccounts are usable immediately — no review step like
+          // Stripe Connect Express, so payouts are enabled as soon as it's created.
+          payoutsEnabled: true,
+        });
+      }, 8000);
+      if (locked === BUSY) {
+        return res.status(409).json({ code: "BUSY", message: "Your payout account is being changed right now. Try again in a minute." });
+      }
+      const account = locked;
 
       res.json({
         message: "Payout account connected",

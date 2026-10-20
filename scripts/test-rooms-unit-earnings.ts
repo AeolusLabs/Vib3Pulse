@@ -30,8 +30,9 @@ const all = (i: EarningsInput) => computeEarnings(i, { range: "all", nowMs: NOW 
 const tk = (id: string, roomId: string, hostId: string, hostKobo: number, at: number, status = "paid"): EarningsTicketRow =>
   ({ id, roomId, hostId, hostKobo, status, createdAtMs: at });
 const balanced = (e: RoomEarnings) =>
-  e.settledKobo + e.onItsWayKobo + e.heldTicketKobo === e.totals.sprayKobo + e.totals.ticketKobo + e.sprayReturnedKobo - e.clawbackAppliedKobo
-  && e.onItsWayKobo === e.sprayDirectKobo + e.ticketSendingKobo + e.needsAttentionKobo;
+  e.settledKobo + e.onItsWayKobo + e.needsAttentionKobo + e.heldTicketKobo + e.sprayReturnedKobo
+    === e.totals.sprayKobo + e.totals.ticketKobo + e.sprayReturnedKobo - e.clawbackAppliedKobo
+  && e.onItsWayKobo === e.sprayDirectKobo + e.ticketSendingKobo;
 
 // ---------------------------------------------------------------- ranges
 test("rangeStartMs: week starts Monday 00:00 UTC, month on the 1st, all is null", () => {
@@ -65,14 +66,14 @@ test("tickets: no payout = held; refunded tickets never count", () => {
   assert.ok(balanced(e));
 });
 
-test("tickets: payout paid = settled, queued and failed = on its way (never settled)", () => {
-  for (const [status, bucket] of [["paid", "settledKobo"], ["queued", "onItsWayKobo"], ["failed", "onItsWayKobo"], ["held", "heldTicketKobo"]] as const) {
+test("tickets: payout paid = settled, queued = on its way, failed = needs attention (never settled, never on its way)", () => {
+  for (const [status, bucket] of [["paid", "settledKobo"], ["queued", "onItsWayKobo"], ["failed", "needsAttentionKobo"], ["held", "heldTicketKobo"]] as const) {
     const i = empty();
     i.tickets.push(tk("a", "r1", "v", 4000, NOW - D));
     i.payouts.push({ roomId: "r1", hostId: "v", status, amountKobo: 4000, releaseAtMs: NOW + D });
     const e = all(i);
     assert.equal(e[bucket], 4000, status);
-    assert.equal(e.settledKobo + e.onItsWayKobo + e.heldTicketKobo, 4000, status);
+    assert.equal(e.settledKobo + e.onItsWayKobo + e.needsAttentionKobo + e.heldTicketKobo, 4000, status);
   }
 });
 
@@ -149,7 +150,8 @@ test("fix round I2: a reversed spray's split share is received AND clawed back, 
   assert.equal(e.settledKobo, 800_000);
   assert.equal(e.clawbackAppliedKobo, 200_000);
   // What reached the bank (8,000 payout + 2,000 split) equals what was earned (10,000 tickets): nothing counted twice.
-  assert.equal(e.settledKobo + e.sprayDirectKobo, e.totals.ticketKobo + e.totals.sprayKobo);
+  assert.equal(e.settledKobo + e.sprayDirectKobo + e.sprayReturnedKobo, e.totals.ticketKobo + e.totals.sprayKobo);
+  assert.equal(e.onItsWayKobo, 0, "a share being clawed back is never 'on its way' (review r3 m2)");
   assert.ok(balanced(e));
   // The same while the clawback is still open: owed 2,000 against 2,000 received.
   const j = empty();
@@ -169,7 +171,7 @@ test("fix round: queued payouts are 'sending', failed ones 'need attention', spr
   assert.equal(e.ticketSendingKobo, 1000);
   assert.equal(e.needsAttentionKobo, 2000);
   assert.equal(e.sprayDirectKobo, 500);
-  assert.equal(e.onItsWayKobo, 3500);
+  assert.equal(e.onItsWayKobo, 1500, "on its way = sprays + payouts being sent; the failed payout is not in it (review r3 m2)");
 });
 
 test("rows of other people are ignored even when passed in", () => {
@@ -409,11 +411,12 @@ test("property: generated histories add up for every person and every range (400
       assert.equal(e.sprayReturnedKobo, truthReturned, `${ctx} returned split shares (fix round I2)`);
       assert.equal(e.needsAttentionKobo, truthFailed, `${ctx} failed payouts need attention`);
       assert.equal(e.ticketSendingKobo, truthSending, `${ctx} queued payouts are being sent`);
-      assert.equal(e.sprayDirectKobo, truthSpray + truthReturned, `${ctx} spray money paid straight to the bank`);
+      assert.equal(e.sprayDirectKobo, truthSpray, `${ctx} earned spray money paid straight to the bank`);
+      assert.equal(e.onItsWayKobo, truthSpray + truthSending, `${ctx} on its way excludes failed payouts and returned shares (r3 m2)`);
       // The identity: settled + on its way + held - open clawbacks = earned (refunds and reversals out of the totals)
       // + the returned split shares (they did reach the subaccount) - everything clawed back (taken from payouts, or owed).
       // Each returned share has a matching clawback, so it is never both excluded and clawed back.
-      assert.equal(e.settledKobo + e.onItsWayKobo + e.heldTicketKobo - e.clawbackOpenKobo,
+      assert.equal(e.settledKobo + e.onItsWayKobo + e.needsAttentionKobo + e.heldTicketKobo + e.sprayReturnedKobo - e.clawbackOpenKobo,
         truthSpray + truthTicket + truthReturned - truthApplied - truthOpen, `${ctx} identity`);
       assert.ok(balanced(e), `${ctx} balance`);
       for (const k of ["settledKobo", "onItsWayKobo", "heldTicketKobo", "clawbackOpenKobo", "clawbackAppliedKobo", "sprayReturnedKobo", "sprayDirectKobo", "ticketSendingKobo", "needsAttentionKobo"] as const) {
@@ -627,6 +630,31 @@ test("receipt route sends the exact safety headers", () => {
   assert.match(r, /"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'"/);
   assert.match(r, /"X-Content-Type-Options": "nosniff"/);
   assert.match(r, /"Cache-Control": "private, no-store"/);
+});
+
+test("review r3 N1: never queue an unpayable host; a waiting payout never blocks a change; it is held still meanwhile", () => {
+  const settle = src("server/rooms/settlement.ts");
+  const q = settle.slice(settle.indexOf("async function queueDuePayout"), settle.indexOf("export type PayOutcome"));
+  assert.ok(q.indexOf("await payableSubaccountOf(p.host_id, c)") > q.indexOf("payoutBlockFor(c, p.room_id)"), "blocked rooms still refund");
+  assert.ok(q.indexOf("await payableSubaccountOf(p.host_id, c)") < q.indexOf("applyClawbacks"), "checked before anything is applied");
+  assert.match(q, /return "waiting_account";/);
+  assert.match(settle, /order by \(exists \(select 1 from organizer_payment_accounts a where a\.user_id = room_payouts\.host_id and \$\{PAYABLE_ACCOUNT_SQL\}\)\) desc/);
+  const p = src("server/rooms/payouts.ts");
+  assert.match(p, /status = 'queued' and coalesce\(last_error, ''\) <> 'NO_PAYOUT_ACCOUNT'/);
+  const ch = p.slice(p.indexOf("async function changeLocked"), p.indexOf("async function changeWithPayoutsHeld"));
+  assert.match(ch, /pg_try_advisory_lock\(\$1::int, hashtext\(\$2::text\)\) as ok", \[LOCK_PAYOUT, id\]/);
+  assert.match(ch, /pg_advisory_unlock\(\$1::int, hashtext\(\$2::text\)\)", \[LOCK_PAYOUT, id\]/);
+});
+
+test("review r3 m3 / m5 / m8", () => {
+  const p = src("server/rooms/payouts.ts");
+  assert.match(p, /if \(out === BUSY\) \{ logAccount\(userId, "BUSY"\); return refuse\("BUSY"\); \}/);
+  const o = src("server/organizer-payments-routes.ts");
+  const onboard = o.slice(o.indexOf("/api/organizer/payments/paystack/onboard"));
+  assert.ok(onboard.indexOf("withAdvisoryLock(LOCK_ACCOUNT_CHANGE, req.user!.id") < onboard.indexOf("createPaystackSubaccount("), "the lock is taken before Paystack");
+  assert.ok(onboard.indexOf("createPaystackSubaccount(") < onboard.indexOf("upsertOrganizerPaymentAccount("));
+  const sock = src("server/rooms/roomSocket.ts");
+  assert.match(sock, /const floor = room\?\.startedAt \? Math\.max\(peak, 1\) : peak;/);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
