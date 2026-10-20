@@ -598,7 +598,9 @@ try {
   await spray(PRS.id, R, body(H));
   const rsrow = (await sprayRows(PRS.id))[0];
   mock.pay(rsrow.provider_ref);
-  await q(`update spray_payments set status = 'paid', paid_at = now() where id = $1`, [rsrow.id]); // finalize died after "paid"
+  // finalize died after "paid". paid_at comes from the spray clock (as finalizeSpray writes it), not the database's now():
+  // a database clock a second or two ahead of this machine put the row "in the future" and the pass skipped it.
+  await q(`update spray_payments set status = 'paid', paid_at = $2::timestamp where id = $1`, [rsrow.id, new Date(sprayClock.now()).toISOString()]);
   await sweepPendingSprays(sprayClock.now());
   check("restart: the sweep delivers a paid spray once", (await rowById(rsrow.id)).status === "delivered" && (await ledger(rsrow.provider_ref, "spray")).length === 1);
   const PRS2 = await payer("p_restart_late", { card: false });
@@ -650,8 +652,12 @@ try {
   mock.pay(rfrow.provider_ref);
   mock.refundMode = "outage";
   await webhook("charge.success", { reference: rfrow.provider_ref });
-  clockAhead(); // past the delivery deadline: the absent recipient now means a reversal
-  try { await due(rfrow.id); await sweepPendingSprays(sprayClock.now()); } finally { clockBack(); }
+  // Past the delivery deadline: the absent recipient now means a reversal. The clock STAYS ahead for the whole block:
+  // refund_requested_at is written from the spray clock, so going back in time would make the row look like it was asked
+  // for in the future and no pass would list it for two minutes.
+  clockAhead();
+  try {
+  await due(rfrow.id); await sweepPendingSprays(sprayClock.now());
   check("refund outage: stays reversing", (await rowById(rfrow.id)).status === "reversing");
   await due(rfrow.id);
   await sweepPendingSprays(sprayClock.now());
@@ -676,6 +682,7 @@ try {
   check("provider back: reversed, issues resolved, one refund ledger row", (await rowById(rfrow.id)).status === "reversed"
     && (await ledger(rfrow.provider_ref, "spray_refund")).length === 1
     && (await q(`select 1 from payment_issues where provider_payment_id = $1 and resolved_at is null`, [rfrow.provider_ref])).length === 0);
+  } finally { clockBack(); }
   await settleClawbacks(rfrow.id);
 
   // =============================================================== chargeback after delivery: clawbacks, idempotent
