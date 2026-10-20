@@ -34,6 +34,7 @@ import LookoutPage from "@/pages/LookoutPage";
 import AvatarEditorPage from "@/pages/AvatarEditorPage";
 import RoomsPage from "@/pages/RoomsPage";
 import RoomPage from "@/pages/RoomPage";
+import RoomRecapPage from "@/pages/RoomRecapPage";
 import DistressAlertsPage from "@/pages/DistressAlertsPage";
 import AccountSettingsPage from "@/pages/AccountSettingsPage";
 import ManageVenuesPage from "@/pages/ManageVenuesPage";
@@ -222,6 +223,12 @@ function Router() {
           <Suspense fallback={null}><SprayFixture /></Suspense>
         </Route>
       )}
+
+      <Route path="/rooms/:id/recap">
+        <AuthenticatedLayout>
+          <RoomRecapPage />
+        </AuthenticatedLayout>
+      </Route>
 
       <Route path="/rooms/:id">
         <AuthenticatedLayout>

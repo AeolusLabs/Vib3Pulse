@@ -348,15 +348,15 @@ const okInput = { title: "Friday pre-party", kind: "party", visibility: "public"
 
 test("resolveRoomPrivacy: null/junk/{} give defaults; partial merges per field", () => {
   for (const v of [null, undefined, "x", 5, [], {}]) assert.deepEqual(resolveRoomPrivacy(v), DEFAULT_ROOM_PRIVACY);
-  assert.deepEqual(DEFAULT_ROOM_PRIVACY, { v: 1, interactions: "mutuals", appearInLists: true, allowInvites: true, allowCrossAgeDm: false });
+  assert.deepEqual(DEFAULT_ROOM_PRIVACY, { v: 1, interactions: "mutuals", appearInLists: true, allowInvites: true, allowCrossAgeDm: false, notifyFriendsLive: true }); // phase 6.6 added notifyFriendsLive
   assert.deepEqual(resolveRoomPrivacy({ interactions: "none" }), { ...DEFAULT_ROOM_PRIVACY, interactions: "none" });
   assert.deepEqual(resolveRoomPrivacy({ interactions: "bogus", appearInLists: false }), { ...DEFAULT_ROOM_PRIVACY, appearInLists: false });
 });
 
 test("validateRoomPrivacy: strict, names the field", () => {
   const good = { interactions: "everyone", appearInLists: false, allowInvites: true };
-  assert.deepEqual(validateRoomPrivacy(good), { ok: true, value: { v: 1, ...good, allowCrossAgeDm: false } }); // omitted -> the safe default
-  assert.deepEqual(validateRoomPrivacy({ ...good, allowCrossAgeDm: true }), { ok: true, value: { v: 1, ...good, allowCrossAgeDm: true } });
+  assert.deepEqual(validateRoomPrivacy(good), { ok: true, value: { v: 1, ...good, allowCrossAgeDm: false, notifyFriendsLive: true } }); // omitted -> the safe default
+  assert.deepEqual(validateRoomPrivacy({ ...good, allowCrossAgeDm: true }), { ok: true, value: { v: 1, ...good, allowCrossAgeDm: true, notifyFriendsLive: true } });
   assert.deepEqual(validateRoomPrivacy({ ...good, allowCrossAgeDm: "yes" }), { ok: false, field: "allowCrossAgeDm" });
   assert.equal(resolveRoomPrivacy({ interactions: "none" }).allowCrossAgeDm, false); // stored values without the key stay restricted
   const bad = (x: unknown, field: string) => assert.deepEqual(validateRoomPrivacy(x), { ok: false, field });

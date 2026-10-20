@@ -24,7 +24,7 @@ export default function RoomPrivacyCard() {
   useEffect(() => { if (data) setValue(data.roomPrivacy); }, [data]);
 
   const save = useMutation({
-    mutationFn: async (next: RoomPrivacy) => (await apiRequest("PUT", "/api/users/me/room-privacy", { interactions: next.interactions, appearInLists: next.appearInLists, allowInvites: next.allowInvites, allowCrossAgeDm: next.allowCrossAgeDm })).json(),
+    mutationFn: async (next: RoomPrivacy) => (await apiRequest("PUT", "/api/users/me/room-privacy", { interactions: next.interactions, appearInLists: next.appearInLists, allowInvites: next.allowInvites, allowCrossAgeDm: next.allowCrossAgeDm, notifyFriendsLive: next.notifyFriendsLive })).json(),
     onSuccess: (session) => {
       queryClient.setQueryData(["/api/users/me/room-privacy"], (old: object | undefined) => ({ ...old, roomPrivacy: session.roomPrivacy })); // keep `age`, which the create dialog reads
       queryClient.setQueryData(["/api/auth/session"], session); // the PUT answers with the refreshed session user
@@ -70,6 +70,10 @@ export default function RoomPrivacyCard() {
             <div className="flex items-start justify-between gap-4">
               <div><Label htmlFor="rp-invites">Let people invite me to their rooms</Label><p className="text-xs text-muted-foreground">Only from people you could already interact with.</p></div>
               <Switch id="rp-invites" checked={value.allowInvites} onCheckedChange={(v) => change({ allowInvites: v })} data-testid="switch-allow-invites" />
+            </div>
+            <div className="flex items-start justify-between gap-4">
+              <div><Label htmlFor="rp-live">Tell my followers when I go live</Label><p className="text-xs text-muted-foreground">Off: nobody gets a notification when you start a room. People you invite are still told.</p></div>
+              <Switch id="rp-live" checked={value.notifyFriendsLive} onCheckedChange={(v) => change({ notifyFriendsLive: v })} data-testid="switch-notify-friends-live" />
             </div>
           </>
         )}

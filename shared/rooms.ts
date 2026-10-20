@@ -107,9 +107,11 @@ export interface RoomPrivacy {
    * other age group can start a conversation with you, and you can't start one with them. Both people must turn it on.
    */
   allowCrossAgeDm: boolean;
+  /** Phase 6.6: tell my followers when I go live (the room_live notice). ON by default; off = nobody is told. */
+  notifyFriendsLive: boolean;
 }
 
-export const DEFAULT_ROOM_PRIVACY: RoomPrivacy = { v: 1, interactions: "mutuals", appearInLists: true, allowInvites: true, allowCrossAgeDm: false };
+export const DEFAULT_ROOM_PRIVACY: RoomPrivacy = { v: 1, interactions: "mutuals", appearInLists: true, allowInvites: true, allowCrossAgeDm: false, notifyFriendsLive: true };
 
 const isObj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
 
@@ -123,21 +125,28 @@ export function resolveRoomPrivacy(stored: unknown): RoomPrivacy {
     appearInLists: typeof stored.appearInLists === "boolean" ? stored.appearInLists : d.appearInLists,
     allowInvites: typeof stored.allowInvites === "boolean" ? stored.allowInvites : d.allowInvites,
     allowCrossAgeDm: typeof stored.allowCrossAgeDm === "boolean" ? stored.allowCrossAgeDm : d.allowCrossAgeDm,
+    notifyFriendsLive: typeof stored.notifyFriendsLive === "boolean" ? stored.notifyFriendsLive : d.notifyFriendsLive,
   };
 }
 
 export type Validated<T> = { ok: true; value: T } | { ok: false; field: string };
 
-/** Strict: for writes. Unknown keys and wrong types are rejected, naming the field. */
-export function validateRoomPrivacy(input: unknown): Validated<RoomPrivacy> {
+/**
+ * Strict: for writes. Unknown keys and wrong types are rejected, naming the field. notifyFriendsLive is optional (older
+ * clients do not send it): when absent it keeps `prev`'s value (the stored setting), else the default (true).
+ */
+export function validateRoomPrivacy(input: unknown, prev?: Pick<RoomPrivacy, "notifyFriendsLive">): Validated<RoomPrivacy> {
   if (!isObj(input)) return { ok: false, field: "body" };
-  for (const k of Object.keys(input)) if (!["v", "interactions", "appearInLists", "allowInvites", "allowCrossAgeDm"].includes(k)) return { ok: false, field: k };
+  for (const k of Object.keys(input)) if (!["v", "interactions", "appearInLists", "allowInvites", "allowCrossAgeDm", "notifyFriendsLive"].includes(k)) return { ok: false, field: k };
   if (input.v !== undefined && input.v !== 1) return { ok: false, field: "v" };
   if (!(INTERACTION_MODES as readonly unknown[]).includes(input.interactions)) return { ok: false, field: "interactions" };
   if (typeof input.appearInLists !== "boolean") return { ok: false, field: "appearInLists" };
   if (typeof input.allowInvites !== "boolean") return { ok: false, field: "allowInvites" };
   if (input.allowCrossAgeDm !== undefined && typeof input.allowCrossAgeDm !== "boolean") return { ok: false, field: "allowCrossAgeDm" };
-  return { ok: true, value: { v: 1, interactions: input.interactions as InteractionMode, appearInLists: input.appearInLists, allowInvites: input.allowInvites, allowCrossAgeDm: input.allowCrossAgeDm === true } };
+  if (input.notifyFriendsLive !== undefined && typeof input.notifyFriendsLive !== "boolean") return { ok: false, field: "notifyFriendsLive" };
+  const notifyFriendsLive = typeof input.notifyFriendsLive === "boolean" ? input.notifyFriendsLive
+    : typeof prev?.notifyFriendsLive === "boolean" ? prev.notifyFriendsLive : DEFAULT_ROOM_PRIVACY.notifyFriendsLive;
+  return { ok: true, value: { v: 1, interactions: input.interactions as InteractionMode, appearInLists: input.appearInLists, allowInvites: input.allowInvites, allowCrossAgeDm: input.allowCrossAgeDm === true, notifyFriendsLive } };
 }
 
 // ---------------------------------------------------------------- room input

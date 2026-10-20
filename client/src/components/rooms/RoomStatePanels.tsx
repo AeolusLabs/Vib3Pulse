@@ -30,10 +30,12 @@ interface CodeProps {
   kickRemainingMs?: number | null;
   room?: { startedAt?: string | null; endedAt?: string | null; peakCount?: number | null } | null;
   onRetry: () => void;
+  /** Ended rooms: where the viewer's recap is (phase 6). The server answers 404 there for anyone who was not in the room. */
+  recapHref?: string;
 }
 
 /** Full, removed, banned, ended, locked, not live. Returns null for any other code so the caller keeps its own screen (age, minors' room). */
-export function RoomCodePanel({ code, kickRemainingMs, room, onRetry }: CodeProps) {
+export function RoomCodePanel({ code, kickRemainingMs, room, onRetry, recapHref }: CodeProps) {
   const kind = stateForCode(code);
   if (!kind) return null;
   // The ended title already says it; the recap follows.
@@ -45,6 +47,7 @@ export function RoomCodePanel({ code, kickRemainingMs, room, onRetry }: CodeProp
     return (
       <Shell icon={ICON[kind]} title={STATE_TITLE[kind]} body={body}>
         {recap.length > 0 && <ul className="space-y-1 rounded-xl border border-border p-3 text-sm" aria-label="Room recap" data-testid="room-recap">{recap.map((l) => <li key={l}>{l}</li>)}</ul>}
+        {recapHref && room?.startedAt && <Button asChild className="min-h-[44px]" data-testid="link-room-recap"><Link href={recapHref}>See your recap</Link></Button>}
         {action}
       </Shell>
     );

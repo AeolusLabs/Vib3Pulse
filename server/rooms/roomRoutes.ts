@@ -34,6 +34,7 @@ import { registerRoomTicketRoutes } from "./ticketRoutes";
 import { registerRoomMoneyRoutes } from "./ticketMoneyRoutes";
 import { registerSprayRoutes } from "./sprayRoutes";
 import { sprayBlockFor } from "./spray";
+import { registerRoomRecapRoutes } from "./recap";
 
 const MAX_SCHEDULED = 10;
 const MAX_LIVE = 1;
@@ -115,8 +116,10 @@ async function hostingInfo(userId: string): Promise<{ accountAgeDays: number; mi
   return { accountAgeDays, minAccountAgeDays: Number(minAccountAgeDays) || 0 };
 }
 
+/** The "is live" notice to the host's followers. Phase 6.6: never when the host turned "Tell my friends" off. */
 async function notifyFollowers(room: Room, host: User): Promise<void> {
   if (room.visibility === "invite") return;
+  if (!resolveRoomPrivacy(host.roomPrivacy).notifyFriendsLive) return;
   const rows = await db.select({ id: users.id, dob: users.dateOfBirth }).from(follows)
     .innerJoin(users, eq(users.id, follows.followerId)).where(eq(follows.followingId, host.id)).limit(2000);
   if (!rows.length) return;
@@ -973,7 +976,10 @@ export function registerRoomRoutes(app: Express): void {
 
   app.put("/api/users/me/room-privacy", requireAuth, roomLimiter, async (req, res) => {
     try {
-      const v = validateRoomPrivacy(req.body);
+      // An older client that does not send notifyFriendsLive keeps the stored choice (never silently turned back on).
+      const current = await storage.getUser(req.user!.id);
+      if (!current) return res.status(404).json({ message: "User not found" });
+      const v = validateRoomPrivacy(req.body, resolveRoomPrivacy(current.roomPrivacy));
       if (!v.ok) return res.status(400).json({ message: "Invalid room privacy", field: v.field });
       const updated = await storage.updateUser(req.user!.id, { roomPrivacy: v.value } as any);
       // Respond only after req.login's session regeneration finishes (see Passport 0.6+ note in users-routes).
@@ -992,4 +998,5 @@ export function registerRoomRoutes(app: Express): void {
 
   registerRoomMoneyRoutes(app); // paid rooms: refund, cancel, sales summary (lane S3)
   registerSprayRoutes(app); // spraying (phase 5): spray, status, limits, saved card
+  registerRoomRecapRoutes(app); // recaps (phase 6): GET /api/rooms/:id/recap
 }
