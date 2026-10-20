@@ -17,6 +17,7 @@ import { SPRAY_COPY, SPRAY_FAIL_COPY, bankAsk, outcomeOfStatus, pollDelayMs, wai
 interface Props {
   tier: SprayTier;
   url: string;
+  /** Hides this sheet only: the flow keeps tracking the approval (review M8), and the outcome brings the sheet back. */
   onClose(): void;
 }
 
@@ -47,7 +48,8 @@ export default function BankApproval({ tier, url, onClose }: Props) {
 /**
  * The page the provider returns to (/rooms/:id?spray=<sprayId>), usually in the tab BankApproval opened. It never joins the
  * room (RoomPage holds the join while this shows): it only asks the server how the payer's own spray went and says so.
- * The server answers only the payer (anyone else gets 404), so this shows nothing about the room or anyone else.
+ * The server answers only the payer (anyone else gets 404), so this shows nothing about the room or anyone else. A 404 is
+ * final ("isn't on your account, or doesn't exist"): it never turns into a long wait (review M3).
  */
 export function SprayReturn({ roomId, sprayId, token, onBack }: { roomId: string; sprayId: string; token?: string; onBack(): void }) {
   const [o, setO] = useState<SprayOutcome | { kind: "timeout" } | null>(null);
@@ -91,11 +93,11 @@ export function SprayReturn({ roomId, sprayId, token, onBack }: { roomId: string
   const copy = o.kind === "failed" ? SPRAY_FAIL_COPY[o.reason] : o.kind === "timeout" ? SPRAY_FAIL_COPY.STILL_WAITING : null;
   return (
     <Card className="mx-auto max-w-md space-y-4 rounded-2xl p-8 text-center" data-testid="spray-return" data-outcome={o.kind}>
-      <div className={`mx-auto flex h-14 w-14 items-center justify-center rounded-full ${ok ? "bg-primary/15 text-primary" : "bg-destructive/15 text-destructive"}`} aria-hidden>
+      <div className={`mx-auto flex h-14 w-14 items-center justify-center rounded-full ${ok ? "bg-primary/15 text-primary" : copy!.tone === "fail" ? "bg-destructive/15 text-destructive" : "bg-muted text-foreground"}`} aria-hidden>
         {ok ? <CheckCircleIcon className="h-7 w-7" /> : <AlertCircleIcon className="h-7 w-7" />}
       </div>
       <h1 ref={heading} tabIndex={-1} className="font-serif text-2xl font-bold outline-none">{ok ? "Your spray landed" : copy!.title}</h1>
-      <p role={ok ? "status" : "alert"} className="text-sm">{ok ? "Everyone in the room saw it. You can close this window and go back to the room." : copy!.body}</p>
+      <p role={ok || copy!.tone !== "fail" ? "status" : "alert"} className="text-sm">{ok ? "Everyone in the room saw it. You can close this window and go back to the room." : copy!.body}</p>
       {actions}
       <p className="text-xs text-muted-foreground"><Link href="/rooms">Back to Rooms</Link></p>
     </Card>

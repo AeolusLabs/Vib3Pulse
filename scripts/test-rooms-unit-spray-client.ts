@@ -7,12 +7,13 @@ import { SPRAY_TIERS } from "../shared/money";
 import { idempotencyKeyShape, sprayPrice } from "../shared/spray";
 import { SPRAY_CAP, initialRoomState, roomReducer, type RoomState } from "../client/src/lib/roomReducer";
 import {
-  IDLE, SAME_KEY_REASONS, SPRAY_COPY, SPRAY_FAIL_COPY, allSprayCopy, animateSprays, cardLabel, chargeLine, dailyChoices, defaultTarget,
-  inFlight, limitChoices, needsSlide, newIdempotencyKey, newSprays, outcomeOfPost, outcomeOfStatus, parseLimitBody, parseSprayBlock,
-  parseSprayFixture, parseSprayMe, reasonOfRefusal, safeAuthorizationUrl, searchWithoutSpray, sprayFlow, sprayReturnId, sprayTargets,
-  tileAction, waitDeadlineMs, type SprayBlock, type SprayFlow, type SprayMe,
+  IDLE, MOCK_CHECKOUT_HOST, RAIN_FX, SAME_KEY_REASONS, SPRAY_COPY, SPRAY_FAIL_COPY, SPRAY_SCREEN_FX, SPRAY_TRACK_KEY, allSprayCopy, animateSprays,
+  cardLabel, chargeLine, counterAt, dailyChoices, decodeSprayTrack, defaultTarget, encodeSprayTrack, holdsSprayBlock, inFlight, isDevBuild,
+  limitChoices, limitErrorText, needsSlide, newIdempotencyKey, newSprays, outcomeOfPost, outcomeOfStatus, parseLimitBody, parseRetryAfter,
+  parseSprayBlock, parseSprayMe, rainBannerText, reasonOfRefusal, safeAuthorizationUrl, searchWithoutSpray, sprayFlow, sprayReturnId,
+  sprayTargets, systemChatText, thankYouText, tileAction, waitDeadlineMs, type SprayBlock, type SprayFlow, type SprayMe,
 } from "../client/src/lib/sprayUi";
-import { FIXTURE_SPRAY_KEY, fixtureSprayStart } from "../client/src/lib/sprayFixtures";
+import { FIXTURE_SPRAY_KEY, fixtureSprayChatText, fixtureSprayStart, parseSprayFixture } from "../client/src/lib/sprayFixtures";
 
 const src = (rel: string) => readFileSync(new URL(rel, import.meta.url), "utf8");
 
@@ -195,7 +196,8 @@ test("machine: an answer about a different spray is ignored", () => {
 test("machine: action_required (bank) then delivered from the poll", () => {
   let s = sprayFlow(sprayFlow(confirm(), { type: "pay", now: 1 }), { type: "outcome", outcome: { kind: "action_required", sprayId: "sp1", url: `${ORIGIN}/x` }, now: 5 });
   assert.equal(s.kind, "action_required");
-  assert.equal(s.kind === "action_required" && s.since, 5);
+  assert.equal(s.kind === "action_required" && s.since, 1); // the deadline counts from the Pay tap
+  assert.equal(s.kind === "action_required" && s.intent.bankUrl, `${ORIGIN}/x`);
   s = sprayFlow(s, { type: "outcome", outcome: { kind: "wait" }, now: 9 });
   assert.equal(s.kind, "action_required");
   s = sprayFlow(s, { type: "outcome", outcome: { kind: "delivered", sprayId: "sp1" }, now: 10 });
@@ -207,8 +209,8 @@ test("machine: a declined payment is definitive: Try again is a NEW intent with 
   s = sprayFlow(s, { type: "retry", key: K2 });
   assert.equal(s.kind === "confirming" && s.intent.key, K2);
 });
-test("machine: an unknown outcome (offline, 5xx, still waiting) retries with the SAME key", () => {
-  for (const reason of ["OFFLINE", "SERVER", "STILL_WAITING", "RATE_LIMITED", "NETWORK"] as const) {
+test("machine: not sent, rate limited and the still-waiting deadlines retry with the SAME key", () => {
+  for (const reason of ["NOT_SENT", "STILL_CHECKING", "STILL_WAITING", "RATE_LIMITED"] as const) {
     assert.ok(SAME_KEY_REASONS.has(reason), reason);
     let s = sprayFlow(sprayFlow(confirm(), { type: "pay", now: 1 }), { type: "outcome", outcome: { kind: "failed", reason, sprayId: null }, now: 2 });
     s = sprayFlow(s, { type: "retry", key: K2 });
@@ -226,7 +228,6 @@ test("machine: saveCard is off by default and set only by the explicit choice", 
 
 // ---------------------------------------------------------------- server answers
 test("outcomeOfPost: refusals map to plain reasons, no oracle beyond the payer's own facts", () => {
-  assert.equal(reasonOfRefusal(0), "OFFLINE");
   assert.equal(reasonOfRefusal(401), "SIGNED_OUT");
   assert.equal(reasonOfRefusal(402, "PAYMENT_DECLINED"), "DECLINED");
   assert.equal(reasonOfRefusal(403, "SPRAY_UNAVAILABLE"), "UNAVAILABLE");
@@ -235,7 +236,6 @@ test("outcomeOfPost: refusals map to plain reasons, no oracle beyond the payer's
   assert.equal(reasonOfRefusal(409, "DAILY_LIMIT"), "DAILY_LIMIT");
   assert.equal(reasonOfRefusal(409, "IDEMPOTENCY_MISMATCH"), "MISMATCH");
   assert.equal(reasonOfRefusal(429), "RATE_LIMITED");
-  assert.equal(reasonOfRefusal(503), "SERVER");
   const o = outcomeOfPost({ ok: false, status: 429, code: "RATE_LIMITED", retryAfterSec: 30 }, ORIGIN);
   assert.equal(o.kind === "failed" && o.retryAfterSec, 30);
 });
@@ -246,19 +246,24 @@ test("outcomeOfPost: 200 answers", () => {
   assert.equal(ok.kind, "action_required");
   const evil = outcomeOfPost({ ok: true, status: 200, body: { status: "action_required", sprayId: "sp1", authorizationUrl: "javascript:alert(1)" } }, ORIGIN);
   assert.equal(evil.kind === "failed" && evil.reason, "BAD_LINK");
-  assert.equal(outcomeOfPost({ ok: true, status: 200, body: { status: "delivered" } }, ORIGIN).kind, "failed");
-  // NETWORK is an unknown outcome: keep checking, never "failed".
-  assert.deepEqual(outcomeOfPost({ ok: true, status: 200, body: { status: "failed", sprayId: "sp1", reason: "NETWORK" } }, ORIGIN), { kind: "pending", sprayId: "sp1" });
+  // A 200 we can't read may still mean the payment started: unknown (check again, same key), never "failed".
+  assert.equal(outcomeOfPost({ ok: true, status: 200, body: { status: "delivered" } }, ORIGIN).kind, "unknown");
+  // A failed row is final: NETWORK there means the checkout never started (not charged), never "your bank said no".
+  const net = outcomeOfPost({ ok: true, status: 200, body: { status: "failed", sprayId: "sp1", reason: "NETWORK" } }, ORIGIN);
+  assert.equal(net.kind === "failed" && net.reason, "NOT_STARTED");
   const dec = outcomeOfPost({ ok: true, status: 200, body: { status: "failed", sprayId: "sp1", reason: "DECLINED" } }, ORIGIN);
   assert.equal(dec.kind === "failed" && dec.reason, "DECLINED");
 });
-test("outcomeOfStatus: refunded reasons, NETWORK keeps waiting, a failed poll never ends the wait", () => {
+test("outcomeOfStatus: refunded only when reversed; a failed row is final; a failed poll never ends the wait", () => {
   const r = outcomeOfStatus({ ok: true, status: 200, body: { status: "reversed", reason: "RECIPIENT_LEFT" } }, "sp1");
   assert.equal(r.kind === "failed" && r.reason, "RECIPIENT_LEFT");
-  assert.equal(outcomeOfStatus({ ok: true, status: 200, body: { status: "failed", reason: "NETWORK" } }, "sp1").kind, "wait");
+  const net = outcomeOfStatus({ ok: true, status: 200, body: { status: "failed", reason: "NETWORK" } }, "sp1");
+  assert.equal(net.kind === "failed" && net.reason, "NOT_STARTED");
   assert.equal(outcomeOfStatus({ ok: true, status: 200, body: { status: "pending" } }, "sp1").kind, "wait");
   assert.equal(outcomeOfStatus({ ok: false, status: 0 }, "sp1").kind, "wait");
-  assert.equal(outcomeOfStatus({ ok: false, status: 404 }, "sp1").kind, "wait");
+  const nf = outcomeOfStatus({ ok: false, status: 404 }, "sp1");
+  assert.equal(nf.kind === "failed" && nf.reason, "NOT_FOUND"); // not yours, or none: final (review M3)
+  assert.equal(outcomeOfStatus({ ok: false, status: 503 }, "sp1").kind, "wait");
   const out = outcomeOfStatus({ ok: false, status: 401 }, "sp1");
   assert.equal(out.kind === "failed" && out.reason, "SIGNED_OUT");
   const unk = outcomeOfStatus({ ok: true, status: 200, body: { status: "reversed", reason: "<script>" } }, "sp1");
@@ -268,13 +273,26 @@ test("waits always end: a paid spray within delivery plus a sweep, a bank approv
   assert.ok(waitDeadlineMs("paying") >= 60_000 && waitDeadlineMs("paying") <= 120_000);
   assert.ok(waitDeadlineMs("action_required") > 10 * 60_000 && waitDeadlineMs("action_required") <= 12 * 60_000);
 });
-test("safeAuthorizationUrl: our origin or https Paystack only", () => {
-  assert.ok(safeAuthorizationUrl("https://checkout.paystack.com/x", ORIGIN));
-  assert.ok(safeAuthorizationUrl("https://standard.paystack.co/close", ORIGIN));
-  assert.ok(safeAuthorizationUrl("/dev/room-fixture?spray=tray", ORIGIN));
-  for (const bad of ["http://checkout.paystack.com/x", "https://paystack.com.evil.example/x", "https://user:pw@checkout.paystack.com/x", "javascript:alert(1)", "data:text/html,x", "https://evil.example/", 5, ""]) {
-    assert.equal(safeAuthorizationUrl(bad, ORIGIN), null, String(bad));
+test("safeAuthorizationUrl: production is https Paystack only; dev and test builds also allow our origin and the mock", () => {
+  assert.equal(isDevBuild(), false); // outside Vite the build flag is off: production rules
+  for (const dev of [false, true]) {
+    assert.ok(safeAuthorizationUrl("https://checkout.paystack.com/x", ORIGIN, { dev }));
+    assert.ok(safeAuthorizationUrl("https://standard.paystack.co/close", ORIGIN, { dev }));
+    for (const bad of ["http://checkout.paystack.com/x", "https://paystack.com.evil.example/x", "https://user:pw@checkout.paystack.com/x", "javascript:alert(1)", "data:text/html,x", "https://evil.example/", `http://${MOCK_CHECKOUT_HOST}/x`, `https://${MOCK_CHECKOUT_HOST}.evil.example/x`, 5, ""]) {
+      assert.equal(safeAuthorizationUrl(bad, ORIGIN, { dev }), null, `${String(bad)} dev=${dev}`);
+    }
   }
+  // Same origin and the mock checkout: never in production, only in dev and test builds.
+  assert.equal(safeAuthorizationUrl("/dev/room-fixture?spray=tray", ORIGIN), null);
+  assert.equal(safeAuthorizationUrl(`${ORIGIN}/anything`, ORIGIN, { dev: false }), null);
+  assert.equal(safeAuthorizationUrl(`https://${MOCK_CHECKOUT_HOST}/pay/abc`, ORIGIN, { dev: false }), null);
+  assert.ok(safeAuthorizationUrl("/dev/room-fixture?spray=tray", ORIGIN, { dev: true }));
+  assert.ok(safeAuthorizationUrl(`https://${MOCK_CHECKOUT_HOST}/pay/abc`, ORIGIN, { dev: true }));
+  // The POST answer uses the same rule: the mock link is a BAD_LINK in production, an approval in dev.
+  const body = { status: "action_required", sprayId: "sp1", authorizationUrl: `https://${MOCK_CHECKOUT_HOST}/pay/abc` };
+  const prod = outcomeOfPost({ ok: true, status: 200, body }, ORIGIN, { dev: false });
+  assert.equal(prod.kind === "failed" && prod.reason, "BAD_LINK");
+  assert.equal(outcomeOfPost({ ok: true, status: 200, body }, ORIGIN, { dev: true }).kind, "action_required");
 });
 
 // ---------------------------------------------------------------- keys, return address, effects
@@ -302,6 +320,254 @@ test("effects: quiet or reduced motion never animates; only new, recent sprays p
   assert.deepEqual(newSprays(list, new Set(["c"]), 60_000).map((x) => x.id), ["b"]);
 });
 
+// ---------------------------------------------------------------- fix round FC
+const paying = (key = K1) => sprayFlow(confirm(key), { type: "pay", now: 1 });
+
+test("I1: 402 keeps the server's reason; NETWORK is our side, never 'your bank said no'", () => {
+  const o = (reason?: string) => outcomeOfPost({ ok: false, status: 402, code: "PAYMENT_DECLINED", sprayId: "sp1", ...(reason ? { reason } : {}) }, ORIGIN);
+  const r = (reason?: string) => { const x = o(reason); return x.kind === "failed" ? x.reason : x.kind; };
+  assert.equal(r("DECLINED"), "DECLINED");
+  assert.equal(r("INSUFFICIENT_FUNDS"), "INSUFFICIENT_FUNDS");
+  assert.equal(r("NOT_REUSABLE"), "NOT_REUSABLE");
+  assert.equal(r("NETWORK"), "NOT_STARTED");
+  assert.equal(r("TIMEOUT"), "EXPIRED");
+  assert.equal(r(), "DECLINED");
+  assert.equal(r("<script>"), "DECLINED");
+  const x = o("DECLINED");
+  assert.equal(x.kind === "failed" && x.sprayId, "sp1");
+  assert.doesNotMatch(SPRAY_FAIL_COPY.NOT_STARTED.body, /bank/i);
+  assert.match(SPRAY_FAIL_COPY.NOT_STARTED.body, /not charged/);
+  // A 402 is definitive: Try again makes a new key (the old key's row is failed for good).
+  let s = sprayFlow(paying(), { type: "outcome", outcome: o("NETWORK"), now: 2 });
+  assert.equal(s.kind === "failed" && s.sameKey, false);
+  s = sprayFlow(s, { type: "retry", key: K2 });
+  assert.equal(s.kind === "confirming" && s.intent.key, K2);
+});
+test("I2: an unpaid approval that timed out says NOT charged; refunded only when the server says reversed", () => {
+  const failed = outcomeOfStatus({ ok: true, status: 200, body: { status: "failed", reason: "TIMEOUT" } }, "sp1");
+  assert.equal(failed.kind === "failed" && failed.reason, "EXPIRED");
+  assert.equal(SPRAY_FAIL_COPY.EXPIRED.refunded, false);
+  assert.match(SPRAY_FAIL_COPY.EXPIRED.body, /not charged/);
+  assert.doesNotMatch(SPRAY_FAIL_COPY.EXPIRED.body + SPRAY_FAIL_COPY.EXPIRED.title, /refund/i);
+  const reversed = outcomeOfStatus({ ok: true, status: 200, body: { status: "reversed", reason: "TIMEOUT" } }, "sp1");
+  assert.equal(reversed.kind === "failed" && reversed.reason, "TIMEOUT");
+  assert.equal(SPRAY_FAIL_COPY.TIMEOUT.refunded, true);
+  // No failed-row reason can reach a "refunded" line.
+  for (const reason of ["DECLINED", "INSUFFICIENT_FUNDS", "NOT_REUSABLE", "NETWORK", "RECIPIENT_LEFT", "ROOM_ENDED", "TIMEOUT", "DISPUTED", "x", undefined]) {
+    for (const r of [outcomeOfStatus({ ok: true, status: 200, body: { status: "failed", reason } }, "sp1"), outcomeOfPost({ ok: true, status: 200, body: { status: "failed", sprayId: "sp1", reason } }, ORIGIN)]) {
+      assert.ok(r.kind === "failed" && !SPRAY_FAIL_COPY[r.reason].refunded, String(reason));
+    }
+  }
+  // Every "refunded" copy is reachable only from status "reversed".
+  for (const [k, c] of Object.entries(SPRAY_FAIL_COPY)) if (c.refunded) assert.ok(["RECIPIENT_LEFT", "ROOM_ENDED", "TIMEOUT", "REVERSED"].includes(k), k);
+});
+test("I3: no answer is UNKNOWN: the flow keeps paying with the same key, says 'checking', never 'failed'", () => {
+  for (const r of [{ ok: false as const, status: 0 }, { ok: false as const, status: 502 }, { ok: false as const, status: 408 }, { ok: true as const, status: 200, body: "garbled" }]) {
+    assert.equal(outcomeOfPost(r, ORIGIN).kind, "unknown");
+  }
+  let s = sprayFlow(paying(), { type: "outcome", outcome: { kind: "unknown" }, now: 5 });
+  assert.equal(s.kind === "paying" && s.unknown, true);
+  assert.equal(s.kind === "paying" && s.intent.key, K1);
+  assert.equal(s.kind === "paying" && s.since, 1);
+  // A later answer to the same key settles it.
+  s = sprayFlow(s, { type: "outcome", outcome: { kind: "pending", sprayId: "sp1" }, now: 6 });
+  assert.equal(s.kind === "paying" && s.sprayId, "sp1");
+  assert.equal(s.kind === "paying" && s.unknown, false);
+  assert.match(SPRAY_COPY.checking, /Don't pay again/);
+  assert.equal(SPRAY_FAIL_COPY.STILL_CHECKING.tone, "wait");
+  assert.equal(SPRAY_FAIL_COPY.STILL_WAITING.tone, "wait");
+  assert.doesNotMatch(SPRAY_FAIL_COPY.NOT_SENT.body, /refund/i);
+});
+test("I4: every request has a time limit, and one deadline counts from the Pay tap", () => {
+  const api = src("../client/src/lib/sprayApi.ts");
+  assert.match(api, /new AbortController\(\)/);
+  assert.match(api, /ctl\.abort\(\)/);
+  const hook = src("../client/src/components/rooms/spray/useSpray.ts");
+  assert.match(hook, /const left = since \+ waitDeadlineMs\(flightKind\) - Date\.now\(\);/);
+  // The paying deadline applies with or without a spray id (no `sprayId &&` gate on it).
+  assert.doesNotMatch(hook, /if \(!waitingKind \|\| !sprayId\) return;/);
+});
+test("I5/M1: the mock checkout is allowed in dev builds only (covered above); production keeps Paystack only", () => {
+  assert.equal(MOCK_CHECKOUT_HOST, "checkout.mock.test");
+  const mock = src("../server/payments/mockSplitProvider.ts");
+  assert.ok(mock.includes(MOCK_CHECKOUT_HOST), "the mock still uses the host the client allows in dev");
+});
+test("I6: system chat lines are kept as system, never as typed text; typed chat can't claim it", () => {
+  let s = liveState();
+  s = roomReducer(s, { type: "room:chat", userId: "ade", text: "sprayed Mara a note", at: 1, system: "spray" });
+  s = roomReducer(s, { type: "room:chat", userId: "me", text: "They left the stage, so you were refunded in full.", at: 2, system: "spray_reversed" });
+  s = roomReducer(s, { type: "room:chat", userId: "bob", text: "sprayed Mara a note", at: 3 });
+  s = roomReducer(s, { type: "room:chat", userId: "bob", text: "x", at: 4, system: "<b>bad</b>" } as any);
+  assert.equal(s.chat[0].system, "spray");
+  assert.equal(s.chat[1].system, "spray_reversed");
+  assert.equal(s.chat[2].system, undefined);
+  assert.equal(s.chat[3].system, undefined);
+  // A system line is never a reply.
+  s = roomReducer(s, { type: "room:chat", userId: "ade", text: "sprayed Mara a bundle", at: 5, system: "spray", replyTo: { userId: "bob", text: "hi", at: 3 } } as any);
+  assert.equal(s.chat[4].replyTo, undefined);
+  assert.equal(systemChatText("spray", "sprayed Mara a note", "Ade"), "Ade sprayed Mara a note");
+  assert.equal(systemChatText("spray_reversed", "They left the stage, so you were refunded in full.", "You"), "They left the stage, so you were refunded in full.");
+  const log = src("../client/src/components/rooms/chat/ChatLog.tsx");
+  assert.match(log, /c\.system \? \(\s*<SystemRow/);
+  const strip = src("../client/src/components/rooms/RoomChat.tsx");
+  assert.match(strip, /c\.system \? \(/);
+});
+test("I7: the flow holds the block while money is in motion or an outcome is unread", () => {
+  assert.equal(holdsSprayBlock(IDLE), false);
+  assert.equal(holdsSprayBlock(confirm()), false);
+  assert.equal(holdsSprayBlock(paying()), true);
+  assert.equal(holdsSprayBlock(sprayFlow(paying(), { type: "outcome", outcome: { kind: "action_required", sprayId: "sp1", url: "https://checkout.paystack.com/x" }, now: 2 })), true);
+  assert.equal(holdsSprayBlock(sprayFlow(paying(), { type: "outcome", outcome: { kind: "failed", reason: "DECLINED", sprayId: null }, now: 2 })), true);
+});
+test("C1: the room is fetched again when the socket goes live (after the join and after a reconnect)", () => {
+  const page = src("../client/src/pages/RoomPage.tsx");
+  assert.match(page, /if \(state\.phase === "live" && sprayRoom\) void refetch\(\);/);
+  assert.match(page, /\}, \[state\.phase, sprayRoom\]\);/);
+  const shell = src("../client/src/components/rooms/shell/RoomShell.tsx");
+  // M18: co-hosts are in the refetch key, and the key works before any block exists.
+  assert.match(shell, /const stageKey = sprayPossible \? `\$\{state\.stage\.join\("\|"\)\}#\$\{cohostIds\.join\("\|"\)\}/);
+  assert.match(shell, /if \(!stageKey \|\| !onSprayChanged\) return;/);
+});
+test("I8: slide to pay has a keyboard slider and a plain two-tap button path", () => {
+  const c = src("../client/src/components/rooms/spray/SprayConfirm.tsx");
+  assert.match(c, /role="slider"/);
+  assert.match(c, /aria-valuetext=/);
+  assert.match(c, /function TwoTapPay/);
+  assert.match(c, /if \(!armed\) \{ setArmed\(true\); return; \}/);
+  assert.match(c, /SPRAY_COPY\.slideAlt/);
+  assert.ok(!c.includes("›"), "M12: no text glyph for the knob");
+  assert.match(c, /<ChevronRightIcon/);
+});
+test("M8: closing the bank sheet keeps tracking; idle and outcomes still close", () => {
+  const bank = sprayFlow(paying(), { type: "outcome", outcome: { kind: "action_required", sprayId: "sp1", url: "https://checkout.paystack.com/x" }, now: 2 });
+  assert.equal(sprayFlow(bank, { type: "close" }), bank);
+  assert.equal(sprayFlow(confirm(), { type: "close" }).kind, "idle");
+  const failed = sprayFlow(paying(), { type: "outcome", outcome: { kind: "failed", reason: "DECLINED", sprayId: null }, now: 2 });
+  assert.equal(sprayFlow(failed, { type: "close" }).kind, "idle");
+  // A new spray can't start while the approval may still go through.
+  assert.equal(sprayFlow(bank, { type: "start", tier: "note", targetId: "host", key: K2 }), bank);
+});
+test("M4: a saved card without last four is still a saved card", () => {
+  for (const last4 of ["", null, undefined]) {
+    const me = parseSprayMe({ method: { last4, brand: "visa" }, dailyLimitKobo: 2_000_000, dailySpentKobo: 0, verified: true })!;
+    assert.deepEqual(me.method, { last4: null, brand: "visa" }, String(last4));
+    assert.equal(cardLabel(me.method), "Your saved Visa");
+    assert.match(chargeLine("note", me.method), /^Charged to your saved Visa\./);
+  }
+  assert.equal(cardLabel({ last4: null, brand: "odd" }), "Your saved card");
+  assert.equal(tileAction("note", BLOCK, { ...ME, method: { last4: null, brand: "visa" } }, true).kind, "pay");
+});
+test("M5: the 'Use another card' save box is wired to the new intent", () => {
+  const flow = src("../client/src/components/rooms/spray/SprayFlow.tsx");
+  assert.match(flow, /saveCard=\{replaceSave\} onSaveCard=\{setReplaceSave\}/);
+  assert.match(flow, /const save = replaceSave;/);
+  // retry then saveCard, in that order, lands the choice on the new intent.
+  let s = sprayFlow(paying(), { type: "outcome", outcome: { kind: "failed", reason: "DECLINED", sprayId: null }, now: 2 });
+  s = sprayFlow(sprayFlow(s, { type: "retry", key: K2 }), { type: "saveCard", on: true });
+  assert.equal(s.kind === "confirming" && s.intent.saveCard, true);
+  assert.equal(s.kind === "confirming" && s.intent.key, K2);
+});
+test("M6/Retry-After: seconds or an HTTP date, capped; the retry button waits for it", () => {
+  assert.equal(parseRetryAfter("30", 0), 30);
+  assert.equal(parseRetryAfter("0", 0), null);
+  assert.equal(parseRetryAfter("99999", 0), 3600);
+  assert.equal(parseRetryAfter(new Date(10_000).toUTCString(), 0), 10);
+  assert.equal(parseRetryAfter(new Date(0).toUTCString(), 5_000), null);
+  assert.equal(parseRetryAfter("soon", 0), null);
+  assert.equal(parseRetryAfter(null, 0), null);
+  const sheet = src("../client/src/components/rooms/spray/PaymentFailedSheet.tsx");
+  assert.match(sheet, /disabled=\{wait > 0\}/);
+});
+test("M9: tracking survives a reload in this tab only, and holds no secret", () => {
+  const s = sprayFlow(paying(), { type: "outcome", outcome: { kind: "pending", sprayId: "sp1" }, now: 2 });
+  const raw = encodeSprayTrack("r1", s)!;
+  assert.ok(raw);
+  assert.deepEqual(Object.keys(JSON.parse(raw)).sort(), ["key", "roomId", "since", "sprayId", "targetId", "tier", "v"]);
+  assert.equal(encodeSprayTrack("r1", paying()), null); // no spray id yet: nothing to resume
+  assert.equal(encodeSprayTrack("r1", confirm()), null);
+  const t = decodeSprayTrack(raw, "r1", 1000)!;
+  assert.equal(t.sprayId, "sp1");
+  assert.equal(decodeSprayTrack(raw, "r2", 1000), null); // another room
+  assert.equal(decodeSprayTrack(raw, "r1", 1 + waitDeadlineMs("action_required") + 1), null); // too old
+  assert.equal(decodeSprayTrack("{bad", "r1", 1000), null);
+  assert.equal(decodeSprayTrack(JSON.stringify({ ...JSON.parse(raw), key: "nope" }), "r1", 1000), null);
+  const resumed = sprayFlow(IDLE, { type: "resume", intent: { tier: t.tier, targetId: t.targetId, key: t.key, saveCard: false }, sprayId: t.sprayId, since: t.since });
+  assert.equal(resumed.kind === "paying" && resumed.sprayId, "sp1");
+  assert.equal(sprayFlow(confirm(), { type: "resume", intent: { tier: t.tier, targetId: t.targetId, key: t.key, saveCard: false }, sprayId: "sp1", since: 1 }).kind, "confirming");
+  assert.equal(SPRAY_TRACK_KEY.startsWith("vib3."), true);
+  const hook = src("../client/src/components/rooms/spray/useSpray.ts");
+  assert.match(hook, /window\.sessionStorage/);
+  assert.ok(!hook.includes("localStorage"));
+});
+test("M17: a room or daily limit above the ID line says to verify ID", () => {
+  assert.match(limitErrorText(403, "ID_REQUIRED", "x"), /^Verify your ID to set a limit above ₦20,000\.$/);
+  assert.match(limitErrorText(0, undefined, "x"), /offline/);
+  assert.equal(limitErrorText(500, "SERVER_ERROR", "fallback"), "fallback");
+});
+test("M19: the fixture's chat line matches the server's text, and the scene parser lives in the fixture module", () => {
+  assert.equal(fixtureSprayChatText("note", "Mara"), "sprayed Mara a note");
+  assert.equal(fixtureSprayChatText("bundle", "Mara"), "sprayed Mara a bundle");
+  assert.equal(fixtureSprayChatText("bag", "Mara"), "sprayed Mara a money bag");
+  assert.equal(fixtureSprayChatText("rain", "Mara"), "made it rain on Mara");
+  const server = src("../server/rooms/spray.ts");
+  assert.ok(server.includes("`made it rain on ${name}`") && server.includes("`sprayed ${name} a ${SPRAY_CATALOGUE[tier].label.toLowerCase()}`"));
+  assert.ok(!src("../client/src/lib/sprayUi.ts").includes("parseSprayFixture"));
+});
+test("ruling 9: screen effects from the prototype, V3C only, never blocking input", () => {
+  assert.equal(SPRAY_SCREEN_FX.rain.dim && SPRAY_SCREEN_FX.rain.banner, true);
+  assert.equal(SPRAY_SCREEN_FX.note.dim || SPRAY_SCREEN_FX.bundle.banner || SPRAY_SCREEN_FX.bag.dim, false);
+  assert.equal(RAIN_FX.dimOpacity, 0.7);
+  // The counter: integers from 0 up to the total, never past it, exactly the total at the end.
+  let last = -1;
+  for (let ms = 0; ms <= RAIN_FX.counterMs + 100; ms += 50) {
+    const v = counterAt(10_000_000, ms);
+    assert.ok(Number.isSafeInteger(v) && v >= last && v <= 10_000_000, `${ms}: ${v}`);
+    last = v;
+  }
+  assert.equal(counterAt(10_000_000, RAIN_FX.counterMs), 10_000_000);
+  assert.equal(counterAt(10_000_000, 0), 0);
+  assert.equal(counterAt(10_000_000, NaN), 0);
+  assert.equal(counterAt(1.5, 100), 0);
+  assert.equal(rainBannerText("Ade", "Mara", false).sub, "Ade is making it rain");
+  assert.equal(rainBannerText("Ade", "Mara", true).sub, "You are making it rain");
+  assert.equal(thankYouText("Ade"), "Thank you Ade!");
+  const fx = src("../client/src/components/rooms/spray/SprayEffects.tsx");
+  const code = fx.split("\n").filter((l) => !l.trim().startsWith("//")).join("\n");
+  assert.ok(!code.includes("₦"), "no naira sign in the effects");
+  assert.ok(!code.includes("room:chat"), "effects never make a chat line");
+  assert.match(fx, /data-testid="spray-dim"/);
+  assert.match(fx, /data-testid="spray-rain-banner"/);
+  assert.match(fx, /data-testid="spray-flash"/);
+  assert.match(fx, /const bump = /);
+  // Everything is pointer-events none, except the one thank-you button.
+  assert.equal((fx.match(/pointer-events-auto/g) ?? []).length, 1);
+  // Skipped under Quiet effects / reduced motion: the chip path.
+  assert.match(fx, /if \(!animate \|\| !eng\) \{\s*chip\(s\);/);
+});
+test("ruling 8: the note art has no rosette or wavy security lines, and is not banknote-shaped", () => {
+  const art = src("../client/src/components/rooms/spray/art.ts");
+  const code = art.split("\n").filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*")).join("\n");
+  assert.ok(!/ROSETTE|lobes|rings/.test(code), "no rosette");
+  assert.ok(!/Math\.sin\(\(x \/ w\)/.test(code), "no wavy line pattern");
+  assert.match(art, /export const NOTE_ASPECT = 1\.6;/);
+  assert.ok(!/\/ 2\.2/.test(code), "no 2.2:1 note anywhere");
+  const engine = src("../client/src/components/rooms/spray/engine.ts");
+  assert.match(engine, /NH = NW \/ NOTE_ASPECT/);
+});
+test("M13/M14/M15/M16: tiles stay focusable, targets are toggle buttons, 44 px rows, focus goes back to the opener", () => {
+  const tray = src("../client/src/components/rooms/spray/SprayTray.tsx");
+  assert.match(tray, /aria-disabled=\{blocked \|\| undefined\}/);
+  assert.ok(!/disabled=\{blocked\}/.test(tray));
+  assert.ok(!tray.includes('role="radio"'));
+  assert.match(tray, /aria-pressed=\{t\.id === targetId\}/);
+  assert.match(tray, /htmlFor="spray-quiet" className="flex min-h-\[44px\] min-w-\[44px\]/);
+  const card = src("../client/src/components/rooms/spray/CardSheet.tsx");
+  assert.match(card, /htmlFor="spray-save-card" className="flex h-11 w-11/);
+  const shell = src("../client/src/components/rooms/shell/RoomShell.tsx");
+  assert.match(shell, /returnFocusTo=\{sprayReturnFocus\}/);
+  assert.match(shell, /sprayOpener\.current = byTestId\(`avatar-\$\{picked\.userId\}`\)/);
+});
+
 // ---------------------------------------------------------------- copy rules
 test("copy: no em dashes, never 'cash', no legal tender wording", () => {
   for (const line of allSprayCopy()) {
@@ -311,7 +577,8 @@ test("copy: no em dashes, never 'cash', no legal tender wording", () => {
   }
   assert.equal(SPRAY_FAIL_COPY.RECIPIENT_LEFT.body, "They left the stage, so you were refunded in full.");
   assert.match(SPRAY_FAIL_COPY.DECLINED.body, /not charged/);
-  assert.match(SPRAY_FAIL_COPY.OFFLINE.title, /offline/);
+  assert.match(SPRAY_FAIL_COPY.NOT_SENT.title, /offline/);
+  assert.match(SPRAY_FAIL_COPY.NOT_SENT.body, /Nothing was sent/);
   assert.equal(SPRAY_FAIL_COPY.UNAVAILABLE.body, "Spraying is not available here.");
   assert.ok(SPRAY_COPY.saveCard.length > 0);
 });
@@ -326,7 +593,7 @@ test("fixture scenes parse and start in valid states", () => {
   assert.ok(idempotencyKeyShape(FIXTURE_SPRAY_KEY));
   for (const scene of ["tray", "confirm", "bank", "declined", "limit", "quiet"] as const) {
     const f = fixtureSprayStart(scene, 1000, ORIGIN);
-    if (f.flow.kind === "action_required") assert.ok(safeAuthorizationUrl(f.flow.url, ORIGIN));
+    if (f.flow.kind === "action_required") assert.ok(safeAuthorizationUrl(f.flow.url, ORIGIN, { dev: true }));
   }
   assert.equal(fixtureSprayStart("quiet", 0, ORIGIN).quiet, true);
 });
@@ -338,7 +605,12 @@ test("source: the dock shows Spray only when given the spray prop; the shell giv
   const shell = src("../client/src/components/rooms/shell/RoomShell.tsx");
   assert.match(shell, /const sprayBlock = listenOnly \? null : spray;/);
   assert.match(shell, /spray=\{sprayBlock && sprayTo\.length > 0/);
-  assert.match(shell, /\{sprayBlock && \(\s*<SprayFlow/);
+  // The flow mounts on the live block, or on the last good one only while it holds money in motion (review I7).
+  assert.match(shell, /const flowBlock = sprayBlock \?\? \(sprayHold \? lastSprayBlock\.current : null\);/);
+  assert.match(shell, /\{flowBlock && \(\s*<SprayFlow/);
+  assert.match(shell, /onHoldChange=\{setSprayHold\}/);
+  // New sprays need the live block: the targets come from it only.
+  assert.match(shell, /const sprayTo = sprayTargets\(sprayBlock \?\? null,/);
   const page = src("../client/src/pages/RoomPage.tsx");
   assert.match(page, /parseSprayBlock\(detail\?\.spray, room, \{ listenOnly \}\)/);
   const sheet = src("../client/src/components/rooms/AvatarActionsSheet.tsx");

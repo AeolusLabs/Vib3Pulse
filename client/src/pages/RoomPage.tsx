@@ -31,6 +31,7 @@ import { isAgeUnknownDenied, isMinorsDenied, isRoomDenial, listenOnlyHere, minor
 import type { AdultInvite } from "@/lib/minorsRoomApi";
 import { SprayReturn } from "@/components/rooms/spray/BankApproval";
 import { parseSprayBlock, searchWithoutSpray, sprayReturnId } from "@/lib/sprayUi";
+import { moneyEligibleRoom } from "@shared/roomRules";
 
 interface RoomDetail {
   room: Omit<RoomView, "host" | "memberCount">;
@@ -177,6 +178,13 @@ function RoomPageInner({ id }: { id: string }) {
   const inRoom = showsShell({ isLoading, hasDetail: !!detail && !!room, roomStatus: room?.status ?? "", canJoin: detail?.canJoin.ok === true, phase: state.phase });
 
   const sprayBlock = parseSprayBlock(detail?.spray, room, { listenOnly });
+  // The spray block is only sent to a viewer the server already has in the room's hub, and the first GET always runs
+  // before the socket joins. So ask again each time the socket becomes live: after the join, and after every reconnect
+  // (review C1). Only where spraying could exist at all, so other rooms make no extra request.
+  const sprayRoom = !!room && room.status === "live" && moneyEligibleRoom(room) && !listenOnly;
+  useEffect(() => {
+    if (state.phase === "live" && sprayRoom) void refetch();
+  }, [state.phase, sprayRoom]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (inRoom && detail && room && !sprayBack) {
     return (

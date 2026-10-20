@@ -33,8 +33,7 @@ import HostSales, { HostSalesBody } from "@/components/rooms/tickets/HostSales";
 import StepPrice from "@/components/rooms/create/StepPrice";
 import { PRICE_COPY, defaultTicketDraft, parseSummary, type TicketDraft } from "@/lib/roomTickets";
 import type { RoomTicketView } from "@/lib/roomsApi";
-import { parseSprayFixture, type SprayScene } from "@/lib/sprayUi";
-import { FIXTURE_SPRAY_BLOCK, fixtureSprayMe, fixtureSprayStart } from "@/lib/sprayFixtures";
+import { FIXTURE_SPRAY_BLOCK, fixtureSprayChatText, fixtureSprayMe, fixtureSprayStart, parseSprayFixture, type SprayScene } from "@/lib/sprayFixtures";
 import { SPRAY_CATALOGUE, isSprayTier, type SprayTier } from "@shared/money";
 
 type Ev = Parameters<typeof roomReducer>[1];
@@ -336,7 +335,8 @@ function ShellFixture({ opts, spray = null }: { opts: ReturnType<typeof parseFix
     const polls = new Map<string, { tier: SprayTier; polls: number; done: boolean }>([["fx-spray-bank", { tier: "bag", polls: 0, done: false }]]);
     const land = (id: string, tier: SprayTier) => {
       dispatch({ type: "room:spray", id, tier, v3c: SPRAY_CATALOGUE[tier].v3c, fromId: FIXTURE_IDS.self, toId: FIXTURE_IDS.host, at: Date.now() });
-      dispatch({ type: "room:chat", userId: FIXTURE_IDS.self, text: `sprayed Maya Okafor (${SPRAY_CATALOGUE[tier].label})`, at: Date.now() });
+      // Word for word what the server sends (a system receipt line, never a typed message).
+      dispatch({ type: "room:chat", userId: FIXTURE_IDS.self, text: fixtureSprayChatText(tier, FIXTURE_NAMES[FIXTURE_IDS.host] ?? "Maya Okafor"), at: Date.now(), system: "spray" });
     };
     const json = (body: unknown, status = 200, delay = 250) => new Promise<Response>((res) =>
       setTimeout(() => res(new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } })), delay));
@@ -362,7 +362,7 @@ function ShellFixture({ opts, spray = null }: { opts: ReturnType<typeof parseFix
       if (path === base && method === "POST") {
         const b = JSON.parse(String(init?.body ?? "{}")) as { tier?: unknown };
         const tier: SprayTier = isSprayTier(b.tier) ? b.tier : "note";
-        if (spray === "declined") return json({ code: "PAYMENT_DECLINED", message: "Declined" }, 402, 600);
+        if (spray === "declined") return json({ code: "PAYMENT_DECLINED", sprayId: `fx-spray-${++n}`, reason: "DECLINED", message: "Your card was not charged." }, 402, 600);
         const id = `fx-spray-${++n}`;
         if (tier === "bag" || tier === "rain" || !sprayMe.current.method) {
           polls.set(id, { tier, polls: 0, done: false });

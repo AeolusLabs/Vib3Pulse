@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { SendIcon } from "@/components/ui/icons";
 import { ROOM_LIMITS, ROOM_REACTIONS } from "@shared/rooms";
 import type { ChatItem } from "@/lib/roomReducer";
+import { SPRAY_COPY, systemChatText } from "@/lib/sprayUi";
 
 interface ChatProps {
   chat: ChatItem[];
@@ -49,7 +50,13 @@ export function RoomChat({ chat, nameOf, onSend, muted, compact, hidden, notice 
         data-testid="chat-log"
       >
         {lines.length === 0 && <p className="text-muted-foreground">Say hi.</p>}
-        {lines.map((c) => (
+        {lines.map((c) => c.system ? (
+          // A server-made line (spray receipt, or the payer-only refund line): never drawn as something a person typed.
+          <p key={c.id} className="break-words rounded-lg bg-secondary/15 px-2 py-0.5 font-medium" data-testid="chat-system-line" data-system={c.system}>
+            <span className="sr-only">{c.system === "spray_reversed" ? `${SPRAY_COPY.privateLine}. ` : "Spray. "}</span>
+            {systemChatText(c.system, c.text, nameOf(c.userId))}
+          </p>
+        ) : (
           <p key={c.id} className="break-words"><span className="font-semibold">{nameOf(c.userId)}</span> <span>{c.text}</span></p>
         ))}
       </div>

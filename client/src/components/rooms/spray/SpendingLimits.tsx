@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Loader2Icon, Trash2Icon } from "@/components/ui/icons";
 import { formatNaira } from "@/lib/roomTickets";
 import { deleteMethod, putDailyLimit } from "@/lib/sprayApi";
-import { SPRAY_COPY, cardLabel, dailyChoices, type SprayMe } from "@/lib/sprayUi";
+import { SPRAY_COPY, cardLabel, dailyChoices, limitErrorText, type SprayMe } from "@/lib/sprayUi";
 
 interface Props {
   me: SprayMe | null;
@@ -30,7 +30,7 @@ export default function SpendingLimits({ me, onChanged, onClose }: Props) {
     const r = await putDailyLimit(kobo);
     setBusy(null);
     if (r.ok) { setLine({ text: `Daily limit set to ${formatNaira(kobo)}.`, bad: false }); onChanged(); }
-    else setLine({ text: r.status === 0 ? offline : "Couldn't change the daily limit. Try again.", bad: true });
+    else setLine({ text: limitErrorText(r.status, r.code, "Couldn't change the daily limit. Try again."), bad: true });
   };
   const removeCard = async () => {
     if (busy) return;

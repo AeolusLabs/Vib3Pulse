@@ -1,8 +1,10 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ChevronDownIcon, HeartIcon, ReplyIcon } from "@/components/ui/icons";
+import { ChevronDownIcon, HeartIcon, ReplyIcon, SparklesIcon } from "@/components/ui/icons";
 import { useIdleScrollbar } from "@/hooks/useIdleScrollbar";
 import { canQuote, quoteView, replyProgress, swipeDecision } from "@/lib/chatReply";
 import type { ChatItem } from "@/lib/roomReducer";
+import { AMBER } from "@/lib/roomTickets";
+import { SPRAY_COPY, systemChatText } from "@/lib/sprayUi";
 
 /**
  * Props for the room chat log.
@@ -164,6 +166,28 @@ const ChatRow = memo(function ChatRow({ item, name, quoteName, quoteText, mine, 
   );
 });
 
+/**
+ * A server-made line (room:chat with `system`): a spray receipt, or the payer-only refund line. Never drawn like a typed
+ * message (no author button, no swipe, no reply, heart or wave), so typed text can never pass for a receipt.
+ */
+const SystemRow = memo(function SystemRow({ item, who, immersive }: { item: ChatItem; who: string; immersive: boolean }) {
+  const priv = item.system === "spray_reversed";
+  return (
+    <div className="relative" data-testid="chat-system-row" data-system={item.system}>
+      <div className={`flex min-w-0 items-start gap-2 rounded-xl px-2 py-1.5 ${immersive ? "bg-black/45 text-white [text-shadow:0_1px_2px_rgb(0_0_0/0.6)]" : priv ? "border border-border bg-muted" : AMBER.tint}`}>
+        <span aria-hidden="true" className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${priv ? "bg-background text-foreground" : "bg-secondary text-secondary-foreground"}`}>
+          <SparklesIcon size={14} />
+        </span>
+        <p className="min-w-0 flex-1 text-[14px] font-medium leading-snug [overflow-wrap:anywhere]">
+          <span className="sr-only">{priv ? `${SPRAY_COPY.privateLine}. ` : "Spray. "}</span>
+          {systemChatText(item.system ?? "", item.text, who)}
+          {priv && <span className={`block text-xs font-normal ${immersive ? "text-white/80" : "text-muted-foreground"}`} aria-hidden="true">{SPRAY_COPY.privateLine}</span>}
+        </p>
+      </div>
+    </div>
+  );
+});
+
 function ActionButton({ onClick, children }: { onClick: (e: React.MouseEvent) => void; children: React.ReactNode }) {
   return (
     <button
@@ -235,7 +259,9 @@ export function ChatLog({ chat, nameOf, selfId, hidden, immersive = false, onRep
         data-testid="chat-log"
       >
         {lines.length === 0 && <p className={immersive ? "px-2 text-white/80" : "px-2 text-muted-foreground"}>Say hi.</p>}
-        {lines.map((c) => (
+        {lines.map((c) => c.system ? (
+          <SystemRow key={c.id} item={c} who={c.userId === selfId ? "You" : nameOf(c.userId) || "Someone"} immersive={immersive} />
+        ) : (
           <ChatRow
             key={c.id}
             item={c}

@@ -40,6 +40,7 @@ import SprayFlow, { type Sub as SpraySub } from "@/components/rooms/spray/SprayF
 import SprayEffects, { useSprayQuiet } from "@/components/rooms/spray/SprayEffects";
 import { snd } from "@/components/rooms/spray/sound";
 import { sprayTargets, type SprayBlock, type SprayFlow as SprayFlowState } from "@/lib/sprayUi";
+import { moneyEligibleRoom } from "@shared/roomRules";
 
 /** The socket actions the shell uses. RoomPage passes useRoomSocket(); the dev fixture passes fakes. */
 export type RoomShellSocket = Pick<ReturnType<typeof useRoomSocket>,
@@ -185,17 +186,33 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
   const [sprayOpen, setSprayOpen] = useState(sprayFixture?.tray ?? false);
   const [sprayPreset, setSprayPreset] = useState<string | null>(null);
   const sprayBlock = listenOnly ? null : spray;
-  const sprayStage = [...state.stage, ...state.members.filter((m) => m.role === "cohost").map((m) => m.userId)];
+  // The flow keeps the last good block while money is in motion or an outcome is unread (review I7, ruling 2): a reload
+  // that comes back without a block (the payer's socket was reconnecting, the room emptied) must never unmount it.
+  // New sprays still need a live block: targets come from `sprayBlock` only, so a held block offers nobody to spray.
+  const [sprayHold, setSprayHold] = useState(false);
+  const lastSprayBlock = useRef<SprayBlock | null>(null);
+  if (sprayBlock) lastSprayBlock.current = sprayBlock;
+  const flowBlock = sprayBlock ?? (sprayHold ? lastSprayBlock.current : null);
+  const cohostIds = state.members.filter((m) => m.role === "cohost").map((m) => m.userId);
+  const sprayStage = [...state.stage, ...cohostIds];
   const sprayTo = sprayTargets(sprayBlock ?? null, { hostId: room.hostId, stage: sprayStage, memberIds: state.members.map((m) => m.userId), selfId: meId });
-  // Who is on stage changed: ask the server again for the targets (it decides who is payable).
-  const stageKey = sprayBlock ? state.stage.join("|") : "";
+  // Who can be sprayed changed (stage, co-hosts, the host coming or going, the room filling): ask the server again for the
+  // block and its targets (it decides who is payable). Not only when a block exists: a block that was absent because the
+  // viewer was alone or nobody was on stage must appear once someone is (review C1, M18). Only where spraying could exist.
+  const sprayPossible = !listenOnly && room.status === "live" && moneyEligibleRoom(room);
+  const hostHere = state.members.some((m) => m.userId === room.hostId);
+  const stageKey = sprayPossible ? `${state.stage.join("|")}#${cohostIds.join("|")}#${hostHere ? 1 : 0}#${(state.memberCount || fallbackCount) > 1 ? 1 : 0}` : "";
   const firstStage = useRef(true);
   useEffect(() => {
     if (firstStage.current) { firstStage.current = false; return; }
-    if (!sprayBlock || !onSprayChanged) return;
+    if (!stageKey || !onSprayChanged) return;
     const t = setTimeout(onSprayChanged, 600);
     return () => clearTimeout(t);
   }, [stageKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Focus goes back to whatever opened Spray (the dock button, or the person's avatar), if it is still on screen (M16).
+  const sprayOpener = useRef<HTMLElement | null>(null);
+  const visibleEl = (el: HTMLElement | null) => (el && el.isConnected && el.getClientRects().length > 0 ? el : null);
+  const sprayReturnFocus = () => visibleEl(sprayOpener.current) ?? visibleEl(byTestId("dock-spray"));
   const liveVideoRef = useRef(state.liveVideo);
   liveVideoRef.current = state.liveVideo;
   const videoActive = useCallback(() => liveVideoRef.current, []);
@@ -377,7 +394,12 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
       immersive={immersive}
       hype={<HypeBar store={hype.store} />}
       tray={<ReactionTray emojis={TRAY_EMOJIS} open={trayOpen} onClose={() => setTrayOpen(false)} onPick={sendReaction} />}
-      spray={sprayBlock && sprayTo.length > 0 ? { onOpen: () => { snd.unlock(); setSprayPreset(null); setSprayOpen(true); } } : undefined}
+      spray={sprayBlock && sprayTo.length > 0 ? { onOpen: () => {
+        snd.unlock();
+        sprayOpener.current = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : byTestId("dock-spray");
+        setSprayPreset(null);
+        setSprayOpen(true);
+      } } : undefined}
     />
   );
 
@@ -385,7 +407,8 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
   const line = statusLine(incomingShown, noticeText, gateNotice);
   const floating = (
     <>
-      <SprayEffects sprays={state.sprays} nameOf={nameOf} quiet={quiet} serverOffsetMs={state.serverOffsetMs} videoActive={videoActive} />
+      <SprayEffects sprays={state.sprays} nameOf={nameOf} quiet={quiet} serverOffsetMs={state.serverOffsetMs} videoActive={videoActive}
+        selfId={meId} onThank={!muted && !listenOnly ? (text) => { sock.chat(text); } : undefined} />
       <HypeBurst burst={hype.burst} layout={layout} />
       <div role="status" aria-live="polite" className={`pointer-events-none absolute top-[calc(68px+env(safe-area-inset-top,0px))] z-[13] w-max -translate-x-1/2 ${layout === "rail" ? "left-[calc((100%-360px)/2)] max-w-[calc((100%-360px)*0.9)]" : "left-1/2 max-w-[90%]"}`} data-testid="room-status-line">
         {line && <p className="rounded-full bg-foreground px-4 py-2 text-center text-sm font-medium text-background shadow-lg">{line}</p>}
@@ -478,14 +501,19 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
         locallyMuted={!!picked && hidden.has(picked.userId)} onToggleLocalMute={toggleHidden}
         voiceOn={state.voiceEnabled} stage={state.stage} onStage={(action, target) => sock.stageAction(action, target)}
         returnFocusTo={() => byTestId(returnFocusTestId(actionsFrom))}
-        onSpray={picked && sprayBlock && sprayTo.includes(picked.userId) ? () => { snd.unlock(); setSprayPreset(picked.userId); after(() => setSprayOpen(true)); } : undefined}
+        onSpray={picked && sprayBlock && sprayTo.includes(picked.userId) ? () => {
+          snd.unlock();
+          sprayOpener.current = byTestId(`avatar-${picked.userId}`) ?? byTestId(`strip-${picked.userId}`);
+          setSprayPreset(picked.userId);
+          after(() => setSprayOpen(true));
+        } : undefined}
       />
-      {sprayBlock && (
+      {flowBlock && (
         <SprayFlow
-          roomId={id} token={token} block={sprayBlock} targets={sprayTo} hostId={room.hostId} nameOf={nameOf} sprays={state.sprays}
+          roomId={id} token={token} block={flowBlock} targets={sprayTo} hostId={room.hostId} nameOf={nameOf} sprays={state.sprays}
           trayOpen={sprayOpen} onTrayOpenChange={setSprayOpen} presetTarget={sprayPreset}
           onSettled={() => onSprayChanged?.()} quiet={quiet} onQuiet={setQuiet}
-          returnFocusTo={() => byTestId("dock-spray")}
+          returnFocusTo={sprayReturnFocus} onHoldChange={setSprayHold}
           initial={sprayFixture ? { flow: sprayFixture.flow, sub: sprayFixture.sub } : undefined}
         />
       )}

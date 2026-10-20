@@ -11,7 +11,7 @@ import { queryClient } from "@/lib/queryClient";
 import type { SprayTier } from "@shared/money";
 import type { SprayEvent } from "@/lib/roomReducer";
 import { deleteMethod, getSprayMe } from "@/lib/sprayApi";
-import { SPRAY_COPY, defaultTarget, parseSprayMe, tileAction, type SprayBlock, type SprayFlow as Flow, type SprayMe } from "@/lib/sprayUi";
+import { SPRAY_COPY, defaultTarget, holdsSprayBlock, inFlight, parseSprayMe, tileAction, type SprayBlock, type SprayFlow as Flow, type SprayMe } from "@/lib/sprayUi";
 import { snd } from "./sound";
 import { useSpray } from "./useSpray";
 import SprayTray from "./SprayTray";
@@ -55,11 +55,16 @@ export interface SprayFlowProps {
   quiet: boolean;
   onQuiet(on: boolean): void;
   returnFocusTo?: () => HTMLElement | null;
+  /**
+   * Money is in motion, or there is an outcome the payer has not read: the room must keep this flow mounted (it holds
+   * the last good spray block) even if a reload comes back without one.
+   */
+  onHoldChange?(hold: boolean): void;
   /** Dev fixture only. */
   initial?: { flow: Flow; sub: Sub | null };
 }
 
-export default function SprayFlow({ roomId, token, block, targets, hostId, nameOf, sprays, trayOpen, onTrayOpenChange, presetTarget, onSettled, quiet, onQuiet, returnFocusTo, initial }: SprayFlowProps) {
+export default function SprayFlow({ roomId, token, block, targets, hostId, nameOf, sprays, trayOpen, onTrayOpenChange, presetTarget, onSettled, quiet, onQuiet, returnFocusTo, onHoldChange, initial }: SprayFlowProps) {
   const { toast } = useToast();
   const online = useOnline();
   const settled = () => { onSettled(); void queryClient.invalidateQueries({ queryKey: SPRAY_ME_KEY }); };
@@ -97,8 +102,17 @@ export default function SprayFlow({ roomId, token, block, targets, hostId, nameO
   });
   const me = meQ.data ?? null;
 
-  // A new step that needs the sheet: show it again if it was hidden while paying.
-  useEffect(() => { if (s.kind !== "paying") setHidden(false); }, [s.kind]);
+  // A new step (the bank, an outcome): show the sheet again if it was hidden while waiting. Opening Spray again shows it too.
+  useEffect(() => { setHidden(false); }, [s.kind]);
+  useEffect(() => { if (trayOpen) setHidden(false); }, [trayOpen]);
+  // Tell the room to keep this flow (and its block) while money is in motion or an outcome is unread.
+  const hold = holdsSprayBlock(s);
+  const holdRef = useRef(onHoldChange);
+  holdRef.current = onHoldChange;
+  useEffect(() => { holdRef.current?.(hold); }, [hold]);
+  useEffect(() => () => { holdRef.current?.(false); }, []);
+  // "Use another card": the save choice is made on that sheet and carried to the new intent.
+  const [replaceSave, setReplaceSave] = useState(false);
   // After "Use another card" the card was chosen in that sheet: skip the add-a-card step once for the new intent.
   const intentKey = s.kind === "idle" ? null : s.intent.key;
   useEffect(() => {
@@ -135,7 +149,7 @@ export default function SprayFlow({ roomId, token, block, targets, hostId, nameO
     if (cardBusy || s.kind !== "failed") return;
     setCardBusy(true);
     setCardError(null);
-    const save = s.intent.saveCard;
+    const save = replaceSave;
     const r = await deleteMethod();
     setCardBusy(false);
     if (!r.ok) { setCardError(r.status === 0 ? "You're offline. Try again when you're back online." : "Couldn't forget the card. Try again."); return; }
@@ -143,7 +157,9 @@ export default function SprayFlow({ roomId, token, block, targets, hostId, nameO
     void queryClient.invalidateQueries({ queryKey: SPRAY_ME_KEY });
     setSub(null);
     skipCard.current = true;
-    flow.retry(); // a decline is definitive: a new intent, a new key
+    // A decline is definitive: a new intent, a new key. The two events are applied in order, so the choice made on the
+    // "Use another card" sheet lands on the new intent (review M5).
+    flow.retry();
     flow.setSaveCard(save);
   };
 
@@ -154,14 +170,16 @@ export default function SprayFlow({ roomId, token, block, targets, hostId, nameO
   const view: View = sub ? sub.kind
     : s.kind === "confirming" ? (needsCard ? "card" : "confirm")
     : s.kind === "paying" ? (hidden ? null : "confirm")
-    : s.kind === "action_required" ? "bank"
+    : s.kind === "action_required" ? (hidden ? null : "bank")
     : s.kind === "failed" ? "failed"
     : s.kind === "delivered" ? null
     : trayOpen ? "tray" : null;
 
+  /** Hide while money is in motion (the hook keeps watching and the outcome brings the sheet back); otherwise close. */
+  const hide = () => { setHidden(true); onTrayOpenChange(false); };
   const dismiss = () => {
     if (sub) { setSub(null); setCardError(null); return; }
-    if (s.kind === "paying") { setHidden(true); return; }
+    if (inFlight(s)) { hide(); return; }
     if (s.kind !== "idle") { flow.close(); return; }
     onTrayOpenChange(false);
   };
@@ -183,18 +201,19 @@ export default function SprayFlow({ roomId, token, block, targets, hostId, nameO
   } else if (view === "card" && s.kind === "confirming") {
     body = <CardSheet mode="add" method={null} saveCard={s.intent.saveCard} onSaveCard={flow.setSaveCard} onContinue={() => setCardOkFor(s.intent.key)} onCancel={flow.close} />;
   } else if (view === "card-replace" && s.kind === "failed") {
-    body = <CardSheet mode="replace" method={me?.method ?? null} saveCard={s.intent.saveCard} onSaveCard={() => { /* chosen again on the add step */ }}
+    body = <CardSheet mode="replace" method={me?.method ?? null} saveCard={replaceSave} onSaveCard={setReplaceSave}
       onContinue={() => void replaceCard()} onCancel={() => setSub(null)} busy={cardBusy} error={cardError} />;
   } else if (view === "confirm" && (s.kind === "confirming" || s.kind === "paying")) {
     body = <SprayConfirm tier={s.intent.tier} name={name(s.intent.targetId)} method={me?.method ?? null}
-      paying={s.kind === "paying"} sending={s.kind === "paying" && !!s.sprayId}
-      onPay={() => { snd.unlock(); void flow.pay(); }} onCancel={flow.close} onHide={() => setHidden(true)} />;
+      paying={s.kind === "paying"} sending={s.kind === "paying" && !!s.sprayId} unknown={s.kind === "paying" && s.unknown === true}
+      bankUrl={s.kind === "paying" ? s.intent.bankUrl ?? null : null}
+      onPay={() => { snd.unlock(); flow.pay(); }} onCancel={flow.close} onHide={hide} />;
   } else if (view === "bank" && s.kind === "action_required") {
-    body = <BankApproval tier={s.intent.tier} url={s.url} onClose={flow.close} />;
+    body = <BankApproval tier={s.intent.tier} url={s.url} onClose={hide} />;
   } else if (view === "failed" && s.kind === "failed") {
     const tier = s.intent.tier;
-    body = <PaymentFailedSheet reason={s.reason} retryAfterSec={s.retryAfterSec} onRetry={retry}
-      onAnotherCard={() => { setCardError(null); setSub({ kind: "card-replace" }); }}
+    body = <PaymentFailedSheet key={`${s.intent.key}:${s.reason}`} reason={s.reason} retryAfterSec={s.retryAfterSec} onRetry={retry}
+      onAnotherCard={() => { setCardError(null); setReplaceSave(false); setSub({ kind: "card-replace" }); }}
       onLimit={() => { flow.close(); setSub({ kind: "limit", tier }); }}
       onLimits={() => { flow.close(); setSub({ kind: "limits" }); }}
       onClose={flow.close} />;
