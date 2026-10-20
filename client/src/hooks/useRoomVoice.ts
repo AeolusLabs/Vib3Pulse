@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { LocalVideoTrack, ReconnectPolicy, RemoteTrack, Room, RemoteTrackPublication } from "livekit-client";
 import { LIVE_HOLD_MS } from "@shared/liveScreen";
 import { apiRequest } from "@/lib/queryClient";
+import { mediaIssueLine, mediaLineFor } from "@/lib/mediaIssues";
 import { shouldRetryStart, startErrorKind, voiceStatus, type StartErrorKind, type VoiceStatus } from "@/lib/voiceState";
 import { cameraSimulcast, micCapture, pickStartProfile, profileSettings, viewerStartsAudioOnly, type ConnInfo, type LinkQuality, type VideoProfile } from "@/lib/bandwidth";
 
@@ -199,7 +200,7 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
       await room.localParticipant.setMicrophoneEnabled(!micOn);
       setMicOn(!micOn);
     } catch (e: any) {
-      setMicError(/denied|permission|NotAllowed/i.test(String(e?.name) + String(e?.message)) ? "Your browser blocked the microphone. Allow it in the address bar and try again." : "Couldn't start the microphone.");
+      setMicError(mediaIssueLine("mic", e));
     }
   }, [micOn]);
 
@@ -293,7 +294,7 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
         const kind = startErrorKind(e);
         // Right after the host hands over the screen, LiveKit's camera permission can still be on its way: wait and try once more.
         if (shouldRetryStart(kind, attempt)) { await wait(1500); if (lk.current === room && stops.current === stopsAtStart) continue; return false; }
-        setCameraError(START_ERROR[kind]);
+        setCameraError(kind === "not-allowed-yet" ? START_ERROR[kind] : kind === "blocked" ? mediaLineFor("camera", "denied") : mediaIssueLine("camera", e));
         return false;
       }
     }

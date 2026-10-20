@@ -1,4 +1,4 @@
-// Seeded spray states for /dev/room-fixture?spray=tray|confirm|bank|declined|limit|quiet (dev only, no network).
+// Seeded spray states for /dev/room-fixture?spray=tray|confirm|bank|declined|limit|quiet|unavailable|offline (dev only, no network).
 // Pure: the clock and the origin are passed in. Imported only by the DEV-only fixture page (and the unit test), so none of
 // this reaches the production bundle.
 import type { SprayTier } from "@shared/money";
@@ -6,7 +6,7 @@ import { FIXTURE_IDS } from "./roomFixtures";
 import { IDLE, type SprayBlock, type SprayFlow, type SprayIntent, type SprayMe } from "./sprayUi";
 
 /** Dev fixture scenes for /dev/room-fixture?spray=... */
-export const SPRAY_SCENES = ["tray", "confirm", "bank", "declined", "limit", "quiet"] as const;
+export const SPRAY_SCENES = ["tray", "confirm", "bank", "declined", "limit", "quiet", "unavailable", "offline"] as const;
 export type SprayScene = (typeof SPRAY_SCENES)[number];
 export function parseSprayFixture(search: string): SprayScene | null {
   const v = new URLSearchParams(search).get("spray");
@@ -42,6 +42,9 @@ export function fixtureSprayStart(scene: SprayScene, now: number, origin: string
     }
     case "declined": return { flow: { kind: "failed", intent: intent("bundle"), reason: "DECLINED", sameKey: false, sprayId: null }, sub: null, tray: true, quiet: false };
     case "limit": return { flow: IDLE, sub: { kind: "limit", tier: "bag" }, tray: true, quiet: false };
+    // Board 11 "Spray not available": one generic line, no reason. "offline": Pay tapped with no connection, nothing sent.
+    case "unavailable": return { flow: { kind: "failed", intent: intent("note"), reason: "UNAVAILABLE", sameKey: false, sprayId: null }, sub: null, tray: true, quiet: false };
+    case "offline": return { flow: { kind: "failed", intent: intent("note"), reason: "NOT_SENT", sameKey: true, sprayId: null }, sub: null, tray: true, quiet: false };
     case "quiet": return { flow: IDLE, sub: null, tray: false, quiet: true };
   }
 }

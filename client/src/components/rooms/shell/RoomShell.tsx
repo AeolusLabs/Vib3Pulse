@@ -3,6 +3,8 @@ import RoomScreen from "@/components/rooms/RoomScreen";
 import RoomScene from "@/components/rooms/RoomScene";
 import { RoomChat, ReactionBar } from "@/components/rooms/RoomChat";
 import AvatarActionsSheet from "@/components/rooms/AvatarActionsSheet";
+import MediaIssueSheet from "@/components/rooms/MediaIssueSheet";
+import { mediaIssueFromLine } from "@/lib/mediaIssues";
 import VoiceBar from "@/components/rooms/VoiceBar";
 import ControlsSheet from "@/components/rooms/host/ControlsSheet";
 import ScreenStage from "@/components/rooms/ScreenStage";
@@ -290,6 +292,11 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
       <ReactionBar onReact={sendReaction} />
     </div>
   );
+  // A blocked, busy or missing mic or camera: the sheet says what to do next (board 11). Closing it keeps the inline line.
+  const mediaIssue = mediaIssueFromLine(voice.micError, voice.cameraError);
+  const mediaKey = mediaIssue ? `${mediaIssue.device}:${mediaIssue.reason}` : null;
+  const [mediaDismissed, setMediaDismissed] = useState<string | null>(null);
+  useEffect(() => { if (!mediaKey) setMediaDismissed(null); }, [mediaKey]);
   const voiceNeedsAttention = voice.status === "needs-tap" || voice.status === "connecting" || voice.status === "error" || !!voice.micError;
 
   const zone = (
@@ -480,6 +487,11 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
         onReport={() => after(() => setReportOpen(true))}
         onLeave={onLeave}
         onControls={isCoHostOrHost ? () => { setControlsFrom("more"); after(() => setControlsOpen(true)); } : undefined}
+      />
+      <MediaIssueSheet
+        issue={mediaKey && mediaKey !== mediaDismissed ? mediaIssue : null}
+        onClose={() => setMediaDismissed(mediaKey)}
+        onTryAgain={() => { setMediaDismissed(mediaKey); if (mediaIssue?.device === "camera") void goLive({}); else void voice.toggleMic(); }}
       />
       <RoomSafetySheet open={safetyOpen} onOpenChange={setSafetyOpen} ageLimit={room.ageLimit} ageLabel={ageLabel} returnFocusTo={() => byTestId("room-more")} />
       <RoomReportSheet open={reportOpen} onOpenChange={setReportOpen} roomId={id} inviteToken={token} returnFocusTo={() => byTestId("room-more")} />
