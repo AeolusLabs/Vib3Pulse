@@ -12,7 +12,7 @@ import { AMBER, formatDeduction, formatNairaWhole } from "@/lib/roomTickets";
 import { formatWhen, useRoomsConfig } from "@/lib/roomsApi";
 import { earningsKey, fetchEarnings, fetchPayoutStatus, payoutStatusKey } from "@/lib/earningsApi";
 import {
-  EARNINGS_COPY, EARNINGS_RANGES, canLinkHere, sprayKeptKobo, earningsEmpty, earningsHeadline, payoutStage, readFailureMessage, roomKindLine,
+  EARNINGS_COPY, EARNINGS_RANGES, canLinkHere, earningsEmpty, earningsHeadline, payoutStage, readFailureMessage, roomKindLine,
   type Earnings, type EarningsRange,
 } from "./earningsUi";
 
@@ -53,11 +53,12 @@ export function EarningsBody({ e, range }: { e: Earnings; range: EarningsRange }
         <Row label={EARNINGS_COPY.settled} value={money(e.settledKobo)} testId="earnings-settled" />
         {e.split ? (
           <>
-            {/* The server's split: failed payouts and clawed shares are never counted as on their way or in the bank. */}
+            {/* The server's split: onItsWay = sprayDirect + ticketSending. Failed payouts and shares being clawed back
+                are separate figures (their own card and row), never counted as on their way or in the bank. */}
             <Row
               label={range === "week" ? EARNINGS_COPY.sprayDirect : EARNINGS_COPY.sprayDirectLong}
               help={range === "week" ? EARNINGS_COPY.sprayDirectHelp : EARNINGS_COPY.sprayDirectLongHelp}
-              value={money(sprayKeptKobo(e.split))} testId="earnings-spray-direct"
+              value={money(e.split.sprayDirectKobo)} testId="earnings-spray-direct"
             />
             {e.split.ticketSendingKobo > 0 && <Row label={EARNINGS_COPY.ticketSending} value={money(e.split.ticketSendingKobo)} testId="earnings-ticket-sending" />}
             {e.split.sprayReturnedKobo > 0 && (

@@ -2,8 +2,12 @@
 // (&page=earnings|payouts|payments). "soon": no account and linking not open on this page yet (canLinkAccount false).
 // "attention": a failed ticket payout and a spray refunded before it landed, so every split row shows.
 // Pure data in the routes' real shapes (the unit test runs each through the parsers). Imported only by the DEV-only
-// fixture page and the unit test, so none of this reaches the production bundle. The week matches flows.html board 8:
-// settled 88,435 + on its way 12,200 + held for tickets 142,965 = 243,600 naira.
+// fixture page and the unit test, so none of this reaches the production bundle. The week is board 8's 243,600 naira,
+// laid out the way the server's computeEarnings does it (fix round 6H): every delivered spray share is sprayDirect
+// ("paid out by Paystack", never "settled"); settled, sending, needs attention and held split the TICKET money only.
+//   onItsWay = sprayDirect + ticketSending
+//   settled + onItsWay + needsAttention + held = totals.spray + totals.ticket - clawbackApplied (0 here)
+//   sprayReturned is its own figure, outside totals and outside sprayDirect.
 
 export const EARN_SCENES = ["empty", "week", "clawback", "noaccount", "mismatch", "soon", "attention"] as const;
 export type EarnScene = (typeof EARN_SCENES)[number];
@@ -50,18 +54,23 @@ export function fixtureEarnings(scene: EarnScene, range: string, now: number) {
   }
   // "all" and "month" show a little more than the week, so switching the period visibly changes the numbers.
   const k = range === "all" ? 3 : range === "month" ? 2 : 1;
-  // "attention": 50,000 of ticket money failed and is being followed up, and a 7,584 spray share is being taken back.
+  // Tickets 142,965: settled 88,435 and held 54,530 in the week. "attention": of the settled part, 20,000 is still being
+  // sent and 30,000 failed (finance follows up), and a 7,584 share of a spray refunded before it landed is taken back.
   const attention = scene === "attention";
-  const sprayReturnedKobo = attention ? 758_400 : 0;
-  const needsAttentionKobo = attention ? 5_000_000 : 0;
+  const ticketKobo = 14_296_500;
   const ticketSendingKobo = attention ? 2_000_000 : 0;
-  const sprayDirectKobo = 1_220_000 + sprayReturnedKobo;
+  const needsAttentionKobo = attention ? 3_000_000 : 0;
+  const heldTicketKobo = 5_453_000;
+  const settledKobo = ticketKobo - heldTicketKobo - ticketSendingKobo - needsAttentionKobo;
+  const sprayKobo = 10_063_500 * k;
+  const sprayDirectKobo = sprayKobo;
+  const sprayReturnedKobo = attention ? 758_400 : 0;
   return {
-    totals: { sprayKobo: 10_063_500 * k, ticketKobo: 14_296_500 },
-    settledKobo: 8_843_500 + 10_063_500 * (k - 1),
-    onItsWayKobo: sprayDirectKobo + ticketSendingKobo + needsAttentionKobo,
+    totals: { sprayKobo, ticketKobo },
+    settledKobo,
+    onItsWayKobo: sprayDirectKobo + ticketSendingKobo,
     sprayDirectKobo, ticketSendingKobo, needsAttentionKobo, sprayReturnedKobo, clawbackAppliedKobo: 0,
-    heldTicketKobo: 14_296_500 - ticketSendingKobo - needsAttentionKobo,
+    heldTicketKobo,
     clawbackOpenKobo: scene === "clawback" || attention ? 758_400 : 0,
     byRoom: [
       { roomId: "fixture-paid-room", title: "Amapiano Sunday Session", sprayKobo: 6_763_500, ticketKobo: 14_296_500, at: iso(now, 30) },

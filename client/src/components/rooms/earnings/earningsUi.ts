@@ -206,9 +206,13 @@ export const isEarningsRange = (v: unknown): v is EarningsRange => typeof v === 
 
 export interface EarningsRoom { roomId: string; title: string; sprayKobo: number; ticketKobo: number; at: string }
 /**
- * The server's split of onItsWayKobo (fix round 6G): sprayDirect + ticketSending + needsAttention = onItsWay, and
- * sprayReturned is the part of sprayDirect that was split to the viewer for sprays refunded or charged back before they
- * landed (clawed back). null when an older server sends no split: the single "on its way" row is shown then.
+ * The server's money split (shared/roomEarnings.ts RoomEarnings, computeEarnings), fix round 6H:
+ *   onItsWayKobo = sprayDirectKobo + ticketSendingKobo            (only money really on its way to the bank)
+ *   needsAttentionKobo: failed or bank-reversed ticket payouts      (its own figure, NOT in onItsWay)
+ *   sprayReturnedKobo: shares split to the viewer for sprays refunded or charged back before delivery (its own figure,
+ *     NOT in sprayDirect, which holds earned delivered shares only; the clawback takes it back)
+ *   settled + onItsWay + needsAttention + held = totals.spray + totals.ticket - clawbackApplied
+ * null when an older server sends no split: the single "on its way" row is shown then.
  */
 export interface EarningsSplit { sprayDirectKobo: number; ticketSendingKobo: number; needsAttentionKobo: number; sprayReturnedKobo: number }
 export interface Earnings {
@@ -252,9 +256,10 @@ export function parseEarnings(body: unknown): Earnings | null {
 
 const SPLIT_KEYS = ["sprayDirectKobo", "ticketSendingKobo", "needsAttentionKobo", "sprayReturnedKobo"] as const;
 /**
- * The split fields: all absent is an older server (null); any present must all be whole kobo at or above zero, the three
- * parts must add up to onItsWayKobo and the returned shares sit inside sprayDirect. Anything else fails the whole body
- * (undefined), so a row is never drawn from numbers that do not add up.
+ * The split fields: all absent is an older server (null); any present must all be whole kobo at or above zero, and
+ * sprayDirect + ticketSending must equal onItsWayKobo (the server's own identity). needsAttention and sprayReturned are
+ * separate figures with no sum to check here. Anything else fails the whole body (undefined), so a row is never drawn
+ * from numbers that do not add up.
  */
 export function parseEarningsSplit(b: Record<string, unknown>): EarningsSplit | null | undefined {
   if (SPLIT_KEYS.every((k) => b[k] === undefined)) return null;
@@ -263,20 +268,17 @@ export function parseEarningsSplit(b: Record<string, unknown>): EarningsSplit | 
     sprayDirectKobo: b.sprayDirectKobo as number, ticketSendingKobo: b.ticketSendingKobo as number,
     needsAttentionKobo: b.needsAttentionKobo as number, sprayReturnedKobo: b.sprayReturnedKobo as number,
   };
-  if (s.sprayDirectKobo + s.ticketSendingKobo + s.needsAttentionKobo !== b.onItsWayKobo) return undefined;
-  if (s.sprayReturnedKobo > s.sprayDirectKobo) return undefined;
+  if (s.sprayDirectKobo + s.ticketSendingKobo !== b.onItsWayKobo) return undefined;
   return s;
 }
-
-/** Spray money paid out by Paystack that stays with the viewer: the direct split minus the shares being taken back. */
-export const sprayKeptKobo = (s: EarningsSplit) => s.sprayDirectKobo - s.sprayReturnedKobo;
 
 /** The big number: the range's spray and ticket totals as the server sent them (no other sum is made here). */
 export const earningsHeadline = (e: Earnings) => e.totals.sprayKobo + e.totals.ticketKobo;
 /** Nothing at all to show for this range. */
 export const earningsEmpty = (e: Earnings) =>
   e.totals.sprayKobo === 0 && e.totals.ticketKobo === 0 && e.byRoom.length === 0 &&
-  e.settledKobo === 0 && e.onItsWayKobo === 0 && e.heldTicketKobo === 0 && e.clawbackOpenKobo === 0;
+  e.settledKobo === 0 && e.onItsWayKobo === 0 && e.heldTicketKobo === 0 && e.clawbackOpenKobo === 0 &&
+  (e.split === null || (e.split.needsAttentionKobo === 0 && e.split.sprayReturnedKobo === 0)); // never hide a failed payout
 /** "Tickets and sprays" / "Tickets" / "Sprays" under a room's name. */
 export function roomKindLine(r: Pick<EarningsRoom, "sprayKobo" | "ticketKobo">): string {
   if (r.sprayKobo !== 0 && r.ticketKobo !== 0) return EARNINGS_COPY.kindBoth;
