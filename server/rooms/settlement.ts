@@ -44,7 +44,7 @@ import {
 } from "@shared/roomRefunds";
 import { BUSY, LOCK_PAYOUT, iso, isUuid, moneyClock, openPaymentIssue, refundAllForRoom, withAdvisoryLock, type RoomRefundTally } from "./refunds";
 import { notifyPayoutPaid } from "./notify";
-import { LOCK_ACCOUNT_CHANGE, payableSubaccountOf } from "./payouts";
+import { LOCK_ACCOUNT_CHANGE, PAYABLE_ACCOUNT_SQL, payableSubaccountOf } from "./payouts";
 
 const isMissingTable = (e: unknown) => (e as { code?: string })?.code === "42P01";
 
@@ -144,9 +144,10 @@ export async function afterRoomEnded(roomId: string, opts: { hostReview?: boolea
 }
 
 /** held -> queued (or removed when nothing is left to pay), under the payout row lock. Returns the new status, or null. */
-async function queueDuePayout(payoutId: string, now: Date): Promise<"queued" | "removed" | "refunding" | "clawed_back" | null> {
+async function queueDuePayout(payoutId: string, now: Date): Promise<"queued" | "removed" | "refunding" | "clawed_back" | "waiting_account" | null> {
   const c = await pool.connect();
   let blocked: { roomId: string; block: PayoutBlock } | null = null;
+  let unpayable: { roomId: string } | null = null;
   try {
     await c.query("BEGIN");
     const p = (await c.query(
@@ -177,6 +178,15 @@ async function queueDuePayout(payoutId: string, now: Date): Promise<"queued" | "
         await c.query(`delete from room_payouts where id = $1 and status = 'held'`, [p.id]);
         await c.query("COMMIT");
         return "removed";
+      }
+      // Review r3 N1 (a): a payout is queued ONLY when it can be paid now (a name-checked payable account). Otherwise it
+      // stays held (nothing is applied, nothing changes) and a payout_failed NO_PAYOUT_ACCOUNT issue is opened; the next
+      // pass queues it once the host has saved a payable account. So 'queued' always means "being sent", and the account
+      // change's 409 keeps its meaning.
+      if (!(await payableSubaccountOf(p.host_id, c))) {
+        await c.query("ROLLBACK");
+        unpayable = { roomId: p.room_id };
+        return "waiting_account";
       }
       // Spraying (phase 5, rule B10): open clawbacks this host owes (chargebacks on sprays) come off this payout, in this
       // transaction, under the payout row lock. The host is paid max(0, amount - applied); the applied rows are recovered.
@@ -209,6 +219,12 @@ async function queueDuePayout(payoutId: string, now: Date): Promise<"queued" | "
     throw e;
   } finally {
     c.release();
+    if (unpayable) {
+      await openPaymentIssue(pool, {
+        ticketId: null, providerRef: payoutReference(unpayable.roomId), provider: "paystack", reason: "payout_failed",
+        error: "NO_PAYOUT_ACCOUNT: due, kept held until the host saves a payable (name-checked) account", now,
+      }).catch(() => {});
+    }
   }
   if (!blocked) return null; // unreachable: every other path returned above
   await refundInsteadOfPayout(blocked.roomId, blocked.block);
@@ -446,7 +462,12 @@ export async function runSettlementPass(now: Date = moneyClock.now()): Promise<S
     }
 
     const due = await pool.query(
-      `select id from room_payouts where status = 'held' and release_at <= $1::timestamp and release_at < $2::timestamp order by release_at limit 50`,
+      // Review r3 N1: payable hosts first, so payouts kept held for an unpayable host can never take every slot.
+      `select id from room_payouts
+        where status = 'held' and release_at <= $1::timestamp and release_at < $2::timestamp
+        order by (exists (select 1 from organizer_payment_accounts a where a.user_id = room_payouts.host_id and ${PAYABLE_ACCOUNT_SQL})) desc,
+                 release_at
+        limit 50`,
       [iso(now), PAYOUT_HOLD_SENTINEL_ISO],
     );
     for (const { id } of due.rows as { id: string }[]) {

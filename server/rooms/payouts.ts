@@ -41,7 +41,7 @@ import {
   createPaystackSubaccountChecked, isPaystackOutage, listPaystackBanksChecked, resolvePaystackBankAccountChecked, updatePaystackSubaccount,
   type PaystackBank,
 } from "../payments/paystack";
-import { BUSY, withAdvisoryLock } from "./refunds";
+import { BUSY, LOCK_PAYOUT, withAdvisoryLock } from "./refunds";
 
 export const ROOMS_ACCOUNT_ATTEMPTS_PER_HOUR = 5;
 const HOUR_MS = 60 * 60_000;
@@ -158,12 +158,13 @@ const MESSAGES: Record<PayoutAccountCode, string> = {
   NO_VERIFIED_NAME: "We do not have your verified name yet, so we cannot check this account. Contact support to finish your ID check.",
   NAME_MISMATCH: "This account is not in your verified name, or the number and bank do not match. Use an account in your own name.",
   PAYOUT_IN_FLIGHT: "A payout to your current account is being sent. You can change your account once it lands.",
+  BUSY: "Your account is already being saved. Try again in a minute.",
   RATE_LIMITED: "Too many tries. Please wait an hour and try again.",
   PROVIDER_UNAVAILABLE: "We could not reach the bank check right now. Try again in a few minutes.",
   SERVER_ERROR: "That did not work. Try again.",
 };
 const STATUS: Record<PayoutAccountCode, number> = {
-  NOT_VERIFIED: 403, BAD_INPUT: 400, BAD_BANK: 400, NO_VERIFIED_NAME: 422, NAME_MISMATCH: 422, PAYOUT_IN_FLIGHT: 409,
+  NOT_VERIFIED: 403, BAD_INPUT: 400, BAD_BANK: 400, NO_VERIFIED_NAME: 422, NAME_MISMATCH: 422, PAYOUT_IN_FLIGHT: 409, BUSY: 409,
   RATE_LIMITED: 429, PROVIDER_UNAVAILABLE: 503, SERVER_ERROR: 500,
 };
 const refuse = (code: PayoutAccountCode, retryAfterSec?: number): PayoutAccountOutcome =>
@@ -184,9 +185,25 @@ async function audit(q: Q, userId: string, action: "attempt" | "account_set" | "
 const auditQuiet = (userId: string, action: "attempt" | "account_set" | "account_refused", outcome: string, bankCode: string | null, last4: string | null) =>
   audit(pool, userId, action, outcome, bankCode, last4).catch((e) => console.error(`[rooms:payouts] user=${userId} audit write failed:`, sanitizeMoneyError(e)));
 
-/** Any payout of this host Paystack may be sending right now. */
+/**
+ * Any payout of this host Paystack may be sending right now. Review r3 N1 (b): a queued row whose note is NO_PAYOUT_ACCOUNT
+ * is NOT in flight (payQueued set that note after Paystack said no transfer with its reference exists, and it verifies
+ * again before it ever creates one), so it never blocks a change; it is paid to the new name-checked account afterwards.
+ * Rows queued before the r3 fix can still carry that note; new ones are never queued unpayable (settlement N1 (a)).
+ */
 async function hasQueuedPayout(q: Q, userId: string): Promise<boolean> {
-  return ((await q.query(`select 1 from room_payouts where host_id = $1 and status = 'queued' limit 1`, [userId])).rowCount ?? 0) > 0;
+  return ((await q.query(
+    `select 1 from room_payouts where host_id = $1 and status = 'queued' and coalesce(last_error, '') <> 'NO_PAYOUT_ACCOUNT' limit 1`,
+    [userId],
+  )).rowCount ?? 0) > 0;
+}
+
+/** Queued rows of this host that wait for a payable account (see hasQueuedPayout). */
+async function waitingPayoutIds(q: Q, userId: string): Promise<string[]> {
+  return ((await q.query(
+    `select id from room_payouts where host_id = $1 and status = 'queued' and last_error = 'NO_PAYOUT_ACCOUNT' order by id`,
+    [userId],
+  )).rows as { id: string }[]).map((r) => r.id);
 }
 
 export type LookupSource = "rooms" | "organizer_resolve" | "organizer_onboard";
@@ -290,7 +307,9 @@ export async function setPayoutAccount(userId: string, body: unknown, nowMs: num
   const out = await withAdvisoryLock(LOCK_ACCOUNT_CHANGE, userId, (c) => changeLocked(c, {
     userId, verifiedName, bankCode, accountNumber, last4, bankName, commissionBps, nowMs,
   }), 8000);
-  if (out === BUSY) { logAccount(userId, "BUSY"); return refuse("PAYOUT_IN_FLIGHT"); }
+  // Review r3 m3: lock contention (a double submit, or a save already talking to Paystack) is "busy", never "a payout is
+  // being sent".
+  if (out === BUSY) { logAccount(userId, "BUSY"); return refuse("BUSY"); }
   return out;
 }
 
@@ -307,6 +326,27 @@ async function changeLocked(c: Q, i: ChangeInput): Promise<PayoutAccountOutcome>
     await auditQuiet(userId, "account_refused", "PAYOUT_IN_FLIGHT", bankCode, last4);
     return refuse("PAYOUT_IN_FLIGHT");
   }
+  // Review r3 N1: a payout waiting for an account (queued, NO_PAYOUT_ACCOUNT) is held still for the whole change: its
+  // payout lock (the one payQueued runs under) is taken here and kept until the change is done, so no pass can start its
+  // transfer while the subaccount is being pointed at the new bank. Busy = payQueued is on it right now: try again.
+  const waiting = await waitingPayoutIds(c, userId);
+  const held: string[] = [];
+  try {
+    for (const id of waiting) {
+      const got = (await c.query("select pg_try_advisory_lock($1::int, hashtext($2::text)) as ok", [LOCK_PAYOUT, id])).rows[0] as { ok: boolean } | undefined;
+      if (got?.ok !== true) { logAccount(userId, "BUSY:payout"); return refuse("BUSY"); }
+      held.push(id);
+    }
+    return await changeWithPayoutsHeld(c, i);
+  } finally {
+    for (const id of held) {
+      await c.query("select pg_advisory_unlock($1::int, hashtext($2::text))", [LOCK_PAYOUT, id]).catch(() => {});
+    }
+  }
+}
+
+async function changeWithPayoutsHeld(c: Q, i: ChangeInput): Promise<PayoutAccountOutcome> {
+  const { userId, bankCode, last4 } = i;
   const existing = (await c.query(ACCOUNT_SQL, [userId])).rows[0] as
     { paystack_subaccount_code: string | null; room_verified_subaccount_code: string | null; matched_ms: number | null } | undefined;
 

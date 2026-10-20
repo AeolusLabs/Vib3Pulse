@@ -32,6 +32,8 @@ const { userToSessionUser } = await import("../server/auth");
 const { registerRoomRoutes } = await import("../server/rooms/roomRoutes");
 const { setPayoutProviderForTests, payoutTestHooks, hostPayoutReady, payableSubaccountOf, maskAccountName, ROOMS_ACCOUNT_ATTEMPTS_PER_HOUR } = await import("../server/rooms/payouts");
 const { registerOrganizerPaymentsRoutes } = await import("../server/organizer-payments-routes");
+const { setPaymentProviderForTests } = await import("../server/payments/index");
+const { runSettlementPass } = await import("../server/rooms/settlement");
 const { hasVerifiedPayoutAccount } = await import("../server/rooms/ticketStorage");
 const { ticketBreakdown, sprayBreakdown } = await import("../shared/money");
 const { setVoiceServiceForTests } = await import("../server/rooms/voice/voiceService");
@@ -327,6 +329,119 @@ try {
   check("no log line carries an account number or a bank account name",
     !logged.some((l) => /0123456789|1111111111|2222222222|3333333333|OKAFOR|SOMEONE ELSE/i.test(l)));
 
+  // =============================================================== review r3 N1: an unpayable host's payout is never stranded
+  // Transfers are mocked (no Paystack): no transfer exists for a reference until we "create" it, and it succeeds at once.
+  const transfers = new Map<string, string>();
+  const transferCalls: string[] = [];
+  setPaymentProviderForTests({
+    verifyTransfer: async (ref) => (transfers.has(ref) ? { status: transfers.get(ref)! } : null),
+    createTransferRecipient: async ({ subaccountCode }) => ({ recipientCode: `RCP_${subaccountCode}` }),
+    createTransfer: async ({ reference, recipientCode }) => { transferCalls.push(`${reference}>${recipientCode}`); transfers.set(reference, "success"); return { status: "success" }; },
+  });
+  const restoreProv = () => setPayoutProviderForTests({
+    listBanks: async () => BANKS,
+    resolve: async (n: string) => ({ accountNumber: n, accountName: OWNER.get(n) ?? "" }),
+    createSubaccount: async (p) => { mock.calls.create.push(p); return { subaccountCode: `ACCT_ea_n1_${mock.calls.create.length}_${Date.now()}` }; },
+    updateSubaccount: async (code, p) => { mock.calls.update.push({ code, ...p }); },
+  });
+  const payoutOf = async (roomId: string) => (await q(`select status, last_error, amount_kobo from room_payouts where room_id = $1`, [roomId]))[0];
+  const dueRoom = async (hostId: string, title: string) => {
+    const room = await mkRoom(hostId, title);
+    await mkTicket(room, P_N1, 500000);
+    await q(`insert into room_payouts (room_id, host_id, amount_kobo, status, release_at) values ($1,$2,$3,'held', now() - interval '1 minute')`,
+      [room, hostId, ticketBreakdown(500000).host]);
+    return room;
+  };
+  const P_N1 = await mk("n1payer");
+
+  // (1) An unclear Paystack answer during a change leaves the account unpayable; the payout falls due meanwhile.
+  const HN = await mk("n1host");
+  VERIFIED_NAME.set(HN, "Nnamdi Host");
+  OWNER.set("4444444444", "HOST NNAMDI");
+  restoreProv();
+  r = await rest("POST", "/api/rooms/payouts/account", HN, { bankCode: "058", accountNumber: "4444444444" });
+  check("N1 setup: account saved", r.status === 200, r.text);
+  const roomN = await dueRoom(HN, "N1 room");
+  setPayoutProviderForTests({ listBanks: async () => BANKS, resolve: async (n: string) => ({ accountNumber: n, accountName: OWNER.get(n) ?? "" }),
+    updateSubaccount: async () => { throw new Error("Paystack unavailable: The operation was aborted due to timeout"); } });
+  r = await rest("POST", "/api/rooms/payouts/account", HN, { bankCode: "058", accountNumber: "4444444444" });
+  check("N1 setup: an unclear answer leaves the account unpayable", r.status === 503 && (await hostPayoutReady(HN)) === false, r.text);
+  restoreProv();
+  await runSettlementPass();
+  let po = await payoutOf(roomN);
+  check("N1 (a): a due payout of an unpayable host stays HELD (never queued, nothing applied)", po?.status === "held", JSON.stringify(po));
+  check("N1 (a): finance gets a NO_PAYOUT_ACCOUNT issue for it",
+    (await q(`select 1 from payment_issues where provider_payment_id = $1 and reason = 'payout_failed' and resolved_at is null and error_message like 'NO_PAYOUT_ACCOUNT%'`, [`room-payout-${roomN}`])).length === 1);
+  r = await rest("POST", "/api/rooms/payouts/account", HN, { bankCode: "058", accountNumber: "4444444444" });
+  check("N1: the host can save again (no false 'payout being sent')", r.status === 200 && (await hostPayoutReady(HN)) === true, r.text);
+  await runSettlementPass();
+  po = await payoutOf(roomN);
+  check("N1: once payable, the next pass queues and pays it to the name-checked account", po?.status === "paid"
+    && transferCalls.some((t) => t.startsWith(`room-payout-${roomN}>RCP_`)), JSON.stringify({ po, transferCalls }));
+
+  // (2) A row queued before the fix and parked with NO_PAYOUT_ACCOUNT never blocks a change, and is paid afterwards.
+  const HL = await mk("n1legacy");
+  VERIFIED_NAME.set(HL, "Legacy Host");
+  OWNER.set("5555555555", "LEGACY HOST");
+  await q(`insert into organizer_payment_accounts (user_id, provider, paystack_subaccount_code, details_submitted, payouts_enabled) values ($1,'paystack',$2,true,true)`,
+    [HL, `ACCT_ea_legacy_${stamp}`]); // organiser-made: not payable in rooms (C1)
+  const roomL = await mkRoom(HL, "Legacy room");
+  await mkTicket(roomL, P_N1, 500000);
+  await q(`insert into room_payouts (room_id, host_id, amount_kobo, status, release_at, transfer_ref, last_error) values ($1,$2,$3,'queued', now() - interval '1 hour', $4, 'NO_PAYOUT_ACCOUNT')`,
+    [roomL, HL, ticketBreakdown(500000).host, `room-payout-${roomL}`]);
+  r = await rest("POST", "/api/rooms/payouts/account", HL, { bankCode: "058", accountNumber: "5555555555" });
+  check("N1 (b): a queued NO_PAYOUT_ACCOUNT row does not block the change (200, not 409)", r.status === 200 && r.json?.updated === true, r.text);
+  await runSettlementPass();
+  po = await payoutOf(roomL);
+  check("N1 (b): it is then paid to the new name-checked account", po?.status === "paid", JSON.stringify(po));
+  // A real in-flight row (any other note) still blocks.
+  const roomL2 = await mkRoom(HL, "Legacy room 2");
+  await q(`insert into room_payouts (room_id, host_id, amount_kobo, status, release_at, transfer_ref, last_error) values ($1,$2,5000,'queued', now(), $3, 'TRANSFER_PENDING')`,
+    [roomL2, HL, `room-payout-${roomL2}`]);
+  r = await rest("POST", "/api/rooms/payouts/account", HL, { bankCode: "058", accountNumber: "5555555555" });
+  check("N1: a payout really being sent still answers 409 PAYOUT_IN_FLIGHT", r.status === 409 && r.json?.code === "PAYOUT_IN_FLIGHT", r.text);
+  await q(`update room_payouts set status = 'paid' where room_id = $1`, [roomL2]);
+
+  // (3) Organiser re-onboarding makes the host unpayable; the due payout waits held; a rooms save releases it.
+  const roomO = await dueRoom(HN, "N1 room after re-onboard");
+  const goodN = (await q(`select paystack_subaccount_code from organizer_payment_accounts where user_id = $1`, [HN]))[0].paystack_subaccount_code;
+  await q(`update organizer_payment_accounts set paystack_subaccount_code = $2 where user_id = $1`, [HN, `ACCT_ea_reon_${stamp}`]);
+  await runSettlementPass();
+  check("N1 (3): after an organiser re-onboarding the due payout stays held", (await payoutOf(roomO))?.status === "held");
+  r = await rest("POST", "/api/rooms/payouts/account", HN, { bankCode: "058", accountNumber: "4444444444" });
+  await runSettlementPass();
+  check("N1 (3): a rooms save makes it payable and it is paid", r.status === 200 && (await payoutOf(roomO))?.status === "paid", JSON.stringify(await payoutOf(roomO)));
+  void goodN;
+
+  // ---- review r3 m3: a double submit is "busy", never "a payout is being sent"
+  await q(`delete from room_payout_account_events where user_id = $1`, [HN]); // a fresh hourly budget for this case
+  setPayoutProviderForTests({ listBanks: async () => BANKS, resolve: async (n: string) => ({ accountNumber: n, accountName: OWNER.get(n) ?? "" }),
+    updateSubaccount: async () => { await new Promise((res) => setTimeout(res, 9000)); } });
+  const [d1, d2] = await Promise.all([
+    rest("POST", "/api/rooms/payouts/account", HN, { bankCode: "058", accountNumber: "4444444444" }),
+    new Promise<any>((res) => setTimeout(() => res(rest("POST", "/api/rooms/payouts/account", HN, { bankCode: "058", accountNumber: "4444444444" })), 300)),
+  ]);
+  check("m3: the second of two quick saves answers 409 BUSY (not PAYOUT_IN_FLIGHT)", [d1, d2].some((x) => x.status === 409 && x.json?.code === "BUSY")
+    && ![d1, d2].some((x) => x.json?.code === "PAYOUT_IN_FLIGHT"), JSON.stringify([d1.json, d2.json]));
+
+  // ---- review r3 m5: organiser onboarding waits for (or refuses during) a rooms change
+  const lockM5 = await pool.connect();
+  try {
+    await lockM5.query("select pg_advisory_lock(41004, hashtext($1::text))", [ORG]);
+    await q(`delete from room_payout_account_events where user_id = $1`, [ORG]);
+    const busy = await rest("POST", "/api/organizer/payments/paystack/onboard", ORG, { accountNumber: "0123456789", bankCode: "058", businessName: "X" });
+    // The lookup itself happens before the lock (it is outside the critical section); with the real Paystack unreachable in
+    // tests it may fail first. Either way the subaccount row is never written while a rooms change holds the lock.
+    check("m5: no organiser subaccount write while a rooms change holds the lock",
+      (busy.status === 409 && busy.json?.code === "BUSY") || busy.status === 400, JSON.stringify(busy.json));
+    check("m5: nothing was written", (await q(`select 1 from organizer_payment_accounts where user_id = $1`, [ORG])).length === 0);
+  } finally {
+    await lockM5.query("select pg_advisory_unlock(41004, hashtext($1::text))", [ORG]).catch(() => {});
+    lockM5.release();
+  }
+  restoreProv();
+  setPaymentProviderForTests(null);
+
   // =============================================================== 6.2 earnings
   const V = await mk("viewer");
   const O = await mk("otherhost");
@@ -358,11 +473,12 @@ try {
   check("settled = the payout Paystack confirmed (net of the clawback taken)", e.settledKobo === 2 * tb5 - 1000 && e.clawbackAppliedKobo === 1000, r.text);
   check("held = tickets of the room with no payout yet", e.heldTicketKobo === tb25, r.text);
   check("sprays are paid straight to the bank by Paystack, never 'settled' (r2 I4)",
-    e.sprayDirectKobo === bHost + (bStage.guest as number) + bHost && e.onItsWayKobo === e.sprayDirectKobo + e.ticketSendingKobo + e.needsAttentionKobo, r.text);
+    e.sprayDirectKobo === bHost + (bStage.guest as number) && e.onItsWayKobo === e.sprayDirectKobo + e.ticketSendingKobo, r.text);
   check("I2: the reversed spray's split share is returned (received, then clawed back), not earnings", e.sprayReturnedKobo === bHost && e.totals.sprayKobo === bHost + (bStage.guest as number), r.text);
   check("open clawback = amount minus recovered", e.clawbackOpenKobo === 2000, r.text);
   check("balance: settled + on its way + held = totals + returned - applied",
-    e.settledKobo + e.onItsWayKobo + e.heldTicketKobo === e.totals.sprayKobo + e.totals.ticketKobo + e.sprayReturnedKobo - e.clawbackAppliedKobo, r.text);
+    e.settledKobo + e.onItsWayKobo + e.needsAttentionKobo + e.heldTicketKobo + e.sprayReturnedKobo
+      === e.totals.sprayKobo + e.totals.ticketKobo + e.sprayReturnedKobo - e.clawbackAppliedKobo, r.text);
   check("byRoom: the viewer's rooms and the room where they were sprayed on stage, titles only",
     e.byRoom.length === 3 && e.byRoom.some((b: any) => b.roomId === ro && b.ticketKobo === 0 && b.sprayKobo === bStage.guest), r.text);
   check("no payer identity anywhere in the earnings answer", ![P, P2, G, "ea_payer"].some((s) => r.text.includes(s)));
@@ -439,6 +555,8 @@ try {
   delete payoutTestHooks.verifiedName;
   try {
     if (created.length) {
+      await q(`delete from payment_transactions where organizer_id = any($1::varchar[])`, [created]);
+      await q(`delete from payment_issues where provider_payment_id in (select 'room-payout-' || room_id from room_payouts where host_id = any($1::varchar[]))`, [created]);
       await q(`delete from host_clawbacks where host_id = any($1::varchar[]) or beneficiary_id = any($1::varchar[])`, [created]);
       await q(`delete from spray_payments where payer_id = any($1::varchar[]) or host_id = any($1::varchar[])`, [created]);
       await q(`delete from user_payment_methods where user_id = any($1::varchar[])`, [created]);
