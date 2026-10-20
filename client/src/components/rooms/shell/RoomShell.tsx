@@ -280,7 +280,9 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
   const ageLabel = ageLimitLabel(room.ageLimit);
   const count = state.memberCount || fallbackCount;
   const holderName = state.holder ? nameOf(state.holder) : null;
-  const goLive = (d: { cameraId?: string; micId?: string; musicMode?: boolean }) => voice.startCamera({ ...d, profile: quality === "auto" ? pickStartProfile((navigator as unknown as { connection?: ConnInfo }).connection) : quality });
+  // The last devices the person chose, so the blocked-camera sheet's Try again starts with the same ones.
+  const lastGoLive = useRef<{ cameraId?: string; micId?: string; musicMode?: boolean }>({});
+  const goLive = (d: { cameraId?: string; micId?: string; musicMode?: boolean }) => { lastGoLive.current = d; return voice.startCamera({ ...d, profile: quality === "auto" ? pickStartProfile((navigator as unknown as { connection?: ConnInfo }).connection) : quality }); };
   const stopLive = () => { void voice.stopCamera(); sock.liveAction("stop"); };
   const askLive = () => (isCoHostOrHost && meId ? sock.liveAction("grant", meId) : sock.liveAction("ask"));
   const withdrawLive = () => sock.liveAction("withdraw");
@@ -490,8 +492,9 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
       />
       <MediaIssueSheet
         issue={mediaKey && mediaKey !== mediaDismissed ? mediaIssue : null}
+        returnFocusTo={() => byTestId(mediaIssue?.device === "camera" ? "dock-cam" : "dock-mic")}
         onClose={() => setMediaDismissed(mediaKey)}
-        onTryAgain={() => { setMediaDismissed(mediaKey); if (mediaIssue?.device === "camera") void goLive({}); else void voice.toggleMic(); }}
+        onTryAgain={() => { setMediaDismissed(mediaKey); if (mediaIssue?.device === "camera") void goLive(lastGoLive.current); else void voice.toggleMic(); }}
       />
       <RoomSafetySheet open={safetyOpen} onOpenChange={setSafetyOpen} ageLimit={room.ageLimit} ageLabel={ageLabel} returnFocusTo={() => byTestId("room-more")} />
       <RoomReportSheet open={reportOpen} onOpenChange={setReportOpen} roomId={id} inviteToken={token} returnFocusTo={() => byTestId("room-more")} />
