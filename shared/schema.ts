@@ -1159,6 +1159,9 @@ export const rooms = pgTable("rooms", {
   ticketPriceKobo: integer("ticket_price_kobo"),
   ticketCapacity: integer("ticket_capacity"),
   refundBeforeStart: boolean("refund_before_start").notNull().default(true),
+  // Phase 6 recap: the most people in the room at once (RoomHub), raised while live and on end. Null = not tracked (rooms
+  // that ended before migrations/add_room_peak.sql). Host-only: never sent inside a room object (publicRoom strips it).
+  peakMembers: integer("peak_members"),
 }, (t) => ({
   // Also created by migrations/add_room_tickets.sql and ensureSchema; declared here so drizzle-kit push keeps them.
   ticketPriceCheck: check("rooms_ticket_price_kobo_check", sql`${t.ticketPriceKobo} IS NULL OR ${t.ticketPriceKobo} > 0`),
@@ -1205,6 +1208,10 @@ export const roomMembers = pgTable("room_members", {
   muted: boolean("muted").notNull().default(false),
   banned: boolean("banned").notNull().default(false),
   onStage: boolean("on_stage").notNull().default(false), // a guest given the mic; kept so a reconnect restores it
+  // Phase 6 recap (migrations/add_room_peak.sql): seconds spent in the room over every visit (added on each leave, database
+  // clock), and chat lines sent. Only ever shown to the member themselves (GET /api/rooms/:id/recap).
+  secondsIn: integer("seconds_in").notNull().default(0),
+  messagesSent: integer("messages_sent").notNull().default(0),
 }, (t) => ({ pk: primaryKey({ columns: [t.roomId, t.userId] }) }));
 export type RoomMember = typeof roomMembers.$inferSelect;
 
@@ -1763,6 +1770,10 @@ export const notificationTypes = [
   "room_starting",
   "room_refund", // paid room ticket refunded (phase 4, server/rooms/refunds.ts)
   "spray_reversed", // a paid spray could not be delivered and was refunded in full (phase 5, server/rooms/spray.ts)
+  // Phase 6 (server/rooms/notify.ts, copy in shared/roomNotifications.ts):
+  "room_ticket", // a paid room ticket was issued to the buyer
+  "spray_received", // sprays delivered to a host or stage guest, ONE per (recipient, room) batch; never names the payer
+  "payout_paid", // a room payout Paystack confirmed as sent
 ] as const;
 export type NotificationType = typeof notificationTypes[number];
 

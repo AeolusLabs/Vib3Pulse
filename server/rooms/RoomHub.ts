@@ -39,6 +39,26 @@ export class RoomHub {
   private lives = new Map<string, LiveState>();
   private liveVideo = new Map<string, boolean>();
   private minors = new Set<string>(); // live rooms that are minors' rooms (mirrors rooms.minors_room, which never clears)
+  /** Phase 6 recap: the most people in each live room at once (this process). Kept while the room lives; gone on end. */
+  private peaks = new Map<string, number>();
+
+  /**
+   * Call right after a join: returns the new peak when this join raised it (the caller persists it, conditionally), else
+   * null. Counts everyone in the hub for the room, host included.
+   */
+  recordPeak(roomId: string): number | null {
+    const n = this.count(roomId);
+    if (n <= (this.peaks.get(roomId) ?? 0)) return null;
+    if (this.peaks.size > 5000 && !this.peaks.has(roomId)) {
+      // Safety valve only: forget rooms nobody is in (their peak is already in the database).
+      Array.from(this.peaks.keys()).forEach((id) => { if (this.count(id) === 0) this.peaks.delete(id); });
+    }
+    this.peaks.set(roomId, n);
+    return n;
+  }
+
+  /** The peak this process saw for the room (0 when it saw nobody). */
+  peakOf(roomId: string): number { return this.peaks.get(roomId) ?? 0; }
 
   /** One room per user: joining another leaves the first. Returns the room that was left, if any. */
   join(roomId: string, m: HubMember): string | null {
@@ -107,6 +127,7 @@ export class RoomHub {
     this.lives.delete(roomId);
     this.liveVideo.delete(roomId);
     this.minors.delete(roomId);
+    this.peaks.delete(roomId);
     return gone;
   }
 

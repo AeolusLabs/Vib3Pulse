@@ -181,6 +181,9 @@ export async function endRoom(roomId: string, opts: { hostReview?: boolean } = {
     await rs.clearStage(roomId).catch(() => {});
     await getVoiceService()?.deleteRoom(roomId).catch((e) => console.error("[voice] deleteRoom failed:", e?.message ?? e));
   }
+  // Phase 6 recap: persist the busiest moment this process saw before the hub forgets the room (never lowers the column).
+  const peak = roomHub.peakOf(roomId);
+  if (room && peak > 0) await rs.raisePeak(roomId, peak).catch((e) => console.error("[rooms] peak write on end failed:", roomId, e?.message ?? e));
   for (const m of roomHub.end(roomId)) {
     joinedSockets.delete(m.userId);
   }
@@ -467,6 +470,9 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
     me = { userId, role, muted: freshMember?.muted ?? false, joinedAt: Date.now(), send: (m) => fanout(userId, m), info: memberInfo(freshUser), age: freshAge };
     roomHub.join(roomId, me);
     if (fresh.minorsRoom) roomHub.markMinorsRoom(roomId); // before any stage decision for this room
+    // Phase 6 recap: a new busiest moment is written at once (conditional, never lowers it), fire-and-forget, no await.
+    const peak = roomHub.recordPeak(roomId);
+    if (peak !== null) void rs.raisePeak(roomId, peak).catch((e) => console.error("[rooms] peak write failed:", roomId, e?.message ?? e));
     // Only the first person in sets the room's flags from the database. Once anyone is in, the voice / live-video routes keep
     // them current, and this joiner's row may predate a switch-off: writing it would turn voice or the camera back on.
     if (roomHub.count(roomId) === 1) {
@@ -899,6 +905,8 @@ export async function handleRoomMessage(ws: RoomClient, userId: string, msg: any
         const line = { userId, text, at: Date.now(), ...(replyTo ? { replyTo } : {}) };
         roomHub.recordChat(roomId, line);
         roomHub.broadcast(roomId, { type: "room:chat", ...line });
+        // Phase 6 recap: the sender's own count. Fire-and-forget (no await here, see above).
+        void rs.countChatLine(roomId, userId).catch(() => {});
         return;
       }
       case "room:react": {

@@ -43,7 +43,8 @@ export function pinnedPlainText(raw: string | null | undefined): string | null {
 export function publicRoom(room: Room) {
   // Paid rooms: the price, ticket capacity and refund setting never ride on a room object. The price reaches only eligible
   // viewers (GET /api/rooms/:id `ticket`, list `priceMinor`); the host gets all three through hostRoom.
-  const { inviteTokenHash, pinnedMessage, reminderNotifiedAt, ticketPriceKobo, ticketCapacity, refundBeforeStart, ...rest } = room;
+  // peakMembers is a host-only recap number (phase 6): it reaches the host only through GET /api/rooms/:id/recap.
+  const { inviteTokenHash, pinnedMessage, reminderNotifiedAt, ticketPriceKobo, ticketCapacity, refundBeforeStart, peakMembers, ...rest } = room;
   return rest;
 }
 

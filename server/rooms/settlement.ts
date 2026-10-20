@@ -43,6 +43,7 @@ import {
   type PayoutBlock,
 } from "@shared/roomRefunds";
 import { BUSY, LOCK_PAYOUT, iso, isUuid, moneyClock, openPaymentIssue, refundAllForRoom, withAdvisoryLock, type RoomRefundTally } from "./refunds";
+import { notifyPayoutPaid } from "./notify";
 
 const isMissingTable = (e: unknown) => (e as { code?: string })?.code === "42P01";
 type Queryable = { query: (text: string, values?: any[]) => Promise<{ rows: any[]; rowCount?: number | null }> };
@@ -237,6 +238,9 @@ async function markPaid(c: PoolClient, p: PayoutRow & { title: string }, now: Da
     console.error(`[rooms] payout ${p.id}: transfer succeeded but marking it paid failed, will retry:`, sanitizeMoneyError(e));
     return "wait";
   }
+  // Only the call that won queued/failed -> paid gets here, and only from a transfer status Paystack reported as paid, so
+  // "sent" is never claimed from an estimate. Fire-and-forget: notify never rejects.
+  void notifyPayoutPaid(p.host_id, p.room_id, Number(p.amount_kobo));
   return "paid";
 }
 
