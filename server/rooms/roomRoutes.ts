@@ -20,7 +20,10 @@ import { canHostRoom, canJoinRoom, canSellTickets, isMinorsRoomHost, isTicketedR
 import { isIdVerifiedAdult } from "@shared/ageVerification";
 import * as rs from "./roomStorage";
 import { canViewRoom, hostRoom, hostSummary, mutualFollow, pinnedPlainText, plainText, publicRoom, sha256, viewerRoom, viewRoom } from "./roomAccess";
-import { countPaidTickets, hasPaidTicket, hasVerifiedPayoutAccount, hostCanSellNow, TicketGuardError, updateRoomWithTicketGuard } from "./ticketStorage";
+import { countPaidTickets, hasPaidTicket, hostCanSellNow, TicketGuardError, updateRoomWithTicketGuard } from "./ticketStorage";
+import { hostPayoutReady } from "./payouts";
+import { registerRoomPayoutRoutes } from "./payoutRoutes";
+import { registerRoomEarningsRoutes } from "./earningsRoutes";
 import { isSellablePrice } from "@shared/roomTickets";
 import * as mr from "./minorsRoom";
 import { TokenBucket } from "./rateLimit";
@@ -65,7 +68,7 @@ const TICKET_SALE_MESSAGES: Record<TicketSaleCode, string> = {
   FEATURE_OFF: "Paid rooms aren't available yet.",
   HOST_NOT_ADULT: "You need to be 18 or over to sell tickets.",
   HOST_NOT_VERIFIED: "Verify your ID to sell tickets.",
-  NO_PAYOUT_ACCOUNT: "Add a payout account to sell tickets.",
+  NO_PAYOUT_ACCOUNT: "Add a bank account on the Payout account page (/rooms/payouts) to sell tickets.",
   ROOM_NOT_ADULT: "Tickets can only be sold for 18+ or 21+ rooms.",
 };
 const TICKET_GUARD_MESSAGES = {
@@ -79,7 +82,7 @@ const TICKET_GUARD_MESSAGES = {
  * age, ID check (isIdVerifiedAdult) and a verified Paystack payout account from organizer_payment_accounts.
  */
 async function sellCheck(host: User, room: { ageLimit: string; minorsRoom: boolean }) {
-  const hasPayoutAccount = roomFeatures.paidRooms ? await hasVerifiedPayoutAccount(host.id) : false;
+  const hasPayoutAccount = roomFeatures.paidRooms ? await hostPayoutReady(host.id) : false;
   return canSellTickets({ age: ageFromDob(host.dateOfBirth), idVerified: isIdVerifiedAdult(host), hasPayoutAccount }, room, roomFeatures);
 }
 
@@ -153,6 +156,9 @@ async function checkLink(res: Response, hostId: string, v: { eventId?: string; v
 }
 
 export function registerRoomRoutes(app: Express): void {
+  // Phase 6 money reads FIRST: /api/rooms/payouts/* must never be taken by a /api/rooms/:id route.
+  registerRoomPayoutRoutes(app); // payout account: status, banks, account (task 6.1)
+  registerRoomEarningsRoutes(app); // earnings, payments, receipts (tasks 6.2, 6.3)
   registerRoomTicketRoutes(app); // paid room tickets: checkout + verify (phase 4, task 4.3)
   // Loads the room and answers 404 (invisible) / 403 (not the host) itself; returns null when it has responded.
   async function loadHostRoom(req: Request, res: Response): Promise<{ room: Room; host: User } | null> {

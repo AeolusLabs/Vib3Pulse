@@ -287,7 +287,7 @@ export const TICKET_CREATE_ERROR: Record<string, string> = {
   FEATURE_OFF: "Paid rooms are not available yet.",
   HOST_NOT_ADULT: "You need to be 18 to sell tickets.",
   HOST_NOT_VERIFIED: "Verify your ID before you sell tickets.",
-  NO_PAYOUT_ACCOUNT: "Connect a payout account in your organizer settings before you sell tickets.",
+  NO_PAYOUT_ACCOUNT: "Add a bank account in your own name on the Payout account page (/rooms/payouts) before you sell tickets.",
   ROOM_NOT_ADULT: "Tickets are only for 18+ and 21+ rooms.",
   TICKETS_SOLD: "Tickets are sold, so the price, age limit and refunds can't change.",
   CAPACITY_BELOW_SOLD: "You can't have fewer tickets than you have sold.",

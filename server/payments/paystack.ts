@@ -320,6 +320,48 @@ export async function createPaystackSubaccount(params: CreateSubaccountParams): 
   return { subaccountCode: data.subaccount_code };
 }
 
+// ---- Rooms payout account (phase 6, task 6.1). Same calls as above, but through paystackCall so the caller can tell an
+// outage ("Paystack unavailable: ...", HTTP 5xx or no answer) from a refusal ("Paystack error: ..."). Never log what these
+// receive or return: they carry bank account numbers and the account holder's name.
+
+export async function listPaystackBanksChecked(): Promise<PaystackBank[]> {
+  const data = await paystackCall<Array<{ name: string; code: string }>>("/bank?country=nigeria&currency=NGN");
+  return (data ?? []).map((b) => ({ name: String(b.name ?? ""), code: String(b.code ?? "") }));
+}
+
+export async function resolvePaystackBankAccountChecked(accountNumber: string, bankCode: string): Promise<ResolvedBankAccount> {
+  const data = await paystackCall<{ account_number: string; account_name: string }>(
+    `/bank/resolve?account_number=${encodeURIComponent(accountNumber)}&bank_code=${encodeURIComponent(bankCode)}`,
+  );
+  return { accountNumber: String(data?.account_number ?? ""), accountName: String(data?.account_name ?? "") };
+}
+
+export async function createPaystackSubaccountChecked(params: CreateSubaccountParams): Promise<{ subaccountCode: string }> {
+  const data = await paystackCall<{ subaccount_code: string }>("/subaccount", {
+    method: "POST",
+    body: JSON.stringify({
+      business_name: params.businessName,
+      settlement_bank: params.bankCode,
+      account_number: params.accountNumber,
+      percentage_charge: params.percentageCharge,
+    }),
+  });
+  if (!data?.subaccount_code) throw new Error("Paystack error: no subaccount code returned");
+  return { subaccountCode: data.subaccount_code };
+}
+
+/** Points an existing subaccount at another bank account (PUT /subaccount/:code). The code stays the same. */
+export async function updatePaystackSubaccount(subaccountCode: string, params: { businessName?: string; bankCode: string; accountNumber: string }): Promise<void> {
+  await paystackCall<unknown>(`/subaccount/${encodeURIComponent(subaccountCode)}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      ...(params.businessName ? { business_name: params.businessName } : {}),
+      settlement_bank: params.bankCode,
+      account_number: params.accountNumber,
+    }),
+  });
+}
+
 
 // ============================================================
 // REFUND LOOKUP + TRANSFERS (paid rooms: refunds and host payouts, lane S3)

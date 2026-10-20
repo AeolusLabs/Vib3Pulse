@@ -6,6 +6,7 @@ import { db, storage } from "../storage";
 import { rooms, roomTickets, type Room } from "@shared/schema";
 import { isIdVerifiedAdult } from "@shared/ageVerification";
 import { roomPatchSet, type RoomPatch } from "./roomStorage";
+import { hostPayoutReady } from "./payouts";
 
 /** True when this person holds a PAID ticket for this room (a refunded ticket is not a ticket). */
 export async function hasPaidTicket(roomId: string, userId: string): Promise<boolean> {
@@ -22,12 +23,11 @@ export async function countPaidTickets(roomId: string): Promise<number> {
 }
 
 /**
- * The host can be paid: a Paystack row in organizer_payment_accounts (made by the existing organizer onboarding,
- * server/organizer-payments-routes.ts) with a subaccount code and payouts enabled. Never reads or returns bank details.
+ * The host can be paid. Phase 6: kept as a name for existing callers and tests; the rule lives in ONE place,
+ * hostPayoutReady (server/rooms/payouts.ts), which the spray gate and canSellTickets' input read too.
  */
 export async function hasVerifiedPayoutAccount(userId: string): Promise<boolean> {
-  const acct = await storage.getOrganizerPaymentAccount(userId, "paystack");
-  return !!acct && acct.payoutsEnabled === true && !!acct.paystackSubaccountCode;
+  return hostPayoutReady(userId);
 }
 
 /**

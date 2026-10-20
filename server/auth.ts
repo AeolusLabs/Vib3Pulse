@@ -145,4 +145,9 @@ export const SENSITIVE_RESPONSE_KEYS = new Set<string>([
   "authorization",
   "sprayDailyLimitKobo",
   "spray_daily_limit_kobo",
+  // Rooms payouts (phase 6): Paystack's raw bank-resolve / subaccount fields. The rooms routes never return them (last four
+  // and a boolean only); this strips them from any body that forgets. Snake case only: the organiser onboarding routes
+  // deliberately return camelCase accountName / accountNumber and keep working.
+  "account_number",
+  "account_name",
 ]);

@@ -1253,6 +1253,7 @@ export const roomPayouts = pgTable("room_payouts", {
   paidAt: timestamp("paid_at"),
 }, (t) => ({
   statusReleaseIdx: index("room_payouts_status_release_idx").on(t.status, t.releaseAt),
+  hostStatusIdx: index("room_payouts_host_status_idx").on(t.hostId, t.status), // phase 6: add_room_payout_account.sql
   statusCheck: check("room_payouts_status_check", sql`${t.status} IN ('held', 'queued', 'paid', 'failed')`),
   amountCheck: check("room_payouts_amount_check", sql`${t.amountKobo} >= 0`),
 }));
@@ -2164,8 +2165,30 @@ export const organizerPaymentAccounts = pgTable("organizer_payment_accounts", {
   payoutsEnabled: boolean("payouts_enabled").notNull().default(false),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
   updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+  // Rooms phase 6 (task 6.1, migrations/add_room_payout_account.sql). Written only by POST /api/rooms/payouts/account.
+  // Never the full account number, never the bank's account name. nameMatches = roomVerifiedSubaccountCode is the current code.
+  bankCode: text("bank_code"),
+  bankName: text("bank_name"),
+  accountLast4: text("account_last4"),
+  roomVerifiedSubaccountCode: varchar("room_verified_subaccount_code", { length: 255 }),
+  nameMatchedAt: timestamp("name_matched_at"),
 }, (table) => ({
   uniqueUserProvider: unique().on(table.userId, table.provider),
+}));
+
+// Rooms phase 6 (task 6.1): the audit log of payout account changes and the durable per-user limit on bank lookups.
+// Also created by migrations/add_room_payout_account.sql and ensureSchema (server/rooms/payoutsMigration.ts).
+export const roomPayoutAccountEvents = pgTable("room_payout_account_events", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  action: text("action").notNull(),   // attempt | account_set | account_refused
+  outcome: text("outcome").notNull(), // a PayoutAccountCode or "ok" / "started"
+  bankCode: text("bank_code"),
+  accountLast4: text("account_last4"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+}, (t) => ({
+  userCreatedIdx: index("room_payout_account_events_user_created_idx").on(t.userId, t.createdAt),
+  actionCheck: check("room_payout_account_events_action_check", sql`${t.action} IN ('attempt', 'account_set', 'account_refused')`),
 }));
 
 export const insertOrganizerPaymentAccountSchema = createInsertSchema(organizerPaymentAccounts).omit({
