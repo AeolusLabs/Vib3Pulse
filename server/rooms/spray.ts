@@ -295,7 +295,8 @@ type Reservation =
   | { kind: "in_flight" }
   | { kind: "daily" }
   | { kind: "room" }
-  | { kind: "cap" };
+  | { kind: "cap" }
+  | { kind: "ban" };
 
 export interface StartInput {
   roomId: string;
@@ -385,7 +386,7 @@ export async function startSpray(input: StartInput): Promise<StartOutcome> {
       for (const u of people) await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${capLockKey(u.id)}))`);
       if (await overNewHostCapAtStart(people, price, now, tx)) return { kind: "cap" };
       // The receive ban again, now serialised with toReversing / disputes (they write clawbacks under the same locks).
-      if (await ss.receiveBlocked(people.map((u) => u.id), clawbackBlockThresholdKobo(), tx)) return { kind: "cap" };
+      if (await ss.receiveBlocked(people.map((u) => u.id), clawbackBlockThresholdKobo(), tx)) return { kind: "ban" };
       if (!(await ss.addSpend(roomId, payerId, price, limit.limitKobo, tx))) return { kind: "room" };
       const ins = await ss.insertSprayIfNew({
         idempotencyKey, requestHash, roomId, hostId: f.room.hostId, payerId, recipientId: targetId, tier,
@@ -407,8 +408,12 @@ export async function startSpray(input: StartInput): Promise<StartOutcome> {
     case "in_flight": return rateLimited(10);
     case "daily": return dailyLimit();
     case "room": return roomLimit();
+    // Same generic 403 for both (no oracle); distinct labels in the server log only (review r5 m6).
     case "cap":
-      console.log(`[rooms:spray] start refused room=${roomId} payer=${payerId} code=NEW_HOST_CAP_OR_RECEIVE_BAN`);
+      console.log(`[rooms:spray] start refused room=${roomId} payer=${payerId} code=NEW_HOST_CAP`);
+      return unavailable();
+    case "ban":
+      console.log(`[rooms:spray] start refused room=${roomId} payer=${payerId} code=RECEIVE_BAN`);
       return unavailable();
     case "created": break;
   }

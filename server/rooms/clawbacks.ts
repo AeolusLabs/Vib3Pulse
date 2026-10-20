@@ -21,6 +21,10 @@
 //        merchant won + delivered = the dispute clawbacks are settled and a REPAY issue is opened for whatever payouts had
 //        already taken (open or fully recovered rows alike); merchant won + never delivered = an issue to refund the payer;
 //        payer won = clawbacks stay open. An unknown word opens an issue and flips nothing.
+//      * review r5: the dispute rows are locked FOR UPDATE before recovered_kobo is summed (I1); a resolve that flips nothing
+//        but disagrees with the ledger opens an OUTCOME_CHANGED issue, and the 'dispute' issue is closed only when the
+//        event decided something (I2); an outcome issue first closes an older open dispute_resolved issue so it always
+//        lands, and owedBack is in the issue and the log line (I3); LOST_AFTER_REFUND is raised once per reference (m2).
 //    Reversal clawbacks are never touched by a dispute outcome.
 //  - applyClawbacks(beneficiaryId, availableKobo) is called by settlement (settlement.ts, queueDuePayout) INSIDE the payout
 //    transaction that holds the payout row lock: open clawbacks of that person are locked FOR UPDATE and applied oldest
@@ -174,81 +178,138 @@ async function resolveLocked(c: PoolClient, reference: string, resolution: strin
   if (!row) return "unknown";
   const now = new Date(nowMs);
   const issue = (error: string) => openPaymentIssue(c, { ticketId: null, providerRef: reference, provider: row.provider, reason: "dispute_resolved", error, now });
+  // Review r5 I3: an OUTCOME issue (REPAY, LOST_AFTER_REFUND, WON_UNDELIVERED) must always land. openPaymentIssue keeps one
+  // open row per (reference, reason), so any older open dispute_resolved issue (for example an UNKNOWN one) is closed
+  // first; it is superseded by the outcome now known.
+  const outcomeIssue = async (error: string) => {
+    await c.query(
+      `update payment_issues set resolved_at = $2::timestamp where provider_payment_id = $1 and reason = 'dispute_resolved' and resolved_at is null`,
+      [reference, iso(nowMs)],
+    );
+    await issue(error);
+  };
+  // Review r5 I2: an issue that must never be swallowed by the de-duplication, and must not hide an open outcome issue
+  // either: a new row when possible, else appended to the open one.
+  const noteIssue = async (error: string) => {
+    if (await issue(error)) return;
+    await c.query(
+      `update payment_issues set error_message = left(coalesce(error_message, '') || ' | ' || $3::text, 2000)
+        where provider_payment_id = $1 and reason = 'dispute_resolved' and resolved_at is null and created_at <= $2::timestamp
+          and position($3::text in coalesce(error_message, '')) = 0`,
+      [reference, iso(nowMs), error],
+    );
+  };
   const merchantWon = resolution === "declined";
   const customerWon = resolution === "merchant-accepted" || resolution === "accepted";
   let outcome: DisputeResolveOutcome;
+  /** Something was actually decided (review r5 I2): only then is the 'dispute' issue closed. */
+  let acted = false;
+  let owedBack = 0;
   try {
     await c.query("BEGIN");
-    // The dispute itself is over: nothing more to answer in Paystack.
-    await c.query(
-      `update payment_issues set resolved_at = $2::timestamp where provider_payment_id = $1 and reason = 'dispute' and resolved_at is null`,
-      [reference, iso(nowMs)],
-    );
     if (row.status === "reversing" || row.status === "reversed") {
       // Review r4 N1 / N2: the payer was already refunded in full (by us). Never "refund the payer by hand".
       if (customerWon) {
-        await issue("SPRAY_DISPUTE_LOST_AFTER_REFUND: the payer won a chargeback on a spray we had already refunded in full; they were paid back twice. Recover it through Paystack or from the payer");
-        outcome = "needs_person";
+        // Review r5 m2: once per reference, even after a person closed the first one (no duplicate chase of the payer).
+        const seen = await c.query(
+          `select 1 from payment_issues where provider_payment_id = $1 and reason = 'dispute_resolved' and error_message like 'SPRAY_DISPUTE_LOST_AFTER_REFUND%' limit 1`,
+          [reference],
+        );
+        if (seen.rowCount) {
+          outcome = "already";
+        } else {
+          await outcomeIssue("SPRAY_DISPUTE_LOST_AFTER_REFUND: the payer won a chargeback on a spray we had already refunded in full (or were refunding); they may be paid back twice. Check whether our refund went out, then recover it through Paystack or from the payer");
+          outcome = "needs_person";
+        }
+        acted = true;
       } else if (merchantWon) {
         outcome = "settled"; // no money moves: the refund stands, the reversal clawbacks are untouched
+        acted = true;
       } else {
-        await issue("SPRAY_DISPUTE_RESOLVED_UNKNOWN: a dispute on a refunded spray was resolved with an outcome we do not recognise; check it in Paystack (no money action taken)");
+        await noteIssue("SPRAY_DISPUTE_RESOLVED_UNKNOWN: a dispute on a refunded spray was resolved with an outcome we do not recognise; check it in Paystack (no money action taken)");
         outcome = "needs_person";
       }
     } else if (row.status === "disputed") {
       if (!merchantWon && !customerWon) {
         // Not acted on and not marked done, so a later event with a known word can still settle it.
-        await issue("SPRAY_DISPUTE_RESOLVED_UNKNOWN: the dispute was resolved with an outcome we do not recognise; check it in Paystack (clawbacks stay open)");
+        await noteIssue("SPRAY_DISPUTE_RESOLVED_UNKNOWN: the dispute was resolved with an outcome we do not recognise; check it in Paystack (clawbacks stay open)");
         outcome = "needs_person";
       } else {
         // Review r4 N3: idempotent on the chargeback ledger row (flipped once, by code only), NOT on whether open clawbacks
         // remain: a payout may already have recovered them all, and the host must then be repaid.
+        const target = merchantWon ? "chargeback_won" : "chargeback_lost";
         const flip = await c.query(
           `update payment_transactions set status = $2 where type = 'chargeback' and provider_payment_id = $1 and status = 'disputed' returning id`,
-          [reference, merchantWon ? "chargeback_won" : "chargeback_lost"],
+          [reference, target],
         );
         if (!flip.rowCount) {
-          outcome = "already";
+          // Review r5 I2: nothing flipped. The same outcome again is a harmless repeat; a DIFFERENT outcome (a second
+          // dispute cycle, pre-arbitration, or two resolve events disagreeing) must reach a person.
+          const cur = (await c.query(
+            `select status from payment_transactions where type = 'chargeback' and provider_payment_id = $1 limit 1`,
+            [reference],
+          )).rows[0] as { status: string } | undefined;
+          if (cur && cur.status !== target) {
+            await noteIssue(`SPRAY_DISPUTE_OUTCOME_CHANGED: the chargeback was ${cur.status}, the provider now says ${target}; check it in Paystack (clawbacks were not changed)`);
+            outcome = "needs_person";
+          } else if (!cur) {
+            await noteIssue("SPRAY_DISPUTE_RESOLVED_NO_LEDGER: a dispute was resolved but the chargeback ledger row is missing; check it in Paystack (nothing changed)");
+            outcome = "needs_person";
+          } else {
+            outcome = "already";
+          }
         } else if (customerWon) {
           outcome = "kept_open"; // the chargeback stands: the clawbacks are the record of what is owed
+          acted = true;
         } else if (row.delivered) {
           // Won on a delivered spray: the money came back through the dispute, so the dispute clawbacks are settled, and
-          // whatever payouts had already taken for them (from EVERY dispute row, read before anything changes) is repaid.
-          const taken = (await c.query(
-            `select coalesce(sum(recovered_kobo), 0)::bigint as n from host_clawbacks where spray_id = $1::uuid and origin = 'dispute'`,
+          // whatever payouts had already taken for them is repaid. Review r5 I1: EVERY dispute row of the spray is locked
+          // FOR UPDATE before anything is summed, so a payout applying a clawback at this moment either commits first (and
+          // is counted) or waits and then finds the rows settled. (No aggregate with FOR UPDATE: rows, summed here.)
+          const rows = (await c.query(
+            `select id, status, recovered_kobo from host_clawbacks where spray_id = $1::uuid and origin = 'dispute' order by id for update`,
             [row.id],
-          )).rows[0];
-          const owedBack = Number(taken?.n ?? 0);
+          )).rows as { id: string; status: string; recovered_kobo: number }[];
+          owedBack = rows.reduce((n, r) => n + (Number.isSafeInteger(Number(r.recovered_kobo)) ? Number(r.recovered_kobo) : 0), 0);
           // Settled rows read recovered_kobo = amount_kobo (the table's rule for 'recovered'); what payouts really took is
-          // in the REPAY issue below (review r4 m4, schema frozen).
+          // in the REPAY issue and the log line below (review r4 m4, schema frozen).
           await c.query(
             `update host_clawbacks set status = 'recovered', recovered_at = $2::timestamp, recovered_kobo = amount_kobo
               where spray_id = $1::uuid and origin = 'dispute' and status = 'open'`,
             [row.id, iso(nowMs)],
           );
           if (owedBack > 0) {
-            await issue(`SPRAY_DISPUTE_WON_REPAY: the dispute was won, but ${owedBack} kobo had already been recovered from payouts for it; repay the beneficiaries by hand`);
+            await outcomeIssue(`SPRAY_DISPUTE_WON_REPAY: the dispute was won, but ${owedBack} kobo had already been recovered from payouts for it; repay the beneficiaries by hand`);
             outcome = "needs_person";
           } else {
             outcome = "settled";
           }
+          acted = true;
         } else {
           // Won on a spray that was never delivered AND never refunded (disputed straight from created / pending / paid /
           // failed): the payer paid for nothing.
-          await issue("SPRAY_DISPUTE_WON_UNDELIVERED: the dispute was won, but the spray was never delivered or refunded; refund the payer by hand or record why not (clawbacks stay open)");
+          await outcomeIssue("SPRAY_DISPUTE_WON_UNDELIVERED: the dispute was won, but the spray was never delivered or refunded; refund the payer by hand or record why not (clawbacks stay open)");
           outcome = "needs_person";
+          acted = true;
         }
       }
     } else {
-      await issue(`SPRAY_DISPUTE_RESOLVED_UNEXPECTED: a dispute was resolved on a spray in status ${row.status}; check it in Paystack`);
+      await noteIssue(`SPRAY_DISPUTE_RESOLVED_UNEXPECTED: a dispute was resolved on a spray in status ${row.status}; check it in Paystack`);
       outcome = "needs_person";
+    }
+    // Review r5 I2: the dispute issue is closed only when this event actually decided something.
+    if (acted) {
+      await c.query(
+        `update payment_issues set resolved_at = $2::timestamp where provider_payment_id = $1 and reason = 'dispute' and resolved_at is null`,
+        [reference, iso(nowMs)],
+      );
     }
     await c.query("COMMIT");
   } catch (e) {
     await c.query("ROLLBACK").catch(() => {});
     throw e;
   }
-  console.error(`[rooms:spray] ALERT dispute resolved ref=${sprayReferenceForLog(reference)} outcome=${outcome}`);
+  console.error(`[rooms:spray] ALERT dispute resolved ref=${sprayReferenceForLog(reference)} outcome=${outcome} resolution=${resolution || "?"} owed_back_kobo=${owedBack}`);
   return outcome;
 }
 
