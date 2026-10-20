@@ -5160,9 +5160,12 @@ export class DbStorage implements IStorage {
     if (filters.currency) conds.push(eq(paymentTransactions.currency, filters.currency));
     const where = conds.length ? and(...conds) : undefined;
 
+    // Chargebacks are split by outcome (review r5 m4): open ones stay "chargeback", resolved ones are counted as
+    // "chargeback_won" / "chargeback_lost", so a won dispute is never summed with a lost one.
+    const typeKey = sql<string>`case when ${paymentTransactions.type} = 'chargeback' and ${paymentTransactions.status} in ('chargeback_won', 'chargeback_lost') then ${paymentTransactions.status} else ${paymentTransactions.type} end`;
     const rows = await db
       .select({
-        type: paymentTransactions.type,
+        type: typeKey,
         currency: paymentTransactions.currency,
         count: sql<number>`count(*)::int`,
         grossAmount: sql<number>`coalesce(sum(${paymentTransactions.grossAmount}), 0)::int`,
@@ -5171,8 +5174,8 @@ export class DbStorage implements IStorage {
       })
       .from(paymentTransactions)
       .where(where)
-      .groupBy(paymentTransactions.type, paymentTransactions.currency)
-      .orderBy(paymentTransactions.type, paymentTransactions.currency);
+      .groupBy(typeKey, paymentTransactions.currency)
+      .orderBy(typeKey, paymentTransactions.currency);
 
     return rows.map(r => ({
       type: r.type,

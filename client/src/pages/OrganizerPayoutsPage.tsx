@@ -36,7 +36,33 @@ const TRANSACTION_TYPE_LABELS: Record<string, string> = {
   event_promotion: "Event promotion",
   venue_promotion: "Venue promotion",
   refund: "Refund",
+  room_ticket: "Room ticket sale",
+  room_ticket_refund: "Room ticket refund",
+  room_payout: "Room payout",
+  room_payout_reversal: "Room payout reversed",
+  spray: "Spray received",
+  spray_refund: "Spray refunded",
+  chargeback: "Chargeback",
 };
+
+/**
+ * The note shown after a non-succeeded row (review r5 m4). A chargeback row is never "refund failed": it reads disputed,
+ * dispute won or dispute lost. Unknown statuses are shown as words, never guessed.
+ */
+export function transactionStatusNote(tx: { type: string; status: string }): string | null {
+  if (tx.status === "succeeded") return null;
+  if (tx.type === "chargeback") {
+    return tx.status === "chargeback_won" ? "dispute won" : tx.status === "chargeback_lost" ? "dispute lost" : "disputed";
+  }
+  if (tx.status === "refunded") return "refunded";
+  if (tx.status === "refund_failed") return "refund failed";
+  return tx.status.replace(/_/g, " ");
+}
+
+/** Money that left the organizer (shown red with a minus): refunds, and chargebacks not won. */
+export function transactionIsDebit(tx: { type: string; status: string }): boolean {
+  return tx.type === "refund" || (tx.type === "chargeback" && tx.status !== "chargeback_won");
+}
 
 export default function OrganizerPayoutsPage() {
   const { toast } = useToast();
@@ -305,9 +331,9 @@ export default function OrganizerPayoutsPage() {
                     <div className="min-w-0">
                       <p className="font-medium truncate">
                         {TRANSACTION_TYPE_LABELS[tx.type] ?? tx.type}
-                        {tx.status !== "succeeded" && (
+                        {transactionStatusNote(tx) && (
                           <span className="ml-2 text-xs text-muted-foreground">
-                            ({tx.status === "refunded" ? "refunded" : "refund failed"})
+                            ({transactionStatusNote(tx)})
                           </span>
                         )}
                       </p>
@@ -315,8 +341,8 @@ export default function OrganizerPayoutsPage() {
                         {format(new Date(tx.createdAt), "MMM d, yyyy")} · {tx.provider === "stripe" ? "Stripe" : tx.provider === "paystack" ? "Paystack" : "Free"}
                       </p>
                     </div>
-                    <p className={`font-semibold flex-shrink-0 ${tx.type === "refund" ? "text-red-500" : "text-emerald-600 dark:text-emerald-400"}`}>
-                      {tx.type === "refund" ? "-" : ""}{formatMoney(tx.netToOrganizerAmount, tx.currency)}
+                    <p className={`font-semibold flex-shrink-0 ${transactionIsDebit(tx) ? "text-red-500" : tx.type === "chargeback" ? "text-muted-foreground" : "text-emerald-600 dark:text-emerald-400"}`}>
+                      {transactionIsDebit(tx) ? "-" : ""}{formatMoney(tx.netToOrganizerAmount, tx.currency)}
                     </p>
                   </div>
                 ))}

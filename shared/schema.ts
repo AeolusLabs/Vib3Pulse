@@ -2198,7 +2198,9 @@ export const paymentTransactionTypes = [
 ] as const;
 export type PaymentTransactionType = typeof paymentTransactionTypes[number];
 
-export const paymentTransactionStatuses = ["succeeded", "refunded", "refund_failed"] as const;
+// disputed / chargeback_won / chargeback_lost: a `chargeback` row (spraying, server/rooms/clawbacks.ts) while the dispute
+// runs, and once Paystack resolves it (flipped once, by code). Column is free text (no DB CHECK); this list is the TS truth.
+export const paymentTransactionStatuses = ["succeeded", "refunded", "refund_failed", "disputed", "chargeback_won", "chargeback_lost"] as const;
 export type PaymentTransactionStatus = typeof paymentTransactionStatuses[number];
 
 export const paymentTransactions = pgTable("payment_transactions", {
