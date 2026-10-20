@@ -188,7 +188,9 @@ test("split rows: failed payouts get a needs-attention line, never 'on its way o
   assert.ok(ev.includes("money(e.split.sprayDirectKobo)"), "the spray row is the server's earned direct shares (returned ones are not in it)");
   assert.ok(!ev.includes("sprayKeptKobo"));
   assert.ok(ev.includes("e.split && e.split.needsAttentionKobo > 0") && ev.includes('data-testid="earnings-needs-attention"'));
-  assert.ok(ev.includes('data-testid="earnings-spray-returned"') && ev.includes('data-testid="earnings-ticket-sending"'));
+  // the rows pass testId to Row, which renders it as data-testid
+  assert.ok(ev.includes("data-testid={testId}"));
+  assert.ok(ev.includes('testId="earnings-spray-returned"') && ev.includes('testId="earnings-ticket-sending"'));
   const sprayRow = ev.slice(ev.indexOf("{e.split ? ("), ev.indexOf('testId="earnings-spray-direct"'));
   assert.ok(!sprayRow.includes("onItsWayKobo") && !sprayRow.includes("needsAttention"), "failed payouts never sit in the spray row");
   assert.ok(/needs attention/i.test(EARNINGS_COPY.needsAttention) && !/next business day/.test(EARNINGS_COPY.sprayDirectLong + EARNINGS_COPY.sprayDirectLongHelp));
@@ -296,7 +298,10 @@ test("fixture: wired into the dev-only room fixture, fake fetch before children 
   const fx = src("../client/src/pages/dev/RoomFixture.tsx");
   assert.ok(fx.includes("parseEarnFixture(window.location.search)") && fx.includes("<EarningsFixture"));
   const ef = src("../client/src/pages/dev/EarningsFixture.tsx");
-  assert.ok(/useLayoutEffect\(\(\) => \{\s*const real = window\.fetch/.test(ef));
+  // the fake fetch is installed inside the layout effect (stale cache entries are dropped first, in the same effect)
+  const layout = ef.slice(ef.indexOf("useLayoutEffect(() => {"));
+  assert.ok(ef.includes("useLayoutEffect(() => {") && /^useLayoutEffect\(\(\) => \{[^]*?const real = window\.fetch/.test(layout));
+  assert.ok(!/useEffect\(|\n  \}, \[/.test(layout.slice(0, layout.indexOf("const real = window.fetch"))), "nothing between the layout effect's start and the fake fetch leaves the effect");
   for (const p of ["/api/rooms/config", "/api/rooms/payouts/status", "/api/rooms/payouts/banks", "/api/rooms/payouts/account", "/api/users/me/room-earnings", "/api/users/me/room-payments", "/api/csrf-token"]) assert.ok(ef.includes(p), p);
   assert.ok(ef.includes("removeQueries"));
   const app = src("../client/src/App.tsx");

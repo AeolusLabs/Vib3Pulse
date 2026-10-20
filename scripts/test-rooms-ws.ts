@@ -477,21 +477,29 @@ try {
     await endRoom(VR.id);
     check("ending the room deletes the LiveKit session", logOf("delete", VR.id).length > before);
 
-    // teens: speak only when everyone present is a teen; an adult joining takes teen speakers off the stage
-    const TH = await mk("sg_teenhost", yearsAgo(16)), T1 = await mk("sg_t1", yearsAgo(15)), T2 = await mk("sg_t2", yearsAgo(14)), AD = await mk("sg_adult", yearsAgo(30));
-    const TR = await liveRoom(TH, { title: "teens", visibility: "public", ageLimit: "all" }); await rs.setVoiceEnabled(TR.id, true);
+    // teens in an ORDINARY (adult-hosted, all ages) room: speak only when everyone present is a teen; an adult joining takes
+    // teen speakers off the stage. A teen-hosted room is a minors' room, where teens always keep the mic and adults only listen
+    // (that rule is tested in test-rooms-ws-minorsroom.ts), so the all-teen moment here is an adult host's room while the
+    // adult host is not connected (they never joined the socket, so no grace timer runs), run by a teen co-host.
+    const AH = await mk("sg_adulthost", yearsAgo(35));
+    const TH = await mk("sg_teenco", yearsAgo(16)), T1 = await mk("sg_t1", yearsAgo(15)), T2 = await mk("sg_t2", yearsAgo(14)), AD = await mk("sg_adult", yearsAgo(30));
+    const TR = await liveRoom(AH, { title: "teens", visibility: "public", ageLimit: "all" }); await rs.setVoiceEnabled(TR.id, true);
+    await rs.upsertMember(TR.id, TH, "cohost");
     const th = await connect(TH), t1 = await connect(T1), t2 = await connect(T2), ad = await connect(AD);
-    await join(th, TR.id); await join(t1, TR.id); await join(t2, TR.id);
+    const thState = await join(th, TR.id); await join(t1, TR.id); await join(t2, TR.id);
+    check("setup: an ordinary room (not a minors' room), the teen joins as co-host", thState?.you?.role === "cohost" && (await rs.getRoom(TR.id))?.minorsRoom === false && !roomHub.isMinorsRoom(TR.id), JSON.stringify(thState?.you));
     send(t1, "raise"); check("all-teen room: a teen can raise a hand", await stageNow(th, (s) => s.hands.includes(T1)));
-    send(th, "accept", T1); check("all-teen room: the teen host gives a teen the mic", await stageNow(th, (s) => s.stage.includes(T1)));
+    send(th, "accept", T1); check("all-teen room: the teen co-host gives a teen the mic", await stageNow(th, (s) => s.stage.includes(T1)));
     send(th, "accept", T2); await stageNow(th, (s) => s.stage.includes(T2));
-    await join(ad, TR.id);
+    const adState = await join(ad, TR.id);
+    check("setup: the adult is admitted to the ordinary room", adState?.type === "room:state", JSON.stringify(adState));
     check("an adult joins: the teen speakers come off the stage", await stageNow(th, (s) => s.stage.length === 0));
     check("...their LiveKit publish permission is revoked and the stage flag cleared", await until(async () => logOf("setCanPublish", TR.id, T1, false).length >= 1 && logOf("setCanPublish", TR.id, T2, false).length >= 1 && (await rs.listOnStage(TR.id)).length === 0));
     send(t2, "raise"); check("with an adult present a teen cannot raise a hand (NOT_ELIGIBLE)", await notice(t2, "NOT_ELIGIBLE"));
-    send(th, "accept", T2); check("...and the host cannot give a teen the mic (NOT_ELIGIBLE)", await notice(th, "NOT_ELIGIBLE"));
+    send(th, "accept", T2); check("...and the co-host cannot give a teen the mic (NOT_ELIGIBLE)", await notice(th, "NOT_ELIGIBLE"));
     send(ad, "raise"); check("the adult can raise a hand", await stageNow(th, (s) => s.hands.includes(AD)));
-    send(th, "accept", AD); check("...and the teen host can give the adult the mic", await stageNow(th, (s) => s.stage.includes(AD)));
+    send(th, "accept", AD); check("...and the teen co-host can give the adult the mic", await stageNow(th, (s) => s.stage.includes(AD)));
+    await endRoom(TR.id);
 
     // an age-limit raise sends a staged teen out of LiveKit as well
     const AR = await liveRoom(HV, { title: "age raise" }); await rs.setVoiceEnabled(AR.id, true);
@@ -639,17 +647,23 @@ try {
     check("room:state never carries anyone's age", !/"age"/.test(JSON.stringify(bstate)));
     roomHub.end(BR.id);
 
-    // teen host: publish follows the teen rule as adults come and go
-    const TH = await mk("rv_teenhost", yearsAgo(16)), T1 = await mk("rv_teen1", yearsAgo(15)), AD = await mk("rv_adult", yearsAgo(30));
-    const TR = await liveRoom(TH, { title: "teen host" }); await rs.setVoiceEnabled(TR.id, true);
+    // teen co-host in an ORDINARY room (adult host not connected): publish follows the teen rule as adults come and go.
+    // (A teen host's own room is a minors' room, where the teen host keeps the mic whoever arrives: test-rooms-ws-minorsroom.ts.)
+    const AH = await mk("rv_adulthost", yearsAgo(35));
+    const TH = await mk("rv_teenco", yearsAgo(16)), T1 = await mk("rv_teen1", yearsAgo(15)), AD = await mk("rv_adult", yearsAgo(30));
+    const TR = await liveRoom(AH, { title: "teen co-host" }); await rs.setVoiceEnabled(TR.id, true);
+    await rs.upsertMember(TR.id, TH, "cohost");
     const th = await connect(TH), t1 = await connect(T1), ad = await connect(AD);
-    await join(th, TR.id); await join(t1, TR.id);
+    const thState = await join(th, TR.id); await join(t1, TR.id);
+    check("setup: an ordinary room, the teen is co-host", thState?.you?.role === "cohost" && !roomHub.isMinorsRoom(TR.id), JSON.stringify(thState?.you));
     roomHub.get(TR.id, TH)!.publish = true; // what the token route records when a token is minted
     fake.calls.length = 0;
-    await join(ad, TR.id);
-    check("an adult arrives: the teen host's publish permission is revoked", await until(async () => logOf("setCanPublish", TR.id, TH, false).length >= 1));
+    const adState = await join(ad, TR.id);
+    check("setup: the adult is admitted", adState?.type === "room:state", JSON.stringify(adState));
+    check("an adult arrives: the teen co-host's publish permission is revoked", await until(async () => logOf("setCanPublish", TR.id, TH, false).length >= 1));
     ad.send({ type: "room:leave" }); await until(async () => roomHub.roomOf(AD) === null);
-    check("the adult leaves: the teen host's publish permission is restored", await until(async () => logOf("setCanPublish", TR.id, TH, true).length >= 1));
+    check("the adult leaves: the teen co-host's publish permission is restored", await until(async () => logOf("setCanPublish", TR.id, TH, true).length >= 1));
+    roomHub.end(TR.id);
 
     // last person out of a room also leaves LiveKit; a ban of someone who is not present removes them too
     const LH = await mk("rv_lastH"); const LR = await liveRoom(LH, { title: "last out" }); await rs.setVoiceEnabled(LR.id, true);
@@ -760,16 +774,23 @@ try {
     check("live: if taking the camera from the old holder fails, they are removed from LiveKit instead", await liveNow(fh, (l) => l.holder === FB) && await until(async () => fake.calls.some((c) => c.op === "remove" && c.userId === FA)));
     fake.failOn = null;
 
-    // the teen rule: an adult arriving takes the screen from a teen holder
-    const TH = await mk("lv_teenhost", yearsAgo(16)), T1 = await mk("lv_teen1", yearsAgo(15)), AD = await mk("lv_adult", yearsAgo(30));
-    const TR = await liveRoom(TH, { title: "teen live" }); await rs.setVoiceEnabled(TR.id, true); await rs.setLiveVideo(TR.id, true);
+    // the teen rule in an ORDINARY room (adult host not connected, a teen co-host runs it): an adult arriving takes the screen
+    // from a teen holder. (In a teen host's minors' room the teen keeps the screen: test-rooms-ws-minorsroom.ts.)
+    const AH = await mk("lv_adulthost", yearsAgo(35));
+    const TH = await mk("lv_teenco", yearsAgo(16)), T1 = await mk("lv_teen1", yearsAgo(15)), AD = await mk("lv_adult", yearsAgo(30));
+    const TR = await liveRoom(AH, { title: "teen live" }); await rs.setVoiceEnabled(TR.id, true); await rs.setLiveVideo(TR.id, true);
+    await rs.upsertMember(TR.id, TH, "cohost");
     const th = await connect(TH), t1 = await connect(T1), ad = await connect(AD);
-    await join(th, TR.id); await join(t1, TR.id);
+    const thState = await join(th, TR.id); await join(t1, TR.id);
+    check("live setup: an ordinary room, the teen is co-host", thState?.you?.role === "cohost" && !roomHub.isMinorsRoom(TR.id), JSON.stringify(thState?.you));
     sendStage(th, "accept", T1); await until(async () => roomHub.stageOf(TR.id).stage.includes(T1));
     sendLive(th, "grant", T1);
     check("live: an all-teen room lets a teen on stage hold the screen", await liveNow(th, (l) => l.holder === T1));
-    await join(ad, TR.id);
+    check("live: ...and LiveKit gives the teen holder the camera", await until(async () => !!calls(TR.id, T1).at(-1)?.camera));
+    const adState = await join(ad, TR.id);
+    check("live setup: the adult is admitted", adState?.type === "room:state", JSON.stringify(adState));
     check("live: an adult arriving clears the teen holder and takes the camera away", await liveNow(th, (l) => l.holder === null) && await until(async () => !calls(TR.id, T1).at(-1)!.camera));
+    roomHub.end(TR.id);
 
     // live video off for the room: asks and grants are refused
     const NH = await mk("lv_nolive"), NG = await mk("lv_noliveg"); const NR = await liveRoom(NH, { title: "voice only" }); await rs.setVoiceEnabled(NR.id, true);

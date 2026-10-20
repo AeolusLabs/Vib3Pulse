@@ -145,8 +145,8 @@ try {
   check("setup: CO made co-host", role.status === 200 && roomHub.get(R, CO)?.role === "cohost", JSON.stringify(role));
 
   // ---- pinned message exposure: viewers yes, lists no
-  const g = await rest("GET", `/api/rooms/${R}`, A);
-  check("GET /api/rooms/:id shows the pinned message to a viewer", g.status === 200 && g.json.room.pinnedMessage === "Welcome", JSON.stringify(g.json?.room));
+  const got = await rest("GET", `/api/rooms/${R}`, A);
+  check("GET /api/rooms/:id shows the pinned message to a viewer", got.status === 200 && got.json.room.pinnedMessage === "Welcome", JSON.stringify(got.json?.room));
   const list = await rest("GET", "/api/rooms?scope=live", A);
   const inList = (list.json?.rooms ?? []).find((r: any) => r.id === R);
   check("GET /api/rooms (list) never carries the pinned message, still shows slowModeSec/locked", !!inList && !("pinnedMessage" in inList) && inList.slowModeSec === 5 && inList.locked === false, JSON.stringify(inList));

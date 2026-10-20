@@ -204,9 +204,10 @@ test("sheets: a sheet opened from another sheet hands focus back to the top bar 
 
 // ---------------------------------------------------------------- dev fixture options
 test("fixture query: defaults, clamps and unknown values", () => {
-  assert.deepEqual(parseFixtureQuery(""), { scene: "voice", theme: "dark", as: "guest", sound: false, tap: false, invite: false, flood: 0 });
-  const o = parseFixtureQuery("?scene=weak&theme=light&as=holder&sound=1&tap=1&invite=1&flood=300");
-  assert.deepEqual(o, { scene: "weak", theme: "light", as: "holder", sound: true, tap: true, invite: true, flood: 300 });
+  assert.deepEqual(parseFixtureQuery(""), { scene: "voice", theme: "dark", as: "guest", sound: false, tap: false, invite: false, minors: null, flood: 0 });
+  const o = parseFixtureQuery("?scene=weak&theme=light&as=holder&sound=1&tap=1&invite=1&minors=listen&flood=300");
+  assert.deepEqual(o, { scene: "weak", theme: "light", as: "holder", sound: true, tap: true, invite: true, minors: "listen", flood: 300 });
+  assert.equal(parseFixtureQuery("?minors=bogus").minors, null); // phase 2 added the minors' room scenes
   assert.equal(parseFixtureQuery("?scene=nope&as=admin&flood=-4").scene, "voice");
   assert.equal(parseFixtureQuery("?as=admin").as, "guest");
   assert.equal(parseFixtureQuery("?flood=99999").flood, 1000);

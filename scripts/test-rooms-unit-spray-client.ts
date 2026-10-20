@@ -16,6 +16,8 @@ import {
 import { FIXTURE_SPRAY_KEY, fixtureSprayChatText, fixtureSprayStart, parseSprayFixture } from "../client/src/lib/sprayFixtures";
 
 const src = (rel: string) => readFileSync(new URL(rel, import.meta.url), "utf8");
+/** Source without block comments and whole-line or trailing `//` comments (a `//` inside a URL string is kept). */
+const stripComments = (s: string) => s.replace(/\/\*[^]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
 
 let passed = 0, failed = 0;
 function test(name: string, fn: () => void) {
@@ -169,7 +171,11 @@ test("machine: start makes an intent with the key; a bad key or tier is refused"
   const s = confirm();
   assert.equal(s.kind, "confirming");
   assert.equal(s.kind === "confirming" && s.intent.key, K1);
-  assert.equal(sprayFlow(IDLE, { type: "start", tier: "bundle", targetId: "host", key: K1.toUpperCase() }).kind, "idle");
+  // K1 is all digits, so its upper case is itself; an uppercase key needs hex letters to be a real test
+  const lettered = "abcdefab-cdef-4abc-8def-abcdefabcdef";
+  assert.equal(sprayFlow(IDLE, { type: "start", tier: "bundle", targetId: "host", key: lettered }).kind, "confirming");
+  assert.equal(sprayFlow(IDLE, { type: "start", tier: "bundle", targetId: "host", key: lettered.toUpperCase() }).kind, "idle");
+  assert.equal(sprayFlow(IDLE, { type: "start", tier: "bundle", targetId: "host", key: "not-a-key" }).kind, "idle");
   assert.equal(sprayFlow(IDLE, { type: "start", tier: "n20" as any, targetId: "host", key: K1 }).kind, "idle");
   assert.equal(sprayFlow(IDLE, { type: "start", tier: "note", targetId: "", key: K1 }).kind, "idle");
 });
@@ -618,7 +624,9 @@ test("source: the dock shows Spray only when given the spray prop; the shell giv
 });
 test("source: the client never sends an amount, split, currency, payer or reference", () => {
   const api = src("../client/src/lib/sprayApi.ts");
-  const body = api.slice(api.indexOf("export const postSpray"), api.indexOf("export const getSprayStatus"));
+  // code only: the doc comment of the next export ("the payer's own spray only") sits inside this slice
+  const body = stripComments(api.slice(api.indexOf("export const postSpray"), api.indexOf("export const getSprayStatus")));
+  assert.ok(body.includes("idempotencyKey") && body.includes("tier") && body.includes("targetId"), "the slice is the postSpray call");
   for (const word of ["amount", "kobo", "currency", "payer", "reference", "split"]) assert.ok(!new RegExp(word, "i").test(body.replace(/idempotencyKey/g, "")), word);
 });
 test("source: every attempt of an intent sends the intent's key; the bank link is noopener noreferrer", () => {
@@ -629,8 +637,10 @@ test("source: every attempt of an intent sends the intent's key; the bank link i
   assert.match(bank, /rel="noopener noreferrer"/);
 });
 test("source: effects never make a chat line, and the tray draws no naira sign in artwork", () => {
-  const fx = src("../client/src/components/rooms/spray/SprayEffects.tsx");
+  // code only: the file's header comment names room:chat to say the chat line is the server's own
+  const fx = stripComments(src("../client/src/components/rooms/spray/SprayEffects.tsx"));
   assert.ok(!fx.includes("room:chat"));
+  assert.ok(!/\bsend\(|socket|\bws\./.test(fx), "effects never touch the socket (the thank-you is the viewer's own tap through a prop)");
   const tray = src("../client/src/components/rooms/spray/SprayTray.tsx");
   assert.ok(!tray.includes("₦"));
 });
