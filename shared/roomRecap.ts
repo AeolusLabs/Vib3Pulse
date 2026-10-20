@@ -3,10 +3,13 @@
 
 /** What every member sees about their own visit. */
 export interface GuestRecap {
-  /** Whole minutes this viewer spent in the room, over every visit, never more than the room lasted. */
-  minutesIn: number;
-  /** Chat lines this viewer sent. */
-  messages: number;
+  /**
+   * Whole minutes this viewer spent in the room, over every visit, never more than the room lasted. null when the room
+   * ended before tracking existed (review r2 I5): never a false 0.
+   */
+  minutesIn: number | null;
+  /** Chat lines this viewer sent (a lower bound: counts are batched); null when not tracked (as minutesIn). */
+  messages: number | null;
   /** The host's next scheduled room this viewer may see, or null. */
   next: { roomId: string; scheduledFor: string } | null;
   /** The viewer already follows the host (false for the host themselves). */
@@ -37,6 +40,8 @@ export interface RoomRecapResponse {
   host: { id: string; username: string | null; displayName: string | null; organizationName: string | null; avatarUrl: string | null } | null;
   isHost: boolean;
   recap: RoomRecap;
+  /** Only on the admin read path (GET /api/admin/rooms/:id/recap): the recap is the host's view. */
+  adminView?: true;
 }
 
 const int0 = (n: unknown): number => (typeof n === "number" && Number.isFinite(n) && n > 0 ? Math.floor(n) : 0);
@@ -47,8 +52,8 @@ const int0 = (n: unknown): number => (typeof n === "number" && Number.isFinite(n
  */
 export function shapeRecap(all: GuestRecap & HostRecapExtras, isHost: boolean): RoomRecap {
   const guest: GuestRecap = {
-    minutesIn: int0(all.minutesIn),
-    messages: int0(all.messages),
+    minutesIn: all.minutesIn === null ? null : int0(all.minutesIn),
+    messages: all.messages === null ? null : int0(all.messages),
     next: all.next ? { roomId: all.next.roomId, scheduledFor: all.next.scheduledFor } : null,
     follow: isHost ? false : all.follow === true,
   };

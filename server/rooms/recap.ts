@@ -5,12 +5,20 @@
 //    started has nothing to recap;
 //  - the host, or a member who really joined it (a room_members row whose joined_at is not NEVER_JOINED; a row made only to
 //    ban someone before they arrived does not count), who is not banned from it and not blocked either way with the host.
+//  - (fix round) the room is not taken down by moderation (moderation_status 'approved'); an admin still reads it.
+// Owner decision (fix round): the host and the people who actually took part, NOTHING else; plus an ADMIN read path
+// (GET /api/admin/rooms/:id/recap, admin session + role, audited) that returns the host's view.
 // What it shows: only the viewer's own numbers, the host's public summary (shown in the room already) and the host's next
 // room if the viewer may see it. No other member's identity, ever. Host-only numbers are added by shapeRecap only for the
-// host. earnedKobo comes from stored rows only (paid tickets' host_kobo + delivered sprays' host_kobo for this host).
+// host. earnedKobo comes from stored rows only, with the Earnings page's rule: paid tickets' host_kobo + the host's share of
+// sprays delivered in the room (delivered, or delivered then disputed).
+// Rooms that ended before tracking existed (peak_members IS NULL, review r2 I5) answer minutesIn / messages / peak as null:
+// the counters were never recorded for them, so no number is shown rather than a false 0.
 import type { Express } from "express";
 import { pool, storage } from "../storage";
 import { requireAuth } from "../middleware";
+import { requireRole } from "../services/adminSecurity";
+import { roomLimiter } from "../security";
 import { isBlockedEitherWay } from "../utils/blocks";
 import { liveMinutes, minutesInRoom, shapeRecap, type RoomRecapResponse } from "@shared/roomRecap";
 import type { Room } from "@shared/schema";
@@ -46,7 +54,8 @@ async function hostNumbers(room: Room): Promise<{ ticketsSold: number; earnedKob
     [room.id],
   )).rows[0] as { n: number; kobo: string };
   const s = (await pool.query(
-    `select coalesce(sum(host_kobo), 0)::bigint as kobo from spray_payments where room_id = $1 and host_id = $2 and status = 'delivered'`,
+    `select coalesce(sum(host_kobo), 0)::bigint as kobo from spray_payments
+      where room_id = $1 and host_id = $2 and delivered_at is not null and status in ('delivered', 'disputed')`,
     [room.id, room.hostId],
   )).rows[0] as { kobo: string };
   let followersGained: number | null = null;
@@ -64,11 +73,16 @@ async function hostNumbers(room: Room): Promise<{ ticketsSold: number; earnedKob
   return { ticketsSold: Number(t?.n ?? 0), earnedKobo: Number(t?.kobo ?? 0) + Number(s?.kobo ?? 0), followersGained };
 }
 
-/** The recap for this viewer, or null (the route answers 404 for every null). */
-export async function buildRecap(roomId: string, viewerId: string, nowMs = Date.now()): Promise<RoomRecapResponse | null> {
+/**
+ * The recap for this viewer, or null (the route answers 404 for every null). opts.admin: the admin read path; the viewer is
+ * then the host (the answer is exactly the host's view) and a room taken down by moderation is still readable.
+ */
+export async function buildRecap(roomId: string, viewerIdIn: string, nowMs = Date.now(), opts: { admin?: boolean } = {}): Promise<RoomRecapResponse | null> {
   if (typeof roomId !== "string" || !ID_SHAPE.test(roomId)) return null;
   const room = await rs.getRoom(roomId);
   if (!room || room.status !== "ended" || !room.startedAt) return null;
+  if (!opts.admin && room.moderationStatus !== "approved") return null; // review r2 m4: taken down = no recap
+  const viewerId = opts.admin ? room.hostId : viewerIdIn;
   const isHost = room.hostId === viewerId;
   const member = await rs.getMember(roomId, viewerId);
   if (!isHost) {
@@ -90,8 +104,10 @@ export async function buildRecap(roomId: string, viewerId: string, nowMs = Date.
       : pool.query(`select 1 from follows where follower_id = $1 and following_id = $2 limit 1`, [viewerId, room.hostId]).then((r) => (r.rowCount ?? 0) > 0),
     isHost ? hostNumbers(room) : Promise.resolve({ ticketsSold: 0, earnedKobo: 0, followersGained: null as number | null }),
   ]);
+  // Not tracked (ended before the counters existed): null, never a false 0.
+  const tracked = room.peakMembers !== null && room.peakMembers !== undefined;
   const recap = shapeRecap({
-    minutesIn, messages: realVisit ? member!.messagesSent ?? 0 : 0, next, follow: followsHost,
+    minutesIn: tracked ? minutesIn : null, messages: tracked ? (realVisit ? member!.messagesSent ?? 0 : 0) : null, next, follow: followsHost,
     minutes: roomMinutes, peak: room.peakMembers ?? null, ...extras,
   }, isHost);
   const h = host ? hostSummary(host) : null;
@@ -100,11 +116,12 @@ export async function buildRecap(roomId: string, viewerId: string, nowMs = Date.
     host: h ? { id: h.id, username: h.username ?? null, displayName: h.displayName ?? null, organizationName: h.organizationName ?? null, avatarUrl: h.avatarUrl ?? null } : null,
     isHost,
     recap,
+    ...(opts.admin ? { adminView: true as const } : {}),
   };
 }
 
 export function registerRoomRecapRoutes(app: Express): void {
-  app.get("/api/rooms/:id/recap", requireAuth, async (req, res) => {
+  app.get("/api/rooms/:id/recap", requireAuth, roomLimiter, async (req, res) => {
     try {
       const out = await buildRecap(req.params.id, req.user!.id);
       if (!out) return res.status(404).json({ message: "Room not found" });
@@ -113,6 +130,34 @@ export function registerRoomRecapRoutes(app: Express): void {
     } catch (e) {
       console.error("[rooms] recap failed:", req.params.id, e instanceof Error ? e.message : e);
       res.status(500).json({ message: "Couldn't load the recap" });
+    }
+  });
+}
+
+/**
+ * Admin read path (owner decision, fix round): the host's view of an ended room's recap, for moderation and support.
+ * The route (admin-routes.ts) runs behind the admin session and requireRole; this writes the audit row. null = 404.
+ */
+export async function adminRecap(a: { adminId: string; roomId: string; ip?: string }): Promise<RoomRecapResponse | null> {
+  const out = await buildRecap(a.roomId, "", Date.now(), { admin: true });
+  if (!out) return null;
+  await storage.logAdminActivity({
+    adminId: a.adminId, action: "room.recap_viewed", targetType: "room", targetId: out.room.id, details: "admin read the room recap", ipAddress: a.ip,
+  });
+  return out;
+}
+
+/** Registered by admin-routes.ts (after the admin session middleware). Moderator roles only; users never reach it. */
+export function registerRoomRecapAdminRoute(app: Express): void {
+  app.get("/api/admin/rooms/:id/recap", requireRole("super_admin", "content_moderator"), async (req, res) => {
+    try {
+      const out = await adminRecap({ adminId: req.session.adminId!, roomId: String(req.params.id ?? ""), ip: req.ip });
+      if (!out) return res.status(404).json({ message: "Room not found" });
+      res.setHeader("Cache-Control", "private, no-store");
+      res.json(out);
+    } catch (e) {
+      console.error("[ADMIN] room recap failed:", e instanceof Error ? e.message : e);
+      res.status(500).json({ message: "Failed to load the recap" });
     }
   });
 }
