@@ -68,6 +68,14 @@ const spray = async (roomId: string, hostId: string, payerId: string, tier: stri
   return { vat, fee, reserve, platform, host };
 };
 
+// A ticket row as the issuing code writes it (500,000 kobo price, stored split that adds up). daysAgo moves created_at (and refunded_at).
+const TICKET = { amount: 500000, vat: 34884, fee: 17500, reserve: 5000, platform: 66392, host: 376224 };
+const ticket = async (roomId: string, userId: string, status: "paid" | "refunded", daysAgo: number, refundReason: string | null = null) => {
+  await q(`insert into room_tickets (room_id, user_id, amount_kobo, vat_kobo, fee_kobo, reserve_kobo, platform_kobo, host_kobo, provider, provider_ref, status, created_at, refund_reason, refunded_at)
+    values ($1,$2,$3,$4,$5,$6,$7,$8,'paystack',$9,$10, now() - ($11::int * interval '1 day'), $12, case when $10 = 'refunded' then now() - ($11::int * interval '1 day') end)`,
+    [roomId, userId, TICKET.amount, TICKET.vat, TICKET.fee, TICKET.reserve, TICKET.platform, TICKET.host, `vib3rt_as${stamp}${++seq}`, status, daysAgo, refundReason]);
+};
+
 try {
   const SA = await mkAdmin("super_admin"), FIN = await mkAdmin("finance_manager"), MOD = await mkAdmin("content_moderator"), SUP = await mkAdmin("user_support");
   const day = (n: number) => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
@@ -75,6 +83,7 @@ try {
   // Other suites share this database, so everything below is a before/after difference or looks up its own ids.
   const before = (await get(`/api/admin/rooms/sprays?${range}`, FIN)).json;
   const ovBefore = (await get(`/api/admin/rooms/overview?${range}`, FIN)).json;
+  const tkBefore = (await get(`/api/admin/rooms/tickets?${range}`, FIN)).json;
   const H = await mk("host"), H2 = await mk("host2"), P1 = await mk("p1"), P2 = await mk("p2");
   const live = await mkRoom(H, "as live room", { status: "live", startedDaysAgo: 0, peak: 7, price: 500000 });
   const ended = await mkRoom(H, "as ended room", { status: "ended", startedDaysAgo: 2, peak: 12 });
@@ -89,6 +98,43 @@ try {
   await spray(live, H, P1, "note", 50000, "delivered", 35); // previous period (before day(30))
   await spray(live, H, P2, "note", 70000, "reversed", 0);
   await spray(live, H, P1, "note", 50000, "pending", 0);
+
+  // tickets: 4 paid in range (2 in the live room today, 1 in the ended room 2 days ago, 1 in the frozen host's live room today),
+  // 1 refunded and 1 auto-refused charge today (excluded everywhere), 1 paid 35 days ago (previous period)
+  const [B1, B2, B3, B4] = [await mk("b1"), await mk("b2"), await mk("b3"), await mk("b4")];
+  await ticket(live, B1, "paid", 0); await ticket(live, B2, "paid", 0); await ticket(ended, B1, "paid", 2); await ticket(live2, B4, "paid", 0);
+  await ticket(live, B3, "refunded", 0);
+  await ticket(live, B4, "refunded", 0, "auto_sold_out");
+  await ticket(ended, B2, "paid", 35);
+
+  // ---- ticket sales
+  const tk = await get(`/api/admin/rooms/tickets?${range}`, FIN);
+  const tt = tk.json?.totals;
+  const td = (k: string) => (tt?.[k] ?? 0) - (tkBefore.totals[k] ?? 0);
+  check("tickets: totals count only paid tickets in the range", tk.status === 200 && td("count") === 4 && td("grossKobo") === 4 * TICKET.amount, JSON.stringify(tk.json));
+  check("tickets: vat, fee, reserve, platform and host sums come from the stored rows", td("vatKobo") === 4 * TICKET.vat && td("feeKobo") === 4 * TICKET.fee && td("reserveKobo") === 4 * TICKET.reserve
+    && td("platformKobo") === 4 * TICKET.platform && td("hostKobo") === 4 * TICKET.host, JSON.stringify(tt));
+  check("tickets: the parts add up to the gross", td("vatKobo") + td("feeKobo") + td("reserveKobo") + td("platformKobo") + td("hostKobo") === td("grossKobo"));
+  check("tickets: one refunded ticket counted, the auto-refused charge is nowhere", td("refundedCount") === 1 && td("refundedKobo") === TICKET.amount, JSON.stringify(tt));
+  check("tickets: uniqueBuyers counts distinct paying people (B1, B2, B4)", tk.json?.uniqueBuyers - tkBefore.uniqueBuyers === 3, JSON.stringify([tkBefore.uniqueBuyers, tk.json?.uniqueBuyers]));
+  const tp = tk.json?.previous, tpb = tkBefore.previous;
+  check("tickets: previous is the same-length window before the range (count, gross, buyers, refunded)", tp && tp.count - tpb.count === 1 && tp.grossKobo - tpb.grossKobo === TICKET.amount && tp.uniqueBuyers - tpb.uniqueBuyers === 1 && typeof tp.refundedKobo === "number", JSON.stringify([tpb, tp]));
+  const tday = (j: any, k: string) => (j.byDay ?? []).find((x: any) => x.day === k) ?? { count: 0, grossKobo: 0 };
+  check("tickets: byDay buckets by UTC day", tday(tk.json, day(0)).count - tday(tkBefore, day(0)).count === 3 && tday(tk.json, day(2)).count - tday(tkBefore, day(2)).count === 1
+    && tday(tk.json, day(0)).grossKobo - tday(tkBefore, day(0)).grossKobo === 3 * TICKET.amount, JSON.stringify(tk.json?.byDay));
+  const ticketRoom = (tk.json?.topRooms ?? []).find((r: any) => r.roomId === live);
+  check("tickets: topRooms lists the room with its title and ticket total", ticketRoom?.title === "as live room" && ticketRoom.count === 2 && ticketRoom.grossKobo === 2 * TICKET.amount, JSON.stringify(tk.json?.topRooms));
+  const th1 = (tk.json?.topHosts ?? []).find((h: any) => h.hostId === H), th2 = (tk.json?.topHosts ?? []).find((h: any) => h.hostId === H2);
+  check("tickets: topHosts lists both hosts with usernames and totals, ordered by gross", th1?.count === 3 && th1.grossKobo === 3 * TICKET.amount && th1.username.startsWith("as_host") && th2?.count === 1
+    && (tk.json.topHosts as any[]).every((h, i, a) => i === 0 || a[i - 1].grossKobo >= h.grossKobo), JSON.stringify(tk.json?.topHosts));
+  const tkEmpty = await get(`/api/admin/rooms/tickets?from=2020-01-01&to=2020-01-31`, FIN);
+  const refundOnly = await get(`/api/admin/rooms/tickets?${range}`, FIN);
+  check("tickets: refunded tickets never count as sales (the refunded one adds no gross, count or buyer)", td("count") === 4 && refundOnly.json.uniqueBuyers - tkBefore.uniqueBuyers === 3);
+  check("tickets: an empty range is zeros and empty lists", tkEmpty.status === 200 && tkEmpty.json.totals.count === 0 && tkEmpty.json.totals.refundedCount === 0 && tkEmpty.json.uniqueBuyers === 0 && tkEmpty.json.byDay.length === 0 && tkEmpty.json.topHosts.length === 0, JSON.stringify(tkEmpty.json));
+  check("tickets: an inverted range and a junk date are 400 BAD_RANGE", (await get(`/api/admin/rooms/tickets?from=${day(0)}&to=${day(5)}`, FIN)).json?.code === "BAD_RANGE" && (await get(`/api/admin/rooms/tickets?from=nope`, FIN)).json?.code === "BAD_RANGE");
+  check("tickets: a range over 366 days is 400 BAD_RANGE", (await get(`/api/admin/rooms/tickets?from=2020-01-01&to=2021-06-01`, FIN)).status === 400);
+  check("tickets: super_admin allowed, content_moderator and user_support 403, signed out 401", (await get(`/api/admin/rooms/tickets?${range}`, SA)).status === 200 && (await get(`/api/admin/rooms/tickets?${range}`, MOD)).status === 403
+    && (await get(`/api/admin/rooms/tickets?${range}`, SUP)).status === 403 && (await get(`/api/admin/rooms/tickets?${range}`, null)).status === 401);
 
   // ---- live rooms
   const lv = await get("/api/admin/rooms/live", MOD);
@@ -140,6 +186,7 @@ try {
   check("overview: an empty range is zeros (peak 0), never null or an error", ovEmpty.status === 200 && ovEmpty.json.roomsCreated === 0 && ovEmpty.json.peakConcurrent === 0 && ovEmpty.json.uniqueHosts === 0, JSON.stringify(ovEmpty.json));
   check("overview: a moderator is 403", (await get(`/api/admin/rooms/overview?${range}`, MOD)).status === 403);
 } finally {
+  await q(`delete from room_tickets where room_id = any($1)`, [madeRooms]).catch(() => {});
   await q(`delete from spray_payments where room_id = any($1)`, [madeRooms]).catch(() => {});
   await q(`delete from room_host_freezes where host_id = any($1)`, [madeUsers]).catch(() => {});
   await q(`delete from rooms where id = any($1)`, [madeRooms]).catch((e) => console.log(`(cleanup rooms failed: ${e.message})`));

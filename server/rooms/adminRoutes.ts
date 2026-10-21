@@ -5,7 +5,7 @@ import type { Express, Request, Response } from "express";
 import { z } from "zod";
 import { pool, storage } from "../storage";
 import { requireRole } from "../services/adminSecurity";
-import { listLiveRooms, parseRange, roomsOverview, sprayBreakdown } from "./adminStats";
+import { listLiveRooms, parseRange, roomsOverview, sprayBreakdown, ticketSalesBreakdown } from "./adminStats";
 import { CONTROL_KEYS, freezeHost, getControl, listFrozenHosts, setControl, unfreezeHost, type ControlKey } from "./roomControls";
 import { adminHoldAllPayoutsForHost } from "./settlement";
 import { adminEndRoom } from "./roomAdmin";
@@ -54,6 +54,17 @@ export function registerRoomsAdminRoutes(app: Express): void {
     } catch (e) {
       console.error("[ADMIN] spray breakdown failed:", (e as Error)?.message);
       res.status(500).json({ message: "Failed to load the spray breakdown" });
+    }
+  });
+
+  app.get("/api/admin/rooms/tickets", requireRole(...FINANCE), async (req: Request, res: Response) => {
+    const range = parseRange({ from: req.query.from, to: req.query.to });
+    if (!range) return res.status(400).json({ message: "Pick a valid date range of at most 366 days.", code: "BAD_RANGE" });
+    try {
+      res.json(await ticketSalesBreakdown(range));
+    } catch (e) {
+      console.error("[ADMIN] ticket sales breakdown failed:", (e as Error)?.message);
+      res.status(500).json({ message: "Failed to load the ticket sales" });
     }
   });
 

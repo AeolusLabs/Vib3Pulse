@@ -147,3 +147,64 @@ export async function sprayBreakdown(range: Range): Promise<SprayBreakdown> {
     topHosts: (hosts.rows as any[]).map((r) => ({ hostId: r.host_id, username: r.username, count: r.c, grossKobo: n(r.gross) })),
   };
 }
+
+export interface TicketSales {
+  totals: { count: number; grossKobo: number; vatKobo: number; feeKobo: number; reserveKobo: number; platformKobo: number; hostKobo: number; refundedCount: number; refundedKobo: number };
+  /** Distinct paying people with a paid ticket in the range. */
+  uniqueBuyers: number;
+  /** The same-length window just before the range, for "vs previous period" deltas. */
+  previous: { count: number; grossKobo: number; uniqueBuyers: number; refundedKobo: number };
+  byDay: { day: string; count: number; grossKobo: number }[];
+  topRooms: { roomId: string; title: string; count: number; grossKobo: number }[];
+  topHosts: { hostId: string; username: string; count: number; grossKobo: number }[];
+}
+
+/**
+ * Ticket sales from the stored split on each room_tickets row. A sale is a paid ticket by created_at; a refund is a refunded ticket
+ * by refunded_at. Refused charges (refund_reason starting 'auto_': the buyer never got a ticket) are never a sale and never a refund.
+ */
+export async function ticketSalesBreakdown(range: Range): Promise<TicketSales> {
+  const p = [range.from, range.to];
+  const prev = previousRange(range);
+  const pp = [prev.from, prev.to];
+  const real = `coalesce(left(refund_reason, 5), '') <> 'auto_'`;
+  const sold = `status = 'paid' and ${real} and created_at >= $1 and created_at < $2`;
+  const refundedWhere = `status = 'refunded' and ${real} and refunded_at >= $1 and refunded_at < $2`;
+  const n = (v: unknown) => Number(v ?? 0);
+  const [tot, refunded, day, rooms, hosts, prevTot, prevRefunded] = await Promise.all([
+    pool.query(
+      `select count(*)::int as c, count(distinct user_id)::int as buyers, coalesce(sum(amount_kobo),0)::bigint as gross, coalesce(sum(vat_kobo),0)::bigint as vat,
+              coalesce(sum(fee_kobo),0)::bigint as fee, coalesce(sum(reserve_kobo),0)::bigint as reserve, coalesce(sum(platform_kobo),0)::bigint as platform,
+              coalesce(sum(host_kobo),0)::bigint as host
+         from room_tickets where ${sold}`, p),
+    pool.query(`select count(*)::int as c, coalesce(sum(amount_kobo),0)::bigint as k from room_tickets where ${refundedWhere}`, p),
+    pool.query(
+      `select to_char(created_at at time zone 'UTC', 'YYYY-MM-DD') as d, count(*)::int as c, sum(amount_kobo)::bigint as gross
+         from room_tickets where ${sold} group by 1 order by 1`, p),
+    pool.query(
+      `select t.room_id, r.title, count(*)::int as c, sum(t.amount_kobo)::bigint as gross
+         from room_tickets t join rooms r on r.id = t.room_id
+        where t.status = 'paid' and coalesce(left(t.refund_reason, 5), '') <> 'auto_' and t.created_at >= $1 and t.created_at < $2
+        group by t.room_id, r.title order by gross desc limit 10`, p),
+    pool.query(
+      `select r.host_id, u.username, count(*)::int as c, sum(t.amount_kobo)::bigint as gross
+         from room_tickets t join rooms r on r.id = t.room_id join users u on u.id = r.host_id
+        where t.status = 'paid' and coalesce(left(t.refund_reason, 5), '') <> 'auto_' and t.created_at >= $1 and t.created_at < $2
+        group by r.host_id, u.username order by gross desc limit 10`, p),
+    pool.query(`select count(*)::int as c, count(distinct user_id)::int as buyers, coalesce(sum(amount_kobo),0)::bigint as gross from room_tickets where ${sold}`, pp),
+    pool.query(`select coalesce(sum(amount_kobo),0)::bigint as k from room_tickets where ${refundedWhere}`, pp),
+  ]);
+  const t0 = tot.rows[0] as Record<string, unknown>;
+  const pt = prevTot.rows[0] as { c: number; buyers: number; gross: unknown };
+  return {
+    totals: {
+      count: n(t0.c), grossKobo: n(t0.gross), vatKobo: n(t0.vat), feeKobo: n(t0.fee), reserveKobo: n(t0.reserve), platformKobo: n(t0.platform), hostKobo: n(t0.host),
+      refundedCount: n((refunded.rows[0] as { c: unknown }).c), refundedKobo: n((refunded.rows[0] as { k: unknown }).k),
+    },
+    uniqueBuyers: n(t0.buyers),
+    previous: { count: pt.c, grossKobo: n(pt.gross), uniqueBuyers: pt.buyers, refundedKobo: n((prevRefunded.rows[0] as { k: unknown }).k) },
+    byDay: (day.rows as any[]).map((r) => ({ day: r.d, count: r.c, grossKobo: n(r.gross) })),
+    topRooms: (rooms.rows as any[]).map((r) => ({ roomId: r.room_id, title: r.title, count: r.c, grossKobo: n(r.gross) })),
+    topHosts: (hosts.rows as any[]).map((r) => ({ hostId: r.host_id, username: r.username, count: r.c, grossKobo: n(r.gross) })),
+  };
+}
