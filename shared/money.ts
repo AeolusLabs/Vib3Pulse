@@ -26,6 +26,23 @@ export function isSprayTier(x: unknown): x is SprayTier {
   return typeof x === "string" && (SPRAY_TIERS as readonly string[]).includes(x);
 }
 
+// ---------------------------------------------------------------- gaming: team spray (owner decision 2026-10-22)
+/**
+ * The smallest team spray: MIN_CHARGE_KOBO (500 naira) for each player on the team now, so every equal share is at least the
+ * 500 naira minimum (a team of 2 is 100,000 kobo). Throws RangeError for anything but a whole number of players from 1.
+ */
+export function teamSprayMinimumKobo(players: number): number {
+  if (!Number.isSafeInteger(players) || players < 1) throw new RangeError(`a team spray needs at least one player, got ${players}`);
+  return MIN_CHARGE_KOBO * players;
+}
+
+/** The tiers a team of this size may be sprayed with: those at or above teamSprayMinimumKobo. None for an empty team. */
+export function teamSprayTiers(players: number): SprayTier[] {
+  if (!Number.isSafeInteger(players) || players < 1) return [];
+  const min = teamSprayMinimumKobo(players);
+  return SPRAY_TIERS.filter((t) => SPRAY_CATALOGUE[t].kobo >= min);
+}
+
 /** Throws RangeError unless `kobo` is a safe integer of at least MIN_CHARGE_KOBO. Call it before any real charge. */
 export function assertChargeable(kobo: number): void {
   if (!Number.isSafeInteger(kobo) || kobo < MIN_CHARGE_KOBO) {
