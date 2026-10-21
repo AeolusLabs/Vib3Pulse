@@ -1,7 +1,7 @@
 // "Play": the one sheet a person uses to get their screen into the match. Not yet a player: pick a side and ask (a host or
 // co-host is put straight in). A player: share a game window, stream from OBS (only when the server has ingest on), or, later,
 // the phone app. It says plainly to share the game, not the whole screen, and that only game sound goes out.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SIDES, type GameView, type Side } from "@shared/gameScreen";
 import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -46,6 +46,9 @@ function ObsPanel({ onGet }: { onGet?: () => Promise<{ url: string; streamKey: s
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [copied, setCopied] = useState<"url" | "key" | null>(null);
+  const [manual, setManual] = useState(false); // the clipboard refused: the field is selected for the person to copy by hand
+  const urlEl = useRef<HTMLInputElement>(null);
+  const keyEl = useRef<HTMLInputElement>(null);
   useEffect(() => () => { setInfo(null); }, []); // the key is not kept past this panel
   const get = async () => {
     if (!onGet || busy) return;
@@ -56,29 +59,36 @@ function ObsPanel({ onGet }: { onGet?: () => Promise<{ url: string; streamKey: s
   };
   const doCopy = async (what: "url" | "key") => {
     if (!info) return;
-    setCopied((await copy(what === "url" ? info.url : info.streamKey)) ? what : null);
+    const ok = await copy(what === "url" ? info.url : info.streamKey);
+    setCopied(ok ? what : null);
+    setManual(!ok);
+    if (!ok) { // select-to-copy fallback; a masked key has to be shown to be selected
+      if (what === "key") setShown(true);
+      setTimeout(() => { const el = what === "url" ? urlEl.current : keyEl.current; el?.focus(); el?.select(); }, 0);
+    }
     setTimeout(() => setCopied(null), 1500);
   };
   return (
     <div className="space-y-3 rounded-2xl border p-3" data-testid="game-obs">
-      <p className="text-sm text-muted-foreground">In OBS, open Settings, then Stream. Choose Custom, and paste the address and key below. Keep the key to yourself: anyone with it can stream as you.</p>
+      <p className="text-sm text-muted-foreground">Paste into OBS: Settings, Stream. Keep the key to yourself: anyone with it can stream as you.</p>
       {!info ? (
         <Button className="min-h-[44px] rounded-full" variant="outline" disabled={!onGet || busy} onClick={() => void get()} data-testid="game-obs-get">{busy ? "Getting your key…" : "Show my stream key"}</Button>
       ) : (
         <div className="space-y-2">
           <div>
             <label htmlFor="obs-url" className="text-xs font-medium text-muted-foreground">Server address</label>
-            <div className="flex gap-2"><input id="obs-url" readOnly value={info.url} className="h-11 min-w-0 flex-1 rounded-xl border bg-muted px-3 text-[16px]" onFocus={(e) => e.currentTarget.select()} />
+            <div className="flex gap-2"><input id="obs-url" ref={urlEl} readOnly value={info.url} className="h-11 min-w-0 flex-1 rounded-xl border bg-muted px-3 text-[16px]" onFocus={(e) => e.currentTarget.select()} />
               <Button type="button" variant="outline" className="min-h-[44px] rounded-full" onClick={() => void doCopy("url")}>{copied === "url" ? "Copied" : "Copy"}</Button></div>
           </div>
           <div>
             <label htmlFor="obs-key" className="text-xs font-medium text-muted-foreground">Stream key</label>
-            <div className="flex gap-2"><input id="obs-key" readOnly type={shown ? "text" : "password"} value={info.streamKey} autoComplete="off" className="h-11 min-w-0 flex-1 rounded-xl border bg-muted px-3 text-[16px]" />
+            <div className="flex gap-2"><input id="obs-key" ref={keyEl} readOnly type={shown ? "text" : "password"} value={info.streamKey} autoComplete="off" className="h-11 min-w-0 flex-1 rounded-xl border bg-muted px-3 text-[16px]" />
               <Button type="button" variant="outline" className="min-h-[44px] rounded-full" aria-pressed={shown} onClick={() => setShown((v) => !v)}>{shown ? "Hide" : "Show"}</Button>
               <Button type="button" variant="outline" className="min-h-[44px] rounded-full" onClick={() => void doCopy("key")}>{copied === "key" ? "Copied" : "Copy"}</Button></div>
           </div>
         </div>
       )}
+      {manual && <p role="status" className="text-sm text-muted-foreground">Couldn't copy. Select the text and copy it yourself.</p>}
       {err && <p role="alert" className="text-sm text-destructive">{err}</p>}
     </div>
   );

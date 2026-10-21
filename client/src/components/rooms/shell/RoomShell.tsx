@@ -16,7 +16,7 @@ import { call } from "@/components/rooms/create/createRoomApi";
 import { useGameCaps } from "@/hooks/useGameCaps";
 import { pickGameProfile } from "@/lib/bandwidth";
 import { sideOf, type Side } from "@shared/gameScreen";
-import { GAME_MAX_NOTES, allPlayers, gameNoticeText, layoutFor as gameLayoutFor, type GameLayout } from "@/lib/gameScreen";
+import { GAME_MAX_NOTES, allPlayers, gameNoticeText, gameRefusalText, layoutFor as gameLayoutFor, type AgeLane, type GameLayout } from "@/lib/gameScreen";
 import RoomFrame from "@/components/rooms/shell/RoomFrame";
 import RoomTopBar from "@/components/rooms/shell/RoomTopBar";
 import RoomDock from "@/components/rooms/shell/RoomDock";
@@ -324,6 +324,9 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
   // A host or co-host is put straight in (the server lets them accept themselves); everyone else asks and waits for an accept.
   const joinGame = (side: Side) => { if (!meId) return; if (iAmMod) sock.gameAction?.("accept", { targetId: meId, side }); else sock.gameAction?.("ask", { side }); };
   const stopPlaying = () => { gameTracks.stopShare(); if (meId) sock.gameAction?.("remove", { targetId: meId }); setPlayOpen(false); };
+  // Age lanes: the room's own lane (the server sends it only to that lane's own viewers) and the parent it belongs to.
+  const laneInfo = (state.room ?? room) as { ageLane?: string | null; parentRoomId?: string | null };
+  const roomLane: AgeLane | null = laneInfo.ageLane === "teen" || laneInfo.ageLane === "adult" ? laneInfo.ageLane : null;
   const sprayTeamOk = gameCaps.teamSpray && !!sprayBlock && sprayTo.length > 0;
   const sprayPlayer = (playerId: string) => {
     snd.unlock();
@@ -391,6 +394,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
           sprayable={sprayTo} onSpray={sprayPlayer}
           onSprayTeam={sprayTeamOk ? (side) => { setTeamSpraySide(side); setTeamSprayOpen(true); } : undefined}
           onPlay={sock.gameAction ? onPlay : undefined}
+          ageLane={gameCaps.lanes ? roomLane : null}
         />
       )}
       {state.liveVideo && !LINK_SCREENS && !(gameOn && game) && (
@@ -560,7 +564,10 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
           holderAwayLeftMs={holderAwayLeftMs}
           hostExtras={isHost ? hostControls : undefined}
           gameConsole={gameOn && game && sock.gameAction ? {
-            game, nameOf, onAction: (a, extra) => sock.gameAction?.(a, extra) ?? false, onSaveRoom: (patch) => sock.saveSettings(patch),
+            game, nameOf, onAction: (a, extra) => sock.gameAction?.(a, extra) ?? false,
+            // A refusal comes back in words (TEAM_FULL, GAME_IN_PROGRESS ...), not as the server's raw text.
+            onSaveRoom: async (patch) => { const r = await call<unknown>("PATCH", `/api/rooms/${encodeURIComponent(id)}`, patch); return r.ok ? null : gameRefusalText(r) ?? "Couldn't save that. Try again."; },
+            lanes: gameCaps.lanes && roomLane && laneInfo.parentRoomId ? { ageLane: roomLane, parentId: laneInfo.parentRoomId, onOpened: () => onSprayChanged?.() } : undefined,
             dropTimeoutMs: Number((state.room as { gameDropTimeoutMs?: number } | null)?.gameDropTimeoutMs ?? 120_000),
             layout: gameLayout, onLayout: setGameViewPref, serverOffsetMs: state.serverOffsetMs, canSaveRoom: role === "host",
           } : undefined}

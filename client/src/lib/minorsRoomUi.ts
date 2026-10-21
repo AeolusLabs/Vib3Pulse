@@ -1,6 +1,7 @@
 // Pure rules and words for the minors' room screens (no React, no network). The server is the gate; this only decides what to show.
 import { DENIED_MESSAGE } from "./roomsApi";
-import { MINORS_ROOM_CODES, MINORS_ROOM_WARNING, type MinorsRoomCode } from "@shared/rooms";
+import { MINORS_ROOM_CODES, type MinorsRoomCode } from "@shared/rooms";
+import { cleanWarning } from "./roomReducer";
 
 export const ADULT_LISTEN_LINE = "In this room adults can listen and chat.";
 export const TEEN_HOST_NOTE = "Only people under 18 can join. You can invite an adult yourself.";
@@ -25,18 +26,23 @@ export function warningScreenFor(code: unknown): "refuse" | "ack" | null {
 }
 
 /** What the page keeps from a 403 on GET /api/rooms/:id: the code, nothing else (no title, host, counts or the body's text). */
-export interface MinorsDenied { minorsDenied: MinorsRoomCode }
+export interface MinorsDenied { minorsDenied: MinorsRoomCode; /** The server's warning text (a teen lane's wording differs from a plain minors' room's). */ warning?: string }
 export interface AgeUnknownDenied { denied: "AGE_UNKNOWN" }
-export type RoomDenial = MinorsDenied | AgeUnknownDenied;
+/** A lane parent's door: no lane for this viewer (404 NO_LANE) or not their age group (403 AGE_LIMIT). The text is the server's. */
+export interface LaneDenied { laneDenied: "AGE_LIMIT" | "NO_LANE"; warning?: string }
+export type RoomDenial = MinorsDenied | AgeUnknownDenied | LaneDenied;
+export const isLaneDenied = (x: unknown): x is LaneDenied => !!x && typeof x === "object" && ((x as { laneDenied?: unknown }).laneDenied === "AGE_LIMIT" || (x as { laneDenied?: unknown }).laneDenied === "NO_LANE");
 export const isMinorsDenied = (x: unknown): x is MinorsDenied => !!x && typeof x === "object" && isMinorsCode((x as { minorsDenied?: unknown }).minorsDenied);
 export const isAgeUnknownDenied = (x: unknown): x is AgeUnknownDenied => !!x && typeof x === "object" && (x as { denied?: unknown }).denied === "AGE_UNKNOWN";
-export const isRoomDenial = (x: unknown): x is RoomDenial => isMinorsDenied(x) || isAgeUnknownDenied(x);
+export const isRoomDenial = (x: unknown): x is RoomDenial => isMinorsDenied(x) || isAgeUnknownDenied(x) || isLaneDenied(x);
 
 export function parseRoomDenial(status: number, body: unknown): RoomDenial | null {
-  if (status !== 403 || !body || typeof body !== "object") return null;
+  if ((status !== 403 && status !== 404) || !body || typeof body !== "object") return null;
   const code = (body as { code?: unknown }).code;
-  if (code === "AGE_UNKNOWN") return { denied: "AGE_UNKNOWN" }; // no warning and no room details: they may be a teen
-  return isMinorsCode(code) ? { minorsDenied: code } : null;
+  const warning = cleanWarning((body as { warning?: unknown }).warning);
+  if (status === 403 && code === "AGE_UNKNOWN") return { denied: "AGE_UNKNOWN" }; // no warning and no room details: they may be a teen
+  if ((code === "NO_LANE" && (status === 404 || status === 403)) || (code === "AGE_LIMIT" && status === 403)) return { laneDenied: code, ...(warning ? { warning } : {}) };
+  return status === 403 && isMinorsCode(code) ? { minorsDenied: code, ...(warning ? { warning } : {}) } : null;
 }
 
 /** The warning screen's code, from the HTTP answer or from the socket's join refusal. HTTP wins (it is the same decision, read first). */

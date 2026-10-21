@@ -133,6 +133,24 @@ export const GAME_NOTICE: Record<string, string> = {
 };
 export const gameNoticeText = (code: string): string | null => GAME_NOTICE[code] ?? null;
 
+/**
+ * Tracks that come in through OBS/RTMP ingest are published by a LiveKit identity `<userId>#obs` (one connection per identity:
+ * the player's own browser keeps the bare id). Every place that maps a track to a player goes through this.
+ */
+export const OBS_SUFFIX = "#obs";
+export const playerIdOf = (identity: string): string => (identity.endsWith(OBS_SUFFIX) ? identity.slice(0, -OBS_SUFFIX.length) : identity);
+
+/** Age lanes: which group a lane is, in words. */
+export type AgeLane = "teen" | "adult";
+export const LANE_LABEL: Record<AgeLane, string> = { teen: "13-17", adult: "18+" };
+export const LANE_BAR_TEXT = "Matches, chat and spray stay inside your age group.";
+export const laneBarTitle = (lane: AgeLane): string => `You are in the ${LANE_LABEL[lane]} lane`;
+/** The other lane's name for the open button. */
+export const otherLane = (lane: AgeLane): AgeLane => (lane === "teen" ? "adult" : "teen");
+export const openLaneLabel = (lane: AgeLane): string => `Open the ${lane === "teen" ? "teen" : "18+"} lane`;
+/** The lane an account of this age would open: under 18 the teen lane, 18 and over the adult lane (the server decides anyway). */
+export const laneForAge = (age: number | null | undefined): AgeLane | null => (typeof age !== "number" ? null : age < 18 ? "teen" : "adult");
+
 /** Names of the two teams' lanes on screen. */
 export const SIDE_NAME: Record<Side, string> = { A: "Team A", B: "Team B" };
 
@@ -155,6 +173,8 @@ export const GAME_COPY = {
   formatHelp: "Players put their own screen in the room. Viewers see up to four feeds at a time and can spray players.",
   dropLegend: "If a player drops",
   dropHelp: "Their place stays with a countdown. When it runs out, the room says they dropped out.",
+  lanesLabel: "Separate age groups",
+  lanesHelp: "13-17 and 18+ each get their own lane with their own matches, chat and spray. Adults and teens never see each other.",
 } as const;
 
 // ---------------------------------------------------------------- team spray (owner ruling 2026-10-22)
@@ -169,4 +189,27 @@ export const teamSprayTiers = (players: number): SprayTier[] =>
 /** What each player would get from this tier: an equal split, the few kobo left over to the featured player. */
 export function teamShares(game: GameView, side: Side, tier: SprayTier, featured: string | null): Record<string, number> {
   return splitShares(SPRAY_CATALOGUE[tier].kobo, game.teams[side], featured);
+}
+
+// ---------------------------------------------------------------- refusals on create / edit / lanes (no wording about anyone's age)
+
+const REFUSAL_REASON: Record<string, string> = {
+  needs_live_video: "Game rooms need live video. Keep the room small enough for video, then try again.",
+  needs_game: "Pick a game format first, then turn on separate lanes.",
+  lanes: "Separate lanes can't be used with paid tickets.",
+  teen_host_required: "You can't open that lane.",
+  minors_parent: "That lane can't be opened in this room.",
+};
+const REFUSAL_CODE: Record<string, string> = {
+  LANE_EXISTS: "That lane is already open.",
+  TEAM_FULL: "A team has more players than that format allows. Remove players first.",
+  GAME_IN_PROGRESS: "Players are in the match. Remove them before turning the game off.",
+  LANE_ROOM: "This room's game can't be turned off while it has age groups.",
+};
+/** Plain words for a refused game field (`reason`) or code, or null when it isn't a game refusal. `invalid` counts only on a game field. */
+export function gameRefusalText(f: { code?: string; reason?: string; field?: string }): string | null {
+  if (f.code && REFUSAL_CODE[f.code]) return REFUSAL_CODE[f.code];
+  if (f.reason && REFUSAL_REASON[f.reason]) return REFUSAL_REASON[f.reason];
+  if (f.reason === "invalid" && (f.field === "gameFormat" || f.field === "gameDropTimeoutMs" || f.field === "lanes")) return "That game setting isn't allowed. Pick one from the list.";
+  return null;
 }

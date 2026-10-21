@@ -22,11 +22,13 @@ export interface WizardState {
   scheduledFor: string | null;
   /**
    * Gamers live (shown only while the server's gaming flag is on): players per side, 1 to 4, or null for an ordinary room.
-   * Optional so every existing state and fixture stays valid. Sent as a PATCH after live video is on, never in the create body.
+   * Optional so every existing state and fixture stays valid. Sent in the create body (the server accepts it for live and scheduled rooms).
    */
   gameFormat?: 1 | 2 | 3 | 4 | null;
   /** How long a dropped player keeps their slot (ms): 30000, 120000 or 0 = hold it. Only read when gameFormat is set. */
   gameDropTimeoutMs?: 30000 | 120000 | 0;
+  /** Separate age groups: the room becomes a parent with a lane per group. Only offered while the server's config allows lanes. */
+  lanes?: boolean;
 }
 
 export interface WizardFlags { paidRooms: boolean; spray: boolean }

@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LocalAudioTrack, LocalVideoTrack, RemoteTrackPublication, Room } from "livekit-client";
 import type { GameView, Side } from "@shared/gameScreen";
 import { gameProfileSettings, viewerLayer, type GameProfile } from "@/lib/bandwidth";
-import { allPlayers, soundFeed, videoFeeds, type Follow, type GameLayout } from "@/lib/gameScreen";
+import { allPlayers, playerIdOf, soundFeed, videoFeeds, type Follow, type GameLayout } from "@/lib/gameScreen";
 import { loadLk, type ScreenTrack } from "@/hooks/useRoomVoice";
 
 export interface GameTracks {
@@ -75,10 +75,10 @@ export function useGameTracks(
     room.remoteParticipants.forEach((p) => p.trackPublications.forEach((pub) => {
       const rp = pub as RemoteTrackPublication;
       if ((rp.source as string) === SOURCE_VIDEO) {
-        const want = video.includes(p.identity);
+        const want = video.includes(playerIdOf(p.identity));
         if (rp.isSubscribed !== want) rp.setSubscribed(want);
       } else if ((rp.source as string) === SOURCE_AUDIO) {
-        const want = sound === p.identity;
+        const want = sound === playerIdOf(p.identity);
         if (rp.isSubscribed !== want) rp.setSubscribed(want);
       }
     }));
@@ -97,11 +97,11 @@ export function useGameTracks(
       document.body.appendChild(box);
       sink.current = box;
       const onSub = (track: { kind: string; attach(): HTMLMediaElement; detach(): HTMLMediaElement[] }, pub: { source: unknown }, p: { identity: string }) => {
-        if (pub.source === SOURCE_VIDEO) setTracks((t) => ({ ...t, [p.identity]: track as unknown as ScreenTrack }));
+        if (pub.source === SOURCE_VIDEO) setTracks((t) => ({ ...t, [playerIdOf(p.identity)]: track as unknown as ScreenTrack }));
         else if (pub.source === SOURCE_AUDIO) box.appendChild(track.attach());
       };
       const onUnsub = (track: { detach(): HTMLMediaElement[] }, pub: { source: unknown }, p: { identity: string }) => {
-        if (pub.source === SOURCE_VIDEO) setTracks((t) => { const { [p.identity]: _gone, ...rest } = t; return rest; });
+        if (pub.source === SOURCE_VIDEO) setTracks((t) => { const { [playerIdOf(p.identity)]: _gone, ...rest } = t; return rest; });
         else if (pub.source === SOURCE_AUDIO) track.detach().forEach((el) => el.remove());
       };
       room.on(RoomEvent.TrackSubscribed, onSub as never);
@@ -187,7 +187,7 @@ export function useGameTracks(
     if (widths.current.get(userId) === layerOf) return;
     widths.current.set(userId, layerOf);
     room?.remoteParticipants.forEach((p) => {
-      if (p.identity !== userId) return;
+      if (playerIdOf(p.identity) !== userId) return;
       p.trackPublications.forEach((pub) => {
         if ((pub.source as string) === SOURCE_VIDEO) (pub as RemoteTrackPublication).setVideoQuality(layerOf === 720 ? 2 : layerOf === 360 ? 1 : 0); // HIGH / MEDIUM / LOW
       });

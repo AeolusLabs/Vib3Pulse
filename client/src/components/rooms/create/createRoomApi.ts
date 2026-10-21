@@ -22,9 +22,10 @@ export async function call<T>(method: string, url: string, data?: unknown): Prom
       const b = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
       const code = typeof b.code === "string" ? b.code : undefined;
       const field = typeof b.field === "string" ? b.field : undefined;
+      const reason = typeof b.reason === "string" ? b.reason : undefined;
       // A stale CSRF token answers 403 with no code: fetch a fresh one and try once more, like apiRequest does.
       if (res.status === 403 && attempt === 0 && (!code || text.includes("CSRF"))) continue;
-      return { ok: false, status: res.status, code, field };
+      return { ok: false, status: res.status, code, field, reason };
     }
   } catch {
     return { ok: false, status: 0 };
@@ -34,7 +35,7 @@ export async function call<T>(method: string, url: string, data?: unknown): Prom
 export interface CreatedRoom { room: { id: string }; inviteLink?: string }
 
 export type CreateOutcome =
-  | { ok: true; roomId: string; inviteLink: string | null; live: boolean; startFailure: ApiFailure | null; voiceFailed: boolean; videoFailed: boolean; /** Gamers live: the game format could not be set (the room is live; the host can set it in Controls). */ gameFailed?: boolean }
+  | { ok: true; roomId: string; inviteLink: string | null; live: boolean; startFailure: ApiFailure | null; voiceFailed: boolean; videoFailed: boolean }
   | ({ ok: false } & ApiFailure);
 
 /**
@@ -51,7 +52,7 @@ export async function createRoom(s: WizardState, extras: WizardExtras, link: Roo
 
   const enc = encodeURIComponent(id);
   const started = await call<unknown>("POST", `/api/rooms/${enc}/start`);
-  if (!started.ok) return { ...base, live: false, startFailure: { status: started.status, code: started.code, field: started.field } };
+  if (!started.ok) return { ...base, live: false, startFailure: { status: started.status, code: started.code, field: started.field, reason: started.reason } };
   let voiceFailed = false, videoFailed = false;
   if (s.voice) {
     const v = await call<unknown>("PUT", `/api/rooms/${enc}/voice`, { enabled: true });
@@ -59,12 +60,7 @@ export async function createRoom(s: WizardState, extras: WizardExtras, link: Roo
     if (v.ok && s.liveVideo) videoFailed = !(await call<unknown>("PUT", `/api/rooms/${enc}/live-video`, { enabled: true })).ok;
     else if (!v.ok && s.liveVideo) videoFailed = true;
   }
-  // Gamers live: the format needs voice and live video already on, so it is set last (the create body can't carry it).
-  let gameFailed = false;
-  if (s.gameFormat && s.voice && s.liveVideo && !voiceFailed && !videoFailed) {
-    gameFailed = !(await call<unknown>("PATCH", `/api/rooms/${enc}`, { gameFormat: s.gameFormat, gameDropTimeoutMs: s.gameDropTimeoutMs ?? 120_000 })).ok;
-  }
-  return { ...base, live: true, startFailure: null, voiceFailed, videoFailed, ...(s.gameFormat ? { gameFailed } : {}) };
+  return { ...base, live: true, startFailure: null, voiceFailed, videoFailed };
 }
 
 /** Used only while GET /api/rooms/config has not said how old the account is: assume old enough, the server decides. */
@@ -93,5 +89,6 @@ export function useWizardHost(open: boolean, accountTooNew: boolean) {
   const flags = { paidRooms: config.data?.features.paidRooms === true, spray: config.data?.features.spray === true };
   // Gamers live: the game-format choice is offered only while the server says the flag is on (the key is absent when off).
   const gaming = config.data?.features.gaming === true;
-  return { host, flags, gaming, minAccountAgeDays, loading: me.isLoading, failed: me.isError };
+  const gameLanes = gaming && config.data?.game?.lanes === true;
+  return { host, flags, gaming, gameLanes, minAccountAgeDays, loading: me.isLoading, failed: me.isError };
 }

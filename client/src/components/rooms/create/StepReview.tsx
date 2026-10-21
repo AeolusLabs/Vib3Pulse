@@ -18,7 +18,7 @@ interface Props {
 
 export default function StepReview({ state, ageText, linkedText, error, ticketText = null, ticketCount = null }: Props) {
   const parsed = state.scheduledFor ? Date.parse(state.scheduledFor) : NaN;
-  const features = [state.voice ? COPY.voiceLabel : null, state.voice && state.liveVideo ? COPY.videoLabel : null, state.voice && state.liveVideo && state.gameFormat ? `Game room, ${state.gameFormat}v${state.gameFormat}` : null].filter(Boolean).join(", ");
+  const features = [state.voice ? COPY.voiceLabel : null, state.voice && state.liveVideo ? COPY.videoLabel : null, state.voice && state.liveVideo && state.gameFormat ? `Game room, ${state.gameFormat}v${state.gameFormat}${state.lanes ? ", separate age groups" : ""}` : null].filter(Boolean).join(", ");
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-border p-4">

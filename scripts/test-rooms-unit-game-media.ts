@@ -1,7 +1,7 @@
 // Rooms unit checks for the gamers-live media rules (no database, no browser):   npx tsx scripts/test-rooms-unit-game-media.ts
 import assert from "node:assert/strict";
 import { gameProfileSettings, pickGameProfile, viewerLayer } from "../client/src/lib/bandwidth";
-import { MAX_VIDEO_SUBS, soundFeed, videoFeeds } from "../client/src/lib/gameScreen";
+import { MAX_VIDEO_SUBS, playerIdOf, soundFeed, videoFeeds } from "../client/src/lib/gameScreen";
 import type { GameView } from "../shared/gameScreen";
 
 let passed = 0, failed = 0;
@@ -65,6 +65,11 @@ test("sound: one feed only; a pick that left falls back to a featured feed", () 
   assert.equal(soundFeed(eight, {}, "zz"), "a1");
   const g = { ...eight, away: { a1: null } };
   assert.equal(soundFeed(g, {}, null), "b1");
+});
+
+test("obs: a track from 'a1#obs' maps to player a1 and so is a wanted feed", () => {
+  assert.ok(videoFeeds(eight, "team", {}, false).includes(playerIdOf("a1#obs")));
+  assert.equal(soundFeed(eight, {}, playerIdOf("b2#obs")), "b2");
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -52,6 +52,8 @@ export interface RoomState {
   sprays: SprayEvent[];
   /** Terminal failure code (AGE_LIMIT, BANNED, KICKED, ROOM_FULL ...). */
   error: string | null;
+  /** The server's own warning text that came with a socket refusal (a minors' room or lane), shown instead of the bare constant. */
+  errorWarning: string | null;
   /** Last non-terminal rejection (RATE_LIMITED, MUTED, PRIVACY, SLOW_MODE ...); `n` changes on every notice so the UI can react to repeats. `retryMs` comes with SLOW_MODE. */
   notice: { code: string; n: number; retryMs?: number } | null;
   seq: number;
@@ -81,7 +83,7 @@ export const SPRAY_CAP = 20;
 
 export const initialRoomState = (selfId: string | null = null): RoomState => ({
   selfId, phase: "idle", room: null, members: [], memberCount: 0, screen: null, you: null,
-  chat: [], reactions: [], interactions: [], sprays: [], error: null, notice: null, seq: 0,
+  chat: [], reactions: [], interactions: [], sprays: [], error: null, errorWarning: null, notice: null, seq: 0,
   voiceEnabled: false, stage: [], hands: [], invitedYou: false, liveVideo: false, holder: null, asks: [], holderAwayUntil: null, nowPlaying: null, serverOffsetMs: 0, game: null,
 });
 
@@ -98,12 +100,12 @@ export type RoomServerMessage =
   | { type: "room:voice"; enabled: boolean }
   | { type: "room:live"; holder: string | null; asks: string[]; away?: number | null }
   | { type: "room:livevideo"; enabled: boolean }
-  | { type: "room:game"; game: GameView }
+  | { type: "room:game"; game: GameView | null }
   | { type: "room:settings"; pinnedMessage: string | null; slowModeSec: number; locked: boolean }
   | { type: "room:playback"; nowPlaying: NowPlaying | null; serverNowMs: number }
   | { type: "room:mod"; action: "mute" | "unmute" | "kick" | "ban" | "role"; targetId: string; role?: MemberRole }
   | { type: "room:ended" }
-  | { type: "room:error"; code: string }
+  | { type: "room:error"; code: string; warning?: string }
   | { type: "room:notice"; code: string; retryMs?: number };
 
 export type RoomClientEvent =
@@ -115,6 +117,9 @@ export type RoomClientEvent =
   | { type: "client:dismissInvite" };
 
 export type RoomEvent = RoomServerMessage | RoomClientEvent;
+
+/** The server's warning text, kept only when it is a sentence of sensible size (never markup-sized or empty). */
+export const cleanWarning = (w: unknown): string | undefined => (typeof w === "string" && w.trim().length >= 20 && w.length <= 800 ? w.trim() : undefined);
 
 /** A game view from the wire, checked before it is kept: a malformed one is dropped, never rendered. */
 export function validGameView(g: unknown): g is GameView {
@@ -203,8 +208,11 @@ export function roomReducer(state: RoomState, event: RoomEvent, now: () => numbe
     case "room:livevideo":
       return event.enabled ? { ...state, liveVideo: true } : { ...state, liveVideo: false, holder: null, asks: [], holderAwayUntil: null };
     case "room:game":
-      // Only a room that started with a game (room:state carried one) takes updates: a stale or stray message never makes a game appear.
-      return state.game && validGameView(event.game) ? { ...state, game: event.game } : state;
+      // null: the room stopped being a game room, clear it. A valid view is kept even when there was none (a host turned the game
+      // on mid-session); the server sends it only while its flag is on, and the shell draws it only when the config agrees.
+      // Anything malformed is dropped, never rendered.
+      if (event.game === null) return state.game ? { ...state, game: null } : state;
+      return validGameView(event.game) ? { ...state, game: event.game } : state;
     case "room:playback": {
       const current = (state.room as { screenVersion?: number } | null)?.screenVersion;
       // A message about a screen that has since been replaced (it crossed a screen change on the way) must not resurrect old playback.
@@ -226,7 +234,7 @@ export function roomReducer(state: RoomState, event: RoomEvent, now: () => numbe
       return state; // someone else removed: the server follows up with room:left
     }
     case "room:ended": return { ...state, phase: "ended" };
-    case "room:error": return { ...state, phase: "denied", error: event.code };
+    case "room:error": return { ...state, phase: "denied", error: event.code, errorWarning: cleanWarning(event.warning) ?? null };
     case "room:settings": {
       // Host settings live on the room object (room:state carries them there too). Before the first room:state there is no
       // room to put them on: the room:state that follows carries the current values anyway.
