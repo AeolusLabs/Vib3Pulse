@@ -1,0 +1,799 @@
+<title>Gamer Rooms Preview</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,500;6..96,700&family=Jost:wght@400;500;600&display=swap">
+<style>
+/* Hallmark · macrostructure: Workbench (stage + side console) · theme: Vib3 Rooms, locked by DESIGN.md · genre: product-dark
+   Layout: one stage column (header, score, feeds, support bar) beside a Chat / Host console; container queries, so the phone/desktop toggle is a real layout. */
+:root{
+  --bg: oklch(14% .003 270);
+  --surface: oklch(18% .004 270);
+  --raised: oklch(22% .005 270);
+  --void: oklch(11% .01 280);
+  --line: oklch(100% 0 0 / .09);
+  --text: oklch(96% .004 90);
+  --muted: oklch(70% .006 270);
+  --violet: oklch(50% .21 290);
+  --violet-hi: oklch(70% .17 290);
+  --amber: oklch(78% .16 70);
+  --live: oklch(58% .22 25);
+  --ok: oklch(74% .17 150);
+  --serif: "Bodoni Moda", "Didot", Georgia, serif;
+  --sans: "Jost", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --out: cubic-bezier(.23,1,.32,1);
+  --drawer: cubic-bezier(.32,.72,0,1);
+  color-scheme: dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font:400 15px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer;border:0;background:none;padding:0}
+button:focus-visible,input:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--violet-hi);outline-offset:2px}
+.page{max-width:1240px;margin-inline:auto;padding-inline:max(16px,env(safe-area-inset-left,0px)) max(16px,env(safe-area-inset-right,0px));padding-block:28px 56px}
+.eyebrow{font-size:11px;letter-spacing:.28em;text-transform:uppercase;color:var(--violet-hi);margin:0 0 10px;font-weight:500}
+h1{font-family:var(--serif);font-weight:500;letter-spacing:-.02em;line-height:.95;font-size:clamp(2.4rem,7vw,4.2rem);margin:0 0 14px;text-wrap:balance}
+.lede{max-width:62ch;color:var(--muted);margin:0 0 26px}
+
+/* prototype controls (not part of the product UI) */
+.bar{display:flex;flex-wrap:wrap;gap:10px 22px;align-items:center;margin-bottom:16px}
+.bar .grp{display:flex;align-items:center;gap:10px;min-width:0}
+.bar .lab{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted)}
+.seg{display:inline-flex;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:3px}
+.seg button{padding:8px 14px;border-radius:999px;font-size:14px;font-weight:500;color:var(--muted);min-height:38px;transition:background-color 160ms var(--out),color 160ms var(--out),transform 120ms var(--out)}
+.seg button[aria-pressed=true]{background:var(--violet);color:#fff}
+.seg button:active{transform:scale(.97)}
+.pull{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.pull b{color:var(--text);font-weight:600}
+.sw{display:inline-flex;align-items:center;gap:8px;min-height:38px;font-size:14px;color:var(--muted)}
+.sw i{width:38px;height:22px;border-radius:999px;background:var(--raised);border:1px solid var(--line);position:relative;transition:background-color 160ms var(--out)}
+.sw i::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--text);transition:transform 160ms var(--out)}
+.sw[aria-checked=true] i{background:var(--violet)}
+.sw[aria-checked=true] i::after{transform:translateX(16px)}
+
+/* room */
+.room{container:room/inline-size;position:relative;width:100%;margin-inline:auto;background:var(--surface);border:1px solid var(--line);border-radius:24px;overflow:hidden}
+.room[data-device=phone]{max-width:400px;height:960px}
+.shell{display:flex;flex-direction:column;height:100%}
+.stage{padding:0 12px 12px;flex:none;min-width:0}
+.side{flex:1;min-height:360px;position:relative;border-top:1px solid var(--line);min-width:0}
+.side-inner{position:absolute;inset:0;display:flex;flex-direction:column;min-height:0}
+@container room (min-width:860px){
+  .shell{display:grid;grid-template-columns:minmax(0,1fr) 360px;height:auto}
+  .side{border-top:0;border-left:1px solid var(--line);min-height:560px}
+  .stage{padding:0 16px 16px}
+}
+
+.rh{display:flex;align-items:center;gap:10px;padding:12px 2px}
+.rh .back,.rh .more{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;color:var(--text)}
+.rh .ttl{flex:1;min-width:0}
+.rh h2{margin:0;font-size:17px;font-weight:600;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rh .sub{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden}
+.live{background:var(--live);color:#fff;font-size:11px;font-weight:600;letter-spacing:.06em;padding:3px 7px;border-radius:5px;display:inline-flex;align-items:center;gap:5px}
+.live::before{content:"";width:6px;height:6px;border-radius:50%;background:#fff}
+.count{display:inline-flex;align-items:center;gap:6px;background:var(--raised);border-radius:999px;padding:0 14px;height:40px;font-weight:600;font-variant-numeric:tabular-nums}
+
+.ic{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+
+.match{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;padding:2px 2px 12px}
+.match .who{min-width:0}
+.match .who.r{text-align:right}
+.match .who b{display:block;font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.match .who span{font-size:12px;color:var(--muted)}
+.match .sc{font-family:var(--serif);font-weight:700;font-size:1.75rem;letter-spacing:-.02em;line-height:1;font-variant-numeric:lining-nums tabular-nums;white-space:nowrap}
+.match .sc em{font-style:normal;color:var(--muted);padding:0 .35em;font-weight:500}
+
+.tiles{display:grid;gap:8px}
+.tiles[data-layout=versus]{grid-template-columns:1fr}
+.tiles[data-layout=grid]{grid-template-columns:1fr 1fr}
+@container room (min-width:560px){ .tiles[data-layout=versus]{grid-template-columns:1fr 1fr} }
+.thumbs{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}
+
+.tile{container:tile/inline-size;position:relative;aspect-ratio:16/9;background:var(--void);border-radius:14px;overflow:hidden;min-width:0}
+.tile canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.tile::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(to bottom,oklch(10% .005 270 / .72),transparent 32%,transparent 58%,oklch(10% .005 270 / .78))}
+.tt{position:absolute;inset:8px 8px auto;display:flex;align-items:center;gap:6px;z-index:2;min-width:0}
+.chip{font-size:11px;font-weight:600;letter-spacing:.04em;line-height:1;padding:5px 8px;border-radius:999px;background:oklch(16% .005 270 / .86);white-space:nowrap}
+.side-chip{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:600;padding:0;color:#fff;flex:none}
+.side-chip.a{background:var(--violet)}
+.side-chip.b{background:var(--amber);color:oklch(20% .02 70)}
+.side-chip.n{background:var(--raised)}
+.tname{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.tt .sp{flex:1}
+.lyr{display:none;color:var(--ok)}
+.room[data-layers=on] .lyr{display:inline-block}
+.tact{display:flex;gap:6px}
+.ib{width:32px;height:32px;border-radius:50%;background:oklch(16% .005 270 / .86);display:grid;place-items:center;position:relative;transition:transform 120ms var(--out),background-color 160ms var(--out)}
+.ib::before{content:"";position:absolute;inset:-6px}
+.ib:active{transform:scale(.95)}
+@media (hover:hover) and (pointer:fine){ .ib:hover{background:var(--raised)} }
+.ib[aria-pressed=true]{color:var(--amber)}
+.tb{position:absolute;inset:auto 8px 8px;display:flex;justify-content:space-between;align-items:flex-end;z-index:2;gap:8px}
+.tally{font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;background:oklch(16% .005 270 / .86);border-radius:999px;padding:6px 10px;line-height:1;transition:transform 160ms var(--out)}
+.tally small{font-weight:400;color:var(--muted);margin-left:4px;font-size:12px}
+.tally.pop{transform:scale(1.08)}
+.spray{background:var(--violet);color:#fff;font-weight:600;font-size:14px;min-height:40px;padding:0 18px;border-radius:999px;transition:transform 120ms var(--out),background-color 160ms var(--out)}
+.spray:active{transform:scale(.97)}
+@media (hover:hover) and (pointer:fine){ .spray:hover{background:oklch(56% .21 290)} }
+.tile.thumb{cursor:pointer;border-radius:10px}
+.tile.thumb .tact,.tile.thumb .tb .spray,.tile.thumb .chip.src,.tile.thumb .chip.q{display:none}
+.tile.thumb .tally{font-size:11px;padding:4px 7px}
+@container tile (max-width:259px){
+  .chip.src,.chip.q{display:none}
+  .tname{font-size:13px}
+  .spray{min-height:34px;padding:0 13px;font-size:13px}
+}
+.slot{aspect-ratio:16/9;border-radius:14px;border:1px dashed var(--line);display:grid;place-items:center;text-align:center;color:var(--muted);font-size:13px;padding:12px}
+.spray-layer{position:absolute;inset:0;z-index:3;pointer-events:none;overflow:hidden}
+.note{position:absolute;left:0;top:0;width:34px;height:18px;border-radius:3px;will-change:transform,opacity;opacity:0}
+.note.n20{background:oklch(52% .2 290)}
+.note.n50{background:oklch(30% .09 285);box-shadow:inset 0 0 0 1px oklch(70% .12 290 / .5)}
+.note.n100{background:oklch(76% .15 70)}
+.fl{position:absolute;left:0;top:0;font-size:26px;opacity:0;will-change:transform,opacity}
+
+.support{padding:12px 2px 2px}
+.support .bar2{display:flex;height:8px;border-radius:999px;overflow:hidden;background:var(--raised);gap:2px}
+.support .bar2 i{display:block;height:100%;transition:flex-grow 400ms var(--out)}
+.support .bar2 .sa{background:var(--violet)}
+.support .bar2 .sb{background:var(--amber)}
+.support .leg{display:flex;justify-content:space-between;gap:10px;font-size:13px;color:var(--muted);margin-top:8px;font-variant-numeric:tabular-nums}
+.support .leg b{color:var(--text);font-weight:600}
+.support .leg > span{min-width:0}
+.hint{font-size:12px;color:var(--muted);padding:8px 2px 0}
+
+/* side console */
+.tabs{display:flex;gap:4px;padding:10px 12px 0;border-bottom:1px solid var(--line);flex:none}
+.tabs button{padding:10px 12px 12px;font-weight:500;font-size:14px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;min-height:44px}
+.tabs button[aria-selected=true]{color:var(--text);border-color:var(--violet-hi)}
+.panel{flex:1;min-height:0;display:flex;flex-direction:column}
+.pin{margin:10px 12px 0;background:var(--raised);border-radius:12px;padding:9px 12px;font-size:13px;color:var(--muted);flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pin b{color:var(--text);font-weight:600}
+.chat{flex:1;min-height:0;overflow:auto;padding:10px 12px;display:flex;flex-direction:column;gap:10px;overscroll-behavior:contain}
+.msg{display:flex;gap:10px;align-items:flex-start;font-size:14px;line-height:1.4}
+.av{width:30px;height:30px;border-radius:50%;flex:none;display:grid;place-items:center;font-size:12px;font-weight:600;color:#fff}
+.msg .n{font-weight:600;font-size:13px;margin-right:6px}
+.msg.sys{justify-content:center;color:var(--muted);font-size:13px;gap:0}
+.msg.sys b{color:var(--amber);font-weight:600}
+.rx{display:flex;gap:8px;padding:8px 12px;overflow:auto;flex:none;scrollbar-width:none}
+.rx button{min-height:40px;padding:0 14px;border-radius:999px;background:var(--raised);font-size:17px;flex:none;transition:transform 120ms var(--out)}
+.rx button:active{transform:scale(.95)}
+.rx button.wave{font-size:14px;font-weight:500}
+.comp{display:flex;gap:8px;padding:4px 12px 12px;flex:none}
+.comp input{flex:1;min-width:0;height:44px;border-radius:999px;border:1px solid var(--line);background:oklch(100% 0 0 / .04);color:var(--text);padding:0 16px;font:inherit}
+.comp input::placeholder{color:var(--muted)}
+.round{width:44px;height:44px;border-radius:50%;background:var(--raised);display:grid;place-items:center;flex:none;transition:transform 120ms var(--out)}
+.round:active{transform:scale(.95)}
+.round.pri{background:var(--violet)}
+
+.ctl{padding:14px 12px 18px;overflow:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:18px}
+.ctl h3{margin:0 0 8px;font-size:11px;font-weight:500;letter-spacing:.24em;text-transform:uppercase;color:var(--muted)}
+.ctl .seg{display:flex}
+.ctl .seg button{flex:1;padding-inline:6px}
+.prow{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line)}
+.prow:first-of-type{border-top:0}
+.prow .who{flex:1;min-width:0}
+.prow .who b{font-weight:600;font-size:14px}
+.prow .who div{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block}
+.dot.off{background:var(--muted)}
+.rb{min-height:36px;min-width:36px;border-radius:999px;display:grid;place-items:center;background:var(--raised);padding:0 10px;font-size:13px;font-weight:600;transition:transform 120ms var(--out)}
+.rb:active{transform:scale(.95)}
+.rb.pri{background:var(--violet);color:#fff}
+.rb[disabled]{opacity:.4;cursor:not-allowed}
+.step{display:flex;align-items:center;gap:8px}
+.step output{min-width:22px;text-align:center;font-family:var(--serif);font-weight:700;font-size:1.5rem;font-variant-numeric:lining-nums}
+.mrow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0}
+.mrow span{min-width:0}
+
+/* sheets: spray tray and go-live */
+.scrim{position:absolute;inset:0;background:oklch(8% .005 270 / .6);opacity:0;visibility:hidden;transition:opacity 150ms var(--out),visibility 0s linear 150ms;z-index:20}
+.sheet{position:absolute;z-index:21;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);border-radius:22px 22px 0 0;padding:10px 16px 18px;max-height:92%;overflow:auto;transform:translateY(100%);visibility:hidden;transition:transform 150ms var(--out),visibility 0s linear 150ms;box-shadow:0 -24px 60px hsl(0 0% 0% / .55)}
+.room[data-sheet=open] .scrim{opacity:1;visibility:visible;transition:opacity 220ms var(--out),visibility 0s}
+.room[data-sheet=open] .sheet{transform:none;visibility:visible;transition:transform 260ms var(--drawer),visibility 0s}
+@container room (min-width:860px){
+  .sheet{left:auto;width:380px;right:12px;bottom:12px;border-radius:20px;border:1px solid var(--line)}
+  .scrim{background:none}
+}
+.grab{width:40px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 12px}
+.sheet h2{margin:0 0 4px;font-size:18px;font-weight:600}
+.sheet h2:focus{outline:none}
+.sheet p{margin:0 0 14px;color:var(--muted);font-size:14px}
+.n3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:8px}
+.nb{background:var(--raised);border-radius:14px;padding:12px 6px;display:flex;flex-direction:column;align-items:center;gap:8px;min-height:44px;transition:transform 120ms var(--out)}
+.nb:active{transform:scale(.97)}
+.nb .bill{width:100%;max-width:92px;aspect-ratio:2/1;border-radius:6px;display:grid;place-items:center;font-family:var(--serif);font-weight:700;font-size:1.5rem;font-variant-numeric:lining-nums}
+.nb .bill.n20{background:var(--violet);color:#fff}
+.nb .bill.n50{background:oklch(24% .08 285);color:var(--text);box-shadow:inset 0 0 0 1px oklch(70% .12 290 / .45)}
+.nb .bill.n100{background:var(--amber);color:oklch(20% .03 70)}
+.nb b{font-size:14px;font-weight:600}
+.nb small{color:var(--muted);font-size:12px}
+.big{width:100%;display:flex;align-items:center;gap:14px;text-align:left;background:var(--raised);border-radius:14px;padding:12px 14px;margin-bottom:8px;min-height:60px;transition:transform 120ms var(--out)}
+.big:active{transform:scale(.99)}
+.big svg.pic{width:44px;height:36px;flex:none}
+.big b{display:block;font-size:15px;font-weight:600}
+.big small{color:var(--muted);font-size:13px}
+.nb[disabled],.big[disabled]{opacity:.4;cursor:not-allowed}
+.lim{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+.lim .pill{background:var(--raised);border-radius:999px;padding:10px 14px;font-size:14px;flex:1;min-width:0}
+.lim .pill button{color:var(--violet-hi);text-decoration:underline;text-underline-offset:3px;margin-left:6px;min-height:24px}
+.done{background:var(--violet);color:#fff;font-weight:600;border-radius:999px;min-height:44px;padding:0 22px}
+.opt{display:flex;gap:12px;align-items:flex-start;width:100%;text-align:left;background:var(--raised);border:1px solid transparent;border-radius:14px;padding:12px 14px;margin-bottom:8px;min-height:60px}
+.opt[aria-checked=true]{border-color:var(--violet)}
+.opt[disabled]{opacity:.45;cursor:not-allowed}
+.opt b{display:block;font-weight:600;font-size:15px}
+.opt small{color:var(--muted);font-size:13px;display:block}
+.kv{display:flex;gap:8px;align-items:center;background:oklch(100% 0 0 / .04);border:1px solid var(--line);border-radius:12px;padding:6px 6px 6px 12px;margin-bottom:8px;font-size:13px}
+.kv code{flex:1;min-width:0;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kv .k{color:var(--muted);font-size:11px;letter-spacing:.14em;text-transform:uppercase;width:44px;flex:none}
+.warn{background:oklch(78% .16 70 / .1);border-radius:12px;padding:10px 12px;font-size:13px;color:var(--text);margin:12px 0}
+.warn b{color:var(--amber)}
+.sub2{margin:12px 0 8px;font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:var(--muted)}
+.toast{position:absolute;left:50%;top:64px;transform:translate(-50%,-8px);z-index:30;background:var(--raised);border:1px solid var(--line);border-radius:999px;padding:9px 16px;font-size:14px;font-weight:500;opacity:0;pointer-events:none;transition:opacity 200ms var(--out),transform 200ms var(--out);white-space:nowrap;max-width:92%;overflow:hidden;text-overflow:ellipsis}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+
+/* team match, age lanes, drops */
+.room[data-device=phone][data-layout=team]{height:1120px}
+.bar .ghost{border:1px solid var(--line);border-radius:999px;padding:0 16px;min-height:38px;font-size:14px;font-weight:500;color:var(--muted);transition:transform 120ms var(--out),color 160ms var(--out)}
+.bar .ghost:active{transform:scale(.97)}
+@media (hover:hover) and (pointer:fine){ .bar .ghost:hover{color:var(--text)} }
+.lanes{display:grid;gap:14px;grid-template-columns:1fr}
+@container room (min-width:560px){ .lanes{grid-template-columns:1fr 1fr} }
+.lane{display:flex;flex-direction:column;gap:8px;min-width:0}
+.lane-h{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
+.lane-h b{font-weight:600;font-size:15px}
+.lane-h .sp{flex:1}
+.mut{font-size:12px;color:var(--muted)}
+.roster{display:grid;gap:8px}
+.tile.thumb .side-chip{display:none}
+.tile.thumb .tname{font-size:12px}
+.tile.thumb .tt{inset:6px 6px auto}
+.tstat{position:absolute;inset:0;z-index:1;display:grid;place-items:center;text-align:center;padding:8px;background:oklch(10% .01 270 / .8);font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
+.tile.thumb .tstat{font-size:11px;padding:4px}
+.spray[disabled]{opacity:.4;cursor:not-allowed}
+.lanebadge{background:var(--raised);color:var(--violet-hi);font-size:11px;font-weight:600;letter-spacing:.06em;padding:3px 8px;border-radius:999px}
+.agebar{margin:0;padding:0 2px 10px;font-size:12px;color:var(--muted)}
+.agebar b{color:var(--text);font-weight:500}
+.card{background:var(--raised);border-radius:14px;padding:12px 14px;font-size:13px;color:var(--muted)}
+.card b{color:var(--text);font-weight:600}
+.tmode{display:flex;margin-bottom:12px}
+.tmode button{flex:1}
+
+/* review notes under the prototype */
+.notes{margin-top:56px;display:grid;gap:0;max-width:880px}
+.notes h2{font-family:var(--serif);font-weight:500;font-size:clamp(1.8rem,4vw,2.6rem);letter-spacing:-.02em;margin:0 0 18px;line-height:1}
+.nrow{display:grid;grid-template-columns:200px minmax(0,1fr);gap:8px 28px;padding:16px 0;border-top:1px solid var(--line)}
+.nrow dt{font-weight:600}
+.nrow dd{margin:0;color:var(--muted);max-width:62ch}
+.nrow dd b{color:var(--text);font-weight:500}
+.fine{margin-top:22px;font-size:13px;color:var(--muted)}
+@media (max-width:620px){ .nrow{grid-template-columns:1fr} }
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{transition-duration:.01ms!important;animation-duration:.01ms!important}
+}
+</style>
+
+<div class="page">
+  <p class="eyebrow">Vib3 Rooms · Preview</p>
+  <h1>Gamers in the room</h1>
+  <p class="lede">Two players, four players or one in the spotlight, each on their own screen, with spray landing on the player you back. Switch the layout and device below, throw some notes, open the host console. Gameplay is placeholder animation; names, amounts and sources are examples.</p>
+
+  <div class="bar" role="toolbar" aria-label="Prototype controls">
+    <div class="grp"><span class="lab">Layout</span>
+      <div class="seg" id="segLayout">
+        <button data-act="layout:versus" aria-pressed="true">Versus</button>
+        <button data-act="layout:grid" aria-pressed="false">Four-way</button>
+        <button data-act="layout:spot" aria-pressed="false">Spotlight</button>
+        <button data-act="layout:team" aria-pressed="false">Teams</button>
+      </div>
+    </div>
+    <div class="grp" id="grpFormat" hidden><span class="lab">Format</span>
+      <div class="seg" id="segFormat">
+        <button data-act="format:2" aria-pressed="false">2v2</button>
+        <button data-act="format:3" aria-pressed="false">3v3</button>
+        <button data-act="format:4" aria-pressed="true">4v4</button>
+      </div>
+    </div>
+    <div class="grp"><span class="lab">View as</span>
+      <div class="seg" id="segLane">
+        <button data-act="lane:adult" aria-pressed="true">Adult 18+</button>
+        <button data-act="lane:teen" aria-pressed="false">Teen 13–17</button>
+      </div>
+    </div>
+    <button class="ghost" data-act="drop">Simulate a drop</button>
+    <div class="grp"><span class="lab">Device</span>
+      <div class="seg" id="segDevice">
+        <button data-act="device:phone" aria-pressed="false">Phone</button>
+        <button data-act="device:desktop" aria-pressed="true">Desktop</button>
+      </div>
+    </div>
+    <button class="sw" id="swLayers" role="switch" aria-checked="false" data-act="layers"><i></i>Show stream layers</button>
+    <span class="pull" id="pull" aria-live="polite"></span>
+  </div>
+
+  <main id="room" class="room" data-device="desktop" data-layers="off" data-sheet="closed">
+    <div class="shell">
+      <section id="stage" class="stage" aria-label="Live screen"></section>
+      <aside class="side" aria-label="Room console">
+        <div class="side-inner">
+          <div class="tabs" role="tablist">
+            <button role="tab" id="tabChat" aria-selected="true" data-act="tab:chat">Chat</button>
+            <button role="tab" id="tabCtl" aria-selected="false" data-act="tab:ctl">Host console</button>
+          </div>
+          <div class="panel" id="pChat" role="tabpanel" aria-labelledby="tabChat">
+            <div class="pin" id="pin"></div>
+            <div class="chat" id="chat" aria-live="polite"></div>
+            <div class="rx" id="rx">
+              <button class="wave" data-act="react:👋" aria-label="Wave">Wave 👋</button>
+              <button data-act="react:🔥" aria-label="Fire">🔥</button>
+              <button data-act="react:❤️" aria-label="Heart">❤️</button>
+              <button data-act="react:😂" aria-label="Laugh">😂</button>
+              <button data-act="react:👏" aria-label="Clap">👏</button>
+              <button data-act="react:🎉" aria-label="Party">🎉</button>
+            </div>
+            <form class="comp" id="form">
+              <input id="msg" type="text" placeholder="Message the room" autocomplete="off" aria-label="Message the room">
+              <button type="button" class="round" data-act="golive" aria-label="Go live as a player"></button>
+              <button type="submit" class="round pri" aria-label="Send"></button>
+            </form>
+          </div>
+          <div class="panel ctl" id="pCtl" role="tabpanel" aria-labelledby="tabCtl" hidden></div>
+        </div>
+      </aside>
+    </div>
+    <div class="scrim" id="scrim" data-act="close"></div>
+    <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" inert></div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </main>
+
+  <section class="notes" aria-labelledby="nh">
+    <h2 id="nh">What this decides</h2>
+    <dl>
+      <div class="nrow"><dt>Spray goes to the player</dt><dd>Notes land on the tile you tap and add to that player's total. The split bar shows who the room is backing. <b>It tips a person. It is never a bet on the result</b>, and the tray says so.</dd></div>
+      <div class="nrow"><dt>Three ways on screen</dt><dd><b>Share a window</b> from Chrome or Edge on PC. <b>OBS</b> with a stream key, which also covers consoles through a capture card. <b>Phone</b> waits for the native app and shows as coming soon.</dd></div>
+      <div class="nrow"><dt>Cheap to watch</dt><dd>Each tile pulls only the quality its size needs: 720p when big, 360p in a versus pair, 180p in a thumbnail. Turn on <b>Show stream layers</b> to see it, and the line beside it adds up what one viewer downloads.</dd></div>
+      <div class="nrow"><dt>Team games, 2v2 to 4v4</dt><dd>Every player shares their own screen. The room shows <b>one featured feed per team</b> and the rest as small thumbnails. The host picks the featured feed; any viewer can tap a thumbnail to follow a player on their own device, which changes only what that viewer downloads. Feeds nobody is watching stop uploading.</dd></div>
+      <div class="nrow"><dt>Spray a player or a team</dt><dd>Spray a player from their feed, or spray the whole team and the amount <b>splits equally</b> between players still in the match. The tray shows the share per player before you throw.</dd></div>
+      <div class="nrow"><dt>Age lanes</dt><dd>All ages can join, but each age group gets its own lane: <b>18+</b> and <b>13–17</b>. Matches, chat, spray and viewer counts stay inside the lane, so adults and teens never see or message each other. Use <b>View as</b> to switch.</dd></div>
+      <div class="nrow"><dt>When a player drops</dt><dd>Their feed holds the slot and shows <b>Reconnecting</b> with a countdown. If the host set a timeout and it runs out, the room posts <b>"[name] has dropped out"</b>. With no timeout, the slot stays as it is until they return.</dd></div>
+      <div class="nrow"><dt>Host decides who plays</dt><dd>Players ask to go live, the host accepts, up to four on screen. Remove, spotlight and mute game audio sit in the host console. Teen and adult rules stay the same as the stage.</dd></div>
+      <div class="nrow"><dt>Safe to share</dt><dd>The go-live sheet tells players to share the game window, not the whole screen, because DMs and notifications can show up on stream.</dd></div>
+    </dl>
+    <p class="fine">Mockup only. Spray amounts, the limit and the stream key are example values. Real payouts stay behind the existing payments gate.</p>
+  </section>
+</div>
+
+<script>
+(function(){
+"use strict";
+var $=function(s,r){return (r||document).querySelector(s)};
+var $$=function(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s))};
+var reduce=window.matchMedia("(prefers-reduced-motion: reduce)");
+var fmt=function(n){return "₦"+n.toLocaleString("en-NG")};
+var ICONS={
+  expand:'<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+  vol:'<path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16.5 8.5a5 5 0 010 7"/>',
+  mute:'<path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M17 9l4 6M21 9l-4 6"/>',
+  back:'<path d="M15 5l-7 7 7 7"/>',
+  users:'<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.4 2.7-6 6-6s6 2.6 6 6"/><path d="M16 5.3a3.2 3.2 0 010 5.4M18 14.4c1.8.8 3 2.7 3 5.6"/>',
+  more:'<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>',
+  send:'<path d="M4 12l16-8-6 16-2.5-6.5L4 12z"/>',
+  game:'<rect x="2.5" y="7" width="19" height="10" rx="5"/><path d="M7 10v4M5 12h4"/><circle cx="16" cy="11" r=".8"/><circle cx="18" cy="13" r=".8"/>',
+  copy:'<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 012-2h9"/>',
+  x:'<path d="M6 6l12 12M18 6L6 18"/>',
+  check:'<path d="M5 12l5 5 9-10"/>',
+  monitor:'<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+  cast:'<circle cx="12" cy="12" r="3"/><path d="M6.3 6.3a8 8 0 000 11.4M17.7 6.3a8 8 0 010 11.4"/>',
+  phone:'<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>'
+};
+function ic(n){return '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">'+ICONS[n]+'</svg>'}
+var BAG='<svg class="pic" viewBox="0 0 44 36" aria-hidden="true"><rect x="5" y="9" width="34" height="24" rx="9" fill="oklch(30% .12 290)"/><rect x="14" y="3" width="16" height="9" rx="4" fill="oklch(76% .15 70)"/><circle cx="22" cy="21" r="5" fill="oklch(76% .15 70)"/></svg>';
+var BUNDLE='<svg class="pic" viewBox="0 0 44 36" aria-hidden="true"><rect x="4" y="8" width="32" height="20" rx="3" fill="oklch(76% .15 70)"/><rect x="9" y="12" width="32" height="20" rx="3" fill="oklch(52% .2 290)"/><rect x="19" y="10" width="7" height="24" fill="oklch(22% .02 270)"/></svg>';
+var RAIN='<svg class="pic" viewBox="0 0 44 36" aria-hidden="true"><ellipse cx="22" cy="10" rx="18" ry="7" fill="oklch(40% .15 290)"/><rect x="9" y="19" width="9" height="5" rx="1" fill="oklch(76% .15 70)"/><rect x="24" y="23" width="9" height="5" rx="1" fill="oklch(52% .2 290)"/><rect x="15" y="29" width="9" height="5" rx="1" fill="oklch(76% .15 70)"/></svg>';
+
+var SRC={win:{t:"PC · window",long:"Sharing a game window"},obs:{t:"PC · OBS",long:"Streaming from OBS"},con:{t:"Console · OBS",long:"Console through a capture card"}};
+var COLORS=["oklch(58% .14 290)","oklch(56% .12 200)","oklch(58% .14 50)","oklch(56% .12 150)","oklch(58% .13 20)"];
+var SCENES=["pitch","track","arena","blocks"];
+var TEAMS={A:{name:"Lagos",cls:"a"},B:{name:"London",cls:"b"}};
+function mk(id,name,city,team,src,i,on,tally,q){return {id:id,name:name,city:city,team:team,src:src,q:q||"720p60",scene:SCENES[i%4],tally:tally,audio:true,on:on,status:"live",dropAt:0}}
+/* each age lane has its own players, requests, score, host and chat: nothing crosses between them */
+var LANES={
+  adult:{label:"18+",host:"Dayo",count:31,score:[2,1],feat:{A:"kemi",B:"tayo"},follow:{A:null,B:null},log:[],
+    pin:"Best of 5. Be kind, no sharing phone numbers.",
+    players:[mk("kemi","Kemi","Lagos","A","win",0,true,4200),mk("tayo","Tayo","London","B","con",1,true,3100,"1080p30"),mk("bisi","Bisi","Lagos","A","obs",2,true,900),mk("zane","Zane","London","B","win",3,true,1500),mk("chidi","Chidi","Lagos","A","win",0,false,600),mk("jo","Jo","London","B","con",1,false,450,"1080p30"),mk("femi","Femi","Lagos","A","obs",2,false,300),mk("remi","Remi","London","B","win",3,false,200)],
+    asks:[mk("zee","Zee","Manchester","B","win",2,true,0)]},
+  teen:{label:"13–17",host:"Ola",count:15,score:[1,1],feat:{A:"joy",B:"kai"},follow:{A:null,B:null},log:[],
+    pin:"First to 3 wins. Keep it friendly, no personal info.",
+    players:[mk("joy","Joy","Lagos","A","win",0,true,1800),mk("kai","Kai","London","B","win",1,true,1300),mk("nia","Nia","Lagos","A","obs",2,true,400),mk("sol","Sol","London","B","win",3,true,700),mk("ife","Ife","Lagos","A","win",0,false,250),mk("max","Max","London","B","obs",1,false,150),mk("bea","Bea","Lagos","A","win",2,false,120),mk("ty","Ty","London","B","win",3,false,90)],
+    asks:[mk("rue","Rue","Leeds","B","win",2,true,0)]}
+};
+var state={layout:"team",device:window.innerWidth>=900?"desktop":"phone",lane:"adult",format:4,timeout:30,spotId:"kemi",layers:false,tab:"chat",limit:2000,spent:0,sheet:null};
+Object.defineProperty(state,"players",{get:function(){return LANES[state.lane].players}});
+Object.defineProperty(state,"score",{get:function(){return LANES[state.lane].score}});
+Object.defineProperty(state,"asks",{get:function(){return LANES[state.lane].asks},set:function(v){LANES[state.lane].asks=v}});
+function L(){return LANES[state.lane]}
+var byId=function(id){return state.players.filter(function(p){return p.id===id})[0]};
+var onScreen=function(){return state.players.filter(function(p){return p.on})};
+var LETTER=["A","B","C","D"];
+function members(t){return state.players.filter(function(p){return p.team===t}).slice(0,state.format)}
+function featuredOf(t){var m=members(t),f=L().follow[t]||L().feat[t];return m.filter(function(x){return x.id===f})[0]||m[0]}
+function teamObj(t){return {id:"t"+t,name:"Team "+TEAMS[t].name,tally:members(t).reduce(function(s,p){return s+p.tally},0)}}
+function statusText(p){
+  if(p.status==="out")return "Dropped out";
+  if(p.status==="reconnecting"){
+    if(state.timeout>0){var left=Math.max(0,state.timeout-Math.floor((Date.now()-p.dropAt)/1000));return "Reconnecting… "+Math.floor(left/60)+":"+("0"+left%60).slice(-2)}
+    return "Reconnecting…";
+  }
+  return "";
+}
+function statusHtml(p){return p.status==="live"?"":'<div class="tstat" data-status="'+p.id+'">'+statusText(p)+'</div>'}
+
+/* ---------- gameplay placeholders (generic, no real game) ---------- */
+function draw(c,t){
+  var ctx=c.__ctx||(c.__ctx=c.getContext("2d"));var w=320,h=180,s=c.dataset.scene,k=+c.dataset.seed||0;t=t+k*1.7;
+  ctx.clearRect(0,0,w,h);
+  if(s==="pitch"){
+    ctx.fillStyle="#12261f";ctx.fillRect(0,0,w,h);
+    ctx.strokeStyle="rgba(255,255,255,.28)";ctx.lineWidth=1.5;ctx.strokeRect(12,10,w-24,h-20);
+    ctx.beginPath();ctx.moveTo(w/2,10);ctx.lineTo(w/2,h-10);ctx.stroke();
+    ctx.beginPath();ctx.arc(w/2,h/2,22,0,7);ctx.stroke();
+    ctx.strokeRect(12,h/2-28,34,56);ctx.strokeRect(w-46,h/2-28,34,56);
+    for(var i=0;i<5;i++){
+      var a=t*.7+i*1.3;ctx.fillStyle="#7c46d6";ctx.beginPath();ctx.arc(70+i*34+Math.sin(a)*14,40+((i*31)%100)+Math.cos(a*1.1)*10,5,0,7);ctx.fill();
+      ctx.fillStyle="#e9e4da";ctx.beginPath();ctx.arc(110+i*34+Math.cos(a*.9)*14,55+((i*47)%90)+Math.sin(a)*10,5,0,7);ctx.fill();
+    }
+    ctx.fillStyle="#fff";ctx.beginPath();ctx.arc(w/2+Math.sin(t*.8)*80,h/2+Math.cos(t*1.3)*36,3.5,0,7);ctx.fill();
+  }else if(s==="track"){
+    ctx.fillStyle="#1b1b22";ctx.fillRect(0,0,w,h);
+    ctx.lineWidth=34;ctx.strokeStyle="#2c2c36";ctx.beginPath();ctx.ellipse(w/2,h/2,100,52,0,0,7);ctx.stroke();
+    ctx.lineWidth=2;ctx.setLineDash([8,10]);ctx.strokeStyle="rgba(255,255,255,.35)";ctx.beginPath();ctx.ellipse(w/2,h/2,100,52,0,0,7);ctx.stroke();ctx.setLineDash([]);
+    for(var j=0;j<2;j++){var u=t*(1.1+j*.12)+j*2.2;var x=w/2+Math.cos(u)*100,y=h/2+Math.sin(u)*52;
+      ctx.fillStyle=j?"#f2b54a":"#9b6fef";ctx.save();ctx.translate(x,y);ctx.rotate(u+Math.PI/2);ctx.fillRect(-9,-5,18,10);ctx.restore();}
+    ctx.fillStyle="rgba(255,255,255,.7)";ctx.font="600 12px Jost,sans-serif";ctx.fillText("LAP 2/3",12,22);
+  }else if(s==="arena"){
+    ctx.fillStyle="#15141c";ctx.fillRect(0,0,w,h);ctx.strokeStyle="rgba(155,111,239,.12)";ctx.lineWidth=1;
+    for(var g=0;g<w;g+=24){ctx.beginPath();ctx.moveTo(g,0);ctx.lineTo(g,h);ctx.stroke()}
+    for(var r=0;r<h;r+=24){ctx.beginPath();ctx.moveTo(0,r);ctx.lineTo(w,r);ctx.stroke()}
+    for(var e=0;e<9;e++){var ex=(e*37+t*22)%w,ey=24+((e*53)%110)+Math.sin(t*2+e)*8;ctx.fillStyle=e%3?"#e9e4da":"#f2b54a";ctx.fillRect(ex,ey,9,9)}
+    var px=w/2+Math.sin(t*.9)*90;ctx.fillStyle="#9b6fef";ctx.beginPath();ctx.moveTo(px,h-30);ctx.lineTo(px-9,h-12);ctx.lineTo(px+9,h-12);ctx.fill();
+    ctx.fillStyle="#fff";for(var b=0;b<3;b++){ctx.fillRect(px-1,h-40-((t*160+b*50)%140),2,8)}
+  }else{
+    ctx.fillStyle="#17161d";ctx.fillRect(0,0,w,h);var cols=["#7c46d6","#f2b54a","#e9e4da","#4a8f78"];
+    for(var q=0;q<9;q++){var qx=14+(q%9)*33,qy=((t*34+q*41)%(h+30))-20;ctx.fillStyle=cols[q%4];ctx.fillRect(qx,qy,26,16);ctx.fillRect(qx+(q%2?10:-10),qy+16,26,16)}
+    ctx.fillStyle="rgba(255,255,255,.08)";for(var f=0;f<7;f++){ctx.fillRect(14+f*40,h-14,34,8)}
+  }
+}
+var last=0;
+function frame(ts){
+  if(ts-last>48){last=ts;$$("canvas[data-scene]").forEach(function(c){draw(c,ts/1000)})}
+  requestAnimationFrame(frame);
+}
+function drawOnce(){$$("canvas[data-scene]").forEach(function(c){draw(c,2)})}
+
+/* ---------- stage ---------- */
+function tile(p,o){
+  o=o||{};var side=o.side||"n";
+  return '<article class="tile'+(o.thumb?' thumb':'')+'" data-id="'+p.id+'"'+(o.thumb?' tabindex="0" role="button" aria-label="'+(o.label||"Put "+p.name+" in the spotlight")+'" data-act="'+(o.act||"focus:"+p.id)+'"':'')+'>'+
+    '<canvas data-scene="'+p.scene+'" data-seed="'+p.id.length+'" width="320" height="180" aria-hidden="true"></canvas>'+
+    statusHtml(p)+'<div class="tt"><span class="chip side-chip '+side+'" aria-label="Side '+(o.letter||"")+'">'+(o.letter||"")+'</span><span class="tname">'+p.name+'</span><span class="chip src">'+SRC[p.src].t+'</span><span class="chip q">'+p.q+'</span><span class="chip lyr"></span><span class="sp"></span>'+
+      '<span class="tact"><button class="ib" aria-pressed="'+(!p.audio)+'" aria-label="'+(p.audio?"Mute":"Unmute")+' '+p.name+' game audio" data-act="audio:'+p.id+'">'+ic(p.audio?"vol":"mute")+'</button>'+
+      (o.noFocus?'':'<button class="ib" aria-label="Spotlight '+p.name+'" data-act="focus:'+p.id+'">'+ic("expand")+'</button>')+'</span></div>'+
+    '<div class="tb"><span class="tally" data-tally="'+p.id+'">'+fmt(p.tally)+'<small>sprayed</small></span><button class="spray" data-act="spray:'+p.id+'"'+(p.status==="out"?' disabled':'')+'>Spray '+p.name+'</button></div>'+
+    '<div class="spray-layer"></div></article>';
+}
+function slot(){return '<div class="slot">Waiting for a player.<br>Accept a request in the host console.</div>'}
+function support(a,b){
+  var tot=a.tally+b.tally||1;var pa=Math.round(a.tally/tot*100);
+  return '<div class="support" id="support"><div class="bar2" role="img" aria-label="Spray support: '+a.name+' '+pa+' percent, '+b.name+' '+(100-pa)+' percent"><i class="sa" style="flex-grow:'+a.tally+'"></i><i class="sb" style="flex-grow:'+b.tally+'"></i></div>'+
+    '<div class="leg"><span><b>'+a.name+'</b> '+pa+'% · <span data-tally2="'+a.id+'">'+fmt(a.tally)+'</span></span><span style="text-align:right"><b>'+b.name+'</b> '+(100-pa)+'% · <span data-tally2="'+b.id+'">'+fmt(b.tally)+'</span></span></div></div>';
+}
+function render(){
+  var room=$("#room"),on=onScreen(),h='';
+  room.dataset.device=state.device;room.dataset.layers=state.layers?"on":"off";
+  $$("#segLayout button").forEach(function(b){b.setAttribute("aria-pressed",String(b.dataset.act==="layout:"+state.layout))});
+  $$("#segDevice button").forEach(function(b){b.setAttribute("aria-pressed",String(b.dataset.act==="device:"+state.device))});
+  $("#swLayers").setAttribute("aria-checked",String(state.layers));
+  $$("#segLane button").forEach(function(b){b.setAttribute("aria-pressed",String(b.dataset.act==="lane:"+state.lane))});
+  $$("#segFormat button").forEach(function(b){b.setAttribute("aria-pressed",String(b.dataset.act==="format:"+state.format))});
+  $("#grpFormat").hidden=state.layout!=="team";
+  room.dataset.layout=state.layout;
+  $("#pin").innerHTML='<b>'+L().host+':</b> '+L().pin;
+  h+='<header class="rh"><button class="back" aria-label="Leave room">'+ic("back")+'</button><div class="ttl"><h2>Friday Night Finals, Lagos v London</h2><div class="sub"><span class="live">LIVE</span><span>Hosted by '+L().host+'</span><span class="lanebadge">'+L().label+' lane</span></div></div><span class="count" aria-label="'+L().count+' in this lane">'+ic("users")+L().count+'</span><button class="more" aria-label="More">'+ic("more")+'</button></header>';
+  h+='<p class="agebar">You are in the <b>'+L().label+' lane</b>. Matches, chat and spray stay inside your age group.</p>';
+  if(state.layout==="team"){h+=teamHtml()}
+  else if(state.layout==="versus"){
+    var a=on[0],b=on[1];
+    if(a&&b){
+      h+='<div class="match"><div class="who"><b>'+a.name+'</b><span>'+a.city+'</span></div><div class="sc" aria-label="Score '+state.score[0]+' to '+state.score[1]+'">'+state.score[0]+'<em>–</em>'+state.score[1]+'</div><div class="who r"><b>'+b.name+'</b><span>'+b.city+'</span></div></div>';
+    }
+    h+='<div class="tiles" data-layout="versus">'+(a?tile(a,{side:"a",letter:"A"}):slot())+(b?tile(b,{side:"b",letter:"B"}):slot())+'</div>';
+    if(a&&b){h+=support(a,b)+'<p class="hint">Spray tips the player you tap. It is not a bet on the result.</p>'}
+  }else if(state.layout==="grid"){
+    h+='<div class="tiles" data-layout="grid">'+on.slice(0,4).map(function(p,i){return tile(p,{side:"n",letter:LETTER[i]})}).join("")+'</div>';
+    h+='<p class="hint">Four feeds on screen. Tap a tile\'s expand button to put one in the spotlight.</p>';
+  }else{
+    var main=byId(state.spotId);if(!main||!main.on)main=on[0];
+    if(main){
+      state.spotId=main.id;
+      h+='<div class="tiles" data-layout="spot">'+tile(main,{side:"n",letter:LETTER[on.indexOf(main)],noFocus:true})+'</div>';
+      h+='<div class="thumbs">'+on.filter(function(p){return p!==main}).slice(0,3).map(function(p){return tile(p,{thumb:true,letter:LETTER[on.indexOf(p)]})}).join("")+'</div>';
+    }else h+=slot();
+  }
+  $("#stage").innerHTML=h;
+  renderCtl();
+  if(reduce.matches)drawOnce();
+  updateLayers();
+}
+
+function lane(t){
+  var m=members(t),f=featuredOf(t),fol=L().follow[t],side=TEAMS[t].cls;
+  var rest=m.filter(function(p){return p!==f});
+  return '<section class="lane" data-team="'+t+'" aria-label="Team '+TEAMS[t].name+'"><div class="lane-h"><span class="chip side-chip '+side+'">'+t+'</span><b>Team '+TEAMS[t].name+'</b><span class="sp"></span>'+
+    (fol?'<button class="rb" data-act="unfollow:'+t+'">Following '+f.name+' · back to host pick</button>':'<span class="mut">Host pick: '+f.name+'</span>')+
+    '<button class="rb pri" data-act="sprayteam:'+t+'">Spray team</button></div>'+
+    tile(f,{side:side,letter:t,noFocus:true})+
+    '<div class="roster" style="grid-template-columns:repeat('+Math.max(rest.length,1)+',minmax(0,1fr))">'+rest.map(function(p){return tile(p,{thumb:true,side:side,letter:t,act:"follow:"+t+":"+p.id,label:"Follow "+p.name})}).join("")+'</div></section>';
+}
+function teamHtml(){
+  var A=teamObj("A"),B=teamObj("B"),n=state.format,sc=state.score;
+  return '<div class="match"><div class="who"><b>'+A.name+'</b><span>'+n+'v'+n+' · '+members("A").length+' players</span></div><div class="sc" aria-label="Score '+sc[0]+' to '+sc[1]+'">'+sc[0]+'<em>–</em>'+sc[1]+'</div><div class="who r"><b>'+B.name+'</b><span>'+n+'v'+n+' · '+members("B").length+' players</span></div></div>'+
+    '<div class="lanes">'+lane("A")+lane("B")+'</div>'+support(A,B)+'<p class="hint">Spray a player on their feed, or spray the whole team and it splits equally. It is not a bet on the result.</p>';
+}
+
+/* ---------- viewer layers ---------- */
+var MBPS={720:1.5,360:.5,180:.15},rq=0;
+function updateLayers(){
+  cancelAnimationFrame(rq);
+  rq=requestAnimationFrame(function(){
+    var total=0,n=0;
+    $$(".tile").forEach(function(t){
+      var w=t.getBoundingClientRect().width,L=w>=560?720:w>=250?360:180;
+      var c=$(".lyr",t);if(c)c.textContent="pulls "+L+"p";
+      total+=MBPS[L];n++;
+    });
+    var full=n*MBPS[720];
+    $("#pull").innerHTML='Viewer pulls about <b>'+total.toFixed(1)+' Mbps</b> across '+n+' feeds, vs '+full.toFixed(1)+' Mbps if every feed ran at full quality';
+  });
+}
+
+/* ---------- host console ---------- */
+function seg(name,opts,cur){return '<div class="seg">'+opts.map(function(o){return '<button data-act="'+name+':'+o[0]+'" aria-pressed="'+(cur===o[0])+'">'+o[1]+'</button>'}).join("")+'</div>'}
+function renderCtl(){
+  var on=onScreen(),full=on.length>=4,h='';
+  h+='<div><h3>Layout</h3>'+seg("layout",[["versus","Versus"],["grid","Four-way"],["spot","Spotlight"],["team","Teams"]],state.layout)+'</div>';
+  if(state.layout==="team")h+=teamCtl();
+  else h+='<div><h3>On screen · '+on.length+' of 4</h3>'+state.players.map(function(p){
+    return '<div class="prow"><span class="av" style="background:'+COLORS[state.players.indexOf(p)%5]+'">'+p.name[0]+'</span><div class="who"><b>'+p.name+'</b><div><span class="dot'+(p.on?'':' off')+'"></span>'+(p.on?"Live":"Off screen")+' · '+SRC[p.src].t+' · '+p.q+'</div></div>'+
+      (p.on?'<button class="rb" aria-label="Spotlight '+p.name+'" data-act="focus:'+p.id+'">'+ic("expand")+'</button><button class="rb" aria-label="Take '+p.name+' off screen" data-act="remove:'+p.id+'">'+ic("x")+'</button>'
+           :'<button class="rb pri" data-act="bring:'+p.id+'"'+(full?' disabled':'')+'>Bring on</button>')+'</div>';
+  }).join("")+'</div>';
+  if(state.layout!=="team"&&state.asks.length){
+    h+='<div><h3>Asking to play</h3>'+state.asks.map(function(p){
+      return '<div class="prow"><span class="av" style="background:'+COLORS[4]+'">'+p.name[0]+'</span><div class="who"><b>'+p.name+'</b><div>'+SRC[p.src].t+' · '+p.city+'</div></div><button class="rb" data-act="decline:'+p.id+'">Decline</button><button class="rb pri" data-act="accept:'+p.id+'"'+(full?' disabled':'')+'>Accept</button></div>';
+    }).join("")+(full?'<p class="hint" style="padding-left:0">Screen is full. Take someone off to accept.</p>':'')+'</div>';
+  }
+  var a=on[0],b=on[1];
+  if(state.layout==="team"||(a&&b)){
+    var sn=state.layout==="team"?["Team "+TEAMS.A.name,"Team "+TEAMS.B.name]:[a&&a.name,b&&b.name];
+    h+='<div><h3>Score</h3>'+sn.map(function(nm,i){return '<div class="mrow"><span><b>'+nm+'</b></span><div class="step"><button class="rb" aria-label="Lower '+nm+' score" data-act="score:'+i+':-1">−</button><output>'+state.score[i]+'</output><button class="rb" aria-label="Raise '+nm+' score" data-act="score:'+i+':1">+</button></div></div>'}).join("")+'</div>';
+  }
+  h+='<div><h3>If a player drops</h3>'+seg("timeout",[["30","Out after 30s"],["120","2 min"],["0","Hold slot"]],String(state.timeout))+'<p class="hint" style="padding-left:0">The feed shows Reconnecting. When time runs out the room posts "[name] has dropped out". Hold slot keeps it as it is.</p></div>';
+  h+='<div><h3>Room</h3><div class="mrow"><span>Max feed quality</span>'+'<span class="chip" style="background:var(--raised)">Smooth 720p60</span></div><div class="mrow"><span>Spray on screen</span><span class="chip" style="background:var(--raised);color:var(--ok)">On</span></div></div>';
+  h+='<div><h3>Age lanes</h3><div class="card"><b>18+</b> · 31 watching<br><b>13–17</b> · 15 watching<br><span style="display:block;margin-top:6px">Each lane has its own matches, chat and spray. Adults and teens cannot see or message each other. You are viewing the <b>'+L().label+'</b> lane.</span></div></div>';
+  $("#pCtl").innerHTML=h;
+}
+function teamCtl(){
+  var h='<div><h3>Format</h3>'+seg("format",[["2","2v2"],["3","3v3"],["4","4v4"]],String(state.format))+'</div>';
+  ["A","B"].forEach(function(t){
+    var m=members(t);
+    h+='<div><h3>Team '+TEAMS[t].name+' · '+m.length+' players</h3>'+m.map(function(p){
+      var live=p.status==="live",ft=L().feat[t]===p.id;
+      return '<div class="prow"><span class="av" style="background:'+COLORS[state.players.indexOf(p)%5]+'">'+p.name[0]+'</span><div class="who"><b>'+p.name+'</b><div><span class="dot'+(live?'':' off')+'"></span>'+(live?"Live":p.status==="reconnecting"?"Reconnecting":"Dropped out")+' · '+SRC[p.src].t+'</div></div>'+
+        (live?'<button class="rb'+(ft?' pri':'')+'" aria-label="Feature '+p.name+'" data-act="feat:'+t+':'+p.id+'">'+(ft?"Featured":"Feature")+'</button>':'<button class="rb" data-act="back:'+p.id+'">Back (demo)</button>')+'</div>';
+    }).join("")+'</div>';
+  });
+  return h;
+}
+
+/* ---------- chat ---------- */
+var chatSeed=[["Kemi","Lagos is loud tonight",1],["Ada","who has the first round",2],["Dayo","Co-host · feeds are live, say hi to the players",0],["Guest 7K1","lurking, love this",4],["Sam","Peckham checking in",3]];
+function paintChat(m){
+  var el=document.createElement("div");el.className="msg"+(m.sys?" sys":"");
+  if(m.sys)el.innerHTML='<span>'+m.html+'</span>';
+  else el.innerHTML='<span class="av" style="background:'+COLORS[m.c%5]+'">'+m.n[0]+'</span><div><span class="n" style="color:'+COLORS[m.c%5]+'">'+m.n+'</span>'+m.t.replace(/</g,"&lt;")+'</div>';
+  var box=$("#chat");box.appendChild(el);while(box.children.length>60)box.removeChild(box.firstChild);box.scrollTop=box.scrollHeight;
+}
+function addChat(m,ln){ln=ln||state.lane;var lg=LANES[ln].log;lg.push(m);if(lg.length>60)lg.shift();if(ln===state.lane)paintChat(m)}
+function sys(html,ln){addChat({sys:true,html:html},ln)}
+function repaintChat(){$("#chat").innerHTML="";L().log.forEach(paintChat)}
+
+/* ---------- spray ---------- */
+var KINDS={
+  n20:{amt:20,n:5,d:["n20"],mode:"throw",label:"₦20"},
+  n50:{amt:50,n:6,d:["n50"],mode:"throw",label:"₦50"},
+  n100:{amt:100,n:8,d:["n100"],mode:"throw",label:"₦100"},
+  bundle:{amt:1000,n:22,d:["n20","n50","n100"],mode:"throw",label:"a bundle"},
+  bag:{amt:10000,n:38,d:["n20","n50","n100","n100"],mode:"throw",label:"a money bag"},
+  rain:{amt:100000,n:64,d:["n20","n50","n100"],mode:"rain",label:"the rain"}
+};
+function throwNotes(tl,kind){
+  if(reduce.matches)return;
+  var layer=$(".spray-layer",tl),r=tl.getBoundingClientRect(),w=r.width,h=r.height;
+  for(var i=0;i<kind.n;i++){
+    var el=document.createElement("i");el.className="note "+kind.d[i%kind.d.length];layer.appendChild(el);
+    var rot=(Math.random()*180-90),dx=(Math.random()-.5)*60,x1,y1,x0,y0,x2,y2,delay,dur;
+    if(kind.mode==="rain"){x0=Math.random()*(w-34);y0=-30;x1=x0+dx;y1=h*.55;x2=x0+dx*1.6;y2=h+30;delay=Math.random()*800;dur=1100+Math.random()*600}
+    else{x0=w-70;y0=h-34;x1=w*(.25+Math.random()*.5);y1=h*(.12+Math.random()*.3);x2=x1+dx;y2=h+30;delay=i*(kind.n>20?22:38);dur=950+Math.random()*350}
+    var a=el.animate([
+      {transform:"translate("+x0+"px,"+y0+"px) rotate(0deg) scale(.9)",opacity:0,offset:0},
+      {transform:"translate("+x1+"px,"+y1+"px) rotate("+rot+"deg) scale(1)",opacity:1,offset:.45,easing:"cubic-bezier(.23,1,.32,1)"},
+      {transform:"translate("+x2+"px,"+y2+"px) rotate("+(rot*2)+"deg) scale(1)",opacity:0,offset:1}
+    ],{duration:dur,delay:delay,easing:"cubic-bezier(.23,1,.32,1)",fill:"both"});
+    a.onfinish=(function(n){return function(){n.remove()}})(el);
+  }
+}
+function floatEmoji(em){
+  var tl=$(".tile:not(.thumb)");if(!tl||reduce.matches)return;
+  var layer=$(".spray-layer",tl),r=tl.getBoundingClientRect(),el=document.createElement("span");el.className="fl";el.textContent=em;layer.appendChild(el);
+  var x=r.width*(.15+Math.random()*.7);
+  el.animate([{transform:"translate("+x+"px,"+(r.height-30)+"px) scale(.9)",opacity:0},{transform:"translate("+(x+14)+"px,"+(r.height*.55)+"px) scale(1)",opacity:1,offset:.3},{transform:"translate("+(x-10)+"px,"+(r.height*.1)+"px) scale(1)",opacity:0}],{duration:1500,easing:"cubic-bezier(.23,1,.32,1)",fill:"both"}).onfinish=function(){el.remove()};
+}
+function toast(t){var el=$("#toast");el.textContent=t;el.classList.add("on");clearTimeout(toast.t);toast.t=setTimeout(function(){el.classList.remove("on")},2200)}
+function pop(el){if(!el)return;el.classList.add("pop");setTimeout(function(){el.classList.remove("pop")},160)}
+function refreshBars(){
+  var on=onScreen();$$("[data-tally]").forEach(function(e){var p=byId(e.dataset.tally);if(p)e.firstChild.nodeValue=fmt(p.tally)});
+  var pair=state.layout==="team"?[teamObj("A"),teamObj("B")]:(state.layout==="versus"&&on[0]&&on[1]?[on[0],on[1]]:null);
+  if(pair&&$("#support")){
+    var s=document.createElement("div");s.innerHTML=support(pair[0],pair[1]);$("#support").replaceWith(s.firstChild);
+  }
+}
+
+/* ---------- sheets ---------- */
+var lastFocus=null;
+function teamN(t){return members(t).filter(function(x){return x.status!=="out"}).length||1}
+function sheetSpray(){
+  var s=state.sheet,p=byId(s.arg),team=s.mode==="team",left=state.limit-state.spent,n=team?teamN(p.team):1,tn="Team "+TEAMS[p.team].name;
+  function dis(a){return a>left?" disabled":""}
+  function each(a){return team?"about "+fmt(Math.floor(a/n))+" each":null}
+  var tog=state.layout==="team"?'<div class="seg tmode"><button data-act="tmode:player" aria-pressed="'+!team+'">'+p.name+'</button><button data-act="tmode:team" aria-pressed="'+team+'">'+tn+'</button></div>':'';
+  return '<div class="grab"></div><h2 id="sheetTitle" tabindex="-1">Spray '+(team?tn:p.name)+'</h2><p>You pay when you throw. '+(team?'It splits equally between the '+n+' players still in the match. ':'It goes to '+p.name+'. ')+'It is not a bet on the result.</p>'+tog+
+   '<div class="n3">'+[20,50,100].map(function(a){return '<button class="nb" data-act="throw:n'+a+'" data-amt="'+a+'"'+dis(a)+'><span class="bill n'+a+'">'+a+'</span><b>'+fmt(a)+'</b><small>'+(each(a)||(a*100).toLocaleString()+' V3C')+'</small></button>'}).join("")+'</div>'+
+   '<button class="big" data-act="throw:bundle" data-amt="1000"'+dis(1000)+'>'+BUNDLE+'<span><b>Bundle · ₦1,000</b><small>'+(each(1000)||"100 notes at once")+'</small></span></button>'+
+   '<button class="big" data-act="throw:bag" data-amt="10000"'+dis(10000)+'>'+BAG+'<span><b>Money bag · ₦10,000</b><small>'+(each(10000)||"A duffle unzips over the feed")+'</small></span></button>'+
+   '<button class="big" data-act="throw:rain" data-amt="100000"'+dis(100000)+'>'+RAIN+'<span><b>Make it rain · ₦100,000</b><small>'+(each(100000)||"The whole room sees it")+'</small></span></button>'+
+   '<div class="lim"><span class="pill" id="limText">Room limit '+fmt(state.limit)+' · spent '+fmt(state.spent)+'<button data-act="limit">Change</button></span><button class="done" data-act="close">Done</button></div>';
+}
+var GO={mode:"win",q:"smooth",asked:false,reveal:false};
+function sheetGo(){
+  var obs=GO.mode!=="win";
+  return '<div class="grab"></div><h2 id="sheetTitle" tabindex="-1">Go live as a player</h2><p>The host puts you on screen once you ask. Nothing is recorded.</p>'+
+   '<div role="radiogroup" aria-label="Where is your game">'+
+   '<button class="opt" role="radio" aria-checked="'+(GO.mode==="win")+'" data-act="gomode:win">'+ic("monitor")+'<span><b>Share a game window</b><small>PC · Chrome or Edge. Picks up the game sound too.</small></span></button>'+
+   '<button class="opt" role="radio" aria-checked="'+(GO.mode==="obs")+'" data-act="gomode:obs">'+ic("cast")+'<span><b>Stream with OBS</b><small>PC, or a console through a capture card.</small></span></button>'+
+   '<button class="opt" role="radio" aria-checked="false" disabled>'+ic("phone")+'<span><b>Phone</b><small>Arrives with the Vib3 app.</small></span></button></div>'+
+   (obs?'<p class="sub2">Paste into OBS · Settings · Stream</p><div class="kv"><span class="k">Server</span><code>rtmps://live.vib3.example/room</code><button class="rb" aria-label="Copy server" data-act="copy:rtmps://live.vib3.example/room">'+ic("copy")+'</button></div><div class="kv"><span class="k">Key</span><code>'+(GO.reveal?'vib3_fnf_7Hq2xK9dLm':'••••••••••••••••')+'</code><button class="rb" data-act="reveal">'+(GO.reveal?"Hide":"Show")+'</button><button class="rb" aria-label="Copy stream key" data-act="copy:vib3_fnf_7Hq2xK9dLm">'+ic("copy")+'</button></div><p style="margin:0 0 4px;font-size:13px">This key only works for this room and stops when it ends.</p>':'')+
+   '<p class="sub2">Quality</p>'+seg("goq",[["smooth","Smooth 720p · 60fps"],["sharp","Sharp 1080p · 30fps"]],GO.q)+
+   '<div class="warn"><b>Share the game, not your whole screen.</b> DMs and notifications can pop up on stream.</div>'+
+   '<div class="lim"><button class="done" style="flex:1" data-act="askhost"'+(GO.asked?' disabled':'')+'>'+(GO.asked?"Waiting for Dayo":"Ask Dayo to put me on screen")+'</button><button class="rb" style="min-height:44px;padding:0 18px" data-act="close">Not now</button></div>';
+}
+function openSheet(type,arg,mode){
+  lastFocus=document.activeElement;state.sheet={type:type,arg:arg,mode:mode||"player"};
+  var sh=$("#sheet");sh.innerHTML=type==="spray"?sheetSpray():sheetGo();
+  $("#room").dataset.sheet="open";sh.removeAttribute("inert");
+  setTimeout(function(){var t=$("#sheetTitle");if(t)t.focus({preventScroll:true})},30);
+  sh.scrollIntoView({block:"nearest",behavior:reduce.matches?"auto":"smooth"});
+}
+function closeSheet(){
+  if(!state.sheet)return;state.sheet=null;$("#room").dataset.sheet="closed";$("#sheet").setAttribute("inert","");
+  if(lastFocus&&document.contains(lastFocus))lastFocus.focus({preventScroll:true});
+}
+function refreshSpray(){
+  var left=state.limit-state.spent;
+  $$("#sheet [data-amt]").forEach(function(b){b.disabled=+b.dataset.amt>left});
+  var t=$("#limText");if(t){t.firstChild.nodeValue="Room limit "+fmt(state.limit)+" · spent "+fmt(state.spent)}
+}
+
+/* ---------- actions ---------- */
+function doThrow(k){
+  var kind=KINDS[k],s=state.sheet,p=s&&byId(s.arg);
+  if(!kind||!p||state.spent+kind.amt>state.limit)return;
+  var tl,label,extra="";
+  if(s.mode==="team"){
+    var m=members(p.team).filter(function(x){return x.status!=="out"});
+    if(!m.length)return;
+    var share=Math.floor(kind.amt/m.length),rem=kind.amt-share*m.length,f=featuredOf(p.team);
+    m.forEach(function(x){x.tally+=share});(m.indexOf(f)>-1?f:m[0]).tally+=rem;
+    tl=$('.lane[data-team="'+p.team+'"] .tile:not(.thumb)');label="Team "+TEAMS[p.team].name;extra=" · about "+fmt(share)+" each";
+  }else{
+    p.tally+=kind.amt;label=p.name;
+    tl=$('.tile[data-id="'+p.id+'"]:not(.thumb)')||$('.tile[data-id="'+p.id+'"]');
+  }
+  state.spent+=kind.amt;
+  if(tl)throwNotes(tl,kind);
+  refreshBars();$$("[data-tally]").forEach(pop);refreshSpray();
+  toast((kind.mode==="rain"?"You made it rain on ":"You sprayed ")+label+(kind.mode==="rain"?"":" "+fmt(kind.amt))+extra);
+  sys('You sprayed '+label+' <b>'+fmt(kind.amt)+'</b>'+extra);
+}
+function act(a,el){
+  var p=a.split(":"),k=p[0];
+  switch(k){
+    case "layout":state.layout=p[1];render();break;
+    case "device":state.device=p[1];render();break;
+    case "lane":if(state.lane!==p[1]){closeSheet();state.lane=p[1];state.spotId=(onScreen()[0]||{}).id;repaintChat();render()}break;
+    case "format":state.format=+p[1];render();break;
+    case "timeout":state.timeout=+p[1];render();break;
+    case "feat":L().feat[p[1]]=p[2];L().follow[p[1]]=null;render();break;
+    case "follow":L().follow[p[1]]=p[2];render();break;
+    case "unfollow":L().follow[p[1]]=null;render();break;
+    case "sprayteam":openSheet("spray",featuredOf(p[1]).id,"team");break;
+    case "tmode":state.sheet.mode=p[1];$("#sheet").innerHTML=sheetSpray();$('#sheet [data-act="tmode:'+p[1]+'"]').focus();break;
+    case "drop":
+      var cands=state.layout==="team"?[featuredOf("B"),featuredOf("A")]:onScreen().slice(1).concat(onScreen().slice(0,1));
+      var v=cands.filter(function(x){return x&&x.status==="live"})[0];
+      if(!v){toast("Nobody left to drop");break}
+      v.status="reconnecting";v.dropAt=Date.now();sys('<b>'+v.name+'</b> lost connection');render();break;
+    case "back":var bp=byId(p[1]);bp.status="live";sys('<b>'+bp.name+'</b> is back');render();break;
+    case "layers":state.layers=!state.layers;render();break;
+    case "tab":state.tab=p[1];$("#pChat").hidden=p[1]!=="chat";$("#pCtl").hidden=p[1]!=="ctl";$("#tabChat").setAttribute("aria-selected",String(p[1]==="chat"));$("#tabCtl").setAttribute("aria-selected",String(p[1]==="ctl"));break;
+    case "focus":state.spotId=p[1];state.layout="spot";render();break;
+    case "audio":var q=byId(p[1]);q.audio=!q.audio;render();break;
+    case "spray":openSheet("spray",p[1]);break;
+    case "golive":openSheet("golive");break;
+    case "close":closeSheet();break;
+    case "throw":doThrow(p[1]);break;
+    case "limit":state.limit=state.limit<=2000?200000:2000;refreshSpray();break;
+    case "remove":byId(p[1]).on=false;render();break;
+    case "bring":if(onScreen().length<4){byId(p[1]).on=true;render()}break;
+    case "accept":if(onScreen().length<4){var s=state.asks.shift();state.players.push(s);render();toast(s.name+" is on screen")}break;
+    case "decline":state.asks=state.asks.filter(function(x){return x.id!==p[1]});renderCtl();break;
+    case "score":var i=+p[1];state.score[i]=Math.max(0,state.score[i]+ +p[2]);render();break;
+    case "gomode":GO.mode=p[1];$("#sheet").innerHTML=sheetGo();$('#sheet [aria-checked="true"]').focus();break;
+    case "goq":GO.q=p[1];$("#sheet").innerHTML=sheetGo();$('#sheet [data-act="goq:'+p[1]+'"]').focus();break;
+    case "reveal":GO.reveal=!GO.reveal;$("#sheet").innerHTML=sheetGo();$('#sheet [data-act="reveal"]').focus();break;
+    case "askhost":GO.asked=true;$("#sheet").innerHTML=sheetGo();toast("Asked Dayo to put you on screen");break;
+    case "copy":
+      var txt=a.slice(5);
+      var ok=function(){toast("Copied")};
+      if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(ok,function(){toast("Select the text to copy it")});
+      else toast("Select the text to copy it");
+      break;
+    case "react":addChat({n:"You",t:p[1],c:0});floatEmoji(p[1]);break;
+  }
+}
+document.addEventListener("click",function(e){
+  var t=e.target.closest("[data-act]");if(!t)return;
+  if(t.classList.contains("tile")&&e.target.closest(".ib,.spray"))return;
+  act(t.dataset.act,t);
+});
+document.addEventListener("keydown",function(e){
+  if(e.key==="Escape")closeSheet();
+  var t=e.target;if((e.key==="Enter"||e.key===" ")&&t.classList&&t.classList.contains("thumb")){e.preventDefault();act(t.dataset.act,t)}
+});
+$("#form").addEventListener("submit",function(e){
+  e.preventDefault();var i=$("#msg"),v=i.value.trim();if(!v)return;addChat({n:"You",t:v,c:0});i.value="";
+});
+$("#form").querySelector('[data-act="golive"]').innerHTML=ic("game");
+$("#form").querySelector('[type="submit"]').innerHTML=ic("send");
+
+/* ---------- boot ---------- */
+chatSeed.forEach(function(m){addChat({n:m[0],t:m[1],c:m[2]},"adult")});
+sys("Sam and Zee joined","adult");
+[["Joy","lets go Lagos",1],["Kai","london is ready",3],["Ola","Host · play fair, first to 3",0],["Nia","who is on first",2]].forEach(function(m){addChat({n:m[0],t:m[1],c:m[2]},"teen")});
+sys("Max joined","teen");
+/* drop countdown: updates the text each second and posts "has dropped out" when a set timeout runs out */
+setInterval(function(){
+  var changed=false;
+  Object.keys(LANES).forEach(function(ln){
+    LANES[ln].players.forEach(function(p){
+      if(p.status==="reconnecting"&&state.timeout>0&&(Date.now()-p.dropAt)/1000>=state.timeout){
+        p.status="out";sys('<b>'+p.name+'</b> has dropped out',ln);if(ln===state.lane)changed=true;
+      }
+    });
+  });
+  if(changed){render();return}
+  $$("[data-status]").forEach(function(el){var p=byId(el.dataset.status);if(p)el.textContent=statusText(p)});
+},1000);
+var talk=["that save","Lagos taking this","come on London","first to 3?","this is tense","the lag is clean, nice","who is sponsoring this"],names={adult:["Ada","Sam","Tayo","Guest 7K1","Kemi"],teen:["Joy","Kai","Nia","Sol","Ife"]};
+setInterval(function(){if(document.hidden)return;var nm=names[state.lane],i=Math.floor(Math.random()*nm.length);addChat({n:nm[i],t:talk[Math.floor(Math.random()*talk.length)],c:i})},7000);
+if("ResizeObserver" in window)new ResizeObserver(updateLayers).observe($("#room"));
+render();
+if(!reduce.matches)requestAnimationFrame(frame);
+})();
+</script>
