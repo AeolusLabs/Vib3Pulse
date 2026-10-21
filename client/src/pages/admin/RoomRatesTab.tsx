@@ -26,7 +26,7 @@ type Row = { key: RateKey; label: string; help: string };
 const tierRow = (tier: SprayTier): Row => ({
   key: `spray_platform_${tier}` as RateKey,
   label: `${SPRAY_CATALOGUE[tier].label} (${naira(SPRAY_CATALOGUE[tier].kobo)})`,
-  help: "The platform's share of what is left after VAT, card fees and the fraud reserve.",
+  help: "",
 });
 const GROUPS: { title: string; note: string; rows: Row[] }[] = [
   { title: "Sprays: platform share", note: "One rate per tier. Percent of what is left after VAT, card fees and the fraud reserve.", rows: (["note", "bundle", "bag", "rain"] as SprayTier[]).map(tierRow) },
@@ -153,7 +153,7 @@ export default function RoomRatesTab({ isSuper }: { isSuper: boolean }) {
                   <li key={r.key} className="flex flex-wrap items-center gap-x-4 gap-y-3 p-4" data-testid={`rate-row-${r.key}`}>
                     <div className="min-w-0 flex-1 basis-56">
                       <p className="font-medium text-white">{r.label}</p>
-                      <p className="mt-0.5 text-sm text-slate-400">{r.help}</p>
+                      {r.help && <p className="mt-0.5 text-sm text-slate-400">{r.help}</p>}
                       <p className="mt-1 text-xs text-slate-400">Default {pct(data.defaults[r.key])}, allowed {data.limits[r.key].min} to {data.limits[r.key].max}{changed && <span className="ml-2 font-semibold text-amber-300">Changed from default</span>}</p>
                     </div>
                     <p className="text-2xl font-semibold tabular-nums text-white" data-testid={`rate-value-${r.key}`}>{pct(data.rates[r.key])}</p>
