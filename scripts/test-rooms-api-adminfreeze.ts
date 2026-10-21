@@ -89,11 +89,13 @@ try {
   check("freezing a junk host id is 404", (await call("POST", "/api/admin/rooms/hosts/not-a-uuid/freeze", FIN, { reason: "no such host" })).status === 404);
   check("a content_moderator cannot freeze a host", (await call("POST", `/api/admin/rooms/hosts/${H}/freeze`, MOD, { reason: "not allowed" })).status === 403);
   check("freeze without a reason is 400 REASON_REQUIRED", (await call("POST", `/api/admin/rooms/hosts/${H}/freeze`, FIN, {})).json?.code === "REASON_REQUIRED");
+  const esc = await call("POST", `/api/admin/rooms/hosts/${H}/freeze`, FIN, { reason: "try to end rooms", endLiveRooms: true });
+  check("a finance_manager cannot use endLiveRooms: 403 SUPER_ADMIN_ONLY, nothing frozen, the live room stays live", esc.status === 403 && esc.json?.code === "SUPER_ADMIN_ONLY" && (await controls.isHostFrozen(H)) === false && (await q(`select status from rooms where id = $1`, [live]))[0].status === "live", JSON.stringify(esc.json));
   const f1 = await call("POST", `/api/admin/rooms/hosts/${H}/freeze`, FIN, { reason: "suspected misconduct" });
   check("finance_manager can freeze: changed, payouts held, the live room stays live", f1.status === 200 && f1.json?.changed === true && f1.json?.held?.held === 1 && f1.json?.endedRooms === 0 && (await q(`select status from rooms where id = $1`, [live]))[0].status === "live", JSON.stringify(f1.json));
   check("the host is frozen and the payout is held to the sentinel", (await controls.isHostFrozen(H)) === true && (await q(`select release_at > '9000-01-01' as held from room_payouts where room_id = $1`, [ended]))[0].held === true);
   check("freezing writes one audit row with the reason", (await audits("room_host.freeze", H)).length === 1 && (await audits("room_host.freeze", H))[0].reason === "suspected misconduct");
-  const f2 = await call("POST", `/api/admin/rooms/hosts/${H}/freeze`, FIN, { reason: "again again", endLiveRooms: true });
+  const f2 = await call("POST", `/api/admin/rooms/hosts/${H}/freeze`, SA, { reason: "again again", endLiveRooms: true });
   check("freezing again is 200 changed:false, no side effects, no second audit row (the live room stays live)", f2.status === 200 && f2.json?.changed === false && (await audits("room_host.freeze", H)).length === 1 && (await q(`select status from rooms where id = $1`, [live]))[0].status === "live", JSON.stringify(f2.json));
   const list = await call("GET", "/api/admin/rooms/controls", FIN);
   check("controls lists the frozen host with the reason", list.json?.frozenHosts?.some((h: any) => h.hostId === H && h.reason === "suspected misconduct"), JSON.stringify(list.json?.frozenHosts));

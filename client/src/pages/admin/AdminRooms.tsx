@@ -85,7 +85,7 @@ const errText = (e: unknown) => {
 };
 
 /** Reason plus the option to end the host's live rooms too. */
-function FreezeHostDialog({ host, busy, error, onConfirm, onClose }: { host: { id: string; name: string } | null; busy: boolean; error: string | null; onConfirm: (reason: string, endLiveRooms: boolean) => void; onClose: () => void }) {
+function FreezeHostDialog({ host, canEndRooms, busy, error, onConfirm, onClose }: { host: { id: string; name: string } | null; canEndRooms: boolean; busy: boolean; error: string | null; onConfirm: (reason: string, endLiveRooms: boolean) => void; onClose: () => void }) {
   const [reason, setReason] = useState("");
   const [endRooms, setEndRooms] = useState(false);
   const ok = reason.trim().length >= 3;
@@ -98,15 +98,15 @@ function FreezeHostDialog({ host, busy, error, onConfirm, onClose }: { host: { i
             Stops new sprays and new ticket sales for this host and holds their payouts that have not been sent. Money already paid out is not touched.
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={(e) => { e.preventDefault(); if (ok && !busy) onConfirm(reason.trim(), endRooms); }} className="space-y-4">
+        <form onSubmit={(e) => { e.preventDefault(); if (ok && !busy) onConfirm(reason.trim(), canEndRooms && endRooms); }} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="freeze-reason" className="text-slate-300">Reason (recorded in the audit log)</Label>
             <Textarea id="freeze-reason" rows={3} maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} autoFocus className="border-slate-600 bg-slate-700 text-white" data-testid="input-freeze-reason" />
           </div>
-          <div className="flex items-start gap-3">
+          {canEndRooms && <div className="flex items-start gap-3">
             <Checkbox id="freeze-end" checked={endRooms} onCheckedChange={(v) => setEndRooms(v === true)} className="mt-0.5" data-testid="check-freeze-end-rooms" />
             <Label htmlFor="freeze-end" className="text-sm font-normal leading-snug text-slate-300">Also end their live rooms now. This cuts any stream in progress.</Label>
-          </div>
+          </div>}
           {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
           <DialogFooter className="gap-2 sm:gap-0">
             <Button type="button" variant="ghost" onClick={onClose} className="min-h-[44px] text-slate-300">Cancel</Button>
@@ -120,7 +120,7 @@ function FreezeHostDialog({ host, busy, error, onConfirm, onClose }: { host: { i
   );
 }
 
-function LiveTab({ canFreeze }: { canFreeze: boolean }) {
+function LiveTab({ canFreeze, canEndRooms }: { canFreeze: boolean; canEndRooms: boolean }) {
   const { data, isLoading, error, refetch } = useQuery<{ rooms: LiveRoom[] }>({ queryKey: ["/api/admin/rooms/live"], refetchInterval: 15_000 });
   const act = useAction(["/api/admin/rooms"]);
   const [ending, setEnding] = useState<LiveRoom | null>(null);
@@ -161,7 +161,7 @@ function LiveTab({ canFreeze }: { canFreeze: boolean }) {
         onConfirm={(reason) => act.mutate({ method: "POST", url: `/api/admin/rooms/${ending!.id}/end`, body: { reason }, done: "Room ended" }, { onSuccess: () => setEnding(null), onError: (e) => setErr(errText(e)) })}
       />
       <FreezeHostDialog
-        host={freezing ? { id: freezing.hostId, name: freezing.hostUsername } : null} busy={act.isPending} error={err} onClose={() => setFreezing(null)}
+        host={freezing ? { id: freezing.hostId, name: freezing.hostUsername } : null} canEndRooms={canEndRooms} busy={act.isPending} error={err} onClose={() => setFreezing(null)}
         onConfirm={(reason, endLiveRooms) => act.mutate({ method: "POST", url: `/api/admin/rooms/hosts/${freezing!.hostId}/freeze`, body: { reason, endLiveRooms }, done: "Host frozen" }, { onSuccess: () => setFreezing(null), onError: (e) => setErr(errText(e)) })}
       />
     </section>
@@ -409,7 +409,7 @@ export default function AdminRooms() {
               ))}
             </div>
             <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} className="mt-6">
-              {tab === "live" && <LiveTab canFreeze={canMoney} />}
+              {tab === "live" && <LiveTab canFreeze={canMoney} canEndRooms={role === "super_admin"} />}
               {tab === "reported" && <ReportedTab />}
               {tab === "money" && <MoneyTab />}
               {tab === "controls" && <ControlsTab isSuper={role === "super_admin"} />}

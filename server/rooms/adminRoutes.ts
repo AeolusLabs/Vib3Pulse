@@ -92,6 +92,8 @@ export function registerRoomsAdminRoutes(app: Express): void {
     const reason = reasonSchema.safeParse(req.body?.reason);
     if (!reason.success) return res.status(400).json(REASON_REQUIRED);
     const endLiveRooms = req.body?.endLiveRooms === true;
+    // Cutting a live stream is a moderation power (end room: super_admin or content_moderator); a finance freeze must not widen it.
+    if (endLiveRooms && req.session.adminRole !== "super_admin") return res.status(403).json({ message: "Only a super-admin can end a host's live rooms from a freeze.", code: "SUPER_ADMIN_ONLY" });
     try {
       const r = await freezeHost({ hostId, adminId: req.session.adminId!, reason: reason.data });
       if (!r.changed) return res.json({ changed: false });

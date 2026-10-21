@@ -975,6 +975,7 @@ try {
     await refused("host frozen: a spray to a stage guest of that host's room", PX.id, R, body(G));
     const blk = await rest("GET", `/api/rooms/${R}`, PX.id);
     check("host frozen: the room stays live", blk.json?.room?.status === "live", JSON.stringify(blk.json?.room?.status));
+    check("host frozen: the Spray button is not offered (no spray block for a guest)", !blk.json?.spray, JSON.stringify(blk.json?.spray));
     await controls.unfreezeHost({ hostId: H, adminId: ADMIN2 });
     await controls.freezeHost({ hostId: G, adminId: ADMIN2, reason: "test freeze guest" });
     await refused("recipient frozen: a spray to a frozen stage guest", PX.id, R, body(G));
