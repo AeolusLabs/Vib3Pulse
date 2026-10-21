@@ -939,6 +939,32 @@ try {
     return sent && !("authorizationCode" in sent.a) && !("authEnc" in sent.a) && !("signature" in sent.a) && !("authorization" in sent.a) && sent.a.last4 === "4242";
   })());
 
+  // =============================================================== admin pause (rooms admin plan, task 2): new money stops, a taken charge still delivers
+  {
+    const controls = await import("../server/rooms/roomControls");
+    const ADMIN = await mk("ctl_admin");
+    const PM = await payer("p_midflight", { card: false });
+    const mid = await spray(PM.id, R, body(H));
+    const midRow = (await sprayRows(PM.id))[0];
+    check("pause setup: a first-payment spray is pending (bank page open) before the pause", mid.json?.status === "action_required" && midRow?.status === "pending", JSON.stringify(mid.json));
+    const PP = await payer("p_paused");
+    const blockBefore = await rest("GET", `/api/rooms/${R}`, PP.id);
+    check("before the pause the spray block is offered to a guest", !!blockBefore.json?.spray?.enabled, JSON.stringify(blockBefore.json?.spray));
+    await controls.setControl({ key: "sprays_paused", on: true, adminId: ADMIN, reason: "test pause" });
+    await refused("sprays paused: a new spray", PP.id, R, body(H));
+    const cfgPaused = await rest("GET", "/api/rooms/config", PP.id);
+    check("paused: /api/rooms/config reports spray false", cfgPaused.json?.features?.spray === false, JSON.stringify(cfgPaused.json?.features));
+    const blockPaused = await rest("GET", `/api/rooms/${R}`, PP.id);
+    check("paused: the spray block is not offered", !blockPaused.json?.spray, JSON.stringify(blockPaused.json?.spray));
+    mock.pay(midRow.provider_ref);
+    check("paused: the webhook for the in-flight spray is accepted", (await webhook("charge.success", { reference: midRow.provider_ref, metadata: { type: "spray" } })) === 200);
+    check("paused: the spray already paid still delivers (never stranded)", (await rowById(midRow.id)).status === "delivered");
+    await controls.setControl({ key: "sprays_paused", on: false, adminId: ADMIN, reason: "test resume" });
+    const back = await spray(PP.id, R, body(H));
+    check("resumed: a new spray goes through again", back.status === 200 && back.json?.status !== undefined, JSON.stringify(back.json));
+    created.push(ADMIN);
+  }
+
   // =============================================================== boot: production with the flag off and no key still boots
   let threw = false;
   try { assertPaymentTokenKeyForBoot(false, { NODE_ENV: "production" } as any); } catch { threw = true; }

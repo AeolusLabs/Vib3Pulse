@@ -181,6 +181,16 @@ try {
   check("flag off: no price in the body", !off.text.includes(String(PRICE)));
   roomFeatures.paidRooms = true;
 
+  // ------------------------------------------------------------ admin pause (rooms admin plan, task 2)
+  {
+    const controls = await import("../server/rooms/roomControls");
+    await controls.setControl({ key: "tickets_paused", on: true, adminId: "ctl-test-admin", reason: "test pause" });
+    const paused = await checkout(room, a);
+    check("tickets paused: checkout is 403 FEATURE_OFF", paused.status === 403 && paused.json?.code === "FEATURE_OFF", JSON.stringify(paused.json));
+    check("tickets paused: no provider call and no price in the body", checkouts.length === 0 && !paused.text.includes(String(PRICE)));
+    await controls.setControl({ key: "tickets_paused", on: false, adminId: "ctl-test-admin", reason: "test resume" });
+  }
+
   // ------------------------------------------------------------ gates before price
   const anon = await http("POST", `/api/rooms/${room}/tickets/checkout`, null, {});
   check("signed out: 401", anon.status === 401, JSON.stringify(anon.json));

@@ -11,7 +11,7 @@ import { checkPurchase, type PurchaseBlock, type RoomTicketRefusal } from "@shar
 import { createCheckout, verifyCheckoutSession } from "../payments/index";
 import * as rs from "./roomStorage";
 import { canViewRoom } from "./roomAccess";
-import { roomFeatures } from "./features";
+import { ticketSalesAllowed } from "./roomControls";
 import { TokenBucket } from "./rateLimit";
 import { handleRoomTicketCharge, IssueQueueFullError, replayRoomTicket, ticketCountsFor, toTicketView, type IssueRoomTicketResult } from "./tickets";
 import { hostCanSellNow } from "./ticketStorage";
@@ -74,7 +74,7 @@ export function registerRoomTicketRoutes(app: Express): void {
   app.post("/api/rooms/:id/tickets/checkout", requireAuth, roomLimiter, async (req, res) => {
     const uid = req.user!.id;
     try {
-      if (!roomFeatures.paidRooms) return res.status(403).json({ message: "Paid rooms aren't available yet.", code: "FEATURE_OFF" });
+      if (!(await ticketSalesAllowed())) return res.status(403).json({ message: "Paid rooms aren't available yet.", code: "FEATURE_OFF" });
       if (!takeCheckout(uid)) return res.status(429).json({ message: "Too many tries. Wait a moment and try again.", code: "RATE_LIMITED" });
 
       const room = await rs.getRoom(req.params.id);

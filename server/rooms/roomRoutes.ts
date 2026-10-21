@@ -33,6 +33,7 @@ import { afterRoleChange, canCameraNow, canPublishNow, shutdownVoice, stopAllLiv
 import { applyMod, endRoom, enforceAgeLimit, enforceTicketFor, expectHost, interactionVerdict, isKicked, notifyScreen, removeFromMinorsRoom, writeRoomSettings } from "./roomSocket";
 import { roomHub } from "./RoomHub";
 import { roomFeatures } from "./features";
+import { sprayAllowed, ticketSalesAllowed } from "./roomControls";
 import { clearReminder, hasReminder, setReminder } from "./reminders";
 import { registerRoomTicketRoutes } from "./ticketRoutes";
 import { registerRoomMoneyRoutes } from "./ticketMoneyRoutes";
@@ -239,7 +240,7 @@ export function registerRoomRoutes(app: Express): void {
   app.get("/api/rooms/config", requireAuth, async (req, res) => {
     try {
       res.json({
-        features: { paidRooms: roomFeatures.paidRooms, spray: roomFeatures.spray },
+        features: { paidRooms: await ticketSalesAllowed(), spray: await sprayAllowed() },
         limits: ROOM_LIMITS,
         currency: "NGN",
         region: "NG",
