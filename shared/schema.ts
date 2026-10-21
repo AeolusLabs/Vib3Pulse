@@ -2486,3 +2486,18 @@ export type SocialRsvpDto = z.input<typeof socialRsvpDto>;
 export const socialAppealDto = z.object({
   message: z.string().trim().min(10, "Tell us a little more (at least 10 characters)").max(1000),
 });
+
+// Admin money controls (rooms admin plan): global switches and per-host freezes. SQL: server/rooms/roomControlsMigration.ts.
+export const roomControls = pgTable("room_controls", {
+  key: text("key").primaryKey(),
+  enabled: boolean("enabled").notNull().default(false),
+  reason: text("reason"),
+  updatedBy: varchar("updated_by"),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+export const roomHostFreezes = pgTable("room_host_freezes", {
+  hostId: varchar("host_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  reason: text("reason").notNull(),
+  frozenBy: varchar("frozen_by").notNull(),
+  frozenAt: timestamp("frozen_at").notNull().default(sql`now()`),
+});
