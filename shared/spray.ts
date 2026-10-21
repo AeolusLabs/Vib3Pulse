@@ -3,7 +3,7 @@
 // answers EVERY failing code with the same generic 403 (no oracle). The client mirrors it only to hide controls.
 // No wallet, no balance: one spray is one real charge, priced from SPRAY_CATALOGUE (shared/money.ts).
 import { moneyEligibleRoom, type Check } from "./roomRules";
-import { SPRAY_CATALOGUE, sprayBreakdown, isSprayTier, type Breakdown, type SprayTier } from "./money";
+import { SPRAY_CATALOGUE, sprayBreakdown, isSprayTier, type Breakdown, type Rates, type SprayTier } from "./money";
 
 export type SprayCode =
   | "FEATURE_OFF"
@@ -150,9 +150,9 @@ export function sprayTargetKind(room: { hostId: string; stage: readonly string[]
  * The split for one spray. Host target: the whole host share, no guest. Any other on-stage person:
  * sprayBreakdown(tier, true), `hostKobo` is the host's cut and `guestKobo` the stage person's.
  */
-export function spraySplit(tier: SprayTier, kind: SprayTargetKind): { hostKobo: number; guestKobo: number | null; breakdown: Breakdown } {
+export function spraySplit(tier: SprayTier, kind: SprayTargetKind, rates?: Rates): { hostKobo: number; guestKobo: number | null; breakdown: Breakdown } {
   if (kind !== "host" && kind !== "stage") throw new RangeError(`unknown spray target kind ${String(kind)}`);
-  const b = sprayBreakdown(tier, kind === "stage");
+  const b = sprayBreakdown(tier, kind === "stage", rates);
   return { hostKobo: b.host, guestKobo: kind === "stage" ? (b.guest as number) : null, breakdown: b };
 }
 
