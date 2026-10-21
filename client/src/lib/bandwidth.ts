@@ -49,3 +49,31 @@ export function micCapture(micId: string | undefined, music: boolean): { deviceI
 export function cameraSimulcast(p: VideoProfile): boolean {
   return p !== "saver";
 }
+
+// ---------------------------------------------------------------- Gamers live: a player's own screen capture
+
+/** What a player picks for their screen: Light 540p30, Smooth 720p60, Sharp 1080p30. */
+export type GameProfile = "light" | "smooth" | "sharp";
+export const GAME_PROFILES: readonly GameProfile[] = ["light", "smooth", "sharp"];
+export const GAME_PROFILE_LABEL: Record<GameProfile, string> = { light: "Light", smooth: "Smooth", sharp: "Sharp" };
+export const GAME_PROFILE_HINT: Record<GameProfile, string> = { light: "540p, 30 fps. Easiest on your connection.", smooth: "720p, 60 fps. Best for fast games.", sharp: "1080p, 30 fps. Needs a strong upload." };
+
+export function gameProfileSettings(p: GameProfile): { width: number; height: number; frameRate: number; maxBitrate: number } {
+  switch (p) {
+    case "light": return { width: 960, height: 540, frameRate: 30, maxBitrate: 1_200_000 };
+    case "smooth": return { width: 1280, height: 720, frameRate: 60, maxBitrate: 3_500_000 };
+    case "sharp": return { width: 1920, height: 1080, frameRate: 30, maxBitrate: 4_500_000 };
+  }
+}
+
+/** The start quality for a player who has not chosen: never assume a fast upload. */
+export function pickGameProfile(c: ConnInfo | undefined): GameProfile {
+  return pickStartProfile(c) === "standard" ? "smooth" : "light";
+}
+
+/** The simulcast layer a viewer's tile needs: 720p for a big tile, 360p for a medium one, 180p for a thumbnail. */
+export function viewerLayer(tileWidthPx: number): 720 | 360 | 180 {
+  if (tileWidthPx >= 560) return 720;
+  if (tileWidthPx >= 250) return 360;
+  return 180;
+}
