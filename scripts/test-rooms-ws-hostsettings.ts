@@ -420,26 +420,28 @@ try {
   check("slow mode: after the wait a reply goes out, quoting from the server's record", g4?.replyTo?.userId === B && g4.replyTo.text === "quote-me", JSON.stringify(g4));
 
   check("slow mode 30", (await rest("PATCH", `/api/rooms/${R}`, H, { slowModeSec: 30 })).json?.room?.slowModeSec === 30);
-  await a3.waitFor((m) => settingsMsg(m) && m.slowModeSec === 30);
-  b.drain(); a3.drain();
-  a3.send({ type: "room:chat", text: "m1" });
+  const A2 = await mk("a2"); // fresh slow-mode clock: A's earlier lines would still be inside the 30 s window on a fast DB
+  const a4 = await connect(A2);
+  check("setup: A2 joined", (await join(a4, R))?.type === "room:state");
+  b.drain(); a4.drain();
+  a4.send({ type: "room:chat", text: "m1" });
   const m1 = await chatOf(b, "m1");
   const m1Seen = Date.now(); // the server recorded m1 before this moment
   check("A's first line under slow mode 30 goes out", !!m1);
-  a3.send({ type: "room:chat", text: "m2" });
-  const sm30 = await a3.waitFor((m) => m.type === "room:notice" && m.code === "SLOW_MODE");
+  a4.send({ type: "room:chat", text: "m2" });
+  const sm30 = await a4.waitFor((m) => m.type === "room:notice" && m.code === "SLOW_MODE");
   check("slow mode 30: A's next line is held for more than 5 s", !!sm30 && sm30.retryMs > 5000, JSON.stringify(sm30));
   check("host shortens slow mode to 5 mid-window", (await rest("PATCH", `/api/rooms/${R}`, H, { slowModeSec: 5 })).json?.room?.slowModeSec === 5);
-  await a3.waitFor((m) => settingsMsg(m) && m.slowModeSec === 5);
+  await a4.waitFor((m) => settingsMsg(m) && m.slowModeSec === 5);
   await until(() => Date.now() > m1Seen + 5300, 10_000);
-  a3.drain(); b.drain();
-  a3.send({ type: "room:chat", text: "m3" });
-  check("slow mode change mid-window: 5 s after the last line A may talk again (the 30 s wait is gone)", !!(await chatOf(b, "m3")) && !a3.all((m) => m.code === "SLOW_MODE").length);
+  a4.drain(); b.drain();
+  a4.send({ type: "room:chat", text: "m3" });
+  check("slow mode change mid-window: 5 s after the last line A may talk again (the 30 s wait is gone)", !!(await chatOf(b, "m3")) && !a4.all((m) => m.code === "SLOW_MODE").length);
   check("host turns slow mode off", (await rest("PATCH", `/api/rooms/${R}`, H, { slowModeSec: 0 })).json?.room?.slowModeSec === 0);
-  await a3.waitFor((m) => settingsMsg(m) && m.slowModeSec === 0);
-  a3.drain(); b.drain();
-  a3.send({ type: "room:chat", text: "m4" }); a3.send({ type: "room:chat", text: "m5" });
-  check("slow mode off mid-window: two quick lines both go out", !!(await chatOf(b, "m4")) && !!(await chatOf(b, "m5")) && !a3.all((m) => m.code === "SLOW_MODE").length);
+  await a4.waitFor((m) => settingsMsg(m) && m.slowModeSec === 0);
+  a4.drain(); b.drain();
+  a4.send({ type: "room:chat", text: "m4" }); a4.send({ type: "room:chat", text: "m5" });
+  check("slow mode off mid-window: two quick lines both go out", !!(await chatOf(b, "m4")) && !!(await chatOf(b, "m5")) && !a4.all((m) => m.code === "SLOW_MODE").length);
 
   // ---- lock and a minors' room: the minors' gate is unchanged and comes first; an invited adult still gets in
   const T = await mk("teenhost", yearsAgo(15)), T2 = await mk("teen2", yearsAgo(16)), T3 = await mk("teen3", yearsAgo(14));

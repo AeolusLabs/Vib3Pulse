@@ -70,7 +70,8 @@ function canvasTrack(): ScreenTrack & { stop(): void } {
 
 /** Answers the endpoints the room sheets read, inside the page. Everything else goes to the real fetch. */
 function useFixtureFetch() {
-  useEffect(() => {
+  // Layout effect: a child's query effect runs before the parent's plain effect, so its first request would reach the real fetch.
+  useLayoutEffect(() => {
     const real = window.fetch;
     const json = (body: unknown) => Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } }));
     window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {

@@ -84,7 +84,7 @@ test("one notice per spray (owner decision): the key is the spray id, the copy i
 
 test("notify.ts: de-duplicated by spray, read from the stored row, bounded concurrency, no batching left", () => {
   const src = readFileSync(new URL("../server/rooms/notify.ts", import.meta.url), "utf8");
-  assert.match(src, /where not exists \(select 1 from notifications where user_id = \$1 and type = 'spray_received' and related_entity_id = \$5\)/);
+  assert.match(src, /where not exists \(select 1 from notifications where user_id = \$1(::varchar)? and type = 'spray_received' and related_entity_id = \$5(::varchar)?\)/);
   assert.match(src, /where s\.id = \$1::uuid and s\.status = 'delivered'/);
   assert.match(src, /SPRAY_NOTIFY_CONCURRENCY = 4/);
   assert.doesNotMatch(src, /sprayBatchDecision|SPRAY_BATCH_WINDOW_MS|BEGIN|pg_advisory/, "no batching transaction or lock remains");

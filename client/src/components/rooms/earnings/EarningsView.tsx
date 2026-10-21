@@ -46,7 +46,7 @@ export function EarningsBody({ e, range }: { e: Earnings; range: EarningsRange }
     <div className="space-y-5" data-testid="earnings-body">
       <div className={`rounded-2xl p-5 ${AMBER.fill}`} data-testid="earnings-headline-card">
         <p className="text-sm">{EARNINGS_COPY.range[range]}</p>
-        <p className="font-serif text-5xl font-bold tabular-nums" data-testid="earnings-headline">{money(earningsHeadline(e))}</p>
+        <p className="font-sans text-5xl font-bold tabular-nums" data-testid="earnings-headline">{money(earningsHeadline(e))}</p>
       </div>
 
       <dl className="rounded-2xl bg-muted/60 px-4 py-3 text-sm">

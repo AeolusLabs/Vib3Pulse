@@ -179,6 +179,7 @@ try {
   const U1 = await mk("buyer1");
   const U2 = await mk("buyer2");
   const U3 = await mk("buyer3");
+  const U4 = await mk("buyer4"); // own refund-rate bucket (burst 3 per user): a fast local DB no longer spaces U1's calls out
   const S = await mk("stranger");
 
   // ---- buyer refund inside the window
@@ -217,12 +218,12 @@ try {
   check("45 minutes before the start: 409 WINDOW_CLOSED, ticket still paid, no provider call",
     r2.status === 409 && r2.json?.code === "WINDOW_CLOSED" && (await ticket(t2.id)).status === "paid" && callsFor(t2.ref) === 0, JSON.stringify(r2));
   const R3 = await mkRoom(H, { minutesAhead: 600, refundBeforeStart: false });
-  const t3 = await mkTicket(R3, U1);
-  const r3 = await http("POST", `/api/rooms/${R3}/tickets/refund`, U1);
+  const t3 = await mkTicket(R3, U4);
+  const r3 = await http("POST", `/api/rooms/${R3}/tickets/refund`, U4);
   check("host turned refunds off: 409 NO_REFUNDS", r3.status === 409 && r3.json?.code === "NO_REFUNDS" && (await ticket(t3.id)).status === "paid", JSON.stringify(r3));
   const RL = await mkRoom(H2, { minutesAhead: 600, status: "live" });
-  const tL = await mkTicket(RL, U1);
-  const rL = await http("POST", `/api/rooms/${RL}/tickets/refund`, U1);
+  const tL = await mkTicket(RL, U4);
+  const rL = await http("POST", `/api/rooms/${RL}/tickets/refund`, U4);
   check("the room already started (even hours before its planned time): 409 ROOM_NOT_SCHEDULED",
     rL.status === 409 && rL.json?.code === "ROOM_NOT_SCHEDULED" && (await ticket(tL.id)).status === "paid", JSON.stringify(rL));
   const noTicket = await http("POST", `/api/rooms/${R3}/tickets/refund`, U3);

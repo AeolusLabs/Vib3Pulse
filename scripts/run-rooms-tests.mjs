@@ -17,7 +17,7 @@ if (!adminUrl) { console.error("DATABASE_URL is not set. Run with:  npm run test
 const SCRATCH = /^vib3_rooms_test_[0-9a-f]{8}$/;
 const withDb = (url, name) => { const u = new URL(url); u.pathname = `/${name}`; return u.toString(); };
 const run = (cmd, args, env) => new Promise((resolve) => {
-  const child = spawn(cmd, args, { cwd: root, env: { ...process.env, ...env }, shell: process.platform === "win32" });
+  const child = spawn(cmd, args, { cwd: root, env: { ...process.env, TZ: "UTC", ...env }, shell: process.platform === "win32" });
   let out = "";
   child.stdout.on("data", (d) => { out += d; });
   child.stderr.on("data", (d) => { out += d; });
@@ -55,11 +55,14 @@ try {
     const apiFiles = requireFiles("api", testFiles("api"));
     const wsFiles = requireFiles("ws", testFiles("ws"));
     await admin(`CREATE DATABASE ${dbName}`); created = true;
+    // Prod runs on UTC; a local server in another zone shifts every timestamp-without-tz comparison.
+    await admin(`ALTER DATABASE ${dbName} SET timezone = 'UTC'`);
     process.stdout.write("\napi: building scratch schema... ");
     const push = await run("npx", ["drizzle-kit", "push", "--force"], { DATABASE_URL: url });
     if (push.code !== 0) throw new Error(`drizzle-kit push failed:\n${push.out.slice(-600)}`);
     console.log("done");
-    for (const f of [...apiFiles, ...wsFiles]) {
+    const fileOnly = process.argv.find((a) => a.startsWith("--file="))?.slice(7);
+    for (const f of [...apiFiles, ...wsFiles].filter((f) => !fileOnly || f.includes(fileOnly))) {
       // LIVEKIT_* blanked: a test server's boot (rehydrate + boot voice sweep) must never reach the real LiveKit project;
       // tests that need voice install a fake with setVoiceServiceForTests.
       const r = await run("npx", ["tsx", f], { DATABASE_URL: url, SESSION_SECRET: "test", DISABLE_GEOCODING: "1", RESEND_API_KEY: "re_dummy_not_real", LIVEKIT_URL: "", LIVEKIT_API_KEY: "", LIVEKIT_API_SECRET: "" });

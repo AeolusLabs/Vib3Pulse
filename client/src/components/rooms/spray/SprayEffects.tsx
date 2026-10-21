@@ -216,7 +216,7 @@ export default function SprayEffects({ sprays, nameOf, quiet, serverOffsetMs, vi
             <small className="block truncate text-[13px] opacity-80">{banner.sub}</small>
             <b className="block truncate font-serif text-2xl leading-none">{banner.who}</b>
           </div>
-          <span ref={counterRef} className="shrink-0 font-serif text-2xl font-bold leading-none tabular-nums" aria-hidden data-testid="spray-rain-counter">{formatV3c(0)}</span>
+          <span ref={counterRef} className="shrink-0 text-2xl font-bold leading-none tabular-nums" aria-hidden data-testid="spray-rain-counter">{formatV3c(0)}</span>
         </div>
       )}
       {thank && (

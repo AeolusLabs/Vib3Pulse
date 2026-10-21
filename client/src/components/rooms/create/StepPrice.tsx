@@ -46,13 +46,13 @@ export default function StepPrice({ draft, set, error, liveVideo = false }: Prop
             onClick={() => set({ priceNaira: clampPriceNaira((Number.isFinite(draft.priceNaira) ? draft.priceNaira : TICKET_LIMITS.defaultPriceNaira) - TICKET_LIMITS.priceStepNaira) })}
             data-testid="button-price-down"><MinusIcon className="h-5 w-5" aria-hidden /></button>
           <div className="flex min-w-0 flex-1 items-center justify-center gap-1">
-            <span className="font-serif text-3xl font-bold" aria-hidden>₦</span>
+            <span className="text-3xl font-bold" aria-hidden>₦</span>
             <Input
               id="wiz-price" inputMode="numeric" autoComplete="off"
               value={Number.isFinite(draft.priceNaira) ? draft.priceNaira.toLocaleString("en-US") : ""}
               onChange={(e) => set({ priceNaira: readWhole(e.target.value) })}
               aria-invalid={priceErr || undefined} aria-describedby={`wiz-price-help${priceErr ? " wiz-price-err" : ""}`}
-              className="h-12 w-40 border-0 bg-transparent text-center font-serif text-3xl font-bold shadow-none focus-visible:ring-2"
+              className="h-12 w-40 border-0 bg-transparent text-center text-3xl font-bold shadow-none focus-visible:ring-2"
               data-testid="input-ticket-price"
             />
           </div>
@@ -75,7 +75,7 @@ export default function StepPrice({ draft, set, error, liveVideo = false }: Prop
             value={Number.isFinite(draft.capacity) ? String(draft.capacity) : ""}
             onChange={(e) => set({ capacity: readWhole(e.target.value) })}
             aria-invalid={capErr || undefined} aria-describedby={capErr ? "wiz-ticket-cap-err" : undefined}
-            className="h-12 flex-1 border-0 bg-transparent text-center font-serif text-3xl font-bold shadow-none focus-visible:ring-2"
+            className="h-12 flex-1 border-0 bg-transparent text-center text-3xl font-bold shadow-none focus-visible:ring-2"
             data-testid="input-ticket-capacity"
           />
           <button type="button" className={stepBtn} aria-label={PRICE_COPY.more} disabled={draft.capacity >= TICKET_LIMITS.capacityMax}
