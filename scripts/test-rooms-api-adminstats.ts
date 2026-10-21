@@ -70,6 +70,11 @@ const spray = async (roomId: string, hostId: string, payerId: string, tier: stri
 
 try {
   const SA = await mkAdmin("super_admin"), FIN = await mkAdmin("finance_manager"), MOD = await mkAdmin("content_moderator"), SUP = await mkAdmin("user_support");
+  const day = (n: number) => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
+  const range = `from=${day(30)}&to=${day(0)}`;
+  // Other suites share this database, so everything below is a before/after difference or looks up its own ids.
+  const before = (await get(`/api/admin/rooms/sprays?${range}`, FIN)).json;
+  const ovBefore = (await get(`/api/admin/rooms/overview?${range}`, FIN)).json;
   const H = await mk("host"), H2 = await mk("host2"), P1 = await mk("p1"), P2 = await mk("p2");
   const live = await mkRoom(H, "as live room", { status: "live", startedDaysAgo: 0, peak: 7, price: 500000 });
   const ended = await mkRoom(H, "as ended room", { status: "ended", startedDaysAgo: 2, peak: 12 });
@@ -94,20 +99,24 @@ try {
   check("live rooms: super_admin allowed, finance_manager 403, user_support 403, signed out 401", (await get("/api/admin/rooms/live", SA)).status === 200 && (await get("/api/admin/rooms/live", FIN)).status === 403 && (await get("/api/admin/rooms/live", SUP)).status === 403 && (await get("/api/admin/rooms/live", null)).status === 401);
 
   // ---- spray breakdown
-  const day = (n: number) => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
-  const range = `from=${day(30)}&to=${day(0)}`;
   const sp = await get(`/api/admin/rooms/sprays?${range}`, FIN);
   const t = sp.json?.totals;
   const sum = (k: "vat" | "fee" | "reserve" | "platform" | "host") => s1[k] + s2[k] + s3[k];
-  check("sprays: totals count only delivered rows", sp.status === 200 && t?.count === 3 && t.grossKobo === 200000, JSON.stringify(sp.json));
-  check("sprays: vat, fee, reserve, platform and host sums come from the stored rows", t?.vatKobo === sum("vat") && t.feeKobo === sum("fee") && t.reserveKobo === sum("reserve") && t.platformKobo === sum("platform") && t.hostKobo === sum("host"), JSON.stringify(t));
-  check("sprays: refundedKobo is the reversed amount", t?.refundedKobo === 70000, JSON.stringify(t));
-  const byTier = Object.fromEntries((sp.json?.byTier ?? []).map((x: any) => [x.tier, x]));
-  check("sprays: byTier splits note and bundle and sums to the total", byTier.note?.count === 2 && byTier.note.grossKobo === 100000 && byTier.bundle?.count === 1 && byTier.bundle.grossKobo === 100000, JSON.stringify(sp.json?.byTier));
-  const byDay: any[] = sp.json?.byDay ?? [];
-  check("sprays: byDay has today and two days ago (UTC) and sums to the total", byDay.find((d) => d.day === day(0))?.grossKobo === 150000 && byDay.find((d) => d.day === day(2))?.grossKobo === 50000 && byDay.reduce((a, d) => a + d.grossKobo, 0) === 200000, JSON.stringify(byDay));
-  check("sprays: topRooms ordered by gross with the title", sp.json?.topRooms?.[0]?.roomId === live && sp.json.topRooms[0].title === "as live room" && sp.json.topRooms[0].grossKobo === 150000, JSON.stringify(sp.json?.topRooms));
-  check("sprays: topHosts has the host with the username and total", sp.json?.topHosts?.[0]?.hostId === H && sp.json.topHosts[0].grossKobo === 200000 && sp.json.topHosts[0].count === 3 && sp.json.topHosts[0].username.startsWith("as_host"), JSON.stringify(sp.json?.topHosts));
+  const d = (k: string) => (t?.[k] ?? 0) - (before.totals[k] ?? 0);
+  check("sprays: totals count only delivered rows", sp.status === 200 && d("count") === 3 && d("grossKobo") === 200000, JSON.stringify(sp.json));
+  check("sprays: vat, fee, reserve, platform and host sums come from the stored rows", d("vatKobo") === sum("vat") && d("feeKobo") === sum("fee") && d("reserveKobo") === sum("reserve") && d("platformKobo") === sum("platform") && d("hostKobo") === sum("host"), JSON.stringify(t));
+  check("sprays: refundedKobo is the reversed amount", d("refundedKobo") === 70000, JSON.stringify(t));
+  const tierOf = (j: any, k: string) => (j.byTier ?? []).find((x: any) => x.tier === k) ?? { count: 0, grossKobo: 0 };
+  check("sprays: byTier splits note and bundle and sums to the total", tierOf(sp.json, "note").count - tierOf(before, "note").count === 2 && tierOf(sp.json, "note").grossKobo - tierOf(before, "note").grossKobo === 100000
+    && tierOf(sp.json, "bundle").count - tierOf(before, "bundle").count === 1 && tierOf(sp.json, "bundle").grossKobo - tierOf(before, "bundle").grossKobo === 100000, JSON.stringify(sp.json?.byTier));
+  const dayOf = (j: any, k: string) => (j.byDay ?? []).find((x: any) => x.day === k)?.grossKobo ?? 0;
+  check("sprays: byDay has today and two days ago (UTC) and sums to the total", dayOf(sp.json, day(0)) - dayOf(before, day(0)) === 150000 && dayOf(sp.json, day(2)) - dayOf(before, day(2)) === 50000
+    && (sp.json.byDay as any[]).reduce((a, x) => a + x.grossKobo, 0) - (before.byDay as any[]).reduce((a, x) => a + x.grossKobo, 0) === 200000, JSON.stringify(sp.json?.byDay));
+  const tr = (sp.json?.topRooms ?? []).find((r: any) => r.roomId === live);
+  check("sprays: topRooms lists the room with its title and total", tr?.title === "as live room" && tr.grossKobo === 150000 && tr.count === 2, JSON.stringify(sp.json?.topRooms));
+  const th = (sp.json?.topHosts ?? []).find((h: any) => h.hostId === H);
+  check("sprays: topHosts lists the host with the username and total, and the list is ordered by gross", th?.grossKobo === 200000 && th.count === 3 && th.username.startsWith("as_host")
+    && (sp.json.topHosts as any[]).every((h, i, a) => i === 0 || a[i - 1].grossKobo >= h.grossKobo), JSON.stringify(sp.json?.topHosts));
   check("sprays: finance_manager and super_admin allowed, content_moderator 403", (await get(`/api/admin/rooms/sprays?${range}`, SA)).status === 200 && (await get(`/api/admin/rooms/sprays?${range}`, MOD)).status === 403);
   const emptyOld = await get(`/api/admin/rooms/sprays?from=2020-01-01&to=2020-01-31`, FIN);
   check("sprays: an empty range returns zeros and empty lists, not an error", emptyOld.status === 200 && emptyOld.json.totals.count === 0 && emptyOld.json.totals.grossKobo === 0 && emptyOld.json.byDay.length === 0 && emptyOld.json.topHosts.length === 0, JSON.stringify(emptyOld.json));
@@ -118,7 +127,7 @@ try {
 
   // ---- overview
   const ov = await get(`/api/admin/rooms/overview?${range}`, FIN);
-  check("overview: rooms created, started, unique hosts, peak and tickets sold", ov.status === 200 && ov.json?.roomsCreated >= 4 && ov.json.roomsStarted === 3 && ov.json.uniqueHosts === 2 && ov.json.peakConcurrent === 12 && typeof ov.json.ticketsSold === "number", JSON.stringify(ov.json));
+  check("overview: rooms created, started, unique hosts, peak and tickets sold", ov.status === 200 && ov.json.roomsCreated - ovBefore.roomsCreated === 4 && ov.json.roomsStarted - ovBefore.roomsStarted === 3 && ov.json.uniqueHosts - ovBefore.uniqueHosts === 2 && ov.json.peakConcurrent >= 12 && typeof ov.json.ticketsSold === "number", JSON.stringify([ovBefore, ov.json]));
   const ovEmpty = await get(`/api/admin/rooms/overview?from=2020-01-01&to=2020-01-31`, FIN);
   check("overview: an empty range is zeros (peak 0), never null or an error", ovEmpty.status === 200 && ovEmpty.json.roomsCreated === 0 && ovEmpty.json.peakConcurrent === 0 && ovEmpty.json.uniqueHosts === 0, JSON.stringify(ovEmpty.json));
   check("overview: a moderator is 403", (await get(`/api/admin/rooms/overview?${range}`, MOD)).status === 403);

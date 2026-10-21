@@ -149,7 +149,8 @@ const roleLabels: Record<AdminRole, string> = {
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const [location, setLocation] = useLocation();
   const { toast } = useToast();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Starts collapsed to the icon rail on phones and tablets so page content gets the width; the toggle still opens it.
+  const [sidebarOpen, setSidebarOpen] = useState(() => (typeof window === "undefined" ? true : window.innerWidth >= 1024));
 
   const { data: admin, isLoading, error } = useQuery<AdminUser>({
     queryKey: ["/api/admin/me"],
@@ -291,7 +292,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       </aside>
 
       <main className={cn(
-        "flex-1 transition-all duration-300",
+        "min-w-0 flex-1 transition-all duration-300",
         sidebarOpen ? "ml-64" : "ml-16"
       )}>
         <div className="p-6">

@@ -39,14 +39,14 @@ type Finance = {
 
 const MONEY_ROLES = ["super_admin", "finance_manager"];
 const MOD_ROLES = ["super_admin", "content_moderator"];
-const naira = (kobo: number) => `₦${(kobo / 100).toLocaleString("en-NG", { maximumFractionDigits: 2 })}`;
+const naira = (kobo: number) => `₦${(kobo / 100).toLocaleString("en-NG", { minimumFractionDigits: kobo % 100 === 0 ? 0 : 2, maximumFractionDigits: 2 })}`;
 const ymd = (d: Date) => format(d, "yyyy-MM-dd");
 const TIER_LABEL: Record<string, string> = { note: "Note", bundle: "Bundle", bag: "Money bag", rain: "Rain" };
 
 const panel = "rounded-xl border border-slate-700 bg-slate-800/50";
-const th = "px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-slate-400";
-const td = "px-3 py-2 text-sm text-slate-200";
-const num = "px-3 py-2 text-right text-sm tabular-nums text-slate-200";
+const th = "px-2.5 py-2 text-left text-xs font-medium uppercase tracking-wide text-slate-400";
+const td = "px-2.5 py-2 text-sm text-slate-200";
+const num = "px-2.5 py-2 text-right text-sm tabular-nums text-slate-200";
 
 function Msg({ children, tone = "muted" }: { children: React.ReactNode; tone?: "muted" | "error" }) {
   return <p role={tone === "error" ? "alert" : "status"} className={`py-8 text-center text-sm ${tone === "error" ? "text-red-400" : "text-slate-400"}`}>{children}</p>;
@@ -204,15 +204,15 @@ function Row({ label, value, strong }: { label: string; value: string; strong?: 
   );
 }
 
-function SmallTable({ caption, head, rows }: { caption: string; head: string[]; rows: (string | number)[][] }) {
+function SmallTable({ caption, head, rows, empty = "Nothing in this range." }: { caption: string; head: string[]; rows: (string | number)[][]; empty?: string }) {
   return (
     <div className={`${panel} overflow-x-auto`}>
-      <table className="w-full min-w-[20rem]">
+      <table className="w-full">
         <caption className="px-4 pt-3 text-left text-sm font-medium text-white">{caption}</caption>
         <thead><tr>{head.map((h, i) => <th key={h} className={`${th} ${i > 0 ? "text-right" : ""}`}>{h}</th>)}</tr></thead>
         <tbody className="divide-y divide-slate-700/60">
-          {rows.length === 0 ? <tr><td className={`${td} text-slate-400`} colSpan={head.length}>Nothing in this range.</td></tr> : rows.map((r, i) => (
-            <tr key={i}>{r.map((c, j) => <td key={j} className={j === 0 ? `${td} max-w-[14rem] truncate` : num}>{c}</td>)}</tr>
+          {rows.length === 0 ? <tr><td className={`${td} text-slate-400`} colSpan={head.length}>{empty}</td></tr> : rows.map((r, i) => (
+            <tr key={i}>{r.map((c, j) => <td key={j} className={j === 0 ? `${td} max-w-[7.5rem] truncate sm:max-w-[14rem]` : num}>{c}</td>)}</tr>
           ))}
         </tbody>
       </table>
@@ -256,7 +256,7 @@ function MoneyTab() {
               In this range: {overview.data.roomsCreated} rooms created, {overview.data.roomsStarted} started by {overview.data.uniqueHosts} hosts, busiest room {overview.data.peakConcurrent} people, {overview.data.ticketsSold} tickets sold.
             </p>
           )}
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid items-start gap-4 lg:grid-cols-2">
             <SmallTable caption="By tier" head={["Tier", "Sprays", "Amount"]} rows={s.byTier.map((t) => [TIER_LABEL[t.tier] ?? t.tier, t.count, naira(t.grossKobo)])} />
             <SmallTable caption="By day (UTC)" head={["Day", "Sprays", "Amount"]} rows={s.byDay.map((d) => [d.day, d.count, naira(d.grossKobo)])} />
             <SmallTable caption="Top rooms" head={["Room", "Sprays", "Amount"]} rows={s.topRooms.map((r) => [r.title, r.count, naira(r.grossKobo)])} />
@@ -270,9 +270,9 @@ function MoneyTab() {
         {finance.isLoading && <Msg>Loading...</Msg>}
         {finance.error && <Msg tone="error">Could not load ticket totals.</Msg>}
         {finance.data && (
-          <div className="grid gap-4 lg:grid-cols-2">
-            <SmallTable caption="Ticket sales (all time)" head={["Status", "Tickets", "Gross"]} rows={finance.data.tickets.map((t) => [t.status, t.count, naira(t.grossKobo)])} />
-            <SmallTable caption="Host payouts (all time)" head={["Status", "Payouts", "Amount"]} rows={finance.data.payouts.map((p) => [p.status, p.count, naira(p.amountKobo)])} />
+          <div className="grid items-start gap-4 lg:grid-cols-2">
+            <SmallTable caption="Ticket sales (all time)" head={["Status", "Tickets", "Gross"]} rows={finance.data.tickets.map((t) => [t.status, t.count, naira(t.grossKobo)])} empty="No ticket sales yet." />
+            <SmallTable caption="Host payouts (all time)" head={["Status", "Payouts", "Amount"]} rows={finance.data.payouts.map((p) => [p.status, p.count, naira(p.amountKobo)])} empty="No payouts yet." />
           </div>
         )}
         {finance.data && finance.data.alerts.length > 0 && (
