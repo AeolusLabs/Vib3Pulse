@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, integer, boolean, unique, primaryKey, doublePrecision, check, jsonb, numeric, index, uniqueIndex, uuid, bigint } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, integer, smallint, boolean, unique, primaryKey, doublePrecision, check, jsonb, numeric, index, uniqueIndex, uuid, bigint } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import type { AvatarConfig } from "./avatar";
@@ -1162,7 +1162,17 @@ export const rooms = pgTable("rooms", {
   // Phase 6 recap: the most people in the room at once (RoomHub), raised while live and on end. Null = not tracked (rooms
   // that ended before migrations/add_room_peak.sql). Host-only: never sent inside a room object (publicRoom strips it).
   peakMembers: integer("peak_members"),
+  // Gaming (migrations/add_rooms_game.sql): players per side 1-4 (null = not a game room), how long a dropped player keeps their
+  // slot (30000 | 120000 | 0 = hold), the age lane of a lane room ("teen" | "adult") and the game room it belongs to.
+  gameFormat: smallint("game_format"),
+  gameDropTimeoutMs: integer("game_drop_timeout_ms").notNull().default(120000),
+  ageLane: text("age_lane"),
+  parentRoomId: varchar("parent_room_id"),
 }, (t) => ({
+  gameFormatCheck: check("rooms_game_format_check", sql`${t.gameFormat} IS NULL OR (${t.gameFormat} >= 1 AND ${t.gameFormat} <= 4)`),
+  gameDropTimeoutCheck: check("rooms_game_drop_timeout_check", sql`${t.gameDropTimeoutMs} IN (0, 30000, 120000)`),
+  ageLaneCheck: check("rooms_age_lane_check", sql`${t.ageLane} IS NULL OR ${t.ageLane} IN ('teen', 'adult')`),
+  parentIdx: index("rooms_parent_idx").on(t.parentRoomId).where(sql`${t.parentRoomId} IS NOT NULL`),
   // Also created by migrations/add_room_tickets.sql and ensureSchema; declared here so drizzle-kit push keeps them.
   ticketPriceCheck: check("rooms_ticket_price_kobo_check", sql`${t.ticketPriceKobo} IS NULL OR ${t.ticketPriceKobo} > 0`),
   ticketCapacityCheck: check("rooms_ticket_capacity_check", sql`${t.ticketCapacity} IS NULL OR (${t.ticketCapacity} >= 20 AND ${t.ticketCapacity} <= 150)`),

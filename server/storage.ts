@@ -466,6 +466,11 @@ CREATE TABLE IF NOT EXISTS room_members (
     const { ROOM_RATES_SCHEMA_SQL } = await import("./rooms/roomRatesMigration");
     await pool.query(ROOM_RATES_SCHEMA_SQL);
   }
+  // Gaming: rooms.game_format / game_drop_timeout_ms / age_lane / parent_room_id. Same SQL as migrations/add_rooms_game.sql.
+  {
+    const { ROOM_GAME_SCHEMA_SQL } = await import("./rooms/roomGameMigration");
+    await pool.query(ROOM_GAME_SCHEMA_SQL);
+  }
   await pool.query(`
     ALTER TABLE venues ADD COLUMN IF NOT EXISTS building JSONB
   `);
