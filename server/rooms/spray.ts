@@ -59,6 +59,7 @@ import * as rs from "./roomStorage";
 import * as ss from "./sprayStorage";
 import { roomHub } from "./RoomHub";
 import { isKicked } from "./roomSocket";
+import { isGamePlayer } from "./stage";
 import { roomFeatures } from "./features";
 import { isHostFrozen, sprayAllowed } from "./roomControls";
 import { getRates } from "./roomRates";
@@ -176,8 +177,9 @@ export async function sprayGate(roomId: string, payerId: string, recipientId: st
   const recipientHub = roomHub.get(roomId, recipientId);
   const stage = roomHub.stageOf(roomId).stage;
   const role: "host" | "cohost" | "guest" = recipientId === room.hostId ? "host" : recipientHub?.role === "cohost" ? "cohost" : "guest";
-  // On stage: a co-host who is in the room (an implicit speaker) or a guest the host put on the stage list.
-  const onStage = role !== "host" && !!recipientHub && (role === "cohost" || stage.includes(recipientId));
+  // On stage: a co-host who is in the room (an implicit speaker) or a guest the host put on the stage list. Gaming: a current
+  // game player counts too (isGamePlayer is false whenever ROOMS_GAMING is off); nothing else about the money path changes.
+  const onStage = role !== "host" && !!recipientHub && (role === "cohost" || stage.includes(recipientId) || isGamePlayer(roomId, recipientId));
   const payerBanned = !payerOk || payerMember?.banned === true || isKicked(roomId, payerId);
   const recipientPayable = recipientId === room.hostId ? !!hostSub : !!recipientSub;
 
