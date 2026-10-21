@@ -44,6 +44,10 @@ try {
   const log = await r.listRateChanges();
   check("the change log is newest first with key, before, after, reason and admin", log.length === 2 && log[0].key === "spray_reserve" && log[0].before === 2.5 && log[0].after === 3.25 && log[0].reason === "tighter reserve" && log[0].adminId === B
     && log[1].key === "ticket_platform" && log[1].before === 15 && log[1].after === 12 && typeof log[0].at === "string", JSON.stringify(log));
+  check("the history carries the admin's display name (or a safe fallback), never just an id", log[0].adminName === "rt b" && log[1].adminName === "rt a", JSON.stringify(log.map((l) => l.adminName)));
+  await q(`insert into room_rate_changes (key, before_value, after_value, reason, admin_id) values ('ticket_platform', 12, 13, 'orphan row', 'no-such-admin')`);
+  check("a change by an admin that no longer exists shows as 'Unknown admin'", (await r.listRateChanges(5)).some((l) => l.reason === "orphan row" && l.adminName === "Unknown admin"));
+  await q(`delete from room_rate_changes where reason = 'orphan row'`);
   check("listRateChanges honours the limit", (await r.listRateChanges(1)).length === 1);
 
   // two admins at once on the same key: both land in the log in order, the last committed value stands

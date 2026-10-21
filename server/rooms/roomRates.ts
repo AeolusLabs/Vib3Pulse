@@ -48,15 +48,20 @@ export async function setRate(p: { key: RateKey; value: number; adminId: string;
   }
 }
 
-export interface RateChange { id: string; key: RateKey; before: number; after: number; reason: string; adminId: string; at: string }
+export interface RateChange { id: string; key: RateKey; before: number; after: number; reason: string; adminId: string; adminName: string; at: string }
 
 export async function listRateChanges(limit = 50): Promise<RateChange[]> {
   const n = Math.min(Math.max(Math.trunc(limit) || 50, 1), 200);
   const rows = (await pool.query(
-    `select id, key, before_value::float8 as before, after_value::float8 as after, reason, admin_id, created_at
-       from room_rate_changes order by created_at desc, id desc limit $1`, [n],
-  )).rows as { id: string; key: string; before: number; after: number; reason: string; admin_id: string; created_at: Date }[];
-  return rows.filter((r) => isRateKey(r.key)).map((r) => ({ id: r.id, key: r.key as RateKey, before: r.before, after: r.after, reason: r.reason, adminId: r.admin_id, at: new Date(r.created_at).toISOString() }));
+    `select c.id, c.key, c.before_value::float8 as before, c.after_value::float8 as after, c.reason, c.admin_id, c.created_at,
+            coalesce(a.display_name, a.username) as admin_name
+       from room_rate_changes c left join admin_users a on a.id::text = c.admin_id
+      order by c.created_at desc, c.id desc limit $1`, [n],
+  )).rows as { id: string; key: string; before: number; after: number; reason: string; admin_id: string; created_at: Date; admin_name: string | null }[];
+  return rows.filter((r) => isRateKey(r.key)).map((r) => ({
+    id: r.id, key: r.key as RateKey, before: r.before, after: r.after, reason: r.reason, adminId: r.admin_id,
+    adminName: r.admin_name ?? "Unknown admin", at: new Date(r.created_at).toISOString(),
+  }));
 }
 
 export { RATE_KEYS };
