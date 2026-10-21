@@ -13,6 +13,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertTriangleIcon, Loader2Icon, LockIcon, PauseIcon, PlayIcon, ShieldIcon } from "@/components/ui/icons";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { DayColumnChart, DayLineChart, type DayPoint } from "@/components/admin/charts/DayCharts";
+import { RankedBars, StackedBar, type BarRow, type SplitPart } from "@/components/admin/charts/BarCharts";
+import { StatTile, pctChange } from "@/components/admin/charts/StatTile";
+import { COLOR_MONEY, COLOR_USAGE, SERIES, compactCount, compactNaira, daysBetween } from "@/components/admin/charts/tokens";
 
 // Rooms admin (rooms admin plan, task 6). One screen for what an admin needs when something looks wrong: who is live right now,
 // where the money went, and the switches that stop new money. A pause or freeze stops NEW money only; money already settled to a
@@ -23,9 +27,15 @@ type Me = { role: string };
 type LiveRoom = { id: string; title: string; hostId: string; hostUsername: string; ageLimit: string; members: number; startedAt: string | null; ticketed: boolean; hostFrozen: boolean };
 type ReportedRoom = { roomId: string; title: string; status: string; ageLimit: string; hostId: string; host: { username?: string; displayName?: string } | null; reports: { id: string; reason: string; description?: string | null }[] };
 type Controls = { spraysPaused: boolean; ticketsPaused: boolean; frozenHosts: { hostId: string; username: string; reason: string; frozenAt: string }[] };
-type Overview = { roomsCreated: number; roomsStarted: number; uniqueHosts: number; peakConcurrent: number; ticketsSold: number };
+type Overview = {
+  roomsCreated: number; roomsStarted: number; uniqueHosts: number; peakConcurrent: number; ticketsSold: number;
+  byDay: { day: string; roomsStarted: number; peakConcurrent: number; ticketsSold: number }[];
+  previous: { roomsStarted: number; uniqueHosts: number; ticketsSold: number };
+};
 type Sprays = {
-  totals: { count: number; grossKobo: number; vatKobo: number; feeKobo: number; reserveKobo: number; platformKobo: number; hostKobo: number; refundedKobo: number };
+  totals: { count: number; grossKobo: number; vatKobo: number; feeKobo: number; reserveKobo: number; platformKobo: number; hostKobo: number; guestKobo: number; refundedKobo: number };
+  uniquePayers: number;
+  previous: { count: number; grossKobo: number; uniquePayers: number; refundedKobo: number };
   byTier: { tier: string; count: number; grossKobo: number }[];
   byDay: { day: string; count: number; grossKobo: number }[];
   topRooms: { roomId: string; title: string; count: number; grossKobo: number }[];
@@ -220,49 +230,161 @@ function SmallTable({ caption, head, rows, empty = "Nothing in this range." }: {
   );
 }
 
+function Panel({ title, note, children, testId }: { title: string; note?: string; children: React.ReactNode; testId?: string }) {
+  return (
+    <section className={`${panel} min-w-0 p-4`} aria-label={title} data-testid={testId}>
+      <h3 className="text-base font-semibold text-white">{title}</h3>
+      {note && <p className="mb-3 mt-0.5 text-sm text-slate-400">{note}</p>}
+      {!note && <div className="mb-3" />}
+      {children}
+    </section>
+  );
+}
+
+function ViewToggle({ view, onChange }: { view: "charts" | "tables"; onChange: (v: "charts" | "tables") => void }) {
+  return (
+    <div role="group" aria-label="View" className="inline-flex overflow-hidden rounded-md border border-slate-600">
+      {(["charts", "tables"] as const).map((v) => (
+        <button key={v} type="button" aria-pressed={view === v} onClick={() => onChange(v)} data-testid={`view-${v}`}
+          className={`min-h-[44px] px-4 text-sm font-medium transition-colors ${view === v ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-300 hover:text-white"}`}>
+          {v === "charts" ? "Charts" : "Tables"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function MoneyTab() {
   const [range, setRange] = useState<{ from?: Date; to?: Date }>(() => ({ from: new Date(Date.now() - 30 * 864e5), to: new Date() }));
-  const qs = useMemo(() => `from=${range.from ? ymd(range.from) : ymd(new Date(Date.now() - 30 * 864e5))}&to=${range.to ? ymd(range.to) : ymd(new Date())}`, [range]);
-  const sprays = useQuery<Sprays>({ queryKey: [`/api/admin/rooms/sprays?${qs}`] });
-  const overview = useQuery<Overview>({ queryKey: [`/api/admin/rooms/overview?${qs}`] });
+  const [view, setView] = useState<"charts" | "tables">("charts");
+  const fromYmd = range.from ? ymd(range.from) : ymd(new Date(Date.now() - 30 * 864e5));
+  const toYmd = range.to ? ymd(range.to) : ymd(new Date());
+  const qs = `from=${fromYmd}&to=${toYmd}`;
+  const sprays = useQuery<Sprays>({ queryKey: [`/api/admin/rooms/sprays?${qs}`], placeholderData: (prev) => prev });
+  const overview = useQuery<Overview>({ queryKey: [`/api/admin/rooms/overview?${qs}`], placeholderData: (prev) => prev });
   const finance = useQuery<Finance>({ queryKey: ["/api/admin/finance/room-tickets"] });
+  const days = useMemo(() => daysBetween(fromYmd, toYmd), [fromYmd, toYmd]);
+  const vs = `the previous ${days.length} days`;
   const s = sprays.data;
+  const o = overview.data;
+  const stale = sprays.isFetching || overview.isFetching;
+
+  const sprayDay = useMemo(() => new Map((s?.byDay ?? []).map((d) => [d.day, d])), [s]);
+  const useDay = useMemo(() => new Map((o?.byDay ?? []).map((d) => [d.day, d])), [o]);
+  const grossSeries: DayPoint[] = days.map((d) => {
+    const r = sprayDay.get(d);
+    return { day: d, value: r?.grossKobo ?? 0, tip: [{ label: "Gross", value: naira(r?.grossKobo ?? 0) }, { label: "Sprays", value: String(r?.count ?? 0) }] };
+  });
+  const usageTip = (d: string) => {
+    const r = useDay.get(d);
+    return [{ label: "Rooms started", value: String(r?.roomsStarted ?? 0) }, { label: "Peak attendance", value: String(r?.peakConcurrent ?? 0) }, { label: "Tickets sold", value: String(r?.ticketsSold ?? 0) }];
+  };
+  const startedSeries: DayPoint[] = days.map((d) => ({ day: d, value: useDay.get(d)?.roomsStarted ?? 0, tip: usageTip(d) }));
+  const peakSeries: DayPoint[] = days.map((d) => ({ day: d, value: useDay.get(d)?.peakConcurrent ?? 0, tip: usageTip(d) }));
+
+  const t = s?.totals;
+  const avg = (gross: number, count: number) => (count > 0 ? Math.round(gross / count) : 0);
+  const reversedShare = t && t.grossKobo + t.refundedKobo > 0 ? (t.refundedKobo / (t.grossKobo + t.refundedKobo)) * 100 : 0;
+  const split: SplitPart[] = t ? [
+    { id: "host", label: "Host share", value: t.hostKobo, valueLabel: naira(t.hostKobo), color: SERIES[0] },
+    { id: "platform", label: "Platform share", value: t.platformKobo, valueLabel: naira(t.platformKobo), color: SERIES[1] },
+    { id: "vat", label: "VAT", value: t.vatKobo, valueLabel: naira(t.vatKobo), color: SERIES[2] },
+    { id: "fees", label: "Card fees", value: t.feeKobo, valueLabel: naira(t.feeKobo), color: SERIES[3] },
+    { id: "reserve", label: "Fraud reserve", value: t.reserveKobo, valueLabel: naira(t.reserveKobo), color: SERIES[4] },
+    { id: "guest", label: "Stage guests", value: t.guestKobo, valueLabel: naira(t.guestKobo), color: SERIES[5] },
+  ] : [];
+  const tierRows: BarRow[] = s ? ["note", "bundle", "bag", "rain"].map((k) => {
+    const r = s.byTier.find((x) => x.tier === k);
+    return { id: k, label: TIER_LABEL[k], value: r?.grossKobo ?? 0, valueLabel: naira(r?.grossKobo ?? 0), sub: `${r?.count ?? 0} ${(r?.count ?? 0) === 1 ? "spray" : "sprays"}` };
+  }) : [];
+  const roomRows: BarRow[] = (s?.topRooms ?? []).map((r) => ({ id: r.roomId, label: r.title, value: r.grossKobo, valueLabel: naira(r.grossKobo), sub: `${r.count} sprays` }));
+  const hostRows: BarRow[] = (s?.topHosts ?? []).map((h) => ({ id: h.hostId, label: h.username, value: h.grossKobo, valueLabel: naira(h.grossKobo), sub: `${h.count} sprays` }));
+
   return (
     <section aria-labelledby="money-h" className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 id="money-h" className="text-lg font-semibold text-white">Money</h2>
-          <p className="text-sm text-slate-400">Days are in UTC. Sales count sprays that were delivered.</p>
+          <p className="text-sm text-slate-400">Days are in UTC. Sales count sprays that were delivered. Changes compare with {vs}.</p>
         </div>
-        <AdminDateRangePicker from={range.from} to={range.to} onChange={setRange} className="min-h-[44px] border-slate-600 bg-slate-800 text-slate-100" />
+        <div className="flex flex-wrap items-center gap-2">
+          <AdminDateRangePicker from={range.from} to={range.to} onChange={setRange} className="min-h-[44px] border-slate-600 bg-slate-800 text-slate-100" />
+          <ViewToggle view={view} onChange={setView} />
+        </div>
       </div>
 
       {(sprays.error || overview.error) && <Msg tone="error">Could not load this range. Pick a range of up to 366 days, or try again.</Msg>}
-      {sprays.isLoading && <Msg>Loading...</Msg>}
+      {!s && sprays.isLoading && <Msg>Loading...</Msg>}
 
-      {s && (
-        <>
-          <dl className={`${panel} divide-y divide-slate-700/60`} data-testid="spray-totals">
-            <Row label={`Sprays delivered (${s.totals.count})`} value={naira(s.totals.grossKobo)} strong />
-            <Row label="VAT" value={naira(s.totals.vatKobo)} />
-            <Row label="Card fees" value={naira(s.totals.feeKobo)} />
-            <Row label="Fraud reserve" value={naira(s.totals.reserveKobo)} />
-            <Row label="Platform share" value={naira(s.totals.platformKobo)} />
-            <Row label="Host share" value={naira(s.totals.hostKobo)} />
-            <Row label="Reversed and refunded" value={naira(s.totals.refundedKobo)} />
-          </dl>
-          {overview.data && (
-            <p className="text-sm text-slate-400" data-testid="overview-line">
-              In this range: {overview.data.roomsCreated} rooms created, {overview.data.roomsStarted} started by {overview.data.uniqueHosts} hosts, busiest room {overview.data.peakConcurrent} people, {overview.data.ticketsSold} tickets sold.
-            </p>
-          )}
-          <div className="grid items-start gap-4 lg:grid-cols-2">
-            <SmallTable caption="By tier" head={["Tier", "Sprays", "Amount"]} rows={s.byTier.map((t) => [TIER_LABEL[t.tier] ?? t.tier, t.count, naira(t.grossKobo)])} />
-            <SmallTable caption="By day (UTC)" head={["Day", "Sprays", "Amount"]} rows={s.byDay.map((d) => [d.day, d.count, naira(d.grossKobo)])} />
-            <SmallTable caption="Top rooms" head={["Room", "Sprays", "Amount"]} rows={s.topRooms.map((r) => [r.title, r.count, naira(r.grossKobo)])} />
-            <SmallTable caption="Top hosts" head={["Host", "Sprays", "Amount"]} rows={s.topHosts.map((h) => [h.username, h.count, naira(h.grossKobo)])} />
+      {s && t && (
+        <div className={`space-y-6 transition-opacity ${stale ? "opacity-60" : ""}`} aria-busy={stale}>
+          <div className={`${panel} p-5`} data-testid="spray-kpis">
+            <StatTile hero testId="kpi-gross" label="Gross sprayed" value={naira(t.grossKobo)} delta={{ pct: pctChange(t.grossKobo, s.previous.grossKobo), upIsGood: true, vs }} />
+            <div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-5 border-t border-slate-700/60 pt-5 sm:grid-cols-4">
+              <StatTile testId="kpi-count" label="Sprays" value={compactCount(t.count)} delta={{ pct: pctChange(t.count, s.previous.count), upIsGood: true, vs }} />
+              <StatTile testId="kpi-average" label="Average spray" value={compactNaira(avg(t.grossKobo, t.count))} delta={{ pct: pctChange(avg(t.grossKobo, t.count), avg(s.previous.grossKobo, s.previous.count)), upIsGood: true, vs }} />
+              <StatTile testId="kpi-payers" label="Unique spenders" value={compactCount(s.uniquePayers)} delta={{ pct: pctChange(s.uniquePayers, s.previous.uniquePayers), upIsGood: true, vs }} />
+              <StatTile testId="kpi-reversed" label="Reversed share" value={`${Math.round(reversedShare * 10) / 10}%`} note={`${naira(t.refundedKobo)} reversed and refunded`} />
+            </div>
           </div>
-        </>
+
+          {view === "charts" ? (
+            <>
+              <Panel title="Spray money per day" note="Gross of delivered sprays. Hover or use the arrow keys to read a day." testId="chart-gross-per-day">
+                <DayLineChart data={grossSeries} color={COLOR_MONEY} formatTick={compactNaira} formatValue={compactNaira} ariaLabel={`Gross spray money per day, ${naira(t.grossKobo)} in total`} testId="chart-gross-line" />
+              </Panel>
+              <Panel title="Where each naira goes" note="One bar is the whole gross; each part is a share of it. Platform share is what the platform keeps." testId="chart-split">
+                <StackedBar parts={split} total={t.grossKobo} totalLabel={naira(t.grossKobo)} ariaLabel="How the gross is split" testId="chart-split-bar" />
+              </Panel>
+              <div className="grid items-start gap-4 lg:grid-cols-2">
+                <Panel title="By tier" note="Ordered by price, note to rain." testId="chart-tier"><RankedBars rows={tierRows} color={COLOR_MONEY} ariaLabel="Gross by spray tier" testId="chart-tier-bars" /></Panel>
+                <Panel title="Top rooms" note="By gross, up to 10." testId="chart-rooms"><RankedBars rows={roomRows} color={COLOR_MONEY} ariaLabel="Top rooms by gross" testId="chart-rooms-bars" /></Panel>
+              </div>
+              <Panel title="Top hosts" note="By gross sprayed in their rooms, up to 10." testId="chart-hosts"><RankedBars rows={hostRows} color={COLOR_MONEY} ariaLabel="Top hosts by gross" testId="chart-hosts-bars" /></Panel>
+            </>
+          ) : (
+            <div className="space-y-4" data-testid="money-tables">
+              <dl className={`${panel} divide-y divide-slate-700/60`} data-testid="spray-totals">
+                <Row label={`Sprays delivered (${t.count})`} value={naira(t.grossKobo)} strong />
+                {split.map((p) => <Row key={p.id} label={p.label} value={p.valueLabel} />)}
+                <Row label="Reversed and refunded" value={naira(t.refundedKobo)} />
+              </dl>
+              <div className="grid items-start gap-4 lg:grid-cols-2">
+                <SmallTable caption="By tier" head={["Tier", "Sprays", "Amount"]} rows={s.byTier.map((x) => [TIER_LABEL[x.tier] ?? x.tier, x.count, naira(x.grossKobo)])} />
+                <SmallTable caption="By day (UTC)" head={["Day", "Sprays", "Amount"]} rows={s.byDay.map((d) => [d.day, d.count, naira(d.grossKobo)])} />
+                <SmallTable caption="Top rooms" head={["Room", "Sprays", "Amount"]} rows={s.topRooms.map((r) => [r.title, r.count, naira(r.grossKobo)])} />
+                <SmallTable caption="Top hosts" head={["Host", "Sprays", "Amount"]} rows={s.topHosts.map((h) => [h.username, h.count, naira(h.grossKobo)])} />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {o && (
+        <div className={`space-y-6 transition-opacity ${stale ? "opacity-60" : ""}`}>
+          <div>
+            <h3 className="text-base font-semibold text-white">Rooms and attendance</h3>
+            <p className="text-sm text-slate-400">A day's peak is the busiest room that started that day.</p>
+          </div>
+          <div className={`${panel} grid grid-cols-2 gap-x-6 gap-y-5 p-5 sm:grid-cols-4`} data-testid="usage-kpis">
+            <StatTile testId="kpi-rooms-started" label="Rooms started" value={compactCount(o.roomsStarted)} delta={{ pct: pctChange(o.roomsStarted, o.previous.roomsStarted), upIsGood: true, vs }} />
+            <StatTile testId="kpi-hosts" label="Active hosts" value={compactCount(o.uniqueHosts)} delta={{ pct: pctChange(o.uniqueHosts, o.previous.uniqueHosts), upIsGood: true, vs }} />
+            <StatTile testId="kpi-peak" label="Busiest room" value={`${compactCount(o.peakConcurrent)} ${o.peakConcurrent === 1 ? "person" : "people"}`} />
+            <StatTile testId="kpi-tickets" label="Tickets sold" value={compactCount(o.ticketsSold)} delta={{ pct: pctChange(o.ticketsSold, o.previous.ticketsSold), upIsGood: true, vs }} />
+          </div>
+          {view === "charts" ? (
+            <div className="grid items-start gap-4 lg:grid-cols-2">
+              <Panel title="Rooms started per day" testId="chart-rooms-started">
+                <DayColumnChart data={startedSeries} color={COLOR_USAGE} formatTick={(n) => String(Math.round(n))} formatValue={(n) => String(n)} ariaLabel="Rooms started per day" testId="chart-rooms-started-cols" />
+              </Panel>
+              <Panel title="Peak attendance per day" testId="chart-peak">
+                <DayColumnChart data={peakSeries} color={COLOR_USAGE} formatTick={(n) => String(Math.round(n))} formatValue={(n) => String(n)} ariaLabel="Peak attendance per day" testId="chart-peak-cols" />
+              </Panel>
+            </div>
+          ) : (
+            <SmallTable caption="Usage by day (UTC)" head={["Day", "Rooms started", "Peak attendance", "Tickets sold"]} rows={o.byDay.map((d) => [d.day, d.roomsStarted, d.peakConcurrent, d.ticketsSold])} empty="No rooms started in this range." />
+          )}
+        </div>
       )}
 
       <div className="space-y-4">
@@ -271,7 +393,7 @@ function MoneyTab() {
         {finance.error && <Msg tone="error">Could not load ticket totals.</Msg>}
         {finance.data && (
           <div className="grid items-start gap-4 lg:grid-cols-2">
-            <SmallTable caption="Ticket sales (all time)" head={["Status", "Tickets", "Gross"]} rows={finance.data.tickets.map((t) => [t.status, t.count, naira(t.grossKobo)])} empty="No ticket sales yet." />
+            <SmallTable caption="Ticket sales (all time)" head={["Status", "Tickets", "Gross"]} rows={finance.data.tickets.map((x) => [x.status, x.count, naira(x.grossKobo)])} empty="No ticket sales yet." />
             <SmallTable caption="Host payouts (all time)" head={["Status", "Payouts", "Amount"]} rows={finance.data.payouts.map((p) => [p.status, p.count, naira(p.amountKobo)])} empty="No payouts yet." />
           </div>
         )}

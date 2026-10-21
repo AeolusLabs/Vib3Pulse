@@ -45,3 +45,18 @@ test("copy rules: no em dashes and no emoji icons in the page", () => {
   assert.ok(!src.includes("—"), "em dash found");
   assert.ok(!/[\u{1F300}-\u{1FAFF}☀-➿]/u.test(src), "emoji found");
 });
+
+test("the Money tab uses the right chart for each measure and every chart has a table twin", () => {
+  const src = read(PAGE);
+  // trend over time = line; part of a whole = one stacked bar; ranking = horizontal bars; daily counts = columns; headline numbers = stat tiles
+  for (const id of ["chart-gross-line", "chart-split-bar", "chart-tier-bars", "chart-rooms-bars", "chart-hosts-bars", "chart-rooms-started-cols", "chart-peak-cols", "kpi-gross", "kpi-count", "kpi-average", "kpi-payers", "kpi-reversed", "kpi-rooms-started", "kpi-hosts", "kpi-peak", "kpi-tickets"])
+    assert.ok(src.includes(`"${id}"`), `${id} missing`);
+  assert.ok(src.includes('data-testid={`view-${v}`}') && src.includes('data-testid="money-tables"'), "the Charts and Tables switch is missing");
+  assert.ok(!/dual|secondaryAxis|yAxisRight/i.test(src), "no dual-axis charts");
+});
+
+test("the chart palette is the validated dark set and chart text never wears a series colour", () => {
+  const tokens = read("client/src/components/admin/charts/tokens.ts");
+  assert.match(tokens, /"#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300"/);
+  for (const f of ["DayCharts.tsx", "BarCharts.tsx"]) assert.ok(!/<text[^>]*fill={color}/.test(read(`client/src/components/admin/charts/${f}`)), `${f} colours text with the series colour`);
+});
