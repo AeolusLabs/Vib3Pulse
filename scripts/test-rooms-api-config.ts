@@ -12,7 +12,7 @@ if (!/test/i.test(dbName)) {
   process.exit(2);
 }
 // The runner loads .env; a ROOMS_* value there must not decide the default-flags-off assertion.
-for (const k of ["ROOMS_PAID", "ROOMS_SPRAY", "ROOMS_GAMING"]) delete process.env[k];
+for (const k of ["ROOMS_PAID", "ROOMS_SPRAY", "ROOMS_GAMING", "LIVEKIT_INGRESS"]) delete process.env[k];
 process.env.DISABLE_GEOCODING = "1";
 process.env.RESEND_API_KEY ||= "re_dummy_not_real";
 
@@ -118,6 +118,11 @@ try {
   const g = await http("GET", "/api/rooms/config", adult);
   Object.assign(roomFeatures, saved);
   check("config: features.gaming is true while ROOMS_GAMING is on", g.status === 200 && g.json?.features?.gaming === true, JSON.stringify(g.json?.features));
+  check("config: game capabilities appear with the flag, exactly ingest / teamSpray / lanes, all booleans",
+    JSON.stringify(Object.keys(g.json?.game ?? {})) === JSON.stringify(["ingest", "teamSpray", "lanes"]) && Object.values(g.json.game).every((x) => typeof x === "boolean"), JSON.stringify(g.json?.game));
+  check("config: ingest is off without LIVEKIT_INGRESS (and without a voice service)", g.json?.game?.ingest === false);
+  check("config: teamSpray is off while spraying is off", g.json?.game?.teamSpray === false);
+  check("config: no game key at all while the flag is off", !("game" in (r.json ?? {})) && !("gaming" in (r.json?.features ?? {})));
 
   // The two ticket rates the host screens need follow the saved rates (rooms rates plan, task 3); nothing else about rates is exposed.
   const rates = await import("../server/rooms/roomRates");

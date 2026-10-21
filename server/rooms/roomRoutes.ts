@@ -32,7 +32,7 @@ import { getVoiceService } from "./voice/voiceService";
 import { afterRoleChange, canCameraNow, canPublishNow, isGamePlayer, publishSourcesNow, shutdownVoice, stopAllLive } from "./stage";
 import { applyMod, endRoom, enforceAgeLimit, enforceTicketFor, expectHost, interactionVerdict, isKicked, notifyScreen, removeFromMinorsRoom, writeRoomSettings } from "./roomSocket";
 import { roomHub } from "./RoomHub";
-import { roomFeatures } from "./features";
+import { GAME_PARTS, ingressFlag, roomFeatures } from "./features";
 import { sprayAllowed, ticketSalesAllowed } from "./roomControls";
 import { getRates } from "./roomRates";
 import { clearReminder, hasReminder, setReminder } from "./reminders";
@@ -69,6 +69,19 @@ const HOST_NOT_MINOR = { code: "HOST_NOT_MINOR" } as const;
 const NEEDS_LIVE_VIDEO = { message: "A game room needs live video, which works in rooms of up to 50 people.", field: "gameFormat", reason: "needs_live_video" } as const;
 const videoSized = (r: { capacity: number; ticketPriceKobo?: number | null; ticketCapacity?: number | null }) => roomCapacity(r) <= ROOM_LIMITS.liveVideoMax;
 const badGameField = (field: string) => ({ message: `Invalid ${field}`, field, reason: "invalid" });
+
+/**
+ * What the gaming client may offer. ingest: LIVEKIT_INGRESS is on and the voice service can create an ingress (OBS); teamSpray:
+ * spraying is allowed now and team spray is built; lanes: age lanes are built.
+ */
+async function gameCapabilities(): Promise<{ ingest: boolean; teamSpray: boolean; lanes: boolean }> {
+  const svc = getVoiceService();
+  return {
+    ingest: ingressFlag() && !!svc && typeof (svc as { createIngress?: unknown }).createIngress === "function",
+    teamSpray: GAME_PARTS.teamSpray && (await sprayAllowed()),
+    lanes: GAME_PARTS.lanes,
+  };
+}
 
 export function isHost(room: Room, userId: string) {
   return room.hostId === userId;
@@ -273,6 +286,8 @@ export function registerRoomRoutes(app: Express): void {
         // Only the two ticket rates the host screens need for their earnings estimate; no spray rate and nothing else.
         rates: await ticketRatesForClients(),
         host: await hostingInfo(req.user!.id),
+        // Gaming capabilities, only while ROOMS_GAMING is on (absent otherwise, so the flag-off body is unchanged).
+        ...(roomFeatures.gaming ? { game: await gameCapabilities() } : {}),
       });
     } catch (e) {
       console.error("[rooms] config failed:", e);
