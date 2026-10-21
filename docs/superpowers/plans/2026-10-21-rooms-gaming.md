@@ -10,6 +10,20 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-21-rooms-gaming-design.md`. Visual reference: `docs/design/rooms-2026-10/gamer-rooms-mockup.html`.
 
+## Phases (each is a stopping point: built, reviewed once, committed, merged by the orchestrator)
+
+| Phase | Tasks | Agent | Done when |
+|---|---|---|---|
+| 1 Foundation | 0 (flag), 1 rules, 2 LiveKit sources | Backend | Flag exists, pure game rules and `canPlayGame` written, per-player publish sources in LiveKit + fake |
+| 2 Server game | 3 state/handler/drops/sweep, 4 spray recipients | Backend | `room:game` works end to end on the server; players can be sprayed; drops hold slots and post "has dropped out" |
+| 3 Client plumbing | 5 state/socket, 6 media | Frontend | Reducer, socket action, screen capture, game profiles, subscription limits, Stop-sharing release |
+| 4 Game stage UI | 7 | Frontend | Team lanes, featured + thumbnails, follow, statuses, four layouts, fixture scenes; flag off = no change |
+| 5 Host and player flows | 8 (client) + routes for `gameFormat` / drop timeout (backend) | Both | Create toggle, host console, go-live sheet, drop-timeout setting |
+| 6 Age lanes | 9 | Backend, then Frontend | Parent routes to teen and adult lanes; teen host rule; invite + warning path; no cross-lane leaks |
+| 7 OBS ingest | 10 | Backend, then Frontend | Per-player stream key, revoked on leave/remove/end; OBS option in the sheet |
+| 8 Team spray | 11 | Backend, then Frontend | Team tray, 500 x players minimum, equal split, batch refund (mock provider) |
+| 9 Test and release | 12 | Orchestrator | One full test, browser pass, flag-off parity, rollout plan |
+
 ## Global Constraints
 
 - Flag `ROOMS_GAMING`, default OFF; only exactly `"1"`/`"true"` turn it on (same as `parseFlag`). Flag off: no new route, WS message or UI is reachable and every existing payload is byte-identical.
