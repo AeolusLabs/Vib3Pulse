@@ -5,6 +5,7 @@ import { validateChatReply, type ChatReply } from "@shared/rooms";
 import type { Screen } from "@shared/screen";
 import type { NowPlaying } from "@shared/playback";
 import { isSprayTier, type SprayTier } from "@shared/money";
+import type { GameView } from "@shared/gameScreen";
 
 export type RoomPhase = "idle" | "connecting" | "live" | "reconnecting" | "ended" | "denied";
 export type MemberRole = "host" | "cohost" | "guest";
@@ -69,6 +70,8 @@ export interface RoomState {
   /** Synced playback: what is playing, and server clock minus client clock when it last arrived. */
   nowPlaying: NowPlaying | null;
   serverOffsetMs: number;
+  /** Gamers live: the match (teams, featured feeds, score, who is away). null unless the server's flag is on and this is a game room. */
+  game: GameView | null;
 }
 
 export const CHAT_CAP = 200;
@@ -79,11 +82,11 @@ export const SPRAY_CAP = 20;
 export const initialRoomState = (selfId: string | null = null): RoomState => ({
   selfId, phase: "idle", room: null, members: [], memberCount: 0, screen: null, you: null,
   chat: [], reactions: [], interactions: [], sprays: [], error: null, notice: null, seq: 0,
-  voiceEnabled: false, stage: [], hands: [], invitedYou: false, liveVideo: false, holder: null, asks: [], holderAwayUntil: null, nowPlaying: null, serverOffsetMs: 0,
+  voiceEnabled: false, stage: [], hands: [], invitedYou: false, liveVideo: false, holder: null, asks: [], holderAwayUntil: null, nowPlaying: null, serverOffsetMs: 0, game: null,
 });
 
 export type RoomServerMessage =
-  | { type: "room:state"; room: { id: string }; members: RoomMemberView[]; memberCount: number; screen: Screen | null; you: { role: MemberRole; muted: boolean }; voiceEnabled?: boolean; stage?: string[]; hands?: string[]; holder?: string | null; asks?: string[]; away?: number | null; nowPlaying?: NowPlaying | null; serverNowMs?: number }
+  | { type: "room:state"; room: { id: string }; members: RoomMemberView[]; memberCount: number; screen: Screen | null; you: { role: MemberRole; muted: boolean }; voiceEnabled?: boolean; stage?: string[]; hands?: string[]; holder?: string | null; asks?: string[]; away?: number | null; nowPlaying?: NowPlaying | null; serverNowMs?: number; game?: GameView }
   | { type: "room:joined"; member: RoomMemberView }
   | { type: "room:left"; userId: string }
   | { type: "room:chat"; userId: string; text: string; at: number; replyTo?: ChatReply; system?: string }
@@ -95,6 +98,7 @@ export type RoomServerMessage =
   | { type: "room:voice"; enabled: boolean }
   | { type: "room:live"; holder: string | null; asks: string[]; away?: number | null }
   | { type: "room:livevideo"; enabled: boolean }
+  | { type: "room:game"; game: GameView }
   | { type: "room:settings"; pinnedMessage: string | null; slowModeSec: number; locked: boolean }
   | { type: "room:playback"; nowPlaying: NowPlaying | null; serverNowMs: number }
   | { type: "room:mod"; action: "mute" | "unmute" | "kick" | "ban" | "role"; targetId: string; role?: MemberRole }
@@ -111,6 +115,15 @@ export type RoomClientEvent =
   | { type: "client:dismissInvite" };
 
 export type RoomEvent = RoomServerMessage | RoomClientEvent;
+
+/** A game view from the wire, checked before it is kept: a malformed one is dropped, never rendered. */
+export function validGameView(g: unknown): g is GameView {
+  const v = g as Partial<GameView> | null;
+  if (!v || typeof v !== "object") return false;
+  const team = (t: unknown) => Array.isArray(t) && t.every((x) => typeof x === "string");
+  return typeof v.format === "number" && !!v.teams && team(v.teams.A) && team(v.teams.B)
+    && !!v.featured && Array.isArray(v.asks) && Array.isArray(v.score) && !!v.away && typeof v.away === "object";
+}
 
 const TERMINAL: RoomPhase[] = ["ended", "denied"];
 const cap = <T,>(list: T[], n: number) => (list.length > n ? list.slice(list.length - n) : list);
@@ -135,6 +148,7 @@ export function roomReducer(state: RoomState, event: RoomEvent, now: () => numbe
         ...state, phase: "live", error: null, room: event.room, members: event.members, memberCount: event.memberCount,
         screen: event.screen ?? null, you: event.you,
         voiceEnabled: event.voiceEnabled === true, stage: event.stage ?? [], hands: event.hands ?? [], invitedYou: false, liveVideo: (event.room as { liveVideo?: boolean }).liveVideo === true, holder: event.holder ?? null, asks: event.asks ?? [], holderAwayUntil: event.away ?? null, nowPlaying: event.nowPlaying ?? null,
+        game: validGameView(event.game) ? event.game : null,
         // A late joiner has the host's clock from this message, not only from the next heartbeat.
         serverOffsetMs: event.serverNowMs !== undefined ? event.serverNowMs - now() : state.serverOffsetMs,
         chat: sameRoom ? state.chat : [], reactions: sameRoom ? state.reactions : [], interactions: sameRoom ? state.interactions : [], sprays: sameRoom ? state.sprays : [],
@@ -188,6 +202,9 @@ export function roomReducer(state: RoomState, event: RoomEvent, now: () => numbe
       return { ...state, holder: event.holder, asks: event.asks, holderAwayUntil: event.holder ? event.away ?? null : null };
     case "room:livevideo":
       return event.enabled ? { ...state, liveVideo: true } : { ...state, liveVideo: false, holder: null, asks: [], holderAwayUntil: null };
+    case "room:game":
+      // Only a room that started with a game (room:state carried one) takes updates: a stale or stray message never makes a game appear.
+      return state.game && validGameView(event.game) ? { ...state, game: event.game } : state;
     case "room:playback": {
       const current = (state.room as { screenVersion?: number } | null)?.screenVersion;
       // A message about a screen that has since been replaced (it crossed a screen change on the way) must not resurrect old playback.

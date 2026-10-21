@@ -13,6 +13,8 @@ import { NOTICE_MESSAGE, useRoomsConfig } from "@/lib/roomsApi";
 import { CONTROLS_COPY, TAB_LABEL, controlsFor, moneyPlaceholderVisible, readSettings, requestQueue, roleChange, settingsErrorMessage, type ControlsRole, type ControlsTab } from "@/lib/hostControls";
 import type { useRoomSocket } from "@/hooks/useRoomSocket";
 import type { RoomMemberView, RoomState } from "@/lib/roomReducer";
+import GameConsole, { type GameConsoleProps } from "@/components/rooms/game/GameConsole";
+import { gameNoticeText } from "@/lib/gameScreen";
 
 /** The socket and REST actions the sheet uses. RoomPage passes useRoomSocket(); the dev fixture passes fakes. */
 export type ControlsSocket = Pick<ReturnType<typeof useRoomSocket>,
@@ -38,6 +40,8 @@ export interface ControlsSheetProps {
   returnFocusTo?: () => HTMLElement | null;
   /** Dev fixture only: open on this tab. */
   startTab?: ControlsTab;
+  /** Gamers live: present only for a game room with the flag on. Adds a Game tab; without it the sheet is exactly as before. */
+  gameConsole?: Omit<GameConsoleProps, "say" | "game"> & { game: NonNullable<RoomState["game"]> };
 }
 
 const nameOf = (m: RoomMemberView) => m.displayName || m.organizationName || m.username || "Guest";
@@ -47,9 +51,9 @@ const FOCUS = "focus-visible:outline focus-visible:outline-2 focus-visible:outli
  * The host's (and a co-host's) Controls: Requests, Stage, People, Settings. A co-host gets the actions they already have
  * and only the pinned message in Settings. Every action goes through the existing socket and REST endpoints; the server decides.
  */
-export default function ControlsSheet({ open, onOpenChange, roomId, inviteToken, role, room, state, count, selfId, sock, holderAwayLeftMs, hostExtras, returnFocusTo, startTab }: ControlsSheetProps) {
+export default function ControlsSheet({ open, onOpenChange, roomId, inviteToken, role, room, state, count, selfId, sock, holderAwayLeftMs, hostExtras, returnFocusTo, startTab, gameConsole }: ControlsSheetProps) {
   const can = controlsFor(role);
-  const [tab, setTab] = useState<ControlsTab>(startTab ?? "requests");
+  const [tab, setTab] = useState<ControlsTab | "game">(startTab ?? "requests");
   const { data: config } = useRoomsConfig();
   const settings = readSettings(state.room, room as unknown as Record<string, unknown>);
   const showMoney = moneyPlaceholderVisible({ role, flags: config?.features, ageLimit: room.ageLimit, minorsRoom: room.minorsRoom });
@@ -75,7 +79,7 @@ export default function ControlsSheet({ open, onOpenChange, roomId, inviteToken,
   useEffect(() => {
     if (!open || noticeN === seenNotice.current) { seenNotice.current = noticeN; return; }
     seenNotice.current = noticeN;
-    say(NOTICE_MESSAGE[state.notice?.code ?? ""] ?? CONTROLS_COPY.sendFailed);
+    say((state.game ? gameNoticeText(state.notice?.code ?? "") : null) ?? NOTICE_MESSAGE[state.notice?.code ?? ""] ?? CONTROLS_COPY.sendFailed);
   }, [open, noticeN]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const changeRole = async (m: RoomMemberView, to: "cohost" | "guest") => {
@@ -108,7 +112,7 @@ export default function ControlsSheet({ open, onOpenChange, roomId, inviteToken,
           {notice && <p className="mt-3 rounded-xl border bg-muted px-3 py-2 text-sm font-medium text-foreground">{notice}</p>}
         </div>
 
-        <Tabs value={tab} onValueChange={(v) => setTab(v as ControlsTab)} className="mt-3">
+        <Tabs value={tab} onValueChange={(v) => setTab(v as ControlsTab | "game")} className="mt-3">
           <TabsList className="h-auto w-full flex-wrap justify-start gap-2 bg-transparent p-0" aria-label="Controls">
             {can.tabs.map((t) => (
               <TabsTrigger key={t} value={t} className={triggerCls} data-testid={`controls-tab-${t}`}>
@@ -116,6 +120,7 @@ export default function ControlsSheet({ open, onOpenChange, roomId, inviteToken,
                 {t === "requests" && requests > 0 && <><span className="ml-1.5" aria-hidden>{requests}</span><span className="sr-only">, {requests} waiting</span></>}
               </TabsTrigger>
             ))}
+            {gameConsole && <TabsTrigger value="game" className={triggerCls} data-testid="controls-tab-game">Game</TabsTrigger>}
           </TabsList>
 
           <TabsContent value="requests" className="mt-4">
@@ -163,6 +168,12 @@ export default function ControlsSheet({ open, onOpenChange, roomId, inviteToken,
               roleExtra={can.makeCohost ? roleButton : undefined}
             />
           </TabsContent>
+
+          {gameConsole && (
+            <TabsContent value="game" className="mt-4">
+              <GameConsole {...gameConsole} say={say} />
+            </TabsContent>
+          )}
 
           {/* Settings stays mounted (hidden) so an unsaved pinned message survives a tab switch. */}
           <TabsContent value="settings" forceMount className="mt-4 space-y-5 data-[state=inactive]:hidden">

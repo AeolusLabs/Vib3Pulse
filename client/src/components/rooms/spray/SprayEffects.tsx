@@ -69,9 +69,11 @@ interface Props {
   selfId?: string | null;
   /** Send a chat line as the viewer (the thank-you). Absent (muted, listen-only): no thank-you is offered. */
   onThank?(text: string): void;
+  /** Cap on simultaneous spray notes (a game room keeps it low: several feeds are already playing). Default: the engine's own cap. */
+  maxNotes?: number;
 }
 
-export default function SprayEffects({ sprays, nameOf, quiet, serverOffsetMs, videoActive, selfId = null, onThank }: Props) {
+export default function SprayEffects({ sprays, nameOf, quiet, serverOffsetMs, videoActive, selfId = null, onThank, maxNotes }: Props) {
   const engineRef = useRef<SprayEngine | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const flashRef = useRef<HTMLDivElement>(null);
@@ -201,7 +203,7 @@ export default function SprayEffects({ sprays, nameOf, quiet, serverOffsetMs, vi
         <div className="pointer-events-none absolute inset-0 transition-opacity duration-[260ms] ease-out" data-testid="spray-dim" data-on={dim.on ? "1" : "0"}
           style={{ opacity: dimOpacity, background: `radial-gradient(circle at ${Math.round(dim.x)}px ${Math.round(dim.y)}px, transparent 0, transparent 54px, rgb(5 3 10) 190px)` }} />
         <div ref={flashRef} className="pointer-events-none absolute inset-0 opacity-0" data-testid="spray-flash" />
-        <SprayLayer engineRef={engineRef} videoActive={videoActive} />
+        <SprayLayer engineRef={engineRef} videoActive={videoActive} maxNotes={maxNotes} />
         <div className="absolute inset-x-0 bottom-[calc(150px+env(safe-area-inset-bottom,0px))] flex flex-col items-center gap-1.5 px-4">
           {chips.map((c) => <p key={c.id} className={`${AMBER.chip} max-w-full truncate px-3 py-1.5 text-sm shadow-lg`} data-testid="spray-chip">{c.text}</p>)}
         </div>
