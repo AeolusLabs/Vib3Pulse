@@ -144,7 +144,7 @@ export function handleGame(userId: string, roomId: string, msg: unknown): Promis
 
     const before = roomHub.gameOf(roomId);
     const r = applyGame(before, action, {
-      actorId: userId, actorRole: actor.role, targetId, targetPresent: !!target,
+      actorId: userId, actorRole: actor.role, targetId, targetRole: target?.role ?? "guest", targetPresent: !!target,
       targetEligible: !!target && needsEligibility && (await eligible(roomId, target, true)),
       gameOn: gameLive(roomId), side: m.side as Side | undefined, value: m.value as number | undefined,
     });

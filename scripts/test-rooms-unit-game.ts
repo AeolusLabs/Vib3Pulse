@@ -92,6 +92,13 @@ test("remove: a guest cannot remove someone else, but may remove themselves (als
   assert.deepEqual(self.teams.A, []);
   assert.equal(code(applyGame(self, "remove", ctx({ actorId: G1, actorRole: "guest", targetId: G1 }))), "NO_CHANGE");
 });
+test("remove: a co-host cannot remove the host's slot; the host may remove themselves; a co-host removes a guest", () => {
+  let s = ok(applyGame(newGame(2), "accept", ctx({ targetId: HOST, targetRole: "host", side: "A" })));
+  s = ok(applyGame(s, "accept", ctx({ targetId: G1, side: "A" })));
+  assert.equal(code(applyGame(s, "remove", ctx({ actorId: "co", actorRole: "cohost", targetId: HOST, targetRole: "host" }))), "NOT_ALLOWED");
+  assert.deepEqual(ok(applyGame(s, "remove", ctx({ actorId: "co", actorRole: "cohost", targetId: G1, targetRole: "guest" }))).teams.A, [HOST]);
+  assert.deepEqual(ok(applyGame(s, "remove", ctx({ actorId: HOST, actorRole: "host", targetId: HOST, targetRole: "host" }))).teams.A, [G1]);
+});
 test("score below 0 or not a whole number -> BAD_VALUE; a valid score sets that side", () => {
   for (const value of [-1, 1.5, NaN, 1000]) assert.equal(code(applyGame(newGame(1), "score", ctx({ side: "A", value }))), "BAD_VALUE", String(value));
   assert.equal(code(applyGame(newGame(1), "score", ctx({ value: 1 }))), "BAD_VALUE", "no side");

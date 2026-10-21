@@ -75,6 +75,8 @@ export interface GameContext {
   actorId: string;
   actorRole: "host" | "cohost" | "guest";
   targetId: string;
+  /** The target's role in the room (the server passes it): only the host may remove the host's own slot. Defaults to guest. */
+  targetRole?: "host" | "cohost" | "guest";
   targetPresent: boolean;
   /** canPlayGame(...).ok for the target, computed by the caller. */
   targetEligible: boolean;
@@ -157,8 +159,10 @@ export function applyGame(state: GameState, action: GameAction, c: GameContext):
     }
 
     case "remove": {
-      // A host or co-host removes anyone; a player may always remove themselves (their own "Stop sharing" lands here).
+      // A host or co-host removes anyone except that a co-host never removes the host (orchestrator ruling 2026-10-22); a
+      // player may always remove themselves (their own "Stop sharing" lands here).
       if (!self && !isMod(c.actorRole)) return no("NOT_ALLOWED");
+      if (!self && c.targetRole === "host" && c.actorRole !== "host") return no("NOT_ALLOWED");
       if (!sideOf(s, c.targetId) && !s.asks.some((a) => a.userId === c.targetId)) return no("NO_CHANGE");
       return { ok: true, state: dropFromGame(s, c.targetId) };
     }
