@@ -133,6 +133,13 @@ export const GAME_NOTICE: Record<string, string> = {
 };
 export const gameNoticeText = (code: string): string | null => GAME_NOTICE[code] ?? null;
 
+/**
+ * Tracks that come in through OBS/RTMP ingest are published by a LiveKit identity `<userId>#obs` (one connection per identity:
+ * the player's own browser keeps the bare id). Every place that maps a track to a player goes through this.
+ */
+export const OBS_SUFFIX = "#obs";
+export const playerIdOf = (identity: string): string => (identity.endsWith(OBS_SUFFIX) ? identity.slice(0, -OBS_SUFFIX.length) : identity);
+
 /** Names of the two teams' lanes on screen. */
 export const SIDE_NAME: Record<Side, string> = { A: "Team A", B: "Team B" };
 
@@ -170,3 +177,28 @@ export const teamSprayTiers = (players: number): SprayTier[] =>
 export function teamShares(game: GameView, side: Side, tier: SprayTier, featured: string | null): Record<string, number> {
   return splitShares(SPRAY_CATALOGUE[tier].kobo, game.teams[side], featured);
 }
+
+// ---------------------------------------------------------------- refusals on create / edit / lanes (no wording about anyone's age)
+
+const REFUSAL_REASON: Record<string, string> = {
+  needs_live_video: "Game rooms need live video. Keep the room small enough for video, then try again.",
+  needs_game: "Pick a game format first, then separate age groups.",
+  lanes: "Separate age groups can't be used with paid tickets.",
+  teen_host_required: "You can't open that lane.",
+  minors_parent: "That lane can't be opened in this room.",
+};
+const REFUSAL_CODE: Record<string, string> = {
+  LANE_EXISTS: "That lane is already open.",
+  TEAM_FULL: "A team has more players than that format allows. Remove players first.",
+  GAME_IN_PROGRESS: "Players are in the match. Remove them before turning the game off.",
+  LANE_ROOM: "This room's game can't be turned off while it has age groups.",
+};
+/** Plain words for a refused game field (`reason`) or code, or null when it isn't a game refusal. `invalid` counts only on a game field. */
+export function gameRefusalText(f: { code?: string; reason?: string; field?: string }): string | null {
+  if (f.code && REFUSAL_CODE[f.code]) return REFUSAL_CODE[f.code];
+  if (f.reason && REFUSAL_REASON[f.reason]) return REFUSAL_REASON[f.reason];
+  if (f.reason === "invalid" && (f.field === "gameFormat" || f.field === "gameDropTimeoutMs" || f.field === "lanes")) return "That game setting isn't allowed. Pick one from the list.";
+  return null;
+}
+/** The create flow made the room but could not set the game up. */
+export const GAME_SETUP_FAILED = "The room is live, but the game wasn't set up. Open Controls, Game, to try again.";

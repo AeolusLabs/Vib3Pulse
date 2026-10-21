@@ -1,5 +1,6 @@
 // Pure helpers and words for the create-a-room wizard and the quick start sheet (no React, no network, no storage).
 // The rules about what a host may pick live in createRoomRules.ts (task 3.2); the server is always the gate.
+import { gameRefusalText } from "@/lib/gameScreen";
 import type { RoomVisibility } from "@shared/rooms";
 import { ROOM_LIMITS, SLOW_MODES } from "@shared/rooms";
 import type { WizardState } from "@/lib/createRoomRules";
@@ -170,10 +171,12 @@ export const FIELD_ERROR: Record<string, string> = {
 export const OFFLINE_ERROR = "Couldn't reach Vib3Pulse. Check your connection and try again.";
 export const GENERIC_CREATE_ERROR = "Couldn't create the room. Try again.";
 
-export interface ApiFailure { status: number; code?: string; field?: string }
+export interface ApiFailure { status: number; code?: string; field?: string; reason?: string }
 
 /** Plain words for a refused create or start. Never the server's raw text, so every line follows the copy rules. */
 export function createErrorMessage(f: ApiFailure): string {
+  const game = gameRefusalText(f);
+  if (game) return game;
   if (f.code && CREATE_ERROR[f.code]) return CREATE_ERROR[f.code];
   if (f.status === 0) return OFFLINE_ERROR;
   if (f.status === 429) return CREATE_ERROR.RATE_LIMITED;
@@ -211,7 +214,7 @@ export function stepOfField(field: string): WizardStep | null {
   switch (field) {
     case "title": case "description": case "kind": case "capacity": case "eventId": case "venueId": return "basics";
     case "ageLimit": case "visibility": return "audience";
-    case "voice": case "liveVideo": case "slowModeSec": case "pinned": case "pinnedMessage": case "screenUrl": case "noDirectInteractions": return "features";
+    case "gameFormat": case "gameDropTimeoutMs": case "lanes": case "voice": case "liveVideo": case "slowModeSec": case "pinned": case "pinnedMessage": case "screenUrl": case "noDirectInteractions": return "features";
     case "when": case "scheduledFor": return "when";
     default: return null;
   }

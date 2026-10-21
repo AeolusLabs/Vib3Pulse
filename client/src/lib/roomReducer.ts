@@ -98,7 +98,7 @@ export type RoomServerMessage =
   | { type: "room:voice"; enabled: boolean }
   | { type: "room:live"; holder: string | null; asks: string[]; away?: number | null }
   | { type: "room:livevideo"; enabled: boolean }
-  | { type: "room:game"; game: GameView }
+  | { type: "room:game"; game: GameView | null }
   | { type: "room:settings"; pinnedMessage: string | null; slowModeSec: number; locked: boolean }
   | { type: "room:playback"; nowPlaying: NowPlaying | null; serverNowMs: number }
   | { type: "room:mod"; action: "mute" | "unmute" | "kick" | "ban" | "role"; targetId: string; role?: MemberRole }
@@ -203,8 +203,11 @@ export function roomReducer(state: RoomState, event: RoomEvent, now: () => numbe
     case "room:livevideo":
       return event.enabled ? { ...state, liveVideo: true } : { ...state, liveVideo: false, holder: null, asks: [], holderAwayUntil: null };
     case "room:game":
-      // Only a room that started with a game (room:state carried one) takes updates: a stale or stray message never makes a game appear.
-      return state.game && validGameView(event.game) ? { ...state, game: event.game } : state;
+      // null: the room stopped being a game room, clear it. A valid view is kept even when there was none (a host turned the game
+      // on mid-session); the server sends it only while its flag is on, and the shell draws it only when the config agrees.
+      // Anything malformed is dropped, never rendered.
+      if (event.game === null) return state.game ? { ...state, game: null } : state;
+      return validGameView(event.game) ? { ...state, game: event.game } : state;
     case "room:playback": {
       const current = (state.room as { screenVersion?: number } | null)?.screenVersion;
       // A message about a screen that has since been replaced (it crossed a screen change on the way) must not resurrect old playback.

@@ -1,7 +1,7 @@
 // Rooms unit checks for the gamers-live client state (no database):   npx tsx scripts/test-rooms-unit-game-client.ts
 import assert from "node:assert/strict";
 import { initialRoomState, roomReducer, type RoomState } from "../client/src/lib/roomReducer";
-import { countdownMs, featuredFor, formatCountdown, gameNoticeText, membersOf, statusOf, statusText } from "../client/src/lib/gameScreen";
+import { countdownMs, featuredFor, formatCountdown, gameNoticeText, gameRefusalText, membersOf, playerIdOf, statusOf, statusText } from "../client/src/lib/gameScreen";
 import type { GameView } from "../shared/gameScreen";
 
 let passed = 0, failed = 0;
@@ -23,9 +23,16 @@ const live = (game?: GameView): RoomState => roomReducer(initialRoomState("u"), 
 test("reducer: no game key in room:state means game is null", () => {
   assert.equal(live().game, null);
 });
-test("reducer: room:game is ignored while the state has no game", () => {
+test("reducer: a game that appears mid-session is kept (the host turned it on)", () => {
+  const s = roomReducer(live(), { type: "room:game", game: view() });
+  assert.deepEqual(s.game?.teams.A, ["a1", "a2"]);
+});
+test("reducer: room:game with null clears the game (the room stopped being a game room)", () => {
+  assert.equal(roomReducer(live(view()), { type: "room:game", game: null }).game, null);
+});
+test("reducer: room:game null with no game changes nothing", () => {
   const s = live();
-  assert.equal(roomReducer(s, { type: "room:game", game: view() }), s);
+  assert.equal(roomReducer(s, { type: "room:game", game: null }), s);
 });
 test("reducer: room:state with a game keeps it; room:game replaces it", () => {
   const s = live(view());
@@ -98,6 +105,22 @@ test("formatCountdown: m:ss, rounds up", () => {
 test("gameNoticeText: every wire code has a message, unknown has none", () => {
   for (const c of ["GAME_OFF", "FEATURE_OFF", "NOT_ALLOWED", "TEEN_RULE", "NOT_PRESENT", "TEAM_FULL", "NO_CHANGE", "BAD_VALUE", "BAD_REQUEST", "NOT_IN_ROOM", "RATE_LIMITED"]) assert.ok(gameNoticeText(c), c);
   assert.equal(gameNoticeText("SERVER_ERROR"), null);
+});
+
+// ---------------------------------------------------------------- OBS identity and refusal wording
+test("playerIdOf: strips the #obs ingest suffix and leaves other ids alone", () => {
+  assert.equal(playerIdOf("u1#obs"), "u1");
+  assert.equal(playerIdOf("u1"), "u1");
+  assert.equal(playerIdOf("u#obs#obs"), "u#obs");
+});
+test("refusals: every server reason and code has a short plain line", () => {
+  for (const reason of ["needs_live_video", "needs_game", "lanes", "teen_host_required", "minors_parent"]) assert.ok(gameRefusalText({ reason }), reason);
+  for (const code of ["LANE_EXISTS", "TEAM_FULL", "GAME_IN_PROGRESS", "LANE_ROOM"]) assert.ok(gameRefusalText({ code }), code);
+  assert.ok(gameRefusalText({ reason: "invalid", field: "gameFormat" }));
+});
+test("refusals: a bare 'invalid' on another field is not ours, and no line mentions age", () => {
+  assert.equal(gameRefusalText({ reason: "invalid", field: "title" }), null);
+  for (const r of ["teen_host_required", "minors_parent", "lanes"]) assert.ok(!/(age|adult|teen|minor|old|young|1[3-8])/i.test(gameRefusalText({ reason: r }) ?? ""), r);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

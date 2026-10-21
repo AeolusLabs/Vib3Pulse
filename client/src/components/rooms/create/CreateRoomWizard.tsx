@@ -27,6 +27,7 @@ import {
   ticketDraftProblem, ticketFieldSelectors, ticketsTooManyForVideo, type TicketDraft,
 } from "@/lib/roomTickets";
 import { createRoom, useWizardHost } from "./createRoomApi";
+import { GAME_SETUP_FAILED } from "@/lib/gameScreen";
 import StepBasics, { type FieldError } from "./StepBasics";
 import StepAudience from "./StepAudience";
 import StepFeatures from "./StepFeatures";
@@ -235,6 +236,7 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
     if (adultHost) { try { localStorage.setItem(LAST_VISIBILITY_KEY, s.visibility); } catch { /* only a convenience */ } }
     if (res.voiceFailed) toast({ title: COPY.voiceLate });
     else if (res.videoFailed) toast({ title: COPY.videoLate });
+    else if (res.gameFailed) toast({ title: GAME_SETUP_FAILED });
     // Intended: a live public or friends room skips Done and goes straight in, because the host has only a short grace
     // period to arrive before an empty room closes and Done has nothing they need. An invite room stops at Done first (its
     // link is shown only once), and so does a room that was made but did not start (Done says so, and why).
