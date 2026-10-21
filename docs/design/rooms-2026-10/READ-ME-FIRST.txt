@@ -1,0 +1,23 @@
+VIB3 ROOMS DESIGN PACK
+======================
+
+To view (no account or special software needed):
+  1. Double-click  index.html  (opens in Chrome, Edge, Safari or Firefox).
+  2. Click the buttons to open each interactive prototype and the legal and accounting brief.
+  3. On a phone: unzip first, then open index.html from the Files app, or just send the PDF.
+
+What is in here:
+  index.html ........ the overview with all key screens
+  rooms.html ........ interactive Rooms prototype (chat, live video, immersive, join with age rules)
+  notes.html ........ interactive spray prototype (pay at the moment you spray, bundle, money bag, Make it Rain)
+  flows.html ........ every flow end to end, including a create-a-room wizard you can try
+  brief.html ........ legal and accounting brief for Nigeria (version 2, pay-per-spray, no balance)
+  Vib3-Rooms-Legal-Accounting-Brief-Nigeria.pdf ... the same brief as a PDF (best for phones and email)
+  img/ .............. screenshots used by the overview
+
+Sharing:
+  - Easiest: send the PDF (the brief) and/or the whole zip file by email or WhatsApp.
+  - To give someone a link: drag this folder onto https://app.netlify.com/drop (free). Anyone with the link can view it.
+    It is not password protected and the brief is confidential, so only do this if you are comfortable with that.
+
+All people, messages, prices and numbers in the screens are sample data. Nothing is charged.

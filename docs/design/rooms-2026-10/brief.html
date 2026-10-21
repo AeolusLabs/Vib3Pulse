@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vib3 Rooms Legal and Accounting Brief, Nigeria</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,600;6..96,700&family=Jost:wght@400;500;600&display=swap">
+<style>
+:root{--ink:#17141f;--mut:#5a5568;--line:#d9d5e3;--soft:#f3f1f8;--acc:#5b2fb8;--amb:#f5b83d;--ambink:#2a1802;--red:#b3261e;--grn:#1d6f42;--warn:#8a5a00;--warnbg:#fbefd2;--f-d:"Bodoni Moda",Georgia,serif;--f-b:"Jost",system-ui,Segoe UI,Arial,sans-serif}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:#fff;color:var(--ink);font:16px/1.55 var(--f-b);padding-inline:20px}
+.page{max-width:900px;margin:0 auto;padding-block:36px 80px}
+h1{font:700 clamp(2.2rem,7vw,3.4rem)/1 var(--f-d);letter-spacing:-.02em;margin:0 0 10px}
+h2{font:700 1.7rem/1.1 var(--f-d);letter-spacing:-.01em;margin:56px 0 12px;padding-top:8px;border-top:2px solid var(--ink)}
+h3{font:600 1.1rem/1.3 var(--f-b);margin:26px 0 6px}
+p{margin:0 0 12px}
+ul,ol{margin:0 0 14px;padding-left:22px}
+li{margin-bottom:6px}
+a{color:var(--acc)}
+.lead{font-size:1.15rem;color:var(--mut);max-width:60ch}
+.meta{color:var(--mut);font-size:14px;margin-top:14px}
+.toc{columns:2;column-gap:32px;padding:0;list-style:none;font-size:15px}
+.toc li{break-inside:avoid;margin-bottom:4px}
+.box{border-radius:14px;padding:16px 18px;margin:16px 0;background:var(--soft);break-inside:avoid}
+.box.warn{background:var(--warnbg);color:#3a2800}
+.box.dec{background:var(--ink);color:#fff}
+.box.dec a{color:#d6c6ff}
+.box h3:first-child,.box p:first-child{margin-top:0}
+.tag{display:inline-block;font-size:12px;font-weight:600;padding:1px 9px;border-radius:999px;background:var(--soft);vertical-align:1px}
+.tag.c{background:#fbdcd9;color:var(--red)}.tag.h{background:var(--warnbg);color:var(--warn)}.tag.m{background:#e3effa;color:#1f5b8a}
+table{border-collapse:collapse;width:100%;font-size:14.5px;margin:12px 0 18px}
+th,td{text-align:left;padding:9px 11px;border-bottom:1px solid var(--line);vertical-align:top}
+th{background:var(--soft);font-size:13px;color:var(--mut);font-weight:600}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tw{overflow-x:auto;margin:0 -2px}
+.tw table{min-width:560px}
+.item{border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin:12px 0;break-inside:avoid}
+.item h3{margin:0 0 6px}
+.item p{margin-bottom:6px;font-size:15px}
+.item .k{font-weight:600}
+.small{font-size:13.5px;color:var(--mut)}
+.chk{list-style:none;padding-left:0}
+.chk li{padding-left:28px;position:relative}
+.chk li::before{content:"";position:absolute;left:0;top:4px;width:16px;height:16px;border:2px solid var(--ink);border-radius:4px}
+footer{margin-top:60px;border-top:1px solid var(--line);padding-top:16px;color:var(--mut);font-size:13.5px}
+@media(max-width:640px){.toc{columns:1}}
+@media print{
+  @page{size:A4;margin:16mm}
+  body{padding:0;font-size:11.5pt}
+  .page{max-width:none;padding:0}
+  h2{break-after:avoid;margin-top:28px}
+  h3{break-after:avoid}
+  tr{break-inside:avoid}
+  a{color:inherit;text-decoration:none}
+  .noprint{display:none}
+}
+</style></head>
+<body><div class="page">
+
+<header>
+  <span class="tag">Confidential. Draft for advisors.</span>
+  <h1 style="margin-top:14px">Vib3 Rooms</h1>
+  <p class="lead">Legal and accounting brief for a Nigeria-first launch of paid rooms and spraying.</p>
+  <p class="meta">Version 2, prepared 17 October 2026 from the product designs and public sources. Replaces the earlier version that assumed a wallet balance. This is a map of the questions, not legal, tax or accounting advice. Every item marked "verify" must be confirmed by a Nigerian lawyer or accountant before launch.</p>
+</header>
+
+<h2 id="summary" style="margin-top:36px">1. The short version</h2>
+<p>Vib3 Rooms lets people talk and watch live video in rooms. Two money features are planned: <b>paid rooms</b> (tickets) and <b>spraying</b> (sending a virtual note, bundle, money bag or "Make it Rain" to a host or a person on stage). Hosts and stage guests earn a share. We keep a share.</p>
+<p><b>The key design decision.</b> There is <b>no balance and no wallet</b>. A fan pays at the moment they spray, by card, in the local price. The unit shown on each spray is <b>Vib3Cash (V3C)</b>, where ₦1,000 = 100,000 V3C, but V3C is only a label on the price. It is never held for the fan. Each payment is <b>split at the moment of payment</b> through Paystack, so the host's share goes towards the host's bank and we never hold it. This removes most of the biggest legal and accounting problems of a stored balance (e-money licensing, unclaimed balances, deferred revenue, breakage).</p>
+<p>What remains is still serious: whether collecting and splitting payments needs any CBN approval beyond Paystack's own licence, <b>children</b> (Nigeria's data law does not let us rely on a self-declared birthday), <b>money laundering and fraud</b> (instant settlement raises the risk), and a Nigerian specialty: <b>spraying naira is a criminal offence</b>, so the name, artwork and wording of a product built around "spraying" and "cash" need careful handling.</p>
+<div class="box dec">
+  <h3>What we recommend, in order</h3>
+  <ol>
+    <li><b>Keep it balance-free.</b> One payment per spray, split at source through Paystack. Do not add a wallet, top-up or "spray pass" without redoing the legal opinion.</li>
+    <li><b>Get a written opinion</b> that this structure needs no extra CBN licence (section 5.1) before selling any spray.</li>
+    <li><b>Launch in phases</b> (section 9): adults and free rooms first, then paid rooms, then sprays, then teens.</li>
+    <li><b>Rename "Vib3Cash"</b> to something without the word cash, and keep all artwork unlike real naira (section 5.2).</li>
+    <li><b>Verify age and identity with ID checks</b> for hosts and anyone who spends (section 5.4).</li>
+  </ol>
+</div>
+
+<h3>Contents</h3>
+<ul class="toc">
+  <li><a href="#units">2. Prices, V3C and the numbers</a></li>
+  <li><a href="#unsprayed">3. What happens to "unsprayed" cash</a></li>
+  <li><a href="#map">4. How the money moves</a></li>
+  <li><a href="#legal">5. Legal factors (Nigeria first)</a></li>
+  <li><a href="#acct">6. Accounting and tax factors</a></li>
+  <li><a href="#cross">7. Other countries, later</a></li>
+  <li><a href="#qs">8. Questions for each advisor</a></li>
+  <li><a href="#phases">9. A safe order of launch</a></li>
+  <li><a href="#risk">10. Top risks</a></li>
+  <li><a href="#gate">11. Go-live checklist</a></li>
+  <li><a href="#src">12. Sources and what to verify</a></li>
+</ul>
+
+<h2 id="units">2. Prices, V3C and the numbers</h2>
+<p><b>Conversion.</b> ₦1,000 = 100,000 V3C, so <b>1 V3C = ₦0.01 = 1 kobo</b>. Prices outside Nigeria are the naira price converted at the day's rate and shown in the buyer's currency, based on where they are using the app. Official rates in mid October 2026 were about <b>₦1,330 per US dollar</b> and <b>₦1,757 per pound</b> (verify live).</p>
+<div class="tw"><table>
+  <thead><tr><th>Spray</th><th class="n">V3C</th><th class="n">Naira</th><th class="n">About (USD)</th><th class="n">About (GBP)</th></tr></thead>
+  <tbody>
+    <tr><td>Note, small</td><td class="n">2,000</td><td class="n">₦20</td><td class="n">$0.015</td><td class="n">£0.011</td></tr>
+    <tr><td>Note, medium</td><td class="n">5,000</td><td class="n">₦50</td><td class="n">$0.04</td><td class="n">£0.03</td></tr>
+    <tr><td>Note, large</td><td class="n">10,000</td><td class="n">₦100</td><td class="n">$0.08</td><td class="n">£0.06</td></tr>
+    <tr><td>Bundle (100 notes)</td><td class="n">100,000</td><td class="n">₦1,000</td><td class="n">$0.75</td><td class="n">£0.57</td></tr>
+    <tr><td>Money bag</td><td class="n">1,000,000</td><td class="n">₦10,000</td><td class="n">$7.52</td><td class="n">£5.69</td></tr>
+    <tr><td>Make it Rain</td><td class="n">10,000,000</td><td class="n">₦100,000</td><td class="n">$75.19</td><td class="n">£56.91</td></tr>
+  </tbody>
+</table></div>
+<div class="box warn"><p><b>Assumption to confirm.</b> The note values (₦20, ₦50, ₦100) come from the earlier menu and are assumed to be naira amounts, i.e. 2,000, 5,000 and 10,000 V3C. The bundle, bag and rain tiers are as you specified.</p></div>
+
+<h3>What each payment leaves after tax and fees (naira, local card)</h3>
+<p class="small">VAT 7.5% is inside the price. Paystack's published local-card fee is 1.5% plus ₦100 (the ₦100 is waived under ₦2,500, and total fees are capped at ₦2,000). A 2.5% fraud reserve is our own assumption. International cards cost 3.9% plus ₦100 with no cap.</p>
+<div class="tw"><table>
+  <thead><tr><th>Spray</th><th class="n">VAT</th><th class="n">Card fee</th><th class="n">Reserve</th><th class="n">Left to share</th><th class="n">Share of price</th></tr></thead>
+  <tbody>
+    <tr><td>Note ₦50</td><td class="n">₦3.49</td><td class="n">₦0.75</td><td class="n">₦1.25</td><td class="n">₦44.51</td><td class="n">89.0%</td></tr>
+    <tr><td>Note ₦100</td><td class="n">₦6.98</td><td class="n">₦1.50</td><td class="n">₦2.50</td><td class="n">₦89.02</td><td class="n">89.0%</td></tr>
+    <tr><td>Bundle ₦1,000</td><td class="n">₦69.77</td><td class="n">₦15.00</td><td class="n">₦25.00</td><td class="n">₦890.23</td><td class="n">89.0%</td></tr>
+    <tr><td>Money bag ₦10,000</td><td class="n">₦697.67</td><td class="n">₦250.00</td><td class="n">₦250.00</td><td class="n">₦8,802.33</td><td class="n">88.0%</td></tr>
+    <tr><td>Make it Rain ₦100,000</td><td class="n">₦6,976.74</td><td class="n">₦1,600.00</td><td class="n">₦2,500.00</td><td class="n">₦88,923.26</td><td class="n">88.9%</td></tr>
+  </tbody>
+</table></div>
+<h3>Proposed split of the amount left to share</h3>
+<div class="tw"><table>
+  <thead><tr><th>Spray</th><th class="n">Platform</th><th class="n">Host (spray to host)</th><th class="n">Host (spray to stage guest)</th><th class="n">Stage guest</th></tr></thead>
+  <tbody>
+    <tr><td>Notes</td><td class="n">30%</td><td class="n">70%</td><td class="n">15%</td><td class="n">55%</td></tr>
+    <tr><td>Bundle</td><td class="n">25%</td><td class="n">75%</td><td class="n">15%</td><td class="n">60%</td></tr>
+    <tr><td>Money bag</td><td class="n">20%</td><td class="n">80%</td><td class="n">15%</td><td class="n">65%</td></tr>
+    <tr><td>Make it Rain</td><td class="n">15%</td><td class="n">85%</td><td class="n">15%</td><td class="n">70%</td></tr>
+    <tr><td>Paid room ticket</td><td class="n">15%</td><td class="n">85%</td><td class="n">n/a</td><td class="n">n/a</td></tr>
+  </tbody>
+</table></div>
+<p><b>Worked examples.</b></p>
+<div class="tw"><table>
+  <thead><tr><th>Spray to a host</th><th class="n">Host earns</th><th class="n">Platform keeps</th></tr></thead>
+  <tbody>
+    <tr><td>Note ₦100</td><td class="n">₦62.31</td><td class="n">₦26.71</td></tr>
+    <tr><td>Bundle ₦1,000</td><td class="n">₦667.67</td><td class="n">₦222.56</td></tr>
+    <tr><td>Money bag ₦10,000</td><td class="n">₦7,041.86</td><td class="n">₦1,760.47 (about $1.32)</td></tr>
+    <tr><td>Make it Rain ₦100,000</td><td class="n">₦75,584.77</td><td class="n">₦13,338.49 (about $10.03)</td></tr>
+  </tbody>
+</table></div>
+<div class="box warn"><h3>Consequences to be aware of</h3>
+<ol>
+  <li><b>Small sprays earn very little.</b> A ₦100 note leaves the platform about ₦27. The business depends on volume and on bigger spenders, including people abroad.</li>
+  <li><b>Paystack recommends at least ₦50 for a charge.</b> Lower amounts "aren't guaranteed to work on all card brands or banks". So a ₦20 note cannot be a one-off card charge. Options: (a) make ₦50 the smallest note, or (b) <b>batch</b> small notes into one charge when the running total reaches ₦100 or the fan stops spraying for two minutes, with never more than ₦200 owed at any moment. If the card then fails, spraying pauses and the small amount is written off. This is a tiny credit exposure and needs a decision.</li>
+  <li><b>Cards abroad cost more.</b> An international card pays 3.9% plus ₦100. A ₦1,000 bundle then loses about ₦139 (13.9%) to the fee. That is why single notes are hidden outside Nigeria and bundles are the smallest option there.</li>
+  <li><b>Price by location.</b> Showing prices by where the buyer is invites workarounds (VPNs, foreign cards). Decide the rule: price by the card's issuing country or the account's registered country, not by IP alone.</li>
+  <li><b>The naira moves.</b> Foreign prices are naira converted. Update on a schedule (weekly) and round to clean prices.</li>
+  <li><b>Turnover threshold.</b> The new tax law relieves small companies (turnover under ₦100 million and assets up to ₦250 million) of company income tax and the development levy. If we are legally an agent taking a commission, only our commission counts as turnover (section 6.1).</li>
+</ol></div>
+
+<h2 id="unsprayed">3. What happens to "unsprayed" cash</h2>
+<p><b>Short answer: by design, nothing is left behind.</b> There is no balance. A fan is only charged at the moment a spray is sent, and the V3C figure is just the price label. The remaining cases are about failed payments and reversals.</p>
+<div class="tw"><table>
+  <thead><tr><th>Situation</th><th>What happens</th></tr></thead>
+  <tbody>
+    <tr><td>Fan opens the tray and leaves</td><td>Nothing charged, nothing stored.</td></tr>
+    <tr><td>Card declined</td><td>Nothing sent, nothing charged, a clear message with retry.</td></tr>
+    <tr><td>Paid, but the spray cannot be delivered (connection lost, recipient removed, room ended before it landed)</td><td>Delivery must be confirmed by our server within 60 seconds of payment. Otherwise the payment is reversed in full automatically. Once the server records delivery it is final, even if the room then ends.</td></tr>
+    <tr><td>Double tap or retry creates two charges</td><td>Each spray carries a unique key, so a duplicate is rejected or refunded automatically.</td></tr>
+    <tr><td>Fan's bank reverses the payment later (chargeback)</td><td>We bear it first. Recover from the reserve, then from the host's next settlements. Proposed rule, to confirm with Paystack and counsel.</td></tr>
+    <tr><td>Recipient is banned for fraud after receiving</td><td>Pending settlements held. Sprays that were part of a proven scam can be reversed to the fan.</td></tr>
+    <tr><td>Tickets</td><td>Collected by us, held until the room has happened plus 48 hours, then paid to the host. Full automatic refund if the room does not start. Refund up to 1 hour before if the host allows it.</td></tr>
+    <tr><td>Host's bank account is closed or rejects a settlement</td><td>Paystack returns the money. We keep it in a separate "unclaimed host funds" record, contact the host, and never forfeit it. After 12 months of silence get legal advice on unclaimed funds (verify).</td></tr>
+    <tr><td>Small batched notes and the card then fails</td><td>Spraying pauses. The amount owed (never more than ₦200) is written off, not chased.</td></tr>
+    <tr><td>Foreign payment refunded later</td><td>Refund the original amount in the original currency, not at today's rate.</td></tr>
+  </tbody>
+</table></div>
+<p><b>If a "spray pass" or balance is ever added.</b> Money held for a fan returns the original questions: e-money licensing, a ring-fenced account, refunds, dormancy and unclaimed balances. This brief assumes it will not be.</p>
+
+<h2 id="map">4. How the money moves</h2>
+<p><b>Sprays.</b></p>
+<ol>
+  <li>The fan taps a spray and pays through <b>Paystack</b> (card saved once, usually one tap after that).</li>
+  <li>The payment is <b>split at the moment of payment</b>: the host's share (and the stage guest's share, if there is one) is credited to their Paystack subaccount and goes to their bank on Paystack's settlement schedule. Our share, the VAT and the reserve stay in our account. Paystack's fee is charged to our account by default.</li>
+  <li>Our server records the split in a ledger (a record only, since we do not hold the host's money).</li>
+</ol>
+<p><b>Tickets.</b> Collected into our account, held until the room has happened, then paid to the host by transfer. This lets us refund if the room does not start. During that hold we do hold the host's money for a short time (section 6.9).</p>
+<p>Paystack supports splits as fixed amounts or percentages across one or more subaccounts, so the shares above can be calculated for each payment (verify the maximum number of subaccounts per split, the settlement timing, and who bears chargebacks). The key rule: <b>we only ever move money through a licensed provider</b>.</p>
+
+<h2 id="legal">5. Legal factors (Nigeria first)</h2>
+<p class="small">Priority: <span class="tag c">Critical</span> blocks launch of money features. <span class="tag h">High</span> needed before launch. <span class="tag m">Medium</span> needed soon after.</p>
+
+<div class="item" id="l1"><h3>5.1 Do we need any CBN approval? <span class="tag c">Critical</span></h3>
+<p><span class="k">The issue.</span> The CBN licenses e-money issuing and wallet management (mobile money operators, with a published minimum capital of ₦2 billion) and separately licenses payment solution services (published minimum ₦100 million). A balance-free design, with Paystack collecting and splitting each payment, is much closer to being an ordinary merchant on a licensed provider than a wallet. But we still choose the split, set prices and take a commission on money passing between users, and we sell a virtual unit (V3C). Whether that counts as a regulated "payment collection" or "aggregator" activity is a question for counsel (verify).</p>
+<p><span class="k">Ask.</span> Fintech and payments lawyer in Lagos: does this structure need a CBN licence, a PSP agreement with Paystack covering marketplace splits, or neither? <span class="k">Do not</span> sell sprays before the answer is in writing. If balances, top-ups or a "spray pass" are ever added, ask again.</p></div>
+
+<div class="item" id="l2"><h3>5.2 Spraying naira is an offence, and the name matters <span class="tag c">Critical</span></h3>
+<p><span class="k">The issue.</span> Section 21 of the CBN Act 2007 treats spraying, dancing or matching on naira notes at social events as abuse and defacing of the naira. The penalty is a fine of not less than ₦50,000, or imprisonment of not less than six months, or both. The CBN has said it works with the EFCC, police and the Nigerian Financial Intelligence Unit, and there have been convictions, including a TikTok user in 2025. Our spraying is digital and uses our own notes, so the law probably does not apply directly, but a product called "spray" with a unit called "cash" invites regulator and press attention.</p>
+<p><span class="k">Do.</span> Never show naira notes or the ₦ sign on our notes. Make the artwork clearly different (ours already says "not legal tender"). Rename Vib3Cash to something without the word cash. Add a terms line that users may not upload images of naira. Ask counsel whether to brief the CBN or EFCC before launch.</p></div>
+
+<div class="item" id="l3"><h3>5.3 Money laundering, fraud and scams <span class="tag c">Critical</span></h3>
+<p><span class="k">The issue.</span> Instant split settlement means a stolen card or a scam can move value to a host's bank quickly. Laws and rules to review: Money Laundering (Prevention and Prohibition) Act 2022, the Terrorism (Prevention and Prohibition) Act 2022, CBN anti-money-laundering rules, and reporting duties to the Nigerian Financial Intelligence Unit (verify whether we are a reporting entity).</p>
+<p><span class="k">Do.</span> Verify every host with BVN or NIN. Pay only to accounts in the host's name (Paystack checks the account name when a subaccount is created). Require 3D Secure for large sprays. Set daily limits and room limits, velocity checks and unusual-pattern alerts. Cap what a new host can receive in the first weeks. Appoint a compliance lead.</p></div>
+
+<div class="item" id="l4"><h3>5.4 Children and age checks <span class="tag c">Critical</span></h3>
+<p><span class="k">The issue.</span> The Nigeria Data Protection Act 2023 (section 65) treats anyone under 18 as a child. Section 31 requires a parent or guardian's consent to process a child's data, and requires us to verify both the child's age and the parent's consent. Guidance says a self-declared birthday or an unchecked "I am over 18" box is not enough. Our current rule (a birthday that is locked after signup) is self-declared. The Act also allows the regulator to set rules for children aged 13 and over using online services (verify what has been issued).</p>
+<p><span class="k">What follows.</span> (1) For anything involving money, require an ID-verified age (NIN or BVN, or an ID document) for hosts and for anyone who spends above a small amount. (2) Do not onboard under-18s in Nigeria until a parental-consent and age-verification flow exists. (3) The "no adults in a kids room" rule is only as strong as the age check behind it.</p></div>
+
+<div class="item" id="l5"><h3>5.5 Data protection <span class="tag h">High</span></h3>
+<p>Nigeria Data Protection Act 2023 and the General Application and Implementation Directive (GAID) issued 20 March 2025. Expect: registration with the Nigeria Data Protection Commission as a data controller of major importance (if the thresholds are met), a data protection officer, privacy impact assessments (needed for children's data and for large-scale identity checks), an annual compliance audit return, breach notification (within 72 hours, verify), and data subject rights. We use providers outside Nigeria (video infrastructure in South Africa, email, hosting), so cross-border transfer rules and written processing agreements apply. Collecting BVN or NIN data raises the security bar. Cards are handled by Paystack, so we avoid card data.</p></div>
+
+<div class="item" id="l6"><h3>5.6 Platform duties under NITDA's Code of Practice <span class="tag h">High</span></h3>
+<p>NITDA's Code of Practice for Interactive Computer Service Platforms (in force since September 2022) asks platforms to take down unlawful content within 24 hours of a notice from an authorised agency, and requires platforms with more than 100,000 users to be incorporated in Nigeria, keep a Nigerian address and appoint a liaison officer. Plan for both. Its legal weight and current enforcement should be confirmed (verify).</p></div>
+
+<div class="item" id="l7"><h3>5.7 Company set-up <span class="tag h">High</span></h3>
+<p>Incorporate a Nigerian company with the Corporate Affairs Commission under the Companies and Allied Matters Act 2020, get a tax identification number, register for VAT, open a business bank account and a Paystack business account with marketplace splits enabled, and put intellectual property into the company. Consider whether the company qualifies as a labelled startup under the Nigeria Startup Act 2022, which carries incentives. If founders or investors are in the UK, decide the group structure.</p></div>
+
+<div class="item" id="l8"><h3>5.8 Consumer protection <span class="tag h">High</span></h3>
+<p>The Federal Competition and Consumer Protection Act 2018 requires fair terms, clear prices and honest dealing. Show naira prices with VAT included, state reversal and refund rules plainly (section 3), give a complaints route and respond fast. Note: the FCCPC's 2025 "DEON" regulations cover digital lending, not our product. Advertising must follow the rules of the Advertising Regulatory Council of Nigeria (ARCON).</p></div>
+
+<div class="item" id="l9"><h3>5.9 Content, safety and the criminal law <span class="tag h">High</span></h3>
+<p>Review the Cybercrimes Act 2015 (as amended in 2024), the Violence Against Persons (Prohibition) Act 2015 and the Child's Rights Act 2003 (adopted state by state). Have a zero-tolerance policy and a clear route for child sexual abuse material, including reporting to the proper authorities. Keep the existing rule of no recording. Write a moderator playbook, a law-enforcement request process and a transparency log.</p></div>
+
+<div class="item" id="l10"><h3>5.10 Music and copyright <span class="tag h">High</span></h3>
+<p>DJ and music rooms will play copyrighted music. Under the Copyright Act 2022 and Nigerian collecting societies (for example COSON), public performance and communication to the public usually need licences. Decide: obtain licences, or require hosts to use cleared music only with a fast takedown process. This is a launch-time issue for the live-video "Music mode".</p></div>
+
+<div class="item" id="l11"><h3>5.11 Contracts and policies we must publish <span class="tag h">High</span></h3>
+<ul>
+  <li><b>Terms of Use</b> and <b>Community Guidelines</b>, including the anonymous-guest rules.</li>
+  <li><b>Host Agreement</b>: independent contractor, content standards, KYC, settlement timing, reversal and clawback for fraud and chargebacks, tax responsibility.</li>
+  <li><b>Spray Terms</b>: you pay at the moment you spray, V3C is a unit with no cash value and is not stored for you, a spray is final once delivered, and how reversals work.</li>
+  <li><b>Paid Room Terms</b>: tickets, refunds, automatic refund if the room does not start.</li>
+  <li><b>Privacy Notice</b>, cookie notice, and a <b>child safety policy</b>.</li>
+  <li><b>Takedown and appeals process.</b></li>
+</ul>
+<p>Governing law Nigeria, with arbitration under the Arbitration and Mediation Act 2023 for host disputes (verify enforceability against consumers).</p></div>
+
+<div class="item" id="l12"><h3>5.12 Not gambling <span class="tag m">Medium</span></h3>
+<p>Spraying has no random reward, so it should not be a lottery or gambling. Keep it that way: no prizes, draws or randomised rewards tied to spending. If "top sprayer" boards carry prizes, get advice under the National Lottery Act and gaming rules.</p></div>
+
+<div class="item" id="l13"><h3>5.13 Insurance, security and staff <span class="tag m">Medium</span></h3>
+<p>Cyber and professional indemnity insurance. Security testing before launch and an incident response plan. Moderators and support staff bring employment law, pension and social insurance duties if they are employees.</p></div>
+
+<h2 id="acct">6. Accounting and tax factors</h2>
+<p class="small">Nigeria's tax laws changed on 1 January 2026 (Nigeria Tax Act 2025 and Tax Administration Act 2025). The names of the tax authority and some rates and thresholds have moved. Confirm everything with a tax adviser.</p>
+
+<div class="item"><h3>6.1 Principal or agent <span class="tag c">Critical</span></h3>
+<p>With a split at the source, we look much more like an <b>agent or marketplace</b>: the fan pays, the host provides the experience, and we take a commission. Under IFRS 15 that means we record only our commission as revenue, not the whole price. This is the natural reading of the new design, but the contracts and the product wording must match it. It changes reported revenue, VAT, and whether we stay under the ₦100 million small-company threshold. Confirm with the auditor.</p></div>
+
+<div class="item"><h3>6.2 Revenue recognition <span class="tag h">High</span></h3>
+<ul>
+  <li><b>Sprays:</b> commission revenue at the moment of the spray. No deferred revenue and no breakage, because nothing is stored.</li>
+  <li><b>Tickets:</b> commission recognised when the room takes place. Until then the ticket money we hold is a liability to the host. Refunds reduce it.</li>
+  <li>Report revenue by stream (spray commission, ticket commission).</li>
+</ul></div>
+
+<div class="item"><h3>6.3 Illustrative ledger, one ₦10,000 money bag to a host <span class="tag h">High</span></h3>
+<div class="tw"><table>
+  <thead><tr><th>Item</th><th class="n">Debit</th><th class="n">Credit</th></tr></thead>
+  <tbody>
+    <tr><td>Cash received into our Paystack account (after the host's share and the card fee)</td><td class="n">₦2,708.14</td><td class="n"></td></tr>
+    <tr><td>Card fee expense</td><td class="n">₦250.00</td><td class="n"></td></tr>
+    <tr><td>VAT payable</td><td class="n"></td><td class="n">₦697.67</td></tr>
+    <tr><td>Fraud reserve (kept as a liability until the dispute window passes)</td><td class="n"></td><td class="n">₦250.00</td></tr>
+    <tr><td>Commission revenue</td><td class="n"></td><td class="n">₦2,010.47</td></tr>
+    <tr><td><b>Totals</b></td><td class="n"><b>₦2,958.14</b></td><td class="n"><b>₦2,958.14</b></td></tr>
+  </tbody>
+</table></div>
+<p class="small">The host's ₦7,041.86 goes to the host through Paystack and is recorded as a memo only. Commission ₦2,010.47 less the card fee ₦250.00 equals the ₦1,760.47 platform share shown in section 2. Illustrative. VAT timing and whether VAT applies to the full price or only our commission are for the tax adviser.</p></div>
+
+<div class="item"><h3>6.4 VAT <span class="tag h">High</span></h3>
+<p>VAT is 7.5% and applies to digital services. Register, charge VAT on sprays and tickets sold to Nigerian buyers, file monthly (usually by the 21st of the next month, verify), and issue proper invoices or receipts. The main question: does VAT fall on the full price paid by the fan or only on our commission, given the host is the one delivering the experience? Foreign buyers raise their own VAT rules (section 7).</p></div>
+
+<div class="item"><h3>6.5 Company income tax, development levy and the small-company relief <span class="tag h">High</span></h3>
+<p>Companies with turnover under ₦100 million and total assets up to ₦250 million are relieved of company income tax, capital gains tax and the development levy. Above that, the standard company rate and the development levy apply (rates to be confirmed by the adviser). As an agent, our turnover is our commission, a much smaller number than the full price of sprays and tickets.</p></div>
+
+<div class="item"><h3>6.6 Withholding tax and paying hosts <span class="tag h">High</span></h3>
+<p>The Deduction of Tax at Source (Withholding) Regulations 2024 (in force from 1 July 2024) set withholding rates on payments for services and commissions, with relief for small suppliers who have a tax number and stay under ₦2 million a month, and an exemption for very small businesses (reported at annual turnover up to ₦25 million). With a split at source, decide who is responsible for any withholding on the host's share. In any case collect each host's tax identification number, give earnings statements, and tell hosts that income tax is theirs to settle.</p></div>
+
+<div class="item"><h3>6.7 Other taxes and levies <span class="tag m">Medium</span></h3>
+<p>Pay as you earn, pension, NSITF and ITF for staff. Stamp duty or the electronic money transfer levy on certain receipts. Minimum tax rules. Electronic invoicing duties if we become a large taxpayer. The Nigeria Revenue Service has taken over from the FIRS under the 2025 reforms (verify).</p></div>
+
+<div class="item"><h3>6.8 Foreign currency <span class="tag h">High</span></h3>
+<p>Our functional currency is the naira. Payments by cards from abroad are converted by Paystack into naira, so exchange differences land in the books. Document the price-update rule (section 2). Check the CBN rules on holding or converting foreign receipts. Keep records to support transfer pricing if there is a UK or other entity.</p></div>
+
+<div class="item"><h3>6.9 Controls <span class="tag h">High</span></h3>
+<ul>
+  <li><b>Ticket money</b> is the only host money we hold. Keep it in a <b>ring-fenced account</b>, separate from our operating money, and pay hosts from it.</li>
+  <li><b>Daily reconciliation</b> of Paystack settlements and splits against our ledger, to the kobo.</li>
+  <li>Segregation of duties for host payouts and manual adjustments. Two approvals above a set amount.</li>
+  <li>Immutable audit trail on every payment, split, reversal and refund.</li>
+  <li>Records kept for at least six years (confirm), balanced against data protection retention limits.</li>
+  <li>Annual audit by a registered auditor. The adviser should confirm which reporting standard applies.</li>
+</ul></div>
+
+<h2 id="cross">7. Other countries, later</h2>
+<p>Launch in Nigeria only, and restrict sign-up and purchases to Nigeria at first. Before opening the UK (the second audience): UK VAT for digital sales to UK consumers (20%, not Nigeria's 7.5%), the Online Safety Act duties on child safety and age checks (Ofcom), UK data protection rules, and whether any UK payment rules apply to collecting and splitting payments. If the app is ever packaged for the Apple or Google stores, digital goods usually must use their payment systems, with fees of up to 30%, which would break the margins above. Selling to the United States raises COPPA (children under 13) and state rules.</p>
+
+<h2 id="qs">8. Questions for each advisor</h2>
+<h3>Nigerian fintech and payments lawyer</h3>
+<ol>
+  <li>Does selling per-spray digital items, collected and split by Paystack, need a CBN licence, or can we operate as a Paystack merchant with marketplace splits?</li>
+  <li>Does selling a virtual unit (V3C) that is shown on the price but never stored change that answer?</li>
+  <li>What changes if we add a balance, top-up or spray pass later?</li>
+  <li>Does anti-money-laundering law make us a reporting entity, and what are our duties?</li>
+  <li>Does naming a product "spray" or "cash" create exposure under section 21 of the CBN Act, and should we engage the CBN or EFCC first?</li>
+  <li>Are our reversal and chargeback-recovery rules (taking back from a host's future settlements) lawful and enforceable?</li>
+</ol>
+<h3>Tax adviser and accountant</h3>
+<ol>
+  <li>Are we an agent for sprays and for tickets, so that only our commission is revenue?</li>
+  <li>VAT: on the full price, or only on our commission? When does the VAT point arise?</li>
+  <li>Do we qualify as a small company, and how is turnover counted?</li>
+  <li>Withholding tax on the host's share, and on our own suppliers?</li>
+  <li>Stamp duty and transfer levies on receipts and payouts?</li>
+  <li>How to treat foreign-currency receipts and exchange differences?</li>
+  <li>Setup of a ring-fenced account for ticket money, and the audit approach.</li>
+  <li>Startup Act labelling: worth it?</li>
+</ol>
+<h3>Data protection counsel</h3>
+<ol>
+  <li>Registration, data protection officer and audit return duties for our size.</li>
+  <li>The age-verification and parental-consent standard for under-18s, and what is acceptable for 18+ checks.</li>
+  <li>Cross-border transfer paperwork for our infrastructure providers.</li>
+  <li>Retention periods for ID data, chat, reports and financial records.</li>
+</ol>
+<h3>Online platform and child safety adviser</h3>
+<ol>
+  <li>Which parts of the NITDA Code apply to us now, and at 100,000 users.</li>
+  <li>Reporting duties for child sexual abuse material and requests from law enforcement.</li>
+  <li>Adequacy of the age-gating and anonymous-guest design.</li>
+</ol>
+<h3>Intellectual property lawyer</h3>
+<ol>
+  <li>Licensing for DJs and music rooms, and our liability if hosts play copyrighted music.</li>
+  <li>Takedown process and any safe harbour for platforms.</li>
+</ol>
+<h3>Ask Paystack directly</h3>
+<ol>
+  <li>Marketplace split limits (subaccounts per split), settlement timing per subaccount, and who bears chargebacks.</li>
+  <li>How well saved cards work for repeated small charges, and any velocity rules.</li>
+  <li>Minimum charge, and international card fees and terms for our case.</li>
+</ol>
+
+<h2 id="phases">9. A safe order of launch</h2>
+<div class="tw"><table>
+  <thead><tr><th>Phase</th><th>What launches</th><th>What must be true first</th></tr></thead>
+  <tbody>
+    <tr><td>0. Now</td><td>Nothing public. Written opinions and company set-up.</td><td>Payments opinion, tax structure, data protection registration, terms drafted.</td></tr>
+    <tr><td>1. Free rooms, adults only</td><td>Create and join free rooms, chat, voice, live video, reporting. No money, no teens.</td><td>ID-verified age, moderation, NITDA takedown process, music policy.</td></tr>
+    <tr><td>2. Paid rooms</td><td>Tickets through Paystack, refunds, host settlement after the room.</td><td>Host KYC, ring-fenced ticket account, VAT registration, reconciliation, host agreement.</td></tr>
+    <tr><td>3. Spraying</td><td>Per-spray payments with a split at source, room limits, bank approval for large sprays.</td><td>Written opinion on the structure, agent treatment agreed, naming and artwork cleared, fraud monitoring, Paystack tested with real Nigerian cards.</td></tr>
+    <tr><td>4. Teens</td><td>Under-18 accounts and teens-only rooms (no money).</td><td>Parental consent and age verification, child impact assessment, extra moderation.</td></tr>
+    <tr><td>5. Abroad</td><td>UK first.</td><td>Section 7 items.</td></tr>
+  </tbody>
+</table></div>
+<p>This order puts the highest legal risk (money, children) last, and means each phase proves demand before the next adds risk.</p>
+
+<h2 id="risk">10. Top risks</h2>
+<div class="tw"><table>
+  <thead><tr><th>Risk</th><th>Likelihood and impact</th><th>Mitigation</th></tr></thead>
+  <tbody>
+    <tr><td>Treated as an unlicensed payment business</td><td>Low to medium, severe</td><td>Written opinion, Paystack-only money flow, no balances, phase 3 gating.</td></tr>
+    <tr><td>Regulator or press reaction to "spraying cash"</td><td>Medium, high</td><td>Rename, artwork unlike naira, early counsel on engaging authorities.</td></tr>
+    <tr><td>Child data or contact harm</td><td>Medium, severe</td><td>Adults only first, ID-verified age, teens last with parental consent, anonymous-guest limits.</td></tr>
+    <tr><td>Stolen-card sprays and chargebacks (host is already paid)</td><td>High, medium</td><td>3D Secure for large sprays, room and daily limits, reserve, new-host caps, clawback rule.</td></tr>
+    <tr><td>Money laundering and scam flows</td><td>Medium, severe</td><td>Host KYC, name-matched settlement accounts, monitoring, compliance lead.</td></tr>
+    <tr><td>Small payments fail or banks flag rapid small charges</td><td>Medium, medium</td><td>₦50 minimum or batching, test with real Nigerian cards, clear retry messages.</td></tr>
+    <tr><td>Location-based pricing is gamed</td><td>Medium, low</td><td>Price by card or account country, not IP alone.</td></tr>
+    <tr><td>Unlicensed music in rooms</td><td>High, medium</td><td>Licensing or cleared-music rule, takedowns.</td></tr>
+    <tr><td>Naira weakens, hosts' dollar value falls and foreign pricing drifts</td><td>High, medium</td><td>Price-update rule, partial foreign-currency holding if permitted.</td></tr>
+    <tr><td>Thin margins on small sprays</td><td>High, medium</td><td>Higher spray tiers, bundles outside Nigeria, volume targets, cost control.</td></tr>
+  </tbody>
+</table></div>
+
+<h2 id="gate">11. Go-live checklist</h2>
+<ul class="chk">
+  <li>Nigerian company registered, tax number, VAT registration, bank and Paystack accounts with marketplace splits.</li>
+  <li>Written opinion that the per-spray, split-at-source structure needs no further CBN approval.</li>
+  <li>Agent treatment documented and the terms aligned.</li>
+  <li>ID-verified age for hosts and anyone who spends above the small-amount limit. Under-18s excluded from money features by the server.</li>
+  <li>Host KYC with BVN or NIN. Settlement only to accounts in the host's name.</li>
+  <li>Ledger tested to the kobo, with reversals, refunds, chargebacks and duplicate-payment protection.</li>
+  <li>Ring-fenced account for ticket money, with daily reconciliation running.</li>
+  <li>Delivery rule live: a spray not confirmed within 60 seconds is reversed automatically.</li>
+  <li>Terms, Host Agreement, Spray Terms, Paid Room Terms, Privacy Notice and child safety policy live.</li>
+  <li>NDPC registration and data protection officer in place if required. Privacy impact assessments done.</li>
+  <li>24-hour takedown and law-enforcement request process working.</li>
+  <li>Music policy or licences in place.</li>
+  <li>Room limits, daily limits, 3D Secure for large sprays and fraud monitoring switched on.</li>
+  <li>Naming and artwork cleared, no naira imagery.</li>
+  <li>Paystack tested with real Nigerian cards, including small and repeated charges and declines.</li>
+  <li>Incident response plan and cyber insurance.</li>
+</ul>
+
+<h2 id="src">12. Sources and what to verify</h2>
+<p>Checked on 17 October 2026 from public sources. Laws change, so treat each as a starting point.</p>
+<ul>
+  <li>New tax laws, effective 1 January 2026, VAT 7.5%, small company thresholds: <a href="https://www.bdo.global/en-gb/insights/tax/indirect-tax/nigeria-new-legislation-includes-important-changes-to-vat-rules">BDO</a>, <a href="https://www.mondaq.com/nigeria/tax-authorities/1658706/the-new-era-of-taxation-in-nigeria-what-businesses-and-individuals-should-know-about-the-2025-tax-reform-acts">Mondaq summary</a>.</li>
+  <li>Withholding tax regulations 2024: <a href="https://www.mondaq.com/nigeria/withholding-tax/1491814/an-overview-of-the-nigerian-withholding-tax-regulations-of-2024">Mondaq</a>, <a href="https://taxnews.ey.com/news/2024-1347-nigeria-issues-deduction-of-tax-at-source-withholding-regulations-2024">EY</a>.</li>
+  <li>Data protection: <a href="https://assets.kpmg.com/content/dam/kpmg/ng/pdf/nigeria-data-protection-act2023_kpmg-review.pdf">KPMG review of the NDPA</a>, <a href="https://aln.africa/insight/privacy-please-digital-age-of-consent-for-children-series-6/">ALN on children's consent</a>.</li>
+  <li>Naira spraying offence: <a href="https://www.thecable.ng/?p=596728">TheCable</a>, <a href="https://www.icirnigeria.org/fg-to-arrest-prosecute-abusers-of-naira-in-social-gatherings/">ICIR</a>, <a href="https://allafrica.com/stories/202505150420.html">AllAfrica on a 2025 conviction</a>.</li>
+  <li>CBN payment licence categories and capital: <a href="https://www.pwc.com/ng/en/assets/pdf/cbn-circular-payment-service-providers.pdf">PwC on the CBN circular</a>, <a href="https://marketingedge.com.ng/cbn-fixes-n2b-capital-for-mobile-money-operators/">mobile money capital</a>.</li>
+  <li>NITDA Code of Practice: <a href="https://www.aelex.com/exploring-the-nitda-code-of-practice-and-its-potential-impact-on-social-media-and-online-platforms/">Aelex</a>.</li>
+  <li>Paystack fees and minimum charge: <a href="https://support.paystack.com/hc/en-us/articles/360009881920-What-are-Paystack-s-transaction-charges">Paystack pricing</a>, <a href="https://paystack.com/docs/payments/recurring-charges">recurring charges</a>.</li>
+  <li>Paystack splits: <a href="https://paystack.com/docs/payments/multi-split-payments/">multi-split payments</a>.</li>
+  <li>Exchange rates: <a href="https://nairametrics.com/2026/10/08/naira-slips-to-n1332-75-as-nfem-turnover-hits-1-01-billion/">Nairametrics, 8 October 2026</a>.</li>
+</ul>
+<p class="small"><b>Verify list:</b> whether the per-spray, split-at-source structure needs any CBN approval; Paystack's maximum subaccounts per split, settlement schedule and chargeback treatment; saved-card behaviour for repeated small charges; NDPA breach and audit deadlines; NDPC rules for 13 to 17-year-olds; current withholding tax rates for our payments; stamp duty and levy treatment; foreign-currency receipt rules; NITDA code enforcement.</p>
+
+<footer>
+  <p>Vib3Pulse. Prepared for review by advisors. Not legal, tax or accounting advice. Numbers are illustrative and use official mid-October 2026 exchange rates.</p>
+  <p class="noprint">Tip: to save as PDF, use your browser's Print option and choose "Save as PDF".</p>
+</footer>
+</div></body></html>

@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>html{padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}img{max-width:100%}.packback{display:inline-flex;align-items:center;min-height:44px;color:var(--muted);text-decoration:none;font-size:14px;font-weight:500}.packback:hover{color:var(--fg)}</style>
+<title>Vib3 Rooms End to End</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,600;6..96,700&family=Jost:wght@400;500;600&display=swap">
+<style>
+/* Concept: a storyboard. Every flow is a row of phone screens read left to right. The page is quiet; the screens are dark and always the same dark world.
+   Rules shown in the screens are the rules the server will enforce: age on the account, money for adults in 18+ rooms only. */
+:root{
+  --bg:#0b0a0e; --surface:#141318; --raised:#1d1b23; --line:#2a2731; --fg:#f4f2f7; --muted:#a8a3b5; --accent:#8a5ce6; --accent-fg:#fff;
+  --r-bg:#0f0c18; --r-surface:#16121f; --r-raised:#221d2e; --r-line:#2e2840; --r-fg:#f4f2f7; --r-muted:#a29dae; --r-accent:#8a5ce6; --r-soft:#2a2045;
+  --amber:#f5b83d; --amber-ink:#2a1802; --ok:#34c47a; --no:#ef6b6b; --warn:#f2b441; --warn-soft:#3a2d12;
+  --cv0:#4a2a96; --cv1:#1b1738; --cv2:#0f5f5a; --cv3:#8a3d08; --cvl:#e3d6ff;
+  --sk0:#f1c9a5; --sk1:#c68a5c; --sk2:#8d5a3b; --sk3:#e0ac86; --sk4:#6b4430; --sk5:#f6d9c0;
+  --f-display:"Bodoni Moda",Georgia,serif; --f-body:"Jost",system-ui,sans-serif;
+  --ease-out:cubic-bezier(.23,1,.32,1); color-scheme:dark;
+}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#f4f3f6;--surface:#ffffff;--raised:#eceaf1;--line:#d9d6e2;--fg:#16141c;--muted:#5d586b;--accent:#6a37c9;color-scheme:light}}
+:root[data-theme="light"]{--bg:#f4f3f6;--surface:#ffffff;--raised:#eceaf1;--line:#d9d6e2;--fg:#16141c;--muted:#5d586b;--accent:#6a37c9;color-scheme:light}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--f-body);padding-inline:16px;padding-block:28px 80px}
+button{font:inherit;color:inherit;cursor:pointer;transition:transform 140ms var(--ease-out),background-color 160ms,border-color 160ms,opacity 160ms}
+button:active:not(:disabled):not([aria-disabled=true]){transform:scale(.97)}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wrap{max-width:1240px;margin:0 auto;display:grid;gap:64px}
+h1{font:700 clamp(2.2rem,7vw,3.6rem)/1 var(--f-display);letter-spacing:-.02em;margin:0}
+h2{font:700 clamp(1.6rem,4vw,2.1rem)/1.1 var(--f-display);letter-spacing:-.01em;margin:0}
+.lead{color:var(--muted);max-width:62ch;margin:8px 0 0}
+.jump{display:flex;flex-wrap:wrap;gap:8px}
+.jump a{display:inline-flex;align-items:center;min-height:44px;padding:0 16px;border-radius:999px;background:var(--raised);border:1px solid var(--line);color:var(--fg);text-decoration:none;font-weight:500;font-size:14px}
+.jump a:hover{border-color:var(--accent)}
+.flow{display:grid;gap:22px}
+.flow>header p{margin:6px 0 0;color:var(--muted);max-width:66ch}
+.board{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,360px),360px));gap:30px 24px;justify-content:start}
+figure.ps{margin:0;display:grid;gap:10px;width:360px;max-width:100%}
+figcaption{display:grid;gap:2px;font-size:14px}
+figcaption b{font-weight:600;font-size:15px}
+figcaption span{color:var(--muted)}
+.try{display:grid;grid-template-columns:minmax(0,360px) minmax(0,1fr);gap:32px;align-items:start}
+@media(max-width:820px){.try{grid-template-columns:minmax(0,1fr);justify-items:center}.try>.side{justify-self:stretch}}
+.side{display:grid;gap:14px;max-width:46ch}
+.seg{display:inline-flex;flex-wrap:wrap;background:var(--raised);border-radius:999px;padding:4px;gap:2px;width:fit-content}
+.seg button{border:0;background:none;padding:0 16px;border-radius:999px;min-height:44px;color:var(--muted);font-weight:500}
+.seg button[aria-pressed=true]{background:var(--accent);color:var(--accent-fg)}
+.hint{margin:0;color:var(--muted);font-size:14px}
+
+/* ---------- phone kit ---------- */
+.ph{position:relative;width:360px;max-width:100%;height:740px;border-radius:26px;background:var(--r-bg);border:1px solid var(--r-line);overflow:hidden;display:flex;flex-direction:column;color:var(--r-fg);box-shadow:0 18px 40px rgba(0,0,0,.4)}
+.ph *{min-width:0}
+.i{stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.tb{display:flex;align-items:center;gap:6px;padding:10px 10px 4px;min-height:56px}
+.tb b{flex:1;font-weight:600;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ib{width:44px;height:44px;border-radius:999px;border:0;background:none;display:grid;place-items:center;color:inherit;flex:none}
+.bd{flex:1;overflow:auto;padding:6px 16px 14px;display:flex;flex-direction:column;gap:14px;scrollbar-width:none}
+.bd::-webkit-scrollbar{display:none}
+.ft{padding:12px 16px 18px;border-top:1px solid var(--r-line);display:grid;gap:8px;background:var(--r-surface)}
+.ph h3{margin:0;font:700 1.5rem/1.1 var(--f-display);letter-spacing:-.01em}
+.ph h4{margin:0;font-size:16px;font-weight:600}
+.mu{color:var(--r-muted);font-size:14px}
+.sm{font-size:13px}
+.pb{min-height:52px;border-radius:999px;border:0;background:var(--r-accent);color:#fff;font-weight:600;padding:0 20px;display:flex;align-items:center;justify-content:center;gap:8px;width:100%}
+.pb.alt{background:var(--r-raised);color:var(--r-fg);border:1px solid var(--r-line)}
+.pb.amber{background:var(--amber);color:var(--amber-ink)}
+.pb.danger{background:transparent;color:var(--no);border:1px solid var(--no)}
+.pb.ghost{background:none;color:var(--r-muted)}
+.pb[aria-disabled=true]{opacity:.45}
+.fld{display:grid;gap:4px}
+.fld>span{font-size:13px;color:var(--r-muted)}
+.inp{border:1px solid var(--r-line);background:var(--r-raised);border-radius:14px;padding:12px 14px;min-height:48px;font-size:16px;line-height:1.35}
+.inp.ta{min-height:76px}
+.inp.ph1{color:var(--r-muted)}
+.lst{display:grid;gap:8px}
+.rw{display:flex;align-items:center;gap:12px;min-height:52px;padding:6px 12px;border-radius:14px;background:var(--r-raised);border:1px solid transparent;text-align:left;width:100%}
+.rw.on{border-color:var(--r-accent);background:var(--r-soft)}
+.rw[aria-disabled=true]{opacity:.45}
+.rw .tx{flex:1;display:grid;gap:0;line-height:1.3}
+.rw .tx b{font-weight:600;font-size:15px}
+.rw .tx span{font-size:12.5px;color:var(--r-muted)}
+.rd{width:20px;height:20px;border-radius:50%;border:2px solid var(--r-line);flex:none}
+.rw.on .rd{border:6px solid var(--r-accent)}
+.tg{width:48px;height:30px;border-radius:999px;border:0;background:var(--r-line);position:relative;flex:none}
+.tg::after{content:"";position:absolute;top:4px;left:4px;width:22px;height:22px;border-radius:50%;background:var(--r-fg);transition:transform 200ms var(--ease-out)}
+.tg[aria-checked=true]{background:var(--r-accent)}
+.tg[aria-checked=true]::after{transform:translateX(18px)}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.ch{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 12px;border-radius:999px;background:var(--r-raised);border:1px solid var(--r-line);font-size:14px;font-weight:500}
+.ch.on{background:var(--r-accent);border-color:var(--r-accent);color:#fff}
+.tagc{display:inline-flex;align-items:center;gap:4px;min-height:24px;padding:0 8px;border-radius:999px;background:var(--r-raised);font-size:12px;font-weight:600}
+.tagc.v{background:var(--r-soft);color:#c4b0ff}
+.tagc.a{background:var(--amber);color:var(--amber-ink)}
+.tagc.w{background:var(--warn-soft);color:var(--warn)}
+.tagc.g{background:#12301f;color:var(--ok)}
+.tagc.r{background:#3a1616;color:var(--no)}
+.live{background:#ef4444;color:#fff;font-size:11px;font-weight:600;letter-spacing:.1em;padding:2px 8px;border-radius:6px}
+.card2{border-radius:18px;background:var(--r-raised);padding:14px;display:grid;gap:8px}
+.card2.warn{background:var(--warn-soft)}
+.card2.amber{background:var(--amber);color:var(--amber-ink)}
+.card2.amber .mu{color:var(--amber-ink);opacity:.8}
+.card2.soft{background:var(--r-soft)}
+.kv{display:flex;justify-content:space-between;gap:12px;font-size:14.5px}
+.kv span:first-child{color:var(--r-muted)}
+.kv b{font-weight:600;font-variant-numeric:tabular-nums}
+.hr{height:1px;background:var(--r-line);margin:2px 0}
+.big{font:700 2.6rem/1 var(--f-display);letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.av{border-radius:50%;display:block}
+.avs{display:flex}
+.avs .av{width:30px;height:30px;margin-right:-8px;box-shadow:0 0 0 2px var(--r-bg)}
+.rc{border-radius:18px;background:var(--r-raised);overflow:hidden;display:grid}
+.rc .cov{position:relative;height:84px;overflow:hidden}
+.rc .cov svg{width:100%;height:100%;display:block}
+.rc .cov .live,.rc .cov .when{position:absolute;left:10px;top:10px}
+.when{background:var(--r-bg);font-size:12px;font-weight:600;padding:2px 8px;border-radius:6px}
+.rc .rb{padding:10px 12px 12px;display:grid;gap:4px}
+.rc .rb b{font-size:15.5px;font-weight:600;line-height:1.25}
+.tags{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:2px}
+.nav{display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid var(--r-line);background:var(--r-surface);padding:6px 4px 14px}
+.nav div{display:grid;justify-items:center;gap:2px;font-size:11.5px;color:var(--r-muted);min-height:44px;align-content:center}
+.nav div.on{color:#fff}
+.sh{position:absolute;inset:auto 0 0 0;background:var(--r-surface);border-top:1px solid var(--r-line);border-radius:24px 24px 0 0;padding:10px 16px 18px;display:grid;gap:12px;z-index:3}
+.scr{position:absolute;inset:0;background:rgba(0,0,0,.55);z-index:2}
+.grab{width:40px;height:4px;border-radius:2px;background:var(--r-line);margin:0 auto 2px}
+.steps{display:flex;gap:4px;padding:2px 16px 10px}
+.steps i{flex:1;height:4px;border-radius:2px;background:var(--r-line)}
+.steps i.on{background:var(--r-accent)}
+.vid{position:relative;border-radius:16px;overflow:hidden;aspect-ratio:16/9;background:#07050d}
+.vid svg{width:100%;height:100%;display:block}
+.stepper{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--r-raised);border-radius:16px;padding:6px}
+.stepper button{width:48px;height:48px;border-radius:12px;border:0;background:var(--r-surface);font-size:22px;color:var(--r-fg)}
+.stepper .v{font:700 1.9rem/1 var(--f-display);font-variant-numeric:tabular-nums}
+.note{font-size:13px;color:var(--r-muted);margin:0}
+.toast{position:absolute;left:12px;right:12px;bottom:84px;background:var(--r-fg);color:var(--r-bg);border-radius:14px;padding:10px 14px;font-size:14px;font-weight:500;opacity:0;transform:translateY(8px);transition:opacity 160ms,transform 220ms var(--ease-out);pointer-events:none;z-index:5}
+.toast.on{opacity:1;transform:none}
+.lock{display:grid;gap:10px;padding:16px 12px;background:linear-gradient(180deg,#1d1740,#0f0c18);height:100%}
+.pn{border-radius:18px;background:rgba(255,255,255,.1);padding:12px 14px;display:grid;gap:2px;font-size:14px}
+.pn small{color:var(--r-muted);font-size:12px}
+.qr{width:120px;height:120px;background:var(--r-fg);border-radius:12px;padding:10px;justify-self:center}
+.ticket{border-radius:20px;background:var(--r-accent);color:#fff;padding:16px;display:grid;gap:10px;position:relative}
+.ticket .tt{font:700 1.5rem/1.1 var(--f-display)}
+.ticket hr{border:0;border-top:2px dashed rgba(255,255,255,.4);margin:2px -16px}
+.ch.cvr{padding:0;width:64px;height:44px;overflow:hidden;border-radius:12px;position:relative}
+.ch.cvr svg{width:100%;height:100%;display:block}
+.ch.cvr.on{outline:2px solid #fff;outline-offset:-3px;background:var(--r-raised)}
+.two{display:flex;gap:8px}
+.mn{aspect-ratio:2.2/1;border-radius:6px;display:grid;place-items:center;font:700 20px var(--f-display);color:#fff}
+.mn.p{background:linear-gradient(135deg,#5b2fb8,#8a5ce6)}.mn.m{background:linear-gradient(135deg,#0f0c1a,#2c2257)}.mn.g{background:linear-gradient(135deg,#a8480a,#f5b83d);color:#2a1802}
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.tile{display:grid;gap:3px;justify-items:center;border-radius:14px;background:var(--r-raised);padding:8px 6px;font-size:13px;font-weight:600;text-align:center}
+.tile em{font-style:normal;font-weight:400;font-size:11.5px;color:var(--r-muted)}
+.tile.off{opacity:.4}
+.bigrow{display:flex;align-items:center;gap:12px;border-radius:14px;background:var(--r-raised);padding:8px 12px}
+.bigrow svg.ic3{width:56px;height:40px;flex:none}
+.bigrow b{display:block;font-size:15px}.bigrow span{font-size:12.5px;color:var(--r-muted)}
+.slidebar{height:56px;border-radius:999px;background:var(--r-raised);position:relative;overflow:hidden;display:grid;place-items:center;font-weight:600}
+.slidebar::before{content:"";position:absolute;inset:0 auto 0 0;width:44%;background:var(--amber);opacity:.9;border-radius:999px}
+.slidebar span{position:relative;color:var(--r-fg)}
+.codebox{letter-spacing:.5em;text-align:center;font-size:22px;background:var(--r-raised);border-radius:14px;padding:12px}
+.two .pb.ghost{width:auto;flex:none;padding:0 20px}
+@media(prefers-reduced-motion:reduce){*{transition-duration:.01ms!important}}
+</style>
+
+<div class="wrap"><a class="packback" href="index.html">← Back to the design pack</a>
+  <header>
+    <h1>Rooms, end to end</h1>
+    <p class="lead">Every screen from finding a room to getting paid. Read each row left to right. All people, prices and numbers are sample data, and the rules shown are the ones the server will enforce.</p>
+    <nav class="jump" aria-label="Flows" id="jump" style="margin-top:16px"></nav>
+  </header>
+
+  <section class="flow" id="f-create-try" aria-labelledby="h-try">
+    <header>
+      <h2 id="h-try">Create a room: try it</h2>
+      <p>Change who is hosting and the room's age rule and watch what unlocks. Paid rooms and spray exist only in 18+ rooms with an adult host.</p>
+    </header>
+    <div class="try">
+      <div id="wiz"></div>
+      <div class="side">
+        <div><div class="hint" style="margin-bottom:6px">You are</div>
+          <div class="seg" role="group" aria-label="Host" id="hostSeg"><button data-h="adult" aria-pressed="true">Adult host, 29</button><button data-h="teen" aria-pressed="false">Teen host, 16</button></div></div>
+        <p class="hint">Teen hosts can run 13+ and 16+ rooms and teens-only rooms. They cannot host 18+ rooms, take payments or spray. Adult hosts cannot host teens-only rooms. Nothing here is cosmetic: the server checks the account's age every time.</p>
+      </div>
+    </div>
+  </section>
+
+  <div id="boards" style="display:grid;gap:64px"></div>
+
+  <footer class="hint" style="border-top:1px solid var(--line);padding-top:20px">Vib3Pulse, rooms end to end, October 2026. Sample data only. Nothing is charged.</footer>
+</div>
+
+<script>
+(function(){
+  var $=function(s){return document.querySelector(s)};
+  var skin=['#f1c9a5','#c68a5c','#8d5a3b','#e0ac86','#6b4430','#f6d9c0'];
+  var PPL={mara:['#7c46d6',2],dayo:['#0f8f8a',1],kemi:['#c2410c',0],tayo:['#b45309',4],ada:['#1d6f42',0],jo:['#6d7a14',5],you:['#2b6cb0',3],sam:['#4c51bf',2]};
+  function av(id,sz){var p=PPL[id]||PPL.you;return '<svg class="av" style="width:'+(sz||40)+'px;height:'+(sz||40)+'px" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="20" fill="'+p[0]+'"/><path d="M6 38c1-8 6-12 14-12s13 4 14 12z" fill="rgba(255,255,255,.28)"/><circle cx="20" cy="16" r="6.5" fill="'+skin[p[1]]+'"/></svg>'}
+  var I={back:'M15 5l-7 7 7 7',close:'M6 6l12 12M18 6L6 18',search:'M11 4a7 7 0 100 14 7 7 0 000-14zM21 21l-5-5',plus:'M12 5v14M5 12h14',check:'M5 12l5 5 9-10',lock:'M6 11h12v9H6zM8 11V8a4 4 0 018 0v3',
+    ticket:'M4 7h16v4a2 2 0 000 4v4H4v-4a2 2 0 000-4z',clock:'M12 7v5l3 2M12 3a9 9 0 100 18 9 9 0 000-18z',bell:'M6 16v-5a6 6 0 0112 0v5l2 2H4zM10 20a2 2 0 004 0',
+    link:'M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1',share:'M12 15V4M8 8l4-4 4 4M5 13v6h14v-6',
+    shield:'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z',mic:'M9 3h6v12H9zM5 11a7 7 0 0014 0M12 18v3',video:'M3 6h13v12H3zM16 10l5-3v10l-5-3',
+    users:'M9 11a3 3 0 100-6 3 3 0 000 6zM3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 5a3 3 0 010 6M18 14c2 .7 3 2.6 3 6',wallet:'M3 7h16v12H3zM3 7l12-3v3M15 13h4',
+    chev:'M9 6l6 6-6 6',dots:'M5 12h.01M12 12h.01M19 12h.01',flag:'M5 21V4h12l-2 4 2 4H5',home:'M4 11l8-7 8 7v9H4z',cal:'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4',
+    pin:'M9 4h6l-1 6 3 3H7l3-3zM12 13v7',eye:'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 9a3 3 0 100 6 3 3 0 000-6z',card:'M3 6h18v12H3zM3 10h18',
+    wave:'M3 12h2M7 8v8M11 5v14M15 8v8M19 11v2',star:'M12 3l2.6 5.6 6 .7-4.4 4.1 1.2 6L12 16.5 6.6 19.4l1.2-6L3.4 9.3l6-.7z',wifi:'M2 9a15 15 0 0120 0M5 12.5a10 10 0 0114 0M8.5 16a5 5 0 017 0M12 19.5h.01',
+    out:'M10 5H5v14h5M14 8l5 4-5 4M19 12H9',ban:'M12 3a9 9 0 100 18 9 9 0 000-18zM6 6l12 12',hand:'M8 12V6a1.5 1.5 0 013 0v5M11 11V4.5a1.5 1.5 0 013 0V11M14 11V6a1.5 1.5 0 013 0v7a6 6 0 01-6 6 5 5 0 01-4-2l-3-4 1.5-1.5L8 14',
+    mail:'M3 6h18v12H3zM3 7l9 6 9-6',sliders:'M4 7h10M18 7h2M4 17h2M10 17h10M16 5v4M8 15v4'};
+  function ic(n,s){return '<svg class="i" viewBox="0 0 24 24" width="'+(s||20)+'" height="'+(s||20)+'" aria-hidden="true"><path d="'+I[n]+'"/></svg>'}
+  function cover(i){
+    var c=['--cv0','--cv1','--cv2','--cv3'][i%4],l='var(--cvl)',rings='';
+    for(var k=1;k<=9;k++){rings+='<circle cx="'+(120+i*18)+'" cy="46" r="'+(k*7+i*2)+'" fill="none" stroke="'+l+'" stroke-opacity="'+(.5-k*.04)+'" stroke-width=".9"/>'}
+    return '<svg viewBox="0 0 320 90" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect width="320" height="90" fill="var('+c+')"/>'+rings+'<g stroke="'+l+'" stroke-opacity=".35" stroke-width="1.4" stroke-linecap="round">'+[0,1,2,3,4,5,6].map(function(k){var h=10+((k*37+i*13)%34);return '<line x1="'+(230+k*11)+'" y1="'+(48-h/2)+'" x2="'+(230+k*11)+'" y2="'+(48+h/2)+'"/>'}).join('')+'</g></svg>';
+  }
+  function top(t,o){o=o||{};return '<div class="tb">'+(o.noback?'':'<button class="ib" aria-label="Back">'+ic(o.close?'close':'back')+'</button>')+'<b>'+t+'</b>'+(o.right||'')+'</div>'}
+  function btn(l,c,dis){return '<button class="pb '+(c||'')+'"'+(dis?' aria-disabled="true"':'')+'>'+l+'</button>'}
+  function tag(l,c,i){return '<span class="tagc '+(c||'')+'">'+(i?ic(i,13):'')+l+'</span>'}
+  function nav(a){var n=[['home','Home'],['search','Discover'],['users','Rooms'],['ticket','Tickets'],['wallet','Payments']];return '<div class="nav">'+n.map(function(x,i){return '<div class="'+(i===a?'on':'')+'">'+ic(x[0],22)+x[1]+'</div>'}).join('')+'</div>'}
+  function steps(n,t){var h='<div class="steps">';for(var i=0;i<t;i++)h+='<i class="'+(i<=n?'on':'')+'"></i>';return h+'</div>'}
+  function rc(r){return '<div class="rc"><div class="cov">'+cover(r.cv)+(r.live?'<span class="live">LIVE</span>':'<span class="when">'+r.when+'</span>')+'</div><div class="rb"><b>'+r.t+'</b><span class="mu sm">'+r.h+(r.n?' · '+r.n:'')+'</span><div class="tags">'+r.tags.join('')+(r.fr?'<span class="avs" style="margin-left:6px">'+av('ada',22)+av('tayo',22)+'</span><span class="mu sm" style="margin-left:6px">'+r.fr+'</span>':'')+'</div></div></div>'}
+  function ph(inner,extra){return '<div class="ph">'+inner+(extra||'')+'</div>'}
+  function sheet(inner){return '<div class="scr"></div><div class="sh"><div class="grab"></div>'+inner+'</div>'}
+  function earn(p){var vat=p*.075/1.075,psp=Math.min(2000,.015*p+(p>=2500?100:0)),res=.01*p,net=p-vat-psp-res;return {net:net,host:.85*net,plat:.15*net}}
+  var gbp=function(n){return '₦'+Math.round(n).toLocaleString('en-GB')};
+
+  /* ---------- create-room wizard ---------- */
+  var AGE={13:['13+','Everyone 13 and over','Adults can join, but not anonymously. No money features.'],16:['16+','Everyone 16 and over','Adults can join, but not anonymously. No money features.'],
+           18:['18+','Adults only','Under 18s are blocked. Unlocks paid rooms and spray.'],21:['21+','Adults 21 and over','Under 21s are blocked. Unlocks paid rooms and spray.'],teen:['Teens only','Under 18 only','Adults are blocked and can never join. No money features.']};
+  var TYPES={talk:'Talk',music:'Music',video:'Live video',qa:'Q and A'};
+  function C0(){return {title:'Friday Pre-Drinks, Lagos to London',desc:'Afrobeats into house till midnight. Bring your crew.',type:'music',cv:0,age:'18',host:'adult',vis:'public',anon:true,voice:true,video:true,slow:'off',
+    pin:'House rules. Be kind, no sharing phone numbers.',cap:50,spray:true,paid:true,price:5000,cap2:100,refund:true,when:'later',remind:true,step:0}}
+  function adultRoom(s){return s.age==='18'||s.age==='21'}
+  function moneyOK(s){return adultRoom(s)&&s.host==='adult'}
+  function norm(s){
+    if(s.host==='adult'&&s.age==='teen')s.age='13';
+    if(s.host==='teen'&&(s.age==='18'||s.age==='21'))s.age='13';
+    if(!moneyOK(s)){s.paid=false;s.spray=false}
+    if(!s.paid&&s.cap>50)s.cap=50;
+    s.price=Math.max(1000,Math.min(100000,s.price));s.cap2=Math.max(20,Math.min(150,s.cap2));
+    return s;
+  }
+  function stepsOf(s){return ['basics','audience','features'].concat(s.paid?['price']:[]).concat(['when','review'])}
+  function rowRadio(on,label,sub,set,dis){return '<button class="rw'+(on?' on':'')+'" '+(set?'data-set="'+set+'"':'')+(dis?' aria-disabled="true" data-why="'+dis+'"':'')+' role="radio" aria-checked="'+on+'"><span class="tx"><b>'+label+'</b>'+(sub?'<span>'+sub+'</span>':'')+'</span><span class="rd"></span></button>'}
+  function rowTg(on,label,sub,key,dis){return '<div class="rw"'+(dis?' aria-disabled="true"':'')+'><span class="tx"><b>'+label+'</b>'+(sub?'<span>'+sub+'</span>':'')+'</span><button class="tg" role="switch" aria-checked="'+on+'" aria-label="'+label+'" data-tg="'+key+'"'+(dis?' data-why="'+dis+'"':'')+'></button></div>'}
+  function chipSet(key,opts,cur){return '<div class="chips">'+opts.map(function(o){return '<button class="ch'+(String(cur)===String(o[0])?' on':'')+'" data-set="'+key+':'+o[0]+'">'+o[1]+'</button>'}).join('')+'</div>'}
+
+  function wizBody(s,name,idx,total){
+    var h='';
+    if(name==='basics'){
+      h+='<h3>What is it about?</h3>';
+      h+='<div class="fld"><span>Title</span><div class="inp">'+s.title+'</div></div>';
+      h+='<div class="fld"><span>Description</span><div class="inp ta">'+s.desc+'</div></div>';
+      h+='<div class="fld"><span>Kind of room</span>'+chipSet('type',Object.keys(TYPES).map(function(k){return [k,TYPES[k]]}),s.type)+'</div>';
+      h+='<div class="fld"><span>Cover</span><div class="chips">'+[0,1,2,3].map(function(i){return '<button class="ch cvr'+(s.cv===i?' on':'')+'" data-set="cv:'+i+'" aria-label="Cover '+(i+1)+'">'+cover(i)+'</button>'}).join('')+'</div></div>';
+    }else if(name==='audience'){
+      h+='<h3>Who can join?</h3><div class="lst" role="radiogroup" aria-label="Age rule">';
+      ['13','16','18','21','teen'].forEach(function(k){
+        var a=AGE[k],dis=null;
+        if(k==='teen'&&s.host==='adult')dis='Only teens can host a teens only room.';
+        if((k==='18'||k==='21')&&s.host==='teen')dis='You need to be 18 to host an adult room.';
+        h+=rowRadio(s.age===k,a[0]+' · '+a[1],a[2],'age:'+k,dis);
+      });
+      h+='</div><div class="fld"><span>Who can find it</span>'+chipSet('vis',[['public','Public'],['friends','Friends'],['invite','Invite link']],s.vis)+'</div>';
+      var an=s.age==='18'||s.age==='21'?'Anyone can join anonymously.':s.age==='teen'?'Teens can join anonymously.':'Teens can join anonymously. Adults cannot.';
+      h+=rowTg(s.anon,'Allow anonymous guests',an+' Hosts and moderators still see who they are.','anon');
+    }else if(name==='features'){
+      h+='<h3>How does it run?</h3>';
+      h+=rowTg(s.voice,'Voice on the stage','Guests raise a hand, you bring them up.','voice');
+      h+=rowTg(s.video,'Live video','You or a guest you pick can go on camera.','video');
+      h+='<div class="fld"><span>Slow mode</span>'+chipSet('slow',[['off','Off'],['5','5s'],['15','15s'],['30','30s']],s.slow)+'</div>';
+      h+='<div class="fld"><span>Pinned message</span><div class="inp ta">'+s.pin+'</div></div>';
+      var why=!moneyOK(s)?(s.host==='teen'?'Money features are for adult hosts.':'Money features are only in 18+ and 21+ rooms.'):null;
+      h+=rowTg(s.spray,'Spray notes','People can spray the host and anyone on stage.','spray',why);
+      h+=rowTg(s.paid,'Paid room','Guests buy a ticket to get in.','paid',why);
+    }else if(name==='price'){
+      var e=earn(s.price);
+      h+='<h3>Set the price</h3><div class="stepper"><button data-st="price:-500" aria-label="Lower price">−</button><div class="v">'+gbp(s.price)+'</div><button data-st="price:500" aria-label="Raise price">+</button></div>';
+      h+='<div class="fld"><span>Tickets available</span><div class="stepper"><button data-st="cap2:-10" aria-label="Fewer tickets">−</button><div class="v">'+s.cap2+'</div><button data-st="cap2:10" aria-label="More tickets">+</button></div></div>';
+      h+='<div class="card2 soft"><div class="kv"><span>You earn per ticket</span><b>about '+gbp(e.host)+'</b></div><div class="kv"><span>If '+Math.round(s.cap2/2)+' sell</span><b>about '+gbp(e.host*Math.round(s.cap2/2))+'</b></div><p class="note">After VAT (7.5%), card fees and a fraud reserve, we take 15%. Price includes VAT.</p></div>';
+      h+=rowTg(s.refund,'Refund up to 1 hour before','If the room never starts, everyone is refunded automatically.','refund');
+      h+='<div class="rw">'+ic('check',18)+'<span class="tx"><b>Payouts connected</b><span>Paystack, bank ending 4821. Ticket money is held until 48 hours after the room ends.</span></span></div>';
+    }else if(name==='when'){
+      h+='<h3>When does it start?</h3><div class="seg2">'+chipSet('when',[['now','Go live now'],['later','Schedule']],s.when)+'</div>';
+      if(s.when==='later')h+='<div class="chips"><span class="ch on">'+ic('cal',16)+'Fri 17 Oct</span><span class="ch on">'+ic('clock',16)+'8:00 pm</span></div>'+rowTg(s.remind,'Remind people','We notify followers and ticket holders 15 minutes before.','remind');
+      h+='<div class="fld"><span>Invite friends</span><div class="chips">'+['ada','tayo','jo','sam'].map(function(id){return '<span class="ch on">'+av(id,22)+({ada:'Ada',tayo:'Tayo',jo:'Jo',sam:'Sam'})[id]+'</span>'}).join('')+'<span class="ch">'+ic('plus',16)+'More</span></div></div>';
+    }else if(name==='review'){
+      h+='<h3>Ready?</h3><div class="card2"><h4>'+s.title+'</h4><div class="tags">'+tag(AGE[s.age][0],s.age==='teen'?'w':'v','shield')+tag(TYPES[s.type])+(s.paid?tag(gbp(s.price)+' ticket','a','ticket'):tag('Free'))+(s.spray?tag('Spray on','a'):'')+(s.anon?tag('Anonymous ok'):'')+'</div></div>';
+      h+='<div class="card2"><div class="kv"><span>Who can join</span><b>'+AGE[s.age][1]+'</b></div><div class="kv"><span>Visibility</span><b>'+({public:'Public',friends:'Friends',invite:'Invite link'})[s.vis]+'</b></div><div class="kv"><span>People</span><b>up to '+(s.paid?s.cap2:s.cap)+'</b></div><div class="kv"><span>When</span><b>'+(s.when==='now'?'Now':'Fri 17 Oct, 8:00 pm')+'</b></div></div>';
+      h+='<p class="note">'+(moneyOK(s)?'Age rules are checked on every account. Under 18s can never buy a ticket or receive sprays.':s.age==='teen'?'Adults can never join this room. No payments or sprays.':'Adults cannot join anonymously. No payments or sprays in this room.')+'</p>';
+    }else if(name==='done'){
+      h+='<div style="display:grid;gap:14px;justify-items:center;text-align:center;padding-top:32px"><div style="width:64px;height:64px;border-radius:50%;background:var(--r-accent);display:grid;place-items:center">'+ic('check',32)+'</div><h3>'+(s.when==='now'?'You are live':'Room scheduled')+'</h3><p class="mu">'+(s.when==='now'?'Guests can join now.':'We will remind people 15 minutes before.')+'</p></div>';
+      h+='<div class="card2"><div class="kv"><span>Link</span><b>vib3pulse.app/r/fri-predrinks</b></div></div><div class="chips" style="justify-content:center"><span class="ch">'+ic('link',16)+'Copy link</span><span class="ch">'+ic('share',16)+'Share</span></div>';
+    }
+    return h;
+  }
+  function wizPhone(s,live){
+    var st=stepsOf(s),name=s.step>=st.length?'done':st[s.step],isDone=name==='done',idx=s.step;
+    var h=top(isDone?'Room created':'Start a room',{close:true})+(isDone?'':steps(idx,st.length));
+    h+='<div class="bd">'+wizBody(s,name,idx,st.length)+'</div>';
+    var dgo=live?' data-go="next"':'',dbk=live?' data-go="back"':'';
+    var label=isDone?'Open the room':name==='review'?(s.when==='now'?'Go live now':'Schedule room'):'Continue';
+    var main='<button class="pb'+(name==='review'?' amber':'')+'"'+dgo+'>'+label+'</button>';
+    var back=(idx>0&&!isDone)?'<button class="pb ghost"'+dbk+'>Back</button>':'';
+    var foot=back?'<div class="two">'+back+main+'</div>':main;
+    return '<div class="ph">'+h+'<div class="ft">'+foot+'</div><div class="toast" id="wtoast"></div></div>';
+  }
+  var W=norm(C0());
+  function wizRender(){$('#wiz').innerHTML=wizPhone(W,true)}
+  $('#wiz').addEventListener('click',function(e){
+    var t=e.target.closest('[data-set],[data-tg],[data-st],[data-go]');if(!t)return;
+    var why=t.getAttribute('data-why');
+    if((t.getAttribute('aria-disabled')==='true'||(t.closest('[aria-disabled=true]')&&t.dataset.tg))&&why){var el=$('#wtoast');el.textContent=why;el.classList.add('on');clearTimeout(el.t);el.t=setTimeout(function(){el.classList.remove('on')},2600);return}
+    if(t.dataset.set){var kv=t.dataset.set.split(':');W[kv[0]]=(kv[0]==='cv')?+kv[1]:kv[1]}
+    else if(t.dataset.tg){W[t.dataset.tg]=!W[t.dataset.tg]}
+    else if(t.dataset.st){var p=t.dataset.st.split(':');W[p[0]]=W[p[0]]+ +p[1]}
+    else if(t.dataset.go==='next'){W.step=Math.min(stepsOf(W).length,W.step+1)}
+    else if(t.dataset.go==='back'){W.step=Math.max(0,W.step-1)}
+    norm(W);wizRender();
+  });
+  $('#hostSeg').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;W.host=b.dataset.h;if(W.host==='teen'){W.age='16'}else{W.age='18'}norm(W);W.step=Math.min(W.step,1);
+    this.querySelectorAll('button').forEach(function(x){x.setAttribute('aria-pressed',x===b)});wizRender()});
+  wizRender();
+
+  /* ---------- static boards ---------- */
+  function S(sm){var s=norm(Object.assign(C0(),sm));return s}
+  function wz(sm,name){var s=S(sm),st=stepsOf(s),i=st.indexOf(name);s.step=name==='done'?st.length:Math.max(0,i);return wizPhone(s,false)}
+
+  var live1={t:'Friday Pre-Drinks, Lagos to London',h:'Mara',n:'22 inside',cv:0,live:1,tags:[tag('13+','v','shield'),tag('Voice')],fr:'Ada, Tayo +3'};
+  var live2={t:'Amapiano Sunday Session',h:'Dayo',n:'64 inside',cv:3,live:1,tags:[tag('18+','v','shield'),tag('₦5,000','a','ticket'),tag('Live video')]};
+  var live3={t:'Study with me: GCSE maths',h:'Jo, 17',n:'18 inside',cv:2,live:1,tags:[tag('Teens only','w','shield'),tag('Voice')]};
+  var up1={t:'Open mic: poetry night',h:'Kemi',cv:1,when:'Fri 8:00 pm',tags:[tag('16+','v','shield'),tag('Free')]};
+  var up2={t:'Afrobeats Brunch, London',h:'Mara',cv:0,when:'Sat 11:00 am',tags:[tag('18+','v','shield'),tag('₦8,000','a','ticket')]};
+
+
+  function roomBg(){return top('Friday Pre-Drinks',{noback:true,right:'<span class="live" style="margin-right:8px">LIVE</span>'})+'<div class="bd"><div class="vid"><svg viewBox="0 0 320 180"><rect width="320" height="180" fill="#0a0714"/><circle cx="160" cy="70" r="26" fill="#8d5a3b"/><path d="M96 180c4-44 30-60 64-60s60 16 64 60z" fill="#150f26"/></svg></div></div>'}
+  var IBND='<svg class="ic3" viewBox="0 0 56 40" aria-hidden="true"><g transform="rotate(-6 28 20)"><rect x="8" y="8" width="38" height="22" rx="3" fill="#8a5ce6"/></g><g transform="rotate(4 28 20)"><rect x="8" y="10" width="38" height="22" rx="3" fill="#f5b83d"/></g><rect x="24" y="6" width="9" height="30" fill="#1b1530" stroke="#f5b83d"/></svg>';
+  var IBAG='<svg class="ic3" viewBox="0 0 56 40" aria-hidden="true"><path d="M18 14C18 3 38 3 38 14" fill="none" stroke="#2c2257" stroke-width="3.5" stroke-linecap="round"/><rect x="5" y="14" width="46" height="22" rx="10" fill="#1b1633" stroke="#9b78f0"/><rect x="5" y="14" width="7" height="22" fill="#5b2fb8"/><rect x="44" y="14" width="7" height="22" fill="#5b2fb8"/><path d="M13 19h30" stroke="#f5b83d" stroke-width="2" stroke-dasharray="1.5 1.5"/><circle cx="28" cy="28" r="5.5" fill="#f5b83d"/></svg>';
+  var IRAIN='<svg class="ic3" viewBox="0 0 56 40" aria-hidden="true"><ellipse cx="28" cy="12" rx="18" ry="9" fill="#4a2a96" stroke="#e3d6ff"/><g fill="#f5b83d"><rect x="14" y="24" width="8" height="5" rx="1"/><rect x="26" y="29" width="8" height="5" rx="1"/><rect x="38" y="24" width="8" height="5" rx="1"/></g></svg>';
+  function trayHTML(o){o=o||{};var f=o.fx||function(n){return '₦'+n};
+    var tiles=[['p',20,'2,000'],['m',50,'5,000'],['g',100,'10,000']].map(function(x){return '<div class="tile'+(o.off?' off':'')+'"><div class="mn '+x[0]+'" style="width:100%">'+x[1]+'</div>'+f(x[1]*(o.off?1:1))+'<em>'+x[2]+'</em></div>'}).join('');
+    return '<h4>Spray Mara</h4><p class="mu sm">You pay when you throw. Nothing is stored.</p><div class="tiles">'+tiles+'</div>'+
+      '<div class="bigrow">'+IBND+'<div><b>Bundle · '+(o.b||'₦1,000')+'</b><span>100,000 V3C · 100 notes</span></div></div>'+
+      '<div class="bigrow">'+IBAG+'<div><b>Money bag · '+(o.g||'₦10,000')+'</b><span>1,000,000 V3C · a duffle unzips</span></div></div>'+
+      '<div class="bigrow">'+IRAIN+'<div><b>Make it Rain · '+(o.r||'₦100,000')+'</b><span>10,000,000 V3C · the whole room sees it</span></div></div>'+
+      '<div class="chips" style="justify-content:space-between"><span class="ch">Room limit ₦2,000 · spent ₦0</span><span class="ch on">Done</span></div><p class="note">Paying with Visa ••4242. '+(o.off?'Single notes are sold in Nigeria only.':'Change')+'</p>';}
+
+  var BOARDS=[
+   {id:'discover',t:'1. Find a room',d:'Rooms you cannot join are never shown, so nobody is turned away at the door. Paid rooms show their price on the card.',s:[
+     ['Rooms home','Live now, upcoming and following. Friends who are inside show up on the card.',ph(top('Rooms',{noback:true,right:'<button class="ib">'+ic('search')+'</button><button class="ib" style="background:var(--r-accent)">'+ic('plus')+'</button>'})+'<div class="bd"><div class="chips"><span class="ch on">Live now</span><span class="ch">Upcoming</span><span class="ch">Following</span></div><div class="chips"><span class="ch">All ages</span><span class="ch">Free</span><span class="ch">Paid</span><span class="ch">'+ic('sliders',16)+'</span></div>'+rc(live1)+rc(live2)+rc(live3)+'</div>'+nav(2))],
+     ['Filters','Only rooms you are allowed in are listed, based on your account age.',ph(top('Rooms',{noback:true})+'<div class="bd"><div class="chips"><span class="ch on">Live now</span></div>'+rc(live1)+'</div>'+sheet('<h4>Filters</h4><div class="fld"><span>Price</span><div class="chips"><span class="ch on">Any</span><span class="ch">Free</span><span class="ch">Paid</span></div></div><div class="fld"><span>Kind</span><div class="chips"><span class="ch on">Voice</span><span class="ch on">Live video</span><span class="ch">Music</span><span class="ch">Q and A</span></div></div><div class="rw"><span class="tx"><b>Friends are inside</b></span><button class="tg" role="switch" aria-checked="true" aria-label="Friends inside"></button></div><p class="note">Rooms you are not old enough for are hidden, not locked.</p>'+btn('Show 14 rooms')))],
+     ['Upcoming','Set a reminder with one tap. Paid rooms go straight to a ticket.',ph(top('Rooms',{noback:true})+'<div class="bd"><div class="chips"><span class="ch">Live now</span><span class="ch on">Upcoming</span><span class="ch">Following</span></div><h4>This weekend</h4>'+rc(up1)+'<div class="chips">'+btn('Remind me','alt')+'</div>'+rc(up2)+'<div class="chips">'+btn('Get a ticket','amber')+'</div></div>'+nav(2))],
+     ['Nothing live','A kind empty state with a next step.',ph(top('Rooms',{noback:true})+'<div class="bd" style="align-items:center;justify-content:center;text-align:center;gap:14px"><div style="width:84px;height:84px;border-radius:50%;background:var(--r-raised);display:grid;place-items:center">'+ic('wave',36)+'</div><h3>Quiet right now</h3><p class="mu">No rooms are live. Start one, or we will tell you when your friends go live.</p>'+btn('Start a room')+btn('Tell me when friends go live','alt')+'</div>'+nav(2))]
+   ]},
+   {id:'create',t:'2. Create a room',d:'Five steps, six if it is paid. The rules change what you can pick: teens cannot host adult rooms, adults cannot host teens rooms, money is for adults in 18+ rooms.',s:[
+     ['Start','One sheet to choose how.',ph(top('Rooms',{noback:true})+'<div class="bd">'+rc(live1)+'</div>'+sheet('<h4>Start a room</h4><div class="lst"><div class="rw">'+ic('mic',22)+'<span class="tx"><b>Voice room</b><span>Talk with people now</span></span></div><div class="rw">'+ic('video',22)+'<span class="tx"><b>Live video</b><span>Go on camera with a stage</span></span></div><div class="rw">'+ic('ticket',22)+'<span class="tx"><b>Paid room</b><span>18+ only, sell tickets</span></span></div><div class="rw">'+ic('cal',22)+'<span class="tx"><b>Schedule for later</b><span>Pick a time, remind people</span></span></div></div>'))],
+     ['1. The basics','Title, description, kind and cover.',wz({}, 'basics')],
+     ['2. Who can join','Adult host sees the adult age rules. Teens only is locked for adults.',wz({}, 'audience')],
+     ['2b. As a teen host','Adult rooms are locked with a plain reason. Teens only is open.',wz({host:'teen',age:'teen'}, 'audience')],
+     ['3. How it runs','Voice, video, slow mode, pinned message, spray and paid room.',wz({}, 'features')],
+     ['3b. Money locked','In a 13+ room spray and paid room are off, with the reason.',wz({age:'13'}, 'features')],
+     ['4. Set the price','Live earnings estimate, ticket count, refund promise and payout status.',wz({}, 'price')],
+     ['5. When','Go live now or schedule. Invite friends.',wz({}, 'when')],
+     ['6. Review','Everything on one card, with the safety rule that applies.',wz({}, 'review')],
+     ['Done','Share the link straight away.',wz({}, 'done')]
+   ]},
+   {id:'paid',t:'3. Paid rooms',d:'Tickets are for verified adults in 18+ rooms. Price includes VAT, refunds are automatic if the room does not start, and the host is paid 48 hours after the room ends.',s:[
+     ['Ticket page','What you get, how many are left, and the refund promise before you pay.',ph(top('')+'<div class="bd" style="padding-top:0"><div style="margin:-4px -16px 0;height:130px">'+cover(3)+'</div><div class="tags">'+tag('18+','v','shield')+tag('Live video')+tag('Fri 8:00 pm','', 'clock')+'</div><h3>Amapiano Sunday Session</h3><div class="mu" style="display:flex;gap:8px;align-items:center">'+av('dayo',24)+'Hosted by Dayo</div><div class="card2"><div class="kv"><span>Tickets left</span><b>62 of 100</b></div><div class="kv"><span>Includes</span><b>Live set, chat, spray</b></div></div><p class="note">Full refund up to 1 hour before. If the room does not start, you are refunded automatically.</p></div><div class="ft">'+btn('Get ticket · ₦5,000','amber')+'<p class="note" style="text-align:center">Price includes VAT</p></div>')],
+     ['Checkout','Plain line items, saved card, and one clear consent.',ph(top('Checkout',{close:true})+'<div class="bd"><div class="card2"><h4>Amapiano Sunday Session</h4><div class="kv"><span>Ticket</span><b>₦4,651</b></div><div class="kv"><span>VAT 7.5%</span><b>₦349</b></div><div class="hr"></div><div class="kv"><span>Total</span><b>₦5,000</b></div></div><h4>Pay with</h4><div class="lst"><div class="rw on">'+ic('card',22)+'<span class="tx"><b>Visa ending 4242</b></span><span class="rd"></span></div><div class="rw">'+ic('plus',22)+'<span class="tx"><b>Add a card</b></span></div></div><div class="rw">'+ic('check',18)+'<span class="tx"><b>18 or over</b><span>Confirmed on your account</span></span></div><p class="note">By paying you agree this live event starts straight away, so the 14 day cancellation right does not apply. Refunds follow the policy on the ticket page.</p></div><div class="ft">'+btn('Pay ₦5,000','amber')+'</div>')],
+     ['Ticket confirmed','The ticket lives in the Tickets tab. Reminder is on by default.',ph(top('')+'<div class="bd" style="gap:16px"><div style="display:grid;justify-items:center;gap:8px;text-align:center;padding-top:8px"><div style="width:56px;height:56px;border-radius:50%;background:var(--ok);color:#0b2a17;display:grid;place-items:center">'+ic('check',28)+'</div><h3>You are in</h3></div><div class="ticket"><span class="tagc" style="background:rgba(255,255,255,.2);width:fit-content">'+ic('ticket',13)+'Ticket</span><div class="tt">Amapiano Sunday Session</div><div style="opacity:.85">Fri 17 Oct, 8:00 pm · Dayo</div><hr><div class="qr"><svg viewBox="0 0 10 10" style="width:100%;height:100%"><path fill="#0f0c18" d="M0 0h3v3H0zM7 0h3v3H7zM0 7h3v3H0zM4 0h1v2H4zM4 3h2v1H4zM6 5h1v2H6zM4 6h1v2H4zM8 5h2v1H8zM5 8h2v2H5zM8 8h2v2H8z"/></svg></div></div><div class="rw">'+ic('bell',20)+'<span class="tx"><b>Remind me 15 minutes before</b></span><button class="tg" role="switch" aria-checked="true" aria-label="Remind me"></button></div></div><div class="ft">'+btn('Add to calendar','alt')+'</div>')],
+     ['Waiting room','Ticket holders see a countdown and who is already here.',ph(top('Amapiano Sunday Session',{})+'<div class="bd" style="align-items:center;text-align:center;justify-content:center;gap:14px"><div class="tags" style="justify-content:center">'+tag('Ticket confirmed','g','check')+'</div><div class="big">12:08</div><p class="mu">until Dayo goes live</p><div class="avs">'+['ada','tayo','jo','sam','kemi'].map(function(i){return av(i,34)}).join('')+'</div><p class="mu sm">Ada, Tayo and 36 others are waiting</p></div><div class="ft">'+btn('Invite a friend','alt')+'</div>')],
+     ['Under 18','Paid rooms are never shown to under 18s. If a link is opened, this is what they see.',ph(top('')+'<div class="bd" style="align-items:center;justify-content:center;text-align:center;gap:14px"><div style="width:72px;height:72px;border-radius:50%;background:var(--warn-soft);color:var(--warn);display:grid;place-items:center">'+ic('shield',34)+'</div><h3>This room is 18+</h3><p class="mu">Tickets and sprays are for adults. Try a room made for your age.</p></div><div class="ft">'+btn('Find rooms for you')+'</div>')],
+     ['Payment failed','Say what happened and keep the ticket held for a few minutes.',ph(top('Checkout',{close:true})+'<div class="bd"><div class="card2 warn"><h4>Payment did not go through</h4><p class="mu" style="color:#e9d29a">Your bank declined the card. You have not been charged. Your ticket is held for 10 minutes.</p></div><div class="lst"><div class="rw on">'+ic('card',22)+'<span class="tx"><b>Visa ending 4242</b><span>Declined</span></span><span class="rd"></span></div><div class="rw">'+ic('plus',22)+'<span class="tx"><b>Try another card</b></span></div></div></div><div class="ft">'+btn('Try again','amber')+'</div>')],
+     ['Refund','If the room is cancelled or never starts, money goes back with no action needed.',ph(top('Tickets',{noback:true})+'<div class="bd"><div class="card2"><div class="tags">'+tag('Cancelled','r')+'</div><h4>Amapiano Sunday Session</h4><p class="mu">Dayo cancelled this room. Your ₦5,000 is on its way back to your card. It can take a few days to show.</p><div class="kv"><span>Refund</span><b>₦5,000</b></div></div><div class="card2 soft"><h4>Looking for something tonight?</h4><div class="mu">3 rooms are live that you can join</div></div></div>'+nav(3))],
+     ['Host: tickets sold','Live numbers for the host inside the room. Money is released 48 hours after the room ends.',ph(top('Tickets',{close:true})+'<div class="bd"><div class="card2 amber"><div class="mu">Tickets sold</div><div class="big">38 <span style="font:600 18px var(--f-body)">of 100</span></div></div><div class="card2"><div class="kv"><span>Gross</span><b>₦190,000</b></div><div class="kv"><span>VAT, card fees, reserve</span><b>−₦21,806</b></div><div class="kv"><span>Platform 15%</span><b>−₦25,229</b></div><div class="hr"></div><div class="kv"><span>You earn</span><b>₦142,965</b></div></div><p class="note">Held until Mon 20 Oct, then paid out. Late sales and refunds change these numbers.</p></div>')]
+   ]},
+   {id:'join',t:'4. Joining and waiting',d:'Age and anonymous options live on the join screen. Full prototype in the Rooms prototype. These are the states around it.',s:[
+     ['Not started','A scheduled room tells you when, and lets you set a reminder.',ph(top('')+'<div class="bd" style="align-items:center;justify-content:center;text-align:center;gap:12px"><div class="tags" style="justify-content:center">'+tag('13+','v','shield')+tag('Free')+'</div><h3>Open mic: poetry night</h3><p class="mu">Starts Fri 17 Oct, 8:00 pm with Kemi</p><div class="big">2d 3h</div></div><div class="ft">'+btn('Remind me')+btn('Share','alt')+'</div>')],
+     ['Invite only','Opened from a private link. The token is checked before the room is shown.',ph(top('')+'<div class="bd" style="align-items:center;justify-content:center;text-align:center;gap:12px"><div style="width:72px;height:72px;border-radius:50%;background:var(--r-soft);display:grid;place-items:center">'+ic('link',32)+'</div><h3>Mara invited you</h3><p class="mu">Friday Pre-Drinks is a private room. Your invite is valid for 24 hours.</p></div><div class="ft">'+btn('Join room')+btn('Not now','ghost')+'</div>')],
+     ['Room is full','Free rooms hold 50. Paid rooms hold up to 150. Offer a way back in.',ph(top('')+'<div class="bd" style="align-items:center;justify-content:center;text-align:center;gap:12px"><div style="width:72px;height:72px;border-radius:50%;background:var(--r-raised);display:grid;place-items:center">'+ic('users',32)+'</div><h3>This room is full</h3><p class="mu">50 of 50 people are inside. We can tell you when a spot opens.</p></div><div class="ft">'+btn('Tell me when a spot opens')+btn('Find another room','alt')+'</div>')],
+     ['Removed','Kicked for 10 minutes. Said plainly, without naming a reason you did not see.',ph(top('')+'<div class="bd" style="align-items:center;justify-content:center;text-align:center;gap:12px"><div style="width:72px;height:72px;border-radius:50%;background:var(--warn-soft);color:var(--warn);display:grid;place-items:center">'+ic('out',32)+'</div><h3>You were removed</h3><p class="mu">The host removed you from this room. You can try again in 10 minutes.</p></div><div class="ft">'+btn('Back to Rooms')+btn('Read the room rules','ghost')+'</div>')],
+     ['Room ended','A soft landing with a next step.',ph(top('')+'<div class="bd" style="align-items:center;justify-content:center;text-align:center;gap:12px"><h3>The host ended the room</h3><p class="mu">Thanks for joining. You were here for 43 minutes.</p></div><div class="ft">'+btn('Follow Mara')+btn('Back to Rooms','alt')+'</div>')]
+   ]},
+   {id:'host',t:'5. Hosting a live room',d:'Everything a host needs without leaving the room: requests, stage, people, settings. Guests see their half too.',s:[
+     ['Host view','Mic, camera, requests badge and a Controls button.',ph(top('Friday Pre-Drinks',{right:'<span class="live" style="margin-right:6px">LIVE</span><button class="ib">'+ic('dots')+'</button>'})+'<div class="bd"><div class="vid"><svg viewBox="0 0 320 180"><rect width="320" height="180" fill="#0a0714"/><circle cx="160" cy="70" r="26" fill="#8d5a3b"/><path d="M96 180c4-44 30-60 64-60s60 16 64 60z" fill="#150f26"/></svg></div><div class="avs" style="margin-left:6px">'+['mara','dayo','kemi'].map(function(i){return av(i,44)}).join('')+'</div><div class="card2 soft" style="grid-template-columns:1fr auto;align-items:center"><span><b>3 requests</b><br><span class="mu sm">2 hands up, 1 wants to go live</span></span>'+btn('Review','alt')+'</div></div><div class="ft"><div class="chips" style="justify-content:space-between"><span class="ch">'+ic('mic',18)+'Mic on</span><span class="ch">'+ic('video',18)+'Camera</span><span class="ch on">'+ic('sliders',18)+'Controls</span></div></div>')],
+     ['Requests','Hands up and go-live asks in one queue. One tap to accept.',ph(top('Controls',{close:true})+'<div class="bd"><div class="chips"><span class="ch on">Requests 3</span><span class="ch">Stage</span><span class="ch">People</span><span class="ch">Settings</span></div><div class="lst">'+[['kemi','Kemi','Hand up'],['tayo','Tayo','Hand up'],['ada','Ada','Wants to go live']].map(function(r){return '<div class="rw">'+av(r[0],40)+'<span class="tx"><b>'+r[1]+'</b><span>'+r[2]+'</span></span><span class="ch on" style="min-height:40px">Accept</span><span class="ch" style="min-height:40px">'+ic('close',16)+'</span></div>'}).join('')+'</div><p class="note">Only one person can be on camera at a time. Accepting someone else switches the picture.</p></div>')],
+     ['Stage','Guests on the mic, co-hosts, and who is live on camera.',ph(top('Controls',{close:true})+'<div class="bd"><div class="chips"><span class="ch">Requests 3</span><span class="ch on">Stage</span><span class="ch">People</span><span class="ch">Settings</span></div><div class="lst">'+[['mara','Mara','Host','On camera'],['dayo','Dayo','Co-host',''],['kemi','Kemi','On the mic','']].map(function(r){return '<div class="rw">'+av(r[0],40)+'<span class="tx"><b>'+r[1]+'</b><span>'+r[2]+(r[3]?' · '+r[3]:'')+'</span></span>'+(r[2]==='Host'?'':'<span class="ch" style="min-height:40px">Mute</span><span class="ch" style="min-height:40px">'+ic('dots',16)+'</span>')+'</div>'}).join('')+'</div></div>')],
+     ['Room settings','Slow mode, pinned message, anonymous guests, spray. End the room at the bottom.',ph(top('Controls',{close:true})+'<div class="bd"><div class="chips"><span class="ch">Requests</span><span class="ch">Stage</span><span class="ch">People</span><span class="ch on">Settings</span></div><div class="fld"><span>Slow mode</span><div class="chips"><span class="ch">Off</span><span class="ch on">5s</span><span class="ch">15s</span><span class="ch">30s</span></div></div><div class="rw">'+ic('pin',20)+'<span class="tx"><b>Pinned message</b><span>House rules. Be kind...</span></span>'+ic('chev',18)+'</div><div class="rw"><span class="tx"><b>Allow anonymous guests</b></span><button class="tg" role="switch" aria-checked="true" aria-label="Anonymous"></button></div><div class="rw"><span class="tx"><b>Spray notes</b></span><button class="tg" role="switch" aria-checked="true" aria-label="Spray"></button></div><div class="rw"><span class="tx"><b>Lock the room</b><span>No one new can join</span></span><button class="tg" role="switch" aria-checked="false" aria-label="Lock"></button></div></div><div class="ft">'+btn('End room','danger')+'</div>')],
+     ['End the room','A confirmation that says what will happen and what it earned.',ph(top('Friday Pre-Drinks',{noback:true})+'<div class="bd"><div class="vid"><svg viewBox="0 0 320 180"><rect width="320" height="180" fill="#0a0714"/></svg></div></div>'+sheet('<h4>End for everyone?</h4><p class="mu">22 people will be sent out. Tickets and sprays are settled after 48 hours.</p>'+btn('End room','danger')+btn('Keep going','alt')))],
+     ['Moderate a person','Mute, remove for 10 minutes, ban, or report. Applies to anonymous guests too.',ph(top('Friday Pre-Drinks',{noback:true})+'<div class="bd"><div class="vid"><svg viewBox="0 0 320 180"><rect width="320" height="180" fill="#0a0714"/></svg></div></div>'+sheet('<div style="display:flex;gap:12px;align-items:center"><svg class="av" style="width:44px;height:44px" viewBox="0 0 40 40"><circle cx="20" cy="20" r="20" fill="#4a4655"/><circle cx="20" cy="16" r="6.5" fill="#9b96a8"/><path d="M6 38c1-8 6-12 14-12s13 4 14 12z" fill="#9b96a8" opacity=".6"/></svg><div><h4>Guest 7K1</h4><span class="mu sm">Anonymous · you can see who they are</span></div></div><div class="lst"><div class="rw">'+ic('mic',20)+'<span class="tx"><b>Mute in chat</b></span></div><div class="rw">'+ic('out',20)+'<span class="tx"><b>Remove for 10 minutes</b></span></div><div class="rw" style="color:var(--no)">'+ic('ban',20)+'<span class="tx"><b>Ban from this room</b><span>Follows their account</span></span></div></div>'))],
+     ['Guest: ask to speak','The hand-up button and what happens next.',ph(top('Friday Pre-Drinks',{})+'<div class="bd"><div class="vid"><svg viewBox="0 0 320 180"><rect width="320" height="180" fill="#0a0714"/><circle cx="160" cy="70" r="26" fill="#8d5a3b"/><path d="M96 180c4-44 30-60 64-60s60 16 64 60z" fill="#150f26"/></svg></div><div class="card2 soft"><b>The host invited you to speak.</b><div class="chips">'+btn('Accept')+btn('Decline','alt')+'</div></div></div><div class="ft"><div class="chips"><span class="ch on">'+ic('hand',18)+'Hand raised</span><span class="ch">'+ic('video',18)+'Ask to go live</span></div></div>')]
+   ]},
+   {id:'safety',t:'6. Safety and reporting',d:'Reports go to the host and moderators. Age gaps are called out before a private message starts. Nothing reveals a person\'s age.',s:[
+     ['Report','Reasons are plain. Reporting never tells the person.',ph(top('Report',{close:true})+'<div class="bd"><h4>What is happening?</h4><div class="lst">'+['Harassment or bullying','Sexual content','Spam or scam','Someone seems under 13','Something else'].map(function(x,i){return '<button class="rw'+(i===1?' on':'')+'"><span class="tx"><b>'+x+'</b></span><span class="rd"></span></button>'}).join('')+'</div><p class="note">The host and moderators see this. They will not tell the person who reported.</p></div><div class="ft">'+btn('Send report')+'</div>')],
+     ['Report sent','Close the loop and offer a block.',ph(top('')+'<div class="bd" style="align-items:center;justify-content:center;text-align:center;gap:12px"><div style="width:64px;height:64px;border-radius:50%;background:var(--r-accent);display:grid;place-items:center">'+ic('check',30)+'</div><h3>Thanks for telling us</h3><p class="mu">A moderator will look at it. You can also block them so you never see each other again.</p></div><div class="ft">'+btn('Block them','alt')+btn('Done')+'</div>')],
+     ['Age gap warning','Shown before the first private message across the adult and under 18 line. Both people must opt in.',ph(top('New message',{close:true})+'<div class="bd"><div class="card2 warn"><h4>Before you message</h4><p class="mu" style="color:#e9d29a">This person may be a different age group to you. Private messages across that line need both people to turn them on, and both of you will see a note in the chat.</p></div><div class="rw"><span class="tx"><b>I understand</b></span><button class="tg" role="switch" aria-checked="false" aria-label="I understand"></button></div></div><div class="ft">'+btn('Continue','',true)+btn('Cancel','ghost')+'</div>')],
+     ['Room safety','One tap from the room menu. Plain rules, no jargon.',ph(top('Room safety',{close:true})+'<div class="bd"><div class="tags">'+tag('13+','v','shield')+'</div><ul style="margin:0;padding:0;list-style:none;display:grid;gap:14px;font-size:15px"><li>People 13 and over can join. Adults cannot join anonymously here.</li><li>Anonymous guests can chat and react. They cannot message, wave, use the mic or send notes.</li><li>Hosts and moderators can always see who an anonymous guest is.</li><li>Reports and bans follow the account.</li></ul></div><div class="ft">'+btn('Report this room','alt')+'</div>')],
+     ['Host left','If the host drops, the room waits two minutes before it ends.',ph(top('Friday Pre-Drinks',{noback:true})+'<div class="bd" style="align-items:center;justify-content:center;text-align:center;gap:12px"><div class="tags" style="justify-content:center">'+tag('Waiting for the host','w','clock')+'</div><div class="big">1:48</div><p class="mu">The room ends if Mara does not come back.</p></div>')]
+   ]},
+   {id:'wallet',t:'7. Paying for a spray',d:'No balance and no wallet. Each spray is its own payment to a card saved once. Vib3Cash (V3C) is the unit shown on the spray, not money held for you. Prices follow the naira price, converted where you are.',s:[
+     ['Spray tray','Naira and V3C on every spray. Room limit and card always in view.',ph(roomBg()+sheet(trayHTML()))],
+     ['First spray: add a card','One bank approval, then one tap. Cards are handled by Paystack.',ph(roomBg()+sheet('<h4>Add a card</h4><p class="mu">Your bank asks you to approve once. After that, sprays are one tap. We never see your card number.</p><div class="rw on">'+ic('card',22)+'<span class="tx"><b>Visa ending 4242</b></span><span class="rd"></span></div>'+btn('Add card and continue')+btn('Not now','ghost')))],
+     ['Slide to pay','Bundles, bags and Make it Rain need a deliberate slide.',ph(roomBg()+sheet('<div style="display:grid;justify-items:center;gap:6px;text-align:center">'+IBAG.replace('class="ic3"','class="ic3" style="width:96px;height:68px"')+'<h4>Unzip a money bag over Mara</h4><p class="mu sm">₦10,000 · 1,000,000 V3C. A duffle bag unzips and pours notes.</p></div><div class="slidebar"><span>Slide to pay ₦10,000</span></div><p class="note" style="text-align:center">Charged to Visa ••4242. Your bank will ask you to approve it.</p>'+btn('Not now','ghost')))],
+     ['Bank approval','For bags and Make it Rain the bank confirms the payment.',ph(roomBg()+sheet('<h4>Approve with your bank</h4><p class="mu">Your bank is asking you to approve a payment of ₦10,000 to Vib3Pulse.</p><div class="codebox">• • • • • •</div>'+btn('Approve')+btn('Cancel','ghost')))],
+     ['Payment declined','Plain words, nothing sent, nothing charged.',ph(roomBg()+sheet('<h4>Payment declined</h4><p class="mu">Your bank said no. You were not charged and nothing was sent. Try again, or use another card.</p>'+btn('Try again')+btn('Use another card','alt')+btn('Cancel','ghost')))],
+     ['Room limit','You choose the most you spend in a room. A spray above it asks first.',ph(roomBg()+sheet('<h4>Room limit</h4><p class="mu">This spray is ₦10,000, above your limit of ₦2,000. Raise it to continue.</p><div class="chips"><span class="ch" style="opacity:.4">₦500</span><span class="ch" style="opacity:.4">₦1,000</span><span class="ch" style="opacity:.4">₦2,000</span><span class="ch">₦5,000</span><span class="ch on">₦10,000</span><span class="ch">₦100,000</span></div><p class="note">Limits above ₦20,000 need a verified account.</p>'+btn('Done')))],
+     ['Outside Nigeria','Prices follow the naira price at today\'s rate. Single notes are hidden because fees on tiny card charges are too high.',ph(roomBg()+sheet(trayHTML({off:1,fx:function(n){return '£'+(n/1757).toFixed(2)},b:'£0.57',g:'£5.69',r:'£56.91'})))],
+     ['Spending limits','Daily limit, a cooling-off pause and an opt-out of top sprayer boards.',ph(top('Spending limits',{close:true})+'<div class="bd"><div class="fld"><span>Most I can spend in a day</span><div class="chips"><span class="ch">₦5,000</span><span class="ch on">₦20,000</span><span class="ch">₦50,000</span><span class="ch">₦100,000</span></div></div><p class="note">Verified adults can go up to ₦100,000 a day. Higher needs a review.</p><div class="rw"><span class="tx"><b>Remind me every ₦5,000</b></span><button class="tg" role="switch" aria-checked="true" aria-label="Remind"></button></div><div class="rw"><span class="tx"><b>Pause spraying for 24 hours</b><span>A cooling-off break you can end any time</span></span><button class="tg" role="switch" aria-checked="false" aria-label="Pause"></button></div><div class="rw"><span class="tx"><b>Hide top sprayer boards</b></span><button class="tg" role="switch" aria-checked="false" aria-label="Hide boards"></button></div></div>')],
+     ['Receipts','Every spray and ticket has a receipt with the VAT shown.',ph(top('Payments',{noback:true})+'<div class="bd"><div class="lst">'+[['Money bag for Mara','₦10,000','Tonight, VAT ₦698'],['Bundle for Mara','₦1,000','Tonight, VAT ₦70'],['Ticket, Amapiano Sunday','₦5,000','Mon, VAT ₦349']].map(function(r){return '<div class="rw"><span class="tx"><b>'+r[0]+'</b><span>'+r[2]+'</span></span><b>'+r[1]+'</b></div>'}).join('')+'</div><div class="rw">'+ic('sliders',20)+'<span class="tx"><b>Spending limits</b><span>₦20,000 a day</span></span>'+ic('chev',18)+'</div></div>'+nav(4))],
+     ['Verify for large sprays','Spraying ₦20,000 or more needs a verified adult account.',ph(top('Make it Rain',{close:true})+'<div class="bd" style="align-items:center;justify-content:center;text-align:center;gap:12px"><div style="width:72px;height:72px;border-radius:50%;background:var(--warn-soft);color:var(--warn);display:grid;place-items:center">'+ic('shield',34)+'</div><h3>Verify to continue</h3><p class="mu">Sprays of ₦20,000 or more need an ID-verified adult account. It takes about two minutes.</p></div><div class="ft">'+btn('Verify my account')+btn('Not now','ghost')+'</div>')]
+   ]},
+   {id:'earn',t:'8. Earnings and settlement',d:'For hosts and people on stage. Sprays are split at the moment of payment and settle to the bank through Paystack. Tickets are held until the room has happened, then paid.',s:[
+     ['Earnings','What has settled, what is on its way, and what is held for tickets.',ph(top('Earnings',{noback:true})+'<div class="bd"><div class="card2 amber"><div class="mu">This week</div><div class="big" style="font-size:2.2rem">₦243,600</div></div><div class="card2"><div class="kv"><span>Settled to your bank</span><b>₦88,435</b></div><div class="kv"><span>On its way, next business day</span><b>₦12,200</b></div><div class="kv"><span>Tickets, paid 48h after the room ends</span><b>₦142,965</b></div></div><h4>By room</h4><div class="lst">'+[['Amapiano Sunday Session','38 tickets and sprays','₦210,600'],['Friday Pre-Drinks','Sprays','₦33,000']].map(function(r){return '<div class="rw"><span class="tx"><b>'+r[0]+'</b><span>'+r[1]+'</span></span><b>'+r[2]+'</b></div>'}).join('')+'</div></div>'+nav(4))],
+     ['Settlement account','Paid by Paystack straight to your bank. The name on the account must match your ID.',ph(top('Get paid',{close:true})+'<div class="bd"><div class="lst"><div class="rw">'+ic('check',20)+'<span class="tx"><b>Bank account</b><span>Account ending 4821 · name matches your ID</span></span>'+tag('Verified','g')+'</div><div class="rw">'+ic('check',20)+'<span class="tx"><b>Identity</b><span>BVN or NIN checked, 18 or over</span></span>'+tag('Verified','g')+'</div><div class="rw">'+ic('mail',20)+'<span class="tx"><b>Tax details</b><span>Needed for your tax statement</span></span>'+ic('chev',18)+'</div></div><p class="note">Sprays settle to your bank the next business day. We never hold your spray money in our own account.</p></div>')],
+     ['Settlement history','Dates, amounts and what was taken off.',ph(top('Settlements',{close:true})+'<div class="bd"><div class="lst">'+[['Mon 20 Oct','₦88,435','Settled'],['Fri 17 Oct','₦34,920','Settled'],['Wed 15 Oct','₦12,780','Settled']].map(function(r){return '<div class="rw"><span class="tx"><b>'+r[0]+'</b><span>To account ending 4821</span></span><b>'+r[1]+'</b>'+tag(r[2],'g')+'</div>'}).join('')+'</div><div class="card2"><div class="kv"><span>Platform share this month</span><b>₦47,300</b></div><div class="kv"><span>VAT, card fees, reserve</span><b>₦38,900</b></div></div></div>')],
+     ['A reversed payment','If a bank reverses a fan\'s payment, that amount comes off the next settlement. We tell you first.',ph(top('Heads up',{close:true})+'<div class="bd"><div class="card2 warn"><h4>A payment was reversed</h4><p class="mu" style="color:#e9d29a">A bank reversed a ₦10,000 spray from a fan. That amount will be taken from your next settlement. Nothing else changes.</p></div><div class="card2"><div class="kv"><span>Reversed</span><b>−₦7,584</b></div><div class="kv"><span>From</span><b>Fri 17 Oct spray</b></div></div><p class="note">Proposed rule, to be checked with Paystack and counsel.</p></div>')]
+   ]},
+   {id:'after',t:'9. After the room',d:'A good ending brings people back. Guests get a recap and a next step; hosts get numbers and a one-tap rebook.',s:[
+     ['Guest recap','What happened, a way to follow, and the next date.',ph(top('')+'<div class="bd" style="gap:16px"><div style="display:grid;gap:6px;padding-top:6px"><h3>That was a good one</h3><p class="mu">Friday Pre-Drinks with Mara</p></div><div class="card2"><div class="kv"><span>You were here</span><b>43 min</b></div><div class="kv"><span>Messages</span><b>12</b></div><div class="kv"><span>Notes sprayed</span><b>120 V</b></div></div><div class="card2 soft"><b>Next one: Fri 24 Oct, 8:00 pm</b><div class="chips">'+btn('Remind me')+'</div></div></div><div class="ft">'+btn('Follow Mara')+btn('Back to Rooms','ghost')+'</div>')],
+     ['Host recap','Peak crowd, time, money and a one-tap rebook.',ph(top('Room summary',{noback:true})+'<div class="bd"><div class="card2"><div class="kv"><span>Time live</span><b>1h 12m</b></div><div class="kv"><span>Peak in room</span><b>64</b></div><div class="kv"><span>Tickets sold</span><b>38</b></div><div class="kv"><span>New followers</span><b>+21</b></div></div><div class="card2 amber"><div class="mu">Earned so far</div><div class="big">₦243,600</div><span class="mu sm">Sprays settle next business day. Tickets paid Mon 20 Oct.</span></div></div><div class="ft">'+btn('Schedule the next one')+btn('Share a clip','alt')+'</div>')]
+   ]},
+   {id:'notify',t:'10. Notifications, invites and settings',d:'Short, useful, never spammy. Invites carry a private link. Cross-age private messages are off until both people say yes.',s:[
+     ['Notifications','Live, starting soon, and money events.',ph('<div class="lock"><div style="text-align:center;padding:20px 0 6px"><div style="font:700 56px/1 var(--f-display)">8:14</div><div class="mu">Friday 17 October</div></div><div class="pn"><b>Mara is live</b>Friday Pre-Drinks, Lagos to London<small>now</small></div><div class="pn"><b>Starts in 15 minutes</b>Amapiano Sunday Session · your ticket<small>8:00 pm</small></div><div class="pn"><b>Refund issued</b>₦5,000 is on its way back to your card<small>yesterday</small></div></div>')],
+     ['Invite','Private links carry a token that expires.',ph(top('Invite')+'<div class="bd"><div class="card2"><div class="kv"><span>Link</span><b>vib3pulse.app/r/fri...</b></div><p class="note">Valid for 24 hours. Anyone with it can join if they are old enough.</p></div><div class="chips"><span class="ch">'+ic('link',16)+'Copy link</span><span class="ch">'+ic('share',16)+'Share</span></div><h4>Friends</h4><div class="lst">'+[['ada','Ada'],['tayo','Tayo'],['jo','Jo']].map(function(r){return '<div class="rw">'+av(r[0],40)+'<span class="tx"><b>'+r[1]+'</b></span><span class="ch on" style="min-height:40px">Invite</span></div>'}).join('')+'</div></div>')],
+     ['Room privacy','Cross-age private messages are off by default and need both people.',ph(top('Rooms and privacy',{noback:true})+'<div class="bd"><div class="rw"><span class="tx"><b>Who can invite me</b><span>Friends only</span></span>'+ic('chev',18)+'</div><div class="rw"><span class="tx"><b>Private messages across age groups</b><span>Off. Both people must turn this on.</span></span><button class="tg" role="switch" aria-checked="false" aria-label="Cross-age messages"></button></div><div class="rw"><span class="tx"><b>Show me in friends\' rooms lists</b></span><button class="tg" role="switch" aria-checked="true" aria-label="Show me"></button></div><div class="rw"><span class="tx"><b>Notify me when friends go live</b></span><button class="tg" role="switch" aria-checked="true" aria-label="Notify"></button></div></div>'+nav(4))]
+   ]},
+   {id:'errors',t:'11. When things go wrong',d:'Every failure says what happened and what to do next.',s:[
+     ['Reconnecting','The room keeps your place while the connection comes back.',ph(top('Friday Pre-Drinks',{noback:true})+'<div class="bd"><div class="card2 warn" style="grid-template-columns:auto 1fr;align-items:center">'+ic('wifi',22)+'<span>Reconnecting. The room will pick up where you left off.</span></div><div class="vid"><svg viewBox="0 0 320 180"><rect width="320" height="180" fill="#0a0714"/></svg></div></div>')],
+     ['Mic blocked','Say how to fix it in the phone settings.',ph(top('Friday Pre-Drinks',{noback:true})+'<div class="bd"></div>'+sheet('<h4>Microphone is blocked</h4><p class="mu">Turn it on in your browser settings, then tap Try again. You can still listen and chat.</p>'+btn('Try again')+btn('Keep listening','alt')))],
+     ['Weak signal','Offer sound only before the picture stutters.',ph(top('Friday Pre-Drinks',{noback:true})+'<div class="bd"><div class="card2 soft" style="grid-template-columns:1fr auto;align-items:center"><span>Your signal is weak. Switch to sound only to keep up.</span>'+btn('Sound only')+'</div><div class="vid"><svg viewBox="0 0 320 180"><rect width="320" height="180" fill="#0a0714"/></svg></div></div>')],
+     ['Spray not available','Why, in one line, without shaming.',ph(top('Friday Pre-Drinks',{noback:true})+'<div class="bd"></div>'+sheet('<h4>Spray is for verified adults</h4><p class="mu">Notes and tickets are only for adults in 18+ rooms. You can still react, chat and wave.</p>'+btn('Got it')))]
+   ]}
+  ];
+
+  var jump='<a href="#f-create-try">Try creating a room</a>';
+  BOARDS.forEach(function(b){jump+='<a href="#f-'+b.id+'">'+b.t.replace(/^\d+\.\s/,'')+'</a>'});
+  $('#jump').innerHTML=jump;
+  $('#boards').innerHTML=BOARDS.map(function(b){
+    return '<section class="flow" id="f-'+b.id+'" aria-labelledby="h-'+b.id+'"><header><h2 id="h-'+b.id+'">'+b.t+'</h2><p>'+b.d+'</p></header><div class="board">'+
+      b.s.map(function(sc,i){return '<figure class="ps" id="s-'+b.id+'-'+(i+1)+'">'+sc[2]+'<figcaption><b>'+sc[0]+'</b><span>'+sc[1]+'</span></figcaption></figure>'}).join('')+'</div></section>';
+  }).join('');
+})();
+</script>

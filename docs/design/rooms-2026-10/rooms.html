@@ -1,0 +1,928 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>html{padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px)}body{margin:0}[hidden]{display:none!important}img{max-width:100%}.packback{display:inline-flex;align-items:center;min-height:44px;color:var(--muted);text-decoration:none;font-size:14px;font-weight:500}.packback:hover{color:var(--fg)}</style>
+<title>Vib3Pulse Rooms Redesign</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,600;6..96,700&family=Jost:wght@400;500;600&display=swap">
+<style>
+/* Hallmark pre-emit critique: P4 H4 E4 S4 R4 V4
+   Layout concept: the room is a stage you watch and a chat you are in. Chat always owns the lower half.
+   Scene types: voice (avatars), live (video + speaker strip), immersive (video fills, chat floats over it).
+   Scene: someone at a pre-party, one hand on the phone, dim light, half watching a stream, half talking. Dark first. */
+:root{
+  --bg:#0b0a0e; --surface:#141318; --raised:#1d1b23; --line:#2a2731; --fg:#f4f2f7; --muted:#a29dae;
+  --accent:#8a5ce6; --accent-fg:#ffffff; --accent-soft:#2a2045; --live:#ef4444; --speak:#34c47a; --warn:#f2b441; --warn-soft:#3a2d12;
+  --scrim:rgba(8,6,12,.66); --on-media:#ffffff; --media-ink:rgba(255,255,255,.16); --shadow:0 24px 60px rgba(0,0,0,.6);
+  --a1:#7c46d6; --a2:#0f8f8a; --a3:#c2410c; --a4:#2b6cb0; --a5:#b45309; --a6:#1d6f42; --a7:#6d7a14; --a8:#4c51bf; --a9:#0e7490; --a10:#a16207; --anon:#4a4655; --anon-fg:#9b96a8;
+  --sk0:#f1c9a5; --sk1:#c68a5c; --sk2:#8d5a3b; --sk3:#e0ac86; --sk4:#6b4430; --sk5:#f6d9c0;
+  --f-display:"Bodoni Moda",Georgia,serif; --f-body:"Jost",system-ui,sans-serif;
+  --ease-out:cubic-bezier(.23,1,.32,1); --ease-drawer:cubic-bezier(.32,.72,0,1);
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){
+  --bg:#f4f3f6; --surface:#ffffff; --raised:#eceaf1; --line:#d9d6e2; --fg:#16141c; --muted:#5d586b;
+  --accent:#6a37c9; --accent-soft:#e7ddfa; --live:#d92d2d; --speak:#1f9d55; --warn:#8a5a00; --warn-soft:#fbefd2; --anon:#cfcbd9; --anon-fg:#6d6879; --shadow:0 20px 50px rgba(30,20,60,.18); color-scheme:light}}
+:root[data-theme="light"]{
+  --bg:#f4f3f6; --surface:#ffffff; --raised:#eceaf1; --line:#d9d6e2; --fg:#16141c; --muted:#5d586b;
+  --accent:#6a37c9; --accent-soft:#e7ddfa; --live:#d92d2d; --speak:#1f9d55; --warn:#8a5a00; --warn-soft:#fbefd2; --anon:#cfcbd9; --anon-fg:#6d6879; --shadow:0 20px 50px rgba(30,20,60,.18); color-scheme:light}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--f-body);padding-inline:16px;padding-block:28px 56px}
+button{font:inherit;color:inherit;cursor:pointer;transition:transform 140ms var(--ease-out),background-color 160ms,border-color 160ms,color 160ms,opacity 160ms}
+button:active:not(:disabled):not([aria-disabled=true]){transform:scale(.97)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wrap{max-width:1180px;margin:0 auto;display:grid;gap:24px}
+.intro{display:grid;gap:8px;max-width:58ch}
+.intro h1{font:700 clamp(2rem,6vw,3rem)/1 var(--f-display);letter-spacing:-.02em;margin:0;text-wrap:balance}
+.intro p{margin:0;color:var(--muted)}
+.controls{display:grid;gap:12px}
+.ctl{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.ctl>span{font-size:13px;color:var(--muted);min-width:64px}
+.seg{display:inline-flex;flex-wrap:wrap;background:var(--raised);border-radius:999px;padding:4px;gap:2px}
+.seg button{border:0;background:none;padding:0 16px;border-radius:999px;min-height:44px;color:var(--muted);font-weight:500}
+.seg button[aria-pressed=true]{background:var(--accent);color:var(--accent-fg)}
+.cap{margin:0;color:var(--muted);font-size:14px;max-width:70ch;min-height:44px}
+.cols{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:32px;align-items:start}
+@media(max-width:900px){.cols{grid-template-columns:minmax(0,1fr)}}
+.notes{display:grid;gap:22px}
+.notes h2{font:600 17px/1.2 var(--f-body);margin:0 0 10px}
+.notes ul{margin:0;padding:0;list-style:none;display:grid;gap:12px}
+.notes li{display:grid;gap:2px;font-size:14.5px}
+.notes b{font-weight:600}
+.notes span{color:var(--muted)}
+.stagebox{display:flex;justify-content:center;min-width:0}
+
+/* ---------- the room ---------- */
+.room{position:relative;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;background:var(--surface);border:1px solid var(--line);border-radius:28px;box-shadow:var(--shadow);overflow:hidden;width:390px;max-width:100%;height:800px}
+.top{display:flex;align-items:center;gap:6px;padding:12px 10px 8px;min-width:0;transition:opacity 200ms var(--ease-out)}
+.ib{width:44px;height:44px;border-radius:999px;border:0;background:none;display:grid;place-items:center;flex:none}
+.ib svg,.chip svg,.vb svg,.ico svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.ttl{min-width:0;flex:1}
+.ttl b{display:block;font-weight:600;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ttl small{color:var(--muted);font-size:13px;display:flex;gap:6px;align-items:center;white-space:nowrap}
+.ttl small span:last-child{overflow:hidden;text-overflow:ellipsis}
+.live{background:var(--live);color:#fff;font-size:11px;font-weight:600;letter-spacing:.1em;padding:2px 8px;border-radius:6px;display:inline-flex;gap:5px;align-items:center;flex:none}
+.live i{width:6px;height:6px;border-radius:50%;background:#fff;animation:pulse 1.6s infinite}
+@keyframes pulse{50%{opacity:.3}}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--raised);border-radius:999px;padding:0 12px;min-height:44px;font-weight:500;font-size:14px}
+@media (hover:hover) and (pointer:fine){.chip:hover,.ib:hover{border-color:var(--accent)}}
+
+.zone{position:relative;min-width:0}
+.scene{margin:0 12px;border-radius:20px;background:var(--raised);border:1px solid var(--line);padding:8px}
+.scene-h{display:flex;justify-content:space-between;align-items:center;padding:0 6px 2px}
+.scene-h span{font-size:13px;color:var(--muted);font-weight:500}
+.fold{border:0;background:none;color:var(--muted);min-height:44px;padding:0 8px;border-radius:10px;font-size:13px;margin-block:-8px}
+.row{display:flex;flex-wrap:wrap;justify-content:center;gap:2px 4px;margin:0;padding:0;list-style:none}
+.floor{border-top:1px dashed var(--line);margin-top:4px;padding-top:6px}
+.scene.min .floor,.scene.min .stage .nm,.scene.min .tag{display:none}
+.scene.min .av.big{width:48px;height:48px}
+.fig{width:64px;display:flex;flex-direction:column;align-items:center;border:0;background:none;padding:3px 0;border-radius:12px;min-height:44px}
+.av{width:42px;height:42px;border-radius:50%;display:block;transition:box-shadow .2s}
+.av.big{width:58px;height:58px}
+.av.talk{box-shadow:0 0 0 3px var(--surface),0 0 0 6px var(--speak)}
+.nm{font-size:12px;margin-top:3px;max-width:62px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.me .nm{color:var(--accent);font-weight:600}
+.tag{font-size:11px;font-weight:500;color:var(--speak)}
+.more{align-self:center;background:var(--surface);border-radius:999px;font-size:13px;font-weight:600;padding:10px 12px}
+.float{position:absolute;font-size:26px;pointer-events:none;z-index:8;opacity:0;animation:up 1.9s var(--ease-out) forwards}
+@keyframes up{0%{opacity:0;transform:translateY(8px) scale(.85)}15%{opacity:1}100%{opacity:0;transform:translateY(-110px) scale(1.1)}}
+
+/* live video */
+.video{position:relative;margin:0 12px;aspect-ratio:16/9;border-radius:20px;overflow:hidden;background:#000;color:var(--on-media);isolation:isolate}
+.video canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:filter .3s var(--ease-out)}
+.video[data-drop=on] canvas{filter:blur(12px) brightness(.45)}
+.vscrim{position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,var(--scrim) 0,transparent 34%,transparent 62%,var(--scrim) 100%);opacity:.9}
+.vtop,.vbot{position:absolute;left:8px;right:8px;display:flex;gap:6px;align-items:center;z-index:2}
+.vtop{top:8px}.vbot{bottom:8px}
+.vb{min-height:44px;min-width:44px;border-radius:999px;border:0;background:var(--media-ink);color:var(--on-media);padding:0 12px;display:inline-flex;gap:6px;align-items:center;justify-content:center;font-size:13px;font-weight:500;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+.vb.pressed{background:var(--accent)}
+.vlabel{display:inline-flex;gap:6px;align-items:center;min-height:32px;padding:0 10px;border-radius:999px;background:var(--media-ink);font-size:13px;font-weight:500;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+.vlabel .dot{width:8px;height:8px;border-radius:50%;background:var(--speak);animation:pulse 1.1s infinite}
+.sp{flex:1}
+.slate,.sound{position:absolute;inset:0;z-index:1;display:none;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:16px}
+.slate h3,.sound h3{margin:0;font-size:17px;font-weight:600}
+.slate p,.sound p{margin:0;font-size:14px;opacity:.85}
+.sound{background:var(--accent-soft);color:var(--fg)}
+.sound .av{width:72px;height:72px}
+.bars{display:flex;gap:4px;align-items:flex-end;height:28px}
+.bars i{width:5px;height:100%;border-radius:3px;background:var(--speak);transform-origin:bottom;transform:scaleY(.2);transition:transform .12s linear}
+.video[data-drop=on] .slate{display:flex}
+.video[data-sound=on] .sound{display:flex}
+.video[data-sound=on] canvas{visibility:hidden}
+.count{font-variant-numeric:tabular-nums;font-size:26px;font-weight:600}
+.weak{display:none;margin:8px 12px 0;padding:10px 12px;border-radius:14px;background:var(--accent-soft);gap:10px;align-items:center;font-size:14px}
+.weak p{margin:0;flex:1}
+.weak button{min-height:44px;border:0;border-radius:999px;background:var(--accent);color:var(--accent-fg);padding:0 14px;font-weight:600}
+.weak .x{background:none;color:var(--muted);padding:0 8px}
+.strip{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none;padding:6px 12px 0;align-items:flex-start}
+.strip li{list-style:none}
+.strip .fig{flex:none;width:56px}
+.strip .av{width:40px;height:40px}
+
+/* chat */
+.chat{position:relative;min-height:0;display:flex;flex-direction:column;margin-top:6px}
+.chat-h{display:none;padding:14px 16px 8px;font-weight:600}
+.pin,.anonbar{display:flex;gap:8px;align-items:flex-start;margin:0 12px 4px;border:0;border-radius:14px;padding:8px 10px;min-height:44px;text-align:left;width:calc(100% - 24px);font-size:14px;line-height:1.35}
+.pin{background:var(--raised)}
+.pin .ico{color:var(--accent);flex:none;margin-top:1px}
+.pin .ico svg{width:16px;height:16px}
+.pin span{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.pin[aria-expanded=true] span{-webkit-line-clamp:6}
+.anonbar{display:none;background:var(--warn-soft);color:var(--fg);align-items:center}
+.anonbar p{margin:0;flex:1}
+.anonbar button{border:0;background:var(--warn);color:var(--bg);border-radius:999px;min-height:44px;padding:0 14px;font-weight:600;flex:none}
+.room[data-anon=on] .anonbar{display:flex}
+.log{flex:1;min-height:0;overflow-y:auto;padding:4px 10px 8px;display:flex;flex-direction:column;gap:2px;scroll-behavior:smooth;mask-image:linear-gradient(180deg,transparent 0,#000 20px);overscroll-behavior:contain}
+/* scrollbar fades out when idle, returns while the reader scrolls or hovers */
+.log{scrollbar-width:thin;scrollbar-color:transparent transparent;transition:scrollbar-color 500ms var(--ease-out)}
+.log.active,.log:hover{scrollbar-color:var(--muted) transparent;transition-duration:120ms}
+@supports not (scrollbar-color:auto){
+  .log::-webkit-scrollbar{width:6px}
+  .log::-webkit-scrollbar-thumb{border-radius:3px;background:transparent;transition:background 500ms}
+  .log.active::-webkit-scrollbar-thumb,.log:hover::-webkit-scrollbar-thumb{background:var(--muted);transition-duration:120ms}
+}
+.room[data-scene=immersive] .log{scrollbar-width:none}
+.room[data-scene=immersive] .log::-webkit-scrollbar{display:none}
+.m{position:relative;display:grid;grid-template-columns:32px minmax(0,1fr);gap:8px;padding:6px 8px;border-radius:14px;touch-action:pan-y;transition:transform .2s var(--ease-out),background-color .15s;animation:in .18s var(--ease-out)}
+@keyframes in{from{opacity:0;transform:translateY(6px)}}
+.m.drag{transition:none}
+@media (hover:hover) and (pointer:fine){.m:hover{background:var(--raised)}}
+.m.open{background:var(--raised)}
+.m .av{width:32px;height:32px}
+.m .who{font-size:13px;font-weight:600;display:flex;gap:6px;align-items:center}
+.badge{font-size:11px;font-weight:600;background:var(--accent-soft);color:var(--accent);padding:0 6px;border-radius:5px}
+.badge.anon{background:var(--raised);color:var(--muted)}
+.m .tx{font-size:15px;overflow-wrap:anywhere}
+.m .q{font-size:13px;color:var(--muted);background:var(--raised);border-radius:8px;padding:2px 8px;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.m.open .q{background:var(--surface)}
+.m.me .who{color:var(--accent)}
+.m.mention{background:var(--accent-soft)}
+.rp{position:absolute;left:-44px;top:50%;width:32px;height:32px;margin-top:-16px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;opacity:0}
+.rp svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.hearts{display:inline-flex;gap:4px;align-items:center;font-size:13px;margin-top:3px;background:var(--accent-soft);color:var(--accent);padding:2px 8px;border-radius:999px;font-weight:600}
+.acts{display:none;gap:6px;margin-top:6px;flex-wrap:wrap}
+.m.open .acts{display:flex}
+.acts button{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:0 14px;font-size:14px;font-weight:500;min-height:44px}
+@media (hover:hover) and (pointer:fine){.acts button:hover{border-color:var(--accent);color:var(--accent)}}
+.sys{font-size:13px;color:var(--muted);text-align:center;padding:4px 0}
+.typing{height:20px;padding:0 20px;font-size:13px;color:var(--muted)}
+.fresh{position:absolute;left:50%;bottom:6px;transform:translateX(-50%);background:var(--accent);color:var(--accent-fg);border:0;border-radius:999px;padding:0 16px;font-weight:600;font-size:14px;box-shadow:0 6px 18px rgba(0,0,0,.35);z-index:4;min-height:44px}
+.fresh:active{transform:translateX(-50%) scale(.97)}
+
+.dock{padding:4px 12px calc(12px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line);background:var(--surface);display:grid;gap:6px;transition:opacity 200ms var(--ease-out)}
+.hype{height:4px;border-radius:2px;background:var(--raised);overflow:hidden}
+.hype i{display:block;height:100%;width:0;background:var(--accent);transform-origin:left;transition:width 300ms var(--ease-out)}
+.rx{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;align-items:center}
+.rx button,.tray button{flex:none;width:44px;height:44px;border-radius:50%;border:1px solid var(--line);background:var(--raised);font-size:22px}
+.rx .wave{width:auto;padding:0 14px;font-size:14px;font-weight:500;border-radius:999px}
+.reply{display:none;align-items:center;justify-content:space-between;gap:8px;background:var(--accent-soft);color:var(--accent);border-radius:12px;padding:0 4px 0 12px;font-size:14px;min-height:44px}
+.reply.on{display:flex}
+.reply span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.reply button{border:0;background:none;width:44px;height:44px;border-radius:50%;font-size:20px}
+.comp{display:flex;gap:8px;align-items:center}
+.comp input{flex:1;min-width:0;height:48px;border-radius:999px;border:1px solid var(--line);background:var(--raised);padding:0 18px;color:var(--fg);font:inherit;font-size:16px}
+.comp input::placeholder{color:var(--muted)}
+.send,.rb{width:48px;height:48px;border-radius:50%;display:grid;place-items:center;flex:none}
+.send{border:0;background:var(--accent);color:var(--accent-fg)}
+.send:disabled{background:var(--raised);color:var(--muted);cursor:default}
+.rb{border:1px solid var(--line);background:var(--raised)}
+.rb[aria-pressed=true]{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.rb[aria-disabled=true]{opacity:.4}
+.send svg,.rb svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+#heart{display:none}
+.rail,.tray{display:none}
+
+/* scene switching */
+.room[data-scene=voice] .video,.room[data-scene=voice] .strip,.room[data-scene=voice] .weak{display:none}
+.room:not([data-scene=voice]) .scene{display:none}
+.room[data-weak=on] .weak{display:flex}
+.room[data-scene=voice] .cambtn{display:none}
+
+/* immersive: the picture is the room. Only four things sit on it: title, chat, a slim tool rail, and the composer. */
+.room[data-scene=immersive]{background:#000;color:var(--on-media)}
+.room[data-scene=immersive] .zone{position:absolute;inset:0;z-index:0}
+.room[data-scene=immersive] .video{margin:0;height:100%;border-radius:0;aspect-ratio:auto}
+.room[data-scene=immersive] .vtop,.room[data-scene=immersive] .vbot{display:none}
+.room[data-scene=immersive] .strip,.room[data-scene=immersive] .pin,.room[data-scene=immersive] .anonbar,.room[data-scene=immersive] .hype,.room[data-scene=immersive] .rx,.room[data-scene=immersive] .typing{display:none}
+.room[data-scene=immersive] .weak{position:absolute;z-index:6;left:8px;right:8px;top:64px;margin:0}
+.room[data-scene=immersive] .top{position:absolute;inset:0 0 auto 0;z-index:5;background:linear-gradient(180deg,var(--scrim),transparent);padding-bottom:20px}
+.room[data-scene=immersive] .ttl small,.room[data-scene=immersive] .ib{color:var(--on-media)}
+.room[data-scene=immersive] .ttl b{font-size:15px}
+.room[data-scene=immersive] .top .more{display:none}
+.room[data-scene=immersive] .chip{background:var(--media-ink);border-color:transparent;color:var(--on-media)}
+.room[data-scene=immersive] .chat{position:absolute;z-index:4;left:0;right:64px;bottom:76px;height:30%;margin:0;pointer-events:none}
+.room[data-scene=immersive] .log{mask-image:linear-gradient(180deg,transparent 0,#000 48px);padding-inline:12px;pointer-events:none}
+.room[data-scene=immersive] .m{background:none;padding:2px 4px;grid-template-columns:minmax(0,1fr);gap:0;pointer-events:auto;width:fit-content;max-width:100%}
+.room[data-scene=immersive] .m>span[data-av]{display:none}
+.room[data-scene=immersive] .m .who{display:inline;font-size:14px;margin-right:6px}
+.room[data-scene=immersive] .m .who .badge{display:none}
+.room[data-scene=immersive] .m>div>div{display:inline}
+.room[data-scene=immersive] .m .q,.room[data-scene=immersive] .m .acts,.room[data-scene=immersive] .m .hz{display:none}
+.room[data-scene=immersive] .m.open .acts{display:flex;margin-top:6px}
+.room[data-scene=immersive] .m.open>div>div.acts{display:flex}
+.room[data-scene=immersive] .m.open{background:var(--scrim);border-radius:14px;padding:6px 8px}
+.room[data-scene=immersive] .m.open>div>div{display:block}
+.room[data-scene=immersive] .m .who,.room[data-scene=immersive] .m .tx{text-shadow:0 1px 6px rgba(0,0,0,.75)}
+.room[data-scene=immersive] .m .tx{color:var(--on-media);font-size:15px}
+.room[data-scene=immersive] .m .who{color:var(--on-media)!important;opacity:.8}
+.room[data-scene=immersive] .m.mention{background:none}
+.room[data-scene=immersive] .sys{text-align:left;color:var(--on-media);opacity:.8;text-shadow:0 1px 6px rgba(0,0,0,.75);padding:2px 4px}
+.room[data-scene=immersive] .dock{position:absolute;z-index:5;inset:auto 0 0 0;background:linear-gradient(0deg,var(--scrim),transparent);border:0;padding-top:12px}
+.room[data-scene=immersive] .comp input{background:var(--media-ink);border-color:transparent;color:var(--on-media);height:44px}
+.room[data-scene=immersive] .comp input::placeholder{color:rgba(255,255,255,.75)}
+.room[data-scene=immersive] #hand,.room[data-scene=immersive] #cam{display:none}
+.room[data-scene=immersive] #heart{display:grid;background:var(--media-ink);border-color:transparent;color:var(--on-media);width:44px;height:44px}
+.room[data-scene=immersive] .send:disabled{display:none}
+.room[data-scene=immersive] .send:not(:disabled){width:44px;height:44px}
+.room[data-scene=immersive] #heart.hide{display:none}
+.room[data-scene=immersive] .reply{position:absolute;left:12px;right:12px;bottom:70px}
+.room[data-scene=immersive] .rail{display:flex;position:absolute;right:10px;bottom:76px;z-index:5;flex-direction:column;gap:8px;transition:opacity 200ms var(--ease-out)}
+.room[data-scene=immersive] .rail .vb{padding:0;width:44px;height:44px}
+.room[data-scene=immersive] .rail .vb span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.room[data-scene=immersive] .rail small{font-size:11px;font-weight:600;color:var(--on-media);text-align:center;text-shadow:0 1px 4px rgba(0,0,0,.8);margin-top:-4px}
+.room[data-scene=immersive] .tray{display:flex;position:absolute;right:10px;bottom:76px;z-index:6;gap:2px;padding:4px;border-radius:999px;background:var(--scrim);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);transform-origin:right bottom;transform:scale(.9);opacity:0;pointer-events:none;transition:transform 180ms var(--ease-out),opacity 140ms}
+.room[data-scene=immersive] .tray.on{transform:none;opacity:1;pointer-events:auto}
+.room[data-scene=immersive] .tray button{background:none;border-color:transparent}
+.room[data-scene=immersive][data-tray=on] .rail{opacity:0;pointer-events:none}
+.room[data-scene=immersive][data-chrome=off] .top,.room[data-scene=immersive][data-chrome=off] .dock,.room[data-scene=immersive][data-chrome=off] .rail{opacity:0;pointer-events:none}
+
+/* tablet: same layout as phone, wider */
+.room[data-mode=tablet]{width:720px}
+/* desktop */
+.room[data-mode=desktop]{width:100%;height:680px;border-radius:20px;grid-template-columns:minmax(0,1fr) 360px;grid-template-rows:auto minmax(0,1fr) auto}
+.room[data-mode=desktop] .top{grid-column:1;padding:14px 16px 8px}
+.room[data-mode=desktop] .zone{grid-column:1;grid-row:2 / span 2;overflow:auto;padding-bottom:16px}
+.room[data-mode=desktop] .scene,.room[data-mode=desktop] .video{margin-inline:16px}
+.room[data-mode=desktop] .weak{margin-inline:16px}
+.room[data-mode=desktop] .strip{padding-inline:16px}
+.room[data-mode=desktop] .chat{grid-column:2;grid-row:1 / span 2;margin:0;border-left:1px solid var(--line);background:var(--raised)}
+.room[data-mode=desktop] .pin{background:var(--surface)}
+.room[data-mode=desktop] .chat-h{display:block}
+.room[data-mode=desktop] .dock{grid-column:2;grid-row:3;background:var(--raised);border-top:0}
+.room[data-mode=desktop] .fold,.room[data-mode=desktop] .expand{display:none}
+
+/* sheets */
+.sheet{position:absolute;inset:auto 0 0 0;max-height:84%;background:var(--surface);border-top:1px solid var(--line);border-radius:24px 24px 0 0;padding:10px 16px calc(20px + env(safe-area-inset-bottom,0px));transform:translateY(105%);visibility:hidden;transition:transform 220ms var(--ease-drawer),visibility 0s 220ms;z-index:10;overflow:auto;color:var(--fg)}
+.sheet.on{transform:none;visibility:visible;transition:transform 300ms var(--ease-drawer),visibility 0s}
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity 180ms;z-index:9}
+.scrim.on{opacity:1;pointer-events:auto}
+.grab{width:40px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 12px}
+.sheet h3{margin:0 0 4px;font-size:18px;font-weight:600}
+.sheet .sub{margin:0 0 12px;color:var(--muted);font-size:14px}
+.who-h{display:flex;gap:12px;align-items:center;margin-bottom:12px}
+.who-h .av{width:52px;height:52px}
+.who-h small{color:var(--muted);display:block}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.big{border:1px solid var(--line);background:var(--raised);border-radius:14px;min-height:48px;padding:6px 14px;font-weight:500;text-align:left;display:flex;align-items:center;gap:10px;width:100%}
+.big[aria-disabled=true]{opacity:.45;cursor:default}
+.big small{display:block;font-weight:400;color:var(--muted);font-size:12.5px;line-height:1.2}
+@media (hover:hover) and (pointer:fine){.big:not([aria-disabled=true]):hover{border-color:var(--accent)}}
+.big.warn{color:var(--live)}
+.big.cta{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);justify-content:center;font-weight:600;margin-top:12px}
+.big.prof{margin-bottom:8px;justify-content:space-between}
+.note{margin:10px 0 0;color:var(--muted);font-size:13.5px}
+.opts{display:grid;gap:6px}
+.opt{display:flex;gap:12px;align-items:center;min-height:56px;padding:6px 12px;border:1px solid var(--line);background:var(--raised);border-radius:14px;text-align:left;width:100%}
+.opt[aria-checked=true]{border-color:var(--accent);background:var(--accent-soft)}
+.opt[aria-disabled=true]{opacity:.55;cursor:default}
+.opt b{display:block;font-weight:600;font-size:15px}
+.opt small{color:var(--muted);font-size:13px;display:block}
+.opt .rd{width:20px;height:20px;border-radius:50%;border:2px solid var(--line);flex:none}
+.opt[aria-checked=true] .rd{border:6px solid var(--accent)}
+.plist{display:grid;gap:2px}
+.plist button{display:flex;align-items:center;gap:12px;border:0;background:none;padding:6px 8px;border-radius:12px;min-height:52px;text-align:left;width:100%}
+.plist .av{width:36px;height:36px}
+.plist small{color:var(--muted);margin-left:auto}
+.pv{aspect-ratio:16/9;border-radius:16px;background:var(--raised);display:grid;place-items:center;color:var(--muted);font-size:14px;text-align:center;padding:12px;margin-bottom:12px}
+.sw{display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:56px;border-top:1px solid var(--line)}
+.sw small{color:var(--muted);display:block}
+.tg{width:52px;height:32px;border-radius:999px;border:0;background:var(--line);position:relative;flex:none}
+.tg::after{content:"";position:absolute;top:4px;left:4px;width:24px;height:24px;border-radius:50%;background:var(--fg);transition:transform 200ms var(--ease-out)}
+.tg[aria-checked=true]{background:var(--accent)}
+.tg[aria-checked=true]::after{transform:translateX(20px);background:var(--accent-fg)}
+.rules{margin:0;padding:0;list-style:none;display:grid;gap:10px;font-size:14.5px}
+.rules li{display:grid;grid-template-columns:20px minmax(0,1fr);gap:10px}
+.rules svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;margin-top:2px}
+.rules .ok{color:var(--speak)}.rules .no{color:var(--live)}.rules .eye{color:var(--warn)}
+.toast{position:absolute;left:50%;top:72px;transform:translate(-50%,-8px);background:var(--fg);color:var(--bg);border-radius:999px;padding:8px 16px;font-size:14px;font-weight:500;opacity:0;pointer-events:none;transition:opacity 160ms,transform 220ms var(--ease-out);z-index:13;max-width:90%;text-align:center}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+
+/* lobby: where age rules and anonymous join live */
+.lobby{position:absolute;inset:0;z-index:8;background:var(--surface);overflow:auto;display:none}
+.room[data-lobby=on] .lobby{display:block}
+.lb{display:grid;gap:14px;padding:8px 16px 24px;max-width:520px;margin:0 auto}
+.lb-top{display:flex;align-items:center;gap:6px;margin-inline:-8px}
+.lb-top b{font-weight:600}
+.pvw{border:1px dashed var(--line);border-radius:14px;padding:8px 10px;display:grid;gap:6px;font-size:13px;color:var(--muted)}
+.pvw .seg button{min-height:44px;padding:0 12px;font-size:14px}
+.lb h2{font:700 1.7rem/1.05 var(--f-display);letter-spacing:-.01em;margin:0;text-wrap:balance}
+.lb-meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center;color:var(--muted);font-size:14px}
+.lb-meta .av{width:28px;height:28px}
+.tagp{display:inline-flex;gap:6px;align-items:center;min-height:28px;padding:0 10px;border-radius:999px;font-size:13px;font-weight:600;background:var(--accent-soft);color:var(--accent)}
+.tagp svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.tagp.teen{background:var(--warn-soft);color:var(--warn)}
+.friends{display:flex;align-items:center;gap:10px;font-size:14px}
+.friends .av{width:30px;height:30px;margin-right:-10px;box-shadow:0 0 0 2px var(--surface)}
+.friends span{margin-left:10px}
+.block{display:grid;gap:8px;padding:16px;border-radius:18px;background:var(--raised)}
+.block h3{margin:0;font-size:18px;font-weight:600}
+.block p{margin:0;color:var(--muted)}
+.lb-link{border:0;background:none;color:var(--accent);font-weight:600;min-height:44px;text-align:left;padding:0}
+
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+</style>
+
+<div class="wrap"><a class="packback" href="index.html">← Back to the design pack</a>
+  <div class="intro">
+    <h1>Rooms, chat first</h1>
+    <p>A clickable preview of the redesigned room: chat first, live video, a cleaner immersive view, profile links, and anonymous join with strict age rules. People, messages and the video picture are samples.</p>
+  </div>
+
+  <div class="controls">
+    <div class="ctl"><span>Scenario</span>
+      <div class="seg" role="group" aria-label="Scenario" id="scn">
+        <button data-s="join" aria-pressed="false">Join screen</button>
+        <button data-s="voice" aria-pressed="true">Voice room</button>
+        <button data-s="live" aria-pressed="false">Live video</button>
+        <button data-s="weak" aria-pressed="false">Weak signal</button>
+        <button data-s="drop" aria-pressed="false">Host dropped</button>
+      </div>
+    </div>
+    <div class="ctl"><span>Device</span>
+      <div class="seg" role="group" aria-label="Preview size">
+        <button id="bPhone" aria-pressed="true">Phone</button>
+        <button id="bTab" aria-pressed="false">Tablet</button>
+        <button id="bDesk" aria-pressed="false">Desktop</button>
+      </div>
+    </div>
+    <p class="cap" id="cap" aria-live="polite"></p>
+  </div>
+
+  <div class="cols">
+    <div class="stagebox">
+      <div class="room" id="room" data-mode="phone" data-scene="voice" data-anon="off" data-lobby="off" data-chrome="on" data-tray="off">
+        <div class="top">
+          <button class="ib" id="bBack" aria-label="Back to Rooms"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+          <div class="ttl"><b>Friday Pre-Drinks, Lagos to London</b><small><span class="live"><i></i>LIVE</span><span id="meta">Hosted by Mara · 13+</span></small></div>
+          <button class="chip" id="bPeople" aria-label="People in the room"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 5.2a3 3 0 010 5.6M18 14.4c2 .7 3 2.6 3 5.6"/></svg><span id="cnt">22</span></button>
+          <button class="ib more" id="bMore" aria-label="More options"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg></button>
+        </div>
+
+        <div class="zone">
+          <section class="scene" id="scene" aria-label="The room">
+            <div class="scene-h"><span id="sceneT">On stage</span><button class="fold" id="bFold" aria-expanded="true">Collapse room</button></div>
+            <ul class="row stage" id="stage"></ul>
+            <div class="floor"><ul class="row" id="floor"></ul></div>
+          </section>
+
+          <div class="video" id="video" data-drop="off" data-sound="off" aria-label="Live video from Dayo">
+            <canvas id="feed" width="640" height="360" aria-hidden="true"></canvas>
+            <div class="vscrim"></div>
+            <div class="sound"><svg class="av" viewBox="0 0 40 40" aria-hidden="true" id="soundAv"></svg><h3>Sound only</h3><p>Picture is off. You can still hear Dayo.</p><div class="bars" id="bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+            <div class="slate" role="status"><h3>Dayo's connection dropped</h3><p>Holding their spot. The screen frees up if they do not return.</p><div class="count" id="count">1:42</div></div>
+            <div class="vtop">
+              <span class="live"><i></i>LIVE</span>
+              <span class="vlabel" id="watching">19 watching</span>
+              <span class="sp"></span>
+              <button class="vb" id="bQual" aria-label="Video quality"><span id="qlbl">Auto</span></button>
+              <button class="vb expand" id="bExpand" aria-label="Immersive view"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+            </div>
+            <div class="vbot">
+              <span class="vlabel"><i class="dot"></i>Dayo is live</span>
+              <span class="sp"></span>
+              <button class="vb" id="bSound" aria-pressed="false" aria-label="Sound only"><svg viewBox="0 0 24 24"><path d="M4 10v4h4l5 4V6L8 10zM16 9a4 4 0 010 6M18.5 6.5a8 8 0 010 11"/></svg><span id="soundT">Sound only</span></button>
+            </div>
+          </div>
+
+          <div class="weak" role="status"><p>Your signal is weak. Switch to sound only to keep up.</p><button id="weakGo">Sound only</button><button class="x" id="weakX" aria-label="Dismiss">Not now</button></div>
+          <div class="strip" id="strip" aria-label="Speakers and guests"></div>
+        </div>
+
+        <section class="chat" aria-label="Room chat">
+          <div class="chat-h">Chat</div>
+          <button class="pin" id="pin" aria-expanded="false"><span class="ico"><svg viewBox="0 0 24 24"><path d="M9 4h6l-1 6 3 3H7l3-3zM12 13v7"/></svg></span><span><b>Mara:</b> House rules. Be kind, no sharing phone numbers, report anything off. Doors close at midnight.</span></button>
+          <div class="anonbar"><p>You are Guest 4F2. Hosts can still see who you are.</p><button id="reveal">Reveal me</button></div>
+          <div class="log" id="log" role="log" aria-live="polite"></div>
+          <div class="typing" id="typing" aria-hidden="true"></div>
+          <button class="fresh" id="fresh" hidden></button>
+        </section>
+
+        <div class="dock">
+          <div class="hype" aria-hidden="true"><i id="hypeBar"></i></div>
+          <div class="rx" id="rx" role="group" aria-label="React to the room"></div>
+          <div class="reply" id="reply"><span id="replyTx"></span><button id="replyX" aria-label="Cancel reply">×</button></div>
+          <form class="comp" id="form">
+            <button type="button" class="rb" id="hand" aria-pressed="false" aria-label="Ask to speak"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg></button>
+            <button type="button" class="rb" id="cam" aria-pressed="false" aria-label="Go live on camera"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="13" height="12" rx="3"/><path d="M16 10l5-3v10l-5-3"/></svg></button>
+            <input id="inp" autocomplete="off" maxlength="300" placeholder="Message the room" aria-label="Message">
+            <button type="button" class="rb" id="heart" aria-label="React"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.4-7-10a4 4 0 017-2.6A4 4 0 0119 10c0 5.6-7 10-7 10z"/></svg></button>
+            <button class="send" id="send" disabled aria-label="Send message"><svg viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-3-7z"/></svg></button>
+          </form>
+        </div>
+
+        <div class="rail" id="rail">
+          <button class="vb" id="rQual" aria-label="Video quality"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg><span>Quality</span></button>
+          <button class="vb" id="rSound" aria-pressed="false" aria-label="Sound only"><svg viewBox="0 0 24 24"><path d="M4 10v4h4l5 4V6L8 10zM16 9a4 4 0 010 6"/></svg><span>Sound only</span></button>
+          <button class="vb" id="rExit" aria-label="Exit immersive view"><svg viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg><span>Exit</span></button>
+        </div>
+        <div class="tray" id="tray" role="group" aria-label="React to the room"></div>
+
+        <div class="lobby" id="lobby"></div>
+        <div class="scrim" id="scrim"></div>
+        <div class="sheet" id="sheetAv" role="dialog" aria-label="Person actions"></div>
+        <div class="sheet" id="sheetPpl" role="dialog" aria-label="People"></div>
+        <div class="sheet" id="sheetQ" role="dialog" aria-label="Video quality"></div>
+        <div class="sheet" id="sheetLive" role="dialog" aria-label="Go live"></div>
+        <div class="sheet" id="sheetMore" role="dialog" aria-label="Room options"></div>
+        <div class="sheet" id="sheetSafe" role="dialog" aria-label="Room safety"></div>
+        <div class="toast" id="toast" role="status"></div>
+      </div>
+    </div>
+
+    <aside class="notes">
+      <div>
+        <h2>Chat first</h2>
+        <ul>
+          <li><b>Chat is on screen from the first second.</b><span>Swipe a message right to reply. Tap one for heart, reply and wave.</span></li>
+          <li><b>Pinned host message.</b><span>House rules stay in view. Tap to read it all.</span></li>
+          <li><b>Hype bar.</b><span>Reactions fill a thin bar. At full, the whole room gets a burst.</span></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Live video</h2>
+        <ul>
+          <li><b>Immersive is now four things.</b><span>Title, floating chat, a three-button rail, and the composer. Tap the picture to hide everything but chat.</span></li>
+          <li><b>Heart opens reactions.</b><span>They pop out of the button instead of sitting on screen all the time.</span></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Safety and identity</h2>
+        <ul>
+          <li><b>View profile</b><span>is the first action on every person.</span></li>
+          <li><b>Age rules are checked on the account.</b><span>Adults can never enter a teens room. Adults cannot join anonymously in any room open to under 18s.</span></li>
+          <li><b>Anonymous is a mask, not an exit.</b><span>Hosts and moderators still see who it is, and bans follow the account.</span></li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+(function(){
+  var $=function(s){return document.querySelector(s)};
+  var room=$('#room'), log=$('#log'), inp=$('#inp'), send=$('#send'), video=$('#video');
+  var reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var P=[
+    {id:'mara',n:'Mara',c:1,s:2,role:'host',mic:1},
+    {id:'dayo',n:'Dayo',c:2,s:1,role:'cohost',mic:1},
+    {id:'kemi',n:'Kemi',c:3,s:0,role:'guest',mic:1},
+    {id:'you',n:'You',c:4,s:3,role:'guest',me:1},
+    {id:'tayo',n:'Tayo',c:5,s:4},{id:'ada',n:'Ada',c:6,s:0},{id:'g7k1',n:'Guest 7K1',anon:1},{id:'jo',n:'Jo',c:7,s:5},
+    {id:'sam',n:'Sam',c:8,s:2},{id:'nia',n:'Nia',c:9,s:1},{id:'leo',n:'Leo',c:10,s:3},{id:'zee',n:'Zee',c:1,s:4}
+  ];
+  var by=function(id){return P.filter(function(p){return p.id===id})[0]};
+  var col=function(p){return p.anon?'var(--muted)':'color-mix(in srgb,var(--a'+p.c+') 55%,var(--fg))'};
+  function av(p,cls){
+    if(p.anon)return '<svg class="av '+(cls||'')+'" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="20" style="fill:var(--anon)"/><path d="M6 38c1-8 6-12 14-12s13 4 14 12z" style="fill:var(--anon-fg);opacity:.55"/><circle cx="20" cy="16" r="6.5" style="fill:var(--anon-fg);opacity:.8"/></svg>';
+    return '<svg class="av '+(cls||'')+'" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="20" style="fill:var(--a'+p.c+')"/><path d="M6 38c1-8 6-12 14-12s13 4 14 12z" fill="rgba(255,255,255,.28)"/><circle cx="20" cy="16" r="6.5" style="fill:var(--sk'+p.s+')"/></svg>';
+  }
+  $('#soundAv').outerHTML=av(by('dayo'),'');
+  var ic={
+    check:'<svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg>',
+    x:'<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+    eye:'<svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+    shield:'<svg viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>',
+    chev:'<svg viewBox="0 0 24 24" width="18" height="18" style="stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M9 6l6 6-6 6"/></svg>',
+    user:'<svg viewBox="0 0 24 24" width="20" height="20" style="stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>'
+  };
+  var state={scene:'voice',weak:false,drop:false,sound:false,q:'auto',asked:false,hand:false,anon:false,lobby:false,viewer:'teen',rtype:'open',choice:'self'};
+  var RT={teen:'Teens only',open:'13+',adult:'18+'};
+  var speaking='mara', replyTo=null, unread=0, hype=0, cur='voice';
+
+  function fig(p,big,mini){
+    var tag=(!mini&&p.mic&&p.role==='guest')?'<span class="tag">On mic</span>':'';
+    return '<li><button class="fig '+(p.me?'me':'')+'" data-id="'+p.id+'" aria-label="'+(p.me?'You':p.n)+', open actions">'+av(p,(big?'big ':'')+(speaking===p.id?'talk':''))+'<span class="nm">'+(p.me?'You':p.n)+'</span>'+tag+'</button></li>';
+  }
+  function drawScene(){
+    $('#stage').innerHTML=P.filter(function(p){return p.mic}).map(function(p){return fig(p,1)}).join('');
+    $('#floor').innerHTML=P.filter(function(p){return !p.mic}).map(function(p){return fig(p)}).join('')+'<li style="display:flex"><span class="more">+14 more</span></li>';
+    $('#strip').innerHTML=P.map(function(p){return fig(p,0,1)}).join('');
+  }
+  drawScene();
+
+  var emojis=['🔥','❤️','😂','👏','🎉','🙌'];
+  var emojiBtns=emojis.map(function(e){return '<button data-e="'+e+'" aria-label="React with '+e+'">'+e+'</button>'}).join('');
+  $('#rx').innerHTML='<button class="wave" data-wave>Wave 👋</button>'+emojiBtns;
+  $('#tray').innerHTML=emojiBtns;
+
+  function toast(t){var el=$('#toast');el.textContent=t;el.classList.add('on');clearTimeout(toast.t);toast.t=setTimeout(function(){el.classList.remove('on')},2400)}
+  function floatEmoji(e,id){
+    var rr=room.getBoundingClientRect(), x, y;
+    var f=state.scene==='voice'?document.querySelector('.fig[data-id="'+id+'"]'):null;
+    if(f){var r=f.getBoundingClientRect();x=r.left-rr.left+r.width/2-13;y=r.top-rr.top}
+    else{x=rr.width-(room.dataset.mode==='desktop'?380:40)+(Math.random()*14-7);y=rr.height-(state.scene==='immersive'?110:170)}
+    var d=document.createElement('span');d.className='float';d.textContent=e;d.style.left=x+'px';d.style.top=y+'px';
+    room.appendChild(d);setTimeout(function(){d.remove()},1900);
+  }
+  function addHype(n){
+    hype=Math.min(100,hype+n);$('#hypeBar').style.width=hype+'%';
+    if(hype>=100){
+      hype=0;toast('Hype moment. The room is on fire.');
+      for(var k=0;k<7;k++)(function(k){setTimeout(function(){floatEmoji(emojis[k%6],['tayo','ada','jo','sam','nia','leo','zee'][k])},k*90)})(k);
+      setTimeout(function(){$('#hypeBar').style.width='0%'},500);
+    }
+  }
+  setInterval(function(){if(hype>0){hype=Math.max(0,hype-3);$('#hypeBar').style.width=hype+'%'}},1000);
+
+  var nearBottom=function(){return log.scrollHeight-log.scrollTop-log.clientHeight<48};
+  function add(html){
+    var stick=nearBottom();
+    var el=document.createElement('div');el.innerHTML=html;var n=el.firstElementChild;log.appendChild(n);
+    while(log.children.length>120)log.removeChild(log.firstChild);
+    if(stick){log.scrollTop=log.scrollHeight}else{unread++;showFresh()}
+    return n;
+  }
+  function showFresh(){var b=$('#fresh');b.hidden=false;b.textContent=unread+' new message'+(unread>1?'s':'')+' ↓'}
+  $('#fresh').onclick=function(){log.scrollTop=log.scrollHeight;unread=0;$('#fresh').hidden=true};
+  log.addEventListener('scroll',function(){if(nearBottom()){unread=0;$('#fresh').hidden=true}});
+
+  var arrow='<span class="rp"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5M4 9h10a6 6 0 016 6v3"/></svg></span>';
+  function msg(id,text,quote){
+    var p=by(id);
+    var badge=p.role==='host'?'<span class="badge">Host</span>':p.role==='cohost'?'<span class="badge">Co-host</span>':p.anon?'<span class="badge anon">Anonymous</span>':'';
+    var mention=/@You/i.test(text)&&!p.me;
+    var safe=text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+    return add('<div class="m '+(p.me?'me':'')+(mention?' mention':'')+'" tabindex="0" role="button" aria-expanded="false" data-id="'+id+'" data-text="'+safe+'">'+arrow+
+      '<span data-av="'+id+'">'+av(p)+'</span><div><div class="who" style="'+(p.me?'':'color:'+col(p))+'">'+(p.me?'You':p.n)+badge+'</div>'+
+      (quote?'<div class="q">'+quote+'</div>':'')+'<div class="tx">'+safe.replace(/@(\w+)/g,'<b>@$1</b>')+'</div><div class="hz"></div>'+
+      '<div class="acts"><button data-a="heart">Heart</button><button data-a="reply">Reply</button>'+(p.anon||state.anon?'':'<button data-a="wave">Wave at '+(p.me?'yourself':p.n)+'</button>')+'</div></div></div>');
+  }
+  function sys(t){add('<div class="sys">'+t+'</div>')}
+
+  [['mara','Welcome in! Afrobeats into house till midnight.'],['kemi','Lagos is loud tonight'],['tayo','who else is getting ready right now'],['ada','Mara that opening set 👏'],['dayo','Drop where you are tuning in from'],['g7k1','lurking, love this playlist']].forEach(function(a){msg(a[0],a[1])});
+  sys('Sam and Zee joined');
+  msg('sam','Peckham checking in');
+  log.scrollTop=log.scrollHeight;
+
+  function reply(id,text){replyTo=text;$('#replyTx').textContent='Replying to '+by(id).n+': '+text;$('#reply').classList.add('on');inp.focus()}
+  var swiped=false;
+  log.addEventListener('click',function(e){
+    if(swiped){swiped=false;return}
+    var m=e.target.closest('.m');if(!m)return;
+    var a=e.target.closest('[data-a]');
+    if(a){
+      var id=m.dataset.id,k=a.dataset.a;
+      if(k==='heart'){var h=m.querySelector('.hearts'),c=h?+h.dataset.c+1:1;m.querySelector('.hz').innerHTML='<span class="hearts" data-c="'+c+'">♥ '+c+'</span>';floatEmoji('❤️',id);addHype(6)}
+      if(k==='reply')reply(id,m.dataset.text);
+      if(k==='wave'){floatEmoji('👋','you');toast('You waved at '+by(id).n)}
+      m.classList.remove('open');m.setAttribute('aria-expanded','false');return;
+    }
+    if(e.target.closest('[data-av]')){openAv(m.dataset.id);return}
+    var was=m.classList.contains('open');
+    log.querySelectorAll('.m.open').forEach(function(x){x.classList.remove('open');x.setAttribute('aria-expanded','false')});
+    if(!was){m.classList.add('open');m.setAttribute('aria-expanded','true')}
+  });
+  log.addEventListener('keydown',function(e){if((e.key==='Enter'||e.key===' ')&&e.target.classList.contains('m')){e.preventDefault();e.target.click()}});
+
+  /* swipe right to reply */
+  (function(){
+    var m=null,x0=0,y0=0,dx=0,on=false;
+    log.addEventListener('pointerdown',function(e){m=e.target.closest('.m');if(!m)return;x0=e.clientX;y0=e.clientY;dx=0;on=false});
+    log.addEventListener('pointermove',function(e){
+      if(!m)return;var ddx=e.clientX-x0,ddy=e.clientY-y0;
+      if(!on){if(Math.abs(ddx)>10&&Math.abs(ddx)>Math.abs(ddy)*1.5&&ddx>0){on=true;m.classList.add('drag');try{m.setPointerCapture(e.pointerId)}catch(_){}}else return}
+      dx=Math.max(0,Math.min(ddx,80));
+      var damp=dx>56?56+(dx-56)*.3:dx;
+      m.style.transform='translateX('+damp+'px)';
+      m.querySelector('.rp').style.opacity=Math.min(1,dx/48);
+    });
+    function end(){
+      if(!m)return;
+      if(on){swiped=true;setTimeout(function(){swiped=false},60);
+        m.classList.remove('drag');m.style.transform='';m.querySelector('.rp').style.opacity='';
+        if(dx>=56)reply(m.dataset.id,m.dataset.text)}
+      m=null;on=false;
+    }
+    log.addEventListener('pointerup',end);log.addEventListener('pointercancel',end);
+  })();
+
+  $('#replyX').onclick=function(){replyTo=null;$('#reply').classList.remove('on')};
+  inp.addEventListener('input',function(){send.disabled=!inp.value.trim();$('#heart').classList.toggle('hide',!!inp.value.trim())});
+  $('#form').addEventListener('submit',function(e){
+    e.preventDefault();var t=inp.value.trim();if(!t)return;
+    msg('you',t,replyTo);inp.value='';send.disabled=true;$('#heart').classList.remove('hide');replyTo=null;$('#reply').classList.remove('on');
+    log.scrollTop=log.scrollHeight;
+    setTimeout(function(){msg('kemi','haha '+t.split(' ')[0])},1600);
+  });
+
+  function react(e){
+    floatEmoji(e,'you');addHype(12);
+    ['tayo','ada'].forEach(function(id,i){setTimeout(function(){floatEmoji(e,id)},200+i*160)});
+  }
+  $('#rx').addEventListener('click',function(ev){
+    var b=ev.target.closest('button');if(!b)return;
+    if(b.dataset.wave!==undefined){floatEmoji('👋','you');toast('You waved at the room');return}
+    react(b.dataset.e);
+  });
+  $('#heart').onclick=function(){var on=!$('#tray').classList.contains('on');$('#tray').classList.toggle('on',on);room.dataset.tray=on?'on':'off'};
+  $('#tray').addEventListener('click',function(ev){var b=ev.target.closest('button');if(!b)return;react(b.dataset.e);$('#tray').classList.remove('on');room.dataset.tray='off'});
+
+  $('#hand').onclick=function(){
+    if(state.anon){toast('Anonymous guests can\'t use the mic. Reveal yourself first.');return}
+    state.hand=!state.hand;this.setAttribute('aria-pressed',state.hand);
+    this.setAttribute('aria-label',state.hand?'Lower hand':'Ask to speak');
+    toast(state.hand?'Hand raised. The host can bring you on the mic.':'Hand lowered');
+    if(state.hand)sys('You raised your hand');
+  };
+
+  $('#pin').onclick=function(){var x=this.getAttribute('aria-expanded')!=='true';this.setAttribute('aria-expanded',x)};
+
+  /* sheets */
+  var scrim=$('#scrim');
+  function close(){document.querySelectorAll('.sheet').forEach(function(s){s.classList.remove('on')});scrim.classList.remove('on')}
+  function open(s){s.classList.add('on');scrim.classList.add('on')}
+  scrim.onclick=close;
+  document.addEventListener('keydown',function(e){if(e.key==='Escape')close()});
+
+  function bt(label,x,o){o=o||{};return '<button class="big '+(o.warn?'warn':'')+'" data-x="'+x+'"'+(o.dis?' aria-disabled="true"':'')+'><span>'+label+(o.sub?'<small>'+o.sub+'</small>':'')+'</span></button>'}
+  function openAv(id){
+    var p=by(id),s=$('#sheetAv');
+    var role=p.anon?'Anonymous guest':p.role==='host'?'Host':p.role==='cohost'?'Co-host':p.mic?'On the mic':'Guest';
+    var meAnon=state.anon&&!p.me;
+    var html='<div class="grab"></div><div class="who-h">'+av(p)+'<div><b>'+(p.me?(state.anon?'You (Guest 4F2)':'You'):p.n)+'</b><small>'+role+'</small></div></div>';
+    if(p.me){
+      html+='<button class="big prof" data-x="profile"><span>'+ic.user+' &nbsp;View my profile</span>'+ic.chev+'</button><div class="grid2"><button class="big" data-x="close">Edit my avatar</button><button class="big" data-x="close">Room settings</button></div>';
+    }else{
+      html+=p.anon
+        ?'<button class="big prof" data-x="x" aria-disabled="true"><span>'+ic.user+' &nbsp;View profile<small>&nbsp;Hidden, this guest is anonymous</small></span></button>'
+        :'<button class="big prof" data-x="profile"><span>'+ic.user+' &nbsp;View profile</span>'+ic.chev+'</button>';
+      var off=p.anon||meAnon;
+      html+='<div class="grid2">'+bt('👋 Wave','wave',{dis:off})+bt('🔥 Send a reaction','react',{dis:off})+bt('Message privately','dm',{dis:off})+bt('Mute for me','mute')+bt('@ Mention in chat','reply')+bt('Report','report',{warn:1})+'</div>';
+      if(p.anon)html+='<p class="note">Anonymous guests can\'t be waved at or messaged. Hosts and moderators can see who this is, and reports go to them.</p>';
+      else if(meAnon)html+='<p class="note">Anonymous guests can\'t wave or message. Reveal yourself to do that.</p>';
+    }
+    s.innerHTML=html;
+    s.onclick=function(e){var b=e.target.closest('[data-x]');if(!b||b.getAttribute('aria-disabled')==='true')return;var x=b.dataset.x;close();
+      if(x==='profile')toast('Opens '+(p.me?'your':p.n+'\'s')+' profile');
+      if(x==='wave'){floatEmoji('👋','you');toast('You waved at '+p.n)}
+      if(x==='react'){floatEmoji('🔥',id);toast('Sent '+p.n+' a 🔥')}
+      if(x==='dm')toast('Opens a private message with '+p.n);
+      if(x==='mute')toast(p.n+' is muted for you');
+      if(x==='report')toast('Report sent to the host and moderators');
+      if(x==='reply'){inp.value='@'+p.n.replace(' ','')+' ';send.disabled=false;inp.focus()}};
+    open(s);
+  }
+  room.addEventListener('click',function(e){var f=e.target.closest('.fig');if(f&&!e.target.closest('.sheet'))openAv(f.dataset.id)});
+
+  $('#bPeople').onclick=function(){
+    var s=$('#sheetPpl');
+    s.innerHTML='<div class="grab"></div><h3>In the room, 22</h3><div class="plist">'+P.map(function(p){return '<button data-id="'+p.id+'">'+av(p)+'<span>'+(p.me?'You':p.n)+'</span><small>'+(p.role==='host'?'Host':p.role==='cohost'?'Co-host':p.anon?'Anonymous':p.mic?'On mic':'')+'</small></button>'}).join('')+'</div>';
+    s.onclick=function(e){var b=e.target.closest('button');if(b){close();setTimeout(function(){openAv(b.dataset.id)},260)}};
+    open(s);
+  };
+
+  function ruleList(){
+    var t=state.rtype;
+    var r='<ul class="rules">'+
+      '<li class="ok">'+ic.check+'<span>'+(t==='teen'?'Only people under 18 can be in this room. Adults are blocked, checked on their account.':t==='adult'?'Only adults can be in this room. Under 18s are blocked.':'People 13 and over can join. Adults are not allowed to join anonymously here.')+'</span></li>'+
+      '<li class="ok">'+ic.check+'<span>Anonymous guests can read, chat and react.</span></li>'+
+      '<li class="no">'+ic.x+'<span>Anonymous guests can\'t wave, send private messages, use the mic or the camera.</span></li>'+
+      '<li class="eye">'+ic.eye+'<span>Hosts and moderators can still see who an anonymous guest is. Reports and bans follow the account.</span></li></ul>';
+    return r;
+  }
+  $('#bMore').onclick=function(){
+    var s=$('#sheetMore');
+    s.innerHTML='<div class="grab"></div><h3>Room options</h3><p class="sub">'+RT[state.rtype]+' room</p><div class="opts">'+
+      bt('Share room','share',{sub:'Copy the link to bring your crew'})+bt('Room safety','safe',{sub:'Age rules, anonymous guests, how to report'})+bt('Remind me about the next one','remind')+bt('Report this room','report',{warn:1})+bt('Leave quietly','leave')+'</div>';
+    s.onclick=function(e){var b=e.target.closest('[data-x]');if(!b)return;var x=b.dataset.x;
+      if(x==='safe'){close();setTimeout(openSafe,260);return}
+      close();
+      if(x==='share'){try{navigator.clipboard.writeText('Sample room link').then(function(){toast('Link copied')},function(){toast('Copy the link from your browser bar')})}catch(_){toast('Copy the link from your browser bar')}}
+      if(x==='remind')toast('We will remind you before the next one');
+      if(x==='report')toast('Report sent to the moderators');
+      if(x==='leave')toast('You left the room')};
+    open(s);
+  };
+  function openSafe(){
+    var s=$('#sheetSafe');
+    s.innerHTML='<div class="grab"></div><h3>Room safety</h3><p class="sub">'+RT[state.rtype]+' room</p>'+ruleList()+'<button class="big cta" data-x="close">Got it</button>';
+    s.onclick=function(e){if(e.target.closest('[data-x]'))close()};open(s);
+  }
+
+  var QL={auto:['Auto','Matches your connection. Best on mobile data.'],saver:['Data saver','360p. Smallest data use.'],balanced:['Balanced','540p. Good on most phones.'],high:['High','720p. Best picture on Wi-Fi.']};
+  function openQ(){
+    var s=$('#sheetQ');
+    s.innerHTML='<div class="grab"></div><h3>Video quality</h3><p class="sub">Applies on this device only.</p><div class="opts" role="radiogroup">'+
+      Object.keys(QL).map(function(k){return '<button class="opt" role="radio" aria-checked="'+(state.q===k)+'" data-q="'+k+'"><span class="rd"></span><span><b>'+QL[k][0]+'</b><small>'+QL[k][1]+'</small></span></button>'}).join('')+'</div>'+
+      '<div class="sw"><div><b>Sound only</b><small>Turn the picture off and keep the audio</small></div><button class="tg" role="switch" aria-checked="'+state.sound+'" id="tgSound" aria-label="Sound only"></button></div>';
+    s.onclick=function(e){
+      var o=e.target.closest('[data-q]');if(o){state.q=o.dataset.q;render();close();toast('Quality: '+QL[state.q][0]);return}
+      if(e.target.closest('#tgSound')){state.sound=!state.sound;render();close()}
+    };
+    open(s);
+  }
+  $('#bQual').onclick=openQ;$('#rQual').onclick=openQ;
+
+  $('#cam').onclick=function(){
+    if(state.anon){toast('Anonymous guests can\'t use the camera. Reveal yourself first.');return}
+    var s=$('#sheetLive');
+    s.innerHTML='<div class="grab"></div><h3>'+(state.asked?'Request sent':'Go live on camera')+'</h3><p class="sub">One person is live at a time. The host or a co-host lets you on.</p>'+
+      '<div class="pv">Your camera preview shows here before anyone sees you.</div>'+
+      '<div class="sw"><div><b>Camera</b><small>Front camera</small></div></div>'+
+      '<div class="sw"><div><b>Microphone</b><small>Phone microphone</small></div></div>'+
+      '<div class="sw"><div><b>Music mode</b><small>Keeps music clean. Wear headphones to avoid echo.</small></div><button class="tg" role="switch" aria-checked="false" id="tgMusic" aria-label="Music mode"></button></div>'+
+      '<button class="big cta" id="goAsk" data-x="ask">'+(state.asked?'Withdraw request':'Ask to go live')+'</button>';
+    s.onclick=function(e){
+      var t=e.target.closest('#tgMusic');if(t){t.setAttribute('aria-checked',t.getAttribute('aria-checked')!=='true');return}
+      if(e.target.closest('#goAsk')){state.asked=!state.asked;$('#cam').setAttribute('aria-pressed',state.asked);close();toast(state.asked?'Asked. Mara and Dayo can see your request.':'Request withdrawn')}
+    };
+    open(s);
+  };
+
+  $('#bFold').onclick=function(){
+    var sc=$('#scene'),min=sc.classList.toggle('min');
+    this.textContent=min?'Expand room':'Collapse room';this.setAttribute('aria-expanded',!min);
+    $('.floor').style.display=min?'none':'';
+    $('#sceneT').textContent=min?'In the room':'On stage';
+  };
+
+  /* video controls */
+  function toggleSound(){state.sound=!state.sound;if(state.sound){state.weak=false;toast('Sound only on. Picture is off.')}render()}
+  $('#bSound').onclick=toggleSound;$('#rSound').onclick=toggleSound;
+  $('#weakGo').onclick=function(){state.sound=true;state.weak=false;toast('Sound only on. Picture is off.');render()};
+  $('#weakX').onclick=function(){state.weak=false;render()};
+  function setImmersive(on){
+    state.scene=on?'immersive':'live';room.dataset.chrome='on';room.dataset.tray='off';$('#tray').classList.remove('on');render();
+    if(on)hint();
+  }
+  var hinted=false;
+  function hint(){if(hinted)return;hinted=true;toast('Tap the picture to hide controls')}
+  $('#bExpand').onclick=function(){setImmersive(true)};
+  $('#rExit').onclick=function(){setImmersive(false)};
+  $('#bBack').onclick=function(){if(state.scene==='immersive')setImmersive(false);else toast('Back to the Rooms list')};
+  video.addEventListener('click',function(e){
+    if(state.scene!=='immersive'||e.target.closest('button'))return;
+    room.dataset.chrome=room.dataset.chrome==='off'?'on':'off';
+  });
+
+  /* anonymous + age rules (display of server rules; the server enforces them) */
+  function rules(viewer,rtype){
+    if(viewer==='adult'&&rtype==='teen')return {ok:false,t:'This room is for under 18s',b:'Adults can\'t join rooms for teens. This is checked against your account and can\'t be skipped.'};
+    if(viewer==='teen'&&rtype==='adult')return {ok:false,t:'This room is 18+',b:'You can join rooms that match your age. Try a 13+ room or a teens room.'};
+    var anon=!(viewer==='adult'&&rtype==='open');
+    return {ok:true,anon:anon,why:anon?'':'Adults can\'t join anonymously in rooms open to under 18s.'};
+  }
+  var friendsHtml=function(){return '<div class="friends">'+av(by('ada'))+av(by('tayo'))+av(by('jo'))+'<span>Ada, Tayo and 3 friends are inside</span></div>'};
+  function renderLobby(){
+    var r=rules(state.viewer,state.rtype),h='';
+    h+='<div class="lb"><div class="lb-top"><button class="ib" data-l="back" aria-label="Back to Rooms"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button><b>Join room</b></div>';
+    h+='<div class="pvw"><span>Preview only. Change who is joining:</span><div class="seg" role="group" aria-label="Who is joining"><button data-l="v-teen" aria-pressed="'+(state.viewer==='teen')+'">Teen, 16</button><button data-l="v-adult" aria-pressed="'+(state.viewer==='adult')+'">Adult, 28</button></div>'+
+      '<span>Room age rule:</span><div class="seg" role="group" aria-label="Room age rule"><button data-l="r-teen" aria-pressed="'+(state.rtype==='teen')+'">Teens only</button><button data-l="r-open" aria-pressed="'+(state.rtype==='open')+'">13+</button><button data-l="r-adult" aria-pressed="'+(state.rtype==='adult')+'">18+</button></div></div>';
+    h+='<h2>Friday Pre-Drinks, Lagos to London</h2>';
+    h+='<div class="lb-meta">'+av(by('mara'))+'<span>Mara</span><span class="tagp '+(state.rtype==='teen'?'teen':'')+'">'+ic.shield+RT[state.rtype]+'</span><span>22 inside</span></div>';
+    h+=friendsHtml();
+    if(!r.ok){
+      h+='<div class="block" role="alert"><h3>'+r.t+'</h3><p>'+r.b+'</p></div><button class="big cta" data-l="find">Find rooms for you</button>';
+    }else{
+      if(state.choice==='anon'&&!r.anon)state.choice='self';
+      h+='<div class="opts" role="radiogroup" aria-label="How do you want to join?">'+
+        '<button class="opt" role="radio" aria-checked="'+(state.choice==='self')+'" data-l="c-self"><span class="rd"></span><span><b>Join as yourself</b><small>Others see your name, avatar and profile.</small></span></button>'+
+        '<button class="opt" role="radio" aria-checked="'+(state.choice==='anon')+'" aria-disabled="'+(!r.anon)+'" data-l="c-anon"><span class="rd"></span><span><b>Join anonymously</b><small>'+(r.anon?'Others see Guest 4F2 and a plain avatar.':r.why)+'</small></span></button></div>';
+      if(state.choice==='anon')h+=ruleList();
+      else if(state.rtype==='teen')h+='<p class="note">Adults can never enter this room. Age is checked on every account.</p>';
+      h+='<button class="big cta" data-l="join">'+(state.choice==='anon'?'Join anonymously':'Join as yourself')+'</button><button class="lb-link" data-l="how">How anonymous works</button>';
+    }
+    h+='</div>';
+    $('#lobby').innerHTML=h;
+  }
+  $('#lobby').addEventListener('click',function(e){
+    var b=e.target.closest('[data-l]');if(!b)return;var k=b.dataset.l;
+    if(k==='v-teen'||k==='v-adult'){state.viewer=k.slice(2);state.choice='self';renderLobby()}
+    else if(k.indexOf('r-')===0){state.rtype=k.slice(2);state.choice='self';renderLobby()}
+    else if(k==='c-self'){state.choice='self';renderLobby()}
+    else if(k==='c-anon'){if(b.getAttribute('aria-disabled')==='true'){toast('Adults can\'t join anonymously in rooms open to under 18s.');return}state.choice='anon';renderLobby()}
+    else if(k==='how'){openSafe()}
+    else if(k==='find'||k==='back'){toast('Back to the Rooms list')}
+    else if(k==='join'){
+      state.anon=state.choice==='anon';state.lobby=false;cur='voice';state.scene='voice';
+      var me=by('you');me.anon=state.anon;
+      drawScene();render();
+      toast(state.anon?'You joined as Guest 4F2':'Welcome in');
+    }
+  });
+  $('#reveal').onclick=function(){state.anon=false;by('you').anon=false;drawScene();render();toast('You are visible to the room now')};
+
+  var CAP={
+    join:'Join screen. Switch who is joining and the room\'s age rule to see every outcome. Adults are blocked from teen rooms. Adults can\'t join anonymously where under 18s are allowed.',
+    voice:'Voice room. Avatars on stage, a pinned host message, chat takes the rest of the screen. Tap any avatar for View profile and other actions.',
+    live:'Live video. Phones and tablets open it immersive: the picture fills the screen and chat floats over it. Tap the heart for reactions, tap the picture to hide controls, tap Exit for the compact view. Desktop keeps the picture beside the chat rail.',
+    weak:'Weak signal. The app offers sound only before the picture stutters. Tap Sound only to see it.',
+    drop:'Host dropped. Viewers see a slate and a countdown while the app holds the host\'s spot. If they return it resumes by itself.'
+  };
+  function scenario(k){
+    cur=k;
+    state.lobby=k==='join';
+    if(k==='join'){state.choice='self';renderLobby()}
+    state.weak=k==='weak';state.drop=k==='drop';state.sound=false;
+    state.scene=(k==='voice'||k==='join')?'voice':(room.dataset.mode==='desktop'?'live':'immersive');
+    room.dataset.chrome='on';room.dataset.tray='off';$('#tray').classList.remove('on');
+    dropLeft=102;render();
+    if(state.scene==='immersive')hint();
+  }
+  document.querySelectorAll('#scn button').forEach(function(b){b.onclick=function(){scenario(b.dataset.s)}});
+
+  function render(){
+    var scene=state.scene;
+    if(room.dataset.mode==='desktop'&&scene==='immersive')scene='live';
+    room.dataset.scene=scene;room.dataset.weak=state.weak?'on':'off';
+    room.dataset.anon=state.anon?'on':'off';room.dataset.lobby=state.lobby?'on':'off';
+    video.dataset.drop=state.drop?'on':'off';video.dataset.sound=state.sound?'on':'off';
+    $('#qlbl').textContent=QL[state.q][0];
+    ['#bSound','#rSound'].forEach(function(id){$(id).setAttribute('aria-pressed',state.sound);$(id).classList.toggle('pressed',state.sound)});
+    $('#soundT').textContent=state.sound?'Show picture':'Sound only';
+    $('#meta').textContent=scene==='immersive'?'Dayo is live · 19 watching':'Hosted by Mara · '+RT[state.rtype];
+    document.querySelectorAll('#scn button').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.s===cur)});
+    $('#cap').textContent=CAP[cur];
+    $('#watching').textContent=(state.scene==='voice'?'':'19 watching');
+    $('.wave').hidden=state.anon;
+    ['#hand','#cam'].forEach(function(id){$(id).setAttribute('aria-disabled',state.anon)});
+    setTimeout(function(){log.scrollTop=log.scrollHeight},30);
+  }
+  function mode(m){
+    room.dataset.mode=m;$('#bPhone').setAttribute('aria-pressed',m==='phone');$('#bTab').setAttribute('aria-pressed',m==='tablet');$('#bDesk').setAttribute('aria-pressed',m==='desktop');
+    if(cur!=='voice'&&cur!=='join')state.scene=m==='desktop'?'live':'immersive';
+    render();
+  }
+  $('#bPhone').onclick=function(){mode('phone')};$('#bTab').onclick=function(){mode('tablet')};$('#bDesk').onclick=function(){mode('desktop')};
+
+  /* chat scrollbar: visible only while the reader is scrolling or touching it */
+  (function(){
+    var t;function wake(){log.classList.add('active');clearTimeout(t);t=setTimeout(function(){log.classList.remove('active')},1200)}
+    ['wheel','touchstart','touchmove','pointerdown','keydown'].forEach(function(ev){log.addEventListener(ev,wake,{passive:true})});
+  })();
+
+  /* host dropped countdown */
+  var dropLeft=102;
+  setInterval(function(){
+    if(!state.drop)return;
+    if(dropLeft>0)dropLeft--;
+    var el=$('#count');
+    if(dropLeft>0){el.textContent=Math.floor(dropLeft/60)+':'+('0'+dropLeft%60).slice(-2)}
+    else{el.textContent='Released'}
+  },1000);
+
+  /* sample live feed: a stand-in for the camera picture */
+  var cv=$('#feed'),g=cv.getContext('2d'),W=640,H=360,last=0;
+  function frame(t){
+    var s=t/1000;
+    g.fillStyle='#0a0714';g.fillRect(0,0,W,H);
+    var glows=[[0.25,0.35,'rgba(138,92,230,.55)'],[0.75,0.3,'rgba(15,143,138,.45)'],[0.5,0.7,'rgba(245,158,11,.28)']];
+    glows.forEach(function(q,i){
+      var x=W*(q[0]+Math.sin(s*.6+i*2)*.08),y=H*(q[1]+Math.cos(s*.5+i)*.06);
+      var r=g.createRadialGradient(x,y,0,x,y,200);r.addColorStop(0,q[2]);r.addColorStop(1,'rgba(0,0,0,0)');g.fillStyle=r;g.fillRect(0,0,W,H);
+    });
+    [[W*.2,'rgba(138,92,230,.22)',1],[W*.8,'rgba(15,143,138,.2)',-1]].forEach(function(b,i){
+      var a=Math.sin(s*.8+i*1.7)*.28*b[2],x=b[0];
+      g.save();g.translate(x,0);g.rotate(a);g.fillStyle=b[1];g.beginPath();g.moveTo(-6,0);g.lineTo(6,0);g.lineTo(120,H);g.lineTo(-120,H);g.closePath();g.fill();g.restore();
+    });
+    var bob=Math.sin(s*5.2)*4;
+    g.fillStyle='#17122a';g.fillRect(0,H*.78,W,H*.22);
+    var led=g.createLinearGradient(0,0,W,0);led.addColorStop(0,'#8a5ce6');led.addColorStop(.5,'#34c3b5');led.addColorStop(1,'#f59e0b');
+    g.fillStyle=led;g.fillRect(W*.2,H*.78,W*.6,3);
+    var cx=W/2,by0=H*.78+bob;
+    g.fillStyle='#0b0814';
+    g.beginPath();g.moveTo(cx-95,by0+6);g.quadraticCurveTo(cx-90,by0-80,cx,by0-84);g.quadraticCurveTo(cx+90,by0-80,cx+95,by0+6);g.closePath();g.fill();
+    g.fillStyle='#8d5a3b';g.beginPath();g.arc(cx,by0-118+bob*.3,30,0,7);g.fill();
+    g.strokeStyle='#0b0814';g.lineWidth=8;g.beginPath();g.arc(cx,by0-124+bob*.3,36,Math.PI*1.05,Math.PI*1.95);g.stroke();
+    g.fillStyle='#0b0814';g.fillRect(cx-42,by0-128+bob*.3,10,26);g.fillRect(cx+32,by0-128+bob*.3,10,26);
+    g.strokeStyle='#0b0814';g.lineWidth=18;g.lineCap='round';
+    var arm=Math.sin(s*2.6)*10;
+    g.beginPath();g.moveTo(cx-70,by0-50);g.lineTo(cx-110,by0+8+arm);g.stroke();
+    g.beginPath();g.moveTo(cx+70,by0-50);g.lineTo(cx+110,by0+8-arm);g.stroke();
+    var v=g.createRadialGradient(W/2,H/2,H*.3,W/2,H/2,W*.62);v.addColorStop(0,'rgba(0,0,0,0)');v.addColorStop(1,'rgba(0,0,0,.55)');g.fillStyle=v;g.fillRect(0,0,W,H);
+  }
+  var bars=document.querySelectorAll('#bars i');
+  function loop(t){
+    requestAnimationFrame(loop);
+    if(t-last<33)return;last=t;
+    if(room.dataset.scene!=='voice'&&!state.drop&&!state.sound)frame(t);
+    if(state.sound)bars.forEach(function(b){b.style.transform='scaleY('+(.2+Math.random()*.8)+')'});
+  }
+  frame(0);
+  if(!reduce)requestAnimationFrame(loop);
+
+  /* simulated chat */
+  var script=[
+    ['tayo','@Mara can you play the Burna one next'],['jo','this room is the vibe 🙌'],['dayo','Shoutout to everyone from Brixton'],
+    ['g7k1','who made this playlist, it is clean'],['nia','first time here, how do I get on the mic?'],['mara','@Nia tap the mic button, I will bring you up'],['leo','Leeds in the building'],
+    ['ada','@You where are you tuning in from?'],['zee','ok this track though 🔥']
+  ];
+  var i=0;
+  setInterval(function(){
+    if(state.lobby)return;
+    var a=script[i%script.length];i++;
+    var ty=$('#typing');ty.textContent=by(a[0]).n+' is typing…';
+    setTimeout(function(){ty.textContent='';msg(a[0],a[1]);speaking=['mara','dayo','kemi'][i%3];drawScene();
+      if(i%3===0)floatEmoji(emojis[i%6],a[0])},1300);
+  },5200);
+
+  render();
+})();
+</script>

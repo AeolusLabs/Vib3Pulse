@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>body{margin:0}[hidden]{display:none!important}img{max-width:100%}</style>
+<title>Vib3 Rooms Design Pack</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,600;6..96,700&family=Jost:wght@400;500;600&display=swap">
+<style>
+/* Concept: a lookbook. Phone screens are the photographs; words stay short and sit beside them. Dark first, violet for action, amber only for the money moments. */
+:root{
+  --bg:#0b0a0e; --surface:#141318; --raised:#1d1b23; --line:#2a2731; --fg:#f4f2f7; --muted:#a8a3b5;
+  --accent:#8a5ce6; --accent-fg:#ffffff; --amber:#f5b83d; --amber-ink:#2a1802; --ok:#34c47a; --no:#ef6b6b;
+  --f-display:"Bodoni Moda",Georgia,serif; --f-body:"Jost",system-ui,sans-serif;
+  --ease-out:cubic-bezier(.23,1,.32,1); color-scheme:dark;
+}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#f4f3f6;--surface:#ffffff;--raised:#eceaf1;--line:#d9d6e2;--fg:#16141c;--muted:#5d586b;--accent:#6a37c9;--ok:#1f7a45;--no:#c0392b;color-scheme:light}}
+:root[data-theme="light"]{--bg:#f4f3f6;--surface:#ffffff;--raised:#eceaf1;--line:#d9d6e2;--fg:#16141c;--muted:#5d586b;--accent:#6a37c9;--ok:#1f7a45;--no:#c0392b;color-scheme:light}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:16px/1.55 var(--f-body);padding-inline:16px;padding-block:32px 72px}
+a{color:inherit}
+.wrap{max-width:1180px;margin:0 auto;display:grid;gap:72px}
+h1{font:700 clamp(2.6rem,9vw,5.2rem)/.95 var(--f-display);letter-spacing:-.025em;margin:0;text-wrap:balance}
+h2{font:700 clamp(1.7rem,4.5vw,2.4rem)/1.05 var(--f-display);letter-spacing:-.015em;margin:0;text-wrap:balance}
+h3{font:600 1.05rem/1.3 var(--f-body);margin:0}
+p{margin:0}
+.muted{color:var(--muted)}
+.hero{display:grid;gap:22px;max-width:64ch}
+.hero p{font-size:1.1rem;color:var(--muted)}
+.cta{display:flex;flex-wrap:wrap;gap:12px}
+.btn{display:inline-flex;align-items:center;min-height:48px;padding:0 22px;border-radius:999px;background:var(--accent);color:var(--accent-fg);font-weight:600;text-decoration:none;transition:transform 140ms var(--ease-out)}
+.btn.alt{background:var(--raised);color:var(--fg);border:1px solid var(--line)}
+.btn:active{transform:scale(.97)}
+.btn:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.sec{display:grid;gap:26px}
+.sec>header{display:grid;gap:10px;max-width:66ch}
+.sec>header p{color:var(--muted)}
+.shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,250px),1fr));gap:22px;align-items:start}
+.shots.two{grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr))}
+figure{margin:0;display:grid;gap:10px}
+figure img{width:100%;height:auto;display:block;border-radius:22px;border:1px solid var(--line);background:var(--surface)}
+figure.wide img{border-radius:16px}
+figcaption{display:grid;gap:2px;font-size:14.5px}
+figcaption b{font-weight:600;font-size:16px}
+figcaption span{color:var(--muted)}
+.tw{overflow-x:auto;border:1px solid var(--line);border-radius:16px}
+table{border-collapse:collapse;width:100%;min-width:560px;font-size:14.5px}
+th,td{text-align:left;padding:12px 16px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:13px;color:var(--muted);font-weight:600;background:var(--raised)}
+tr:last-child td{border-bottom:0}
+td:first-child{font-weight:600}
+.ok{color:var(--ok)}.no{color:var(--no)}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:22px}
+.card{display:grid;gap:8px;padding:20px;border-radius:18px;background:var(--surface);border:1px solid var(--line)}
+.card.amber{background:var(--amber);color:var(--amber-ink);border-color:var(--amber)}
+.card.amber p{color:var(--amber-ink)}
+ul.clean{margin:0;padding:0;list-style:none;display:grid;gap:10px}
+ul.clean li{display:grid;grid-template-columns:20px minmax(0,1fr);gap:10px}
+ul.clean li::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--accent);margin-top:9px;justify-self:center}
+footer{color:var(--muted);font-size:14px;border-top:1px solid var(--line);padding-top:22px;display:grid;gap:6px}
+@media(prefers-reduced-motion:reduce){*{transition-duration:.01ms!important}}
+</style>
+
+<div class="wrap">
+  <header class="hero">
+    <h1>Vib3 Rooms</h1>
+    <p>A live room you can talk in, watch in and spray in. This pack shows the screens, the rules behind them and the open decisions. Every person and message is sample data. Nothing is charged. You pay at the moment you spray, in Vib3Cash (V3C): <b>₦1,000 = 100,000 V3C</b>, shown in your local currency. There is no balance.</p>
+    <div class="cta">
+      <a class="btn" href="rooms.html">Open the Rooms prototype</a>
+      <a class="btn alt" href="notes.html">Open the spray prototype</a>
+      <a class="btn alt" href="flows.html">Open every flow, end to end</a>
+      <a class="btn alt" href="brief.html">Legal and accounting brief, Nigeria</a>
+    </div>
+  </header>
+
+  <section class="sec" aria-labelledby="s1">
+    <header>
+      <h2 id="s1">Chat comes first</h2>
+      <p>People used to scroll past avatars to find the chat. Now chat takes every pixel the room does not need. Swipe a message right to reply, tap a name for the person sheet, and View profile is always the first option.</p>
+    </header>
+    <div class="shots">
+      <figure><img src="img/r4-voice.png" alt="Voice room with a pinned host message and live chat" loading="lazy"><figcaption><b>Voice room</b><span>Pinned host message, avatars on stage, chat underneath, one-thumb dock.</span></figcaption></figure>
+      <figure><img src="img/r5-profile.png" alt="Person sheet with View profile as the first action" loading="lazy"><figcaption><b>Person sheet</b><span>View profile first, then wave, reaction, message, mute and report.</span></figcaption></figure>
+      <figure><img src="img/r6-live.png" alt="Live video on top with a speaker strip and chat below" loading="lazy"><figcaption><b>Live video</b><span>The picture on top, speakers as a strip of faces, chat still large.</span></figcaption></figure>
+      <figure><img src="img/r7-immersive.png" alt="Immersive live video with floating chat" loading="lazy"><figcaption><b>Immersive</b><span>The default on phones and tablets. Title, floating chat, three tools and the composer. Tap the picture to hide controls.</span></figcaption></figure>
+    </div>
+    <div class="shots two">
+      <figure><img src="img/r8-weak.png" alt="Weak signal banner offering sound only" loading="lazy"><figcaption><b>Weak signal</b><span>Offers sound only before the picture stutters.</span></figcaption></figure>
+      <figure><img src="img/r9-drop.png" alt="Host dropped slate with a countdown" loading="lazy"><figcaption><b>Host dropped</b><span>A slate and a countdown while their spot is held.</span></figcaption></figure>
+    </div>
+    <figure class="wide"><img src="img/r10-desktop.png" alt="Desktop layout with video beside a chat rail" loading="lazy"><figcaption><b>Desktop</b><span>The picture beside a fixed chat rail.</span></figcaption></figure>
+  </section>
+
+  <section class="sec" aria-labelledby="s2">
+    <header>
+      <h2 id="s2">Joining, anonymously if you like</h2>
+      <p>Age is checked on the account, on the server, every time. Anonymous is a mask: others see "Guest 4F2", but hosts and moderators still see who it is, and reports and bans follow the account.</p>
+    </header>
+    <div class="shots">
+      <figure><img src="img/r1-join-anon.png" alt="Join screen with anonymous option selected for a teen" loading="lazy"><figcaption><b>Teen joins a 13+ room</b><span>Can join as themselves or anonymously, and sees exactly what anonymous means.</span></figcaption></figure>
+      <figure><img src="img/r3-join-adult.png" alt="Join screen where an adult cannot choose anonymous in a 13+ room" loading="lazy"><figcaption><b>Adult joins a 13+ room</b><span>Anonymous is off with a plain reason.</span></figcaption></figure>
+      <figure><img src="img/r2-join-blocked.png" alt="Adult blocked from a teens-only room" loading="lazy"><figcaption><b>Adult at a teens-only room</b><span>Blocked. It cannot be skipped.</span></figcaption></figure>
+    </div>
+    <div class="tw"><table>
+      <thead><tr><th>Who is joining</th><th>Teens only</th><th>Open to 13+</th><th>Adults 18+</th></tr></thead>
+      <tbody>
+        <tr><td>Teen (13 to 17)</td><td class="ok">Can join, anonymous allowed</td><td class="ok">Can join, anonymous allowed</td><td class="no">Blocked</td></tr>
+        <tr><td>Adult (18+)</td><td class="no">Blocked, cannot be skipped</td><td>Can join, not anonymously</td><td class="ok">Can join, anonymous allowed</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section class="sec" aria-labelledby="s-find">
+    <header>
+      <h2 id="s-find">Finding and starting a room</h2>
+      <p>Rooms you are not old enough for are hidden, never shown locked. Starting a room is one sheet, then five short steps. What you can switch on depends on who you are and who the room is for.</p>
+    </header>
+    <div class="shots">
+      <figure><img src="img/f-discover.png" alt="Rooms home with live rooms, age tags and price chips" loading="lazy"><figcaption><b>Rooms home</b><span>Live now, with age, price and friends inside on every card.</span></figcaption></figure>
+      <figure><img src="img/f-start.png" alt="Start a room sheet" loading="lazy"><figcaption><b>Start a room</b><span>Voice, live video, paid room or schedule for later.</span></figcaption></figure>
+      <figure><img src="img/f-audience.png" alt="Who can join step for an adult host" loading="lazy"><figcaption><b>Who can join (adult host)</b><span>Teens only is locked. 18+ unlocks money.</span></figcaption></figure>
+      <figure><img src="img/f-teenhost.png" alt="Who can join step for a teen host" loading="lazy"><figcaption><b>Who can join (teen host)</b><span>Adult rooms are locked with a plain reason.</span></figcaption></figure>
+      <figure><img src="img/f-features.png" alt="How it runs step with spray and paid room" loading="lazy"><figcaption><b>How it runs</b><span>Voice, video, slow mode, pinned message, spray and paid room.</span></figcaption></figure>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="s-paid">
+    <header>
+      <h2 id="s-paid">Paid rooms, from price to payout</h2>
+      <p>Hosts set the price and see their take before they publish. Buyers see every line, confirm they are an adult, and are refunded automatically if the room never starts. Ticket money is held until the room has happened, then paid.</p>
+    </header>
+    <div class="shots">
+      <figure><img src="img/f-price.png" alt="Set the price step with live earnings estimate" loading="lazy"><figcaption><b>Set the price</b><span>Live earnings estimate, ticket count, refund promise, payout status.</span></figcaption></figure>
+      <figure><img src="img/f-ticket.png" alt="Ticket page for a paid room" loading="lazy"><figcaption><b>Ticket page</b><span>What you get, tickets left, refund promise.</span></figcaption></figure>
+      <figure><img src="img/f-checkout.png" alt="Checkout with VAT line and consent" loading="lazy"><figcaption><b>Checkout</b><span>Plain line items with 7.5% VAT, saved card, one clear consent.</span></figcaption></figure>
+      <figure><img src="img/f-ticketok.png" alt="Ticket confirmed with a QR ticket" loading="lazy"><figcaption><b>Ticket confirmed</b><span>Reminder on by default, add to calendar.</span></figcaption></figure>
+      <figure><img src="img/f-hostsales.png" alt="Host view of tickets sold and earnings" loading="lazy"><figcaption><b>Host: tickets sold</b><span>Gross, fees, platform share, and what the host earns.</span></figcaption></figure>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="s3">
+    <header>
+      <h2 id="s3">Spraying, paid at the moment you throw</h2>
+      <p>Three notes, a bundle, a money bag and Make it Rain. The notes are our own artwork, not real currency, and say so on their face. Small sprays are quick and quiet. Bags and Make it Rain take over more of the screen. Chat stays readable.</p>
+    </header>
+    <figure class="wide"><img src="img/n1-notes.png" alt="Pulse, Midnight and Gold notes, plus the Bundle, Money bag and Make it Rain artwork" loading="lazy"><figcaption><b>The notes</b><span>Pulse (₦20), Midnight (₦50), Gold (₦100), Bundle (₦1,000), Money bag (₦10,000) and Make it Rain (₦100,000), with the V3C amount on each.</span></figcaption></figure>
+    <div class="shots">
+      <figure><img src="img/f-spraytray.png" alt="Spray tray with prices in naira and V3C" loading="lazy"><figcaption><b>The tray</b><span>Naira and V3C on every spray, room limit and card always in view.</span></figcaption></figure>
+      <figure><img src="img/f-slide.png" alt="Slide to pay for a money bag" loading="lazy"><figcaption><b>Slide to pay</b><span>Bundles, bags and Make it Rain need a deliberate slide.</span></figcaption></figure>
+      <figure><img src="img/f-bank.png" alt="Bank approval for a large spray" loading="lazy"><figcaption><b>Bank approval</b><span>For bags and Make it Rain the bank confirms the payment.</span></figcaption></figure>
+      <figure><img src="img/f-decline.png" alt="Payment declined message" loading="lazy"><figcaption><b>Payment declined</b><span>Nothing sent, nothing charged, and a clear way forward.</span></figcaption></figure>
+    </div>
+    <div class="shots">
+      <figure><img src="img/n6-voice-note.png" alt="Notes arcing to a host avatar with a streak badge" loading="lazy"><figcaption><b>Throwing notes</b><span>A flick that arcs to their avatar. Quick taps build a streak.</span></figcaption></figure>
+      <figure><img src="img/n8-bag.png" alt="A money bag pouring notes over the room" loading="lazy"><figcaption><b>Money bag</b><span>A duffle bag swings in, lands with a thud, unzips and pours about 300 notes in three waves.</span></figcaption></figure>
+      <figure><img src="img/n4-live-bundle.png" alt="A bundle bursting over a live video" loading="lazy"><figcaption><b>Bundle on live video</b><span>The band snaps and 100 notes fan out over the stream.</span></figcaption></figure>
+      <figure><img src="img/n5-immersive-rain.png" alt="Make it Rain over an immersive live video" loading="lazy"><figcaption><b>Make it Rain, immersive</b><span>The room dims, notes fall across the picture, a banner counts the total.</span></figcaption></figure>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="s-host">
+    <header>
+      <h2 id="s-host">Hosting, safety and getting paid</h2>
+      <p>Everything a host needs without leaving the room, the guest side of safety, and earnings that settle through Paystack to the host's own bank.</p>
+    </header>
+    <div class="shots">
+      <figure><img src="img/f-requests.png" alt="Host requests queue" loading="lazy"><figcaption><b>Requests</b><span>Hands up and go-live asks in one queue.</span></figcaption></figure>
+      <figure><img src="img/f-settings.png" alt="Room settings with end room" loading="lazy"><figcaption><b>Room settings</b><span>Slow mode, pinned message, anonymous guests, spray, lock, end.</span></figcaption></figure>
+      <figure><img src="img/f-agegap.png" alt="Age gap warning before a private message" loading="lazy"><figcaption><b>Age gap warning</b><span>Both people must opt in before a private message across age groups.</span></figcaption></figure>
+      <figure><img src="img/f-earn.png" alt="Host earnings with settled, on its way and held amounts" loading="lazy"><figcaption><b>Earnings</b><span>Settled, on its way, and ticket money held until the room has happened.</span></figcaption></figure>
+      <figure><img src="img/f-hostrecap.png" alt="Host recap after the room" loading="lazy"><figcaption><b>Host recap</b><span>Peak crowd, tickets, followers, money, rebook.</span></figcaption></figure>
+    </div>
+    <p class="muted">Eleven flows and about sixty screens in all, including notifications, invites, privacy settings, receipts, spending limits, reversed payments, and every error state. Open the end to end board to see them.</p>
+  </section>
+
+  <section class="sec" aria-labelledby="s4">
+    <header>
+      <h2 id="s4">How the money is shared</h2>
+      <p>Proposed, not final. Each payment is split at the moment of payment through Paystack, so a host's share goes towards their bank and we never hold it. Splits apply to the amount left after VAT (7.5%), card fees and a fraud reserve: about 88 to 89 kobo of every naira on a local card.</p>
+    </header>
+    <div class="tw"><table>
+      <thead><tr><th>Spray</th><th>V3C</th><th>Naira</th><th>Platform</th><th>Host (to host)</th><th>Host (to stage guest)</th><th>Stage guest</th></tr></thead>
+      <tbody>
+        <tr><td>Notes</td><td>2,000 to 10,000</td><td>₦20 to ₦100</td><td>30%</td><td>70%</td><td>15%</td><td>55%</td></tr>
+        <tr><td>Bundle</td><td>100,000</td><td>₦1,000</td><td>25%</td><td>75%</td><td>15%</td><td>60%</td></tr>
+        <tr><td>Money bag</td><td>1,000,000</td><td>₦10,000</td><td>20%</td><td>80%</td><td>15%</td><td>65%</td></tr>
+        <tr><td>Make it Rain</td><td>10,000,000</td><td>₦100,000</td><td>15%</td><td>85%</td><td>15%</td><td>70%</td></tr>
+        <tr><td>Paid room ticket</td><td>n/a</td><td>set by host</td><td>15%</td><td>85%</td><td>n/a</td><td>n/a</td></tr>
+      </tbody>
+    </table></div>
+    <div class="cols">
+      <div class="card"><h3>Who handles the money</h3><p class="muted">Paystack, for Nigeria. Sprays are split at source. Ticket money is held briefly, then paid to the host. Stripe for the UK later. We never pool funds in our own bank account for sprays.</p></div>
+      <div class="card"><h3>Safety rules</h3><ul class="clean"><li><span>Adults only. Nothing to or from under 18s, nothing in teens rooms, nothing from anonymous guests.</span></li><li><span>Room limits, a slide to pay, bank approval for large sprays, and limits on new hosts.</span></li></ul></div>
+      <div class="card amber"><h3>What V3C is</h3><p>A unit shown on the price of a spray. It is not stored for anyone, has no cash value and cannot be moved or cashed out. You pay at the moment you spray.</p></div>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="s5">
+    <header>
+      <h2 id="s5">Still to decide</h2>
+    </header>
+    <ul class="clean">
+      <li><span><b>Note values.</b> The pack assumes the notes are ₦20, ₦50 and ₦100 (2,000, 5,000 and 10,000 V3C). Paystack recommends at least ₦50 per charge, so either ₦50 becomes the smallest note, or small notes are batched into one charge.</span></li>
+      <li><span><b>The name.</b> "Vib3Cash" and "spray" sit close to the naira-spraying offence. The brief recommends a name that does not say cash.</span></li>
+      <li><span><b>Money only in 18+ rooms.</b> Paid rooms and spray are limited to 18+ and 21+ rooms with an adult host.</span></li>
+      <li><span><b>Anonymous teens on the mic</b> in teens-only rooms. The proposal says no, in every room.</span></li>
+      <li><span><b>Legal and tax review</b> in Nigeria before any money feature is built: whether the per-spray, split-at-source structure needs any CBN approval, agent treatment, VAT, and age verification.</span></li>
+      <li><span><b>Launch in phases.</b> Adults and free rooms first, then paid rooms, then sprays, then teens. See the brief, section 9.</span></li>
+    </ul>
+  </section>
+
+  <footer>
+    <span>Vib3Pulse, design pack, October 2026.</span>
+    <span>Prototypes are interactive demos. Nothing is charged and no real accounts are used.</span>
+  </footer>
+</div>
