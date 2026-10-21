@@ -259,6 +259,26 @@ try {
   const again = await checkout(room, a);
   check("already ticketed: checkout 409 ALREADY_TICKETED", again.status === 409 && again.json?.code === "ALREADY_TICKETED", JSON.stringify(again.json));
 
+  // ------------------------------------------------------------ saved rates apply to NEW tickets only (rooms rates plan, task 3)
+  {
+    const rates = await import("../server/rooms/roomRates");
+    const rb1 = await mk("ratebuyer1", 30, true), rb2 = await mk("ratebuyer2", 30, true);
+    const rr = await mkRoom(host);
+    const c1 = await checkout(rr, rb1); const ref1 = c1.json?.reference as string; pay(ref1); await webhook(ref1);
+    const row1 = (await rowsFor(ref1))[0];
+    check("rates: before any change the ticket uses the default 15%", row1?.platform_kobo === breakdownOf.platform && row1.host_kobo === breakdownOf.host, JSON.stringify(row1));
+    await rates.setRate({ key: "ticket_platform", value: 20, adminId: "tc-test-admin", reason: "ticket rate test" });
+    const c2 = await checkout(rr, rb2); const ref2 = c2.json?.reference as string; pay(ref2); await webhook(ref2);
+    const row2 = (await rowsFor(ref2))[0];
+    const wantPlatform = Math.round((breakdownOf.net * 20) / 100);
+    check("rates: a ticket bought after the change splits at the new 20% of net", row2?.platform_kobo === wantPlatform && row2.host_kobo === breakdownOf.net - wantPlatform && row2.amount_kobo === PRICE
+      && row2.vat_kobo === breakdownOf.vat && row2.fee_kobo === breakdownOf.fee && row2.reserve_kobo === breakdownOf.reserve, JSON.stringify(row2));
+    check("rates: the ticket bought before the change keeps its original split", JSON.stringify((await rowsFor(ref1))[0]) === JSON.stringify(row1));
+    const led2 = await ledgerFor(ref2);
+    check("rates: the ledger row for the new ticket carries the new platform and host amounts", led2.length === 1 && led2[0].platform_fee_amount === wantPlatform && led2[0].net_to_organizer_amount === breakdownOf.net - wantPlatform, JSON.stringify(led2));
+    await rates.setRate({ key: "ticket_platform", value: 15, adminId: "tc-test-admin", reason: "ticket rate test restore" });
+  }
+
   // ------------------------------------------------------------ verify first, then webhook
   const coB = await checkout(room, b);
   const refB = coB.json?.reference as string;

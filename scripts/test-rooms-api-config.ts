@@ -82,6 +82,7 @@ try {
   check("config: signed-in adult gets 200", r.status === 200, JSON.stringify(r));
   check("config: exact body shape with default flags off, plus the caller's own host numbers (new account: 0 days)", JSON.stringify(r.json) === JSON.stringify({
     features: { paidRooms: false, spray: false }, limits: ROOM_LIMITS, currency: "NGN", region: "NG",
+    rates: { ticketPlatformPct: 15, ticketReservePct: 1 },
     host: { accountAgeDays: 0, minAccountAgeDays: minDays },
   }), JSON.stringify(r.json));
   check("config: host has exactly accountAgeDays and minAccountAgeDays, both whole numbers", JSON.stringify(Object.keys(r.json?.host ?? {})) === JSON.stringify(["accountAgeDays", "minAccountAgeDays"])
@@ -111,6 +112,16 @@ try {
   const on = await http("GET", "/api/rooms/config", adult);
   Object.assign(roomFeatures, saved);
   check("config: reflects the live flag values", on.json?.features?.paidRooms === true && on.json.features.spray === true, JSON.stringify(on.json));
+
+  // The two ticket rates the host screens need follow the saved rates (rooms rates plan, task 3); nothing else about rates is exposed.
+  const rates = await import("../server/rooms/roomRates");
+  await rates.setRate({ key: "ticket_platform", value: 20, adminId: "cfg-test-admin", reason: "config test" });
+  await rates.setRate({ key: "ticket_reserve", value: 2.5, adminId: "cfg-test-admin", reason: "config test" });
+  const changed = await http("GET", "/api/rooms/config", adult);
+  check("config: rates follow the saved ticket rates and expose only those two", JSON.stringify(changed.json?.rates) === JSON.stringify({ ticketPlatformPct: 20, ticketReservePct: 2.5 }), JSON.stringify(changed.json?.rates));
+  check("config: no spray rate is exposed", !JSON.stringify(changed.json).includes("spray_platform") && !/spray.*pct/i.test(JSON.stringify(changed.json?.rates)));
+  await rates.setRate({ key: "ticket_platform", value: 15, adminId: "cfg-test-admin", reason: "config test restore" });
+  await rates.setRate({ key: "ticket_reserve", value: 1, adminId: "cfg-test-admin", reason: "config test restore" });
 } catch (e: any) {
   failed++; console.log(`FAIL uncaught: ${e.stack || e}`);
 } finally {

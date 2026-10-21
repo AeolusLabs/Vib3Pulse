@@ -19,6 +19,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { db, storage } from "../storage";
 import { paymentIssues, rooms, roomTickets, type RoomTicket } from "@shared/schema";
 import { ticketBreakdown } from "@shared/money";
+import { getRates } from "./roomRates";
 import { checkPurchase, refusalOf, ticketCode, type RoomTicketRefusal, type RoomTicketView } from "@shared/roomTickets";
 import { refundPayment, type VerifiedSession } from "../payments/index";
 import { recordTransaction } from "../payments/ledger";
@@ -204,6 +205,8 @@ export async function issueRoomTicket(opts: IssueRoomTicketOpts): Promise<IssueR
   // retry for ever. The caller (handleRoomTicketCharge) records a payment issue for a person instead.
   if (!Number.isSafeInteger(opts.verifiedAmountKobo) || opts.verifiedAmountKobo <= 0) throw new UnrecordableChargeError(reference);
 
+  // The saved rates, read once before the lock so one ticket can never mix two rates (the split is stored on the row, never recomputed).
+  const rates = await getRates();
   // Inputs that do not race with other buyers: read before taking the lock, to keep the locked section short.
   const bound = ticketReferenceBelongsTo(reference, roomId, userId, ticketReferenceSecret());
   const [buyer, roomPeek, member] = await Promise.all([storage.getUser(userId), rs.getRoom(roomId), rs.getMember(roomId, userId)]);
@@ -234,7 +237,7 @@ export async function issueRoomTicket(opts: IssueRoomTicketOpts): Promise<IssueR
     });
 
     if (check.ok) {
-      const b = ticketBreakdown(room.ticketPriceKobo as number); // checkPurchase proved it a sellable integer price
+      const b = ticketBreakdown(room.ticketPriceKobo as number, rates); // checkPurchase proved it a sellable integer price
       const [ticket] = await tx.insert(roomTickets).values({
         roomId, userId,
         amountKobo: b.price, vatKobo: b.vat, feeKobo: b.fee, reserveKobo: b.reserve, platformKobo: b.platform, hostKobo: b.host,

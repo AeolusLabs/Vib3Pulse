@@ -34,6 +34,7 @@ import { applyMod, endRoom, enforceAgeLimit, enforceTicketFor, expectHost, inter
 import { roomHub } from "./RoomHub";
 import { roomFeatures } from "./features";
 import { sprayAllowed, ticketSalesAllowed } from "./roomControls";
+import { getRates } from "./roomRates";
 import { clearReminder, hasReminder, setReminder } from "./reminders";
 import { registerRoomTicketRoutes } from "./ticketRoutes";
 import { registerRoomMoneyRoutes } from "./ticketMoneyRoutes";
@@ -114,6 +115,12 @@ async function hostCheck(host: User, input: { visibility: Room["visibility"]; ag
  * The caller's own account age in whole days, and the admin-set minimum for hosting a public room (the same setting
  * hostCheck uses for ACCOUNT_TOO_NEW), so the wizard can explain it before the first refusal. Not sensitive.
  */
+/** The two ticket rates a host screen needs for its earnings estimate (percent). */
+async function ticketRatesForClients(): Promise<{ ticketPlatformPct: number; ticketReservePct: number }> {
+  const r = await getRates();
+  return { ticketPlatformPct: r.ticket_platform, ticketReservePct: r.ticket_reserve };
+}
+
 async function hostingInfo(userId: string): Promise<{ accountAgeDays: number; minAccountAgeDays: number }> {
   const [u, minAccountAgeDays] = await Promise.all([storage.getUser(userId), getConfig("min_account_age_days")]);
   const created = u?.createdAt ? new Date(u.createdAt).getTime() : NaN;
@@ -244,6 +251,8 @@ export function registerRoomRoutes(app: Express): void {
         limits: ROOM_LIMITS,
         currency: "NGN",
         region: "NG",
+        // Only the two ticket rates the host screens need for their earnings estimate; no spray rate and nothing else.
+        rates: await ticketRatesForClients(),
         host: await hostingInfo(req.user!.id),
       });
     } catch (e) {

@@ -61,6 +61,7 @@ import { roomHub } from "./RoomHub";
 import { isKicked } from "./roomSocket";
 import { roomFeatures } from "./features";
 import { isHostFrozen, sprayAllowed } from "./roomControls";
+import { getRates } from "./roomRates";
 import { payableSubaccountOf } from "./payouts";
 import { ticketCheckoutBaseUrl } from "./checkoutUrl";
 import { createKeyedQueue, QueueFullError } from "./keyedQueue";
@@ -350,7 +351,8 @@ export async function startSpray(input: StartInput): Promise<StartOutcome> {
   const f = gate.facts;
   if (!f.payer.email) return unavailable();
 
-  const split = spraySplit(tier, f.kind);
+  // The split is fixed here, once: the saved rates at this moment, stored on the row. Finalize and the sweep never recompute it.
+  const split = spraySplit(tier, f.kind, await getRates());
   const bd = split.breakdown;
   const shares: SplitSpec["shares"] = f.kind === "host"
     ? [{ subaccountCode: f.hostSubaccount, amountKobo: split.hostKobo }]
