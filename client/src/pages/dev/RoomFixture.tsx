@@ -12,6 +12,7 @@
 // ?wizard=adult&paid=1 runs the wizard with paidRooms on and an ID-verified host, so the Paid room switch and price step show.
 // ?spray=tray|confirm|bank|declined|limit|quiet opens the spray flow (phase 5) in an 18+ room as a verified adult guest,
 // every spray endpoint answered here: a note or bundle lands after a moment, bag and rain go to a stand-in bank page.
+// ?game=versus|team|drop|teen shows the gamers-live stage (flag on, every control answered by the shared game rules in the page).
 // ?earn=empty|week|clawback|noaccount|mismatch|soon|attention &page=earnings|payouts|payments shows the room money screens (phase 6).
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import RoomShell, { type RoomShellSocket } from "@/components/rooms/shell/RoomShell";
@@ -23,7 +24,10 @@ import { NotStartedPanel, RoomCodePanel } from "@/components/rooms/RoomStatePane
 import type { AdultInvite } from "@/lib/minorsRoomApi";
 import type { RoomVoice, ScreenTrack } from "@/hooks/useRoomVoice";
 import { roomReducer, type RoomState } from "@/lib/roomReducer";
-import { FIXTURE_HOST, FIXTURE_INVITES, FIXTURE_IDS, FIXTURE_NAMES, FIXTURE_ROOM, fixtureControlsState, fixtureLiveState, fixtureStartView, parseControlsFixture, parseEdgeFixture, parseFixtureQuery, type EdgeScene } from "@/lib/roomFixtures";
+import { applyGame, type GameAction, type GameView, type Side } from "@shared/gameScreen";
+import { soundFeed, type Follow } from "@/lib/gameScreen";
+import type { GameTracks } from "@/hooks/useGameTracks";
+import { FIXTURE_HOST, FIXTURE_INVITES, FIXTURE_IDS, FIXTURE_NAMES, FIXTURE_ROOM, fixtureControlsState, fixtureLiveState, fixtureStartView, parseControlsFixture, parseEdgeFixture, parseFixtureQuery, fixtureGameState, parseGameFixture, type EdgeScene, type GameScene } from "@/lib/roomFixtures";
 import {
   FIXTURE_TICKET, FIXTURE_TICKET_BLOCK, FIXTURE_TICKET_PRICE_KOBO, FIXTURE_TICKET_REF, fixtureTicketRoom, fixtureTicketSummary, parseTicketFixture, type TicketScene,
 } from "@/lib/roomFixtures";
@@ -68,8 +72,49 @@ function canvasTrack(): ScreenTrack & { stop(): void } {
   };
 }
 
+/** A moving canvas in its own colour, so two game feeds can be told apart in the fixture. */
+function gameCanvasTrack(hue: number, label: string): ScreenTrack & { stop(): void } {
+  const c = document.createElement("canvas");
+  c.width = 640; c.height = 360;
+  const g = c.getContext("2d")!;
+  let f = 0;
+  const draw = () => {
+    f++;
+    g.fillStyle = `hsl(${hue} 45% 14%)`; g.fillRect(0, 0, 640, 360);
+    g.fillStyle = `hsl(${hue} 60% 40%)`; g.fillRect(40 + ((f * 6) % 520), 250, 60, 60);
+    g.fillStyle = "#f7f7f7"; g.font = "600 28px sans-serif"; g.fillText(label, 24, 48);
+  };
+  draw();
+  const t = setInterval(draw, 120);
+  const stream = (c as HTMLCanvasElement & { captureStream(fps?: number): MediaStream }).captureStream(8);
+  return {
+    attach(el) { el.srcObject = stream; void el.play().catch(() => {}); },
+    detach(el) { el.srcObject = null; },
+    stop() { clearInterval(t); stream.getTracks().forEach((tr) => tr.stop()); },
+  };
+}
+
+/** Stand-in for useGameTracks: a coloured canvas per player, follow and sound kept locally. */
+function useFixtureGameTracks(game: GameView | null): GameTracks {
+  const cache = useRef(new Map<string, ScreenTrack & { stop(): void }>());
+  useEffect(() => { const m = cache.current; return () => { m.forEach((t) => t.stop()); m.clear(); }; }, []);
+  const [following, setFollowing] = useState<Follow>({});
+  const [pick, setPick] = useState<string | null>(null);
+  const trackFor = (id: string) => {
+    let t = cache.current.get(id);
+    if (!t) { t = gameCanvasTrack((cache.current.size * 67 + 250) % 360, FIXTURE_NAMES[id] ?? id); cache.current.set(id, t); }
+    return t;
+  };
+  return {
+    startShare: async () => {}, stopShare: () => {}, sharing: false, shareError: null, trackFor,
+    follow: (side: Side, id: string) => setFollowing((f) => ({ ...f, [side]: id })),
+    unfollow: (side: Side) => setFollowing((f) => { const { [side]: _x, ...rest } = f; return rest; }),
+    following, soundId: game ? soundFeed(game, following, pick) : null, setSound: setPick, reportWidth: () => {},
+  };
+}
+
 /** Answers the endpoints the room sheets read, inside the page. Everything else goes to the real fetch. */
-function useFixtureFetch() {
+function useFixtureFetch(gaming = false) {
   // Layout effect: a child's query effect runs before the parent's plain effect, so its first request would reach the real fetch.
   useLayoutEffect(() => {
     const real = window.fetch;
@@ -81,14 +126,14 @@ function useFixtureFetch() {
       if (/^\/api\/rooms\/fixture-room\/report/.test(path)) return json({ ok: true });
       if (path.startsWith("/api/rooms/fixture-room/adult-invites")) return json(init?.method && init.method !== "GET" ? { ok: true } : { invites: FIXTURE_INVITES.active });
       if (path === "/api/blocks") return json({ blocked: [] });
-      if (path === "/api/rooms/config") return json({ features: { paidRooms: false, spray: false }, limits: {}, currency: "NGN", region: "NG" });
+      if (path === "/api/rooms/config") return json({ features: { paidRooms: false, spray: false, ...(gaming ? { gaming: true } : {}) }, ...(gaming ? { game: { ingest: true, teamSpray: true, lanes: false } } : {}), limits: {}, currency: "NGN", region: "NG" });
       if (path.startsWith("/api/users/search")) return json([]);
       if (/^\/api\/users\/[^/]+\/follow-stats/.test(path)) return json({ followersCount: 128, followingCount: 64 });
       if (/^\/api\/users\/[^/?]+$/.test(path)) return json({ bio: "Fixture profile. Nothing here is real." });
       return real(input, init);
     }) as typeof window.fetch;
     return () => { window.fetch = real; };
-  }, []);
+  }, [gaming]);
 }
 
 /** The minors' room screens that are not the room shell: the two warnings, the adult invite sheet and the teen host note. */
@@ -288,15 +333,18 @@ export default function RoomFixture() {
   const edge = parseEdgeFixture(window.location.search);
   // The camera sheets need the live-video room; every other edge scene keeps the scene the query asked for.
   const shellOpts = edge?.startsWith("cam") && opts.scene === "voice" ? { ...opts, scene: "live" as const } : opts;
-  return <ShellFixture opts={shellOpts} spray={sprayScene} edge={edge} />;
+  return <ShellFixture opts={shellOpts} spray={sprayScene} edge={edge} game={parseGameFixture(window.location.search)} />;
 }
 
-function ShellFixture({ opts, spray = null, edge = null }: { opts: ReturnType<typeof parseFixtureQuery>; spray?: SprayScene | null; edge?: EdgeScene | null }) {
+function ShellFixture({ opts, spray = null, edge = null, game = null }: { opts: ReturnType<typeof parseFixtureQuery>; spray?: SprayScene | null; edge?: EdgeScene | null; game?: GameScene | null }) {
   const controls = useMemo(() => parseControlsFixture(window.location.search), []);
   const [state, dispatch] = useReducer((s: RoomState, e: Ev) => roomReducer(s, e), undefined, () =>
-    controls ? fixtureControlsState(controls) : fixtureLiveState(opts.scene, { as: opts.as, now: Date.now(), invite: opts.invite }));
+    controls ? fixtureControlsState(controls)
+      : game ? fixtureGameState(game, fixtureLiveState("live", { as: opts.as, now: Date.now(), invite: opts.invite }), Date.now())
+      : fixtureLiveState(opts.scene, { as: opts.as, now: Date.now(), invite: opts.invite }));
   const was = useRef<boolean | null>(null);
-  useFixtureFetch();
+  useFixtureFetch(!!game);
+  const gameTracks = useFixtureGameTracks(state.game);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -464,13 +512,24 @@ function ShellFixture({ opts, spray = null, edge = null }: { opts: ReturnType<ty
     setRole: async (targetId, role) => { later({ type: "room:mod", action: "role", targetId, role }); return null; },
     endRoom: async () => { later({ type: "room:ended" }); return null; },
     dismissInvite: () => {},
+    // The server's job, played by the shared rules: the same answer a real room would give, a moment later.
+    gameAction: (action: GameAction, extra: { targetId?: string; side?: Side; value?: number } = {}) => {
+      const cur = state.game;
+      if (!cur) return false;
+      const role = controls ?? (opts.as === "host" ? "host" : "guest");
+      const r = applyGame(cur, action, { actorId: self, actorRole: role, targetId: extra.targetId ?? self, targetPresent: true, targetEligible: true, gameOn: true, side: extra.side, value: extra.value });
+      if (!r.ok) { later({ type: "room:notice", code: r.code }); return true; }
+      const { away } = cur;
+      later({ type: "room:game", game: { ...r.state, away } });
+      return true;
+    },
   };
 
   return (
     <div className="font-sans" data-testid="room-fixture" data-scene={opts.scene}>
       <RoomShell
         id={FIXTURE_ROOM.id}
-        room={opts.minors === "listen" ? { ...FIXTURE_ROOM, minorsRoom: true } : spray ? { ...FIXTURE_ROOM, ageLimit: "18+" as const } : FIXTURE_ROOM}
+        room={opts.minors === "listen" || game === "teen" ? { ...FIXTURE_ROOM, minorsRoom: true } : spray ? { ...FIXTURE_ROOM, ageLimit: "18+" as const } : FIXTURE_ROOM}
         host={FIXTURE_HOST}
         fallbackCount={state.memberCount}
         isHost={controls ? controls === "host" : opts.as === "host"}
@@ -489,6 +548,7 @@ function ShellFixture({ opts, spray = null, edge = null }: { opts: ReturnType<ty
         listenLine={opts.minors === "listen"}
         spray={spray ? sprayBlock : null}
         sprayFixture={sprayStart ?? undefined}
+        gameTracksFixture={state.game ? gameTracks : undefined}
       />
     </div>
   );

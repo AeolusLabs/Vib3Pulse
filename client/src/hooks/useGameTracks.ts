@@ -74,10 +74,10 @@ export function useGameTracks(
     const { video, sound } = plan.current;
     room.remoteParticipants.forEach((p) => p.trackPublications.forEach((pub) => {
       const rp = pub as RemoteTrackPublication;
-      if (rp.source === SOURCE_VIDEO) {
+      if ((rp.source as string) === SOURCE_VIDEO) {
         const want = video.includes(p.identity);
         if (rp.isSubscribed !== want) rp.setSubscribed(want);
-      } else if (rp.source === SOURCE_AUDIO) {
+      } else if ((rp.source as string) === SOURCE_AUDIO) {
         const want = sound === p.identity;
         if (rp.isSubscribed !== want) rp.setSubscribed(want);
       }
@@ -189,7 +189,7 @@ export function useGameTracks(
     room?.remoteParticipants.forEach((p) => {
       if (p.identity !== userId) return;
       p.trackPublications.forEach((pub) => {
-        if (pub.source === SOURCE_VIDEO) (pub as RemoteTrackPublication).setVideoQuality(layerOf === 720 ? 2 : layerOf === 360 ? 1 : 0); // HIGH / MEDIUM / LOW
+        if ((pub.source as string) === SOURCE_VIDEO) (pub as RemoteTrackPublication).setVideoQuality(layerOf === 720 ? 2 : layerOf === 360 ? 1 : 0); // HIGH / MEDIUM / LOW
       });
     });
   }, [room]);

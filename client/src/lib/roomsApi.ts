@@ -168,7 +168,10 @@ export function slowModeMessage(retryMs: number | undefined): string {
 
 /** Public switches and limits from GET /api/rooms/config. */
 export interface RoomsConfig {
-  features: { paidRooms: boolean; spray: boolean };
+  /** `gaming` is present (true) only while the server's ROOMS_GAMING flag is on. */
+  features: { paidRooms: boolean; spray: boolean; gaming?: boolean };
+  /** Gamers live capabilities; present only with `features.gaming`. A missing object means all false. */
+  game?: { ingest?: boolean; teamSpray?: boolean; lanes?: boolean };
   limits: typeof ROOM_LIMITS;
   currency: "NGN";
   region: "NG";

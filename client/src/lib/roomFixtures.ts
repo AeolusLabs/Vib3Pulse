@@ -1,6 +1,7 @@
 // Seeded room states for the dev fixture route. Pure: no sockets, no network, no clock reads at import time.
 import { initialRoomState, roomReducer, type MemberRole, type RoomMemberView, type RoomState } from "./roomReducer";
 import { ticketBreakdown } from "@shared/money";
+import type { GameView } from "@shared/gameScreen";
 
 export type FixtureScene = "voice" | "live" | "immersive" | "weak" | "dropped";
 
@@ -227,4 +228,33 @@ export function fixtureTicketSummary(sold = 38, releaseAt: string | null = "2026
       payout: releaseAt ? { status: "held", amountKobo: b.host * sold, releaseAt, paidAt: null } : null,
     },
   };
+}
+
+// ---------------------------------------------------------------- gamers live scenes (?game=versus|team|drop|teen)
+
+export type GameScene = "versus" | "team" | "drop" | "teen";
+export const GAME_SCENES: readonly GameScene[] = ["versus", "team", "drop", "teen"];
+export function parseGameFixture(search: string): GameScene | null {
+  const g = new URLSearchParams(search).get("game");
+  return GAME_SCENES.includes(g as GameScene) ? (g as GameScene) : null;
+}
+
+/** The match the server would send for each scene. `now` is the server clock, so a reconnect countdown has time left. */
+export function fixtureGameView(scene: GameScene, now: number): GameView {
+  const g = (ids: string[]) => ids;
+  switch (scene) {
+    case "versus":
+      return { format: 1, teams: { A: g([STAGE_GUEST]), B: g(["fx-g1"]) }, featured: { A: STAGE_GUEST, B: "fx-g1" }, asks: [], score: [2, 1], away: {} };
+    case "team":
+      return { format: 4, teams: { A: g(["fx-g1", "fx-g2", "fx-g3", "fx-g4"]), B: g(["fx-g5", "fx-g6", STAGE_GUEST]) }, featured: { A: "fx-g1", B: "fx-g5" }, asks: [], score: [7, 5], away: {} };
+    case "drop":
+      return { format: 2, teams: { A: g(["fx-g1", "fx-g2"]), B: g(["fx-g5", "fx-g6"]) }, featured: { A: "fx-g1", B: "fx-g5" }, asks: [], score: [1, 1], away: { "fx-g2": now + 24_000, "fx-g6": null } };
+    case "teen":
+      return { format: 2, teams: { A: g(["fx-g1", "fx-g2"]), B: g(["fx-g3", "fx-g4"]) }, featured: { A: "fx-g1", B: "fx-g3" }, asks: [{ userId: SELF, side: "B" }], score: [0, 0], away: {} };
+  }
+}
+
+/** The live fixture state with a game on it (the shell shows the game stage, not the single screen). */
+export function fixtureGameState(scene: GameScene, base: RoomState, now: number): RoomState {
+  return { ...base, liveVideo: true, holder: null, asks: [], holderAwayUntil: null, game: fixtureGameView(scene, now), serverOffsetMs: 0 };
 }

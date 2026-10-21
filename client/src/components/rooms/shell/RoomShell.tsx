@@ -8,6 +8,10 @@ import { mediaIssueFromLine } from "@/lib/mediaIssues";
 import VoiceBar from "@/components/rooms/VoiceBar";
 import ControlsSheet from "@/components/rooms/host/ControlsSheet";
 import ScreenStage from "@/components/rooms/ScreenStage";
+import GameStage from "@/components/rooms/game/GameStage";
+import { useGameTracks, type GameTracks } from "@/hooks/useGameTracks";
+import { useGameCaps } from "@/hooks/useGameCaps";
+import { GAME_MAX_NOTES, allPlayers, gameNoticeText, layoutFor as gameLayoutFor, type GameLayout } from "@/lib/gameScreen";
 import RoomFrame from "@/components/rooms/shell/RoomFrame";
 import RoomTopBar from "@/components/rooms/shell/RoomTopBar";
 import RoomDock from "@/components/rooms/shell/RoomDock";
@@ -46,7 +50,8 @@ import { moneyEligibleRoom } from "@shared/roomRules";
 
 /** The socket actions the shell uses. RoomPage passes useRoomSocket(); the dev fixture passes fakes. */
 export type RoomShellSocket = Pick<ReturnType<typeof useRoomSocket>,
-  "chat" | "react" | "interact" | "setScreen" | "mod" | "stageAction" | "liveAction" | "sendPlayback" | "setVoice" | "setLiveVideo" | "dismissInvite" | "saveSettings" | "setRole" | "endRoom">;
+  "chat" | "react" | "interact" | "setScreen" | "mod" | "stageAction" | "liveAction" | "sendPlayback" | "setVoice" | "setLiveVideo" | "dismissInvite" | "saveSettings" | "setRole" | "endRoom">
+  & Partial<Pick<ReturnType<typeof useRoomSocket>, "gameAction">>;
 
 export interface RoomShellProps {
   id: string;
@@ -88,6 +93,8 @@ export interface RoomShellProps {
   onSprayChanged?: () => void;
   /** Dev fixture only: start the spray flow in this state. */
   sprayFixture?: { flow: SprayFlowState; sub: SpraySub | null; tray: boolean; quiet: boolean };
+  /** Dev fixture only: stand-in game tracks (moving canvases) instead of LiveKit's. */
+  gameTracksFixture?: GameTracks;
 }
 
 function useViewportWidth() {
@@ -107,7 +114,7 @@ const byTestId = (id: string | null) => (id ? document.querySelector<HTMLElement
  * immersive). Crossing 1024 px or switching views only changes classes, so the picture, the camera choice, the composer
  * draft and the chat scroll survive. People are always addressed by RoomMemberView.userId, never by username.
  */
-export default function RoomShell({ id, token, room, host, fallbackCount, isHost, role, meId, state, sock, voice, myRoomId, nav, hostControls, onLeave, startView, startControlsOpen = false, detailsError = false, listenOnly = false, listenLine = false, spray = null, onSprayChanged, sprayFixture }: RoomShellProps) {
+export default function RoomShell({ id, token, room, host, fallbackCount, isHost, role, meId, state, sock, voice, myRoomId, nav, hostControls, onLeave, startView, startControlsOpen = false, detailsError = false, listenOnly = false, listenLine = false, spray = null, onSprayChanged, sprayFixture, gameTracksFixture }: RoomShellProps) {
   const { toast } = useToast();
 
   const [hidden, setHidden] = useState<Set<string>>(new Set()); // people the viewer muted for themselves
@@ -152,7 +159,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
   const [noticeText, setNoticeText] = useState<string | null>(null);
   useEffect(() => {
     if (!state.notice) return;
-    setNoticeText(NOTICE_MESSAGE[state.notice.code] ?? "That didn't work.");
+    setNoticeText((state.game ? gameNoticeText(state.notice.code) : null) ?? NOTICE_MESSAGE[state.notice.code] ?? "That didn't work.");
     const t = setTimeout(() => setNoticeText(null), 3500);
     return () => clearTimeout(t);
   }, [state.notice?.n]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -196,14 +203,15 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
   if (sprayBlock) lastSprayBlock.current = sprayBlock;
   const flowBlock = sprayBlock ?? (sprayHold ? lastSprayBlock.current : null);
   const cohostIds = state.members.filter((m) => m.role === "cohost").map((m) => m.userId);
-  const sprayStage = [...state.stage, ...cohostIds];
+  const gamePlayers = state.game ? allPlayers(state.game) : [];
+  const sprayStage = [...state.stage, ...cohostIds, ...gamePlayers];
   const sprayTo = sprayTargets(sprayBlock ?? null, { hostId: room.hostId, stage: sprayStage, memberIds: state.members.map((m) => m.userId), selfId: meId });
   // Who can be sprayed changed (stage, co-hosts, the host coming or going, the room filling): ask the server again for the
   // block and its targets (it decides who is payable). Not only when a block exists: a block that was absent because the
   // viewer was alone or nobody was on stage must appear once someone is (review C1, M18). Only where spraying could exist.
   const sprayPossible = !listenOnly && room.status === "live" && moneyEligibleRoom(room);
   const hostHere = state.members.some((m) => m.userId === room.hostId);
-  const stageKey = sprayPossible ? `${state.stage.join("|")}#${cohostIds.join("|")}#${hostHere ? 1 : 0}#${(state.memberCount || fallbackCount) > 1 ? 1 : 0}` : "";
+  const stageKey = sprayPossible ? `${state.stage.join("|")}#${cohostIds.join("|")}#${gamePlayers.join("|")}#${hostHere ? 1 : 0}#${(state.memberCount || fallbackCount) > 1 ? 1 : 0}` : "";
   const firstStage = useRef(true);
   useEffect(() => {
     if (firstStage.current) { firstStage.current = false; return; }
@@ -287,6 +295,25 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
   const askLive = () => (isCoHostOrHost && meId ? sock.liveAction("grant", meId) : sock.liveAction("ask"));
   const withdrawLive = () => sock.liveAction("withdraw");
 
+  // ---------------------------------------------------------------- gamers live (flag on AND this room carries a game)
+  const game = state.game;
+  const gameCaps = useGameCaps(!!game);
+  const gameOn = gameCaps.on && !!game;
+  const [gameViewPref, setGameViewPref] = useState<GameLayout | null>(null);
+  const gameLayout: GameLayout = game ? gameLayoutFor(game, gameViewPref) : "team";
+  const realGameTracks = useGameTracks(gameOn ? voice.room : null, gameOn ? game : null, {
+    audioOnly: voice.audioOnly, layout: gameLayout, selfId: meId,
+    // The browser's own "Stop sharing" bar: give the slot back so the room doesn't keep a dead feed.
+    onShareEnded: () => { if (meId) sock.gameAction?.("remove", { targetId: meId }); },
+  });
+  const gameTracks = gameTracksFixture ?? realGameTracks;
+  const sprayPlayer = (playerId: string) => {
+    snd.unlock();
+    sprayOpener.current = byTestId(`tile-spray-${playerId}`);
+    setSprayPreset(playerId);
+    setSprayOpen(true);
+  };
+
   // Chat + reactions over a fullscreen screen (only rendered while it is fullscreen; the dock is not on screen then).
   const strip = (
     <div className="space-y-2">
@@ -339,7 +366,14 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
           strip={strip}
         />
       )}
-      {state.liveVideo && !LINK_SCREENS && (
+      {gameOn && game && (
+        <GameStage
+          game={game} tracks={gameTracks} me={meId} layout={gameLayout} onLayout={setGameViewPref} nameOf={nameOf}
+          serverOffsetMs={state.serverOffsetMs} audioOnly={voice.audioOnly}
+          sprayable={sprayTo} onSpray={sprayPlayer}
+        />
+      )}
+      {state.liveVideo && !LINK_SCREENS && !(gameOn && game) && (
         <ScreenStage
           layout={immersive ? "immersive" : "compact"}
           track={isHolder ? voice.localVideo : voice.video}
@@ -394,7 +428,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
         mic: !listenOnly && voiceUp && voice.canPublish ? { on: voice.micOn, onToggle: () => void voice.toggleMic() } : undefined,
       }}
       cam={{
-        visible: state.liveVideo && !listenOnly,
+        visible: state.liveVideo && !listenOnly && !gameOn,
         pressed: (isHolder && voice.cameraOn) || asked,
         lockedReason: camLockReason({ liveVideo: state.liveVideo, phaseLive: state.phase === "live", onStage: onStageNow, isHolder, cameraOn: voice.cameraOn }),
         label: isHolder ? "Stop live video" : asked ? "Withdraw your request to go live" : isCoHostOrHost ? "Go live on camera" : "Ask to go live",
@@ -417,7 +451,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
   const floating = (
     <>
       <SprayEffects sprays={state.sprays} nameOf={nameOf} quiet={quiet} serverOffsetMs={state.serverOffsetMs} videoActive={videoActive}
-        selfId={meId} onThank={!muted && !listenOnly ? (text) => { sock.chat(text); } : undefined} />
+        selfId={meId} onThank={!muted && !listenOnly ? (text) => { sock.chat(text); } : undefined} maxNotes={gameOn ? GAME_MAX_NOTES : undefined} />
       <HypeBurst burst={hype.burst} layout={layout} />
       <div role="status" aria-live="polite" className={`pointer-events-none absolute top-[calc(68px+env(safe-area-inset-top,0px))] z-[13] w-max -translate-x-1/2 ${layout === "rail" ? "left-[calc((100%-360px)/2)] max-w-[calc((100%-360px)*0.9)]" : "left-1/2 max-w-[90%]"}`} data-testid="room-status-line">
         {line && <p className="rounded-full bg-foreground px-4 py-2 text-center text-sm font-medium text-background shadow-lg">{line}</p>}

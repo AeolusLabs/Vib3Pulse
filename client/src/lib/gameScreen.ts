@@ -11,6 +11,8 @@ export const GAME_LAYOUT_LABEL: Record<GameLayout, string> = { versus: "Versus",
 
 /** Most video feeds a viewer ever receives at once (the four-way grid); every other layout needs fewer. */
 export const MAX_VIDEO_SUBS = 4;
+/** Most spray notes in the air at once in a game room (the engine otherwise allows 120 over a live video). */
+export const GAME_MAX_NOTES = 70;
 
 export const membersOf = (game: GameView, side: Side): string[] => game.teams[side];
 
@@ -132,3 +134,11 @@ export const gameNoticeText = (code: string): string | null => GAME_NOTICE[code]
 
 /** Names of the two teams' lanes on screen. */
 export const SIDE_NAME: Record<Side, string> = { A: "Team A", B: "Team B" };
+
+/** What the server's config says gamers-live can do. Missing pieces are all false: a flag-off server sends neither key. */
+export interface GameCaps { on: boolean; ingest: boolean; teamSpray: boolean; lanes: boolean }
+export const NO_GAME_CAPS: GameCaps = { on: false, ingest: false, teamSpray: false, lanes: false };
+export function gameCaps(cfg: { features?: { gaming?: boolean }; game?: { ingest?: boolean; teamSpray?: boolean; lanes?: boolean } } | null | undefined): GameCaps {
+  if (cfg?.features?.gaming !== true) return NO_GAME_CAPS;
+  return { on: true, ingest: cfg.game?.ingest === true, teamSpray: cfg.game?.teamSpray === true, lanes: cfg.game?.lanes === true };
+}
