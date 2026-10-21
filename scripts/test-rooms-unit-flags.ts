@@ -26,7 +26,7 @@ test("parseFlag: undefined and empty fall back to the default", () => {
 });
 test("loadRoomFeatures: defaults are all off with an empty env", () => {
   const f = loadRoomFeatures({});
-  assert.deepEqual(f, { linkScreens: false, paidRooms: false, spray: false });
+  assert.deepEqual(f, { linkScreens: false, paidRooms: false, spray: false, gaming: false });
   assert.equal((DEFAULT_ROOM_FEATURES as any).anonymousJoin, undefined);
   assert.equal(DEFAULT_ROOM_FEATURES.paidRooms, false);
   assert.equal(DEFAULT_ROOM_FEATURES.spray, false);
@@ -40,7 +40,7 @@ test("loadRoomFeatures: reads ROOMS_PAID, ROOMS_SPRAY (and ignores the removed R
 });
 test("loadRoomFeatures: garbage values are off", () => {
   const f = loadRoomFeatures({ ROOMS_PAID: " 1 ", ROOMS_SPRAY: "false" });
-  assert.deepEqual(f, { linkScreens: false, paidRooms: false, spray: false });
+  assert.deepEqual(f, { linkScreens: false, paidRooms: false, spray: false, gaming: false });
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

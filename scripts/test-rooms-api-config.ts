@@ -12,7 +12,7 @@ if (!/test/i.test(dbName)) {
   process.exit(2);
 }
 // The runner loads .env; a ROOMS_* value there must not decide the default-flags-off assertion.
-for (const k of ["ROOMS_PAID", "ROOMS_SPRAY"]) delete process.env[k];
+for (const k of ["ROOMS_PAID", "ROOMS_SPRAY", "ROOMS_GAMING"]) delete process.env[k];
 process.env.DISABLE_GEOCODING = "1";
 process.env.RESEND_API_KEY ||= "re_dummy_not_real";
 
@@ -112,6 +112,12 @@ try {
   const on = await http("GET", "/api/rooms/config", adult);
   Object.assign(roomFeatures, saved);
   check("config: reflects the live flag values", on.json?.features?.paidRooms === true && on.json.features.spray === true, JSON.stringify(on.json));
+
+  // Gaming: the key is absent while ROOMS_GAMING is off (asserted by the exact-shape check above) and true when it is on.
+  roomFeatures.gaming = true;
+  const g = await http("GET", "/api/rooms/config", adult);
+  Object.assign(roomFeatures, saved);
+  check("config: features.gaming is true while ROOMS_GAMING is on", g.status === 200 && g.json?.features?.gaming === true, JSON.stringify(g.json?.features));
 
   // The two ticket rates the host screens need follow the saved rates (rooms rates plan, task 3); nothing else about rates is exposed.
   const rates = await import("../server/rooms/roomRates");
