@@ -27,7 +27,6 @@ import {
   ticketDraftProblem, ticketFieldSelectors, ticketsTooManyForVideo, type TicketDraft,
 } from "@/lib/roomTickets";
 import { createRoom, useWizardHost } from "./createRoomApi";
-import { GAME_SETUP_FAILED } from "@/lib/gameScreen";
 import StepBasics, { type FieldError } from "./StepBasics";
 import StepAudience from "./StepAudience";
 import StepFeatures from "./StepFeatures";
@@ -54,7 +53,7 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const [accountTooNew, setAccountTooNew] = useState(false);
-  const { host, flags, gaming, minAccountAgeDays, failed: hostFailed } = useWizardHost(open, accountTooNew);
+  const { host, flags, gaming, gameLanes, minAccountAgeDays, failed: hostFailed } = useWizardHost(open, accountTooNew);
   // Public is closed when the account is younger than the server's minimum (known from the config, or from a refusal).
   const publicBlocked = accountTooNew || (!!host && accountTooNewFor(host, minAccountAgeDays));
   const { data: myEvents = [] } = useQuery<{ id: string; title: string }[]>({ queryKey: ["/api/events/my-events"], enabled: open });
@@ -236,7 +235,6 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
     if (adultHost) { try { localStorage.setItem(LAST_VISIBILITY_KEY, s.visibility); } catch { /* only a convenience */ } }
     if (res.voiceFailed) toast({ title: COPY.voiceLate });
     else if (res.videoFailed) toast({ title: COPY.videoLate });
-    else if (res.gameFailed) toast({ title: GAME_SETUP_FAILED });
     // Intended: a live public or friends room skips Done and goes straight in, because the host has only a short grace
     // period to arrive before an empty room closes and Done has nothing they need. An invite room stops at Done first (its
     // link is shown only once), and so does a room that was made but did not start (Done says so, and why).
@@ -332,7 +330,7 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
                   screenUrl={screenUrl} setScreenUrl={setScreenUrl} moneyPlaceholder={moneyPlaceholder && !priceAvailable}
                   paid={priceAvailable ? { on: ticket.on, set: (on) => setTicket({ on }), needsId: !host?.idVerifiedAdult } : null}
                   videoBlocked={videoOverTickets ? PRICE_COPY.videoNeedsFewer : null}
-                  gaming={gaming}
+                  gaming={gaming} gameLanes={gameLanes}
                 />
               ) : current === "money" && priceStepOn ? (
                 <StepPrice draft={ticket} set={setTicket} error={error} liveVideo={state.voice && state.liveVideo} />

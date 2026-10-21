@@ -269,6 +269,10 @@ export interface CreateRoomPayload {
   ticketPriceKobo?: TicketPayload["ticketPriceKobo"];
   ticketCapacity?: TicketPayload["ticketCapacity"];
   refundBeforeStart?: TicketPayload["refundBeforeStart"];
+  /** Gamers live: only present when a format was picked (the server ignores it while its flag is off). */
+  gameFormat?: 1 | 2 | 3 | 4;
+  gameDropTimeoutMs?: 30000 | 120000 | 0;
+  lanes?: true;
 }
 
 /** Cut to `max` characters (code points, so an emoji is never split in half). */
@@ -304,6 +308,10 @@ export function buildCreatePayload(s: WizardState, extras: WizardExtras = {}, li
     ...(eventId ? { eventId } : {}),
     ...(venueId ? { venueId } : {}),
     ...ticketPayload(extras.ticket, extras.ticketsEnabled === true),
+    // A game room needs voice and live video; a stale format left in the state after switching them off is not sent.
+    ...(s.gameFormat && s.voice && s.liveVideo
+      ? { gameFormat: s.gameFormat, gameDropTimeoutMs: s.gameDropTimeoutMs ?? 120_000, ...(s.lanes ? { lanes: true as const } : {}) }
+      : {}),
   };
 }
 

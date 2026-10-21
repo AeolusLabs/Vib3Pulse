@@ -31,9 +31,11 @@ interface Props {
   videoBlocked?: string | null;
   /** Gamers live: the server's flag is on, so the game format choice is offered (only for a room that goes live now with video). */
   gaming?: boolean;
+  /** config.game.lanes: the "Separate age groups" switch is offered once a format is chosen. */
+  gameLanes?: boolean;
 }
 
-export default function StepFeatures({ state, set, error, directInteractions, setDirectInteractions, screenUrl, setScreenUrl, moneyPlaceholder, paid = null, videoBlocked = null, gaming = false }: Props) {
+export default function StepFeatures({ state, set, error, directInteractions, setDirectInteractions, screenUrl, setScreenUrl, moneyPlaceholder, paid = null, videoBlocked = null, gaming = false, gameLanes = false }: Props) {
   const pinnedLen = Array.from(state.pinned).length;
   const screenPreview = useMemo(() => {
     if (!LINK_SCREENS || !screenUrl.trim()) return null;
@@ -57,13 +59,19 @@ export default function StepFeatures({ state, set, error, directInteractions, se
         onChange={(v) => set({ liveVideo: v })} disabledReason={!state.voice ? COPY.videoNeedsVoice : videoBlocked ?? undefined} testId="switch-room-live-video"
       />
 
-      {gaming && state.voice && state.liveVideo && !videoBlocked && state.when === "now" && (
+      {gaming && state.voice && state.liveVideo && !videoBlocked && (
         <div className="space-y-4" data-testid="game-format">
           <ChipGroup<number>
             legend={GAME_COPY.formatLegend} name="wiz-game-format" value={state.gameFormat ?? 0} testId="chips-game-format"
             options={[{ value: 0, label: GAME_COPY.formatOff }, ...GAME_FORMATS.map((n) => ({ value: n, label: `${n}v${n}` }))]}
             onPick={(n) => set({ gameFormat: n === 0 ? null : (n as 1 | 2 | 3 | 4) })} help={GAME_COPY.formatHelp}
           />
+          {state.gameFormat && gameLanes && (
+            <SwitchRow
+              id="wiz-lanes" label={GAME_COPY.lanesLabel} help={GAME_COPY.lanesHelp} checked={state.lanes === true}
+              onChange={(v) => set({ lanes: v })} testId="switch-game-lanes"
+            />
+          )}
           {state.gameFormat && (
             <ChipGroup<number>
               legend={GAME_COPY.dropLegend} name="wiz-game-drop" value={state.gameDropTimeoutMs ?? DEFAULT_DROP_TIMEOUT_MS} testId="chips-game-drop"

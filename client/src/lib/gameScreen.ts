@@ -162,6 +162,8 @@ export const GAME_COPY = {
   formatHelp: "Players put their own screen in the room. Viewers see up to four feeds at a time and can spray players.",
   dropLegend: "If a player drops",
   dropHelp: "Their place stays with a countdown. When it runs out, the room says they dropped out.",
+  lanesLabel: "Separate age groups",
+  lanesHelp: "13-17 and 18+ each get their own lane with their own matches, chat and spray. Adults and teens never see each other.",
 } as const;
 
 // ---------------------------------------------------------------- team spray (owner ruling 2026-10-22)
@@ -200,5 +202,3 @@ export function gameRefusalText(f: { code?: string; reason?: string; field?: str
   if (f.reason === "invalid" && (f.field === "gameFormat" || f.field === "gameDropTimeoutMs" || f.field === "lanes")) return "That game setting isn't allowed. Pick one from the list.";
   return null;
 }
-/** The create flow made the room but could not set the game up. */
-export const GAME_SETUP_FAILED = "The room is live, but the game wasn't set up. Open Controls, Game, to try again.";
