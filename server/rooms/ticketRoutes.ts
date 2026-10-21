@@ -11,7 +11,7 @@ import { checkPurchase, type PurchaseBlock, type RoomTicketRefusal } from "@shar
 import { createCheckout, verifyCheckoutSession } from "../payments/index";
 import * as rs from "./roomStorage";
 import { canViewRoom } from "./roomAccess";
-import { ticketSalesAllowed } from "./roomControls";
+import { isHostFrozen, ticketSalesAllowed } from "./roomControls";
 import { TokenBucket } from "./rateLimit";
 import { handleRoomTicketCharge, IssueQueueFullError, replayRoomTicket, ticketCountsFor, toTicketView, type IssueRoomTicketResult } from "./tickets";
 import { hostCanSellNow } from "./ticketStorage";
@@ -81,6 +81,8 @@ export function registerRoomTicketRoutes(app: Express): void {
       const token = typeof req.query.token === "string" ? req.query.token : undefined;
       // The view and minors' room gate first: a room the caller cannot see is not found, with nothing about it.
       if (!room || !(await canViewRoom(room, uid, token))) return res.status(404).json({ message: "Room not found" });
+      // Admin host freeze (rooms admin plan): no new ticket money for this host, the same answer as the pause.
+      if (await isHostFrozen(room.hostId)) return res.status(403).json({ message: "Paid rooms aren't available yet.", code: "FEATURE_OFF" });
 
       const [buyer, member, blocked, counts, hostCanSell] = await Promise.all([
         storage.getUser(uid), rs.getMember(room.id, uid), isBlockedEitherWay(uid, room.hostId), ticketCountsFor(room.id, uid),

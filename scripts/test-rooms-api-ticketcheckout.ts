@@ -191,6 +191,15 @@ try {
     await controls.setControl({ key: "tickets_paused", on: false, adminId: "ctl-test-admin", reason: "test resume" });
   }
 
+  // ------------------------------------------------------------ admin host freeze (rooms admin plan, task 3)
+  {
+    const controls = await import("../server/rooms/roomControls");
+    await controls.freezeHost({ hostId: host, adminId: "ctl-test-admin", reason: "test freeze" });
+    const fz = await checkout(room, a);
+    check("host frozen: checkout is 403 FEATURE_OFF and nothing is charged", fz.status === 403 && fz.json?.code === "FEATURE_OFF" && checkouts.length === 0 && !fz.text.includes(String(PRICE)), JSON.stringify(fz.json));
+    await controls.unfreezeHost({ hostId: host, adminId: "ctl-test-admin" });
+  }
+
   // ------------------------------------------------------------ gates before price
   const anon = await http("POST", `/api/rooms/${room}/tickets/checkout`, null, {});
   check("signed out: 401", anon.status === 401, JSON.stringify(anon.json));

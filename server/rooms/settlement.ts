@@ -562,7 +562,7 @@ export async function adminHoldPayout(roomId: string, reason: string): Promise<A
     } else {
       await c.query(
         `insert into room_payouts (room_id, host_id, amount_kobo, status, release_at, last_error)
-         select $1, $2, coalesce((select sum(host_kobo) from room_tickets where room_id = $1 and status = 'paid'), 0), 'held', $3::timestamp, $4`,
+         select $1::varchar, $2::varchar, coalesce((select sum(host_kobo) from room_tickets where room_id = $1::varchar and status = 'paid'), 0), 'held', $3::timestamp, $4::text`,
         [roomId, room.host_id, PAYOUT_HOLD_SENTINEL_ISO, note],
       );
     }
@@ -574,6 +574,27 @@ export async function adminHoldPayout(roomId: string, reason: string): Promise<A
     c.release();
   }
   return { ok: true, payout: await payoutView(pool, roomId) };
+}
+
+/**
+ * Host freeze (rooms admin plan): hold every payout of this host that can still be held. A room counts when it has a payout row
+ * or a paid ticket; a payout already being sent (queued), paid or failed answers 409 from adminHoldPayout and is skipped (money
+ * in flight is never touched). Idempotent: holding a held payout just re-applies the hold. Unfreezing does not release anything.
+ */
+export async function adminHoldAllPayoutsForHost(hostId: string, reason: string): Promise<{ held: number; skipped: number }> {
+  const rooms = (await pool.query(
+    `select r.id from rooms r
+      where r.host_id = $1
+        and (exists (select 1 from room_payouts p where p.room_id = r.id)
+          or exists (select 1 from room_tickets t where t.room_id = r.id and t.status = 'paid'))`,
+    [hostId],
+  )).rows as { id: string }[];
+  let held = 0, skipped = 0;
+  for (const r of rooms) {
+    const out = await adminHoldPayout(r.id, reason);
+    if (out.ok) held++; else skipped++;
+  }
+  return { held, skipped };
 }
 
 /** Release: an admin-held payout gets release_at = ended_at + 48 h back (or now + 48 h while the room has not ended). */

@@ -965,6 +965,25 @@ try {
     created.push(ADMIN);
   }
 
+  // =============================================================== admin host freeze (rooms admin plan, task 3)
+  {
+    const controls = await import("../server/rooms/roomControls");
+    const ADMIN2 = await mk("ctl_admin2");
+    const PX = await payer("p_hostfrozen");
+    await controls.freezeHost({ hostId: H, adminId: ADMIN2, reason: "test freeze" });
+    await refused("host frozen: a spray to the host", PX.id, R, body(H));
+    await refused("host frozen: a spray to a stage guest of that host's room", PX.id, R, body(G));
+    const blk = await rest("GET", `/api/rooms/${R}`, PX.id);
+    check("host frozen: the room stays live", blk.json?.room?.status === "live", JSON.stringify(blk.json?.room?.status));
+    await controls.unfreezeHost({ hostId: H, adminId: ADMIN2 });
+    await controls.freezeHost({ hostId: G, adminId: ADMIN2, reason: "test freeze guest" });
+    await refused("recipient frozen: a spray to a frozen stage guest", PX.id, R, body(G));
+    const okHost = await spray(PX.id, R, body(H));
+    check("only the frozen recipient is blocked: the host can still be sprayed", okHost.status === 200, JSON.stringify(okHost.json));
+    await controls.unfreezeHost({ hostId: G, adminId: ADMIN2 });
+    created.push(ADMIN2);
+  }
+
   // =============================================================== boot: production with the flag off and no key still boots
   let threw = false;
   try { assertPaymentTokenKeyForBoot(false, { NODE_ENV: "production" } as any); } catch { threw = true; }

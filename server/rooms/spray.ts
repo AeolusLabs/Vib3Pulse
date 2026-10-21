@@ -60,7 +60,7 @@ import * as ss from "./sprayStorage";
 import { roomHub } from "./RoomHub";
 import { isKicked } from "./roomSocket";
 import { roomFeatures } from "./features";
-import { sprayAllowed } from "./roomControls";
+import { isHostFrozen, sprayAllowed } from "./roomControls";
 import { payableSubaccountOf } from "./payouts";
 import { ticketCheckoutBaseUrl } from "./checkoutUrl";
 import { createKeyedQueue, QueueFullError } from "./keyedQueue";
@@ -216,6 +216,8 @@ export async function sprayGate(roomId: string, payerId: string, recipientId: st
   // OWNER DECISION (review r4 N4/N5): the receive ban, at START only (re-checked in the reservation under the 'spray-recv'
   // locks). Never at delivery: the split already happened at charge time, so reversing a paid spray for a debt only adds a
   // loss. Bites only above CLAWBACK_BLOCK_THRESHOLD_KOBO owed, or with any chargeback clawback (sprayLimits.ts).
+  // Admin host freeze (rooms admin plan): at START only, like the receive ban. A paid spray still delivers.
+  if (phase === "start" && (await isHostFrozen(room.hostId) || (recipientId !== room.hostId && await isHostFrozen(recipientId)))) return fail("SERVER_RULE");
   if (phase === "start" && await ss.receiveBlocked([room.hostId, recipientId], clawbackBlockThresholdKobo())) return fail("OPEN_CLAWBACK");
   const kind = recipientId === room.hostId ? "host" : "stage";
   return {

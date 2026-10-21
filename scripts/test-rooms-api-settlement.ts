@@ -586,6 +586,27 @@ try {
   check("...a refund failure with no ticket row (S2 no_row path) is an alert",
     (tot.json?.alerts ?? []).some((a: any) => a.reference === noRowRef && a.kind === "refund_failed" && a.ticketId === null), JSON.stringify((tot.json?.alerts ?? []).slice(0, 5)));
   check("...refund_pending bookkeeping markers are never shown as alerts", !(tot.json?.alerts ?? []).some((a: any) => a.kind === "refund_pending"));
+  // ---- admin host freeze (rooms admin plan, task 3): every payout of the host that can still be held is held
+  {
+    const FH = await mk("frozenhost"); await payoutAccount(FH);
+    const ra = await mkRoom(FH, { status: "ended" }); await mkTicket(ra, U[0]);
+    await q(`insert into room_payouts (room_id, host_id, amount_kobo, status, release_at) values ($1,$2,$3,'held', now() + interval '1 hour')`, [ra, FH, B.host]);
+    const rb = await mkRoom(FH, { status: "live" }); await mkTicket(rb, U[1]); // paid ticket, no payout row yet
+    const rc = await mkRoom(FH, { status: "ended" }); await mkTicket(rc, U[2]);
+    await q(`insert into room_payouts (room_id, host_id, amount_kobo, status, release_at) values ($1,$2,$3,'queued', now() - interval '1 hour')`, [rc, FH, B.host]);
+    const rd = await mkRoom(FH, { status: "ended" }); await mkTicket(rd, U[3]);
+    await q(`insert into room_payouts (room_id, host_id, amount_kobo, status, release_at, paid_at, transfer_ref) values ($1,$2,$3,'paid', now() - interval '3 days', now() - interval '2 days', $4)`, [rd, FH, B.host, `tr_freeze_paid_${stamp}`]);
+    const re = await mkRoom(FH, { status: "scheduled" }); // no tickets, no payout: nothing to hold
+    const res = await settlement.adminHoldAllPayoutsForHost(FH, "freeze test");
+    check("host freeze: two payouts held; the one being sent and the paid one are skipped", res.held === 2 && res.skipped === 2, JSON.stringify(res));
+    const pa = await payout(ra), pb = await payout(rb), pc = await payout(rc), pd = await payout(rd);
+    check("host freeze: the held payout is pushed to the hold sentinel, the live room gets a held row", pa?.status === "held" && pa.release_ms > Date.parse("9000-01-01") && pb?.status === "held" && pb.release_ms > Date.parse("9000-01-01"), JSON.stringify([pa, pb]));
+    check("host freeze: the queued payout stays queued and the paid one stays paid", pc?.status === "queued" && pd?.status === "paid", JSON.stringify([pc, pd]));
+    check("host freeze: a room with nothing to pay gets no payout row", (await payout(re)) === undefined);
+    const again = await settlement.adminHoldAllPayoutsForHost(FH, "freeze test again");
+    check("host freeze: running it twice holds nothing new (idempotent)", again.held === 2 && (await payout(ra)).status === "held", JSON.stringify(again));
+  }
+
 } catch (e: any) {
   failed++; console.log(`FAIL uncaught: ${e.stack || e}`);
 } finally {
