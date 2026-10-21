@@ -6,6 +6,11 @@
 .gs button { cursor: pointer; }
 .gs button:focus-visible, .gs [tabindex]:focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: 2px; }
 
+/* ---------------------------------------------------------------- age lane bar */
+.gs-lanebar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 12px; background: hsl(var(--muted)); font-size: 13px; line-height: 1.35; color: hsl(var(--muted-foreground)); }
+.gs-lanebar b { color: hsl(var(--foreground)); font-weight: 600; }
+.gs-lanebadge { flex: none; border-radius: 999px; padding: 3px 9px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; background: hsl(var(--card)); color: hsl(var(--primary)); border: 1px solid hsl(var(--border)); }
+
 /* ---------------------------------------------------------------- score banner */
 .gs-score { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 10px; padding: 2px 2px 0; }
 .gs-who { min-width: 0; }

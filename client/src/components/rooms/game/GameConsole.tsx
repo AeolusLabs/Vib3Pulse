@@ -6,7 +6,8 @@ import { MAX_SCORE, SIDES, type DropTimeoutMs, type GameAction, type GameView, t
 import { DROP_TIMEOUTS_MS, DEFAULT_DROP_TIMEOUT_MS } from "@shared/gameScreen";
 import { Button } from "@/components/ui/button";
 import { useNow } from "@/hooks/useNow";
-import { DROP_TIMEOUT_LABEL, GAME_COPY, GAME_FORMATS, GAME_LAYOUTS, GAME_LAYOUT_LABEL, SIDE_NAME, statusText, type GameLayout } from "@/lib/gameScreen";
+import { DROP_TIMEOUT_LABEL, GAME_COPY, GAME_FORMATS, GAME_LAYOUTS, GAME_LAYOUT_LABEL, LANE_LABEL, SIDE_NAME, otherLane, statusText, type AgeLane, type GameLayout } from "@/lib/gameScreen";
+import OpenLane from "./OpenLane";
 import "./game.css";
 
 export interface GameConsoleProps {
@@ -25,6 +26,8 @@ export interface GameConsoleProps {
   canSaveRoom: boolean;
   /** Say one plain line (the sheet's notice). */
   say(message: string): void;
+  /** Age lanes (config.game.lanes on, and this room is a lane): the card and the open-the-other-lane action. */
+  lanes?: { ageLane: AgeLane; parentId: string; onOpened(): void };
 }
 
 const Section = ({ title, children, id }: { title: string; children: ReactNode; id: string }) => (
@@ -38,7 +41,7 @@ const Pill = ({ pressed, onClick, children, label, testId }: { pressed: boolean;
   <button type="button" className="gs-view" aria-pressed={pressed} aria-label={label} onClick={onClick} data-testid={testId}>{children}</button>
 );
 
-export default function GameConsole({ game, nameOf, onAction, onSaveRoom, dropTimeoutMs, layout, onLayout, serverOffsetMs, canSaveRoom, say }: GameConsoleProps) {
+export default function GameConsole({ game, nameOf, onAction, onSaveRoom, dropTimeoutMs, layout, onLayout, serverOffsetMs, canSaveRoom, say, lanes }: GameConsoleProps) {
   const now = useNow(Object.keys(game.away).length > 0) + serverOffsetMs;
   const [busy, setBusy] = useState(false);
   const send = (action: GameAction, extra?: { targetId?: string; side?: Side; value?: number }) => { if (!onAction(action, extra)) say("Couldn't reach the room. Try again."); };
@@ -121,6 +124,14 @@ export default function GameConsole({ game, nameOf, onAction, onSaveRoom, dropTi
         </div>
         <p className="text-xs text-muted-foreground">{GAME_COPY.dropHelp}</p>
       </Section>}
+
+      {lanes && (
+        <Section title="Age lanes" id="gc-lanes">
+          <p className="text-sm text-muted-foreground" data-testid="game-lanes-card">This room has separate lanes. You are in the {LANE_LABEL[lanes.ageLane]} lane. Each lane has its own matches, chat and spray, and the lanes never see each other.</p>
+          <OpenLane parentId={lanes.parentId} lane={otherLane(lanes.ageLane)} onOpened={lanes.onOpened} say={say} />
+          <p className="text-xs text-muted-foreground">Only the host, or someone the host follows back, can open it.</p>
+        </Section>
+      )}
 
       <Section title="Your view" id="gc-view">
         <div className="gs-views" role="group" aria-label="Your view">

@@ -27,8 +27,10 @@ import { AGE_LIMIT_EVICTED_COPY, DENIED_MESSAGE, HOST_REVIEW_COPY, KIND_LABEL, t
 import { inviteTokenFor, parseTicketBlock, returnRef, searchWithoutRef, showsPrice, ticketGate } from "@/lib/roomTickets";
 import { kickRemainingAfter, recapProbeDelayMs, stateForCode } from "@/lib/roomStates";
 import { ArrowLeftIcon } from "@/components/ui/icons";
-import { isAgeUnknownDenied, isMinorsDenied, isRoomDenial, listenOnlyHere, minorsCodeFor, parseRoomDenial, showListenLine, type RoomDenial } from "@/lib/minorsRoomUi";
+import { isAgeUnknownDenied, isLaneDenied, isMinorsDenied, isRoomDenial, listenOnlyHere, minorsCodeFor, parseRoomDenial, showListenLine, type RoomDenial } from "@/lib/minorsRoomUi";
 import type { AdultInvite } from "@/lib/minorsRoomApi";
+import OpenLane from "@/components/rooms/game/OpenLane";
+import { laneForAge } from "@/lib/gameScreen";
 import { SprayReturn } from "@/components/rooms/spray/BankApproval";
 import { parseSprayBlock, searchWithoutSpray, sprayReturnId } from "@/lib/sprayUi";
 import { moneyEligibleRoom } from "@shared/roomRules";
@@ -52,6 +54,11 @@ interface RoomDetail {
    * parseSprayBlock; absent means no Spray button or row anywhere.
    */
   spray?: unknown;
+  /**
+   * Age lanes: when the id in the URL is a lane PARENT, the server answers with the viewer's own lane. `room` is that lane;
+   * everything the page does to the room (join, voice, report, spray) uses `lane.roomId`.
+   */
+  lane?: { parentRoomId: string; roomId: string; ageLane: "teen" | "adult" };
 }
 
 /** sessionStorage, or null where the browser refuses it (private modes): the invite token then lives only in the URL. */
@@ -84,8 +91,9 @@ function RoomPageInner({ id }: { id: string }) {
     queryKey: ["room", id, token ?? ""],
     queryFn: async () => {
       const r = await fetch(`/api/rooms/${id}${token ? `?token=${encodeURIComponent(token)}` : ""}`, { credentials: "include" });
-      if (r.status === 404) return null;
-      // A minors' room refusal keeps only its code: the text and anything else in the body is dropped, so nothing about the room is cached.
+      // A refusal keeps only its code and the server's warning sentence: nothing else in the body is kept, so nothing about the room is cached.
+      // A lane parent with no lane for this viewer answers 404 NO_LANE, which gets its own screen; any other 404 is "not available".
+      if (r.status === 404) { const denied = parseRoomDenial(r.status, await r.json().catch(() => null)); return denied; }
       if (r.status === 403) { const denied = parseRoomDenial(r.status, await r.json().catch(() => null)); if (denied) return denied; }
       if (!r.ok) throw new Error("Couldn't load the room");
       return r.json();
@@ -103,8 +111,10 @@ function RoomPageInner({ id }: { id: string }) {
   const [revokedInvites, setRevokedInvites] = useState<Map<string, AdultInvite>>(new Map());
   const minorsCode = minorsCodeFor(isMinorsDenied(raw) ? raw : null, state); // one screen, whether the refusal came over HTTP or the socket
   // "reconnecting" counts as live: a blip in the app connection must not hang up the media (that ended the stream by our own hand).
-  const voice = useRoomVoice(id, { enabled: state.voiceEnabled && (state.phase === "live" || state.phase === "reconnecting"), inviteToken: token, onCameraLost: () => sock.liveAction("stop"), game: !!state.game });
+  const voice = useRoomVoice(detail?.lane?.roomId ?? id, { enabled: state.voiceEnabled && (state.phase === "live" || state.phase === "reconnecting"), inviteToken: token, onCameraLost: () => sock.liveAction("stop"), game: !!state.game });
   const room = detail?.room;
+  // The room that is actually joined: the viewer's lane when the URL is a lane parent, else the URL's own id.
+  const roomId = detail?.lane?.roomId ?? id;
   const live = room?.status === "live";
   const canJoin = detail?.canJoin.ok === true;
 
@@ -128,7 +138,7 @@ function RoomPageInner({ id }: { id: string }) {
 
   // Adults only listen and chat in a minors' room. The age is the viewer's own, read from their own settings; the server enforces it regardless.
   const minorsRoom = detail?.room.minorsRoom === true || state.room?.minorsRoom === true;
-  const { data: myAge } = useQuery<{ age: number | null }>({ queryKey: ["/api/users/me/room-privacy"], enabled: !!me && minorsRoom });
+  const { data: myAge } = useQuery<{ age: number | null }>({ queryKey: ["/api/users/me/room-privacy"], enabled: !!me && (minorsRoom || isLaneDenied(raw)) });
   const listenOnly = listenOnlyHere({ minorsRoom, age: myAge?.age });
   const listenLine = showListenLine({ minorsRoom, age: myAge?.age });
 
@@ -203,7 +213,7 @@ function RoomPageInner({ id }: { id: string }) {
   if (inRoom && detail && room && !sprayBack) {
     return (
       <RoomShell
-        id={id}
+        id={roomId}
         token={token}
         room={room}
         host={detail.host}
@@ -250,12 +260,17 @@ function RoomPageInner({ id }: { id: string }) {
     content = <div className="space-y-3"><Skeleton className="aspect-video w-full rounded-2xl" /><Skeleton className="h-40 w-full rounded-2xl" /></div>;
   } else if (minorsCode) {
     // The warning screen alone: no title, no host. Acknowledging records it, clears any socket refusal, reloads the room and joins.
-    content = <MinorsRoomWarning code={minorsCode} roomId={id} onAcknowledged={async () => {
+    content = <MinorsRoomWarning code={minorsCode} roomId={id} text={isMinorsDenied(raw) ? raw.warning : state.errorWarning ?? undefined} onAcknowledged={async () => {
       if (state.phase === "denied") sock.leave();
       setJoinTapped(true);
       const r = await refetch();
       return !r.isError && !isRoomDenial(r.data); // still refused or failed: the screen says so
     }} />;
+  } else if (isLaneDenied(raw)) {
+    // A lane parent with nothing for this viewer: the server's own sentence, and (when they know their age group) a way to open it.
+    const lane = laneForAge(myAge?.age);
+    content = <Panel title="You can't join this room" body={raw.warning ?? DENIED_MESSAGE[raw.laneDenied === "NO_LANE" ? "NOT_FOUND" : "AGE_LIMIT"] ?? "You can't join this room."}
+      action={<div className="space-y-3">{lane && raw.laneDenied === "NO_LANE" && <OpenLane parentId={id} lane={lane} onOpened={() => { void refetch(); }} say={(m) => toast({ title: m })} />}{back}</div>} />;
   } else if (ageUnknownDenied) {
     // No date of birth on file: the plain message only. No warning (they may be a teen) and no room details.
     content = <Panel title="You can't join this room" body={DENIED_MESSAGE.AGE_UNKNOWN} action={back} />;
@@ -280,7 +295,7 @@ function RoomPageInner({ id }: { id: string }) {
     content = <RoomCodePanel code={state.error!} kickRemainingMs={state.error === "KICKED" ? kickRemainingAfter(kickedAt.current, Date.now()) : null} room={room} onRetry={() => { sock.leave(); void refetch(); }} />;
   } else if (state.phase === "denied") {
     const code = state.error ?? "NOT_FOUND";
-    content = <Panel title={code === "AGE_LIMIT" ? "This room has an age limit" : "You can't join this room"} body={code === "AGE_LIMIT" && state.room ? AGE_LIMIT_EVICTED_COPY : DENIED_MESSAGE[code] ?? "You can't join this room."} action={back} />;
+    content = <Panel title={code === "AGE_LIMIT" ? "This room has an age limit" : "You can't join this room"} body={code === "AGE_LIMIT" && state.room ? AGE_LIMIT_EVICTED_COPY : state.errorWarning ?? DENIED_MESSAGE[code] ?? "You can't join this room."} action={back} />;
   } else if (room.status === "scheduled" && gate === "held" && ticketBlock) {
     bare = true;
     // The refund promise comes from the ticket block (a guest's room object does not carry refundBeforeStart).

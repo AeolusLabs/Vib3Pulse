@@ -140,6 +140,17 @@ export const gameNoticeText = (code: string): string | null => GAME_NOTICE[code]
 export const OBS_SUFFIX = "#obs";
 export const playerIdOf = (identity: string): string => (identity.endsWith(OBS_SUFFIX) ? identity.slice(0, -OBS_SUFFIX.length) : identity);
 
+/** Age lanes: which group a lane is, in words. */
+export type AgeLane = "teen" | "adult";
+export const LANE_LABEL: Record<AgeLane, string> = { teen: "13-17", adult: "18+" };
+export const LANE_BAR_TEXT = "Matches, chat and spray stay inside your age group.";
+export const laneBarTitle = (lane: AgeLane): string => `You are in the ${LANE_LABEL[lane]} lane`;
+/** The other lane's name for the open button. */
+export const otherLane = (lane: AgeLane): AgeLane => (lane === "teen" ? "adult" : "teen");
+export const openLaneLabel = (lane: AgeLane): string => `Open the ${lane === "teen" ? "teen" : "18+"} lane`;
+/** The lane an account of this age would open: under 18 the teen lane, 18 and over the adult lane (the server decides anyway). */
+export const laneForAge = (age: number | null | undefined): AgeLane | null => (typeof age !== "number" ? null : age < 18 ? "teen" : "adult");
+
 /** Names of the two teams' lanes on screen. */
 export const SIDE_NAME: Record<Side, string> = { A: "Team A", B: "Team B" };
 

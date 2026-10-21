@@ -8,7 +8,7 @@ import { useNow } from "@/hooks/useNow";
 import type { GameTracks } from "@/hooks/useGameTracks";
 import {
   allPlayers, featuredFor, GAME_LAYOUT_LABEL, GAME_LAYOUTS, SIDE_NAME, spotlightFor, statusText, videoFeeds,
-  type GameLayout,
+  LANE_BAR_TEXT, LANE_LABEL, laneBarTitle, type AgeLane, type GameLayout,
 } from "@/lib/gameScreen";
 import GameTile from "./GameTile";
 import TeamLane from "./TeamLane";
@@ -32,6 +32,8 @@ export interface GameStageProps {
   onSprayTeam?: (side: Side) => void;
   /** The play button: ask to play / share your screen / withdraw. Absent for a viewer who may not play (listen-only). */
   onPlay?: () => void;
+  /** The room's own age lane (only present for a lane's own viewers, and only while lanes are on). Draws the lane bar. */
+  ageLane?: AgeLane | null;
   className?: string;
 }
 
@@ -40,7 +42,7 @@ const teamLine = (game: GameView, side: Side, nameOf: (u: string) => string, fol
   return f ? nameOf(f) : "No players yet";
 };
 
-export default function GameStage({ game, tracks, me, layout, onLayout, nameOf, serverOffsetMs, audioOnly, sprayable, onSpray, onSprayTeam, onPlay, className }: GameStageProps) {
+export default function GameStage({ game, tracks, me, layout, onLayout, nameOf, serverOffsetMs, audioOnly, sprayable, onSpray, onSprayTeam, onPlay, ageLane, className }: GameStageProps) {
   const away = Object.keys(game.away).length > 0;
   // One tick a second while anyone is away (the countdown), nothing otherwise.
   const now = useNow(away) + serverOffsetMs;
@@ -94,6 +96,12 @@ export default function GameStage({ game, tracks, me, layout, onLayout, nameOf, 
 
   return (
     <div className={`gs ${className ?? ""}`} data-testid="game-stage" data-layout={layout}>
+      {ageLane && (
+        <div className="gs-lanebar" role="note" data-testid="game-lane-bar">
+          <span className="gs-lanebadge">{LANE_LABEL[ageLane]}</span>
+          <span><b>{laneBarTitle(ageLane)}.</b> {LANE_BAR_TEXT}</span>
+        </div>
+      )}
       <div className="gs-score" role="group" aria-label={`Score, ${SIDE_NAME.A} ${game.score[0]}, ${SIDE_NAME.B} ${game.score[1]}`}>
         <div className="gs-who"><b>{SIDE_NAME.A}</b><span>{teamLine(game, "A", nameOf, follow)}</span></div>
         <div className="gs-num" aria-hidden>{game.score[0]}<i>:</i>{game.score[1]}</div>
