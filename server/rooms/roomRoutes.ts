@@ -32,7 +32,7 @@ import { getVoiceService } from "./voice/voiceService";
 import { afterRoleChange, canCameraNow, canPublishNow, isGamePlayer, publishSourcesNow, shutdownVoice, stopAllLive } from "./stage";
 import { applyMod, endRoom, enforceAgeLimit, enforceTicketFor, expectHost, interactionVerdict, isKicked, notifyScreen, removeFromMinorsRoom, writeRoomSettings } from "./roomSocket";
 import { roomHub } from "./RoomHub";
-import { GAME_PARTS, ingressFlag, roomFeatures } from "./features";
+import { GAME_PARTS, roomFeatures } from "./features";
 import { sprayAllowed, ticketSalesAllowed } from "./roomControls";
 import { getRates } from "./roomRates";
 import { clearReminder, hasReminder, setReminder } from "./reminders";
@@ -44,6 +44,7 @@ import { registerRoomRecapRoutes } from "./recap";
 import { validateGameInput, type DropTimeoutMs, type GameFormat } from "@shared/gameScreen";
 import { applyGameRoom, gameFitCheck } from "./game";
 import * as lanes from "./gameLanes";
+import { ingestAvailable, ingressFor, revokePlayerIngress } from "./gameIngress";
 
 const MAX_SCHEDULED = 10;
 const MAX_LIVE = 1;
@@ -85,7 +86,7 @@ const badGameField = (field: string) => ({ message: `Invalid ${field}`, field, r
 async function gameCapabilities(): Promise<{ ingest: boolean; teamSpray: boolean; lanes: boolean }> {
   const svc = getVoiceService();
   return {
-    ingest: ingressFlag() && !!svc && typeof (svc as { createIngress?: unknown }).createIngress === "function",
+    ingest: !!svc && ingestAvailable(),
     teamSpray: GAME_PARTS.teamSpray && (await sprayAllowed()),
     lanes: GAME_PARTS.lanes,
   };
@@ -656,6 +657,26 @@ export function registerRoomRoutes(app: Express): void {
     } catch (e) {
       console.error("[rooms] end failed:", e);
       res.status(500).json({ message: "Failed to end room" });
+    }
+  });
+
+  // ------------------------------------------------------------ gaming: OBS / RTMP ingest (LIVEKIT_INGRESS)
+  // A current player of this room gets their own ingest point (the same one on every call). Everyone else gets one fixed 403.
+  // The stream key is in this response only: never logged, never in room:state or a broadcast, never in an error.
+  app.post("/api/rooms/:id/game/ingress", requireAuth, roomLimiter, async (req, res) => {
+    const refused = () => res.status(403).json({ message: "Only a player in this game can stream with OBS.", code: "NOT_ALLOWED" });
+    try {
+      if (!ingestAvailable()) return res.status(404).json({ message: "Not found" });
+      const room = await rs.getRoom(req.params.id);
+      if (!room || !(await canViewRoom(room, req.user!.id))) return res.status(404).json({ message: "Room not found" });
+      if (room.status !== "live" || !isGamePlayer(room.id, req.user!.id)) return refused();
+      const i = await ingressFor(room.id, req.user!.id);
+      if (!isGamePlayer(room.id, req.user!.id)) { await revokePlayerIngress(room.id, req.user!.id); return refused(); } // removed meanwhile
+      res.set("Cache-Control", "no-store");
+      res.json({ url: i.url, streamKey: i.streamKey });
+    } catch {
+      console.error("[rooms:ingress] route failed"); // never the error itself: it may carry the request
+      res.status(500).json({ message: "Streaming with OBS isn't available right now." });
     }
   });
 

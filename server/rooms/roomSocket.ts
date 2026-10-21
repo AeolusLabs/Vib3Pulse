@@ -12,6 +12,7 @@ import type { Room, User } from "@shared/schema";
 import * as rs from "./roomStorage";
 import { canViewRoom, mutualFollow, plainText, viewerRoom, viewRoom } from "./roomAccess";
 import { afterLaneEnded, isLaneParent, resolveLaneRoom } from "./gameLanes";
+import { revokeRoomIngresses } from "./gameIngress";
 import { lockAdmits } from "./roomLock";
 import { getInviteState, markHostRoomsMinors, minorsGate, NO_INVITE, revokeInvite } from "./minorsRoom";
 import { roomHub, type HubMember } from "./RoomHub";
@@ -182,6 +183,7 @@ export async function endRoom(roomId: string, opts: { hostReview?: boolean } = {
   // a host review: opts.hostReview, never paid out). Never throws; imported lazily so the money modules stay out of this
   // module's import cycle.
   if (room) await import("./settlement").then((m) => m.afterRoomEnded(roomId, { hostReview: opts.hostReview === true })).catch((e) => console.error("[rooms] after-end money step failed:", e?.message ?? e));
+  await revokeRoomIngresses(roomId); // gaming: every OBS stream key of the room stops working (nothing to do otherwise)
   if (room?.voiceEnabled || roomHub.voiceOn(roomId)) {
     await rs.clearStage(roomId).catch(() => {});
     await getVoiceService()?.deleteRoom(roomId).catch((e) => console.error("[voice] deleteRoom failed:", e?.message ?? e));

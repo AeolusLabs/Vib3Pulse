@@ -11,6 +11,7 @@ import { roomHub, type HubMember } from "./RoomHub";
 import { roomFeatures } from "./features";
 import { getInviteState, NO_INVITE, type InviteState } from "./minorsRoom";
 import { isGamePlayer, publishNowLocked, registerGameHooks, releaseIfAway, withRoomLock } from "./stage";
+import { revokePlayerIngress } from "./gameIngress";
 
 export type { GameView };
 
@@ -79,8 +80,8 @@ async function commitLocked(roomId: string, before: GameState, next: GameState):
   const was = new Set(playersOf(before)), now = new Set(playersOf(next));
   const changed = [...playersOf(next).filter((id) => !was.has(id)), ...playersOf(before).filter((id) => !now.has(id))];
   for (const id of changed) await publishNowLocked(roomId, id);
-  // A removed player whose connection is down has no slot left to hold: let them go now.
-  for (const id of playersOf(before)) if (!now.has(id)) releaseIfAway(roomId, id);
+  // A removed player's OBS stream key stops working; one whose connection is down has no slot left to hold: let them go now.
+  for (const id of playersOf(before)) if (!now.has(id)) { await revokePlayerIngress(roomId, id); releaseIfAway(roomId, id); }
 }
 
 const same = (a: GameState, b: GameState) => JSON.stringify(a) === JSON.stringify(b);
@@ -110,6 +111,7 @@ async function dropLocked(roomId: string, userId: string): Promise<void> {
   if (same(next, cur)) return;
   roomHub.setGame(roomId, next);
   broadcastGame(roomId); // their LiveKit grant goes with removeParticipant (dropFromVoice), right after this
+  await revokePlayerIngress(roomId, userId); // and their OBS stream key stops working
 }
 
 registerGameHooks({ reconcileLocked: reconcileGameLocked, dropLocked });

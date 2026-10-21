@@ -1,6 +1,6 @@
-import type { PublishSource, VoiceParticipant, VoiceService } from "./voiceService";
+import type { GameIngress, PublishSource, VoiceParticipant, VoiceService } from "./voiceService";
 
-export interface VoiceCall { op: "mint" | "setCanPublish" | "setPublishSources" | "remove" | "delete"; roomId: string; userId?: string; canPublish?: boolean; camera?: boolean; sources?: PublishSource[] }
+export interface VoiceCall { op: "mint" | "setCanPublish" | "setPublishSources" | "remove" | "delete" | "createIngress" | "deleteIngress"; ingressId?: string; roomId: string; userId?: string; canPublish?: boolean; camera?: boolean; sources?: PublishSource[] }
 
 /** In-memory stand-in used by tests: records every call, and its tokens decode (`fake.<base64url json>.sig`). */
 export class FakeVoice implements VoiceService {
@@ -37,4 +37,18 @@ export class FakeVoice implements VoiceService {
     }));
   }
   async deleteRoom(roomId: string) { this.calls.push({ op: "delete", roomId }); }
+  /** Gaming: live fake ingresses by `${roomId}:${userId}` (the call log never records a stream key). */
+  ingresses = new Map<string, GameIngress>();
+  private ingressSeq = 0;
+  async createIngress(roomId: string, userId: string): Promise<GameIngress> {
+    const k = `${roomId}:${userId}`;
+    let i = this.ingresses.get(k);
+    if (!i) { i = { ingressId: `IN_fake_${++this.ingressSeq}`, url: "rtmp://fake.livekit.test/x", streamKey: `sk_fake_${Math.random().toString(36).slice(2)}_${this.ingressSeq}` }; this.ingresses.set(k, i); }
+    this.calls.push({ op: "createIngress", roomId, userId, ingressId: i.ingressId });
+    return { ...i };
+  }
+  async deleteIngress(ingressId: string) {
+    this.calls.push({ op: "deleteIngress", roomId: "", ingressId });
+    this.ingresses.forEach((v, k) => { if (v.ingressId === ingressId) this.ingresses.delete(k); });
+  }
 }
