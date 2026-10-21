@@ -2501,3 +2501,20 @@ export const roomHostFreezes = pgTable("room_host_freezes", {
   frozenBy: varchar("frozen_by").notNull(),
   frozenAt: timestamp("frozen_at").notNull().default(sql`now()`),
 });
+
+// Editable money rates (rooms rates plan): changed values and the append-only change log. SQL: server/rooms/roomRatesMigration.ts.
+export const roomRates = pgTable("room_rates", {
+  key: text("key").primaryKey(),
+  value: numeric("value", { precision: 6, scale: 2 }).notNull(),
+  updatedBy: varchar("updated_by"),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+export const roomRateChanges = pgTable("room_rate_changes", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  key: text("key").notNull(),
+  beforeValue: numeric("before_value", { precision: 6, scale: 2 }).notNull(),
+  afterValue: numeric("after_value", { precision: 6, scale: 2 }).notNull(),
+  reason: text("reason").notNull(),
+  adminId: varchar("admin_id").notNull(),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+}, (t) => ({ createdIdx: index("room_rate_changes_created_idx").on(t.createdAt) }));

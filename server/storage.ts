@@ -461,6 +461,11 @@ CREATE TABLE IF NOT EXISTS room_members (
     const { ROOM_CONTROLS_SCHEMA_SQL } = await import("./rooms/roomControlsMigration");
     await pool.query(ROOM_CONTROLS_SCHEMA_SQL);
   }
+  // Editable money rates (rooms rates plan): room_rates + room_rate_changes. Same SQL as migrations/add_room_rates.sql.
+  {
+    const { ROOM_RATES_SCHEMA_SQL } = await import("./rooms/roomRatesMigration");
+    await pool.query(ROOM_RATES_SCHEMA_SQL);
+  }
   await pool.query(`
     ALTER TABLE venues ADD COLUMN IF NOT EXISTS building JSONB
   `);
