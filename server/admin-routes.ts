@@ -12,6 +12,7 @@ import { z } from "zod";
 import { getSocialPlanAdminStats } from "./services/socialAdminStats";
 import { requireAdmin, requireAdminPending, requireRole, requireSuperAdmin, isMfaEnrolled, mfaRequired } from "./services/adminSecurity";
 import { registerSprayClawbackAdminRoutes } from "./rooms/clawbacks";
+import { registerRoomsAdminRoutes } from "./rooms/adminRoutes";
 import { registerRoomRecapAdminRoute } from "./rooms/recap";
 import { registerAdminSocialRoutes } from "./routes/admin-social-routes";
 import {
@@ -1247,6 +1248,7 @@ export function setupAdminRoutes(app: Express) {
 
   registerRoomFinanceAdminRoutes(app); // paid rooms: payouts + ticket totals, read-only
   registerSprayClawbackAdminRoutes(app); // spraying: chargeback clawbacks list + audited write-off (finance roles)
+  registerRoomsAdminRoutes(app); // rooms admin: live rooms, usage overview, spray breakdown, freeze controls
 
   // ============================================
   // UTILITIES (Super Admin only)
