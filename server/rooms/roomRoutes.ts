@@ -247,7 +247,8 @@ export function registerRoomRoutes(app: Express): void {
   app.get("/api/rooms/config", requireAuth, async (req, res) => {
     try {
       res.json({
-        features: { paidRooms: await ticketSalesAllowed(), spray: await sprayAllowed() },
+        // `gaming` only appears while ROOMS_GAMING is on, so the flag-off body stays byte-identical.
+        features: { paidRooms: await ticketSalesAllowed(), spray: await sprayAllowed(), ...(roomFeatures.gaming ? { gaming: true } : {}) },
         limits: ROOM_LIMITS,
         currency: "NGN",
         region: "NG",
