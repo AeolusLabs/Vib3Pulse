@@ -7,6 +7,7 @@ import { initialRoomState, roomReducer, type RoomPhase, type RoomState } from "@
 import type { ChatReply } from "@shared/rooms";
 import type { StageAction } from "@shared/stage";
 import type { LiveAction } from "@shared/liveScreen";
+import type { GameAction, Side } from "@shared/gameScreen";
 import type { PlaybackState } from "@shared/playback";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -75,6 +76,8 @@ export function useRoomSocket(roomId: string, opts: { inviteToken?: string } = {
     stageAction: (action: StageAction, targetId?: string) => ws?.send({ type: "room:stage", action, ...(targetId ? { targetId } : {}) }) ?? false,
     /** ask / withdraw (yourself), grant / revoke / stop (host or co-host name a target; the holder may stop themselves). */
     liveAction: (action: LiveAction, targetId?: string) => ws?.send({ type: "room:live", action, ...(targetId ? { targetId } : {}) }) ?? false,
+    /** Gamers live (flag on): ask / withdraw / accept / decline / remove / feature / score / format. The server decides; refusals arrive as room:notice. */
+    gameAction: (action: GameAction, extra: { targetId?: string; side?: Side; value?: number } = {}) => ws?.send({ type: "room:game", action, ...extra }) ?? false,
     /** Host or co-host: report a play / pause / seek / end, or `cue` (everyone presses play in `inMs`). */
     sendPlayback: (p: { state: PlaybackState; positionMs: number; inMs?: number }) =>
       ws?.send({ type: "room:playback", ...p, screenVersion: (state.room as { screenVersion?: number } | null)?.screenVersion ?? 0 }) ?? false,
