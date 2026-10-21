@@ -9,6 +9,8 @@ import { listLiveRooms, parseRange, roomsOverview, sprayBreakdown } from "./admi
 import { CONTROL_KEYS, freezeHost, getControl, listFrozenHosts, setControl, unfreezeHost, type ControlKey } from "./roomControls";
 import { adminHoldAllPayoutsForHost } from "./settlement";
 import { adminEndRoom } from "./roomAdmin";
+import { getRates, listRateChanges, setRate } from "./roomRates";
+import { DEFAULT_RATES, RATE_LIMITS, isRateKey, validateRate } from "@shared/money";
 
 const MODERATION = ["super_admin", "content_moderator"] as const;
 const FINANCE = ["super_admin", "finance_manager"] as const;
@@ -127,6 +129,36 @@ export function registerRoomsAdminRoutes(app: Express): void {
     } catch (e) {
       console.error("[ADMIN] host unfreeze failed:", (e as Error)?.message);
       res.status(500).json({ message: "That did not work. Check the host's freeze state before trying again." });
+    }
+  });
+
+  // ---------------------------------------------------------------- money rates (audited)
+  // Viewing: super_admin or finance_manager. Changing: super_admin only. A change applies to sprays and tickets created after it;
+  // existing rows keep the split they were created with. VAT and card fees are not rates and are not editable here.
+  app.get("/api/admin/rooms/rates", requireRole(...FINANCE), async (_req: Request, res: Response) => {
+    try {
+      const [rates, changes] = await Promise.all([getRates(), listRateChanges(50)]);
+      res.json({ rates, defaults: DEFAULT_RATES, limits: RATE_LIMITS, changes });
+    } catch (e) {
+      console.error("[ADMIN] room rates failed:", (e as Error)?.message);
+      res.status(500).json({ message: "Failed to load the rates" });
+    }
+  });
+
+  app.put("/api/admin/rooms/rates/:key", requireRole("super_admin"), async (req: Request, res: Response) => {
+    const key = String(req.params.key ?? "");
+    if (!isRateKey(key)) return res.status(404).json({ message: "Unknown rate" });
+    const reason = reasonSchema.safeParse(req.body?.reason);
+    if (!reason.success) return res.status(400).json(REASON_REQUIRED);
+    const v = validateRate(key, req.body?.value);
+    if (!v.ok) return res.status(400).json({ message: v.reason, code: "BAD_VALUE" });
+    try {
+      const r = await setRate({ key, value: v.value, adminId: req.session.adminId!, reason: reason.data });
+      if (r.changed) await audit(req, "room_rate.set", "room_rate", key, reason.data, { key, before: r.before, after: r.after });
+      res.json({ key, value: r.after, changed: r.changed });
+    } catch (e) {
+      console.error("[ADMIN] room rate change failed:", (e as Error)?.message);
+      res.status(500).json({ message: "That did not work. Check the rate before trying again." });
     }
   });
 }
