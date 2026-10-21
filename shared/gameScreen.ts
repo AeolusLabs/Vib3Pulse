@@ -18,7 +18,14 @@ export interface GameState {
   score: [number, number];
 }
 
-export type GameAction = "ask" | "withdraw" | "accept" | "decline" | "remove" | "feature" | "score" | "format";
+/**
+ * What the server sends (`room:game` and `room:state.game`): the game plus `away`, which has a key ONLY for a player whose
+ * connection dropped: the epoch ms their slot is released, or null when the room holds the slot (timeout 0). A player with no
+ * key is present.
+ */
+export type GameView = GameState & { away: Record<string, number | null> };
+
+export type GameAction ="ask" | "withdraw" | "accept" | "decline" | "remove" | "feature" | "score" | "format";
 export const GAME_ACTIONS: readonly GameAction[] = ["ask", "withdraw", "accept", "decline", "remove", "feature", "score", "format"];
 // NOT_ON_STAGE is kept for the wire contract; applyGame never returns it (owner ruling 2026-10-22: playing is decided by
 // canPlayGame, not by the stage, so a player does not have to be on the stage).

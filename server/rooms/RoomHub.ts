@@ -4,6 +4,7 @@ import { CHAT_QUOTE_WINDOW, type ChatReply } from "@shared/rooms";
 import { ageBand, type AgeBand } from "@shared/age";
 import type { StageState } from "@shared/stage";
 import type { LiveState } from "@shared/liveScreen";
+import { emptyGame, type GameState } from "@shared/gameScreen";
 import type { MemberRole } from "./roomStorage";
 
 export interface HubMember {
@@ -20,11 +21,17 @@ export interface HubMember {
   publish?: boolean;
   /** Settles when the room has finished reconciling this joiner (stage right restored, teen rule applied). A voice token waits for it. */
   ready?: Promise<void>;
-  /** The screen holder's connection dropped: their spot is held until `until` (epoch ms). Only ever set on the current holder. */
+  /**
+   * The screen holder's connection dropped: their spot is held until `until` (epoch ms). Only ever set on the current holder,
+   * or (ROOMS_GAMING) on a game player, where `until` 0 means the slot is held until the host acts (timeout "hold").
+   */
   away?: { until: number };
 }
 
 const emptyStage = (): StageState => ({ stage: [], hands: [], invited: [] });
+
+/** Gaming: what the room row says about its game, kept while the room is live (set on the first join, like voice). */
+export interface GameRoomInfo { dropMs: number; ageLane: "teen" | "adult" | null }
 
 export interface ChatLine { userId: string; text: string; at: number; replyTo?: ChatReply; quotable?: false }
 
@@ -38,6 +45,8 @@ export class RoomHub {
   private voice = new Map<string, boolean>();
   private lives = new Map<string, LiveState>();
   private liveVideo = new Map<string, boolean>();
+  private games = new Map<string, GameState>();      // ROOMS_GAMING: teams, asks, featured, score (memory only, like the stage)
+  private gameRooms = new Map<string, GameRoomInfo>(); // ROOMS_GAMING: live game rooms with someone in them
   private minors = new Set<string>(); // live rooms that are minors' rooms (mirrors rooms.minors_room, which never clears)
   /** Phase 6 recap: the most people in each live room at once (this process). Kept while the room lives; gone on end. */
   private peaks = new Map<string, number>();
@@ -78,7 +87,7 @@ export class RoomHub {
     if (!room || !m) return undefined;
     room.delete(userId);
     if (this.byUser.get(userId) === roomId) this.byUser.delete(userId);
-    if (room.size === 0) { this.rooms.delete(roomId); this.chat.delete(roomId); this.stages.delete(roomId); this.voice.delete(roomId); this.lives.delete(roomId); this.liveVideo.delete(roomId); }
+    if (room.size === 0) { this.rooms.delete(roomId); this.chat.delete(roomId); this.stages.delete(roomId); this.voice.delete(roomId); this.lives.delete(roomId); this.liveVideo.delete(roomId); this.games.delete(roomId); this.gameRooms.delete(roomId); }
     return m;
   }
 
@@ -126,6 +135,8 @@ export class RoomHub {
     this.voice.delete(roomId);
     this.lives.delete(roomId);
     this.liveVideo.delete(roomId);
+    this.games.delete(roomId);
+    this.gameRooms.delete(roomId);
     this.minors.delete(roomId);
     this.peaks.delete(roomId);
     return gone;
@@ -156,6 +167,23 @@ export class RoomHub {
     if (s.holder || s.asks.length) this.lives.set(roomId, { holder: s.holder, asks: [...s.asks] });
     else this.lives.delete(roomId);
   }
+
+  /** Gaming: the room's game (an empty one when there is none). Always a copy. */
+  gameOf(roomId: string): GameState {
+    const s = this.games.get(roomId) ?? emptyGame;
+    return { format: s.format, teams: { A: [...s.teams.A], B: [...s.teams.B] }, featured: { ...s.featured }, asks: s.asks.map((a) => ({ ...a })), score: [s.score[0], s.score[1]] };
+  }
+  setGame(roomId: string, s: GameState): void {
+    if (!this.gameRooms.has(roomId)) { this.games.delete(roomId); return; } // only a live game room keeps a game
+    this.games.set(roomId, { format: s.format, teams: { A: [...s.teams.A], B: [...s.teams.B] }, featured: { ...s.featured }, asks: s.asks.map((a) => ({ ...a })), score: [s.score[0], s.score[1]] });
+  }
+  /** Gaming: the room is a game room (rooms.game_format set). Like voice, only kept while someone is in the room. */
+  gameOn(roomId: string): boolean { return this.gameRooms.has(roomId); }
+  setGameOn(roomId: string, on: boolean, info: GameRoomInfo = { dropMs: 120_000, ageLane: null }): void {
+    if (on && this.count(roomId) > 0) this.gameRooms.set(roomId, { ...info });
+    else { this.gameRooms.delete(roomId); this.games.delete(roomId); }
+  }
+  gameInfo(roomId: string): GameRoomInfo | null { const g = this.gameRooms.get(roomId); return g ? { ...g } : null; }
 
   /** Minors' room flag for the stage rule (hot path, no query). Set from the room row on every join; one way, like the column. */
   isMinorsRoom(roomId: string): boolean { return this.minors.has(roomId); }

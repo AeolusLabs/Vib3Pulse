@@ -29,7 +29,7 @@ import { isSellablePrice } from "@shared/roomTickets";
 import * as mr from "./minorsRoom";
 import { TokenBucket } from "./rateLimit";
 import { getVoiceService } from "./voice/voiceService";
-import { afterRoleChange, canCameraNow, canPublishNow, shutdownVoice, stopAllLive } from "./stage";
+import { afterRoleChange, canCameraNow, canPublishNow, isGamePlayer, publishSourcesNow, shutdownVoice, stopAllLive } from "./stage";
 import { applyMod, endRoom, enforceAgeLimit, enforceTicketFor, expectHost, interactionVerdict, isKicked, notifyScreen, removeFromMinorsRoom, writeRoomSettings } from "./roomSocket";
 import { roomHub } from "./RoomHub";
 import { roomFeatures } from "./features";
@@ -896,7 +896,7 @@ export function registerRoomRoutes(app: Express): void {
       if (!user) return res.status(404).json({ message: "User not found" });
       const canPublish = canPublishNow(room.id, user.id);
       present.publish = canPublish;
-      const token = await voice.mintToken({ roomId: room.id, userId: user.id, displayName: user.displayName || user.organizationName || user.username, canPublish, camera: canCameraNow(room.id, user.id) });
+      const token = await voice.mintToken({ roomId: room.id, userId: user.id, displayName: user.displayName || user.organizationName || user.username, canPublish, camera: canCameraNow(room.id, user.id), ...(isGamePlayer(room.id, user.id) ? { sources: publishSourcesNow(room.id, user.id) } : {}) }); // a game player (ROOMS_GAMING) also gets the screen
       res.json({ url: voice.url, token, canPublish, expiresInSec: 60 });
     } catch (e) {
       console.error("[rooms] voice token failed:", e);

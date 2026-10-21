@@ -9,7 +9,8 @@
 import { applyStage, canBeOnStage, MAX_SPEAKERS, type StageAction, type StageState } from "@shared/stage";
 import { applyLive, dropFromLive, emptyLive, type LiveAction } from "@shared/liveScreen";
 import { roomHub, type HubMember } from "./RoomHub";
-import { getVoiceService } from "./voice/voiceService";
+import { getVoiceService, type PublishSource, type VoiceParticipant } from "./voice/voiceService";
+import { roomFeatures } from "./features";
 import * as rs from "./roomStorage";
 
 const ACTIONS: readonly StageAction[] = ["raise", "lower", "invite", "accept", "remove"];
@@ -18,7 +19,8 @@ const log = (what: string) => (e: any) => { console.error(`[voice] ${what} faile
 const soft = async (what: string, p: Promise<unknown> | undefined): Promise<boolean> => { try { await p; return true; } catch (e) { log(what)(e); return false; } };
 
 const locks = new Map<string, Promise<unknown>>();
-function withRoomLock<T>(roomId: string, fn: () => Promise<T>): Promise<T> {
+/** Also used by game.ts (ROOMS_GAMING): one lock per room for every stage, live screen and game change. */
+export function withRoomLock<T>(roomId: string, fn: () => Promise<T>): Promise<T> {
   const run = (locks.get(roomId) ?? Promise.resolve()).then(fn);
   const tail = run.catch(() => {});
   locks.set(roomId, tail);
@@ -43,11 +45,50 @@ export function canCameraNow(roomId: string, userId: string): boolean {
   return roomHub.liveVideoOn(roomId) && roomHub.liveOf(roomId).holder === userId && canPublishNow(roomId, userId);
 }
 
+// ---------------------------------------------------------------- gaming (ROOMS_GAMING) hooks
+const SCREEN_SOURCES: readonly PublishSource[] = ["screen_share", "screen_share_audio"];
+const isScreen = (s: PublishSource) => s === "screen_share" || s === "screen_share_audio";
+
+/** A current player of the room's game. Always false while ROOMS_GAMING is off. */
+export function isGamePlayer(roomId: string, userId: string): boolean {
+  if (!roomFeatures.gaming || !roomHub.gameOn(roomId) || !roomHub.get(roomId, userId)) return false;
+  const { teams } = roomHub.gameOf(roomId);
+  return teams.A.includes(userId) || teams.B.includes(userId);
+}
+
+/** Everything they may publish now: their speaker rights (microphone, the holder's camera) plus, for a player, the screen. */
+export function publishSourcesNow(roomId: string, userId: string): PublishSource[] {
+  const out: PublishSource[] = [];
+  if (canPublishNow(roomId, userId)) out.push("microphone");
+  if (canCameraNow(roomId, userId)) out.push("camera");
+  if (isGamePlayer(roomId, userId)) out.push(...SCREEN_SOURCES);
+  return out;
+}
+
 const publishChange = async (roomId: string, userId: string, canPublish: boolean): Promise<boolean> => {
   const m = roomHub.get(roomId, userId);
   if (m) m.publish = canPublish;
+  // A game player's grant is the full list (the legacy call would reset it to the microphone and take their screen away).
+  if (isGamePlayer(roomId, userId)) return soft("setPublishSources", getVoiceService()?.setPublishSources(roomId, userId, publishSourcesNow(roomId, userId)));
   return soft("setCanPublish", getVoiceService()?.setCanPublish(roomId, userId, canPublish, canPublish && canCameraNow(roomId, userId)));
 };
+
+/**
+ * Gaming: tells LiveKit what this person may publish now (after they joined or left a team). A removed player whose screen
+ * permission LiveKit refused to take back is removed from the session instead, like a camera that cannot be revoked.
+ * Call inside the room lock.
+ */
+export async function publishNowLocked(roomId: string, userId: string): Promise<void> {
+  if (!roomHub.get(roomId, userId)) return;
+  const ok = await publishChange(roomId, userId, canPublishNow(roomId, userId));
+  if (!ok && !isGamePlayer(roomId, userId)) await soft("removeParticipant", getVoiceService()?.removeParticipant(roomId, userId));
+}
+
+// game.ts registers these (it imports this file, so this file cannot import it). All run inside the room lock.
+type GameHooks = { reconcileLocked(roomId: string): Promise<void>; dropLocked(roomId: string, userId: string): Promise<void> };
+let gameHooks: GameHooks | null = null;
+export const registerGameHooks = (h: GameHooks) => { gameHooks = h; };
+const reconcileGameLocked = async (roomId: string) => { if (roomFeatures.gaming && gameHooks) await gameHooks.reconcileLocked(roomId); };
 
 const onStage = (m: HubMember, roomId: string) => m.role !== "guest" || roomHub.stageOf(roomId).stage.includes(m.userId);
 
@@ -66,7 +107,7 @@ export const broadcastLive = (roomId: string) => {
 // let that member go, since nothing is left to hold. Registered by roomSocket to avoid an import cycle.
 let awayReleaser: ((roomId: string, userId: string) => Promise<void>) | null = null;
 export const registerAwayReleaser = (fn: (roomId: string, userId: string) => Promise<void>) => { awayReleaser = fn; };
-const releaseIfAway = (roomId: string, userId: string | null) => {
+export const releaseIfAway = (roomId: string, userId: string | null) => {
   if (userId && roomHub.get(roomId, userId)?.away) void awayReleaser?.(roomId, userId).catch(log("releaseAway"));
 };
 
@@ -128,6 +169,7 @@ export function handleLive(userId: string, roomId: string, msg: any): Promise<{ 
 /** Live video was switched off (or the room lost voice): nobody holds the screen or is waiting for it, and the camera goes. */
 export function stopAllLive(roomId: string): Promise<void> {
   return withRoomLock(roomId, async () => {
+    await reconcileGameLocked(roomId); // no live video, no game: every player and ask goes
     const cur = roomHub.liveOf(roomId);
     if (!cur.holder && cur.asks.length === 0) return;
     roomHub.setLive(roomId, emptyLive);
@@ -172,6 +214,7 @@ export function handleStage(userId: string, roomId: string, msg: any): Promise<{
     for (const id of added) { await publishChange(roomId, id, true); await soft("setOnStage", rs.setOnStage(roomId, id, true)); }
     for (const id of removed) { await publishChange(roomId, id, false); await soft("setOnStage", rs.setOnStage(roomId, id, false)); }
     await reconcileLiveLocked(roomId);
+    await reconcileGameLocked(roomId);
     return { ok: true as const };
   });
 }
@@ -183,6 +226,7 @@ export function handleStage(userId: string, roomId: string, msg: any): Promise<{
  */
 export function dropFromVoice(roomId: string, userId: string, keepRight: boolean): Promise<void> {
   return withRoomLock(roomId, async () => {
+    if (roomFeatures.gaming) await gameHooks?.dropLocked(roomId, userId); // out of the game (team, ask) whatever voice says
     if (!roomHub.voiceOn(roomId)) return;
     const s = roomHub.stageOf(roomId);
     const next: StageState = { stage: without(s.stage, userId), hands: without(s.hands, userId), invited: without(s.invited, userId) };
@@ -229,6 +273,7 @@ export function reconcileVoice(roomId: string): Promise<void> {
     for (const id of demoted) { await publishChange(roomId, id, false); await soft("setOnStage", rs.setOnStage(roomId, id, false)); }
     for (const [id, ok] of toggles) await publishChange(roomId, id, ok);
     await reconcileLiveLocked(roomId);
+    await reconcileGameLocked(roomId); // an adult arriving takes a teen player out of a mixed room's game
   });
 }
 
@@ -260,6 +305,7 @@ export function afterRoleChange(roomId: string, userId: string): Promise<void> {
     if (roomHub.get(roomId, userId)) await publishChange(roomId, userId, canPublishNow(roomId, userId));
     await soft("setOnStage", rs.setOnStage(roomId, userId, false));
     await reconcileLiveLocked(roomId);
+    await reconcileGameLocked(roomId);
   });
 }
 
@@ -271,12 +317,24 @@ export function sweepVoice(roomId: string): Promise<void> {
   return withRoomLock(roomId, async () => {
     const svc = getVoiceService();
     if (!svc || !roomHub.voiceOn(roomId)) return;
-    let present: Array<{ identity: string; canPublish: boolean; canCamera: boolean; hasCamera: boolean }>;
+    let present: VoiceParticipant[];
     try { present = await svc.listParticipants(roomId); } catch (e) { log("listParticipants")(e); return; }
     for (const p of present) {
       if (!roomHub.get(roomId, p.identity)) { await soft("removeParticipant", svc.removeParticipant(roomId, p.identity)); continue; }
       // Permissions alone do not stop a track that is already up: a camera nobody may publish is removed along with its owner.
       if (p.hasCamera && !canCameraNow(roomId, p.identity)) { await soft("removeParticipant", svc.removeParticipant(roomId, p.identity)); continue; }
+      if (roomFeatures.gaming) {
+        // Gaming (sweepGame): a screen track from anyone who is not a current player is removed with its owner (a permission
+        // change alone does not prove the track stopped); a player's grant must be exactly what publishSourcesNow says.
+        const player = isGamePlayer(roomId, p.identity);
+        if (!player && p.publishing?.some(isScreen)) { await soft("removeParticipant", svc.removeParticipant(roomId, p.identity)); continue; }
+        if (player || p.sources?.some(isScreen)) {
+          const want = publishSourcesNow(roomId, p.identity);
+          const have = p.sources ?? [];
+          if (want.length !== have.length || want.some((x) => !have.includes(x))) await publishChange(roomId, p.identity, canPublishNow(roomId, p.identity));
+          continue;
+        }
+      }
       const want = canPublishNow(roomId, p.identity);
       if (p.canPublish !== want || p.canCamera !== canCameraNow(roomId, p.identity)) await publishChange(roomId, p.identity, want);
     }
@@ -294,6 +352,7 @@ export async function shutdownVoice(roomId: string): Promise<void> {
   roomHub.setVoiceOn(roomId, false);
   roomHub.setLive(roomId, emptyLive);
   roomHub.setLiveVideoOn(roomId, false);
+  await reconcileGameLocked(roomId); // voice and live video are off: the game empties (LiveKit's session goes below anyway)
   broadcastStage(roomId);
   broadcastLive(roomId);
   roomHub.broadcast(roomId, { type: "room:livevideo", enabled: false });

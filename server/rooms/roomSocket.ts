@@ -19,6 +19,8 @@ import { LIVE_HOLD_MS } from "@shared/liveScreen";
 import { broadcastLive, dropFromVoice, handleLive, handleStage, liveAway, reconcileVoice, registerAwayReleaser, restoreStageOnJoin, sweepAllVoiceRooms } from "./stage";
 import { getVoiceService } from "./voice/voiceService";
 import { roomFeatures } from "./features";
+import { broadcastGame, gameLine, gameView, handleGame, isGamePlayer, nameOf, syncGameRoom } from "./game";
+import { playersOf } from "@shared/gameScreen";
 import { MEMBER_LIST_CAP, selectStateMembers, wantedMemberIds } from "./memberList";
 
 /** Injectable so tests can shorten the host grace period; rates are the documented limits. */
@@ -26,6 +28,8 @@ export const tuning = {
   graceMs: HOST_LEAVE_GRACE_MS,
   // How long a dropped screen holder keeps the screen before it is released (a stream through a bad connection must not end at the first blip).
   liveGraceMs: Number(process.env.ROOM_LIVE_GRACE_MS) || LIVE_HOLD_MS,
+  // Gaming: tests only. When set, replaces a game room's non-zero drop timeout (rooms.game_drop_timeout_ms); 0 (hold) stays 0.
+  gameDropMs: null as number | null,
   chat: { rate: 1, burst: 5 },
   react: { rate: 3, burst: 3 },
   interact: { rate: 0.5, burst: 1 }, // 1 per 2 s per target
@@ -56,7 +60,7 @@ const kicked = new Map<string, number>(); // `${roomId}:${userId}` -> until (ms)
 export const isKicked = (roomId: string, userId: string) => (kicked.get(`${roomId}:${userId}`) ?? 0) > Date.now();
 const joinLocks = new Map<string, Promise<void>>(); // one join at a time per user
 const endTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const awayTimers = new Map<string, ReturnType<typeof setTimeout>>(); // `${roomId}:${userId}` of a holder whose connection dropped
+const awayTimers = new Map<string, ReturnType<typeof setTimeout>>(); // `${roomId}:${userId}` of a holder (or game player) whose connection dropped
 const clearAway = (roomId: string, userId: string) => { const k = `${roomId}:${userId}`; clearTimeout(awayTimers.get(k)); awayTimers.delete(k); };
 
 const wire = (msg: object) => JSON.stringify(msg);
@@ -270,7 +274,28 @@ export async function handleSocketClose(userId: string, ws: RoomClient): Promise
     awayTimers.set(`${roomId}:${userId}`, t);
     return;
   }
+  // Gaming: a player keeps their slot ("Reconnecting") for the room's drop timeout; 0 = held until the host acts (no timer).
+  if (me && isGamePlayer(roomId, userId)) {
+    const set = roomHub.gameInfo(roomId)?.dropMs ?? LIVE_HOLD_MS;
+    // A host is never held forever: the room must still end if they never come back (then the usual grace runs as well).
+    const ms = set > 0 ? (tuning.gameDropMs ?? set) : me.role === "host" ? tuning.graceMs : 0;
+    me.away = { until: ms > 0 ? Date.now() + ms : 0 };
+    broadcastGame(roomId);
+    clearAway(roomId, userId);
+    if (ms > 0) {
+      const t = setTimeout(() => { releaseDroppedPlayer(roomId, userId).catch((e) => console.error("[rooms] game drop release failed:", e)); }, ms);
+      t.unref?.();
+      awayTimers.set(`${roomId}:${userId}`, t);
+    }
+    return;
+  }
   await leaveRoom(userId, roomId);
+}
+
+/** Gaming: a player's drop timeout ran out. If they really are let go (they did not come back first), the room is told. */
+async function releaseDroppedPlayer(roomId: string, userId: string): Promise<void> {
+  const name = nameOf(roomHub.get(roomId, userId));
+  if (await releaseAwayMember(roomId, userId)) gameLine(roomId, userId, `${name} has dropped out`, "game_drop");
 }
 
 /**
@@ -278,20 +303,21 @@ export async function handleSocketClose(userId: string, ws: RoomClient): Promise
  * Runs on the same per-user chain as joins, and looks again once it has its turn: a holder who came back in the meantime
  * (and has a socket again) must never be removed by a release that was queued before they returned.
  */
-async function releaseAwayMember(roomId: string, userId: string): Promise<void> {
+async function releaseAwayMember(roomId: string, userId: string): Promise<boolean> {
   clearAway(roomId, userId);
   const prev = joinLocks.get(userId) ?? Promise.resolve();
   const run = prev.then(async () => {
     const me = roomHub.get(roomId, userId);
-    if (!me?.away) return;                                  // they came back first
-    if ((joinedSockets.get(userId)?.size ?? 0) > 0) return; // a socket of theirs is attached again
+    if (!me?.away) return false;                                  // they came back first
+    if ((joinedSockets.get(userId)?.size ?? 0) > 0) return false; // a socket of theirs is attached again
     await leaveRoom(userId, roomId);
+    return true;
   });
   const tail = run.then(() => undefined, () => undefined);
   joinLocks.set(userId, tail);
-  try { await run; } finally { if (joinLocks.get(userId) === tail) joinLocks.delete(userId); }
+  try { return await run; } finally { if (joinLocks.get(userId) === tail) joinLocks.delete(userId); }
 }
-registerAwayReleaser(releaseAwayMember);
+registerAwayReleaser(async (roomId, userId) => { await releaseAwayMember(roomId, userId); });
 
 // ---------------------------------------------------------------- join
 const JOIN_AGE_CODES = { AGE_UNKNOWN: "AGE_UNKNOWN", AGE_LIMIT: "AGE_LIMIT" } as const;
@@ -321,7 +347,10 @@ async function sendState(ws: RoomClient, room: Room, you: HubMember) {
       // everyone in the recent chat must resolve to a person, or their name would read "Someone" and could not be reported.
       const s = roomHub.stageOf(room.id);
       const live = roomHub.liveOf(room.id);
-      const wanted = wantedMemberIds({ stage: s.stage, hands: s.hands, asks: live.asks, holder: live.holder, chat: roomHub.recentChat(room.id) });
+      // Gaming: players and people asking to play are wanted too (none while the flag is off).
+      const g = roomFeatures.gaming ? roomHub.gameOf(room.id) : null;
+      const gameIds = g ? [...playersOf(g), ...g.asks.map((a) => a.userId)] : [];
+      const wanted = wantedMemberIds({ stage: s.stage, hands: s.hands, asks: [...live.asks, ...gameIds], holder: live.holder, chat: roomHub.recentChat(room.id) });
       return selectStateMembers(roomHub.members(room.id), MEMBER_LIST_CAP, wanted).map(memberPayload);
     })(),
     serverNowMs: Date.now(),
@@ -333,6 +362,8 @@ async function sendState(ws: RoomClient, room: Room, you: HubMember) {
     ...roomHub.liveOf(room.id),
     away: liveAway(room.id),
     nowPlaying: room.nowPlaying ?? null,
+    // Gaming: only while the flag is on and the room is a game room, so every other room:state is unchanged.
+    ...(roomFeatures.gaming && roomHub.gameOn(room.id) ? { game: gameView(room.id) } : {}),
   });
 }
 
@@ -482,6 +513,7 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
     if (roomHub.count(roomId) === 1) {
       roomHub.setVoiceOn(roomId, fresh.voiceEnabled);
       roomHub.setLiveVideoOn(roomId, fresh.voiceEnabled && fresh.liveVideo);
+      syncGameRoom(fresh); // gaming: nothing while the flag is off
     }
     roomHub.broadcast(roomId, { type: "room:joined", member: memberPayload(me) }, userId);
   }
@@ -493,9 +525,11 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
   if (!set) { set = new Set(); joinedSockets.set(userId, set); }
   set.add(ws);
   if (me.away) { // the holder is back inside the hold window: the stream carries on
+    const player = isGamePlayer(roomId, userId); // gaming: a player back inside their drop timeout keeps the slot
     delete me.away;
     clearAway(roomId, userId);
-    broadcastLive(roomId);
+    if (!player || roomHub.liveOf(roomId).holder === userId) broadcastLive(roomId);
+    if (player) { broadcastGame(roomId); gameLine(roomId, userId, `${nameOf(me)} is back`, "game_back"); }
   }
   if (role === "host") { clearTimeout(endTimers.get(roomId)); endTimers.delete(roomId); }
   if (isNew) {
@@ -935,6 +969,14 @@ export async function handleRoomMessage(ws: RoomClient, userId: string, msg: any
         return;
       }
       case "room:mod": return await doMod(ws, userId, roomId, msg);
+      case "room:game": {
+        // Gaming: refused whole while the flag is off (a stale client after the flag was turned off gets the same answer).
+        if (!roomFeatures.gaming) return notice(ws, "FEATURE_OFF");
+        if (!bucketsFor(userId).stage.take()) return notice(ws, "RATE_LIMITED");
+        const r = await handleGame(userId, roomId, msg);
+        if (!r.ok) notice(ws, r.code);
+        return;
+      }
     }
   } catch (e) {
     console.error("[rooms] socket handler failed:", e);
