@@ -11,6 +11,7 @@ import { roomHub, type HubMember } from "./RoomHub";
 import { roomFeatures } from "./features";
 import { getInviteState, NO_INVITE, type InviteState } from "./minorsRoom";
 import { isGamePlayer, publishNowLocked, registerGameHooks, releaseIfAway, withRoomLock } from "./stage";
+import { revokePlayerIngress } from "./gameIngress";
 
 export type { GameView };
 
@@ -79,8 +80,8 @@ async function commitLocked(roomId: string, before: GameState, next: GameState):
   const was = new Set(playersOf(before)), now = new Set(playersOf(next));
   const changed = [...playersOf(next).filter((id) => !was.has(id)), ...playersOf(before).filter((id) => !now.has(id))];
   for (const id of changed) await publishNowLocked(roomId, id);
-  // A removed player whose connection is down has no slot left to hold: let them go now.
-  for (const id of playersOf(before)) if (!now.has(id)) releaseIfAway(roomId, id);
+  // A removed player's OBS stream key stops working; one whose connection is down has no slot left to hold: let them go now.
+  for (const id of playersOf(before)) if (!now.has(id)) { await revokePlayerIngress(roomId, id); releaseIfAway(roomId, id); }
 }
 
 const same = (a: GameState, b: GameState) => JSON.stringify(a) === JSON.stringify(b);
@@ -110,6 +111,7 @@ async function dropLocked(roomId: string, userId: string): Promise<void> {
   if (same(next, cur)) return;
   roomHub.setGame(roomId, next);
   broadcastGame(roomId); // their LiveKit grant goes with removeParticipant (dropFromVoice), right after this
+  await revokePlayerIngress(roomId, userId); // and their OBS stream key stops working
 }
 
 registerGameHooks({ reconcileLocked: reconcileGameLocked, dropLocked });
@@ -144,7 +146,7 @@ export function handleGame(userId: string, roomId: string, msg: unknown): Promis
 
     const before = roomHub.gameOf(roomId);
     const r = applyGame(before, action, {
-      actorId: userId, actorRole: actor.role, targetId, targetPresent: !!target,
+      actorId: userId, actorRole: actor.role, targetId, targetRole: target?.role ?? "guest", targetPresent: !!target,
       targetEligible: !!target && needsEligibility && (await eligible(roomId, target, true)),
       gameOn: gameLive(roomId), side: m.side as Side | undefined, value: m.value as number | undefined,
     });
@@ -152,4 +154,39 @@ export function handleGame(userId: string, roomId: string, msg: unknown): Promis
     await commitLocked(roomId, before, r.state);
     return { ok: true as const };
   });
+}
+
+/**
+ * The host changed the game settings of a live room (PATCH /api/rooms/:id, after the write): the hub follows the row. A new
+ * format keeps the players (the route refused a format smaller than a team); a room that stops being a game room had no
+ * players (refused otherwise) and everyone is told `{ type: "room:game", game: null }`.
+ */
+export function applyGameRoom(room: Pick<Room, "id" | "gameFormat" | "gameDropTimeoutMs" | "ageLane">): Promise<void> {
+  if (!roomFeatures.gaming || roomHub.count(room.id) === 0) return Promise.resolve();
+  return withRoomLock(room.id, async () => {
+    const was = roomHub.gameOn(room.id);
+    const before = roomHub.gameOf(room.id);
+    syncGameRoom(room);
+    if (!roomHub.gameOn(room.id)) {
+      if (!was) return;
+      for (const id of playersOf(before)) await publishNowLocked(room.id, id);
+      roomHub.broadcast(room.id, { type: "room:game", game: null });
+      return;
+    }
+    const cur = roomHub.gameOf(room.id);
+    const format = room.gameFormat as GameState["format"];
+    if (!was || cur.format === format) { broadcastGame(room.id); return; }
+    // Belt and braces: anyone beyond the new size (newest first) leaves the team; the route already refused this case.
+    let next: GameState = { ...cur, format };
+    for (const side of ["A", "B"] as const) for (const id of cur.teams[side].slice(format)) next = dropFromGame(next, id);
+    await commitLocked(room.id, cur, next);
+  });
+}
+
+/** For the PATCH route: would this format fit the live game (no team bigger), and does the game have anyone in it? */
+export function gameFitCheck(roomId: string, format: number | null): "ok" | "TEAM_FULL" | "GAME_IN_PROGRESS" {
+  if (!roomFeatures.gaming || !roomHub.gameOn(roomId)) return "ok";
+  const g = roomHub.gameOf(roomId);
+  if (format === null) return playersOf(g).length || g.asks.length ? "GAME_IN_PROGRESS" : "ok";
+  return g.teams.A.length > format || g.teams.B.length > format ? "TEAM_FULL" : "ok";
 }

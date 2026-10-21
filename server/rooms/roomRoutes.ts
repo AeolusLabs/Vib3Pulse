@@ -32,7 +32,7 @@ import { getVoiceService } from "./voice/voiceService";
 import { afterRoleChange, canCameraNow, canPublishNow, isGamePlayer, publishSourcesNow, shutdownVoice, stopAllLive } from "./stage";
 import { applyMod, endRoom, enforceAgeLimit, enforceTicketFor, expectHost, interactionVerdict, isKicked, notifyScreen, removeFromMinorsRoom, writeRoomSettings } from "./roomSocket";
 import { roomHub } from "./RoomHub";
-import { roomFeatures } from "./features";
+import { GAME_PARTS, roomFeatures } from "./features";
 import { sprayAllowed, ticketSalesAllowed } from "./roomControls";
 import { getRates } from "./roomRates";
 import { clearReminder, hasReminder, setReminder } from "./reminders";
@@ -41,6 +41,10 @@ import { registerRoomMoneyRoutes } from "./ticketMoneyRoutes";
 import { registerSprayRoutes } from "./sprayRoutes";
 import { sprayBlockFor } from "./spray";
 import { registerRoomRecapRoutes } from "./recap";
+import { validateGameInput, type DropTimeoutMs, type GameFormat } from "@shared/gameScreen";
+import { applyGameRoom, gameFitCheck } from "./game";
+import * as lanes from "./gameLanes";
+import { ingestAvailable, ingressFor, revokePlayerIngress } from "./gameIngress";
 
 const MAX_SCHEDULED = 10;
 const MAX_LIVE = 1;
@@ -62,6 +66,31 @@ const newInviteToken = () => crypto.randomBytes(24).toString("hex");
 const isTeen = (age: number | null) => age !== null && age < 18;
 /** A minors' room whose host is 18 or over now: they may finish a live room, but never start one or bring in adults. */
 const HOST_NOT_MINOR = { code: "HOST_NOT_MINOR" } as const;
+
+/** Gaming: why someone has no lane in a game room (status, body). The other lane is never mentioned. */
+function laneRefusal(code: "NO_AGE" | "TOO_YOUNG" | "NO_LANE"): [number, Record<string, unknown>] {
+  if (code === "NO_AGE") return [403, { code: "AGE_UNKNOWN", message: "Add your date of birth in your profile to join rooms.", canJoin: { ok: false, code: "AGE_UNKNOWN" } }];
+  if (code === "TOO_YOUNG") return [403, { code: "AGE_LIMIT", message: "You can't join this room.", canJoin: { ok: false, code: "AGE_LIMIT" } }];
+  return [404, { code: "NO_LANE", message: "There's no room for your age group here yet." }];
+}
+
+/** Gaming: a game room needs live video, which only works up to ROOM_LIMITS.liveVideoMax people. */
+const NEEDS_LIVE_VIDEO = { message: "A game room needs live video, which works in rooms of up to 50 people.", field: "gameFormat", reason: "needs_live_video" } as const;
+const videoSized = (r: { capacity: number; ticketPriceKobo?: number | null; ticketCapacity?: number | null }) => roomCapacity(r) <= ROOM_LIMITS.liveVideoMax;
+const badGameField = (field: string) => ({ message: `Invalid ${field}`, field, reason: "invalid" });
+
+/**
+ * What the gaming client may offer. ingest: LIVEKIT_INGRESS is on and the voice service can create an ingress (OBS); teamSpray:
+ * spraying is allowed now and team spray is built; lanes: age lanes are built.
+ */
+async function gameCapabilities(): Promise<{ ingest: boolean; teamSpray: boolean; lanes: boolean }> {
+  const svc = getVoiceService();
+  return {
+    ingest: !!svc && ingestAvailable(),
+    teamSpray: GAME_PARTS.teamSpray && (await sprayAllowed()),
+    lanes: GAME_PARTS.lanes,
+  };
+}
 
 export function isHost(room: Room, userId: string) {
   return room.hostId === userId;
@@ -176,6 +205,19 @@ export function registerRoomRoutes(app: Express): void {
       const host = await storage.getUser(req.user!.id);
       if (!host) return res.status(404).json({ message: "User not found" });
 
+      // Gaming (ROOMS_GAMING): the game fields are read only while the flag is on; otherwise they are ignored like any unknown key.
+      let game: { gameFormat?: GameFormat | null; gameDropTimeoutMs?: DropTimeoutMs } = {};
+      if (roomFeatures.gaming) {
+        const g = validateGameInput(req.body ?? {});
+        if (!g.ok) return res.status(400).json(badGameField(g.field));
+        game = g.value;
+        // The room is created before it is live, so voice and live video cannot be on yet: what is checked here is that live
+        // video will be possible (size). The game itself only runs while voice and live video are on (game.ts gameLive).
+        if (typeof game.gameFormat === "number" && !videoSized(v.value)) return res.status(400).json(NEEDS_LIVE_VIDEO);
+        if (req.body?.lanes !== undefined && typeof req.body.lanes !== "boolean") return res.status(400).json(badGameField("lanes"));
+        if (req.body?.lanes === true && typeof game.gameFormat !== "number") return res.status(400).json({ message: "Age lanes are for game rooms.", field: "lanes", reason: "needs_game" });
+      }
+      const withLanes = roomFeatures.gaming && req.body?.lanes === true;
       const hc = await hostCheck(host, v.value);
       if (!hc.ok) return res.status(403).json({ message: HOST_MESSAGES[hc.code], code: hc.code });
       // Paid room: only an adult, ID-verified host with a payout account, only with paid rooms switched on.
@@ -198,7 +240,7 @@ export function registerRoomRoutes(app: Express): void {
       }
 
       const inviteToken = v.value.visibility === "invite" ? newInviteToken() : undefined;
-      const room = await rs.createRoom(host.id, {
+      const createInput: rs.CreateRoomInput = {
         ...v.value,
         title: plainText(v.value.title),
         description: v.value.description ? plainText(v.value.description) : undefined,
@@ -207,7 +249,22 @@ export function registerRoomRoutes(app: Express): void {
         inviteTokenHash: inviteToken ? sha256(inviteToken) : undefined,
         // Decided here from the host's age today, never from the request body; never changes afterwards.
         minorsRoom,
-      });
+        ...game,
+      };
+      if (withLanes) {
+        // Gaming: the game room (it only routes) and the creator's own age lane, in one transaction (gameLanes.ts).
+        try {
+          const made = await lanes.createGameRoomWithLane(host, createInput);
+          return res.status(201).json({
+            room: { ...hostRoom(made.parent), host: hostSummary(host) }, lane: { ...hostRoom(made.lane), host: hostSummary(host) },
+            ...(inviteToken ? { inviteLink: `/rooms/${made.parent.id}?token=${inviteToken}` } : {}),
+          });
+        } catch (e) {
+          if (e instanceof lanes.LaneError) return res.status(e.status).json(e.body);
+          throw e;
+        }
+      }
+      const room = await rs.createRoom(host.id, createInput);
       // Not named "inviteToken": the global response redaction strips that key from every body on purpose.
       res.status(201).json({ room: { ...hostRoom(room), host: hostSummary(host) }, ...(inviteToken ? { inviteLink: `/rooms/${room.id}?token=${inviteToken}` } : {}) });
     } catch (e) {
@@ -232,7 +289,13 @@ export function registerRoomRoutes(app: Express): void {
       // A ticket price (priceMinor, kobo) only for a ticketed room and a viewer who may buy it (ID-verified adult, room
       // 18+/21+ and not a minors' room, viewer meets its age limit). Everyone else gets no priceMinor key at all.
       const priceFor = (r: Room) => (viewer && isTicketedRoom(r) && ticketEligible(viewer, r) ? { priceMinor: r.ticketPriceKobo } : {});
-      const rooms = list.map((r) => ({ ...publicRoom(r), ...priceFor(r), host: byId.get(r.hostId) ?? null, memberCount: roomHub.count(r.id), peek: peekOf(r.id, 5) }));
+      // Gaming: a game room with age lanes shows the viewer's own lane only (its count and its people); never the other lane.
+      const laneOf = roomFeatures.gaming ? await viewerLanes(list, viewer) : new Map<string, string | null>();
+      const shown = (r: Room) => (laneOf.has(r.id) ? laneOf.get(r.id) ?? null : r.id);
+      const rooms = list.map((r) => {
+        const id = shown(r);
+        return { ...publicRoom(r), ...priceFor(r), host: byId.get(r.hostId) ?? null, memberCount: id ? roomHub.count(id) : 0, peek: id ? peekOf(id, 5) : [] };
+      });
       rooms.sort((a, b) => (a.status === b.status && a.status === "live" ? b.memberCount - a.memberCount : 0)); // busiest live rooms first (stable otherwise)
       res.json({ rooms });
     } catch (e) {
@@ -240,6 +303,15 @@ export function registerRoomRoutes(app: Express): void {
       res.status(500).json({ message: "Failed to load rooms" });
     }
   });
+
+  /** For the rooms list: each listed game room with lanes -> the id of the viewer's lane in it (null = none for their age). */
+  async function viewerLanes(list: Room[], viewer: User | undefined): Promise<Map<string, string | null>> {
+    const out = new Map<string, string | null>();
+    const byParent = await lanes.openLanesOf(list.filter((r) => r.gameFormat !== null && !r.parentRoomId).map((r) => r.id));
+    const lane = lanes.laneForAge(ageFromDob(viewer?.dateOfBirth));
+    byParent.forEach((children, parentId) => out.set(parentId, children.find((c) => c.ageLane === lane)?.id ?? null));
+    return out;
+  }
 
   // ------------------------------------------------------------ config (must stay above /api/rooms/:id)
   // Public switches and limits for any signed-in user, plus the caller's own hosting numbers (host). Only these fields:
@@ -255,6 +327,8 @@ export function registerRoomRoutes(app: Express): void {
         // Only the two ticket rates the host screens need for their earnings estimate; no spray rate and nothing else.
         rates: await ticketRatesForClients(),
         host: await hostingInfo(req.user!.id),
+        // Gaming capabilities, only while ROOMS_GAMING is on (absent otherwise, so the flag-off body is unchanged).
+        ...(roomFeatures.gaming ? { game: await gameCapabilities() } : {}),
       });
     } catch (e) {
       console.error("[rooms] config failed:", e);
@@ -265,15 +339,27 @@ export function registerRoomRoutes(app: Express): void {
   // ------------------------------------------------------------ get
   app.get("/api/rooms/:id", requireAuth, async (req, res) => {
     try {
-      const room = await rs.getRoom(req.params.id);
+      let room = await rs.getRoom(req.params.id);
       const token = typeof req.query.token === "string" ? req.query.token : undefined;
+      // Gaming: a game room with age lanes is never shown itself. A viewer who may see it is answered with their own lane
+      // (by date of birth on file); the other lane is never named. Decided before anything about the room is revealed.
+      let routed: { parentRoomId: string } | null = null;
+      if (room && roomFeatures.gaming && (await lanes.isLaneParent(room.id))) {
+        if (!(await canViewRoom(room, req.user!.id, token))) return res.status(404).json({ message: "Room not found" });
+        const r = await lanes.resolveLaneRoom(room.id, req.user!.id);
+        if ("refused" in r) { const [status, body] = laneRefusal(r.refused); return res.status(status).json(body); }
+        routed = { parentRoomId: room.id };
+        room = await rs.getRoom(r.roomId);
+      } else if (room && roomFeatures.gaming && room.parentRoomId && !(await lanes.mayUseLane(room, req.user!.id))) {
+        return res.status(404).json({ message: "Room not found" }); // the other lane, by its id: as if it did not exist
+      }
       const view = room ? await viewRoom(room, req.user!.id, token) : ({ ok: false, code: "NOT_FOUND" } as const);
       if (!room || (!view.ok && view.code === "NOT_FOUND")) return res.status(404).json({ message: "Room not found" });
       // Minors' room, not let in: the reason and the warning only. No title, host, members or counts.
       if (!view.ok && view.code === "AGE_UNKNOWN") {
         return res.status(403).json({ code: "AGE_UNKNOWN", message: "Add your date of birth in your profile to join rooms.", canJoin: { ok: false, code: "AGE_UNKNOWN" } });
       }
-      if (!view.ok) return res.status(403).json(mr.minorsDenialBody(view.code as "MINORS_ROOM" | "MINORS_ROOM_ACK"));
+      if (!view.ok) return res.status(403).json(mr.minorsDenialBody(view.code as "MINORS_ROOM" | "MINORS_ROOM_ACK", room));
       const [viewer, host, member] = await Promise.all([storage.getUser(req.user!.id), storage.getUser(room.hostId), rs.getMember(room.id, req.user!.id)]);
       const gate = canJoinRoom({ age: ageFromDob(viewer?.dateOfBirth) }, room as any);
       const canJoin = member?.banned ? { ok: false, code: "BANNED" } : gate;
@@ -308,10 +394,11 @@ export function registerRoomRoutes(app: Express): void {
       res.json({
         room: self ? hostRoom(room) : viewerRoom(room), host: host ? hostSummary(host) : null, canJoin, memberCount: roomHub.count(room.id), peek: peekOf(room.id, 8),
         you: self ? { role: "host" } : member && !member.banned ? { role: member.role } : null,
-        reminderSet: await hasReminder(room.id, req.user!.id), // this viewer's own flag only
+        reminderSet: await hasReminder(routed?.parentRoomId ?? room.id, req.user!.id), // this viewer's own flag only (a game room's reminder is the game room's)
         ...(ticket ? { ticket } : {}),
         ...(ticketSales ? { ticketSales } : {}),
         ...(spray ? { spray } : {}),
+        ...(routed ? { lane: { parentRoomId: routed.parentRoomId, roomId: room.id, ageLane: room.ageLane } } : {}),
       });
     } catch (e) {
       console.error("[rooms] get failed:", e);
@@ -442,6 +529,28 @@ export function registerRoomRoutes(app: Express): void {
           ticketGuard = { lockedBySale: priceChange || ageChange || refundOff, capacity: capChange ? newCap : null, requireScheduled: becomingTicketed };
         }
       }
+      // Gaming (ROOMS_GAMING, host only: the co-host path above refuses any key but pinnedMessage). Flag off: ignored.
+      if (roomFeatures.gaming && ("gameFormat" in b || "gameDropTimeoutMs" in b)) {
+        const g = validateGameInput(b);
+        if (!g.ok) return res.status(400).json(badGameField(g.field));
+        if (g.value.gameFormat !== undefined) {
+          if (g.value.gameFormat !== null) {
+            // A live room must have voice and live video on now; a scheduled one must be small enough for live video.
+            const ok = room.status === "live" ? room.voiceEnabled && room.liveVideo : videoSized(v.value);
+            if (!ok) return res.status(400).json(NEEDS_LIVE_VIDEO);
+          }
+          if (g.value.gameFormat === null && (room.parentRoomId || (await lanes.isLaneParent(room.id)))) {
+            return res.status(409).json({ message: "A game room with age lanes stays a game room.", code: "LANE_ROOM" });
+          }
+          if (room.status === "live") {
+            const fit = gameFitCheck(room.id, g.value.gameFormat);
+            if (fit === "TEAM_FULL") return res.status(409).json({ message: "A team has more players than that. Remove players first.", code: "TEAM_FULL" });
+            if (fit === "GAME_IN_PROGRESS") return res.status(409).json({ message: "Remove the players before switching the game off.", code: "GAME_IN_PROGRESS" });
+          }
+          patch.gameFormat = g.value.gameFormat;
+        }
+        if (g.value.gameDropTimeoutMs !== undefined) patch.gameDropTimeoutMs = g.value.gameDropTimeoutMs;
+      }
       if ("screenUrl" in b) {
         if (b.screenUrl === null || b.screenUrl === "") patch.screen = null;
         else if (!roomFeatures.linkScreens) return res.status(400).json({ message: "Link screens are switched off for now.", field: "screenUrl", reason: "disabled" });
@@ -465,6 +574,7 @@ export function registerRoomRoutes(app: Express): void {
       }
       if ("screen" in patch && updated.status === "live") notifyScreen(room.id, patch.screen ?? null, updated.screenVersion);
       if (patch.ageLimit && updated.status === "live") await enforceAgeLimit(room.id); // raised: send out anyone now under it
+      if (updated.status === "live" && ("gameFormat" in patch || "gameDropTimeoutMs" in patch)) await applyGameRoom(updated); // the hub follows
       // The ticket settings go back to the host only (a co-host editing the pinned message gets the viewer room).
       res.json({ room: { ...(uid === room.hostId ? hostRoom(updated) : viewerRoom(updated)), host: hostSummary(host) } });
     } catch (e) {
@@ -476,10 +586,18 @@ export function registerRoomRoutes(app: Express): void {
   // ------------------------------------------------------------ start / end
   app.post("/api/rooms/:id/start", requireAuth, roomLimiter, async (req, res) => {
     let wentLive = false; // set once the conditional write succeeded: from then on a failure must not leave the room live
+    let startedId: string | null = null; // the room actually started (a game room starts the host's lane)
     try {
       const ctx = await loadHostRoom(req, res);
       if (!ctx) return;
-      const { room, host } = ctx;
+      const { host } = ctx;
+      let { room } = ctx;
+      // Gaming: a game room with lanes is never live on its own. Starting it starts the host's own lane (and the game room).
+      if (roomFeatures.gaming && (await lanes.isLaneParent(room.id))) {
+        const own = await lanes.ownLane(room.id, host.id);
+        if (!own) return res.status(409).json({ message: "You don't have a lane in this game room.", code: "NO_LANE" });
+        room = own;
+      }
       if (room.status !== "scheduled") return res.status(409).json({ message: room.status === "live" ? "This room is already live." : "This room has ended.", code: "BAD_STATE" });
       if (room.minorsRoom && !isTeen(ageFromDob(host.dateOfBirth))) {
         return res.status(403).json({ ...HOST_NOT_MINOR, message: "This room was set up for under 18s, so it can't be started now. Create a new room instead." });
@@ -494,6 +612,7 @@ export function registerRoomRoutes(app: Express): void {
       let live = await rs.startScheduledRoom(room.id);
       if (!live) return res.status(409).json({ message: "This room can't be started now.", code: "BAD_STATE" });
       wentLive = true;
+      startedId = room.id;
       expectHost(room.id); // the host has the grace period to connect to the room, or it ends (a timer on every path from here)
       // The host's age may have been corrected after the first read. Look again now that the room is live: an adult host never
       // keeps a live minors' room, and a teen host never keeps an unflagged one, whatever the order of events was.
@@ -509,12 +628,16 @@ export function registerRoomRoutes(app: Express): void {
       }
       if (live.minorsRoom) roomHub.markMinorsRoom(room.id);
       await rs.upsertMember(room.id, host.id, "host");
-      notifyFollowers(live, host); // background (never delays the answer)
+      // Gaming: a lane going live takes its game room live (never joinable, no host timer: it lives while a lane does).
+      // Followers are told about the game room when the game room's host starts their lane (the link routes each person to
+      // their own lane); a lane opened by someone else announces that lane, under its own rules.
+      const parent = roomFeatures.gaming && live.parentRoomId ? await lanes.startParentOf(live) : null;
+      notifyFollowers(parent && parent.hostId === host.id ? parent : live, host); // background (never delays the answer)
       res.json({ room: { ...viewerRoom(live), host: hostSummary(host) } });
     } catch (e) {
       console.error("[rooms] start failed:", e);
       // Fail closed: a room that went live must not stay live without a grace timer when a later step threw.
-      if (wentLive) await endRoom(req.params.id).catch((e2) => console.error("[rooms] ending a room that failed to start also failed:", e2));
+      if (wentLive) await endRoom(startedId ?? req.params.id).catch((e2) => console.error("[rooms] ending a room that failed to start also failed:", e2));
       res.status(500).json({ message: "Failed to start room" });
     }
   });
@@ -524,12 +647,67 @@ export function registerRoomRoutes(app: Express): void {
       const ctx = await loadHostRoom(req, res);
       if (!ctx) return;
       if (ctx.room.status === "ended") return res.status(409).json({ message: "This room has already ended.", code: "BAD_STATE" });
-      await endRoom(ctx.room.id); // sets status, tells everyone in the room, clears presence and timers
+      // Gaming: ending a game room ends every lane in it first (each lane's people are told by their own lane).
+      if (roomFeatures.gaming && (await lanes.isLaneParent(ctx.room.id))) {
+        for (const c of await lanes.laneChildren(ctx.room.id)) if (c.status !== "ended") await endRoom(c.id);
+      }
+      if ((await rs.getRoom(ctx.room.id))?.status !== "ended") await endRoom(ctx.room.id); // sets status, tells everyone in the room, clears presence and timers
       const ended = (await rs.getRoom(ctx.room.id))!;
       res.json({ room: { ...viewerRoom(ended), host: hostSummary(ctx.host) } });
     } catch (e) {
       console.error("[rooms] end failed:", e);
       res.status(500).json({ message: "Failed to end room" });
+    }
+  });
+
+  // ------------------------------------------------------------ gaming: OBS / RTMP ingest (LIVEKIT_INGRESS)
+  // A current player of this room gets their own ingest point (the same one on every call). Everyone else gets one fixed 403.
+  // The stream key is in this response only: never logged, never in room:state or a broadcast, never in an error.
+  app.post("/api/rooms/:id/game/ingress", requireAuth, roomLimiter, async (req, res) => {
+    const refused = () => res.status(403).json({ message: "Only a player in this game can stream with OBS.", code: "NOT_ALLOWED" });
+    try {
+      if (!ingestAvailable()) return res.status(404).json({ message: "Not found" });
+      const room = await rs.getRoom(req.params.id);
+      if (!room || !(await canViewRoom(room, req.user!.id))) return res.status(404).json({ message: "Room not found" });
+      if (room.status !== "live" || !isGamePlayer(room.id, req.user!.id)) return refused();
+      const i = await ingressFor(room.id, req.user!.id);
+      if (!isGamePlayer(room.id, req.user!.id)) { await revokePlayerIngress(room.id, req.user!.id); return refused(); } // removed meanwhile
+      res.set("Cache-Control", "no-store");
+      res.json({ url: i.url, streamKey: i.streamKey });
+    } catch {
+      console.error("[rooms:ingress] route failed"); // never the error itself: it may carry the request
+      res.status(500).json({ message: "Streaming with OBS isn't available right now." });
+    }
+  });
+
+  // ------------------------------------------------------------ gaming: open the other age lane of a game room
+  // Body { lane: "teen" | "adult", visibility?: "friends" | "invite" (teen lane; default friends) }. The lane's host is the
+  // caller, who must be of that age (a teen for the teen lane) and the game room's host or one of their mutual follows.
+  app.post("/api/rooms/:id/lanes", requireAuth, roomLimiter, async (req, res) => {
+    try {
+      if (!roomFeatures.gaming) return res.status(404).json({ message: "Not found" });
+      const parent = await rs.getRoom(req.params.id);
+      if (!parent || !(await canViewRoom(parent, req.user!.id)) || !(await lanes.isLaneParent(parent.id))) return res.status(404).json({ message: "Room not found" });
+      const lane = req.body?.lane;
+      if (lane !== "teen" && lane !== "adult") return res.status(400).json({ message: "Invalid lane", field: "lane" });
+      const vis = req.body?.visibility ?? (lane === "teen" ? "friends" : parent.visibility);
+      if (lane === "teen" ? vis !== "friends" && vis !== "invite" : vis !== parent.visibility) return res.status(400).json({ message: "Invalid visibility", field: "visibility" });
+      const me = await storage.getUser(req.user!.id);
+      if (!me) return res.status(404).json({ message: "User not found" });
+      const ageLimit = lanes.laneAgeLimit(parent.ageLimit as any, lane);
+      if (ageLimit) {
+        const hc = await hostCheck(me, { visibility: vis, ageLimit });
+        if (!hc.ok && hc.code !== "ACCOUNT_TOO_NEW") return res.status(403).json({ message: HOST_MESSAGES[hc.code], code: hc.code });
+      }
+      // An invite-only adult lane shares the game room's link; an invite-only teen lane gets its own link.
+      const ownToken = lane === "teen" && vis === "invite" ? newInviteToken() : undefined;
+      const tokenHash = ownToken ? sha256(ownToken) : vis === "invite" ? parent.inviteTokenHash ?? undefined : undefined;
+      const made = await lanes.openLane(parent, me, lane, vis, me.id === parent.hostId || (await mutualFollow(me.id, parent.hostId)), tokenHash);
+      res.status(201).json({ room: { ...hostRoom(made), host: hostSummary(me) }, ...(ownToken ? { inviteLink: `/rooms/${made.id}?token=${ownToken}` } : {}) });
+    } catch (e) {
+      if (e instanceof lanes.LaneError) return res.status(e.status).json(e.body);
+      console.error("[rooms] open lane failed:", e);
+      res.status(500).json({ message: "Failed to open the lane" });
     }
   });
 
@@ -559,6 +737,7 @@ export function registerRoomRoutes(app: Express): void {
     try {
       const room = await rs.getRoom(req.params.id);
       if (!room || !(await canViewRoom(room, req.user!.id))) return res.status(404).json({ message: "Room not found" });
+      if (roomFeatures.gaming && room.parentRoomId && !(await lanes.mayUseLane(room, req.user!.id))) return res.status(404).json({ message: "Room not found" });
       const targetId = req.params.userId;
       // Anyone who is not in the room (or is yourself) gets one fixed answer, so this endpoint cannot be used to probe blocks on arbitrary users.
       const none = { actions: { interact: false, dm: false, invite: false, profile: true } };
@@ -644,12 +823,12 @@ export function registerRoomRoutes(app: Express): void {
       if (view.code === "AGE_UNKNOWN") {
         return res.status(403).json({ code: "AGE_UNKNOWN", message: "Add your date of birth in your profile to join rooms.", canJoin: { ok: false, code: "AGE_UNKNOWN" } });
       }
-      if (view.code === "MINORS_ROOM") return res.status(403).json(mr.minorsDenialBody("MINORS_ROOM"));
+      if (view.code === "MINORS_ROOM") return res.status(403).json(mr.minorsDenialBody("MINORS_ROOM", room));
       // MINORS_ROOM_ACK: invited, not yet acknowledged. The request body is ignored: the act of calling is the acknowledgement.
       // An invite from a host who is 18 or over now no longer opens the room (adults already inside may stay until it ends).
-      if (!isTeen(ageFromDob((await storage.getUser(room.hostId))?.dateOfBirth))) return res.status(403).json(mr.minorsDenialBody("MINORS_ROOM"));
+      if (!isTeen(ageFromDob((await storage.getUser(room.hostId))?.dateOfBirth))) return res.status(403).json(mr.minorsDenialBody("MINORS_ROOM", room));
       const at = await mr.acknowledgeInvite(room.id, uid);
-      if (!at) return res.status(403).json(mr.minorsDenialBody("MINORS_ROOM")); // revoked in the meantime
+      if (!at) return res.status(403).json(mr.minorsDenialBody("MINORS_ROOM", room)); // revoked in the meantime
       res.json({ ok: true, acknowledged: true });
     } catch (e) {
       console.error("[rooms] adult invite acknowledge failed:", e);
@@ -923,6 +1102,8 @@ export function registerRoomRoutes(app: Express): void {
       if (!room || !(await canViewRoom(room, req.user!.id, typeof req.query.token === "string" ? req.query.token : undefined))) {
         return res.status(404).json({ message: "Room not found" });
       }
+      // Gaming: a report about a lane comes only from that lane's own people (its chat excerpt never reaches the other lane's reports).
+      if (roomFeatures.gaming && room.parentRoomId && !(await lanes.mayUseLane(room, req.user!.id))) return res.status(404).json({ message: "Room not found" });
       const parsed = z.object({
         reason: z.string().trim().min(1).max(100),
         description: z.string().max(1000).optional(),

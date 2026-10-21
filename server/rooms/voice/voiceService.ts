@@ -6,6 +6,16 @@ export { roomNameFor } from "./livekitVoice";
 /** A kind of track someone may publish. Game players get the two screen sources only (ROOMS_GAMING); never set by a client. */
 export type PublishSource = "microphone" | "camera" | "screen_share" | "screen_share_audio";
 
+/** Gaming (OBS / RTMP): the identity of a player's ingress participant. Never the bare user id: LiveKit lets one identity in once,
+ *  so an ingress named like the player would throw the player's own browser connection out of the room. */
+export const INGRESS_SUFFIX = "#obs";
+export const ingressIdentity = (userId: string) => `${userId}${INGRESS_SUFFIX}`;
+/** The player behind an ingress identity, or null for an ordinary participant. */
+export const ingressOwner = (identity: string): string | null => (identity.endsWith(INGRESS_SUFFIX) ? identity.slice(0, -INGRESS_SUFFIX.length) : null);
+
+/** A player's OBS ingest point. `streamKey` is a secret: only ever returned to its owner, never logged or stored. */
+export interface GameIngress { ingressId: string; url: string; streamKey: string }
+
 export interface VoiceParticipant {
   identity: string;
   canPublish: boolean;
@@ -35,6 +45,13 @@ export interface VoiceService {
   listParticipants(roomId: string): Promise<VoiceParticipant[]>;
   /** Ends the whole session for everyone. */
   deleteRoom(roomId: string): Promise<void>;
+  /**
+   * Gaming (LIVEKIT_INGRESS): the player's RTMP ingest into the room, publishing as ingressIdentity(userId) with the two screen
+   * sources only. Idempotent: an ingress that already exists for this player and room is returned, never a second one.
+   */
+  createIngress(roomId: string, userId: string): Promise<GameIngress>;
+  /** Removes an ingress (its stream key stops working). Missing is fine. */
+  deleteIngress(ingressId: string): Promise<void>;
 }
 
 let override: VoiceService | null | undefined;

@@ -89,6 +89,16 @@ export interface RoomSettings { pinnedMessage: string | null; slowModeSec: numbe
  */
 export const MINORS_ROOM_WARNING =
   "This room is for under 18s. Adults can only come in if the host has invited them. Any inappropriate behaviour or indecent act will lead to your account being suspended, an investigation being opened, and possible legal action.";
+/**
+ * Gaming (ROOMS_GAMING): the warning for the teen lane of a game room (a minors' room hosted by a teen). Same rule as
+ * MINORS_ROOM_WARNING; the wording (owner decision 2026-10-22, to be checked by the lawyer) says the adult is entering a room
+ * with a minor or minors and that misconduct is recorded and investigated. Sent as `warning` on every teen-lane refusal.
+ */
+export const MINORS_LANE_WARNING =
+  "You are entering a room with a minor or minors. Adults can only come in if the host has invited them. Any misconduct is recorded and investigated, and inappropriate behaviour or an indecent act will lead to your account being suspended and possible legal action.";
+/** The warning for this room: the teen-lane wording for a teen lane, the minors' room wording everywhere else. */
+export const minorsWarningFor = (room: { ageLane?: string | null } | null | undefined): string =>
+  room?.ageLane === "teen" ? MINORS_LANE_WARNING : MINORS_ROOM_WARNING;
 /** MINORS_ROOM: an adult with no personal invite. MINORS_ROOM_ACK: invited, but the warning is not yet acknowledged. */
 export const MINORS_ROOM_CODES = ["MINORS_ROOM", "MINORS_ROOM_ACK"] as const;
 export type MinorsRoomCode = (typeof MINORS_ROOM_CODES)[number];

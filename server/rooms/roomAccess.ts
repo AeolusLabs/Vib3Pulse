@@ -9,6 +9,7 @@ import { follows, type Room, type User } from "@shared/schema";
 import { ageFromDob } from "@shared/age";
 import { cutPinned, stripInvisible, type MinorsRoomCode } from "@shared/rooms";
 import * as rs from "./roomStorage";
+import { roomFeatures } from "./features";
 import { getInviteState, minorsGate, NO_INVITE } from "./minorsRoom";
 
 export const sha256 = (s: string) => crypto.createHash("sha256").update(s).digest("hex");
@@ -44,18 +45,27 @@ export function publicRoom(room: Room) {
   // Paid rooms: the price, ticket capacity and refund setting never ride on a room object. The price reaches only eligible
   // viewers (GET /api/rooms/:id `ticket`, list `priceMinor`); the host gets all three through hostRoom.
   // peakMembers is a host-only recap number (phase 6): it reaches the host only through GET /api/rooms/:id/recap.
-  const { inviteTokenHash, pinnedMessage, reminderNotifiedAt, ticketPriceKobo, ticketCapacity, refundBeforeStart, peakMembers, ...rest } = room;
+  // Gaming columns never ride on a room object either (so a flag-off payload is exactly what it was before they existed): the
+  // host gets gameFormat / gameDropTimeoutMs through hostRoom, a lane's own members get their lane through viewerRoom.
+  const { inviteTokenHash, pinnedMessage, reminderNotifiedAt, ticketPriceKobo, ticketCapacity, refundBeforeStart, peakMembers, gameFormat, gameDropTimeoutMs, ageLane, parentRoomId, ...rest } = room;
   return rest;
 }
 
 /** For someone who may view the room (GET /api/rooms/:id after viewRoom, room:state, the host's own writes): adds the pinned message. */
 export function viewerRoom(room: Room) {
-  return { ...publicRoom(room), pinnedMessage: room.pinnedMessage ?? null };
+  return {
+    ...publicRoom(room), pinnedMessage: room.pinnedMessage ?? null,
+    // Gaming: someone who may view a lane room learns which lane it is and its game room (their own lane only).
+    ...(roomFeatures.gaming && room.ageLane ? { ageLane: room.ageLane, parentRoomId: room.parentRoomId } : {}),
+  };
 }
 
 /** The host's own view of their room (create, PATCH and GET by the host): the viewer room plus the ticket settings. */
 export function hostRoom(room: Room) {
-  return { ...viewerRoom(room), ticketPriceKobo: room.ticketPriceKobo ?? null, ticketCapacity: room.ticketCapacity ?? null, refundBeforeStart: room.refundBeforeStart !== false };
+  return {
+    ...viewerRoom(room), ticketPriceKobo: room.ticketPriceKobo ?? null, ticketCapacity: room.ticketCapacity ?? null, refundBeforeStart: room.refundBeforeStart !== false,
+    ...(roomFeatures.gaming ? { gameFormat: room.gameFormat ?? null, gameDropTimeoutMs: room.gameDropTimeoutMs } : {}),
+  };
 }
 
 export async function mutualFollow(a: string, b: string): Promise<boolean> {

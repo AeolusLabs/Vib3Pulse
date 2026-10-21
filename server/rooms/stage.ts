@@ -9,7 +9,8 @@
 import { applyStage, canBeOnStage, MAX_SPEAKERS, type StageAction, type StageState } from "@shared/stage";
 import { applyLive, dropFromLive, emptyLive, type LiveAction } from "@shared/liveScreen";
 import { roomHub, type HubMember } from "./RoomHub";
-import { getVoiceService, type PublishSource, type VoiceParticipant } from "./voice/voiceService";
+import { getVoiceService, ingressOwner, type PublishSource, type VoiceParticipant } from "./voice/voiceService";
+import { revokePlayerIngress } from "./gameIngress";
 import { roomFeatures } from "./features";
 import * as rs from "./roomStorage";
 
@@ -320,6 +321,13 @@ export function sweepVoice(roomId: string): Promise<void> {
     let present: VoiceParticipant[];
     try { present = await svc.listParticipants(roomId); } catch (e) { log("listParticipants")(e); return; }
     for (const p of present) {
+      // Gaming: a player's OBS ingest (identity "<userId>#obs") stays while they are a current player; otherwise it goes,
+      // and so does its stream key.
+      const obsOf = roomFeatures.gaming ? ingressOwner(p.identity) : null;
+      if (obsOf) {
+        if (!isGamePlayer(roomId, obsOf)) { await soft("removeParticipant", svc.removeParticipant(roomId, p.identity)); await revokePlayerIngress(roomId, obsOf); }
+        continue;
+      }
       if (!roomHub.get(roomId, p.identity)) { await soft("removeParticipant", svc.removeParticipant(roomId, p.identity)); continue; }
       // Permissions alone do not stop a track that is already up: a camera nobody may publish is removed along with its owner.
       if (p.hasCamera && !canCameraNow(roomId, p.identity)) { await soft("removeParticipant", svc.removeParticipant(roomId, p.identity)); continue; }

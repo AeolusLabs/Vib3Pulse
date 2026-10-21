@@ -1,5 +1,5 @@
-import { AccessToken, RoomServiceClient, TrackSource } from "livekit-server-sdk";
-import type { PublishSource, VoiceParticipant, VoiceService } from "./voiceService";
+import { AccessToken, IngressAudioOptions, IngressClient, IngressInput, IngressVideoOptions, RoomServiceClient, TrackSource } from "livekit-server-sdk";
+import { ingressIdentity, type GameIngress, type PublishSource, type VoiceParticipant, type VoiceService } from "./voiceService";
 
 export const roomNameFor = (roomId: string) => `vp-${roomId}`;
 // Short on purpose: LiveKit refreshes the token of a connected participant itself, and the server sweeps (stage.ts sweepVoice)
@@ -24,6 +24,7 @@ const ignoreMissing = (e: any) => { if (e?.status === 404 || /not.?found|does no
 
 export class LiveKitVoice implements VoiceService {
   private client: RoomServiceClient | null = null;
+  private ingressClient: IngressClient | null = null;
 
   constructor(readonly url: string, private apiKey: string, private apiSecret: string) {}
 
@@ -73,5 +74,25 @@ export class LiveKitVoice implements VoiceService {
 
   async deleteRoom(roomId: string): Promise<void> {
     await this.rooms().deleteRoom(roomNameFor(roomId)).catch(ignoreMissing);
+  }
+
+  private ingress() {
+    return (this.ingressClient ??= new IngressClient(this.url.replace(/^wss:/, "https:").replace(/^ws:/, "http:"), this.apiKey, this.apiSecret));
+  }
+
+  async createIngress(roomId: string, userId: string): Promise<GameIngress> {
+    const identity = ingressIdentity(userId);
+    const existing = (await this.ingress().listIngress({ roomName: roomNameFor(roomId) })).find((i) => i.participantIdentity === identity);
+    const info = existing ?? await this.ingress().createIngress(IngressInput.RTMP_INPUT, {
+      name: `game-${roomId}-${userId}`, roomName: roomNameFor(roomId), participantIdentity: identity, participantName: identity,
+      // Screen sources only: an OBS feed is a game screen and its sound, never a camera or a microphone.
+      video: new IngressVideoOptions({ source: TrackSource.SCREEN_SHARE }),
+      audio: new IngressAudioOptions({ source: TrackSource.SCREEN_SHARE_AUDIO }),
+    });
+    return { ingressId: info.ingressId, url: info.url, streamKey: info.streamKey };
+  }
+
+  async deleteIngress(ingressId: string): Promise<void> {
+    await this.ingress().deleteIngress(ingressId).then(() => undefined).catch(ignoreMissing);
   }
 }

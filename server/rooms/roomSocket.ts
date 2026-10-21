@@ -5,12 +5,14 @@ import { isBlockedEitherWay } from "../utils/blocks";
 import { ageFromDob } from "@shared/age";
 import { resolveScreen } from "@shared/screen";
 import { sanitizePlaybackInput, type NowPlaying } from "@shared/playback";
-import { HOST_LEAVE_GRACE_MS, MINORS_ROOM_WARNING, ROOM_LIMITS, ROOM_REACTIONS, resolveRoomPrivacy, resolveChatReply, validateChatReply, type MinorsRoomCode, type RoomSettings } from "@shared/rooms";
+import { HOST_LEAVE_GRACE_MS, minorsWarningFor, ROOM_LIMITS, ROOM_REACTIONS, resolveRoomPrivacy, resolveChatReply, validateChatReply, type MinorsRoomCode, type RoomSettings } from "@shared/rooms";
 import { canHostRoom, canInteract, canJoinRoom, isTicketedRoom, roomCapacity } from "@shared/roomRules";
 import { hasPaidTicket } from "./ticketStorage";
 import type { Room, User } from "@shared/schema";
 import * as rs from "./roomStorage";
-import { mutualFollow, plainText, viewerRoom, viewRoom } from "./roomAccess";
+import { canViewRoom, mutualFollow, plainText, viewerRoom, viewRoom } from "./roomAccess";
+import { afterLaneEnded, isLaneParent, resolveLaneRoom } from "./gameLanes";
+import { revokeRoomIngresses } from "./gameIngress";
 import { lockAdmits } from "./roomLock";
 import { getInviteState, markHostRoomsMinors, minorsGate, NO_INVITE, revokeInvite } from "./minorsRoom";
 import { roomHub, type HubMember } from "./RoomHub";
@@ -71,8 +73,8 @@ function fanout(userId: string, msg: object) {
 const direct = (ws: RoomClient, msg: object) => { if (ws.readyState === OPEN) ws.send(wire(msg)); };
 const notice = (ws: RoomClient, code: string) => direct(ws, { type: "room:notice", code });
 const refuse = (ws: RoomClient, code: string) => direct(ws, { type: "room:error", code });
-/** Every minors' room refusal carries the one warning text (and nothing about the room). */
-const minorsError = (code: MinorsRoomCode) => ({ type: "room:error", code, warning: MINORS_ROOM_WARNING });
+/** Every minors' room refusal carries the one warning text (and nothing about the room); a teen lane its own wording (gaming). */
+const minorsError = (code: MinorsRoomCode, room?: { ageLane?: string | null } | null) => ({ type: "room:error", code, warning: minorsWarningFor(room) });
 
 // ---------------------------------------------------------------- host settings (pinned message, slow mode, lock)
 /**
@@ -181,6 +183,7 @@ export async function endRoom(roomId: string, opts: { hostReview?: boolean } = {
   // a host review: opts.hostReview, never paid out). Never throws; imported lazily so the money modules stay out of this
   // module's import cycle.
   if (room) await import("./settlement").then((m) => m.afterRoomEnded(roomId, { hostReview: opts.hostReview === true })).catch((e) => console.error("[rooms] after-end money step failed:", e?.message ?? e));
+  await revokeRoomIngresses(roomId); // gaming: every OBS stream key of the room stops working (nothing to do otherwise)
   if (room?.voiceEnabled || roomHub.voiceOn(roomId)) {
     await rs.clearStage(roomId).catch(() => {});
     await getVoiceService()?.deleteRoom(roomId).catch((e) => console.error("[voice] deleteRoom failed:", e?.message ?? e));
@@ -198,6 +201,8 @@ export async function endRoom(roomId: string, opts: { hostReview?: boolean } = {
   roomSettings.delete(roomId);
   slowChats.delete(roomId);
   await rs.markAllLeft(roomId).catch(() => {});
+  // Gaming: the last lane of a game room to end takes the game room with it (whatever the flag says now: never left live).
+  if (room?.parentRoomId) await afterLaneEnded(room.parentRoomId);
 }
 
 /** The host is gone (left, crashed, server restarted): end the room unless they come back within the grace period. */
@@ -214,7 +219,10 @@ export function expectHost(roomId: string) { scheduleEnd(roomId); }
 /** After a restart nobody is in the hub: any live room whose host does not reconnect in time is ended. */
 export async function rehydrateLiveRooms(): Promise<void> {
   const live = await rs.listLiveRooms();
-  for (const room of live) if (!roomHub.get(room.id, room.hostId)) scheduleEnd(room.id);
+  // Gaming: a game room with a live lane is never joined (its host is in their lane), so it is not timed out here; its last
+  // lane ending ends it (afterLaneEnded).
+  const parentsWithLiveLane = new Set(live.map((r) => r.parentRoomId).filter((x): x is string => !!x));
+  for (const room of live) if (!parentsWithLiveLane.has(room.id) && !roomHub.get(room.id, room.hostId)) scheduleEnd(room.id);
   await sweepMinorsVoiceAtBoot(live).catch((e) => console.error("[voice] boot sweep failed:", e?.message ?? e));
 }
 
@@ -320,6 +328,17 @@ async function releaseAwayMember(roomId: string, userId: string): Promise<boolea
 registerAwayReleaser(async (roomId, userId) => { await releaseAwayMember(roomId, userId); });
 
 // ---------------------------------------------------------------- join
+/** Gaming: null when this is not a game room with lanes; else the viewer's lane, or the code to refuse with. */
+async function routeToLane(roomId: string, userId: string, token: string | undefined): Promise<{ roomId: string } | { refuse: string } | null> {
+  if (!(await isLaneParent(roomId))) return null;
+  const parent = await rs.getRoom(roomId);
+  if (!parent || !(await canViewRoom(parent, userId, token))) return { refuse: "NOT_FOUND" };
+  if (parent.status === "ended") return { refuse: "ROOM_ENDED" };
+  const r = await resolveLaneRoom(roomId, userId);
+  if ("roomId" in r) return r;
+  return { refuse: r.refused === "NO_AGE" ? "AGE_UNKNOWN" : r.refused === "TOO_YOUNG" ? "AGE_LIMIT" : "NO_LANE" };
+}
+
 const JOIN_AGE_CODES = { AGE_UNKNOWN: "AGE_UNKNOWN", AGE_LIMIT: "AGE_LIMIT" } as const;
 
 /**
@@ -378,9 +397,16 @@ async function doJoin(ws: RoomClient, userId: string, msg: any) {
 }
 
 async function joinOnce(ws: RoomClient, userId: string, msg: any) {
-  const roomId = typeof msg.roomId === "string" && msg.roomId.length <= 64 ? msg.roomId : null;
+  let roomId = typeof msg.roomId === "string" && msg.roomId.length <= 64 ? msg.roomId : null;
   if (!roomId) return refuse(ws, "NOT_FOUND");
   if (!bucketsFor(userId).join.take()) return notice(ws, "RATE_LIMITED");
+  // Gaming: a game room with age lanes is never joined itself. Someone who may see it goes to their own lane (by the date of
+  // birth on file), and from here on that lane's own door decides everything, exactly like a direct join of the lane.
+  if (roomFeatures.gaming) {
+    const routed = await routeToLane(roomId, userId, typeof msg.inviteToken === "string" ? msg.inviteToken : undefined);
+    if (routed && "refuse" in routed) return refuse(ws, routed.refuse);
+    if (routed) roomId = routed.roomId;
+  }
   const [room, user, member] = await Promise.all([rs.getRoom(roomId), storage.getUser(userId), rs.getMember(roomId, userId)]);
   if (!room || !user || user.deletedAt || (await storage.getActiveSuspension(userId))) return refuse(ws, "NOT_FOUND");
   if (room.status === "ended") return refuse(ws, "ROOM_ENDED");
@@ -393,7 +419,7 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
   const view = await viewRoom(room, userId, token);
   if (!view.ok) {
     if (view.code === "NOT_FOUND" || view.code === "AGE_UNKNOWN") return refuse(ws, view.code);
-    return direct(ws, minorsError(view.code));
+    return direct(ws, minorsError(view.code, room));
   }
   const gate = canJoinRoom({ age: ageFromDob(user.dateOfBirth) }, room as any);
   if (!gate.ok) return refuse(ws, JOIN_AGE_CODES[gate.code]);
@@ -478,7 +504,7 @@ async function joinOnce(ws: RoomClient, userId: string, msg: any) {
   // The hub flag is set (synchronously) by a host correction right after its UPDATE commits, and is never cleared while the
   // room lives, so a row read that predates the correction cannot let an uninvited adult in. No await from here to the insert.
   const mg = minorsGate({ minorsRoom: fresh.minorsRoom || roomHub.isMinorsRoom(roomId), hostId: fresh.hostId }, userId, freshAge, freshInvite);
-  if (!mg.ok) return direct(ws, minorsError(mg.code));
+  if (!mg.ok) return direct(ws, minorsError(mg.code, fresh));
   // Room lock, decided here next to the minors' gate: still no await from here to the hub insert. Only NEW joiners are
   // stopped (someone already in the hub is a second tab or a reconnect). A lock that committed while we were awaiting is in
   // the fresh row or in the live copy (notifySettings runs right after the write), so either one saying "locked" locks.
@@ -679,7 +705,7 @@ export async function removeFromMinorsRoom(roomId: string, userId: string): Prom
     return;
   }
   roomHub.markUnquotable(roomId, userId);
-  tm.send(minorsError("MINORS_ROOM")); // the person hears why before being removed
+  tm.send(minorsError("MINORS_ROOM", { ageLane: roomHub.gameInfo(roomId)?.ageLane ?? null })); // the person hears why before being removed
   await evict(roomId, userId);
 }
 
