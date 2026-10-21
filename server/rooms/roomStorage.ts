@@ -13,11 +13,18 @@ import { NEVER_JOINED } from "./roomLock";
 export type RoomStatus = "scheduled" | "live" | "ended";
 export type MemberRole = "host" | "cohost" | "guest";
 
-/** minorsRoom is decided by the route from the host's age, never taken from client input. */
-export type CreateRoomInput = RoomInput & { screen?: Screen | null; inviteTokenHash?: string; minorsRoom?: boolean };
+/**
+ * minorsRoom is decided by the route from the host's age, never taken from client input. Gaming (ROOMS_GAMING): gameFormat
+ * and gameDropTimeoutMs come from the validated request; ageLane and parentRoomId only from gameLanes.ts.
+ */
+export type CreateRoomInput = RoomInput & {
+  screen?: Screen | null; inviteTokenHash?: string; minorsRoom?: boolean;
+  gameFormat?: number | null; gameDropTimeoutMs?: number; ageLane?: "teen" | "adult" | null; parentRoomId?: string | null;
+};
 
-export async function createRoom(hostId: string, input: CreateRoomInput): Promise<Room> {
-  const [row] = await db.insert(rooms).values({
+/** `exec` lets gameLanes.ts create a game room and its lane in one transaction. */
+export async function createRoom(hostId: string, input: CreateRoomInput, exec: Pick<typeof db, "insert"> = db): Promise<Room> {
+  const [row] = await exec.insert(rooms).values({
     hostId,
     title: input.title,
     description: input.description ?? null,
@@ -38,6 +45,11 @@ export async function createRoom(hostId: string, input: CreateRoomInput): Promis
     ticketPriceKobo: input.ticketPriceKobo ?? null,
     ticketCapacity: input.ticketCapacity ?? null,
     refundBeforeStart: input.refundBeforeStart ?? true,
+    // Gaming: the column defaults when not a game room (null, 120000, null, null).
+    gameFormat: input.gameFormat ?? null,
+    gameDropTimeoutMs: input.gameDropTimeoutMs ?? 120_000,
+    ageLane: input.ageLane ?? null,
+    parentRoomId: input.parentRoomId ?? null,
   }).returning();
   return row;
 }
@@ -48,7 +60,7 @@ export async function getRoom(id: string): Promise<Room | null> {
 }
 
 /** pinnedMessage must already be plain text cut to 200 (pinnedPlainText); slowModeSec one of SLOW_MODES. minorsRoom is never patchable. */
-export type RoomPatch = Partial<Pick<Room, "title" | "description" | "ageLimit" | "screen" | "noDirectInteractions" | "capacity" | "moderationStatus" | "scheduledFor" | "inviteTokenHash" | "pinnedMessage" | "slowModeSec" | "locked" | "ticketPriceKobo" | "ticketCapacity" | "refundBeforeStart">>;
+export type RoomPatch = Partial<Pick<Room, "title" | "description" | "ageLimit" | "screen" | "noDirectInteractions" | "capacity" | "moderationStatus" | "scheduledFor" | "inviteTokenHash" | "pinnedMessage" | "slowModeSec" | "locked" | "ticketPriceKobo" | "ticketCapacity" | "refundBeforeStart" | "gameFormat" | "gameDropTimeoutMs">>;
 
 /** The SET clause for a room patch (shared with the ticket-guarded write in ticketStorage.ts). */
 export function roomPatchSet(patch: RoomPatch): Record<string, unknown> {

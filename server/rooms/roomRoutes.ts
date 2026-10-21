@@ -41,6 +41,8 @@ import { registerRoomMoneyRoutes } from "./ticketMoneyRoutes";
 import { registerSprayRoutes } from "./sprayRoutes";
 import { sprayBlockFor } from "./spray";
 import { registerRoomRecapRoutes } from "./recap";
+import { validateGameInput, type DropTimeoutMs, type GameFormat } from "@shared/gameScreen";
+import { applyGameRoom, gameFitCheck } from "./game";
 
 const MAX_SCHEDULED = 10;
 const MAX_LIVE = 1;
@@ -62,6 +64,11 @@ const newInviteToken = () => crypto.randomBytes(24).toString("hex");
 const isTeen = (age: number | null) => age !== null && age < 18;
 /** A minors' room whose host is 18 or over now: they may finish a live room, but never start one or bring in adults. */
 const HOST_NOT_MINOR = { code: "HOST_NOT_MINOR" } as const;
+
+/** Gaming: a game room needs live video, which only works up to ROOM_LIMITS.liveVideoMax people. */
+const NEEDS_LIVE_VIDEO = { message: "A game room needs live video, which works in rooms of up to 50 people.", field: "gameFormat", reason: "needs_live_video" } as const;
+const videoSized = (r: { capacity: number; ticketPriceKobo?: number | null; ticketCapacity?: number | null }) => roomCapacity(r) <= ROOM_LIMITS.liveVideoMax;
+const badGameField = (field: string) => ({ message: `Invalid ${field}`, field, reason: "invalid" });
 
 export function isHost(room: Room, userId: string) {
   return room.hostId === userId;
@@ -176,6 +183,16 @@ export function registerRoomRoutes(app: Express): void {
       const host = await storage.getUser(req.user!.id);
       if (!host) return res.status(404).json({ message: "User not found" });
 
+      // Gaming (ROOMS_GAMING): the game fields are read only while the flag is on; otherwise they are ignored like any unknown key.
+      let game: { gameFormat?: GameFormat | null; gameDropTimeoutMs?: DropTimeoutMs } = {};
+      if (roomFeatures.gaming) {
+        const g = validateGameInput(req.body ?? {});
+        if (!g.ok) return res.status(400).json(badGameField(g.field));
+        game = g.value;
+        // The room is created before it is live, so voice and live video cannot be on yet: what is checked here is that live
+        // video will be possible (size). The game itself only runs while voice and live video are on (game.ts gameLive).
+        if (typeof game.gameFormat === "number" && !videoSized(v.value)) return res.status(400).json(NEEDS_LIVE_VIDEO);
+      }
       const hc = await hostCheck(host, v.value);
       if (!hc.ok) return res.status(403).json({ message: HOST_MESSAGES[hc.code], code: hc.code });
       // Paid room: only an adult, ID-verified host with a payout account, only with paid rooms switched on.
@@ -207,6 +224,7 @@ export function registerRoomRoutes(app: Express): void {
         inviteTokenHash: inviteToken ? sha256(inviteToken) : undefined,
         // Decided here from the host's age today, never from the request body; never changes afterwards.
         minorsRoom,
+        ...game,
       });
       // Not named "inviteToken": the global response redaction strips that key from every body on purpose.
       res.status(201).json({ room: { ...hostRoom(room), host: hostSummary(host) }, ...(inviteToken ? { inviteLink: `/rooms/${room.id}?token=${inviteToken}` } : {}) });
@@ -442,6 +460,25 @@ export function registerRoomRoutes(app: Express): void {
           ticketGuard = { lockedBySale: priceChange || ageChange || refundOff, capacity: capChange ? newCap : null, requireScheduled: becomingTicketed };
         }
       }
+      // Gaming (ROOMS_GAMING, host only: the co-host path above refuses any key but pinnedMessage). Flag off: ignored.
+      if (roomFeatures.gaming && ("gameFormat" in b || "gameDropTimeoutMs" in b)) {
+        const g = validateGameInput(b);
+        if (!g.ok) return res.status(400).json(badGameField(g.field));
+        if (g.value.gameFormat !== undefined) {
+          if (g.value.gameFormat !== null) {
+            // A live room must have voice and live video on now; a scheduled one must be small enough for live video.
+            const ok = room.status === "live" ? room.voiceEnabled && room.liveVideo : videoSized(v.value);
+            if (!ok) return res.status(400).json(NEEDS_LIVE_VIDEO);
+          }
+          if (room.status === "live") {
+            const fit = gameFitCheck(room.id, g.value.gameFormat);
+            if (fit === "TEAM_FULL") return res.status(409).json({ message: "A team has more players than that. Remove players first.", code: "TEAM_FULL" });
+            if (fit === "GAME_IN_PROGRESS") return res.status(409).json({ message: "Remove the players before switching the game off.", code: "GAME_IN_PROGRESS" });
+          }
+          patch.gameFormat = g.value.gameFormat;
+        }
+        if (g.value.gameDropTimeoutMs !== undefined) patch.gameDropTimeoutMs = g.value.gameDropTimeoutMs;
+      }
       if ("screenUrl" in b) {
         if (b.screenUrl === null || b.screenUrl === "") patch.screen = null;
         else if (!roomFeatures.linkScreens) return res.status(400).json({ message: "Link screens are switched off for now.", field: "screenUrl", reason: "disabled" });
@@ -465,6 +502,7 @@ export function registerRoomRoutes(app: Express): void {
       }
       if ("screen" in patch && updated.status === "live") notifyScreen(room.id, patch.screen ?? null, updated.screenVersion);
       if (patch.ageLimit && updated.status === "live") await enforceAgeLimit(room.id); // raised: send out anyone now under it
+      if (updated.status === "live" && ("gameFormat" in patch || "gameDropTimeoutMs" in patch)) await applyGameRoom(updated); // the hub follows
       // The ticket settings go back to the host only (a co-host editing the pinned message gets the viewer room).
       res.json({ room: { ...(uid === room.hostId ? hostRoom(updated) : viewerRoom(updated)), host: hostSummary(host) } });
     } catch (e) {

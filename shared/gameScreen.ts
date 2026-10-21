@@ -219,3 +219,25 @@ export function splitShares(amountKobo: number, memberIds: string[], featuredId:
   out[featuredId !== null && ids.includes(featuredId) ? featuredId : ids[0]] += rest;
   return out;
 }
+
+// ---------------------------------------------------------------- room settings (POST / PATCH /api/rooms, ROOMS_GAMING)
+export type GameFormat = 1 | 2 | 3 | 4;
+export const isGameFormat = (v: unknown): v is GameFormat => v === 1 || v === 2 || v === 3 || v === 4;
+
+/**
+ * The game fields of a room create or edit, shape only. undefined = not sent; gameFormat null = not a game room. Exact
+ * numbers only (the string "2" or 2.0001 are refused). Whether the room may be a game room (live video) is the server's call.
+ */
+export function validateGameInput(b: Record<string, unknown>):
+  { ok: true; value: { gameFormat?: GameFormat | null; gameDropTimeoutMs?: DropTimeoutMs } } | { ok: false; field: string } {
+  const value: { gameFormat?: GameFormat | null; gameDropTimeoutMs?: DropTimeoutMs } = {};
+  if (b.gameFormat !== undefined) {
+    if (b.gameFormat !== null && !isGameFormat(b.gameFormat)) return { ok: false, field: "gameFormat" };
+    value.gameFormat = b.gameFormat as GameFormat | null;
+  }
+  if (b.gameDropTimeoutMs !== undefined) {
+    if (!isDropTimeout(b.gameDropTimeoutMs)) return { ok: false, field: "gameDropTimeoutMs" };
+    value.gameDropTimeoutMs = b.gameDropTimeoutMs;
+  }
+  return { ok: true, value };
+}
