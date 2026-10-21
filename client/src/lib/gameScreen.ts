@@ -182,8 +182,8 @@ export function teamShares(game: GameView, side: Side, tier: SprayTier, featured
 
 const REFUSAL_REASON: Record<string, string> = {
   needs_live_video: "Game rooms need live video. Keep the room small enough for video, then try again.",
-  needs_game: "Pick a game format first, then separate age groups.",
-  lanes: "Separate age groups can't be used with paid tickets.",
+  needs_game: "Pick a game format first, then turn on separate lanes.",
+  lanes: "Separate lanes can't be used with paid tickets.",
   teen_host_required: "You can't open that lane.",
   minors_parent: "That lane can't be opened in this room.",
 };
