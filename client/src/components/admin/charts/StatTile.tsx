@@ -29,11 +29,11 @@ function DeltaLine({ delta }: { delta: Delta }) {
   );
 }
 
-export function StatTile({ label, value, delta, hero, testId, note }: { label: string; value: string; delta?: Delta; hero?: boolean; testId: string; note?: string }) {
+export function StatTile({ label, value, delta, hero, large, testId, note }: { label: string; value: string; delta?: Delta; hero?: boolean; large?: boolean; testId: string; note?: string }) {
   return (
     <div className="min-w-0" data-testid={testId}>
       <p className="text-sm text-slate-400">{label}</p>
-      <p className={`${hero ? "text-[clamp(1.875rem,8.5vw,3rem)]" : "text-2xl"} mt-1 break-words font-semibold leading-tight text-white`}>{value}</p>
+      <p className={`${hero ? "text-[clamp(1.875rem,8.5vw,3rem)]" : large ? "text-3xl" : "text-2xl"} mt-1 break-words font-semibold leading-tight text-white`}>{value}</p>
       {delta && <div className="mt-1"><DeltaLine delta={delta} /></div>}
       {note && <p className="mt-1 text-xs text-slate-500">{note}</p>}
     </div>

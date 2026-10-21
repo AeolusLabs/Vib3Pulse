@@ -60,3 +60,45 @@ test("the chart palette is the validated dark set and chart text never wears a s
   assert.match(tokens, /"#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300"/);
   for (const f of ["DayCharts.tsx", "BarCharts.tsx"]) assert.ok(!/<text[^>]*fill={color}/.test(read(`client/src/components/admin/charts/${f}`)), `${f} colours text with the series colour`);
 });
+
+// ---------------------------------------------------------------- rooms rates plan, task 7
+const TAB = "client/src/pages/admin/RoomRatesTab.tsx";
+
+test("the Rates tab is registered and shows the saved rates, the edit flow, the preview and the history", () => {
+  const page = read(PAGE);
+  assert.ok(page.includes('id: "rates" as const'), "tab rates missing");
+  assert.ok(page.includes('import RoomRatesTab from "./RoomRatesTab"') && page.includes("<RoomRatesTab"), "RoomRatesTab not wired");
+  assert.ok(existsSync(TAB), "RoomRatesTab.tsx is missing");
+  const tab = read(TAB);
+  assert.ok(tab.includes("Applies to new sprays and tickets from now. Existing records keep their original split."), "the settled-records notice is missing");
+  assert.ok(tab.includes('"/api/admin/rooms/rates"') || tab.includes("/api/admin/rooms/rates"), "the tab must use the rates endpoint");
+  for (const id of ["rates-form", "rates-history"]) assert.ok(tab.includes(`"${id}"`), `${id} missing`);
+  assert.ok(tab.includes("data-testid={`rate-row-${"), "per-rate rows need test ids");
+  assert.ok(/validateRate/.test(tab) && /sprayBreakdown|ticketBreakdown/.test(tab), "the edit dialog validates with the shared rule and previews the effect with the shared breakdown");
+  assert.ok(/VAT/.test(tab) && /card fees/i.test(tab), "the tab says VAT and card fees are fixed");
+  assert.ok(tab.includes("isSuper"), "edit controls must depend on the super-admin role");
+});
+
+test("the Rates tab follows the copy rules (no em dashes, no emoji, no side-stripe borders)", () => {
+  const tab = read(TAB);
+  assert.ok(!tab.includes("\u2014"), "em dash found");
+  assert.ok(!/[\u{1F300}-\u{1FAFF}\u2600-\u27BF]/u.test(tab), "emoji found");
+  assert.ok(!/border-l-[2-9]|border-r-[2-9]/.test(tab), "side-stripe border found");
+});
+
+test("the Money tab shows Room earnings and Ticket sales, each with the right chart form", () => {
+  const src = read(PAGE);
+  assert.ok(src.includes("/api/admin/rooms/tickets"), "the Money tab must read the ticket sales endpoint");
+  for (const id of [
+    "kpi-room-sales", "kpi-room-host", "kpi-room-platform", "kpi-room-other", "chart-sales-by-source", "chart-platform-by-source",
+    "kpi-ticket-gross", "kpi-ticket-count", "kpi-ticket-average", "kpi-ticket-buyers", "kpi-ticket-refunded",
+    "chart-ticket-line", "chart-ticket-split-bar", "chart-ticket-rooms-bars", "chart-ticket-hosts-bars",
+  ]) assert.ok(src.includes(`"${id}"`), `${id} missing`);
+  assert.ok(src.includes("Total room sales") && src.includes("Platform share") && src.includes("Host share"), "the three headline numbers are missing");
+  assert.ok(!/dual|secondaryAxis|yAxisRight/i.test(src), "no dual-axis charts");
+});
+
+test("the Rates and Ticket sales copy never invents a percentage in the page (rates come from the server)", () => {
+  const tab = read(TAB);
+  assert.ok(!/we take 15|Platform 15%/.test(tab) && !/\b(30|25|20|15)%/.test(tab.replace(/\/\/.*$/gm, "")), "a hard-coded rate appears in the tab");
+});

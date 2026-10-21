@@ -16,13 +16,14 @@ import { useToast } from "@/hooks/use-toast";
 import { DayColumnChart, DayLineChart, type DayPoint } from "@/components/admin/charts/DayCharts";
 import { RankedBars, StackedBar, type BarRow, type SplitPart } from "@/components/admin/charts/BarCharts";
 import { StatTile, pctChange } from "@/components/admin/charts/StatTile";
-import { COLOR_MONEY, COLOR_USAGE, SERIES, compactCount, compactNaira, daysBetween } from "@/components/admin/charts/tokens";
+import { COLOR_MONEY, COLOR_USAGE, SERIES, compactCount, compactNaira, daysBetween, naira } from "@/components/admin/charts/tokens";
+import RoomRatesTab from "./RoomRatesTab";
 
 // Rooms admin (rooms admin plan, task 6). One screen for what an admin needs when something looks wrong: who is live right now,
 // where the money went, and the switches that stop new money. A pause or freeze stops NEW money only; money already settled to a
 // bank cannot be recalled from here. Every action asks for a reason and is audit-logged by the server.
 
-type Tab = "live" | "reported" | "money" | "controls";
+type Tab = "live" | "reported" | "money" | "rates" | "controls";
 type Me = { role: string };
 type LiveRoom = { id: string; title: string; hostId: string; hostUsername: string; ageLimit: string; members: number; startedAt: string | null; ticketed: boolean; hostFrozen: boolean };
 type ReportedRoom = { roomId: string; title: string; status: string; ageLimit: string; hostId: string; host: { username?: string; displayName?: string } | null; reports: { id: string; reason: string; description?: string | null }[] };
@@ -41,6 +42,14 @@ type Sprays = {
   topRooms: { roomId: string; title: string; count: number; grossKobo: number }[];
   topHosts: { hostId: string; username: string; count: number; grossKobo: number }[];
 };
+type TicketSales = {
+  totals: { count: number; grossKobo: number; vatKobo: number; feeKobo: number; reserveKobo: number; platformKobo: number; hostKobo: number; refundedCount: number; refundedKobo: number };
+  uniqueBuyers: number;
+  previous: { count: number; grossKobo: number; uniqueBuyers: number; refundedKobo: number };
+  byDay: { day: string; count: number; grossKobo: number }[];
+  topRooms: { roomId: string; title: string; count: number; grossKobo: number }[];
+  topHosts: { hostId: string; username: string; count: number; grossKobo: number }[];
+};
 type Finance = {
   tickets: { status: string; count: number; grossKobo: number; platformKobo: number; hostKobo: number }[];
   payouts: { status: string; count: number; amountKobo: number }[];
@@ -49,7 +58,6 @@ type Finance = {
 
 const MONEY_ROLES = ["super_admin", "finance_manager"];
 const MOD_ROLES = ["super_admin", "content_moderator"];
-const naira = (kobo: number) => `₦${(kobo / 100).toLocaleString("en-NG", { minimumFractionDigits: kobo % 100 === 0 ? 0 : 2, maximumFractionDigits: 2 })}`;
 const ymd = (d: Date) => format(d, "yyyy-MM-dd");
 const TIER_LABEL: Record<string, string> = { note: "Note", bundle: "Bundle", bag: "Money bag", rain: "Rain" };
 
@@ -262,12 +270,14 @@ function MoneyTab() {
   const qs = `from=${fromYmd}&to=${toYmd}`;
   const sprays = useQuery<Sprays>({ queryKey: [`/api/admin/rooms/sprays?${qs}`], placeholderData: (prev) => prev });
   const overview = useQuery<Overview>({ queryKey: [`/api/admin/rooms/overview?${qs}`], placeholderData: (prev) => prev });
+  const tickets = useQuery<TicketSales>({ queryKey: [`/api/admin/rooms/tickets?${qs}`], placeholderData: (prev) => prev });
   const finance = useQuery<Finance>({ queryKey: ["/api/admin/finance/room-tickets"] });
   const days = useMemo(() => daysBetween(fromYmd, toYmd), [fromYmd, toYmd]);
   const vs = `the previous ${days.length} days`;
   const s = sprays.data;
   const o = overview.data;
-  const stale = sprays.isFetching || overview.isFetching;
+  const stale = sprays.isFetching || overview.isFetching || tickets.isFetching;
+  const tk = tickets.data;
 
   const sprayDay = useMemo(() => new Map((s?.byDay ?? []).map((d) => [d.day, d])), [s]);
   const useDay = useMemo(() => new Map((o?.byDay ?? []).map((d) => [d.day, d])), [o]);
@@ -284,6 +294,37 @@ function MoneyTab() {
 
   const t = s?.totals;
   const avg = (gross: number, count: number) => (count > 0 ? Math.round(gross / count) : 0);
+  const ticketDay = useMemo(() => new Map((tk?.byDay ?? []).map((d) => [d.day, d])), [tk]);
+  const ticketSeries: DayPoint[] = days.map((d) => {
+    const r = ticketDay.get(d);
+    return { day: d, value: r?.grossKobo ?? 0, tip: [{ label: "Ticket sales", value: naira(r?.grossKobo ?? 0) }, { label: "Tickets", value: String(r?.count ?? 0) }] };
+  });
+  const tt = tk?.totals;
+  // Sprays and tickets together: every figure is the sum of the stored splits, so the three headline numbers always add up.
+  const room = s && tk && t && tt ? {
+    gross: t.grossKobo + tt.grossKobo,
+    host: t.hostKobo + tt.hostKobo,
+    platform: t.platformKobo + tt.platformKobo,
+    other: t.vatKobo + t.feeKobo + t.reserveKobo + t.guestKobo + tt.vatKobo + tt.feeKobo + tt.reserveKobo,
+    prevGross: s.previous.grossKobo + tk.previous.grossKobo,
+  } : null;
+  const share = (part: number, whole: number) => (whole > 0 ? `${Math.round((part / whole) * 1000) / 10}% of sales` : "No sales in this range");
+  const sourceParts = (sprayV: number, ticketV: number): SplitPart[] => [
+    { id: "sprays", label: "Sprays", value: sprayV, valueLabel: naira(sprayV), color: SERIES[0] },
+    { id: "tickets", label: "Tickets", value: ticketV, valueLabel: naira(ticketV), color: SERIES[1] },
+  ];
+  const ticketSplit: SplitPart[] = tt ? [
+    { id: "host", label: "Host share", value: tt.hostKobo, valueLabel: naira(tt.hostKobo), color: SERIES[0] },
+    { id: "platform", label: "Platform share", value: tt.platformKobo, valueLabel: naira(tt.platformKobo), color: SERIES[1] },
+    { id: "vat", label: "VAT", value: tt.vatKobo, valueLabel: naira(tt.vatKobo), color: SERIES[2] },
+    { id: "fees", label: "Card fees", value: tt.feeKobo, valueLabel: naira(tt.feeKobo), color: SERIES[3] },
+    { id: "reserve", label: "Fraud reserve", value: tt.reserveKobo, valueLabel: naira(tt.reserveKobo), color: SERIES[4] },
+  ] : [];
+  const ticketRoomRows: BarRow[] = (tk?.topRooms ?? []).map((r) => ({ id: r.roomId, label: r.title, value: r.grossKobo, valueLabel: naira(r.grossKobo), sub: `${r.count} ${r.count === 1 ? "ticket" : "tickets"}` }));
+  const ticketHostRows: BarRow[] = (tk?.topHosts ?? []).map((h) => ({ id: h.hostId, label: h.username, value: h.grossKobo, valueLabel: naira(h.grossKobo), sub: `${h.count} ${h.count === 1 ? "ticket" : "tickets"}` }));
+  const ticketAvg = tt && tt.count > 0 ? Math.round(tt.grossKobo / tt.count) : 0;
+  const ticketPrevAvg = tk && tk.previous.count > 0 ? Math.round(tk.previous.grossKobo / tk.previous.count) : 0;
+  const ticketRefundShare = tt && tt.grossKobo + tt.refundedKobo > 0 ? (tt.refundedKobo / (tt.grossKobo + tt.refundedKobo)) * 100 : 0;
   const reversedShare = t && t.grossKobo + t.refundedKobo > 0 ? (t.refundedKobo / (t.grossKobo + t.refundedKobo)) * 100 : 0;
   const split: SplitPart[] = t ? [
     { id: "host", label: "Host share", value: t.hostKobo, valueLabel: naira(t.hostKobo), color: SERIES[0] },
@@ -316,10 +357,40 @@ function MoneyTab() {
       {(sprays.error || overview.error) && <Msg tone="error">Could not load this range. Pick a range of up to 366 days, or try again.</Msg>}
       {!s && sprays.isLoading && <Msg>Loading...</Msg>}
 
+      {room && t && tt && s && (
+        <div className={`space-y-6 transition-opacity ${stale ? "opacity-60" : ""}`} data-testid="room-earnings">
+          <div className={`${panel} p-5`}>
+            <StatTile hero testId="kpi-room-sales" label="Total room sales" value={naira(room.gross)} delta={{ pct: pctChange(room.gross, room.prevGross), upIsGood: true, vs }} note="Delivered sprays plus paid tickets" />
+            <div className="mt-5 grid grid-cols-1 gap-x-6 gap-y-5 border-t border-slate-700/60 pt-5 sm:grid-cols-3">
+              <StatTile testId="kpi-room-host" label="Host share" value={naira(room.host)} note={share(room.host, room.gross)} />
+              <StatTile testId="kpi-room-platform" label="Platform share" value={naira(room.platform)} note={share(room.platform, room.gross)} />
+              <StatTile testId="kpi-room-other" label="VAT, card fees, reserve and stage guests" value={naira(room.other)} note={share(room.other, room.gross)} />
+            </div>
+          </div>
+          {view === "charts" ? (
+            <div className="grid items-start gap-4 lg:grid-cols-2">
+              <Panel title="Sales by source" note="Where the total came from." testId="chart-sales-by-source">
+                <StackedBar parts={sourceParts(t.grossKobo, tt.grossKobo)} total={room.gross} totalLabel={naira(room.gross)} ariaLabel="Total room sales by source" testId="chart-sales-by-source-bar" />
+              </Panel>
+              <Panel title="Platform share by source" note="Where the platform's earnings came from." testId="chart-platform-by-source">
+                <StackedBar parts={sourceParts(t.platformKobo, tt.platformKobo)} total={room.platform} totalLabel={naira(room.platform)} ariaLabel="Platform share by source" testId="chart-platform-by-source-bar" />
+              </Panel>
+            </div>
+          ) : (
+            <SmallTable caption="Earnings by source" head={["Source", "Sales", "Host share", "Platform share"]} rows={[
+              ["Sprays", naira(t.grossKobo), naira(t.hostKobo), naira(t.platformKobo)],
+              ["Tickets", naira(tt.grossKobo), naira(tt.hostKobo), naira(tt.platformKobo)],
+              ["Total", naira(room.gross), naira(room.host), naira(room.platform)],
+            ]} />
+          )}
+        </div>
+      )}
+
       {s && t && (
         <div className={`space-y-6 transition-opacity ${stale ? "opacity-60" : ""}`} aria-busy={stale}>
+          <h3 className="text-base font-semibold text-white">Sprays</h3>
           <div className={`${panel} p-5`} data-testid="spray-kpis">
-            <StatTile hero testId="kpi-gross" label="Gross sprayed" value={naira(t.grossKobo)} delta={{ pct: pctChange(t.grossKobo, s.previous.grossKobo), upIsGood: true, vs }} />
+            <StatTile large testId="kpi-gross" label="Gross sprayed" value={naira(t.grossKobo)} delta={{ pct: pctChange(t.grossKobo, s.previous.grossKobo), upIsGood: true, vs }} />
             <div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-5 border-t border-slate-700/60 pt-5 sm:grid-cols-4">
               <StatTile testId="kpi-count" label="Sprays" value={compactCount(t.count)} delta={{ pct: pctChange(t.count, s.previous.count), upIsGood: true, vs }} />
               <StatTile testId="kpi-average" label="Average spray" value={compactNaira(avg(t.grossKobo, t.count))} delta={{ pct: pctChange(avg(t.grossKobo, t.count), avg(s.previous.grossKobo, s.previous.count)), upIsGood: true, vs }} />
@@ -354,6 +425,51 @@ function MoneyTab() {
                 <SmallTable caption="By day (UTC)" head={["Day", "Sprays", "Amount"]} rows={s.byDay.map((d) => [d.day, d.count, naira(d.grossKobo)])} />
                 <SmallTable caption="Top rooms" head={["Room", "Sprays", "Amount"]} rows={s.topRooms.map((r) => [r.title, r.count, naira(r.grossKobo)])} />
                 <SmallTable caption="Top hosts" head={["Host", "Sprays", "Amount"]} rows={s.topHosts.map((h) => [h.username, h.count, naira(h.grossKobo)])} />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tk && tt && (
+        <div className={`space-y-6 transition-opacity ${stale ? "opacity-60" : ""}`} data-testid="ticket-sales">
+          <div>
+            <h3 className="text-base font-semibold text-white">Ticket sales</h3>
+            <p className="text-sm text-slate-400">Paid room tickets. A refunded ticket is not a sale. Each ticket keeps the split it was sold with.</p>
+          </div>
+          <div className={`${panel} p-5`}>
+            <StatTile large testId="kpi-ticket-gross" label="Ticket sales" value={naira(tt.grossKobo)} delta={{ pct: pctChange(tt.grossKobo, tk.previous.grossKobo), upIsGood: true, vs }} />
+            <div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-5 border-t border-slate-700/60 pt-5 sm:grid-cols-4">
+              <StatTile testId="kpi-ticket-count" label="Tickets sold" value={compactCount(tt.count)} delta={{ pct: pctChange(tt.count, tk.previous.count), upIsGood: true, vs }} />
+              <StatTile testId="kpi-ticket-average" label="Average ticket" value={compactNaira(ticketAvg)} delta={{ pct: pctChange(ticketAvg, ticketPrevAvg), upIsGood: true, vs }} />
+              <StatTile testId="kpi-ticket-buyers" label="Unique buyers" value={compactCount(tk.uniqueBuyers)} delta={{ pct: pctChange(tk.uniqueBuyers, tk.previous.uniqueBuyers), upIsGood: true, vs }} />
+              <StatTile testId="kpi-ticket-refunded" label="Refunded share" value={`${Math.round(ticketRefundShare * 10) / 10}%`} note={`${naira(tt.refundedKobo)} across ${tt.refundedCount} ${tt.refundedCount === 1 ? "ticket" : "tickets"}`} />
+            </div>
+          </div>
+          {view === "charts" ? (
+            <>
+              <Panel title="Ticket sales per day" note="Gross of paid tickets. Hover or use the arrow keys to read a day." testId="chart-ticket-per-day">
+                <DayLineChart data={ticketSeries} color={SERIES[1]} formatTick={compactNaira} formatValue={compactNaira} ariaLabel={`Ticket sales per day, ${naira(tt.grossKobo)} in total`} testId="chart-ticket-line" />
+              </Panel>
+              <Panel title="Where each ticket naira goes" note="One bar is the whole ticket gross. Platform share is what the platform keeps." testId="chart-ticket-split">
+                <StackedBar parts={ticketSplit} total={tt.grossKobo} totalLabel={naira(tt.grossKobo)} ariaLabel="How ticket sales are split" testId="chart-ticket-split-bar" />
+              </Panel>
+              <div className="grid items-start gap-4 lg:grid-cols-2">
+                <Panel title="Top rooms by ticket sales" note="Up to 10." testId="chart-ticket-rooms"><RankedBars rows={ticketRoomRows} color={SERIES[1]} ariaLabel="Top rooms by ticket sales" testId="chart-ticket-rooms-bars" empty="No ticket sales in this range." /></Panel>
+                <Panel title="Top hosts by ticket sales" note="Up to 10." testId="chart-ticket-hosts"><RankedBars rows={ticketHostRows} color={SERIES[1]} ariaLabel="Top hosts by ticket sales" testId="chart-ticket-hosts-bars" empty="No ticket sales in this range." /></Panel>
+              </div>
+            </>
+          ) : (
+            <div className="space-y-4">
+              <dl className={`${panel} divide-y divide-slate-700/60`}>
+                <Row label={`Tickets sold (${tt.count})`} value={naira(tt.grossKobo)} strong />
+                {ticketSplit.map((p) => <Row key={p.id} label={p.label} value={p.valueLabel} />)}
+                <Row label="Refunded" value={naira(tt.refundedKobo)} />
+              </dl>
+              <div className="grid items-start gap-4 lg:grid-cols-2">
+                <SmallTable caption="Ticket sales by day (UTC)" head={["Day", "Tickets", "Amount"]} rows={tk.byDay.map((d) => [d.day, d.count, naira(d.grossKobo)])} empty="No ticket sales in this range." />
+                <SmallTable caption="Top rooms" head={["Room", "Tickets", "Amount"]} rows={tk.topRooms.map((r) => [r.title, r.count, naira(r.grossKobo)])} empty="No ticket sales in this range." />
+                <SmallTable caption="Top hosts" head={["Host", "Tickets", "Amount"]} rows={tk.topHosts.map((h) => [h.username, h.count, naira(h.grossKobo)])} empty="No ticket sales in this range." />
               </div>
             </div>
           )}
@@ -493,6 +609,7 @@ export default function AdminRooms() {
     canMod && { id: "live" as const, label: "Live now" },
     canMod && { id: "reported" as const, label: "Reported" },
     canMoney && { id: "money" as const, label: "Money" },
+    canMoney && { id: "rates" as const, label: "Rates" },
     canMoney && { id: "controls" as const, label: "Controls" },
   ].filter(Boolean)) as { id: Tab; label: string }[];
   const [picked, setPicked] = useState<Tab | null>(null);
@@ -534,6 +651,7 @@ export default function AdminRooms() {
               {tab === "live" && <LiveTab canFreeze={canMoney} canEndRooms={role === "super_admin"} />}
               {tab === "reported" && <ReportedTab />}
               {tab === "money" && <MoneyTab />}
+              {tab === "rates" && <RoomRatesTab isSuper={role === "super_admin"} />}
               {tab === "controls" && <ControlsTab isSuper={role === "super_admin"} />}
             </div>
           </>

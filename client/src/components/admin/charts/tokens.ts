@@ -32,6 +32,9 @@ export function compactNaira(kobo: number): string {
   return `₦${Math.round(n).toLocaleString("en-NG")}`;
 }
 
+/** Exact naira from kobo (two decimals only when there are kobo). Used wherever a precise figure is shown. */
+export const naira = (kobo: number) => `\u20A6${(kobo / 100).toLocaleString("en-NG", { minimumFractionDigits: kobo % 100 === 0 ? 0 : 2, maximumFractionDigits: 2 })}`;
+
 export const compactCount = (n: number) => (n >= 10_000 ? `${Math.round(n / 100) / 10}K` : n.toLocaleString("en-NG"));
 
 /** Every UTC day from `from` to `to` inclusive, as YYYY-MM-DD (capped at 400 so a bad range cannot hang the page). */
