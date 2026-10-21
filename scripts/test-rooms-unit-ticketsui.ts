@@ -3,7 +3,7 @@
 // Written, not run (owner's no-testing rule for phase 4). Runs under npm run test:rooms with the other unit suites.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { ticketBreakdown } from "../shared/money";
+import { DEFAULT_RATES, ticketBreakdown } from "../shared/money";
 import { ROOM_LIMITS } from "../shared/rooms";
 import {
   AMBER, BUYER_REFUND_CUTOFF_MS, PRICE_COPY, REFUND_COPY, REFUND_REFUSAL, SALES_COPY, TICKET_COPY, TICKET_CREATE_ERROR, TICKET_ERROR,
@@ -428,13 +428,13 @@ test("earnings estimate comes from ticketBreakdown, shown in whole naira rounded
   assert.ok(!/\./.test(estimateText(e.halfKobo)), "no kobo");
   assert.equal(earningsEstimate(999, 100), null);
   const step = src("../client/src/components/rooms/create/StepPrice.tsx");
-  assert.ok(/earningsEstimate\(draft\.priceNaira, draft\.capacity\)/.test(step));
+  assert.ok(/earningsEstimate\(draft\.priceNaira, draft\.capacity, /.test(step), "the step passes the saved rates");
   assert.ok(step.includes("estimateText(est.perTicketKobo)") && step.includes("estimateText(est.halfKobo)"));
   // M7: aria-live only on the two numbers, not the whole box
   assert.ok(!/data-testid="price-estimate"[^>]*aria-live/.test(step) && !/aria-live="polite" data-testid="price-estimate"/.test(step));
   assert.equal((step.match(/aria-live="polite"/g) ?? []).length, 2);
   const lib = src("../client/src/lib/roomTickets.ts");
-  assert.ok(/ticketBreakdown\(kobo\)\.host/.test(lib), "the estimate uses the shared breakdown, no fee math of its own");
+  assert.ok(/ticketBreakdown\(kobo, /.test(lib) && /\)\.host/.test(lib), "the estimate uses the shared breakdown (with the saved rates), no fee math of its own");
 });
 test("wizard payload: ticket fields only when the price step is enabled and switched on", () => {
   const s = defaultWizardState({ title: "Amapiano Sunday", ageLimit: "18+" });
@@ -631,6 +631,32 @@ test("ticket confirmed has a short code and no QR in this phase", () => {
   const s = src("../client/src/components/rooms/tickets/TicketConfirmed.tsx");
   assert.ok(s.includes("ticket.code"));
   assert.ok(!/qr/i.test(s.replace(/no QR/gi, "")), "no QR");
+});
+
+// ---------------------------------------------------------------- saved ticket rates (rooms rates plan, task 4)
+test("earnings estimate follows the saved ticket rates, and no rates means today's defaults", () => {
+  const rates = { ticketPlatformPct: 20, ticketReservePct: 2.5 };
+  const withRates = earningsEstimate(5000, 100, rates)!;
+  assert.equal(withRates.perTicketKobo, ticketBreakdown(500_000, { ...DEFAULT_RATES, ticket_platform: 20, ticket_reserve: 2.5 }).host);
+  assert.ok(withRates.perTicketKobo < earningsEstimate(5000, 100)!.perTicketKobo, "a higher platform share means the host earns less");
+  assert.equal(earningsEstimate(5000, 100)!.perTicketKobo, ticketBreakdown(500_000).host);
+  assert.equal(earningsEstimate(5000, 100, undefined)!.perTicketKobo, earningsEstimate(5000, 100)!.perTicketKobo);
+  assert.equal(earningsEstimate(999, 100, rates), null);
+});
+test("the fees note states the percent it is given, not a fixed 15", () => {
+  assert.equal(PRICE_COPY.feesNote(20), "After VAT (7.5%), card fees and a fraud reserve, we take 20%. Price includes VAT.");
+  assert.equal(PRICE_COPY.feesNote(12.5), "After VAT (7.5%), card fees and a fraud reserve, we take 12.5%. Price includes VAT.");
+});
+test("the host sales screen no longer prints a fixed platform percent (past tickets may carry different rates)", () => {
+  assert.equal(SALES_COPY.platform, "Platform share");
+});
+test("no client file prints the fixed ticket percent, and the price step reads the saved rates from the config", () => {
+  const tickets = src("../client/src/lib/roomTickets.ts");
+  assert.ok(!/TICKET_PLATFORM_PCT/.test(tickets), "roomTickets.ts must not use TICKET_PLATFORM_PCT");
+  const step = src("../client/src/components/rooms/create/StepPrice.tsx");
+  assert.ok(step.includes("useRoomsConfig") && step.includes("rates"), "StepPrice must read the saved rates from the config");
+  const api = src("../client/src/lib/roomsApi.ts");
+  assert.ok(/rates\?: \{ ticketPlatformPct: number; ticketReservePct: number \}/.test(api), "RoomsConfig must carry the two ticket rates");
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

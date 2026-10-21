@@ -177,6 +177,8 @@ export interface RoomsConfig {
    * (below it the server answers ACCOUNT_TOO_NEW). Optional so older fixtures still type-check.
    */
   host?: { accountAgeDays: number; minAccountAgeDays: number };
+  /** The saved ticket rates (percent) the host's earnings estimate uses. Optional so older fixtures still type-check. */
+  rates?: { ticketPlatformPct: number; ticketReservePct: number };
 }
 
 export async function fetchRoomsConfig(): Promise<RoomsConfig> {

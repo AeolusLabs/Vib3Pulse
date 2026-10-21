@@ -2,7 +2,7 @@
 // (storage is passed in where it is needed). The server is the gate for everything here: who may buy, the price, the
 // charge, refunds and payouts. This file only mirrors the shared rules so the screens never offer what the server will
 // refuse, and never show a price it did not send.
-import { TICKET_PLATFORM_PCT, ticketBreakdown } from "@shared/money";
+import { DEFAULT_RATES, ticketBreakdown } from "@shared/money";
 import { ROOM_LIMITS } from "@shared/rooms";
 import { BUYER_REFUND_CUTOFF_MS, buyerRefundCheck, type BuyerRefundCode } from "@shared/roomRefunds";
 import type { RoomPayoutView, RoomTicketBlock, RoomTicketSummary, RoomTicketView } from "./roomsApi";
@@ -467,7 +467,7 @@ export const PRICE_COPY = {
   perTicket: "You earn per ticket",
   ifHalf: (n: number) => `If ${n} sell`,
   about: (v: string) => `about ${v}`,
-  feesNote: `After VAT (7.5%), card fees and a fraud reserve, we take ${TICKET_PLATFORM_PCT}%. Price includes VAT.`,
+  feesNote: (platformPct: number) => `After VAT (7.5%), card fees and a fraud reserve, we take ${platformPct}%. Price includes VAT.`,
   refundLabel: "Refund up to 1 hour before",
   refundHelp: "If the room never starts, everyone is refunded automatically.",
   payoutTitle: "Payouts",
@@ -509,10 +509,13 @@ export function ticketDraftProblem(d: TicketDraft): { field: string; reason: str
  * The live earnings estimate, from shared/money.ts ticketBreakdown only (the server uses the same). "If half sell" uses
  * half the tickets, rounded. Null while the price is not valid. Shown in whole naira, rounded down (formatNairaWhole floor).
  */
-export function earningsEstimate(priceNaira: number, capacity: number): { perTicketKobo: number; half: number; halfKobo: number } | null {
+export interface TicketRatesConfig { ticketPlatformPct: number; ticketReservePct: number }
+
+export function earningsEstimate(priceNaira: number, capacity: number, rates?: TicketRatesConfig): { perTicketKobo: number; half: number; halfKobo: number } | null {
   const kobo = priceKoboOf(priceNaira);
   if (kobo === null) return null;
-  const host = ticketBreakdown(kobo).host;
+  // The saved rates from /api/rooms/config; until they load (or on an older server) today's defaults.
+  const host = ticketBreakdown(kobo, rates ? { ...DEFAULT_RATES, ticket_platform: rates.ticketPlatformPct, ticket_reserve: rates.ticketReservePct } : DEFAULT_RATES).host;
   const half = Math.max(1, Math.round((Number.isFinite(capacity) ? capacity : TICKET_LIMITS.defaultCapacity) / 2));
   return { perTicketKobo: host, half, halfKobo: host * half };
 }
@@ -545,7 +548,7 @@ export const SALES_COPY = {
   refunded: (n: number) => (n === 1 ? "1 ticket refunded" : `${n} tickets refunded`),
   gross: "Gross",
   costs: "VAT, card fees, reserve",
-  platform: `Platform ${TICKET_PLATFORM_PCT}%`,
+  platform: "Platform share", // no fixed percent: past tickets keep the rate they were sold at
   earn: "You earn",
   heldUntil: (when: string) => `Held until ${when}, then paid out. Late sales and refunds change these numbers.`,
   heldAfterEnd: "Paid out 48 hours after the room ends. Late sales and refunds change these numbers.",

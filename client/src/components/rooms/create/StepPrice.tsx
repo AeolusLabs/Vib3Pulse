@@ -11,6 +11,8 @@ import {
   AMBER, PRICE_COPY, TICKET_LIMITS, clampPriceNaira, clampTicketCapacity, earningsEstimate, estimateText, isPriceStepField,
   ticketsTooManyForVideo, type TicketDraft,
 } from "@/lib/roomTickets";
+import { DEFAULT_RATES } from "@shared/money";
+import { useRoomsConfig } from "@/lib/roomsApi";
 import { SwitchRow } from "./parts";
 import { FieldErr, type FieldError } from "./StepBasics";
 
@@ -31,7 +33,9 @@ const readWhole = (raw: string) => {
 };
 
 export default function StepPrice({ draft, set, error, liveVideo = false }: Props) {
-  const est = earningsEstimate(draft.priceNaira, draft.capacity);
+  const { data: config } = useRoomsConfig();
+  const rates = config?.rates;
+  const est = earningsEstimate(draft.priceNaira, draft.capacity, rates);
   const minN = TICKET_LIMITS.minKobo / 100, maxN = TICKET_LIMITS.maxKobo / 100;
   const priceErr = error?.field === "ticketPriceKobo";
   const capErr = error?.field === "ticketCapacity";
@@ -99,7 +103,7 @@ export default function StepPrice({ draft, set, error, liveVideo = false }: Prop
           <span className="text-muted-foreground">{est ? PRICE_COPY.ifHalf(est.half) : null}</span>
           <span className="font-semibold tabular-nums" aria-live="polite" aria-atomic="true" data-testid="estimate-half">{est ? estimateText(est.halfKobo) : null}</span>
         </div>
-        <p className="text-xs text-muted-foreground">{PRICE_COPY.feesNote}</p>
+        <p className="text-xs text-muted-foreground">{PRICE_COPY.feesNote(rates?.ticketPlatformPct ?? DEFAULT_RATES.ticket_platform)}</p>
       </div>
 
       <SwitchRow
