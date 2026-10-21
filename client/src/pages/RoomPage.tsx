@@ -316,7 +316,7 @@ function RoomPageInner({ id }: { id: string }) {
                 <span aria-hidden>·</span><span>{KIND_LABEL[room!.kind]}</span>
                 <Badge variant="outline" data-testid="badge-room-age">{ageLimitLabel(room!.ageLimit)}</Badge>
                 {room!.visibility !== "public" && <Badge variant="outline">{VISIBILITY_LABEL[room!.visibility]}</Badge>}
-                {room!.status === "live" && <Badge className="bg-red-600 text-white hover:bg-red-600">Live</Badge>}
+                {room!.status === "live" && !roomEnded && <Badge className="bg-red-600 text-white hover:bg-red-600">Live</Badge>}
               </div>
               {room!.description && <p className="mt-1 text-sm">{room!.description}</p>}
             </div>
