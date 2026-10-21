@@ -425,6 +425,7 @@ function ShellFixture({ opts, spray = null, edge = null }: { opts: ReturnType<ty
     audioOnly, setAudioOnly,
     linkQuality: opts.scene === "weak" ? "poor" : "good",
     linkPoorSince: opts.scene === "weak" ? Date.now() - 20_000 : null,
+    room: null,
   } as RoomVoice;
 
   const ok = () => true;

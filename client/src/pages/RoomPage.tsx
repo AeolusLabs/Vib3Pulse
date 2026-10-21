@@ -103,7 +103,7 @@ function RoomPageInner({ id }: { id: string }) {
   const [revokedInvites, setRevokedInvites] = useState<Map<string, AdultInvite>>(new Map());
   const minorsCode = minorsCodeFor(isMinorsDenied(raw) ? raw : null, state); // one screen, whether the refusal came over HTTP or the socket
   // "reconnecting" counts as live: a blip in the app connection must not hang up the media (that ended the stream by our own hand).
-  const voice = useRoomVoice(id, { enabled: state.voiceEnabled && (state.phase === "live" || state.phase === "reconnecting"), inviteToken: token, onCameraLost: () => sock.liveAction("stop") });
+  const voice = useRoomVoice(id, { enabled: state.voiceEnabled && (state.phase === "live" || state.phase === "reconnecting"), inviteToken: token, onCameraLost: () => sock.liveAction("stop"), game: !!state.game });
   const room = detail?.room;
   const live = room?.status === "live";
   const canJoin = detail?.canJoin.ok === true;

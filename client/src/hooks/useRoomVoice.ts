@@ -17,8 +17,12 @@ const holdReconnectPolicy: ReconnectPolicy = {
 // livekit-client is large: it is only downloaded the first time someone actually starts room audio or video, so everyone else
 // (and everyone on a slow connection who is just browsing) never pays for it.
 let lkModule: Promise<typeof import("livekit-client")> | null = null;
-const loadLk = () => (lkModule ??= import("livekit-client").catch((e) => { lkModule = null; throw e; })); // a failed download must be retryable on the next tap
+export const loadLk = () => (lkModule ??= import("livekit-client").catch((e) => { lkModule = null; throw e; })); // a failed download must be retryable on the next tap
 const connInfo = (): ConnInfo | undefined => (typeof navigator !== "undefined" ? (navigator as unknown as { connection?: ConnInfo }).connection : undefined);
+// Gamers live: a player's screen (and its game sound) is a screen_share / screen_share_audio publication. In a game room those are
+// subscribed by useGameTracks, per the match (featured feeds only), never by the blanket rules below.
+const SCREEN_SOURCES = new Set<string>(["screen_share", "screen_share_audio"]);
+const isScreenPub = (pub: { source: unknown }) => SCREEN_SOURCES.has(pub.source as string);
 const AUDIO_ONLY_KEY = "vp.room.audioOnly";
 const readAudioOnly = (): boolean => {
   try { const v = localStorage.getItem(AUDIO_ONLY_KEY); if (v !== null) return v === "1"; } catch { /* storage blocked */ }
@@ -71,11 +75,13 @@ export interface RoomVoice {
   /** This person's own link to LiveKit, and since when it has been poor or lost (null while fine). */
   linkQuality: LinkQuality;
   linkPoorSince: number | null;
+  /** The connected LiveKit room (null until joined): the game tracks hook subscribes and publishes through it. */
+  room: Room | null;
 }
 
 export interface CameraDevices { cameraId?: string; micId?: string; profile?: VideoProfile; /** No echo cancellation, noise suppression or auto gain on the mic. */ musicMode?: boolean }
 
-export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteToken?: string; /** The holder's camera or microphone went away mid-stream: tell the room to take the screen back. */ onCameraLost?: () => void }): RoomVoice {
+export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteToken?: string; /** The holder's camera or microphone went away mid-stream: tell the room to take the screen back. */ onCameraLost?: () => void; /** A game room: screen feeds are left to useGameTracks and are not auto-subscribed. */ game?: boolean }): RoomVoice {
   const [unlocked, setUnlocked] = useState(false);
   const [connected, setConnected] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -97,6 +103,9 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
   const [linkPoorSince, setLinkPoorSince] = useState<number | null>(null);
   const audioOnlyRef = useRef(audioOnly);
   audioOnlyRef.current = audioOnly;
+  const [roomObj, setRoomObj] = useState<Room | null>(null);
+  const gameRef = useRef(!!opts.game);
+  gameRef.current = !!opts.game;
   const lk = useRef<Room | null>(null);
   const sink = useRef<HTMLDivElement | null>(null);
   const connecting = useRef(false);
@@ -111,7 +120,7 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
     lk.current = null;
     sink.current?.remove();
     sink.current = null;
-    setConnected(false); setCanPublish(false); setMicOn(false); setActive([]);
+    setConnected(false); setCanPublish(false); setMicOn(false); setActive([]); setRoomObj(null);
     setVideo(null); setLocalVideo(null); setCameraOn(false); setLinkQuality("unknown"); setLinkPoorSince(null);
     if (!intendedLive.current) setVideoPaused(false); // still on air (a failed attempt during the comeback): keep "picture paused"
   }, []);
@@ -132,7 +141,12 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
       if (gen !== generation.current) return;
       const room = new Room({ adaptiveStream: true, dynacast: true, reconnectPolicy: holdReconnectPolicy });
       // Viewer data saver: never keep a video subscription while "audio only" is on.
-      const applyAudioOnly = (pub: RemoteTrackPublication) => { if (pub.kind === Track.Kind.Video) pub.setSubscribed(!audioOnlyRef.current); };
+      // In a game room nothing is auto-subscribed (autoSubscribe is off below): everything but the screen feeds is subscribed here.
+      const applyAudioOnly = (pub: RemoteTrackPublication) => {
+        if (gameRef.current && isScreenPub(pub)) return;
+        if (pub.kind === Track.Kind.Video) pub.setSubscribed(!audioOnlyRef.current);
+        else if (gameRef.current) pub.setSubscribed(true);
+      };
       room.on(RoomEvent.TrackPublished, (pub) => applyAudioOnly(pub));
       room.on(RoomEvent.ConnectionQualityChanged, (q, p) => {
         if (p !== room.localParticipant) return;
@@ -143,11 +157,13 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
       box.style.display = "none";
       document.body.appendChild(box);
       sink.current = box;
-      room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack) => {
+      room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack, pub) => {
+        if (gameRef.current && isScreenPub(pub)) return;
         if (track.kind === Track.Kind.Audio) box.appendChild(track.attach());
         else if (track.kind === Track.Kind.Video) setVideo(track as unknown as ScreenTrack);
       });
-      room.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
+      room.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack, pub) => {
+        if (gameRef.current && isScreenPub(pub)) return;
         if (track.kind === Track.Kind.Video) { setVideo((v) => (v === (track as unknown as ScreenTrack) ? null : v)); return; } // <video> elements belong to the screen
         track.detach().forEach((el) => el.remove());
       });
@@ -166,18 +182,19 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
       });
       room.on(RoomEvent.Disconnected, (reason) => { // LiveKit gave up reconnecting, or ended our session on purpose
         if (lk.current !== room) return;
-        lk.current = null; setConnected(false); setMicOn(false); setCameraOn(false); setLocalVideo(null);
+        lk.current = null; setRoomObj(null); setConnected(false); setMicOn(false); setCameraOn(false); setLocalVideo(null);
         box.remove(); if (sink.current === box) sink.current = null; // each drop used to leave an empty hidden element behind
         const why = reason === undefined ? "" : DisconnectReason[reason] ?? "";
         if (NO_RESUME.has(why)) { setIntent(null); setVideoPaused(false); setFailed(true); setError("You were disconnected from the room's audio. Tap to reconnect."); return; }
         if (intendedLive.current) { void resumeRef.current(); return; } // on air: keep trying with fresh tokens, do not wait for a tap
         setFailed(true); setError("Audio disconnected. Tap to reconnect.");
       });
-      await room.connect(url, token, { peerConnectionTimeout: 30_000, websocketTimeout: 30_000 });
+      await room.connect(url, token, { peerConnectionTimeout: 30_000, websocketTimeout: 30_000, ...(gameRef.current ? { autoSubscribe: false } : {}) });
       if (gen !== generation.current) { room.disconnect(); box.remove(); return; } // hung up while connecting: do not leave audio running
       room.remoteParticipants.forEach((p) => p.trackPublications.forEach((pub) => applyAudioOnly(pub as RemoteTrackPublication)));
       await room.startAudio().catch(() => {}); // fine if the browser still wants another tap; the audio element resumes on the next one
       lk.current = room;
+      setRoomObj(room);
       setCanPublish(allowed);
       setConnected(true);
       setReconnecting(false);
@@ -315,7 +332,7 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
     setAudioOnlyState(on);
     audioOnlyRef.current = on;
     try { localStorage.setItem(AUDIO_ONLY_KEY, on ? "1" : "0"); } catch { /* storage blocked: the choice just is not remembered */ }
-    lk.current?.remoteParticipants.forEach((p) => p.trackPublications.forEach((pub) => { if (pub.kind === "video") (pub as RemoteTrackPublication).setSubscribed(!on); }));
+    lk.current?.remoteParticipants.forEach((p) => p.trackPublications.forEach((pub) => { if (pub.kind === "video" && !(gameRef.current && isScreenPub(pub))) (pub as RemoteTrackPublication).setSubscribed(!on); }));
     if (on) setVideo(null);
   }, []);
 
@@ -350,5 +367,5 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
   }, [connect, startCamera]);
   resumeRef.current = resumeLive;
 
-  return { status: voiceStatus({ voiceEnabled: opts.enabled, unlocked, connected, failed, canPublish, micOn }), unlock, canPublish, micOn, toggleMic, activeSpeakers: active, error, micError, video, localVideo, cameraOn, cameraError, reconnecting, comingBack, startCamera, stopCamera, onAir, videoPaused, pauseVideo, resumeVideo, audioOnly, setAudioOnly, linkQuality, linkPoorSince };
+  return { status: voiceStatus({ voiceEnabled: opts.enabled, unlocked, connected, failed, canPublish, micOn }), unlock, canPublish, micOn, toggleMic, activeSpeakers: active, error, micError, video, localVideo, cameraOn, cameraError, reconnecting, comingBack, startCamera, stopCamera, onAir, videoPaused, pauseVideo, resumeVideo, audioOnly, setAudioOnly, linkQuality, linkPoorSince, room: roomObj };
 }
