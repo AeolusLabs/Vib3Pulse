@@ -12,7 +12,7 @@
 // ?wizard=adult&paid=1 runs the wizard with paidRooms on and an ID-verified host, so the Paid room switch and price step show.
 // ?spray=tray|confirm|bank|declined|limit|quiet opens the spray flow (phase 5) in an 18+ room as a verified adult guest,
 // every spray endpoint answered here: a note or bundle lands after a moment, bag and rain go to a stand-in bank page.
-// ?game=versus|team|drop|teen shows the gamers-live stage (flag on, every control answered by the shared game rules in the page).
+// ?game=versus|team|drop|teen (&sheet=play|teamspray, &controls=host for the Game tab) shows the gamers-live stage (flag on, every control answered by the shared game rules in the page).
 // ?earn=empty|week|clawback|noaccount|mismatch|soon|attention &page=earnings|payouts|payments shows the room money screens (phase 6).
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import RoomShell, { type RoomShellSocket } from "@/components/rooms/shell/RoomShell";
@@ -339,8 +339,8 @@ export default function RoomFixture() {
 function ShellFixture({ opts, spray = null, edge = null, game = null }: { opts: ReturnType<typeof parseFixtureQuery>; spray?: SprayScene | null; edge?: EdgeScene | null; game?: GameScene | null }) {
   const controls = useMemo(() => parseControlsFixture(window.location.search), []);
   const [state, dispatch] = useReducer((s: RoomState, e: Ev) => roomReducer(s, e), undefined, () =>
-    controls ? fixtureControlsState(controls)
-      : game ? fixtureGameState(game, fixtureLiveState("live", { as: opts.as, now: Date.now(), invite: opts.invite }), Date.now())
+    game ? fixtureGameState(game, controls ? fixtureControlsState(controls) : fixtureLiveState("live", { as: opts.as, now: Date.now(), invite: opts.invite }), Date.now())
+      : controls ? fixtureControlsState(controls)
       : fixtureLiveState(opts.scene, { as: opts.as, now: Date.now(), invite: opts.invite }));
   const was = useRef<boolean | null>(null);
   useFixtureFetch(!!game);
@@ -549,6 +549,7 @@ function ShellFixture({ opts, spray = null, edge = null, game = null }: { opts: 
         spray={spray ? sprayBlock : null}
         sprayFixture={sprayStart ?? undefined}
         gameTracksFixture={state.game ? gameTracks : undefined}
+        gameSheetFixture={(() => { const v = new URLSearchParams(window.location.search).get("sheet"); return v === "play" || v === "teamspray" ? v : undefined; })()}
       />
     </div>
   );

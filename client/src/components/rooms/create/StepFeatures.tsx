@@ -7,6 +7,8 @@ import { LINK_SCREENS, PROVIDER_LABEL } from "@/lib/roomsApi";
 import type { WizardState } from "@/lib/createRoomRules";
 import { COPY, PINNED_MAX, SLOW_MODE_CHOICES, slowModeLabel } from "@/lib/createRoomWizardUi";
 import { PRICE_COPY } from "@/lib/roomTickets";
+import { DEFAULT_DROP_TIMEOUT_MS, DROP_TIMEOUTS_MS } from "@shared/gameScreen";
+import { DROP_TIMEOUT_LABEL, GAME_COPY, GAME_FORMATS } from "@/lib/gameScreen";
 import { ChipGroup, SwitchRow } from "./parts";
 import { FieldErr, type FieldError } from "./StepBasics";
 
@@ -27,9 +29,11 @@ interface Props {
   paid?: { on: boolean; set(on: boolean): void; needsId: boolean } | null;
   /** Why live video is off for this paid room (more tickets than ROOM_LIMITS.liveVideoMax), or null. */
   videoBlocked?: string | null;
+  /** Gamers live: the server's flag is on, so the game format choice is offered (only for a room that goes live now with video). */
+  gaming?: boolean;
 }
 
-export default function StepFeatures({ state, set, error, directInteractions, setDirectInteractions, screenUrl, setScreenUrl, moneyPlaceholder, paid = null, videoBlocked = null }: Props) {
+export default function StepFeatures({ state, set, error, directInteractions, setDirectInteractions, screenUrl, setScreenUrl, moneyPlaceholder, paid = null, videoBlocked = null, gaming = false }: Props) {
   const pinnedLen = Array.from(state.pinned).length;
   const screenPreview = useMemo(() => {
     if (!LINK_SCREENS || !screenUrl.trim()) return null;
@@ -52,6 +56,23 @@ export default function StepFeatures({ state, set, error, directInteractions, se
         id="wiz-video" label={COPY.videoLabel} help={COPY.videoHelp} checked={state.liveVideo && state.voice && !videoBlocked}
         onChange={(v) => set({ liveVideo: v })} disabledReason={!state.voice ? COPY.videoNeedsVoice : videoBlocked ?? undefined} testId="switch-room-live-video"
       />
+
+      {gaming && state.voice && state.liveVideo && !videoBlocked && state.when === "now" && (
+        <div className="space-y-4" data-testid="game-format">
+          <ChipGroup<number>
+            legend={GAME_COPY.formatLegend} name="wiz-game-format" value={state.gameFormat ?? 0} testId="chips-game-format"
+            options={[{ value: 0, label: GAME_COPY.formatOff }, ...GAME_FORMATS.map((n) => ({ value: n, label: `${n}v${n}` }))]}
+            onPick={(n) => set({ gameFormat: n === 0 ? null : (n as 1 | 2 | 3 | 4) })} help={GAME_COPY.formatHelp}
+          />
+          {state.gameFormat && (
+            <ChipGroup<number>
+              legend={GAME_COPY.dropLegend} name="wiz-game-drop" value={state.gameDropTimeoutMs ?? DEFAULT_DROP_TIMEOUT_MS} testId="chips-game-drop"
+              options={DROP_TIMEOUTS_MS.map((ms) => ({ value: ms, label: DROP_TIMEOUT_LABEL[ms] }))}
+              onPick={(ms) => set({ gameDropTimeoutMs: ms as 30000 | 120000 | 0 })} help={GAME_COPY.dropHelp}
+            />
+          )}
+        </div>
+      )}
 
       <ChipGroup<number>
         legend={COPY.slowLegend} name="wiz-slow" value={state.slowModeSec} testId="chips-slow-mode"

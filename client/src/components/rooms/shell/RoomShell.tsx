@@ -10,7 +10,12 @@ import ControlsSheet from "@/components/rooms/host/ControlsSheet";
 import ScreenStage from "@/components/rooms/ScreenStage";
 import GameStage from "@/components/rooms/game/GameStage";
 import { useGameTracks, type GameTracks } from "@/hooks/useGameTracks";
+import GoLiveGameSheet from "@/components/rooms/game/GoLiveGameSheet";
+import SprayTeamSheet from "@/components/rooms/game/SprayTeamSheet";
+import { call } from "@/components/rooms/create/createRoomApi";
 import { useGameCaps } from "@/hooks/useGameCaps";
+import { pickGameProfile } from "@/lib/bandwidth";
+import { sideOf, type Side } from "@shared/gameScreen";
 import { GAME_MAX_NOTES, allPlayers, gameNoticeText, layoutFor as gameLayoutFor, type GameLayout } from "@/lib/gameScreen";
 import RoomFrame from "@/components/rooms/shell/RoomFrame";
 import RoomTopBar from "@/components/rooms/shell/RoomTopBar";
@@ -95,6 +100,8 @@ export interface RoomShellProps {
   sprayFixture?: { flow: SprayFlowState; sub: SpraySub | null; tray: boolean; quiet: boolean };
   /** Dev fixture only: stand-in game tracks (moving canvases) instead of LiveKit's. */
   gameTracksFixture?: GameTracks;
+  /** Dev fixture only: open a game sheet on load. */
+  gameSheetFixture?: "play" | "teamspray";
 }
 
 function useViewportWidth() {
@@ -114,7 +121,7 @@ const byTestId = (id: string | null) => (id ? document.querySelector<HTMLElement
  * immersive). Crossing 1024 px or switching views only changes classes, so the picture, the camera choice, the composer
  * draft and the chat scroll survive. People are always addressed by RoomMemberView.userId, never by username.
  */
-export default function RoomShell({ id, token, room, host, fallbackCount, isHost, role, meId, state, sock, voice, myRoomId, nav, hostControls, onLeave, startView, startControlsOpen = false, detailsError = false, listenOnly = false, listenLine = false, spray = null, onSprayChanged, sprayFixture, gameTracksFixture }: RoomShellProps) {
+export default function RoomShell({ id, token, room, host, fallbackCount, isHost, role, meId, state, sock, voice, myRoomId, nav, hostControls, onLeave, startView, startControlsOpen = false, detailsError = false, listenOnly = false, listenLine = false, spray = null, onSprayChanged, sprayFixture, gameTracksFixture, gameSheetFixture }: RoomShellProps) {
   const { toast } = useToast();
 
   const [hidden, setHidden] = useState<Set<string>>(new Set()); // people the viewer muted for themselves
@@ -307,6 +314,17 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
     onShareEnded: () => { if (meId) sock.gameAction?.("remove", { targetId: meId }); },
   });
   const gameTracks = gameTracksFixture ?? realGameTracks;
+  const iAmMod = role === "host" || role === "cohost";
+  const myGameSide = game && meId ? sideOf(game, meId) : null;
+  const myAskSide = game && meId ? game.asks.find((a) => a.userId === meId)?.side ?? null : null;
+  const [playOpen, setPlayOpen] = useState(gameSheetFixture === "play");
+  const [teamSprayOpen, setTeamSprayOpen] = useState(gameSheetFixture === "teamspray");
+  const [teamSpraySide, setTeamSpraySide] = useState<Side>("A");
+  const onPlay = () => { if (!myGameSide && myAskSide) sock.gameAction?.("withdraw"); else setPlayOpen(true); };
+  // A host or co-host is put straight in (the server lets them accept themselves); everyone else asks and waits for an accept.
+  const joinGame = (side: Side) => { if (!meId) return; if (iAmMod) sock.gameAction?.("accept", { targetId: meId, side }); else sock.gameAction?.("ask", { side }); };
+  const stopPlaying = () => { gameTracks.stopShare(); if (meId) sock.gameAction?.("remove", { targetId: meId }); setPlayOpen(false); };
+  const sprayTeamOk = gameCaps.teamSpray && !!sprayBlock && sprayTo.length > 0;
   const sprayPlayer = (playerId: string) => {
     snd.unlock();
     sprayOpener.current = byTestId(`tile-spray-${playerId}`);
@@ -371,6 +389,8 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
           game={game} tracks={gameTracks} me={meId} layout={gameLayout} onLayout={setGameViewPref} nameOf={nameOf}
           serverOffsetMs={state.serverOffsetMs} audioOnly={voice.audioOnly}
           sprayable={sprayTo} onSpray={sprayPlayer}
+          onSprayTeam={sprayTeamOk ? (side) => { setTeamSpraySide(side); setTeamSprayOpen(true); } : undefined}
+          onPlay={sock.gameAction ? onPlay : undefined}
         />
       )}
       {state.liveVideo && !LINK_SCREENS && !(gameOn && game) && (
@@ -539,6 +559,11 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
           room={room} state={state} count={count} selfId={meId} sock={sock}
           holderAwayLeftMs={holderAwayLeftMs}
           hostExtras={isHost ? hostControls : undefined}
+          gameConsole={gameOn && game && sock.gameAction ? {
+            game, nameOf, onAction: (a, extra) => sock.gameAction?.(a, extra) ?? false, onSaveRoom: (patch) => sock.saveSettings(patch),
+            dropTimeoutMs: Number((state.room as { gameDropTimeoutMs?: number } | null)?.gameDropTimeoutMs ?? 120_000),
+            layout: gameLayout, onLayout: setGameViewPref, serverOffsetMs: state.serverOffsetMs, canSaveRoom: role === "host",
+          } : undefined}
           returnFocusTo={() => byTestId(returnFocusTestId(controlsFrom))}
         />
       )}
@@ -557,6 +582,27 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
           after(() => setSprayOpen(true));
         } : undefined}
       />
+      {gameOn && game && (
+        <GoLiveGameSheet
+          open={playOpen} onOpenChange={setPlayOpen} game={game} mySide={myGameSide} askedSide={myAskSide} isMod={iAmMod}
+          ingest={gameCaps.ingest}
+          onGetIngress={async () => { const r = await call<{ url: string; streamKey: string }>("POST", `/api/rooms/${encodeURIComponent(id)}/game/ingress`); return r.ok && r.body?.url && r.body?.streamKey ? { url: r.body.url, streamKey: r.body.streamKey } : null; }}
+          canCapture={typeof navigator !== "undefined" && typeof navigator.mediaDevices?.getDisplayMedia === "function"}
+          sharing={gameTracks.sharing} shareError={gameTracks.shareError}
+          initialProfile={pickGameProfile((navigator as unknown as { connection?: ConnInfo }).connection)}
+          nameOf={nameOf} onJoin={joinGame} onWithdraw={() => sock.gameAction?.("withdraw")}
+          onShare={(p) => gameTracks.startShare(p)} onStop={stopPlaying}
+          returnFocusTo={() => byTestId("game-play")}
+        />
+      )}
+      {gameOn && game && sprayTeamOk && (
+        <SprayTeamSheet
+          open={teamSprayOpen} onOpenChange={setTeamSprayOpen} game={game} side={teamSpraySide} onSide={setTeamSpraySide}
+          follow={gameTracks.following} nameOf={nameOf}
+          onPlayer={(pid) => { setTeamSprayOpen(false); after(() => sprayPlayer(pid)); }}
+          returnFocusTo={() => byTestId(`lane-spray-${teamSpraySide}`)}
+        />
+      )}
       {flowBlock && (
         <SprayFlow
           roomId={id} token={token} block={flowBlock} targets={sprayTo} hostId={room.hostId} nameOf={nameOf} sprays={state.sprays}

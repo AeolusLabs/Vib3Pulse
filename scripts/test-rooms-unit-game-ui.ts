@@ -1,7 +1,7 @@
 // Rooms unit checks for the game stage's pure helpers (no database, no browser):   npx tsx scripts/test-rooms-unit-game-ui.ts
 import assert from "node:assert/strict";
 import {
-  columnsFor, gameCaps, hostPick, isFollowing, layoutFor, spotlightFor, statusText, thumbsOf, videoFeeds,
+  columnsFor, gameCaps, hostPick, isFollowing, layoutFor, spotlightFor, statusText, teamShares, teamSprayMinKobo, teamSprayTiers, thumbsOf, videoFeeds,
 } from "../client/src/lib/gameScreen";
 import type { GameView } from "../shared/gameScreen";
 
@@ -79,6 +79,25 @@ test("caps: gaming on with no game object is all false except on", () => {
 test("caps: each capability is read on its own and only when exactly true", () => {
   assert.deepEqual(gameCaps({ features: { gaming: true }, game: { ingest: true, teamSpray: false, lanes: true } }), { on: true, ingest: true, teamSpray: false, lanes: true });
   assert.equal(gameCaps({ features: { gaming: true }, game: { ingest: "yes" as any } }).ingest, false);
+});
+
+// ---------------------------------------------------------------- team spray tray
+test("team spray: minimum is 500 NGN x players, in kobo", () => {
+  assert.equal(teamSprayMinKobo(2), 100_000);
+  assert.equal(teamSprayMinKobo(3), 150_000);
+  assert.equal(teamSprayMinKobo(0), 0);
+});
+test("team spray: only tiers at or above the minimum are offered", () => {
+  assert.deepEqual(teamSprayTiers(1), ["note", "bundle", "bag", "rain"]);
+  assert.deepEqual(teamSprayTiers(2), ["bundle", "bag", "rain"]);
+  assert.deepEqual(teamSprayTiers(3), ["bag", "rain"]); // the 1,000 tier is under 1,500
+  assert.deepEqual(teamSprayTiers(0), []);
+});
+test("team spray: shares sum to the tier, each is at least the player minimum", () => {
+  const shares = teamShares(g(), "A", "bag", "a2"); // 3 players, 10,000 NGN
+  assert.equal(Object.values(shares).reduce((a, b) => a + b, 0), 1_000_000);
+  assert.ok(Object.values(shares).every((k) => k >= 50_000));
+  assert.ok(shares.a2 >= shares.a1); // the remainder goes to the featured player
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

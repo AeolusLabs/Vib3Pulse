@@ -1,6 +1,7 @@
 // Gamers live, client side: pure helpers over the server's GameView (no React, no sockets). The server decides who plays,
 // who is featured and who is away; this only reads that and works out what a viewer sees. Spec: docs/superpowers/specs/2026-10-21-rooms-gaming-design.md.
-import { SIDES, sideOf, type GameView, type Side } from "@shared/gameScreen";
+import { SIDES, sideOf, splitShares, type GameView, type Side } from "@shared/gameScreen";
+import { MIN_CHARGE_KOBO, SPRAY_CATALOGUE, SPRAY_TIERS, type SprayTier } from "@shared/money";
 
 /** What a viewer's own follow picks look like: per team, a player the viewer chose to watch (changes only their own device). */
 export type Follow = Partial<Record<Side, string>>;
@@ -141,4 +142,31 @@ export const NO_GAME_CAPS: GameCaps = { on: false, ingest: false, teamSpray: fal
 export function gameCaps(cfg: { features?: { gaming?: boolean }; game?: { ingest?: boolean; teamSpray?: boolean; lanes?: boolean } } | null | undefined): GameCaps {
   if (cfg?.features?.gaming !== true) return NO_GAME_CAPS;
   return { on: true, ingest: cfg.game?.ingest === true, teamSpray: cfg.game?.teamSpray === true, lanes: cfg.game?.lanes === true };
+}
+
+/** The formats a host can pick: players per side. */
+export const GAME_FORMATS: readonly (1 | 2 | 3 | 4)[] = [1, 2, 3, 4];
+export const DROP_TIMEOUT_LABEL: Record<number, string> = { 30_000: "30 seconds", 120_000: "2 minutes", 0: "Hold the slot" };
+
+/** Words for the create step, the host console and the go-live sheet. */
+export const GAME_COPY = {
+  formatLegend: "Game format",
+  formatOff: "Not a game",
+  formatHelp: "Players put their own screen in the room. Viewers see up to four feeds at a time and can spray players.",
+  dropLegend: "If a player drops",
+  dropHelp: "Their place stays with a countdown. When it runs out, the room says they dropped out.",
+} as const;
+
+// ---------------------------------------------------------------- team spray (owner ruling 2026-10-22)
+
+/** A team spray must give every player at least the 500 NGN minimum: 500 x the players on the team, in kobo. 0 for an empty team. */
+export const teamSprayMinKobo = (players: number): number => MIN_CHARGE_KOBO * Math.max(0, players);
+
+/** Only tiers at or above the team minimum are offered (a team of 3 needs 1,500: the 1,000 tier is not there). */
+export const teamSprayTiers = (players: number): SprayTier[] =>
+  players <= 0 ? [] : SPRAY_TIERS.filter((t) => SPRAY_CATALOGUE[t].kobo >= teamSprayMinKobo(players));
+
+/** What each player would get from this tier: an equal split, the few kobo left over to the featured player. */
+export function teamShares(game: GameView, side: Side, tier: SprayTier, featured: string | null): Record<string, number> {
+  return splitShares(SPRAY_CATALOGUE[tier].kobo, game.teams[side], featured);
 }

@@ -34,7 +34,7 @@ export async function call<T>(method: string, url: string, data?: unknown): Prom
 export interface CreatedRoom { room: { id: string }; inviteLink?: string }
 
 export type CreateOutcome =
-  | { ok: true; roomId: string; inviteLink: string | null; live: boolean; startFailure: ApiFailure | null; voiceFailed: boolean; videoFailed: boolean }
+  | { ok: true; roomId: string; inviteLink: string | null; live: boolean; startFailure: ApiFailure | null; voiceFailed: boolean; videoFailed: boolean; /** Gamers live: the game format could not be set (the room is live; the host can set it in Controls). */ gameFailed?: boolean }
   | ({ ok: false } & ApiFailure);
 
 /**
@@ -59,7 +59,12 @@ export async function createRoom(s: WizardState, extras: WizardExtras, link: Roo
     if (v.ok && s.liveVideo) videoFailed = !(await call<unknown>("PUT", `/api/rooms/${enc}/live-video`, { enabled: true })).ok;
     else if (!v.ok && s.liveVideo) videoFailed = true;
   }
-  return { ...base, live: true, startFailure: null, voiceFailed, videoFailed };
+  // Gamers live: the format needs voice and live video already on, so it is set last (the create body can't carry it).
+  let gameFailed = false;
+  if (s.gameFormat && s.voice && s.liveVideo && !voiceFailed && !videoFailed) {
+    gameFailed = !(await call<unknown>("PATCH", `/api/rooms/${enc}`, { gameFormat: s.gameFormat, gameDropTimeoutMs: s.gameDropTimeoutMs ?? 120_000 })).ok;
+  }
+  return { ...base, live: true, startFailure: null, voiceFailed, videoFailed, ...(s.gameFormat ? { gameFailed } : {}) };
 }
 
 /** Used only while GET /api/rooms/config has not said how old the account is: assume old enough, the server decides. */
@@ -86,5 +91,7 @@ export function useWizardHost(open: boolean, accountTooNew: boolean) {
     ? { age: me.data.age ?? null, accountAgeDays: accountTooNew ? 0 : knownDays, idVerifiedAdult: !!verification.data?.verified && verification.data.band === "adult" }
     : null;
   const flags = { paidRooms: config.data?.features.paidRooms === true, spray: config.data?.features.spray === true };
-  return { host, flags, minAccountAgeDays, loading: me.isLoading, failed: me.isError };
+  // Gamers live: the game-format choice is offered only while the server says the flag is on (the key is absent when off).
+  const gaming = config.data?.features.gaming === true;
+  return { host, flags, gaming, minAccountAgeDays, loading: me.isLoading, failed: me.isError };
 }

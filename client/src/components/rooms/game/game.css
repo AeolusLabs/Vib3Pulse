@@ -18,6 +18,7 @@
 /* ---------------------------------------------------------------- view switch */
 .gs-views { display: flex; flex-wrap: wrap; gap: 6px; }
 .gs-view { min-height: 44px; padding: 0 14px; border-radius: 999px; border: 1px solid hsl(var(--border)); background: transparent; color: hsl(var(--muted-foreground)); font-size: 14px; font-weight: 500; }
+.gs-view:focus-visible, .gs-chip:focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: 2px; }
 .gs-view[aria-pressed="true"] { background: hsl(var(--primary)); border-color: hsl(var(--primary)); color: hsl(var(--primary-foreground)); }
 
 /* ---------------------------------------------------------------- lanes and tile grids */

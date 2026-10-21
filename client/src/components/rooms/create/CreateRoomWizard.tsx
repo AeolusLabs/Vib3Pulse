@@ -53,7 +53,7 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const [accountTooNew, setAccountTooNew] = useState(false);
-  const { host, flags, minAccountAgeDays, failed: hostFailed } = useWizardHost(open, accountTooNew);
+  const { host, flags, gaming, minAccountAgeDays, failed: hostFailed } = useWizardHost(open, accountTooNew);
   // Public is closed when the account is younger than the server's minimum (known from the config, or from a refusal).
   const publicBlocked = accountTooNew || (!!host && accountTooNewFor(host, minAccountAgeDays));
   const { data: myEvents = [] } = useQuery<{ id: string; title: string }[]>({ queryKey: ["/api/events/my-events"], enabled: open });
@@ -330,6 +330,7 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
                   screenUrl={screenUrl} setScreenUrl={setScreenUrl} moneyPlaceholder={moneyPlaceholder && !priceAvailable}
                   paid={priceAvailable ? { on: ticket.on, set: (on) => setTicket({ on }), needsId: !host?.idVerifiedAdult } : null}
                   videoBlocked={videoOverTickets ? PRICE_COPY.videoNeedsFewer : null}
+                  gaming={gaming}
                 />
               ) : current === "money" && priceStepOn ? (
                 <StepPrice draft={ticket} set={setTicket} error={error} liveVideo={state.voice && state.liveVideo} />
