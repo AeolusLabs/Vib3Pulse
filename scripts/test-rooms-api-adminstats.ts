@@ -14,6 +14,7 @@ delete process.env.ADMIN_MFA_REQUIRED;
 await import("../server/storage");
 const { registerRoomsAdminRoutes } = await import("../server/rooms/adminRoutes");
 const controls = await import("../server/rooms/roomControls");
+const stats = await import("../server/rooms/adminStats");
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const q = async (sql: string, p: any[] = []) => (await pool.query(sql, p)).rows;
@@ -175,6 +176,15 @@ try {
   const tooLong = await get(`/api/admin/rooms/sprays?from=2020-01-01&to=2021-06-01`, FIN);
   check("sprays: a range over 366 days is 400 BAD_RANGE", tooLong.status === 400 && tooLong.json?.code === "BAD_RANGE", JSON.stringify(tooLong.json));
   check("sprays: a junk date is 400 BAD_RANGE", (await get(`/api/admin/rooms/sprays?from=nope`, FIN)).json?.code === "BAD_RANGE");
+
+  // ---- many dashboards at once must never starve the database pool (one Money tab load used to ask for about 30 connections)
+  stats.resetAdminQueryPeak();
+  const burst = await Promise.all(Array.from({ length: 4 }, () => [
+    get(`/api/admin/rooms/sprays?${range}`, FIN), get(`/api/admin/rooms/overview?${range}`, FIN), get(`/api/admin/rooms/tickets?${range}`, FIN),
+  ]).flat());
+  check("a burst of 12 simultaneous dashboard requests all answer 200", burst.length === 12 && burst.every((r) => r.status === 200), JSON.stringify(burst.map((r) => r.status)));
+  const peak = stats.adminQueryPeak();
+  check("the statistics queries never held more than 4 database connections at once, whatever the burst", peak > 0 && peak <= 4, String(peak));
 
   // ---- overview
   const ov = await get(`/api/admin/rooms/overview?${range}`, FIN);

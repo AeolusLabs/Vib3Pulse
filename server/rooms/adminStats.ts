@@ -4,6 +4,33 @@
 import { pool } from "../storage";
 import { roomHub } from "./RoomHub";
 
+// ---------------------------------------------------------------- a cap on the connections these reports may hold
+// One Money tab load runs about 30 queries at once (each report fans out with Promise.all and the page asks for four reports).
+// The shared pool has 20 connections, so a few admins opening the dashboard could queue everyone else's requests past the 5 s
+// connection timeout. Every statistics query goes through this gate instead: at most MAX_ADMIN_QUERIES at once across ALL admin
+// requests, the rest wait here without holding a connection. Reports are not latency critical; the rest of the app is.
+const MAX_ADMIN_QUERIES = 4;
+let activeQueries = 0;
+let peakQueries = 0;
+const waitingQueries: (() => void)[] = [];
+
+async function gated<T>(fn: () => Promise<T>): Promise<T> {
+  if (activeQueries >= MAX_ADMIN_QUERIES) await new Promise<void>((resolve) => waitingQueries.push(resolve)); // the slot is handed over, not re-counted
+  else activeQueries++;
+  peakQueries = Math.max(peakQueries, activeQueries);
+  try {
+    return await fn();
+  } finally {
+    const next = waitingQueries.shift();
+    if (next) next(); else activeQueries--;
+  }
+}
+
+const adminQuery = (text: string, params?: unknown[]) => gated(() => pool.query(text, params as any[] | undefined));
+/** For tests: the most queries the gate ever ran at once since the last reset. */
+export const adminQueryPeak = () => peakQueries;
+export const resetAdminQueryPeak = () => { peakQueries = activeQueries; };
+
 export type Range = { from: Date; to: Date };
 export const MAX_RANGE_DAYS = 366;
 const DAY_MS = 86_400_000;
@@ -31,7 +58,7 @@ export interface LiveRoomRow {
 }
 
 export async function listLiveRooms(): Promise<LiveRoomRow[]> {
-  const rows = (await pool.query(
+  const rows = (await adminQuery(
     `select r.id, r.title, r.host_id, u.username, r.age_limit, r.started_at, (r.ticket_price_kobo is not null) as ticketed,
             exists (select 1 from room_host_freezes f where f.host_id = r.host_id) as frozen
        from rooms r join users u on u.id = r.host_id
@@ -57,13 +84,13 @@ export const previousRange = (r: Range): Range => ({ from: new Date(r.from.getTi
 async function overviewCounts(range: Range) {
   const p = [range.from, range.to];
   const [rooms, tickets] = await Promise.all([
-    pool.query(
+    adminQuery(
       `select (count(*) filter (where created_at >= $1 and created_at < $2))::int as created,
               (count(*) filter (where started_at >= $1 and started_at < $2))::int as started,
               (count(distinct host_id) filter (where started_at >= $1 and started_at < $2))::int as hosts,
               coalesce(max(peak_members) filter (where started_at >= $1 and started_at < $2), 0)::int as peak
          from rooms`, p),
-    pool.query(`select count(*)::int as n from room_tickets where status = 'paid' and created_at >= $1 and created_at < $2`, p),
+    adminQuery(`select count(*)::int as n from room_tickets where status = 'paid' and created_at >= $1 and created_at < $2`, p),
   ]);
   const r = rooms.rows[0] as { created: number; started: number; hosts: number; peak: number };
   return { roomsCreated: r.created, roomsStarted: r.started, uniqueHosts: r.hosts, peakConcurrent: r.peak, ticketsSold: (tickets.rows[0] as { n: number }).n };
@@ -74,10 +101,10 @@ export async function roomsOverview(range: Range): Promise<Overview> {
   const [now, before, started, sold] = await Promise.all([
     overviewCounts(range),
     overviewCounts(previousRange(range)),
-    pool.query(
+    adminQuery(
       `select to_char(started_at at time zone 'UTC', 'YYYY-MM-DD') as d, count(*)::int as c, coalesce(max(peak_members), 0)::int as peak
          from rooms where started_at >= $1 and started_at < $2 group by 1`, p),
-    pool.query(
+    adminQuery(
       `select to_char(created_at at time zone 'UTC', 'YYYY-MM-DD') as d, count(*)::int as c
          from room_tickets where status = 'paid' and created_at >= $1 and created_at < $2 group by 1`, p),
   ]);
@@ -111,26 +138,26 @@ export async function sprayBreakdown(range: Range): Promise<SprayBreakdown> {
   const prev = previousRange(range);
   const pp = [prev.from, prev.to];
   const [tot, refunded, tier, day, rooms, hosts, prevTot, prevRefunded] = await Promise.all([
-    pool.query(
+    adminQuery(
       `select count(*)::int as c, count(distinct payer_id)::int as payers, coalesce(sum(amount_kobo),0)::bigint as gross, coalesce(sum(vat_kobo),0)::bigint as vat, coalesce(sum(fee_kobo),0)::bigint as fee,
               coalesce(sum(reserve_kobo),0)::bigint as reserve, coalesce(sum(platform_kobo),0)::bigint as platform, coalesce(sum(host_kobo),0)::bigint as host,
               coalesce(sum(guest_kobo),0)::bigint as guest
          from spray_payments where ${sold}`, p),
-    pool.query(`select coalesce(sum(amount_kobo),0)::bigint as k from spray_payments where status = 'reversed' and reversed_at >= $1 and reversed_at < $2`, p),
-    pool.query(`select tier, count(*)::int as c, sum(amount_kobo)::bigint as gross from spray_payments where ${sold} group by tier order by gross desc`, p),
-    pool.query(
+    adminQuery(`select coalesce(sum(amount_kobo),0)::bigint as k from spray_payments where status = 'reversed' and reversed_at >= $1 and reversed_at < $2`, p),
+    adminQuery(`select tier, count(*)::int as c, sum(amount_kobo)::bigint as gross from spray_payments where ${sold} group by tier order by gross desc`, p),
+    adminQuery(
       `select to_char(delivered_at at time zone 'UTC', 'YYYY-MM-DD') as d, count(*)::int as c, sum(amount_kobo)::bigint as gross
          from spray_payments where ${sold} group by 1 order by 1`, p),
-    pool.query(
+    adminQuery(
       `select s.room_id, r.title, count(*)::int as c, sum(s.amount_kobo)::bigint as gross
          from spray_payments s join rooms r on r.id = s.room_id
         where s.status = 'delivered' and s.delivered_at >= $1 and s.delivered_at < $2 group by s.room_id, r.title order by gross desc limit 10`, p),
-    pool.query(
+    adminQuery(
       `select s.host_id, u.username, count(*)::int as c, sum(s.amount_kobo)::bigint as gross
          from spray_payments s join users u on u.id = s.host_id
         where s.status = 'delivered' and s.delivered_at >= $1 and s.delivered_at < $2 group by s.host_id, u.username order by gross desc limit 10`, p),
-    pool.query(`select count(*)::int as c, count(distinct payer_id)::int as payers, coalesce(sum(amount_kobo),0)::bigint as gross from spray_payments where ${sold}`, pp),
-    pool.query(`select coalesce(sum(amount_kobo),0)::bigint as k from spray_payments where status = 'reversed' and reversed_at >= $1 and reversed_at < $2`, pp),
+    adminQuery(`select count(*)::int as c, count(distinct payer_id)::int as payers, coalesce(sum(amount_kobo),0)::bigint as gross from spray_payments where ${sold}`, pp),
+    adminQuery(`select coalesce(sum(amount_kobo),0)::bigint as k from spray_payments where status = 'reversed' and reversed_at >= $1 and reversed_at < $2`, pp),
   ]);
   const pt = prevTot.rows[0] as { c: number; payers: number; gross: unknown };
   const t = tot.rows[0] as Record<string, unknown>;
@@ -172,27 +199,27 @@ export async function ticketSalesBreakdown(range: Range): Promise<TicketSales> {
   const refundedWhere = `status = 'refunded' and ${real} and refunded_at >= $1 and refunded_at < $2`;
   const n = (v: unknown) => Number(v ?? 0);
   const [tot, refunded, day, rooms, hosts, prevTot, prevRefunded] = await Promise.all([
-    pool.query(
+    adminQuery(
       `select count(*)::int as c, count(distinct user_id)::int as buyers, coalesce(sum(amount_kobo),0)::bigint as gross, coalesce(sum(vat_kobo),0)::bigint as vat,
               coalesce(sum(fee_kobo),0)::bigint as fee, coalesce(sum(reserve_kobo),0)::bigint as reserve, coalesce(sum(platform_kobo),0)::bigint as platform,
               coalesce(sum(host_kobo),0)::bigint as host
          from room_tickets where ${sold}`, p),
-    pool.query(`select count(*)::int as c, coalesce(sum(amount_kobo),0)::bigint as k from room_tickets where ${refundedWhere}`, p),
-    pool.query(
+    adminQuery(`select count(*)::int as c, coalesce(sum(amount_kobo),0)::bigint as k from room_tickets where ${refundedWhere}`, p),
+    adminQuery(
       `select to_char(created_at at time zone 'UTC', 'YYYY-MM-DD') as d, count(*)::int as c, sum(amount_kobo)::bigint as gross
          from room_tickets where ${sold} group by 1 order by 1`, p),
-    pool.query(
+    adminQuery(
       `select t.room_id, r.title, count(*)::int as c, sum(t.amount_kobo)::bigint as gross
          from room_tickets t join rooms r on r.id = t.room_id
         where t.status = 'paid' and coalesce(left(t.refund_reason, 5), '') <> 'auto_' and t.created_at >= $1 and t.created_at < $2
         group by t.room_id, r.title order by gross desc limit 10`, p),
-    pool.query(
+    adminQuery(
       `select r.host_id, u.username, count(*)::int as c, sum(t.amount_kobo)::bigint as gross
          from room_tickets t join rooms r on r.id = t.room_id join users u on u.id = r.host_id
         where t.status = 'paid' and coalesce(left(t.refund_reason, 5), '') <> 'auto_' and t.created_at >= $1 and t.created_at < $2
         group by r.host_id, u.username order by gross desc limit 10`, p),
-    pool.query(`select count(*)::int as c, count(distinct user_id)::int as buyers, coalesce(sum(amount_kobo),0)::bigint as gross from room_tickets where ${sold}`, pp),
-    pool.query(`select coalesce(sum(amount_kobo),0)::bigint as k from room_tickets where ${refundedWhere}`, pp),
+    adminQuery(`select count(*)::int as c, count(distinct user_id)::int as buyers, coalesce(sum(amount_kobo),0)::bigint as gross from room_tickets where ${sold}`, pp),
+    adminQuery(`select coalesce(sum(amount_kobo),0)::bigint as k from room_tickets where ${refundedWhere}`, pp),
   ]);
   const t0 = tot.rows[0] as Record<string, unknown>;
   const pt = prevTot.rows[0] as { c: number; buyers: number; gross: unknown };
