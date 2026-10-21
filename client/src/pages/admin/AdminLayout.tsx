@@ -63,6 +63,12 @@ const navItems: NavItem[] = [
     roles: ["super_admin", "admin", "content_moderator", "event_reviewer", "analytics_viewer"],
   },
   {
+    label: "Rooms",
+    path: "/admin/rooms",
+    icon: <UsersIcon className="w-5 h-5" />,
+    roles: ["super_admin", "content_moderator", "finance_manager"],
+  },
+  {
     label: "Reveal access",
     path: "/admin/reveal",
     icon: <LockIcon className="w-5 h-5" />,

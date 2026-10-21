@@ -72,6 +72,7 @@ import InvitePage from "@/pages/InvitePage";
 import AdminModeration from "@/pages/admin/AdminModeration";
 import AdminHosts from "@/pages/admin/AdminHosts";
 import AdminModerationSettings from "@/pages/admin/AdminModerationSettings";
+import AdminRooms from "@/pages/admin/AdminRooms";
 import AdminRevealAccess from "@/pages/admin/AdminRevealAccess";
 import AdminSocialMetrics from "@/pages/admin/AdminSocialMetrics";
 import SocialEventsPage from "@/pages/SocialEventsPage";
@@ -362,6 +363,7 @@ function Router() {
       <Route path="/admin/social-events" component={AdminSocialMetrics} />
       <Route path="/admin/reveal" component={AdminRevealAccess} />
       <Route path="/admin/moderation-settings" component={AdminModerationSettings} />
+      <Route path="/admin/rooms" component={AdminRooms} />
 
       <Route component={NotFound} />
     </Switch>
