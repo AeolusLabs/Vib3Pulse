@@ -4,7 +4,7 @@ import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "../storage";
 import { roomAdultInvites, rooms, users, type Room, type User } from "@shared/schema";
 import { canAdultEnterMinorsRoom, type Check } from "@shared/roomRules";
-import { MINORS_ROOM_WARNING, type MinorsRoomCode } from "@shared/rooms";
+import { MINORS_ROOM_WARNING, minorsWarningFor, type MinorsRoomCode } from "@shared/rooms";
 
 export type InviteState = { invited: boolean; acknowledged: boolean };
 export const NO_INVITE: InviteState = { invited: false, acknowledged: false };
@@ -89,4 +89,8 @@ export function minorsGate(room: Pick<Room, "minorsRoom" | "hostId">, userId: st
 }
 
 /** The body every minors' room denial carries: the code and the one warning text, nothing about the room. */
-export const minorsDenialBody = (code: MinorsRoomCode) => ({ code, message: MINORS_ROOM_WARNING, warning: MINORS_ROOM_WARNING, canJoin: { ok: false, code } });
+/** `room` (gaming): a teen lane carries its own wording (minorsWarningFor); every other room the one MINORS_ROOM_WARNING. */
+export const minorsDenialBody = (code: MinorsRoomCode, room?: { ageLane?: string | null } | null) => {
+  const warning = room ? minorsWarningFor(room) : MINORS_ROOM_WARNING;
+  return { code, message: warning, warning, canJoin: { ok: false, code } };
+};

@@ -177,6 +177,8 @@ export async function listRooms(opts: ListRoomsOpts): Promise<Room[]> {
     inArray(rooms.status, statuses),
     or(ne(rooms.visibility, "invite"), eq(rooms.hostId, viewerId)),
     or(ne(rooms.status, "scheduled"), isNull(rooms.scheduledFor), gt(rooms.scheduledFor, new Date(Date.now() - STALE_MS))),
+    // Gaming: an age lane is never listed; its game room is (once), and routes each person to their own lane.
+    isNull(rooms.parentRoomId),
   ];
   if (blocked.size) conds.push(notInArray(rooms.hostId, Array.from(blocked)));
   if (scope === "friends") {
