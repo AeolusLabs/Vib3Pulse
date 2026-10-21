@@ -86,6 +86,7 @@ try {
   const s1 = await spray(live, H, P1, "note", 50000, "delivered", 0);
   const s2 = await spray(live, H, P2, "bundle", 100000, "delivered", 0);
   const s3 = await spray(ended, H, P1, "note", 50000, "delivered", 2);
+  await spray(live, H, P1, "note", 50000, "delivered", 35); // previous period (before day(30))
   await spray(live, H, P2, "note", 70000, "reversed", 0);
   await spray(live, H, P1, "note", 50000, "pending", 0);
 
@@ -106,6 +107,10 @@ try {
   check("sprays: totals count only delivered rows", sp.status === 200 && d("count") === 3 && d("grossKobo") === 200000, JSON.stringify(sp.json));
   check("sprays: vat, fee, reserve, platform and host sums come from the stored rows", d("vatKobo") === sum("vat") && d("feeKobo") === sum("fee") && d("reserveKobo") === sum("reserve") && d("platformKobo") === sum("platform") && d("hostKobo") === sum("host"), JSON.stringify(t));
   check("sprays: refundedKobo is the reversed amount", d("refundedKobo") === 70000, JSON.stringify(t));
+  check("sprays: guestKobo is a number (stage guests' share), part of the split", typeof t?.guestKobo === "number" && d("guestKobo") === 0, JSON.stringify(t));
+  check("sprays: uniquePayers counts distinct paying people in the range", sp.json?.uniquePayers - before.uniquePayers === 2, JSON.stringify([before.uniquePayers, sp.json?.uniquePayers]));
+  const pv = sp.json?.previous, pvb = before.previous;
+  check("sprays: previous is the same-length window just before the range (count, gross, payers, refunded)", pv && pv.count - pvb.count === 1 && pv.grossKobo - pvb.grossKobo === 50000 && pv.uniquePayers - pvb.uniquePayers === 1 && typeof pv.refundedKobo === "number", JSON.stringify([pvb, pv]));
   const tierOf = (j: any, k: string) => (j.byTier ?? []).find((x: any) => x.tier === k) ?? { count: 0, grossKobo: 0 };
   check("sprays: byTier splits note and bundle and sums to the total", tierOf(sp.json, "note").count - tierOf(before, "note").count === 2 && tierOf(sp.json, "note").grossKobo - tierOf(before, "note").grossKobo === 100000
     && tierOf(sp.json, "bundle").count - tierOf(before, "bundle").count === 1 && tierOf(sp.json, "bundle").grossKobo - tierOf(before, "bundle").grossKobo === 100000, JSON.stringify(sp.json?.byTier));
@@ -129,6 +134,9 @@ try {
   const ov = await get(`/api/admin/rooms/overview?${range}`, FIN);
   check("overview: rooms created, started, unique hosts, peak and tickets sold", ov.status === 200 && ov.json.roomsCreated - ovBefore.roomsCreated === 4 && ov.json.roomsStarted - ovBefore.roomsStarted === 3 && ov.json.uniqueHosts - ovBefore.uniqueHosts === 2 && ov.json.peakConcurrent >= 12 && typeof ov.json.ticketsSold === "number", JSON.stringify([ovBefore, ov.json]));
   const ovEmpty = await get(`/api/admin/rooms/overview?from=2020-01-01&to=2020-01-31`, FIN);
+  const odayOf = (j: any, k: string) => (j.byDay ?? []).find((x: any) => x.day === k) ?? { roomsStarted: 0, peakConcurrent: 0, ticketsSold: 0 };
+  check("overview: byDay has rooms started per day and the day's peak attendance (UTC)", odayOf(ov.json, day(0)).roomsStarted - odayOf(ovBefore, day(0)).roomsStarted === 2 && odayOf(ov.json, day(2)).roomsStarted - odayOf(ovBefore, day(2)).roomsStarted === 1 && odayOf(ov.json, day(2)).peakConcurrent >= 12, JSON.stringify(ov.json.byDay));
+  check("overview: previous has roomsStarted, uniqueHosts and ticketsSold for the window before", ov.json.previous && ["roomsStarted", "uniqueHosts", "ticketsSold"].every((k) => typeof ov.json.previous[k] === "number"), JSON.stringify(ov.json.previous));
   check("overview: an empty range is zeros (peak 0), never null or an error", ovEmpty.status === 200 && ovEmpty.json.roomsCreated === 0 && ovEmpty.json.peakConcurrent === 0 && ovEmpty.json.uniqueHosts === 0, JSON.stringify(ovEmpty.json));
   check("overview: a moderator is 403", (await get(`/api/admin/rooms/overview?${range}`, MOD)).status === 403);
 } finally {

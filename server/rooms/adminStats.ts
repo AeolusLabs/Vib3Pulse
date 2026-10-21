@@ -43,9 +43,18 @@ export async function listLiveRooms(): Promise<LiveRoomRow[]> {
   }));
 }
 
-export interface Overview { roomsCreated: number; roomsStarted: number; uniqueHosts: number; peakConcurrent: number; ticketsSold: number }
+export interface Overview {
+  roomsCreated: number; roomsStarted: number; uniqueHosts: number; peakConcurrent: number; ticketsSold: number;
+  /** Days with activity only (UTC); the client fills the gaps with zeros. A day's peak is the busiest room that STARTED that day. */
+  byDay: { day: string; roomsStarted: number; peakConcurrent: number; ticketsSold: number }[];
+  /** The window of the same length just before the range, for "vs previous period" deltas. */
+  previous: { roomsStarted: number; uniqueHosts: number; ticketsSold: number };
+}
 
-export async function roomsOverview(range: Range): Promise<Overview> {
+/** The same-length window immediately before a range. */
+export const previousRange = (r: Range): Range => ({ from: new Date(r.from.getTime() - (r.to.getTime() - r.from.getTime())), to: r.from });
+
+async function overviewCounts(range: Range) {
   const p = [range.from, range.to];
   const [rooms, tickets] = await Promise.all([
     pool.query(
@@ -60,8 +69,35 @@ export async function roomsOverview(range: Range): Promise<Overview> {
   return { roomsCreated: r.created, roomsStarted: r.started, uniqueHosts: r.hosts, peakConcurrent: r.peak, ticketsSold: (tickets.rows[0] as { n: number }).n };
 }
 
+export async function roomsOverview(range: Range): Promise<Overview> {
+  const p = [range.from, range.to];
+  const [now, before, started, sold] = await Promise.all([
+    overviewCounts(range),
+    overviewCounts(previousRange(range)),
+    pool.query(
+      `select to_char(started_at at time zone 'UTC', 'YYYY-MM-DD') as d, count(*)::int as c, coalesce(max(peak_members), 0)::int as peak
+         from rooms where started_at >= $1 and started_at < $2 group by 1`, p),
+    pool.query(
+      `select to_char(created_at at time zone 'UTC', 'YYYY-MM-DD') as d, count(*)::int as c
+         from room_tickets where status = 'paid' and created_at >= $1 and created_at < $2 group by 1`, p),
+  ]);
+  const days = new Map<string, { day: string; roomsStarted: number; peakConcurrent: number; ticketsSold: number }>();
+  const slot = (d: string) => days.get(d) ?? (days.set(d, { day: d, roomsStarted: 0, peakConcurrent: 0, ticketsSold: 0 }), days.get(d)!);
+  for (const r of started.rows as { d: string; c: number; peak: number }[]) { const s = slot(r.d); s.roomsStarted = r.c; s.peakConcurrent = r.peak; }
+  for (const r of sold.rows as { d: string; c: number }[]) slot(r.d).ticketsSold = r.c;
+  return {
+    ...now,
+    byDay: Array.from(days.values()).sort((a, b) => a.day.localeCompare(b.day)),
+    previous: { roomsStarted: before.roomsStarted, uniqueHosts: before.uniqueHosts, ticketsSold: before.ticketsSold },
+  };
+}
+
 export interface SprayBreakdown {
-  totals: { count: number; grossKobo: number; vatKobo: number; feeKobo: number; reserveKobo: number; platformKobo: number; hostKobo: number; refundedKobo: number };
+  totals: { count: number; grossKobo: number; vatKobo: number; feeKobo: number; reserveKobo: number; platformKobo: number; hostKobo: number; guestKobo: number; refundedKobo: number };
+  /** Distinct paying people with a delivered spray in the range. */
+  uniquePayers: number;
+  /** The same-length window just before the range, for "vs previous period" deltas. */
+  previous: { count: number; grossKobo: number; uniquePayers: number; refundedKobo: number };
   byTier: { tier: string; count: number; grossKobo: number }[];
   byDay: { day: string; count: number; grossKobo: number }[];
   topRooms: { roomId: string; title: string; count: number; grossKobo: number }[];
@@ -72,10 +108,13 @@ export async function sprayBreakdown(range: Range): Promise<SprayBreakdown> {
   const p = [range.from, range.to];
   const sold = `status = 'delivered' and delivered_at >= $1 and delivered_at < $2`;
   const n = (v: unknown) => Number(v ?? 0);
-  const [tot, refunded, tier, day, rooms, hosts] = await Promise.all([
+  const prev = previousRange(range);
+  const pp = [prev.from, prev.to];
+  const [tot, refunded, tier, day, rooms, hosts, prevTot, prevRefunded] = await Promise.all([
     pool.query(
-      `select count(*)::int as c, coalesce(sum(amount_kobo),0)::bigint as gross, coalesce(sum(vat_kobo),0)::bigint as vat, coalesce(sum(fee_kobo),0)::bigint as fee,
-              coalesce(sum(reserve_kobo),0)::bigint as reserve, coalesce(sum(platform_kobo),0)::bigint as platform, coalesce(sum(host_kobo),0)::bigint as host
+      `select count(*)::int as c, count(distinct payer_id)::int as payers, coalesce(sum(amount_kobo),0)::bigint as gross, coalesce(sum(vat_kobo),0)::bigint as vat, coalesce(sum(fee_kobo),0)::bigint as fee,
+              coalesce(sum(reserve_kobo),0)::bigint as reserve, coalesce(sum(platform_kobo),0)::bigint as platform, coalesce(sum(host_kobo),0)::bigint as host,
+              coalesce(sum(guest_kobo),0)::bigint as guest
          from spray_payments where ${sold}`, p),
     pool.query(`select coalesce(sum(amount_kobo),0)::bigint as k from spray_payments where status = 'reversed' and reversed_at >= $1 and reversed_at < $2`, p),
     pool.query(`select tier, count(*)::int as c, sum(amount_kobo)::bigint as gross from spray_payments where ${sold} group by tier order by gross desc`, p),
@@ -90,13 +129,18 @@ export async function sprayBreakdown(range: Range): Promise<SprayBreakdown> {
       `select s.host_id, u.username, count(*)::int as c, sum(s.amount_kobo)::bigint as gross
          from spray_payments s join users u on u.id = s.host_id
         where s.status = 'delivered' and s.delivered_at >= $1 and s.delivered_at < $2 group by s.host_id, u.username order by gross desc limit 10`, p),
+    pool.query(`select count(*)::int as c, count(distinct payer_id)::int as payers, coalesce(sum(amount_kobo),0)::bigint as gross from spray_payments where ${sold}`, pp),
+    pool.query(`select coalesce(sum(amount_kobo),0)::bigint as k from spray_payments where status = 'reversed' and reversed_at >= $1 and reversed_at < $2`, pp),
   ]);
+  const pt = prevTot.rows[0] as { c: number; payers: number; gross: unknown };
   const t = tot.rows[0] as Record<string, unknown>;
   return {
     totals: {
-      count: n(t.c), grossKobo: n(t.gross), vatKobo: n(t.vat), feeKobo: n(t.fee), reserveKobo: n(t.reserve), platformKobo: n(t.platform), hostKobo: n(t.host),
+      count: n(t.c), grossKobo: n(t.gross), vatKobo: n(t.vat), feeKobo: n(t.fee), reserveKobo: n(t.reserve), platformKobo: n(t.platform), hostKobo: n(t.host), guestKobo: n(t.guest),
       refundedKobo: n((refunded.rows[0] as { k: unknown }).k),
     },
+    uniquePayers: n(t.payers),
+    previous: { count: pt.c, grossKobo: n(pt.gross), uniquePayers: pt.payers, refundedKobo: n((prevRefunded.rows[0] as { k: unknown }).k) },
     byTier: (tier.rows as any[]).map((r) => ({ tier: r.tier, count: r.c, grossKobo: n(r.gross) })),
     byDay: (day.rows as any[]).map((r) => ({ day: r.d, count: r.c, grossKobo: n(r.gross) })),
     topRooms: (rooms.rows as any[]).map((r) => ({ roomId: r.room_id, title: r.title, count: r.c, grossKobo: n(r.gross) })),
