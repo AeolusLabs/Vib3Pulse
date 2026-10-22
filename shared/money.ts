@@ -140,3 +140,97 @@ export function formatV3c(n: number): string {
   const digits = String(Math.abs(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   return `${n < 0 ? "-" : ""}${digits} ${UNIT_LABEL}`;
 }
+
+// ---------------------------------------------------------------- gaming: team spray money (owner rules 2026-10-22, backend-E-brief)
+/**
+ * Splits `total` across `weights` in proportion, in whole kobo, deterministically: floor(total * w / sum) each, then the
+ * leftover kobo one each to the largest fractional remainders, ties in list order. The parts always sum to `total`, and when
+ * total <= sum(weights) no part exceeds its weight. (A few million kobo at most, so total * w stays far inside the safe range.)
+ */
+export function allocateKobo(total: number, weights: readonly number[]): number[] {
+  const sum = weights.reduce((a, b) => a + b, 0);
+  if (!Number.isSafeInteger(total) || total < 0 || !weights.every((w) => Number.isSafeInteger(w) && w >= 0) || sum <= 0) {
+    throw new RangeError("allocateKobo: whole, non-negative kobo and at least one positive weight");
+  }
+  const base = weights.map((w) => Math.floor((total * w) / sum));
+  const order = weights.map((w, i) => ({ i, rem: (total * w) % sum })).sort((a, b) => b.rem - a.rem || a.i - b.i);
+  let left = total - base.reduce((a, b) => a + b, 0);
+  for (const o of order) { if (left <= 0) break; base[o.i] += 1; left -= 1; }
+  return base;
+}
+
+export interface TeamShare {
+  userId: string;
+  isHost: boolean;
+  /** What the payer is shown for this player: the equal split of the charge (remainder to the featured player). */
+  gross: number;
+  /** What goes to this player's own subaccount: an equal part of the pool (remainder kobo featured player first). */
+  recipient: number;
+  /** This row's allocated part of the whole-charge deductions (see below). gross = vat + paystackFee + reserve + platform + host + recipient. */
+  vat: number; paystackFee: number; reserve: number; platform: number; host: number;
+}
+
+/**
+ * The whole team spray, in the owner's order (CORRECTION 1): the deductions are taken on the WHOLE charge X first, exactly as a
+ * single spray does it (breakdown(): VAT, the card fee with its flat part once, the reserve, then the tier's platform % of what
+ * is left, then the host %), and what is left (the pool) is split EQUALLY among the N players, each into their own subaccount.
+ *  - The host % applies only to the part of the net that goes to players who are not the host: net * hostPct * (N - hosts) / N
+ *    (the whole net when the host is not on the team; nothing when the host is the only player). Never more than net - platform.
+ *  - The host's subaccount receives whole.host (and, when the host plays, also their equal share of the pool: one merged entry).
+ *  - The pool's remainder (pool mod N) goes one kobo each to the featured player first, then in team (list) order.
+ * Per-row bookkeeping (spray_payments needs every row's parts to sum to its amount): each row's gross is the equal split of X
+ * (splitShares: remainder to the featured player); its recipient part is the pool share above; the rest of the row
+ * (gross - recipient) is filled with the whole-charge parts in the order vat, fee, reserve, platform, host, each part spread
+ * over the rows in proportion to the row room still left (allocateKobo: largest remainder, ties in team order). That never
+ * overfills a row, and the last part (host) fills every row exactly, so the rows' parts sum to X and each row to its gross.
+ * Invariants (tested): platform + host + vat + fee + reserve + sum(recipient) = X; every recipient > 0; all non-negative integers.
+ * Throws RangeError for an unknown tier, no players, duplicates, or a pool too small to give every player at least one kobo.
+ */
+export function teamSprayBreakdown(
+  tier: SprayTier, players: ReadonlyArray<{ userId: string; isHost: boolean }>, featuredId: string | null, rates: Rates = DEFAULT_RATES,
+): {
+  whole: { gross: number; vat: number; paystackFee: number; reserve: number; platform: number; host: number; pool: number };
+  shares: TeamShare[]; hostTotal: number;
+} {
+  if (!isSprayTier(tier)) throw new RangeError(`unknown spray tier ${String(tier)}`);
+  const n = players.length;
+  if (n < 1 || new Set(players.map((p) => p.userId)).size !== n) throw new RangeError("teamSprayBreakdown: one or more distinct players");
+  const price = SPRAY_CATALOGUE[tier].kobo;
+  const whole = breakdown({ price, platformPct: rates[`spray_platform_${tier}` as RateKey], reservePct: rates.spray_reserve / 100 });
+  const nonHost = players.filter((p) => !p.isHost).length;
+  const host = nonHost === 0 ? 0 : Math.min(Math.round((whole.net * rates.stage_guest_host * nonHost) / (100 * n)), whole.net - whole.platform);
+  const pool = whole.net - whole.platform - host;
+  // featured first, then team order: who gets the remainder kobo of the pool, and of the gross
+  const order = players.map((_, i) => i);
+  const fi = featuredId === null ? -1 : players.findIndex((p) => p.userId === featuredId);
+  if (fi > 0) order.splice(0, order.length, fi, ...order.filter((i) => i !== fi));
+  const each = Math.floor(pool / n), rest = pool - each * n;
+  const recipient = players.map(() => each);
+  for (let k = 0; k < rest; k++) recipient[order[k]] += 1;
+  const grossEach = Math.floor(price / n);
+  const gross = players.map(() => grossEach);
+  gross[order[0]] += price - grossEach * n;
+  if (!recipient.every((r) => r > 0)) throw new RangeError("teamSprayBreakdown: every player's cut must be positive");
+  const room = players.map((_, i) => gross[i] - recipient[i]);
+  if (!room.every((r) => r >= 0)) throw new RangeError("teamSprayBreakdown: a cut cannot exceed its share");
+  const fill = (total: number): number[] => {
+    const cap = room.slice();
+    const sum = cap.reduce((a, b) => a + b, 0);
+    if (total === 0) return cap.map(() => 0);
+    if (total > sum) throw new RangeError("teamSprayBreakdown: parts do not fit the rows");
+    const part = allocateKobo(total, cap);
+    for (let i = 0; i < room.length; i++) room[i] -= part[i];
+    return part;
+  };
+  const vat = fill(whole.vat), fee = fill(whole.fee), reserve = fill(whole.reserve), platform = fill(whole.platform), hostPart = fill(host);
+  if (!room.every((r) => r === 0)) throw new RangeError("teamSprayBreakdown: the rows do not add up");
+  const shares: TeamShare[] = players.map((p, i) => ({
+    userId: p.userId, isHost: p.isHost, gross: gross[i], recipient: recipient[i],
+    vat: vat[i], paystackFee: fee[i], reserve: reserve[i], platform: platform[i], host: hostPart[i],
+  }));
+  const hostTotal = host + shares.filter((s) => s.isHost).reduce((a, s) => a + s.recipient, 0);
+  return {
+    whole: { gross: price, vat: whole.vat, paystackFee: whole.fee, reserve: whole.reserve, platform: whole.platform, host, pool },
+    shares, hostTotal,
+  };
+}
