@@ -113,7 +113,8 @@ export async function listStaleSprays(
   const n = isPosInt(limit) ? Math.min(limit, 500) : 50;
   const since = sql`coalesce(${sprayPayments.refundRequestedAt}, ${sprayPayments.paidAt}, ${sprayPayments.createdAt})`;
   // Same Date mapping as drizzle's timestamp columns (ISO text cast to timestamp), so this agrees with gte() elsewhere.
-  const conds = [inArray(sprayPayments.status, [...statuses]), sql`${since} < ${olderThan.toISOString()}::timestamp`];
+  // Team spray share rows (batch_id set) are never finalized on their own: the sweep drives their batch (teamSpray.ts).
+  const conds = [inArray(sprayPayments.status, [...statuses]), sql`${since} < ${olderThan.toISOString()}::timestamp`, isNull(sprayPayments.batchId)];
   if (opts.dueAt) conds.push(sql`(${sprayPayments.nextCheckAt} is null or ${sprayPayments.nextCheckAt} <= ${opts.dueAt.toISOString()}::timestamp)`);
   if (opts.createdSince) conds.push(gte(sprayPayments.createdAt, opts.createdSince));
   return await x(tx).select().from(sprayPayments)

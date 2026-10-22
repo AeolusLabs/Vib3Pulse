@@ -48,11 +48,19 @@ export function scrubProviderMessage(msg: unknown): string {
     .slice(0, 120);
 }
 
-/** Throws (RangeError) unless the split is 1 or 2 distinct subaccounts with positive integer shares summing to at most the price. */
+/** A team spray (gaming) pays up to 4 players and the host from one charge. A single spray stays at one or two. */
+export const TEAM_SPLIT_MAX = 5;
+
+/**
+ * Throws (RangeError) unless the split is 1 or 2 distinct subaccounts (a team split: 2 to TEAM_SPLIT_MAX) with positive
+ * integer shares summing to at most the price.
+ */
 export function assertValidSplit(split: SplitSpec, amountKobo: number): void {
   if (!split || !Array.isArray(split.shares)) throw new RangeError("split: shares missing");
   const shares = split.shares;
-  if (shares.length < 1 || shares.length > 2) throw new RangeError("split: one or two recipients only");
+  if (split.team === true) {
+    if (shares.length < 2 || shares.length > TEAM_SPLIT_MAX) throw new RangeError(`split: a team split has 2 to ${TEAM_SPLIT_MAX} recipients`);
+  } else if (shares.length < 1 || shares.length > 2) throw new RangeError("split: one or two recipients only");
   const seen = new Set<string>();
   let sum = 0;
   for (const s of shares) {
@@ -114,7 +122,7 @@ export function buildChargeBody(p: ChargeBodyInput): Record<string, unknown> {
   };
 
   if (p.split.shares.length === 1) {
-    if (p.splitCode !== undefined) throw new RangeError("splitCode: only for two recipients");
+    if (p.splitCode !== undefined) throw new RangeError("splitCode: only for two or more recipients");
     const only = p.split.shares[0];
     body.subaccount = only.subaccountCode;
     const charge = p.amountKobo - only.amountKobo; // what stays with us
@@ -123,7 +131,7 @@ export function buildChargeBody(p: ChargeBodyInput): Record<string, unknown> {
     body.transaction_charge = charge;
     body.bearer = "account";
   } else {
-    if (typeof p.splitCode !== "string" || !SPLIT_CODE_RE.test(p.splitCode)) throw new RangeError("splitCode: required for two recipients");
+    if (typeof p.splitCode !== "string" || !SPLIT_CODE_RE.test(p.splitCode)) throw new RangeError("splitCode: required for two or more recipients");
     body.split_code = p.splitCode;
   }
 
@@ -171,8 +179,9 @@ export function splitNameFor(shares: SplitSpec["shares"]): string {
 }
 
 export function buildSplitBody(shares: SplitSpec["shares"]): Record<string, unknown> {
-  if (shares.length !== 2) throw new RangeError("a split code is only for two recipients");
-  assertValidSplit({ shares }, Number.MAX_SAFE_INTEGER);
+  if (shares.length < 2 || shares.length > TEAM_SPLIT_MAX) throw new RangeError("a split code is only for two or more recipients");
+  // Two: a single spray's split (the exact old check). More: only ever a team spray's.
+  assertValidSplit(shares.length === 2 ? { shares } : { shares, team: true }, Number.MAX_SAFE_INTEGER);
   return {
     name: splitNameFor(shares),
     type: "flat",
@@ -342,7 +351,7 @@ export function createPaystackSplitProvider(): SplitPaymentProvider {
   // Split codes are fixed per (subaccounts, shares), and shares are fixed per tier, so there are few of them.
   const splitCache = new Map<string, string>();
 
-  async function ensureSplitCode(shares: SplitSpec["shares"]): Promise<string> {
+  async function ensureSplitCode(shares: SplitSpec["shares"]): Promise<string> { // two or more recipients (a team: up to TEAM_SPLIT_MAX)
     const body = buildSplitBody(shares);
     const name = body.name as string;
     const hit = splitCache.get(name);
@@ -361,8 +370,8 @@ export function createPaystackSplitProvider(): SplitPaymentProvider {
 
   async function initialize(p: { reference: string; email: string; amountKobo: number; split: SplitSpec; metadata: Record<string, string>; callbackUrl: string }): Promise<{ url: string }> {
     // Validate before any network call (also before a split is created).
-    buildChargeBody({ kind: "initialize", ...p, currency: "NGN", splitCode: p.split.shares.length === 2 ? "SPL_placeholder0" : undefined });
-    const splitCode = p.split.shares.length === 2 ? await ensureSplitCode(p.split.shares) : undefined;
+    buildChargeBody({ kind: "initialize", ...p, currency: "NGN", splitCode: p.split.shares.length >= 2 ? "SPL_placeholder0" : undefined });
+    const splitCode = p.split.shares.length >= 2 ? await ensureSplitCode(p.split.shares) : undefined;
     const body = buildChargeBody({ kind: "initialize", ...p, currency: "NGN", splitCode });
     const data = await call<{ authorization_url?: string; reference?: string }>("/transaction/initialize", { method: "POST", body: JSON.stringify(body) });
     if (!data || typeof data.authorization_url !== "string" || !/^https:\/\//.test(data.authorization_url)) throw new Error("Paystack error: no checkout link");
@@ -401,8 +410,8 @@ export function createPaystackSplitProvider(): SplitPaymentProvider {
         const { url } = await initialize({ reference: p.reference, email: p.email, amountKobo: p.amountKobo, split: p.split, metadata: p.metadata, callbackUrl: p.callbackUrl });
         return { status: "action_required", reference: p.reference, authorizationUrl: url };
       }
-      buildChargeBody({ kind: "charge_authorization", reference: p.reference, email: p.email, amountKobo: p.amountKobo, currency: "NGN", split: p.split, metadata: p.metadata, authorizationCode: p.authorizationCode, splitCode: p.split.shares.length === 2 ? "SPL_placeholder0" : undefined });
-      const splitCode = p.split.shares.length === 2 ? await ensureSplitCode(p.split.shares) : undefined;
+      buildChargeBody({ kind: "charge_authorization", reference: p.reference, email: p.email, amountKobo: p.amountKobo, currency: "NGN", split: p.split, metadata: p.metadata, authorizationCode: p.authorizationCode, splitCode: p.split.shares.length >= 2 ? "SPL_placeholder0" : undefined });
+      const splitCode = p.split.shares.length >= 2 ? await ensureSplitCode(p.split.shares) : undefined;
       const body = buildChargeBody({ kind: "charge_authorization", reference: p.reference, email: p.email, amountKobo: p.amountKobo, currency: "NGN", split: p.split, metadata: p.metadata, authorizationCode: p.authorizationCode, splitCode });
       let a: Answer<ChargeData>;
       try {

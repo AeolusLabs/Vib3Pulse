@@ -16,6 +16,8 @@ import { canViewRoom } from "./roomAccess";
 import { roomFeatures } from "./features";
 import { TokenBucket } from "./rateLimit";
 import { SPRAY_UNAVAILABLE, finalizeSpray, getOwnSpray, sprayStatusView, startSpray } from "./spray";
+import { batchStatusView, getOwnBatch, startTeamSpray } from "./teamSpray";
+import * as bs from "./sprayBatchStorage";
 import { checkDailyLimitChange, checkRoomLimitChange, dailyWindowStart, effectiveDailyLimit } from "./sprayLimits";
 
 /** A normal per-IP limiter on the spray routes, on top of the per-user database-backed velocity (rule B5). */
@@ -86,6 +88,43 @@ export function registerSprayRoutes(app: Express): void {
       res.json(sprayStatusView(row));
     } catch (e) {
       console.error("[rooms:spray] spray status failed:", sanitizeMoneyError(e));
+      res.status(500).json({ message: "Failed to load the spray" });
+    }
+  });
+
+  // ------------------------------------------------------------ team spray (gaming): ONE charge for a whole team
+  // 404 whenever ROOMS_GAMING is off. Every eligibility failure is the single spray's generic 403 SPRAY_UNAVAILABLE (teamSpray.ts).
+  app.post("/api/rooms/:id/spray/team", requireAuth, sprayIpLimiter, roomLimiter, async (req: Request, res: Response) => {
+    if (!roomFeatures.gaming) return res.status(404).json({ message: "Not found" });
+    try {
+      const out = await startTeamSpray({
+        roomId: String(req.params.id ?? ""),
+        payerId: req.user!.id, // the session's, never the body's
+        body: req.body,
+        devOrigin: `${req.protocol}://${req.headers.host}`,
+      });
+      if (out.retryAfterSec) res.setHeader("Retry-After", String(out.retryAfterSec));
+      res.status(out.status).json(out.body);
+    } catch (e) {
+      console.error("[rooms:spray] team spray failed:", sanitizeMoneyError(e));
+      res.status(500).json({ code: "SERVER_ERROR", message: "Spraying isn't working right now. Try again." });
+    }
+  });
+
+  // The payer's own team spray (polling after a bank approval). Same rules as the single spray's status route.
+  app.get("/api/rooms/:id/spray/team/:batchId", requireAuth, async (req: Request, res: Response) => {
+    if (!roomFeatures.gaming) return res.status(404).json({ message: "Not found" });
+    try {
+      let b = await getOwnBatch(String(req.params.id ?? ""), String(req.params.batchId ?? ""), req.user!.id);
+      if (!b) return res.status(404).json({ message: "Not found" });
+      const recentFailure = b.status === "failed" && Date.now() - new Date(b.createdAt).getTime() < POLL_FAILED_RECHECK_MS;
+      if ((b.status === "created" || b.status === "pending" || b.status === "paid" || recentFailure) && take(`sprayfin:${req.user!.id}`, 1 / 3, 3)) {
+        await finalizeSpray(b.providerRef, { waitMs: 0 }).catch((e) => console.error("[rooms:spray] finalize on team poll failed:", sanitizeMoneyError(e)));
+        b = (await bs.getBatchById(b.id)) ?? b;
+      }
+      res.json(await batchStatusView(b));
+    } catch (e) {
+      console.error("[rooms:spray] team spray status failed:", sanitizeMoneyError(e));
       res.status(500).json({ message: "Failed to load the spray" });
     }
   });

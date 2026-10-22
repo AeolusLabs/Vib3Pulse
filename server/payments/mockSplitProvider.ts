@@ -54,7 +54,7 @@ export class MockSplitProvider implements SplitPaymentProvider {
     return buildChargeBody({
       kind, reference: p.reference, email: p.email, amountKobo: p.amountKobo, currency: "NGN", split: p.split, metadata: p.metadata,
       ...(kind === "initialize" ? { callbackUrl: p.callbackUrl } : { authorizationCode: p.authorizationCode }),
-      splitCode: p.split.shares.length === 2 ? MOCK_SPLIT_CODE : undefined,
+      splitCode: p.split.shares.length >= 2 ? MOCK_SPLIT_CODE : undefined, // two, or a team split of more
     });
   }
 

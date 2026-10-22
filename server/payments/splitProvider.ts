@@ -15,8 +15,11 @@ import { MockSplitProvider } from "./mockSplitProvider.js";
 
 export type { ProviderRefundState };
 
-/** Recipients only (host, and a stage guest when there is one); everything else stays with the platform account. */
-export interface SplitSpec { shares: { subaccountCode: string; amountKobo: number }[]; }
+/**
+ * Recipients only (host, and a stage guest when there is one); everything else stays with the platform account.
+ * `team` (gaming team spray): up to TEAM_SPLIT_MAX recipients (each player's cut and the host's), never set for a single spray.
+ */
+export interface SplitSpec { shares: { subaccountCode: string; amountKobo: number }[]; team?: true }
 
 /**
  * failure meanings (callers show plain words for each):

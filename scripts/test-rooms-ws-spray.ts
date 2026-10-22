@@ -231,7 +231,7 @@ try {
   const rev = await by.c.waitFor((m) => m.type === "room:spray" && m.id === rain.id);
   check("rain: room:spray tier rain, v3c 10,000,000", rev?.tier === "rain" && rev?.v3c === 10000000);
 
-  // ---- a reversal is told to the payer only
+  // ---- owner rule 2026-10-22: a charge that went through is delivered even if the recipient left (no refund, no animation)
   const PL = await mk("payer_left", { card: false });
   const pl = await join(PL, R);
   reset();
@@ -246,10 +246,10 @@ try {
   sprayClock.now = () => Date.now() + 2 * 60_000;
   let out: string;
   try { out = await finalizeSpray(lrow.provider_ref); } finally { sprayClock.now = realNow; }
-  check("finalize reverses once past the deadline", out === "reversed", out);
-  check("the payer gets the plain refund line", !!(await pl.c.waitFor((m) => m.type === "room:chat" && m.system === "spray_reversed" && m.text === "They left the stage, so you were refunded in full.")));
+  check("finalize delivers once past the deadline (never refunds a taken payment)", out === "delivered" && !mock.refunds.has(lrow.provider_ref), out);
   await sleep(300);
-  check("nobody else sees the payer's refund line, and no room:spray went out", [h.c, by.c, pr.c].every((c) => !c.all((m) => m.system === "spray_reversed").length)
+  check("no refund line to the payer, nobody else sees one, and no room:spray went out (nobody to see it)",
+    [h.c, by.c, pr.c, pl.c].every((c) => !c.all((m) => m.system === "spray_reversed").length)
     && !by.c.all((m) => m.type === "room:spray" && m.id === lrow.id).length);
 } catch (e: any) {
   failed++; console.log(`FAIL uncaught: ${e.stack || e}`);

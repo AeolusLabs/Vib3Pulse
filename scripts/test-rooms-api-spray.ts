@@ -577,21 +577,17 @@ try {
   clockAhead();
   try { await due(lrow.id); await sweepPendingSprays(sprayClock.now()); } finally { clockBack(); }
   const lnow = await rowById(lrow.id);
-  check("recipient left: reversed RECIPIENT_LEFT", lnow.status === "reversed" && lnow.reason === "RECIPIENT_LEFT", JSON.stringify(lnow));
-  check("recipient left: one refund call, spend released, refund ledger once, no spray ledger",
-    mock.calls.refund.filter((r) => r === lrow.provider_ref).length === 1 && (await spentIn(R, PL.id)) === 0
-    && (await ledger(lrow.provider_ref, "spray_refund")).length === 1 && (await ledger(lrow.provider_ref, "spray")).length === 0);
-  check("recipient left: no room:spray", !h.c.all((m) => m.type === "room:spray" && m.id === lrow.id).length);
-  check("recipient left: the payer is told (chat line to the payer only)", !!(await PL.c!.waitFor((m) => m.type === "room:chat" && m.system === "spray_reversed" && /refunded in full/.test(m.text), 5000))
-    && !h.c.all((m) => m.system === "spray_reversed").length);
-  check("recipient left: a spray_reversed notification", (await q(`select 1 from notifications where user_id = $1 and type = 'spray_reversed'`, [PL.id])).length === 1);
-  check("recipient left: status poll says reversed with the reason", (await rest("GET", `/api/rooms/${R}/spray/${lrow.id}`, PL.id)).json?.reason === "RECIPIENT_LEFT");
-  const lclaw = await clawbacksOf(lrow.id);
-  check("C1: a stage spray reversal writes the host's cut AND the guest's share as clawbacks", lclaw.length === 2
-    && lclaw.some((c: any) => c.beneficiary_id === H && Number(c.amount_kobo) === Number(lrow.host_kobo))
-    && lclaw.some((c: any) => c.beneficiary_id === GL && Number(c.amount_kobo) === Number(lrow.guest_kobo))
-    && lclaw.every((c: any) => c.origin === "reversal"), JSON.stringify(lclaw));
-  await settleClawbacks(lrow.id);
+  // Owner rule 2026-10-22: a charge that went through is never undone for a delivery problem. The recipient left, so nobody
+  // is there to see it: delivered all the same (ledger rows, notifications), no animation, no refund, no clawback.
+  check("recipient left: delivered (the charge went through), no reversal reason", lnow.status === "delivered" && !lnow.reason, JSON.stringify(lnow));
+  check("recipient left: no refund call, spend kept, spray ledger once, no refund ledger",
+    mock.calls.refund.filter((r) => r === lrow.provider_ref).length === 0 && (await spentIn(R, PL.id)) > 0
+    && (await ledger(lrow.provider_ref, "spray")).length === 1 && (await ledger(lrow.provider_ref, "spray_refund")).length === 0);
+  check("recipient left: no room:spray animation (nobody there to see it)", !h.c.all((m) => m.type === "room:spray" && m.id === lrow.id).length);
+  check("recipient left: the payer is not told of any refund", !h.c.all((m) => m.system === "spray_reversed").length
+    && (await q(`select 1 from notifications where user_id = $1 and type = 'spray_reversed'`, [PL.id])).length === 0);
+  check("recipient left: status poll says delivered", (await rest("GET", `/api/rooms/${R}/spray/${lrow.id}`, PL.id)).json?.status === "delivered");
+  check("recipient left: no clawbacks (nothing was reversed)", (await clawbacksOf(lrow.id)).length === 0);
 
   // =============================================================== server restart between payment and finalize (the sweep)
   const PRS = await payer("p_restart", { card: false });
@@ -609,9 +605,10 @@ try {
   mock.pay(rs2.provider_ref);
   await q(`update spray_payments set status = 'paid', paid_at = now() - interval '2 minutes' where id = $1`, [rs2.id]);
   await sweepPendingSprays(sprayClock.now());
-  check("restart: a paid spray past the 60 s deadline is reversed (TIMEOUT)", (await rowById(rs2.id)).status === "reversed" && (await rowById(rs2.id)).reason === "TIMEOUT");
-  check("restart: the TIMEOUT reversal wrote its clawback too", (await clawbacksOf(rs2.id)).length === 1);
-  await settleClawbacks(rs2.id);
+  // Owner rule 2026-10-22: past the 60 s deadline a taken payment is still delivered (never refunded for being slow).
+  check("restart: a paid spray past the 60 s deadline is delivered all the same, not reversed", (await rowById(rs2.id)).status === "delivered" && !(await rowById(rs2.id)).reason
+    && mock.calls.refund.filter((r) => r === rs2.provider_ref).length === 0 && (await ledger(rs2.provider_ref, "spray")).length === 1);
+  check("restart: the late delivery wrote no clawback", (await clawbacksOf(rs2.id)).length === 0);
   // Unpaid and stale: failed, spend released. Then the payment lands late: refunded, never delivered, spend not given twice.
   const PU = await payer("p_unpaid", { card: false });
   await spray(PU.id, R, body(H));
@@ -699,16 +696,17 @@ try {
   check("dispute again: no-op (same rows, one ledger row)", (await q(`select 1 from host_clawbacks where spray_id = $1`, [disp[0].id])).length === 2 && (await ledger(dref, "chargeback")).length === 1);
   check("I1: every dispute opens ONE 'dispute' issue for a person to answer in Paystack", (await issues(dref, "dispute")).filter((i: any) => !i.resolved_at).length === 1);
   check("dispute clawbacks are origin dispute", claws.every((c: any) => c.origin === "dispute"));
-  const lclawBefore = (await clawbacksOf(lrow.id)).length;
+  // (A spray reversed by an integrity guard: the wrong-currency one; delivery problems no longer reverse.)
+  const lclawBefore = (await clawbacksOf(crow.id)).length;
   check("dispute on a reversed spray: no new clawback (the reversal's stay), still reversed, an issue says contest with the refund",
-    (await webhook("charge.dispute.create", { transaction: { reference: lrow.provider_ref } })) === 200
-    && (await clawbacksOf(lrow.id)).length === lclawBefore && (await rowById(lrow.id)).status === "reversed"
-    && (await issues(lrow.provider_ref, "dispute")).some((i: any) => /AFTER_REFUND/.test(i.error_message ?? "")));
+    (await webhook("charge.dispute.create", { transaction: { reference: crow.provider_ref } })) === 200
+    && (await clawbacksOf(crow.id)).length === lclawBefore && (await rowById(crow.id)).status === "reversed"
+    && (await issues(crow.provider_ref, "dispute")).some((i: any) => /AFTER_REFUND/.test(i.error_message ?? "")));
   // r4 N1: the payer then WINS that chargeback: they were paid back twice; a person is told.
   check("N1: payer wins a dispute on a refunded spray: a LOST_AFTER_REFUND issue (never silent)",
-    (await webhook("charge.dispute.resolve", { transaction: { reference: lrow.provider_ref }, resolution: "merchant-accepted" })) === 200
-    && (await issues(lrow.provider_ref, "dispute_resolved")).some((i: any) => /LOST_AFTER_REFUND/.test(i.error_message ?? "") && !i.resolved_at)
-    && (await issues(lrow.provider_ref, "dispute")).every((i: any) => !!i.resolved_at));
+    (await webhook("charge.dispute.resolve", { transaction: { reference: crow.provider_ref }, resolution: "merchant-accepted" })) === 200
+    && (await issues(crow.provider_ref, "dispute_resolved")).some((i: any) => /LOST_AFTER_REFUND/.test(i.error_message ?? "") && !i.resolved_at)
+    && (await issues(crow.provider_ref, "dispute")).every((i: any) => !!i.resolved_at));
   // r4 N2: the merchant wins on a refunded spray: never "refund the payer by hand" (they were refunded already).
   await webhook("charge.dispute.create", { transaction: { reference: wrow.provider_ref } });
   check("N2: merchant wins a dispute on a refunded spray: no refund-by-hand issue, no money action",
