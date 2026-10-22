@@ -212,7 +212,7 @@ export function registerRoomRoutes(app: Express): void {
         if (!g.ok) return res.status(400).json(badGameField(g.field));
         game = g.value;
         // The room is created before it is live, so voice and live video cannot be on yet: what is checked here is that live
-        // video will be possible (size). The game itself only runs while voice and live video are on (game.ts gameLive).
+        // video will be possible (size; only a ticketed room's ticket capacity can exceed ROOM_LIMITS.liveVideoMax). The game itself only runs while voice and live video are on (game.ts gameLive).
         if (typeof game.gameFormat === "number" && !videoSized(v.value)) return res.status(400).json(NEEDS_LIVE_VIDEO);
         if (req.body?.lanes !== undefined && typeof req.body.lanes !== "boolean") return res.status(400).json(badGameField("lanes"));
         if (req.body?.lanes === true && typeof game.gameFormat !== "number") return res.status(400).json({ message: "Age lanes are for game rooms.", field: "lanes", reason: "needs_game" });
@@ -502,6 +502,30 @@ export function registerRoomRoutes(app: Express): void {
         }
         patch.ageLimit = v.value.ageLimit;
       }
+      // Gaming (ROOMS_GAMING, host only: the co-host path above refuses any key but pinnedMessage). Flag off: ignored.
+      if (roomFeatures.gaming && ("gameFormat" in b || "gameDropTimeoutMs" in b)) {
+        const g = validateGameInput(b);
+        if (!g.ok) return res.status(400).json(badGameField(g.field));
+        if (g.value.gameFormat !== undefined) {
+          if (g.value.gameFormat !== null) {
+            // A live room must have voice and live video on now; a scheduled one must be small enough for live video (only a
+            // ticketed room can be bigger: a free room's capacity is capped at ROOM_LIMITS.capacityMax = liveVideoMax). Checked
+            // before the ticket checks, so the answer is the same whether or not this host may sell.
+            const ok = room.status === "live" ? room.voiceEnabled && room.liveVideo : videoSized(v.value);
+            if (!ok) return res.status(400).json(NEEDS_LIVE_VIDEO);
+          }
+          if (g.value.gameFormat === null && (room.parentRoomId || (await lanes.isLaneParent(room.id)))) {
+            return res.status(409).json({ message: "A game room with age lanes stays a game room.", code: "LANE_ROOM" });
+          }
+          if (room.status === "live") {
+            const fit = gameFitCheck(room.id, g.value.gameFormat);
+            if (fit === "TEAM_FULL") return res.status(409).json({ message: "A team has more players than that. Remove players first.", code: "TEAM_FULL" });
+            if (fit === "GAME_IN_PROGRESS") return res.status(409).json({ message: "Remove the players before switching the game off.", code: "GAME_IN_PROGRESS" });
+          }
+          patch.gameFormat = g.value.gameFormat;
+        }
+        if (g.value.gameDropTimeoutMs !== undefined) patch.gameDropTimeoutMs = g.value.gameDropTimeoutMs;
+      }
       // Paid rooms. Selling (or changing a sale) needs the same host checks as creating. Once any ticket is sold the price,
       // the free/paid switch, the age limit and the refund promise are fixed, and the ticket capacity never goes below the
       // tickets sold. Those two are decided in the write itself, under the room row lock (updateRoomWithTicketGuard).
@@ -528,28 +552,6 @@ export function registerRoomRoutes(app: Express): void {
         if (priceChange || capChange || ageChange || refundOff) {
           ticketGuard = { lockedBySale: priceChange || ageChange || refundOff, capacity: capChange ? newCap : null, requireScheduled: becomingTicketed };
         }
-      }
-      // Gaming (ROOMS_GAMING, host only: the co-host path above refuses any key but pinnedMessage). Flag off: ignored.
-      if (roomFeatures.gaming && ("gameFormat" in b || "gameDropTimeoutMs" in b)) {
-        const g = validateGameInput(b);
-        if (!g.ok) return res.status(400).json(badGameField(g.field));
-        if (g.value.gameFormat !== undefined) {
-          if (g.value.gameFormat !== null) {
-            // A live room must have voice and live video on now; a scheduled one must be small enough for live video.
-            const ok = room.status === "live" ? room.voiceEnabled && room.liveVideo : videoSized(v.value);
-            if (!ok) return res.status(400).json(NEEDS_LIVE_VIDEO);
-          }
-          if (g.value.gameFormat === null && (room.parentRoomId || (await lanes.isLaneParent(room.id)))) {
-            return res.status(409).json({ message: "A game room with age lanes stays a game room.", code: "LANE_ROOM" });
-          }
-          if (room.status === "live") {
-            const fit = gameFitCheck(room.id, g.value.gameFormat);
-            if (fit === "TEAM_FULL") return res.status(409).json({ message: "A team has more players than that. Remove players first.", code: "TEAM_FULL" });
-            if (fit === "GAME_IN_PROGRESS") return res.status(409).json({ message: "Remove the players before switching the game off.", code: "GAME_IN_PROGRESS" });
-          }
-          patch.gameFormat = g.value.gameFormat;
-        }
-        if (g.value.gameDropTimeoutMs !== undefined) patch.gameDropTimeoutMs = g.value.gameDropTimeoutMs;
       }
       if ("screenUrl" in b) {
         if (b.screenUrl === null || b.screenUrl === "") patch.screen = null;

@@ -119,7 +119,10 @@ test("privacy: the room_live followers job reads the host's notifyFriendsLive", 
   assert.match(fn, /room\.visibility === "invite"\) return 0/);
   assert.doesNotMatch(fn, /MAX_NOTIFY|\.slice\(0, \d+\)/); // never capped
   const routes = readFileSync(new URL("../server/rooms/roomRoutes.ts", import.meta.url), "utf8");
-  assert.match(routes, /notifyFollowers\(live, host\); \/\/ background/);
+  // The start route tells followers about the room it started (a game room's lane may announce its game room instead), and
+  // never awaits it: the call is a bare statement, never preceded by `await`.
+  assert.match(routes, /\n\s+notifyFollowers\([^;]*\blive\b[^;]*, host\); \/\/ background/);
+  assert.doesNotMatch(routes, /await\s+notifyFollowers\(/);
 });
 
 test("fix round r2 I5: an untracked room keeps minutesIn / messages null (never a false 0), for guest and host", () => {

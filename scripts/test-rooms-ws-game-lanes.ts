@@ -113,7 +113,9 @@ try {
   roomFeatures.gaming = true;
   const A = await mk("adult_host", yearsAgo(30)), B = await mk("adult_b", yearsAgo(30)), C = await mk("adult_invited", yearsAgo(35));
   const T = await mk("teen_host", yearsAgo(16)), T2 = await mk("teen_two", yearsAgo(15)), N = await mk("nodob", null);
+  const S = await mk("adult_stranger", yearsAgo(33));
   await mutual(A, T); await mutual(T, T2); await mutual(T, C);
+  await mutual(T, B); // B: an adult friend of the teen host with no personal invite (can see the friends-only teen lane)
 
   const cr = await rest("POST", "/api/rooms", A, { title: "Lane test", kind: "party", visibility: "public", capacity: 20, gameFormat: 2, lanes: true });
   const P = cr.json.room.id as string, AL = cr.json.lane.id as string;
@@ -137,6 +139,11 @@ try {
   const direct = await join(bt, TL);
   check("an uninvited adult cannot join the teen lane by id: MINORS_ROOM with the teen-lane warning", direct?.type === "room:error" && direct.code === "MINORS_ROOM" && direct.warning === MINORS_LANE_WARNING, JSON.stringify(direct));
   check("...and is still in the adult lane (refused before leaving it)", roomHub.roomOf(B) === AL);
+  // An adult who cannot even see the teen lane (not a friend of its teen host, no invite) is told nothing about it: the
+  // existing visibility rule answers first, exactly as for any friends-only minors' room (no confirmation a teen room exists).
+  const sx = await connect(S);
+  const stranger = await join(sx, TL);
+  check("a stranger adult joining the friends-only teen lane by id gets NOT_FOUND (it does not exist for them)", stranger?.type === "room:error" && stranger.code === "NOT_FOUND" && !("warning" in stranger), JSON.stringify(stranger));
   const t3 = await connect(T2);
   const teenDirect = await join(t3, AL);
   check("a teen cannot join the adult lane by id (AGE_LIMIT)", teenDirect?.type === "room:error" && teenDirect.code === "AGE_LIMIT", JSON.stringify(teenDirect));

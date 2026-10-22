@@ -92,8 +92,11 @@ try {
     const r = await http("POST", "/api/rooms", H, { ...base_, [field]: value });
     check(`create: ${field} = ${JSON.stringify(value)} -> 400 { field, reason }`, r.status === 400 && r.json?.field === field && r.json?.reason === "invalid", JSON.stringify(r));
   }
-  const big = await http("POST", "/api/rooms", H, { ...base_, capacity: 100, gameFormat: 2 });
-  check("create: a game room too big for live video -> 400 needs_live_video", big.status === 400 && big.json?.field === "gameFormat" && big.json?.reason === "needs_live_video", JSON.stringify(big));
+  // A free room can never be too big for live video (its capacity is capped at 50 = liveVideoMax): only a ticketed room can.
+  const bigFree = await http("POST", "/api/rooms", H, { ...base_, capacity: 100, gameFormat: 2 });
+  check("create: a free room over 50 is refused by the capacity rule itself", bigFree.status === 400 && bigFree.json?.field === "capacity", JSON.stringify(bigFree));
+  const big = await http("POST", "/api/rooms", H, { ...base_, ageLimit: "18+", ticketPriceKobo: 200000, ticketCapacity: 100, gameFormat: 2 });
+  check("create: a ticketed game room with more tickets than live video allows -> 400 needs_live_video (before any ticket check)", big.status === 400 && big.json?.field === "gameFormat" && big.json?.reason === "needs_live_video", JSON.stringify(big));
   const plain = await http("POST", "/api/rooms", H, { ...base_ });
   check("create: no game fields -> an ordinary room (null format, default timeout)", plain.status === 201 && (await row(plain.json.room.id)).game_format === null && plain.json.room.gameFormat === null, JSON.stringify(plain.json?.room));
 
@@ -111,8 +114,9 @@ try {
   check("PATCH scheduled: format and timeout change", p1.status === 200 && p1.json.room.gameFormat === 4 && p1.json.room.gameDropTimeoutMs === 0 && (await row(R)).game_format === 4, JSON.stringify(p1));
   const p2 = await http("PATCH", `/api/rooms/${R}`, H, { gameDropTimeoutMs: 45000 });
   check("PATCH: an invalid timeout -> 400 { field, reason }", p2.status === 400 && p2.json?.field === "gameDropTimeoutMs", JSON.stringify(p2));
-  const p3 = await http("PATCH", `/api/rooms/${R}`, H, { capacity: 100, gameFormat: 4 });
-  check("PATCH scheduled: growing past live video size with a game -> needs_live_video", p3.status === 400 && p3.json?.reason === "needs_live_video", JSON.stringify(p3));
+  const p3 = await http("PATCH", `/api/rooms/${R}`, H, { ageLimit: "18+", ticketPriceKobo: 200000, ticketCapacity: 100, gameFormat: 4 });
+  check("PATCH scheduled: tickets past live video size with a game -> needs_live_video (before any ticket check)", p3.status === 400 && p3.json?.reason === "needs_live_video", JSON.stringify(p3));
+  check("...and nothing was written", (await row(R)).game_format === 4 && (await q(`select ticket_price_kobo, age_limit from rooms where id = $1`, [R]))[0].ticket_price_kobo === null, JSON.stringify(await row(R)));
   const p4 = await http("PATCH", `/api/rooms/${R}`, H, { gameFormat: null });
   check("PATCH: gameFormat null makes it an ordinary room", p4.status === 200 && (await row(R)).game_format === null, JSON.stringify(p4));
   const co = await http("PATCH", `/api/rooms/${R}`, V, { gameFormat: 2 });
