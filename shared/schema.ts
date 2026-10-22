@@ -1300,6 +1300,52 @@ export const userPaymentMethods = pgTable("user_payment_methods", {
 }));
 export type UserPaymentMethod = typeof userPaymentMethods.$inferSelect;
 
+// Team spray (rooms gaming, migrations/add_spray_batches.sql): ONE charge for a whole team. Each player's share is an ordinary
+// spray_payments row with batch_id set, so limits, caps, clawbacks and earnings count it unchanged. Declared before
+// sprayPayments, which points at it.
+export const sprayBatches = pgTable("spray_batches", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  idempotencyKey: text("idempotency_key").notNull(),
+  requestHash: text("request_hash").notNull(),
+  roomId: varchar("room_id").notNull().references(() => rooms.id, { onDelete: "restrict" }),
+  hostId: varchar("host_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  payerId: varchar("payer_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  featuredId: varchar("featured_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  side: text("side").notNull(),
+  tier: text("tier").notNull(),
+  amountKobo: integer("amount_kobo").notNull(),
+  vatKobo: integer("vat_kobo").notNull(),
+  feeKobo: integer("fee_kobo").notNull(),
+  reserveKobo: integer("reserve_kobo").notNull(),
+  hostSubaccount: text("host_subaccount").notNull(),
+  provider: text("provider").notNull(),
+  providerRef: text("provider_ref").notNull().unique("spray_batches_provider_ref_key"),
+  paymentMethodId: uuid("payment_method_id").references(() => userPaymentMethods.id, { onDelete: "restrict" }),
+  status: text("status").notNull().default("created"),
+  reason: text("reason"),
+  authorizationUrl: text("authorization_url"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  paidAt: timestamp("paid_at"),
+  deliveredAt: timestamp("delivered_at"),
+  reversedAt: timestamp("reversed_at"),
+  refundRequestedAt: timestamp("refund_requested_at"),
+  checkAttempts: integer("check_attempts").notNull().default(0),
+  lastCheckedAt: timestamp("last_checked_at"),
+  nextCheckAt: timestamp("next_check_at"),
+}, (t) => ({
+  payerKeyUnique: unique("spray_batches_payer_key_key").on(t.payerId, t.idempotencyKey),
+  roomStatusIdx: index("spray_batches_room_status_idx").on(t.roomId, t.status),
+  payerCreatedIdx: index("spray_batches_payer_created_idx").on(t.payerId, t.createdAt),
+  statusCreatedIdx: index("spray_batches_status_created_idx").on(t.status, t.createdAt),
+  statusNextCheckIdx: index("spray_batches_status_next_check_idx").on(t.status, t.nextCheckAt),
+  sideCheck: check("spray_batches_side_check", sql`${t.side} IN ('A', 'B')`),
+  tierCheck: check("spray_batches_tier_check", sql`${t.tier} IN ('note', 'bundle', 'bag', 'rain')`),
+  statusCheck: check("spray_batches_status_check", sql`${t.status} IN ('created', 'pending', 'paid', 'delivered', 'reversing', 'reversed', 'failed', 'disputed')`),
+  amountsCheck: check("spray_batches_amounts_check", sql`${t.amountKobo} >= 50000 AND ${t.vatKobo} >= 0 AND ${t.feeKobo} >= 0 AND ${t.reserveKobo} >= 0 AND ${t.vatKobo} + ${t.feeKobo} + ${t.reserveKobo} < ${t.amountKobo}`),
+  notSelfCheck: check("spray_batches_not_self_check", sql`${t.payerId} <> ${t.featuredId}`),
+}));
+export type SprayBatch = typeof sprayBatches.$inferSelect;
+
 export const sprayPayments = pgTable("spray_payments", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   idempotencyKey: text("idempotency_key").notNull(),
@@ -1334,6 +1380,9 @@ export const sprayPayments = pgTable("spray_payments", {
   checkAttempts: integer("check_attempts").notNull().default(0),
   lastCheckedAt: timestamp("last_checked_at"),
   nextCheckAt: timestamp("next_check_at"),
+  // Team spray: the batch (the one charge) this share belongs to, and the subaccount fixed for it when the spray started.
+  batchId: uuid("batch_id").references(() => sprayBatches.id, { onDelete: "restrict" }),
+  recipientSubaccount: text("recipient_subaccount"),
 }, (t) => ({
   // Per payer, never global: one user can never squat or probe another's key.
   payerKeyUnique: unique("spray_payments_payer_key_key").on(t.payerId, t.idempotencyKey),
@@ -1347,6 +1396,9 @@ export const sprayPayments = pgTable("spray_payments", {
   tierCheck: check("spray_payments_tier_check", sql`${t.tier} IN ('note', 'bundle', 'bag', 'rain')`),
   amountsCheck: check("spray_payments_amounts_check", sql`${t.amountKobo} >= 50000 AND ${t.v3c} = ${t.amountKobo} AND ${t.vatKobo} >= 0 AND ${t.feeKobo} >= 0 AND ${t.reserveKobo} >= 0 AND ${t.platformKobo} >= 0 AND ${t.hostKobo} >= 0 AND (${t.guestKobo} IS NULL OR ${t.guestKobo} >= 0) AND ${t.vatKobo} + ${t.feeKobo} + ${t.reserveKobo} + ${t.platformKobo} + ${t.hostKobo} + COALESCE(${t.guestKobo}, 0) = ${t.amountKobo}`),
   notSelfCheck: check("spray_payments_not_self_check", sql`${t.payerId} <> ${t.recipientId}`),
+  batchIdx: index("spray_payments_batch_idx").on(t.batchId).where(sql`${t.batchId} IS NOT NULL`),
+  batchRecipientUnique: uniqueIndex("spray_payments_batch_recipient_key").on(t.batchId, t.recipientId).where(sql`${t.batchId} IS NOT NULL`),
+  batchSubaccountCheck: check("spray_payments_batch_subaccount_check", sql`${t.batchId} IS NULL OR ${t.recipientSubaccount} IS NOT NULL`),
 }));
 export type SprayPayment = typeof sprayPayments.$inferSelect;
 export type InsertSprayPayment = typeof sprayPayments.$inferInsert;
