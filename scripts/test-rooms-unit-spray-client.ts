@@ -262,7 +262,7 @@ test("outcomeOfPost: 200 answers", () => {
 });
 test("outcomeOfStatus: refunded only when reversed; a failed row is final; a failed poll never ends the wait", () => {
   const r = outcomeOfStatus({ ok: true, status: 200, body: { status: "reversed", reason: "RECIPIENT_LEFT" } }, "sp1");
-  assert.equal(r.kind === "failed" && r.reason, "RECIPIENT_LEFT");
+  assert.equal(r.kind === "failed" && r.reason, "REVERSED", "a recipient who left no longer reverses; an old row reads as the plain reversed line");
   const net = outcomeOfStatus({ ok: true, status: 200, body: { status: "failed", reason: "NETWORK" } }, "sp1");
   assert.equal(net.kind === "failed" && net.reason, "NOT_STARTED");
   assert.equal(outcomeOfStatus({ ok: true, status: 200, body: { status: "pending" } }, "sp1").kind, "wait");
@@ -356,8 +356,8 @@ test("I2: an unpaid approval that timed out says NOT charged; refunded only when
   assert.match(SPRAY_FAIL_COPY.EXPIRED.body, /not charged/);
   assert.doesNotMatch(SPRAY_FAIL_COPY.EXPIRED.body + SPRAY_FAIL_COPY.EXPIRED.title, /refund/i);
   const reversed = outcomeOfStatus({ ok: true, status: 200, body: { status: "reversed", reason: "TIMEOUT" } }, "sp1");
-  assert.equal(reversed.kind === "failed" && reversed.reason, "TIMEOUT");
-  assert.equal(SPRAY_FAIL_COPY.TIMEOUT.refunded, true);
+  assert.equal(reversed.kind === "failed" && reversed.reason, "REVERSED");
+  assert.equal(SPRAY_FAIL_COPY.REVERSED.refunded, true);
   // No failed-row reason can reach a "refunded" line.
   for (const reason of ["DECLINED", "INSUFFICIENT_FUNDS", "NOT_REUSABLE", "NETWORK", "RECIPIENT_LEFT", "ROOM_ENDED", "TIMEOUT", "DISPUTED", "x", undefined]) {
     for (const r of [outcomeOfStatus({ ok: true, status: 200, body: { status: "failed", reason } }, "sp1"), outcomeOfPost({ ok: true, status: 200, body: { status: "failed", sprayId: "sp1", reason } }, ORIGIN)]) {
@@ -581,7 +581,11 @@ test("copy: no em dashes, never 'cash', no legal tender wording", () => {
     assert.ok(!/cash/i.test(line), line);
     assert.ok(!/legal tender/i.test(line), line);
   }
-  assert.equal(SPRAY_FAIL_COPY.RECIPIENT_LEFT.body, "They left the stage, so you were refunded in full.");
+  // The delivery rule: a charge that went through is delivered. No copy claims a refund because of the room, the player or timing.
+  for (const line of allSprayCopy()) assert.ok(!/left the stage|room ended|took too long|couldn't be delivered|not delivered/i.test(line), line);
+  assert.ok(!/refunded in full if it can/i.test(SPRAY_FAIL_COPY.STILL_CHECKING.body + SPRAY_FAIL_COPY.STILL_WAITING.body));
+  assert.equal(SPRAY_FAIL_COPY.REVERSED.body, "This payment didn't pass our checks, so it was returned to you in full.");
+  assert.equal(SPRAY_FAIL_COPY.DISPUTED.refunded, false);
   assert.match(SPRAY_FAIL_COPY.DECLINED.body, /not charged/);
   assert.match(SPRAY_FAIL_COPY.NOT_SENT.title, /offline/);
   assert.match(SPRAY_FAIL_COPY.NOT_SENT.body, /Nothing was sent/);

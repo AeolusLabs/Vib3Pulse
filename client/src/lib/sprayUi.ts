@@ -332,9 +332,12 @@ function failedReason(reason: unknown): SprayFailReason {
   return "FAILED";
 }
 
-/** A reversed row's reason. Only `status: "reversed"` ever reaches a "refunded" line. */
+/**
+ * A reversed row's reason. Only `status: "reversed"` ever reaches a "returned" line. The recipient leaving, the room ending and
+ * a slow delivery no longer reverse anything (a charge that went through is delivered), so they read as the plain reversed line.
+ */
 function reversedReason(reason: unknown): SprayFailReason {
-  if (reason === "RECIPIENT_LEFT" || reason === "ROOM_ENDED" || reason === "TIMEOUT" || reason === "DISPUTED") return reason as SprayFailReason;
+  if (reason === "DISPUTED") return "DISPUTED";
   return "REVERSED";
 }
 
@@ -471,10 +474,12 @@ export const SPRAY_FAIL_COPY: Record<SprayFailReason, FailCopy> = {
   NETWORK: { title: "The payment didn't start", body: "Something went wrong on our side, so you were not charged and nothing was sent. Try again in a moment.", primary: "retry", anotherCard: false, refunded: false, tone: "fail" },
   NOT_STARTED: { title: "The payment didn't start", body: "Something went wrong on our side, so you were not charged and nothing was sent. Try again in a moment.", primary: "retry", anotherCard: false, refunded: false, tone: "fail" },
   // The three below are only ever shown for status "reversed": money was taken and has been sent back.
-  RECIPIENT_LEFT: { title: "Refunded in full", body: "They left the stage, so you were refunded in full.", primary: null, anotherCard: false, refunded: true, tone: "refund" },
-  ROOM_ENDED: { title: "Refunded in full", body: "The room ended before your spray landed, so you were refunded in full.", primary: null, anotherCard: false, refunded: true, tone: "refund" },
-  TIMEOUT: { title: "Refunded in full", body: "Your spray took too long to land, so you were refunded in full.", primary: "retry", anotherCard: false, refunded: true, tone: "refund" },
-  REVERSED: { title: "Refunded in full", body: "Your spray couldn't be delivered, so you were refunded in full.", primary: null, anotherCard: false, refunded: true, tone: "refund" },
+  // Delivery problems no longer reverse a spray: a charge that went through is delivered. These three keys stay only so an old
+  // row still reads honestly; they say the same as REVERSED and claim nothing about the room or the player.
+  RECIPIENT_LEFT: { title: "Payment returned", body: "This payment didn't pass our checks, so it was returned to you in full.", primary: null, anotherCard: false, refunded: true, tone: "refund" },
+  ROOM_ENDED: { title: "Payment returned", body: "This payment didn't pass our checks, so it was returned to you in full.", primary: null, anotherCard: false, refunded: true, tone: "refund" },
+  TIMEOUT: { title: "Payment returned", body: "This payment didn't pass our checks, so it was returned to you in full.", primary: null, anotherCard: false, refunded: true, tone: "refund" },
+  REVERSED: { title: "Payment returned", body: "This payment didn't pass our checks, so it was returned to you in full.", primary: null, anotherCard: false, refunded: true, tone: "refund" },
   DISPUTED: { title: "This payment was disputed", body: "Your bank reversed this payment. Nothing more happens to it here.", primary: null, anotherCard: false, refunded: false, tone: "info" },
   EXPIRED: { title: "The approval ran out of time", body: "The payment wasn't finished in time, so you were not charged and nothing was sent.", primary: "retry", anotherCard: false, refunded: false, tone: "fail" },
   FAILED: { title: "The payment didn't go through", body: "Nothing was sent. If your bank shows a charge, it is returned in full.", primary: "retry", anotherCard: false, refunded: false, tone: "fail" },
@@ -487,8 +492,8 @@ export const SPRAY_FAIL_COPY: Record<SprayFailReason, FailCopy> = {
   NOT_SENT: { title: "You're offline", body: "Nothing was sent and you were not charged. Try again when you're back online.", primary: "retry", anotherCard: false, refunded: false, tone: "info" },
   BAD_REQUEST: { title: "That didn't work", body: "Nothing was sent. Close this and try again.", primary: null, anotherCard: false, refunded: false, tone: "fail" },
   MISMATCH: { title: "That didn't work", body: "Nothing was sent. Close this and try again.", primary: "retry", anotherCard: false, refunded: false, tone: "fail" },
-  STILL_CHECKING: { title: "Still checking your payment", body: "We haven't had an answer yet. Don't pay again: if it went through, your spray lands, or you are refunded in full if it can't. You are never charged twice for this spray.", primary: "check", anotherCard: false, refunded: false, tone: "wait" },
-  STILL_WAITING: { title: "Still waiting for your bank", body: "We haven't heard back yet. If you approved it, your spray lands, or you are refunded in full if it can't. You are never charged twice for this spray.", primary: "check", anotherCard: false, refunded: false, tone: "wait" },
+  STILL_CHECKING: { title: "Still checking your payment", body: "We haven't had an answer yet. Don't pay again: if it went through, your spray lands. You are never charged twice for this spray.", primary: "check", anotherCard: false, refunded: false, tone: "wait" },
+  STILL_WAITING: { title: "Still waiting for your bank", body: "We haven't heard back yet. If you approved it, your spray lands. You are never charged twice for this spray.", primary: "check", anotherCard: false, refunded: false, tone: "wait" },
   BAD_LINK: { title: "Couldn't open your bank", body: "Something was wrong with the approval link, so we didn't open it. You were not charged.", primary: "retry", anotherCard: false, refunded: false, tone: "fail" },
 };
 
