@@ -14,8 +14,10 @@
 // calls and one category can never starve another.
 // Runs whatever the spray flag says: money already taken must still be delivered or given back.
 import { sanitizeMoneyError } from "@shared/roomRefunds";
-import type { SprayPayment } from "@shared/schema";
+import type { SprayBatch, SprayPayment } from "@shared/schema";
 import * as ss from "./sprayStorage";
+import * as bs from "./sprayBatchStorage";
+import "./teamSpray"; // registers the batch finalizer: the sweep drives team sprays through the same finalizeSpray
 import { finalizeSpray, sprayClock, UNPAID_EXPIRY_MS, type FinalizeOutcome } from "./spray";
 
 export const sprayJobTuning = {
@@ -61,6 +63,25 @@ export async function sweepPendingSprays(now: number = sprayClock.now()): Promis
       ss.listStaleSprays(["created", "pending"], new Date(now - UNPAID_EXPIRY_MS), t.quota.unpaid, { dueAt }),
       ss.listStaleSprays(["failed"], new Date(now - t.failedMinAgeMs), t.quota.failed, { dueAt, createdSince: new Date(now - t.failedWindowMs) }),
     ]);
+    // Team spray (teamSpray.ts): one charge = one batch row, finalized by its reference exactly like a single spray. Same
+    // categories and quotas (share rows are never listed on their own: listStaleSprays leaves out rows with a batch_id).
+    const [bPaid, bReversing, bUnpaid, bFailed] = await Promise.all([
+      bs.listStaleBatches(["paid"], new Date(now + 1000), t.quota.paid, { dueAt }),
+      bs.listStaleBatches(["reversing"], new Date(now + 1000), t.quota.reversing, { dueAt }),
+      bs.listStaleBatches(["created", "pending"], new Date(now - UNPAID_EXPIRY_MS), t.quota.unpaid, { dueAt }),
+      bs.listStaleBatches(["failed"], new Date(now - t.failedMinAgeMs), t.quota.failed, { dueAt, createdSince: new Date(now - t.failedWindowMs) }),
+    ]);
+    const runBatch = async (row: SprayBatch, expireUnpaid: boolean) => {
+      const ref = row.providerRef;
+      out.checked++;
+      try { out.outcomes[ref] = await finalizeSpray(ref, { expireUnpaid, waitMs: 0 }); }
+      catch (e) {
+        out.outcomes[ref] = "error";
+        console.error(`[rooms:spray] sweep: team ref=${ref.slice(0, 12)}... failed, a later pass retries:`, sanitizeMoneyError(e));
+      }
+      await bs.noteBatchChecked(row.id, new Date(now), new Date(now + nextCheckDelayMs(row)))
+        .catch((e) => console.error("[rooms:spray] sweep: recording a team check failed:", sanitizeMoneyError(e)));
+    };
     const run = async (row: SprayPayment, expireUnpaid: boolean) => {
       const ref = row.providerRef;
       out.checked++;
@@ -82,6 +103,13 @@ export async function sweepPendingSprays(now: number = sprayClock.now()): Promis
       ...failed.map((r): [SprayPayment, boolean] => [r, false]),
     ];
     for (const [row, expire] of queue) await run(row, expire); // already bounded by the per-category quotas
+    const bQueue: Array<[SprayBatch, boolean]> = [
+      ...bPaid.map((r): [SprayBatch, boolean] => [r, false]),
+      ...bReversing.map((r): [SprayBatch, boolean] => [r, false]),
+      ...bUnpaid.map((r): [SprayBatch, boolean] => [r, true]),
+      ...bFailed.map((r): [SprayBatch, boolean] => [r, false]),
+    ];
+    for (const [row, expire] of bQueue) await runBatch(row, expire);
   } catch (e) {
     if (isMissingTable(e)) {
       if (!warnedMissing) { warnedMissing = true; console.warn("[rooms:spray] sweep: spray tables are not there yet (migration not applied); skipping"); }

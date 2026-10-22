@@ -33,7 +33,7 @@ export const roomFeatures: RoomFeatures = loadRoomFeatures(process.env);
  * Gaming parts that are built (switched by the code, not the environment): GET /api/rooms/config reports them under `game`
  * while ROOMS_GAMING is on, so the client offers only what the server can do.
  */
-export const GAME_PARTS = { lanes: true, teamSpray: false };
+export const GAME_PARTS = { lanes: true, teamSpray: true };
 
 /** OBS / RTMP ingest (LiveKit Ingress) is switched on for this deployment. */
 export const ingressFlag = (): boolean => parseFlag(process.env.LIVEKIT_INGRESS, false);

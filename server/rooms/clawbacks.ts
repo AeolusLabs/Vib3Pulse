@@ -32,6 +32,7 @@
 //    the same transaction. The payout is the available amount minus what was applied (never below 0).
 //  - written_off only by an admin (finance roles): written_off_by is the admin's id (admin_users), with a reason, audited
 //    in the admin activity log.
+import { disputeBatchLocked, resolveBatchDisputeLocked } from "./teamSpray";
 import type { Express, Request, Response } from "express";
 import type { PoolClient } from "pg";
 import { z } from "zod";
@@ -94,7 +95,12 @@ const DISPUTABLE = ["delivered", "paid", "created", "pending", "failed"] as cons
 async function disputeLocked(c: PoolClient, reference: string): Promise<DisputeOutcome> {
   const nowMs = sprayClock.now();
   const row = await loadRow(c, reference);
-  if (!row) { console.log(`[rooms:spray] dispute ref=${sprayReferenceForLog(reference)} ignored: no spray`); return "unknown"; }
+  if (!row) {
+    const batch = await disputeBatchLocked(c, reference); // a team spray's one charge (teamSpray.ts); null = not a batch either
+    if (batch) return batch;
+    console.log(`[rooms:spray] dispute ref=${sprayReferenceForLog(reference)} ignored: no spray`);
+    return "unknown";
+  }
   const issue = (error: string) => openPaymentIssue(c, { ticketId: null, providerRef: reference, provider: row.provider, reason: "dispute", error, now: new Date(nowMs) });
 
   if (row.status === "reversing" || row.status === "reversed") {
@@ -175,7 +181,7 @@ export async function handleSprayDisputeResolved(reference: string, data: unknow
 async function resolveLocked(c: PoolClient, reference: string, resolution: string): Promise<DisputeResolveOutcome> {
   const nowMs = sprayClock.now();
   const row = await loadRow(c, reference);
-  if (!row) return "unknown";
+  if (!row) return (await resolveBatchDisputeLocked(c, reference, resolution)) ?? "unknown";
   const now = new Date(nowMs);
   const issue = (error: string) => openPaymentIssue(c, { ticketId: null, providerRef: reference, provider: row.provider, reason: "dispute_resolved", error, now });
   // Review r5 I3: an OUTCOME issue (REPAY, LOST_AFTER_REFUND, WON_UNDELIVERED) must always land. openPaymentIssue keeps one

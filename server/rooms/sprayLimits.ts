@@ -153,7 +153,7 @@ export function isNewHost(user: { createdAt: Date | string | null | undefined },
   return now - created < NEW_HOST_WINDOW_DAYS * DAY_MS;
 }
 
-function windowStart(user: { createdAt: Date | string | null | undefined }): Date {
+export function windowStart(user: { createdAt: Date | string | null | undefined }): Date {
   const d = user.createdAt ? new Date(user.createdAt) : new Date(0);
   return Number.isFinite(d.getTime()) ? d : new Date(0);
 }
