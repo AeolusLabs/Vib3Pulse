@@ -6,6 +6,7 @@
 // The idempotency key is made once per intent (start) and kept on the intent; every retry of the same request reuses it.
 // Only a definitive answer from the server (declined, refunded, refused) makes "Try again" a new intent with a new key.
 import { SPRAY_TIERS, formatV3c, isSprayTier, type SprayTier } from "@shared/money";
+import type { Side } from "@shared/gameScreen";
 import {
   DAILY_DEFAULT_KOBO, DAILY_VERIFIED_MAX_KOBO, DELIVERY_DEADLINE_MS, ID_REQUIRED_ABOVE_KOBO, ROOM_LIMIT_OPTIONS_KOBO, SPRAY_REASONS,
   exceedsRoomLimit, idempotencyKeyShape, requiresThreeDs, sprayPrice, type SprayReason,
@@ -160,7 +161,11 @@ export function dailyChoices(verified: boolean): LimitChoice[] {
  * One spray the payer chose. `key` is the idempotency key, made once for this intent and sent on every attempt of it.
  * `bankUrl` is the approval link once the server gave one (kept so the payer can reopen it while we keep checking).
  */
-export interface SprayIntent { tier: SprayTier; targetId: string; key: string; saveCard: boolean; bankUrl?: string }
+export interface SprayIntent {
+  tier: SprayTier; targetId: string; key: string; saveCard: boolean; bankUrl?: string;
+  /** A team spray (one charge split between the team's players). `targetId` is then only an anchor player; the sheet says the team. */
+  side?: Side;
+}
 
 export type SprayFailReason =
   | SprayReason
@@ -203,7 +208,7 @@ export type SprayOutcome =
   | { kind: "wait" };
 
 export type SprayFlowEvent =
-  | { type: "start"; tier: SprayTier; targetId: string; key: string }
+  | { type: "start"; tier: SprayTier; targetId: string; key: string; side?: Side }
   | { type: "saveCard"; on: boolean }
   | { type: "pay"; now: number }
   | { type: "outcome"; outcome: SprayOutcome; now: number }
@@ -229,7 +234,7 @@ export function sprayFlow(s: SprayFlow, e: SprayFlowEvent): SprayFlow {
       // A payment in flight is never replaced by a new one (double tap, a second tray, a tap on another tier).
       if (s.kind === "paying" || s.kind === "action_required") return s;
       if (!isSprayTier(e.tier) || !e.targetId || !idempotencyKeyShape(e.key)) return s;
-      return { kind: "confirming", intent: { tier: e.tier, targetId: e.targetId, key: e.key, saveCard: false } };
+      return { kind: "confirming", intent: { tier: e.tier, targetId: e.targetId, key: e.key, saveCard: false, ...(e.side === "A" || e.side === "B" ? { side: e.side } : {}) } };
     case "saveCard":
       return s.kind === "confirming" ? { ...s, intent: { ...s.intent, saveCard: e.on === true } } : s;
     case "pay":
@@ -264,7 +269,7 @@ export function sprayFlow(s: SprayFlow, e: SprayFlowEvent): SprayFlow {
     case "retry":
       if (s.kind !== "failed") return s;
       if (s.sameKey) return { kind: "confirming", intent: s.intent };
-      return idempotencyKeyShape(e.key) ? { kind: "confirming", intent: { tier: s.intent.tier, targetId: s.intent.targetId, key: e.key, saveCard: s.intent.saveCard } } : s;
+      return idempotencyKeyShape(e.key) ? { kind: "confirming", intent: { tier: s.intent.tier, targetId: s.intent.targetId, key: e.key, saveCard: s.intent.saveCard, ...(s.intent.side ? { side: s.intent.side } : {}) } } : s;
     case "close":
       // While the request is out or the bank page is open the flow is never dropped: the sheet is hidden, and the hook
       // keeps watching (closing the bank sheet must not stop tracking, review M8).
@@ -332,9 +337,12 @@ function failedReason(reason: unknown): SprayFailReason {
   return "FAILED";
 }
 
-/** A reversed row's reason. Only `status: "reversed"` ever reaches a "refunded" line. */
+/**
+ * A reversed row's reason. Only `status: "reversed"` ever reaches a "returned" line. The recipient leaving, the room ending and
+ * a slow delivery no longer reverse anything (a charge that went through is delivered), so they read as the plain reversed line.
+ */
 function reversedReason(reason: unknown): SprayFailReason {
-  if (reason === "RECIPIENT_LEFT" || reason === "ROOM_ENDED" || reason === "TIMEOUT" || reason === "DISPUTED") return reason as SprayFailReason;
+  if (reason === "DISPUTED") return "DISPUTED";
   return "REVERSED";
 }
 
@@ -432,6 +440,7 @@ export interface SprayTrack { v: 1; roomId: string; key: string; sprayId: string
 
 export function encodeSprayTrack(roomId: string, s: SprayFlow): string | null {
   if ((s.kind !== "paying" && s.kind !== "action_required") || !s.sprayId) return null;
+  if (s.intent.side) return null; // a team charge is picked up again from the bank's ?sprayTeam= callback, not from this record
   const t: SprayTrack = { v: 1, roomId, key: s.intent.key, sprayId: s.sprayId, tier: s.intent.tier, targetId: s.intent.targetId, since: s.since };
   return JSON.stringify(t);
 }
@@ -471,10 +480,12 @@ export const SPRAY_FAIL_COPY: Record<SprayFailReason, FailCopy> = {
   NETWORK: { title: "The payment didn't start", body: "Something went wrong on our side, so you were not charged and nothing was sent. Try again in a moment.", primary: "retry", anotherCard: false, refunded: false, tone: "fail" },
   NOT_STARTED: { title: "The payment didn't start", body: "Something went wrong on our side, so you were not charged and nothing was sent. Try again in a moment.", primary: "retry", anotherCard: false, refunded: false, tone: "fail" },
   // The three below are only ever shown for status "reversed": money was taken and has been sent back.
-  RECIPIENT_LEFT: { title: "Refunded in full", body: "They left the stage, so you were refunded in full.", primary: null, anotherCard: false, refunded: true, tone: "refund" },
-  ROOM_ENDED: { title: "Refunded in full", body: "The room ended before your spray landed, so you were refunded in full.", primary: null, anotherCard: false, refunded: true, tone: "refund" },
-  TIMEOUT: { title: "Refunded in full", body: "Your spray took too long to land, so you were refunded in full.", primary: "retry", anotherCard: false, refunded: true, tone: "refund" },
-  REVERSED: { title: "Refunded in full", body: "Your spray couldn't be delivered, so you were refunded in full.", primary: null, anotherCard: false, refunded: true, tone: "refund" },
+  // Delivery problems no longer reverse a spray: a charge that went through is delivered. These three keys stay only so an old
+  // row still reads honestly; they say the same as REVERSED and claim nothing about the room or the player.
+  RECIPIENT_LEFT: { title: "Payment returned", body: "This payment didn't pass our checks, so it was returned to you in full.", primary: null, anotherCard: false, refunded: true, tone: "refund" },
+  ROOM_ENDED: { title: "Payment returned", body: "This payment didn't pass our checks, so it was returned to you in full.", primary: null, anotherCard: false, refunded: true, tone: "refund" },
+  TIMEOUT: { title: "Payment returned", body: "This payment didn't pass our checks, so it was returned to you in full.", primary: null, anotherCard: false, refunded: true, tone: "refund" },
+  REVERSED: { title: "Payment returned", body: "This payment didn't pass our checks, so it was returned to you in full.", primary: null, anotherCard: false, refunded: true, tone: "refund" },
   DISPUTED: { title: "This payment was disputed", body: "Your bank reversed this payment. Nothing more happens to it here.", primary: null, anotherCard: false, refunded: false, tone: "info" },
   EXPIRED: { title: "The approval ran out of time", body: "The payment wasn't finished in time, so you were not charged and nothing was sent.", primary: "retry", anotherCard: false, refunded: false, tone: "fail" },
   FAILED: { title: "The payment didn't go through", body: "Nothing was sent. If your bank shows a charge, it is returned in full.", primary: "retry", anotherCard: false, refunded: false, tone: "fail" },
@@ -487,8 +498,8 @@ export const SPRAY_FAIL_COPY: Record<SprayFailReason, FailCopy> = {
   NOT_SENT: { title: "You're offline", body: "Nothing was sent and you were not charged. Try again when you're back online.", primary: "retry", anotherCard: false, refunded: false, tone: "info" },
   BAD_REQUEST: { title: "That didn't work", body: "Nothing was sent. Close this and try again.", primary: null, anotherCard: false, refunded: false, tone: "fail" },
   MISMATCH: { title: "That didn't work", body: "Nothing was sent. Close this and try again.", primary: "retry", anotherCard: false, refunded: false, tone: "fail" },
-  STILL_CHECKING: { title: "Still checking your payment", body: "We haven't had an answer yet. Don't pay again: if it went through, your spray lands, or you are refunded in full if it can't. You are never charged twice for this spray.", primary: "check", anotherCard: false, refunded: false, tone: "wait" },
-  STILL_WAITING: { title: "Still waiting for your bank", body: "We haven't heard back yet. If you approved it, your spray lands, or you are refunded in full if it can't. You are never charged twice for this spray.", primary: "check", anotherCard: false, refunded: false, tone: "wait" },
+  STILL_CHECKING: { title: "Still checking your payment", body: "We haven't had an answer yet. Don't pay again: if it went through, your spray lands. You are never charged twice for this spray.", primary: "check", anotherCard: false, refunded: false, tone: "wait" },
+  STILL_WAITING: { title: "Still waiting for your bank", body: "We haven't heard back yet. If you approved it, your spray lands. You are never charged twice for this spray.", primary: "check", anotherCard: false, refunded: false, tone: "wait" },
   BAD_LINK: { title: "Couldn't open your bank", body: "Something was wrong with the approval link, so we didn't open it. You were not charged.", primary: "retry", anotherCard: false, refunded: false, tone: "fail" },
 };
 
@@ -660,9 +671,16 @@ export function sprayReturnId(search: string): string | null {
   return v && sprayIdOk(v) ? v : null;
 }
 
+/** The way back from the bank for a team charge: /rooms/:id?sprayTeam=<batchId>. */
+export function sprayTeamReturnId(search: string): string | null {
+  const v = new URLSearchParams(search).get("sprayTeam");
+  return v && sprayIdOk(v) ? v : null;
+}
+
 export function searchWithoutSpray(search: string): string {
   const p = new URLSearchParams(search);
   p.delete("spray");
+  p.delete("sprayTeam");
   const s = p.toString();
   return s ? `?${s}` : "";
 }

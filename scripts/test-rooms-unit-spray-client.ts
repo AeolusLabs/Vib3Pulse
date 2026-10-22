@@ -11,8 +11,9 @@ import {
   cardLabel, chargeLine, counterAt, dailyChoices, decodeSprayTrack, defaultTarget, encodeSprayTrack, holdsSprayBlock, inFlight, isDevBuild,
   limitChoices, limitErrorText, needsSlide, newIdempotencyKey, newSprays, outcomeOfPost, outcomeOfStatus, parseLimitBody, parseRetryAfter,
   parseSprayBlock, parseSprayMe, rainBannerText, reasonOfRefusal, safeAuthorizationUrl, searchWithoutSpray, sprayFlow, sprayReturnId,
-  sprayTargets, systemChatText, thankYouText, tileAction, waitDeadlineMs, type SprayBlock, type SprayFlow, type SprayMe,
+  sprayTargets, sprayTeamReturnId, systemChatText, thankYouText, tileAction, waitDeadlineMs, type SprayBlock, type SprayFlow, type SprayMe,
 } from "../client/src/lib/sprayUi";
+import { splitLine, teamSprayTiers } from "../client/src/lib/gameScreen";
 import { FIXTURE_SPRAY_KEY, fixtureSprayChatText, fixtureSprayStart, parseSprayFixture } from "../client/src/lib/sprayFixtures";
 
 const src = (rel: string) => readFileSync(new URL(rel, import.meta.url), "utf8");
@@ -262,7 +263,7 @@ test("outcomeOfPost: 200 answers", () => {
 });
 test("outcomeOfStatus: refunded only when reversed; a failed row is final; a failed poll never ends the wait", () => {
   const r = outcomeOfStatus({ ok: true, status: 200, body: { status: "reversed", reason: "RECIPIENT_LEFT" } }, "sp1");
-  assert.equal(r.kind === "failed" && r.reason, "RECIPIENT_LEFT");
+  assert.equal(r.kind === "failed" && r.reason, "REVERSED", "a recipient who left no longer reverses; an old row reads as the plain reversed line");
   const net = outcomeOfStatus({ ok: true, status: 200, body: { status: "failed", reason: "NETWORK" } }, "sp1");
   assert.equal(net.kind === "failed" && net.reason, "NOT_STARTED");
   assert.equal(outcomeOfStatus({ ok: true, status: 200, body: { status: "pending" } }, "sp1").kind, "wait");
@@ -356,8 +357,8 @@ test("I2: an unpaid approval that timed out says NOT charged; refunded only when
   assert.match(SPRAY_FAIL_COPY.EXPIRED.body, /not charged/);
   assert.doesNotMatch(SPRAY_FAIL_COPY.EXPIRED.body + SPRAY_FAIL_COPY.EXPIRED.title, /refund/i);
   const reversed = outcomeOfStatus({ ok: true, status: 200, body: { status: "reversed", reason: "TIMEOUT" } }, "sp1");
-  assert.equal(reversed.kind === "failed" && reversed.reason, "TIMEOUT");
-  assert.equal(SPRAY_FAIL_COPY.TIMEOUT.refunded, true);
+  assert.equal(reversed.kind === "failed" && reversed.reason, "REVERSED");
+  assert.equal(SPRAY_FAIL_COPY.REVERSED.refunded, true);
   // No failed-row reason can reach a "refunded" line.
   for (const reason of ["DECLINED", "INSUFFICIENT_FUNDS", "NOT_REUSABLE", "NETWORK", "RECIPIENT_LEFT", "ROOM_ENDED", "TIMEOUT", "DISPUTED", "x", undefined]) {
     for (const r of [outcomeOfStatus({ ok: true, status: 200, body: { status: "failed", reason } }, "sp1"), outcomeOfPost({ ok: true, status: 200, body: { status: "failed", sprayId: "sp1", reason } }, ORIGIN)]) {
@@ -581,7 +582,11 @@ test("copy: no em dashes, never 'cash', no legal tender wording", () => {
     assert.ok(!/cash/i.test(line), line);
     assert.ok(!/legal tender/i.test(line), line);
   }
-  assert.equal(SPRAY_FAIL_COPY.RECIPIENT_LEFT.body, "They left the stage, so you were refunded in full.");
+  // The delivery rule: a charge that went through is delivered. No copy claims a refund because of the room, the player or timing.
+  for (const line of allSprayCopy()) assert.ok(!/left the stage|room ended|took too long|couldn't be delivered|not delivered/i.test(line), line);
+  assert.ok(!/refunded in full if it can/i.test(SPRAY_FAIL_COPY.STILL_CHECKING.body + SPRAY_FAIL_COPY.STILL_WAITING.body));
+  assert.equal(SPRAY_FAIL_COPY.REVERSED.body, "This payment didn't pass our checks, so it was returned to you in full.");
+  assert.equal(SPRAY_FAIL_COPY.DISPUTED.refunded, false);
   assert.match(SPRAY_FAIL_COPY.DECLINED.body, /not charged/);
   assert.match(SPRAY_FAIL_COPY.NOT_SENT.title, /offline/);
   assert.match(SPRAY_FAIL_COPY.NOT_SENT.body, /Nothing was sent/);
@@ -616,6 +621,73 @@ test("non-refundable notice: present in every state a spray can be started (tray
   const confirm = src(files[1]);
   assert.ok(confirm.indexOf("<NonRefundableNotice />") < confirm.indexOf("{paying ? ("), "confirm: before the pay controls");
 });
+// ---------------------------------------------------------------- team spray (one charge split between a team)
+const teamStart = (key = K1): SprayFlow => sprayFlow(IDLE, { type: "start", tier: "bag", targetId: "a1", key, side: "A" });
+test("team spray: the intent carries its side and the idempotency key made once for it", () => {
+  const s = teamStart();
+  assert.equal(s.kind === "confirming" && s.intent.side, "A");
+  assert.equal(s.kind === "confirming" && s.intent.key, K1);
+  assert.equal(sprayFlow(IDLE, { type: "start", tier: "bag", targetId: "a1", key: K1, side: "C" as any }).kind === "confirming" && (sprayFlow(IDLE, { type: "start", tier: "bag", targetId: "a1", key: K1, side: "C" as any }) as any).intent.side, undefined);
+  assert.equal(confirm().kind === "confirming" && (confirm() as any).intent.side, undefined, "a single spray has no side");
+});
+test("team spray: an unknown outcome replays the SAME key and side; a definitive answer is a new intent that keeps the side", () => {
+  let s = sprayFlow(teamStart(), { type: "pay", now: 1 });
+  s = sprayFlow(s, { type: "outcome", outcome: { kind: "unknown" }, now: 2 });
+  assert.equal(s.kind === "paying" && s.unknown, true);
+  assert.equal(s.kind === "paying" && s.intent.key, K1);
+  let f = sprayFlow(sprayFlow(teamStart(), { type: "pay", now: 1 }), { type: "outcome", outcome: { kind: "failed", reason: "DECLINED", sprayId: "b1" }, now: 2 });
+  f = sprayFlow(f, { type: "retry", key: K2 });
+  assert.equal(f.kind === "confirming" && f.intent.key, K2);
+  assert.equal(f.kind === "confirming" && f.intent.side, "A");
+  let g = sprayFlow(sprayFlow(teamStart(), { type: "pay", now: 1 }), { type: "outcome", outcome: { kind: "failed", reason: "STILL_CHECKING", sprayId: null }, now: 2 });
+  g = sprayFlow(g, { type: "retry", key: K2 });
+  assert.equal(g.kind === "confirming" && g.intent.key, K1, "same key after an unknown outcome");
+});
+test("team spray: the throw goes to the team route with the intent's key, side and tier, and no amount", () => {
+  const api = src("../client/src/lib/sprayApi.ts");
+  assert.match(api, /\/spray\/team\$\{withToken\(token\)\}/);
+  assert.match(api, /tier: p\.tier, side: p\.side, idempotencyKey: p\.idempotencyKey/);
+  assert.ok(!/amount|kobo|shares/i.test(api.slice(api.indexOf("export const postSprayTeam"), api.indexOf("export const getSprayTeamStatus"))), "the client sends no amount or share");
+  const hook = src("../client/src/components/rooms/spray/useSpray.ts");
+  assert.match(hook, /postSprayTeam\(roomId, \{ tier: intent\.tier, side: intent\.side, idempotencyKey: intent\.key/);
+  assert.match(hook, /getSprayTeamStatus/);
+});
+test("team spray: answers read through the single spray's rules (batch id plays the spray id)", () => {
+  assert.equal(outcomeOfPost({ ok: true, status: 200, body: { status: "delivered", batchId: "bt1", sprayId: "bt1" } }, ORIGIN).kind, "delivered");
+  const bank = outcomeOfPost({ ok: true, status: 200, body: { status: "action_required", sprayId: "bt1", authorizationUrl: "https://checkout.paystack.com/x" } }, ORIGIN);
+  assert.equal(bank.kind, "action_required");
+  assert.equal(outcomeOfStatus({ ok: true, status: 200, body: { status: "delivered", sprayId: "bt1" } }, "bt1").kind, "delivered");
+  assert.equal(sprayTeamReturnId("?sprayTeam=bt1"), "bt1");
+  assert.equal(sprayTeamReturnId("?sprayTeam=<x>"), null);
+  assert.equal(searchWithoutSpray("?sprayTeam=bt1&a=1"), "?a=1");
+});
+test("team spray: every refusal is the single generic 'spraying isn't available' screen", () => {
+  for (const code of ["SPRAY_UNAVAILABLE"]) {
+    const o = outcomeOfPost({ ok: false, status: 403, code }, ORIGIN);
+    assert.equal(o.kind === "failed" && o.reason, "UNAVAILABLE");
+  }
+  assert.equal(SPRAY_FAIL_COPY.UNAVAILABLE.body, "Spraying is not available here.");
+  const api = src("../client/src/lib/sprayApi.ts");
+  assert.ok(!/reason.*SPRAY_UNAVAILABLE|which player|not payable/i.test(api), "no oracle wording in the api layer");
+});
+test("team spray tray: only tiers at or above the minimum, 'split equally between N players', notice above the tiers", () => {
+  assert.deepEqual(teamSprayTiers(3), ["bag", "rain"]);
+  assert.equal(splitLine(3), "Split equally between 3 players");
+  assert.equal(splitLine(1), "Split equally between 1 player");
+  const sheet = src("../client/src/components/rooms/game/SprayTeamSheet.tsx");
+  assert.match(sheet, /teamSprayTiers\(players\.length\)/);
+  assert.match(sheet, /splitLine\(players\.length\)/);
+  assert.ok(!/to each player|formatNaira\(least\)/.test(sheet), "no invented per-player amount");
+  assert.ok(sheet.indexOf("<NonRefundableNotice />") < sheet.indexOf("spray-team-tile-"));
+  assert.match(sheet, /onClick=\{\(\) => \{ if \(onThrow\) onThrow\(side, tier\); \}\}/);
+});
+test("team spray: the toggle shows only when the config allows it, and the animation cap holds", () => {
+  const shell = src("../client/src/components/rooms/shell/RoomShell.tsx");
+  assert.match(shell, /const sprayTeamOk = gameCaps\.teamSpray && !!sprayBlock/);
+  assert.match(shell, /maxNotes=\{gameOn \? GAME_MAX_NOTES : undefined\}/);
+  assert.match(src("../client/src/lib/gameScreen.ts"), /GAME_MAX_NOTES = 70/);
+});
+
 test("copy: every tier has a price line from sprayPrice", () => {
   for (const t of SPRAY_TIERS) assert.ok(allSprayCopy().some((l) => l.startsWith(sprayPrice(t).display)), t);
 });

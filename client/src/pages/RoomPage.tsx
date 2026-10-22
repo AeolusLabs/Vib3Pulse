@@ -32,7 +32,7 @@ import type { AdultInvite } from "@/lib/minorsRoomApi";
 import OpenLane from "@/components/rooms/game/OpenLane";
 import { laneForAge } from "@/lib/gameScreen";
 import { SprayReturn } from "@/components/rooms/spray/BankApproval";
-import { parseSprayBlock, searchWithoutSpray, sprayReturnId } from "@/lib/sprayUi";
+import { parseSprayBlock, searchWithoutSpray, sprayReturnId, sprayTeamReturnId } from "@/lib/sprayUi";
 import { MINORS_LANE_WARNING } from "@shared/rooms";
 import { moneyEligibleRoom } from "@shared/roomRules";
 
@@ -124,7 +124,12 @@ function RoomPageInner({ id }: { id: string }) {
   const goesStraightIn = !!detail && (detail.room.hostId === me?.id || !!detail.you);
   // The way back from the bank (/rooms/:id?spray=<sprayId>), usually in the tab the approval opened. That tab only reports
   // how the payer's own spray went; it never joins the room (the payer's room tab is still in it).
-  const [sprayBack, setSprayBack] = useState(() => sprayReturnId(window.location.search));
+  const [sprayBack, setSprayBack] = useState<{ id: string; team: boolean } | null>(() => {
+    const t = sprayTeamReturnId(window.location.search);
+    if (t) return { id: t, team: true };
+    const s = sprayReturnId(window.location.search);
+    return s ? { id: s, team: false } : null;
+  });
   const clearSprayBack = () => {
     try { window.history.replaceState(window.history.state, "", `${window.location.pathname}${searchWithoutSpray(window.location.search)}${window.location.hash}`); } catch { /* harmless */ }
     setSprayBack(null);
@@ -246,7 +251,7 @@ function RoomPageInner({ id }: { id: string }) {
   let bare = false; // the ticket screens carry the title themselves: only a back button above them
   if (sprayBack) {
     bare = true;
-    content = <SprayReturn roomId={id} sprayId={sprayBack} token={token} onBack={() => { clearSprayBack(); void refetch(); }} />;
+    content = <SprayReturn roomId={id} sprayId={sprayBack.id} team={sprayBack.team} token={token} onBack={() => { clearSprayBack(); void refetch(); }} />;
   } else if (confirmed) {
     // First: the return from Paystack verified a paid ticket. The room may still be loading (or unavailable); the
     // confirmation then shows the ticket without the room's details.

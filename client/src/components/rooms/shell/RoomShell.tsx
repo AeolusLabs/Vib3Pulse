@@ -52,6 +52,7 @@ import SprayEffects, { useSprayQuiet } from "@/components/rooms/spray/SprayEffec
 import { snd } from "@/components/rooms/spray/sound";
 import { sprayTargets, type SprayBlock, type SprayFlow as SprayFlowState } from "@/lib/sprayUi";
 import { moneyEligibleRoom } from "@shared/roomRules";
+import type { SprayTier } from "@shared/money";
 
 /** The socket actions the shell uses. RoomPage passes useRoomSocket(); the dev fixture passes fakes. */
 export type RoomShellSocket = Pick<ReturnType<typeof useRoomSocket>,
@@ -320,6 +321,9 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
   const [playOpen, setPlayOpen] = useState(gameSheetFixture === "play");
   const [teamSprayOpen, setTeamSprayOpen] = useState(gameSheetFixture === "teamspray");
   const [teamSpraySide, setTeamSpraySide] = useState<Side>("A");
+  // The team sheet's pick, handed to the spray flow (which owns the key, the pay step and the bank page).
+  const [teamRequest, setTeamRequest] = useState<{ side: Side; tier: SprayTier; anchorId: string; seq: number } | null>(null);
+  const teamSeq = useRef(0);
   const onPlay = () => { if (!myGameSide && myAskSide) sock.gameAction?.("withdraw"); else setPlayOpen(true); };
   // A host or co-host is put straight in (the server lets them accept themselves); everyone else asks and waits for an accept.
   const joinGame = (side: Side) => { if (!meId) return; if (iAmMod) sock.gameAction?.("accept", { targetId: meId, side }); else sock.gameAction?.("ask", { side }); };
@@ -606,6 +610,12 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
         <SprayTeamSheet
           open={teamSprayOpen} onOpenChange={setTeamSprayOpen} game={game} side={teamSpraySide} onSide={setTeamSpraySide}
           follow={gameTracks.following} nameOf={nameOf}
+          onThrow={(side, tier) => {
+            const anchorId = game.featured[side] ?? game.teams[side][0];
+            if (!anchorId) return;
+            setTeamSprayOpen(false);
+            after(() => setTeamRequest({ side, tier, anchorId, seq: ++teamSeq.current }));
+          }}
           onPlayer={(pid) => { setTeamSprayOpen(false); after(() => sprayPlayer(pid)); }}
           returnFocusTo={() => byTestId(`lane-spray-${teamSpraySide}`)}
         />
@@ -615,7 +625,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
           roomId={id} token={token} block={flowBlock} targets={sprayTo} hostId={room.hostId} nameOf={nameOf} sprays={state.sprays}
           trayOpen={sprayOpen} onTrayOpenChange={setSprayOpen} presetTarget={sprayPreset}
           onSettled={() => onSprayChanged?.()} quiet={quiet} onQuiet={setQuiet}
-          returnFocusTo={sprayReturnFocus} onHoldChange={setSprayHold}
+          returnFocusTo={sprayReturnFocus} onHoldChange={setSprayHold} teamRequest={teamRequest}
           initial={sprayFixture ? { flow: sprayFixture.flow, sub: sprayFixture.sub } : undefined}
         />
       )}

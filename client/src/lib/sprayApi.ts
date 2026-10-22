@@ -55,7 +55,7 @@ export async function sprayCall<T>(method: string, url: string, data?: unknown, 
       // A stale CSRF token answers 403 with no code: fetch a fresh one and try once more. SPRAY_UNAVAILABLE carries a code.
       if (method !== "GET" && res.status === 403 && attempt === 0 && (!code || text.includes("CSRF"))) continue;
       const reason = short(b.reason, 32);
-      const sprayId = short(b.sprayId, 64);
+      const sprayId = short(b.sprayId, 64) ?? short(b.batchId, 64); // a team charge's batch id plays the spray id
       const ra = parseRetryAfter(res.headers.get("Retry-After"), Date.now());
       return { ok: false, status: res.status, ...(code ? { code } : {}), ...(reason ? { reason } : {}), ...(sprayId ? { sprayId } : {}), ...(ra ? { retryAfterSec: ra } : {}) };
     }
@@ -73,6 +73,31 @@ export const postSpray = (roomId: string, p: { tier: SprayTier; targetId: string
 /** GET /api/rooms/:id/spray/:sprayId (the payer's own spray only; anyone else gets 404). */
 export const getSprayStatus = (roomId: string, sprayId: string, token?: string) =>
   sprayCall<unknown>("GET", `${roomBase(roomId)}/spray/${encodeURIComponent(sprayId)}${withToken(token)}`);
+
+/**
+ * POST /api/rooms/:id/spray/team (one charge paying a whole team). The server answers in the single spray's shape plus
+ * `batchId`; the batch id is used as the spray id from here on, so the same pay machine, replay rule and poll serve both.
+ * The client sends no amount and no share: only the tier, the side and the idempotency key.
+ */
+export const postSprayTeam = async (roomId: string, p: { tier: SprayTier; side: "A" | "B"; idempotencyKey: string; saveCard: boolean }, token?: string): Promise<SprayCall<unknown>> => {
+  const r = await sprayCall<unknown>("POST", `${roomBase(roomId)}/spray/team${withToken(token)}`, {
+    tier: p.tier, side: p.side, idempotencyKey: p.idempotencyKey, ...(p.saveCard ? { saveCard: true } : {}),
+  });
+  return r.ok ? { ...r, body: withSprayId(r.body) } : r;
+};
+
+/** GET /api/rooms/:id/spray/team/:batchId (the payer only; anyone else gets 404). */
+export const getSprayTeamStatus = async (roomId: string, batchId: string, token?: string): Promise<SprayCall<unknown>> => {
+  const r = await sprayCall<unknown>("GET", `${roomBase(roomId)}/spray/team/${encodeURIComponent(batchId)}${withToken(token)}`);
+  return r.ok ? { ...r, body: withSprayId(r.body) } : r;
+};
+
+/** A team answer read as a spray answer: `sprayId` = `batchId`. Anything that isn't an object is passed on untouched. */
+function withSprayId(body: unknown): unknown {
+  if (!body || typeof body !== "object") return body;
+  const b = body as Record<string, unknown>;
+  return typeof b.batchId === "string" && b.sprayId === undefined ? { ...b, sprayId: b.batchId } : b;
+}
 
 /** GET /api/users/me/spray: the saved card (last4 and brand only), the daily limit and today's rolling spend. */
 export const getSprayMe = () => sprayCall<unknown>("GET", "/api/users/me/spray");

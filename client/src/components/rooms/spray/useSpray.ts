@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import type { SprayTier } from "@shared/money";
 import type { SprayEvent } from "@/lib/roomReducer";
-import { getSprayStatus, postSpray } from "@/lib/sprayApi";
+import { getSprayStatus, getSprayTeamStatus, postSpray, postSprayTeam } from "@/lib/sprayApi";
 import {
   IDLE, SPRAY_TRACK_KEY, decodeSprayTrack, encodeSprayTrack, inFlight, newIdempotencyKey, outcomeOfPost, outcomeOfStatus,
   pollDelayMs, sprayFlow, waitDeadlineMs, type SprayFlow, type SprayFlowEvent, type SprayIntent,
@@ -48,11 +48,11 @@ export function useSpray(roomId: string, opts: UseSprayOptions) {
   settledRef.current = opts.onSettled;
 
   /** Open the confirm step for this tier and person: a new intent, so a new key. Ignored while a payment is in flight. */
-  const start = useCallback((tier: SprayTier, targetId: string): boolean => {
+  const start = useCallback((tier: SprayTier, targetId: string, side?: "A" | "B"): boolean => {
     if (inFlight(stateRef.current) || busy.current) return false;
     let key: string;
     try { key = newIdempotencyKey(); } catch { return false; }
-    dispatch({ type: "start", tier, targetId, key });
+    dispatch({ type: "start", tier, targetId, key, ...(side ? { side } : {}) });
     return true;
   }, []);
 
@@ -63,7 +63,10 @@ export function useSpray(roomId: string, opts: UseSprayOptions) {
     if (busy.current) return;
     busy.current = true;
     try {
-      const r = await postSpray(roomId, { tier: intent.tier, targetId: intent.targetId, idempotencyKey: intent.key, saveCard: intent.saveCard }, tokenRef.current);
+      // A team intent goes to the team route with its side; the key, the replay rule and the answer handling are the single spray's.
+      const r = intent.side
+        ? await postSprayTeam(roomId, { tier: intent.tier, side: intent.side, idempotencyKey: intent.key, saveCard: intent.saveCard }, tokenRef.current)
+        : await postSpray(roomId, { tier: intent.tier, targetId: intent.targetId, idempotencyKey: intent.key, saveCard: intent.saveCard }, tokenRef.current);
       if (!alive.current) return;
       const cur = stateRef.current;
       // Only an answer for the intent that is still in flight counts (the machine also ignores other spray ids).
@@ -168,6 +171,7 @@ export function useSpray(roomId: string, opts: UseSprayOptions) {
   }, [replayKey, send]);
 
   // ---------------------------------------------------------------- a known spray: poll until it settles (or the deadline)
+  const isTeam = state.kind !== "idle" && !!state.intent.side;
   const polling = (state.kind === "paying" && !!state.sprayId) || state.kind === "action_required";
   useEffect(() => {
     if (!polling || !sprayId) return;
@@ -176,7 +180,7 @@ export function useSpray(roomId: string, opts: UseSprayOptions) {
     const tick = async () => {
       if (stop) return;
       if (online()) {
-        const r = await getSprayStatus(roomId, sprayId, tokenRef.current);
+        const r = isTeam ? await getSprayTeamStatus(roomId, sprayId, tokenRef.current) : await getSprayStatus(roomId, sprayId, tokenRef.current);
         if (stop) return;
         dispatch({ type: "outcome", outcome: outcomeOfStatus(r, sprayId), now: Date.now() });
       }
@@ -186,7 +190,7 @@ export function useSpray(roomId: string, opts: UseSprayOptions) {
     const onOnline = () => { clearTimeout(timer); void tick(); };
     window.addEventListener("online", onOnline);
     return () => { stop = true; clearTimeout(timer); window.removeEventListener("online", onOnline); };
-  }, [roomId, sprayId, polling, since]);
+  }, [roomId, sprayId, polling, since, isTeam]);
 
   // Coming back to the tab (after the bank's page): ask at once instead of waiting for the next tick.
   const bankId = state.kind === "action_required" ? state.sprayId : null;
@@ -195,7 +199,7 @@ export function useSpray(roomId: string, opts: UseSprayOptions) {
     const id = bankId;
     const onVisible = () => {
       if (document.visibilityState !== "visible" || !online()) return;
-      void getSprayStatus(roomId, id, tokenRef.current).then((r) => { if (alive.current) dispatch({ type: "outcome", outcome: outcomeOfStatus(r, id), now: Date.now() }); });
+      void (isTeam ? getSprayTeamStatus(roomId, id, tokenRef.current) : getSprayStatus(roomId, id, tokenRef.current)).then((r) => { if (alive.current) dispatch({ type: "outcome", outcome: outcomeOfStatus(r, id), now: Date.now() }); });
     };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
