@@ -494,6 +494,7 @@ export const SPRAY_FAIL_COPY: Record<SprayFailReason, FailCopy> = {
 
 export const SPRAY_COPY = {
   trayIntro: "You pay when you throw. Nothing is stored.",
+  nonRefundable: "Spray purchases are non-refundable.",
   addCardTitle: "Add a card",
   addCardBody: "Your bank asks you to approve once. Cards are handled by Paystack: we never see your card number.",
   saveCard: "Save this card so the next note or bundle is one tap",

@@ -7,6 +7,7 @@ import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CreditCardIcon, Loader2Icon } from "@/components/ui/icons";
+import NonRefundableNotice from "./NonRefundableNotice";
 import { SPRAY_COPY, cardInSentence, cardLabel, type SprayCard } from "@/lib/sprayUi";
 
 interface Props {
@@ -33,6 +34,7 @@ export default function CardSheet({ mode, method, saveCard, onSaveCard, onContin
           {replacing ? `To use another card we forget ${card}. Your bank then asks you to add and approve the new one.` : SPRAY_COPY.addCardBody}
         </SheetDescription>
       </SheetHeader>
+      <NonRefundableNotice />
       <div className="flex min-h-[56px] items-center gap-3 rounded-xl border border-border bg-muted/60 px-3">
         <CreditCardIcon className="h-5 w-5 shrink-0" aria-hidden />
         <span className="text-sm font-medium">{replacing ? "A new card, added with your bank" : "Card details go to Paystack only"}</span>

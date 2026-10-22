@@ -9,6 +9,7 @@ import { sprayPrice } from "@shared/spray";
 import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import RoomSheetContent from "@/components/rooms/shell/RoomSheetContent";
 import { TierMark } from "@/components/rooms/spray/SprayTray";
+import NonRefundableNotice from "@/components/rooms/spray/NonRefundableNotice";
 import { formatNaira } from "@/lib/roomTickets";
 import { SIDE_NAME, featuredFor, teamShares, teamSprayMinKobo, teamSprayTiers, type Follow } from "@/lib/gameScreen";
 import "./game.css";
@@ -52,6 +53,8 @@ export default function SprayTeamSheet({ open, onOpenChange, game, side, onSide,
             <button key={s} type="button" className="gs-view" aria-pressed={side === s} disabled={game.teams[s].length === 0} onClick={() => onSide(s)} data-testid={`spray-team-${s}`}>{SIDE_NAME[s]}</button>
           ))}
         </div>
+
+        <div className="mt-3"><NonRefundableNotice /></div>
 
         {players.length === 0 ? <p className="mt-4 text-sm text-muted-foreground">Nobody is on this team yet.</p> : (
           <>

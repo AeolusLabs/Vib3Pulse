@@ -588,6 +588,34 @@ test("copy: no em dashes, never 'cash', no legal tender wording", () => {
   assert.equal(SPRAY_FAIL_COPY.UNAVAILABLE.body, "Spraying is not available here.");
   assert.ok(SPRAY_COPY.saveCard.length > 0);
 });
+test("non-refundable notice: exact wording, plain, and the tray's own line is kept", () => {
+  assert.equal(SPRAY_COPY.nonRefundable, "Spray purchases are non-refundable.");
+  assert.equal(SPRAY_COPY.trayIntro, "You pay when you throw. Nothing is stored.");
+  assert.ok(allSprayCopy().includes(SPRAY_COPY.nonRefundable), "covered by the em dash / cash checks above");
+  const notice = src("../client/src/components/rooms/spray/NonRefundableNotice.tsx");
+  assert.match(notice, /text-sm/, "14 px or larger");
+  assert.ok(!/title=|Tooltip|sr-only|hidden/.test(notice), "always visible: no tooltip, no hidden text");
+});
+test("non-refundable notice: present in every state a spray can be started (tray, confirm, card, team)", () => {
+  const files = [
+    "../client/src/components/rooms/spray/SprayTray.tsx",
+    "../client/src/components/rooms/spray/SprayConfirm.tsx",
+    "../client/src/components/rooms/spray/CardSheet.tsx",
+    "../client/src/components/rooms/game/SprayTeamSheet.tsx",
+  ];
+  for (const f of files) {
+    const code = stripComments(src(f));
+    assert.ok(code.includes("<NonRefundableNotice />"), f);
+    assert.ok(code.includes("NonRefundableNotice"), f);
+  }
+  // Above the tier buttons / pay action, not after them.
+  const tray = src(files[0]);
+  assert.ok(tray.indexOf("<NonRefundableNotice />") < tray.indexOf("data-testid={`spray-tile-"), "tray: before the tiers");
+  const team = src(files[3]);
+  assert.ok(team.indexOf("<NonRefundableNotice />") < team.indexOf("spray-team-tile-"), "team sheet: before the tiers");
+  const confirm = src(files[1]);
+  assert.ok(confirm.indexOf("<NonRefundableNotice />") < confirm.indexOf("{paying ? ("), "confirm: before the pay controls");
+});
 test("copy: every tier has a price line from sprayPrice", () => {
   for (const t of SPRAY_TIERS) assert.ok(allSprayCopy().some((l) => l.startsWith(sprayPrice(t).display)), t);
 });

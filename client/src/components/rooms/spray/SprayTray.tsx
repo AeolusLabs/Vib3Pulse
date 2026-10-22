@@ -8,6 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { SPRAY_TIERS, formatV3c, type SprayTier } from "@shared/money";
 import { sprayPrice } from "@shared/spray";
 import { AMBER } from "@/lib/roomTickets";
+import NonRefundableNotice from "./NonRefundableNotice";
 import { SPRAY_COPY, TIER_LINE, cardInSentence, cardLabel, limitChipText, tileAction, type SprayBlock, type SprayMe } from "@/lib/sprayUi";
 
 /** A small drawing of each tier for the tray and the confirm step. Decorative. */
@@ -76,6 +77,7 @@ export default function SprayTray({ block, me, meError, onRetryMe, targets, targ
         <SheetTitle>Spray {target?.name ?? "someone"}</SheetTitle>
         <SheetDescription>{SPRAY_COPY.trayIntro}</SheetDescription>
       </SheetHeader>
+      <NonRefundableNotice />
 
       {targets.length > 1 && (
         // Plain toggle buttons (aria-pressed) in a labelled group: Tab reaches each one, no roving focus needed (review M14).

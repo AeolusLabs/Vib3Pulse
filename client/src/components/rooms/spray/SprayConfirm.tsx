@@ -15,6 +15,7 @@ import { sprayPrice } from "@shared/spray";
 import type { SprayTier } from "@shared/money";
 import { SPRAY_COPY, TIER_LINE, chargeLine, confirmAgainText, confirmTitle, needsSlide, priceLine, slidePayLabel, type SprayCard } from "@/lib/sprayUi";
 import { TierMark } from "./SprayTray";
+import NonRefundableNotice from "./NonRefundableNotice";
 
 interface Props {
   tier: SprayTier;
@@ -156,6 +157,7 @@ export default function SprayConfirm({ tier, name, method, paying, sending, unkn
         <SheetTitle>{confirmTitle(tier, name)}</SheetTitle>
         <SheetDescription>{priceLine(tier)}. {TIER_LINE[tier].charAt(0).toUpperCase() + TIER_LINE[tier].slice(1)}.</SheetDescription>
       </SheetHeader>
+      <NonRefundableNotice />
 
       {paying ? (
         <div className="grid gap-2">
