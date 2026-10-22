@@ -274,8 +274,8 @@ try {
     && Number((await q(`select coalesce(sum(spent_kobo),0)::int n from room_spend where room_id = $1 and user_id = $2`, [R, P3]))[0].n) === 0);
 
   // ---- a team of 4, the remainder kobo: featured first, then team order (bag = 1,000,000 naira-kobo; a bag always goes through the bank page)
-  setTeams([B1, B2, B3, B4], [A1], B3, A1);
-  const r4 = await team(P4, R, { tier: "bag", side: "B", idempotencyKey: key() });
+  setTeams([B1, B2, B3, B4], [A1], B3, A1); // side A = B1..B4 (featured B3)
+  const r4 = await team(P4, R, { tier: "bag", side: "A", idempotencyKey: key() });
   check("team of 4: the 10,000 naira tier is never a silent saved-card charge -> action_required with 4 gross shares", r4.status === 200 && r4.json?.status === "action_required" && r4.json.shares.length === 4
     && r4.json.shares.reduce((a: number, s: any) => a + s.amountKobo, 0) === 1_000_000, r4.raw);
   const b4 = (await batchesOf(P4))[0];
@@ -295,6 +295,7 @@ try {
   // ---- 3DS / bank page: action_required, then the player LEAVES, then it is paid: delivered all the same (owner rule)
   setTeams([A1, A2], [B1], A1, B1);
   reset();
+  const firstBefore = mock.firstPayments;
   const r2 = await team(P2, R, { tier: "bundle", side: "A", idempotencyKey: key() });
   check("no saved card: 200 action_required with the bank page and the gross shares", r2.status === 200 && r2.json?.status === "action_required"
     && /^https:\/\//.test(r2.json?.authorizationUrl ?? "") && r2.json.shares.length === 2, r2.raw);
@@ -302,7 +303,7 @@ try {
   check("pending: batch and both shares 'pending', the room spend reserved once", b2.status === "pending" && (await sharesOf(b2.id)).every((r: any) => r.status === "pending")
     && Number((await q(`select spent_kobo from room_spend where room_id = $1 and user_id = $2`, [R, P2]))[0]?.spent_kobo) === 100_000);
   const replayPending = await team(P2, R, { tier: "bundle", side: "A", idempotencyKey: (b2.idempotency_key as string) });
-  check("replay while pending: the same bank page again, no second checkout", replayPending.json?.status === "action_required" && replayPending.json?.authorizationUrl === r2.json.authorizationUrl && mock.firstPayments === 1, replayPending.raw);
+  check("replay while pending: the same bank page again, no second checkout", replayPending.json?.status === "action_required" && replayPending.json?.authorizationUrl === r2.json.authorizationUrl && mock.firstPayments === firstBefore + 1, replayPending.raw);
   check("a second team spray while one is in flight is a 429", (await team(P2, R, { tier: "bundle", side: "A", idempotencyKey: key() })).status === 429);
   a2c.send({ type: "room:leave" });
   check("setup: player A2 left after the spray started", await until(() => !roomHub.get(R, A2)));

@@ -644,12 +644,12 @@ try {
   const PRF = await payer("p_refundfail", { card: false });
   await spray(PRF.id, R, body(GF));
   const rfrow = (await sprayRows(PRF.id))[0];
-  gf.c.send({ type: "room:leave" });
-  await until(() => !roomHub.get(R, GF));
-  mock.pay(rfrow.provider_ref);
+  // The reversal comes from a KEPT guard (a payment that is not the price we asked for is refunded in full); a recipient who
+  // left is no longer a reason to refund (the charge is delivered).
+  mock.pay(rfrow.provider_ref, { amountKobo: Number(rfrow.amount_kobo) - 1 });
   mock.refundMode = "outage";
   await webhook("charge.success", { reference: rfrow.provider_ref });
-  // Past the delivery deadline: the absent recipient now means a reversal. The clock STAYS ahead for the whole block:
+  // The clock STAYS ahead for the whole block:
   // refund_requested_at is written from the spray clock, so going back in time would make the row look like it was asked
   // for in the future and no pass would list it for two minutes.
   clockAhead();
@@ -803,10 +803,10 @@ try {
     && (await issues(orow.provider_ref, "dispute")).every((i: any) => !!i.resolved_at));
   check("r5 I3: the amount owed back is also in the log line", logged.some((l) => l.includes(`outcome=needs_person`) && l.includes("owed_back_kobo=100")));
   // r5 m2: a refunded spray whose LOST_AFTER_REFUND issue a person already closed: a redelivered event adds nothing.
-  await q(`update payment_issues set resolved_at = now() where provider_payment_id = $1 and reason = 'dispute_resolved'`, [lrow.provider_ref]);
-  const lostBefore = (await issues(lrow.provider_ref, "dispute_resolved")).length;
-  await webhook("charge.dispute.resolve", { transaction: { reference: lrow.provider_ref }, resolution: "merchant-accepted" });
-  check("r5 m2: no duplicate LOST_AFTER_REFUND issue", (await issues(lrow.provider_ref, "dispute_resolved")).length === lostBefore);
+  await q(`update payment_issues set resolved_at = now() where provider_payment_id = $1 and reason = 'dispute_resolved'`, [crow.provider_ref]);
+  const lostBefore = (await issues(crow.provider_ref, "dispute_resolved")).length;
+  await webhook("charge.dispute.resolve", { transaction: { reference: crow.provider_ref }, resolution: "merchant-accepted" });
+  check("r5 m2: no duplicate LOST_AFTER_REFUND issue", (await issues(crow.provider_ref, "dispute_resolved")).length === lostBefore);
   // A clawback bigger than the payout: closed at 0, nothing sent.
   const H3 = await mk("host_bigclaw", { payout: true });
   await q(`insert into host_clawbacks (host_id, beneficiary_id, spray_id, amount_kobo) values ($1,$1,$2,$3)`, [H3, hrow.id, TB.host]);
