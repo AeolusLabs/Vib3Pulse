@@ -6,6 +6,7 @@
 // The idempotency key is made once per intent (start) and kept on the intent; every retry of the same request reuses it.
 // Only a definitive answer from the server (declined, refunded, refused) makes "Try again" a new intent with a new key.
 import { SPRAY_TIERS, formatV3c, isSprayTier, type SprayTier } from "@shared/money";
+import type { Side } from "@shared/gameScreen";
 import {
   DAILY_DEFAULT_KOBO, DAILY_VERIFIED_MAX_KOBO, DELIVERY_DEADLINE_MS, ID_REQUIRED_ABOVE_KOBO, ROOM_LIMIT_OPTIONS_KOBO, SPRAY_REASONS,
   exceedsRoomLimit, idempotencyKeyShape, requiresThreeDs, sprayPrice, type SprayReason,
@@ -160,7 +161,11 @@ export function dailyChoices(verified: boolean): LimitChoice[] {
  * One spray the payer chose. `key` is the idempotency key, made once for this intent and sent on every attempt of it.
  * `bankUrl` is the approval link once the server gave one (kept so the payer can reopen it while we keep checking).
  */
-export interface SprayIntent { tier: SprayTier; targetId: string; key: string; saveCard: boolean; bankUrl?: string }
+export interface SprayIntent {
+  tier: SprayTier; targetId: string; key: string; saveCard: boolean; bankUrl?: string;
+  /** A team spray (one charge split between the team's players). `targetId` is then only an anchor player; the sheet says the team. */
+  side?: Side;
+}
 
 export type SprayFailReason =
   | SprayReason
@@ -203,7 +208,7 @@ export type SprayOutcome =
   | { kind: "wait" };
 
 export type SprayFlowEvent =
-  | { type: "start"; tier: SprayTier; targetId: string; key: string }
+  | { type: "start"; tier: SprayTier; targetId: string; key: string; side?: Side }
   | { type: "saveCard"; on: boolean }
   | { type: "pay"; now: number }
   | { type: "outcome"; outcome: SprayOutcome; now: number }
@@ -229,7 +234,7 @@ export function sprayFlow(s: SprayFlow, e: SprayFlowEvent): SprayFlow {
       // A payment in flight is never replaced by a new one (double tap, a second tray, a tap on another tier).
       if (s.kind === "paying" || s.kind === "action_required") return s;
       if (!isSprayTier(e.tier) || !e.targetId || !idempotencyKeyShape(e.key)) return s;
-      return { kind: "confirming", intent: { tier: e.tier, targetId: e.targetId, key: e.key, saveCard: false } };
+      return { kind: "confirming", intent: { tier: e.tier, targetId: e.targetId, key: e.key, saveCard: false, ...(e.side === "A" || e.side === "B" ? { side: e.side } : {}) } };
     case "saveCard":
       return s.kind === "confirming" ? { ...s, intent: { ...s.intent, saveCard: e.on === true } } : s;
     case "pay":
@@ -264,7 +269,7 @@ export function sprayFlow(s: SprayFlow, e: SprayFlowEvent): SprayFlow {
     case "retry":
       if (s.kind !== "failed") return s;
       if (s.sameKey) return { kind: "confirming", intent: s.intent };
-      return idempotencyKeyShape(e.key) ? { kind: "confirming", intent: { tier: s.intent.tier, targetId: s.intent.targetId, key: e.key, saveCard: s.intent.saveCard } } : s;
+      return idempotencyKeyShape(e.key) ? { kind: "confirming", intent: { tier: s.intent.tier, targetId: s.intent.targetId, key: e.key, saveCard: s.intent.saveCard, ...(s.intent.side ? { side: s.intent.side } : {}) } } : s;
     case "close":
       // While the request is out or the bank page is open the flow is never dropped: the sheet is hidden, and the hook
       // keeps watching (closing the bank sheet must not stop tracking, review M8).
@@ -435,6 +440,7 @@ export interface SprayTrack { v: 1; roomId: string; key: string; sprayId: string
 
 export function encodeSprayTrack(roomId: string, s: SprayFlow): string | null {
   if ((s.kind !== "paying" && s.kind !== "action_required") || !s.sprayId) return null;
+  if (s.intent.side) return null; // a team charge is picked up again from the bank's ?sprayTeam= callback, not from this record
   const t: SprayTrack = { v: 1, roomId, key: s.intent.key, sprayId: s.sprayId, tier: s.intent.tier, targetId: s.intent.targetId, since: s.since };
   return JSON.stringify(t);
 }
@@ -665,9 +671,16 @@ export function sprayReturnId(search: string): string | null {
   return v && sprayIdOk(v) ? v : null;
 }
 
+/** The way back from the bank for a team charge: /rooms/:id?sprayTeam=<batchId>. */
+export function sprayTeamReturnId(search: string): string | null {
+  const v = new URLSearchParams(search).get("sprayTeam");
+  return v && sprayIdOk(v) ? v : null;
+}
+
 export function searchWithoutSpray(search: string): string {
   const p = new URLSearchParams(search);
   p.delete("spray");
+  p.delete("sprayTeam");
   const s = p.toString();
   return s ? `?${s}` : "";
 }

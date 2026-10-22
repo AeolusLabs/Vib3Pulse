@@ -186,6 +186,9 @@ export const teamSprayMinKobo = (players: number): number => MIN_CHARGE_KOBO * M
 export const teamSprayTiers = (players: number): SprayTier[] =>
   players <= 0 ? [] : SPRAY_TIERS.filter((t) => SPRAY_CATALOGUE[t].kobo >= teamSprayMinKobo(players));
 
+/** The only thing the tray knows about the split: the pool is divided equally. Never a per-player amount (fees come off first). */
+export const splitLine = (players: number): string => `Split equally between ${players} ${players === 1 ? "player" : "players"}`;
+
 /** What each player would get from this tier: an equal split, the few kobo left over to the featured player. */
 export function teamShares(game: GameView, side: Side, tier: SprayTier, featured: string | null): Record<string, number> {
   return splitShares(SPRAY_CATALOGUE[tier].kobo, game.teams[side], featured);

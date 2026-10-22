@@ -1,6 +1,8 @@
 // The whole spray flow in ONE bottom sheet whose content follows the state: tray, add a card, confirm (slide to pay), bank
 // approval, failed, room limit, spending limits. One sheet, so moving between steps never fights over focus, Escape or the
 // scrim. The room renders this only when the server sent a spray block (ID-verified adult, live 18+ room).
+import type { Side } from "@shared/gameScreen";
+import { SIDE_NAME } from "@/lib/gameScreen";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -60,11 +62,13 @@ export interface SprayFlowProps {
    * the last good spray block) even if a reload comes back without one.
    */
   onHoldChange?(hold: boolean): void;
+  /** The game stage's team sheet picked a tier for a team: start a team intent (one charge split between the team). */
+  teamRequest?: { side: Side; tier: SprayTier; anchorId: string; seq: number } | null;
   /** Dev fixture only. */
   initial?: { flow: Flow; sub: Sub | null };
 }
 
-export default function SprayFlow({ roomId, token, block, targets, hostId, nameOf, sprays, trayOpen, onTrayOpenChange, presetTarget, onSettled, quiet, onQuiet, returnFocusTo, onHoldChange, initial }: SprayFlowProps) {
+export default function SprayFlow({ roomId, token, block, targets, hostId, nameOf, sprays, trayOpen, onTrayOpenChange, presetTarget, onSettled, quiet, onQuiet, returnFocusTo, onHoldChange, teamRequest, initial }: SprayFlowProps) {
   const { toast } = useToast();
   const online = useOnline();
   const settled = () => { onSettled(); void queryClient.invalidateQueries({ queryKey: SPRAY_ME_KEY }); };
@@ -126,7 +130,7 @@ export default function SprayFlow({ roomId, token, block, targets, hostId, nameO
   const deliveredId = s.kind === "delivered" ? s.sprayId : null;
   useEffect(() => {
     if (!deliveredId || s.kind !== "delivered") return;
-    toast({ title: `${SPRAY_COPY.sent} ${nameOf(s.intent.targetId)}` });
+    toast({ title: `${SPRAY_COPY.sent} ${s.intent.side ? SIDE_NAME[s.intent.side] : nameOf(s.intent.targetId)}` });
     flow.close();
     onTrayOpenChange(false);
   }, [deliveredId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -139,6 +143,18 @@ export default function SprayFlow({ roomId, token, block, targets, hostId, nameO
     if (a.kind !== "pay") return;
     if (!flow.start(tier, targetId)) toast({ title: "A spray is still on its way. Wait for it to land." });
   };
+
+  // The team sheet's pick: the same checks as a single spray (room limit, daily limit), then a team intent with its own key.
+  const lastTeamSeq = useRef(0);
+  useEffect(() => {
+    if (!teamRequest || teamRequest.seq === lastTeamSeq.current) return;
+    lastTeamSeq.current = teamRequest.seq;
+    snd.unlock();
+    const a = tileAction(teamRequest.tier, eff, me, online);
+    if (a.kind === "limit") { setSub({ kind: "limit", tier: teamRequest.tier }); return; }
+    if (a.kind !== "pay") return;
+    if (!flow.start(teamRequest.tier, teamRequest.anchorId, teamRequest.side)) toast({ title: "A spray is still on its way. Wait for it to land." });
+  }, [teamRequest?.seq]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const retry = () => {
     if (s.kind === "failed" && s.sameKey) autoPay.current = true;
@@ -204,7 +220,7 @@ export default function SprayFlow({ roomId, token, block, targets, hostId, nameO
     body = <CardSheet mode="replace" method={me?.method ?? null} saveCard={replaceSave} onSaveCard={setReplaceSave}
       onContinue={() => void replaceCard()} onCancel={() => setSub(null)} busy={cardBusy} error={cardError} />;
   } else if (view === "confirm" && (s.kind === "confirming" || s.kind === "paying")) {
-    body = <SprayConfirm tier={s.intent.tier} name={name(s.intent.targetId)} method={me?.method ?? null}
+    body = <SprayConfirm tier={s.intent.tier} name={s.intent.side ? SIDE_NAME[s.intent.side] : name(s.intent.targetId)} method={me?.method ?? null}
       paying={s.kind === "paying"} sending={s.kind === "paying" && !!s.sprayId} unknown={s.kind === "paying" && s.unknown === true}
       bankUrl={s.kind === "paying" ? s.intent.bankUrl ?? null : null}
       onPay={() => { snd.unlock(); flow.pay(); }} onCancel={flow.close} onHide={hide} />;

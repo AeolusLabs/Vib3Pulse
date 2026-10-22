@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { AlertCircleIcon, CheckCircleIcon, ExternalLinkIcon, Loader2Icon } from "@/components/ui/icons";
 import type { SprayTier } from "@shared/money";
-import { getSprayStatus } from "@/lib/sprayApi";
+import { getSprayStatus, getSprayTeamStatus } from "@/lib/sprayApi";
 import { SPRAY_COPY, SPRAY_FAIL_COPY, bankAsk, outcomeOfStatus, pollDelayMs, waitDeadlineMs, type SprayOutcome } from "@/lib/sprayUi";
 
 interface Props {
@@ -51,7 +51,7 @@ export default function BankApproval({ tier, url, onClose }: Props) {
  * The server answers only the payer (anyone else gets 404), so this shows nothing about the room or anyone else. A 404 is
  * final ("isn't on your account, or doesn't exist"): it never turns into a long wait (review M3).
  */
-export function SprayReturn({ roomId, sprayId, token, onBack }: { roomId: string; sprayId: string; token?: string; onBack(): void }) {
+export function SprayReturn({ roomId, sprayId, token, onBack, team = false }: { roomId: string; sprayId: string; token?: string; onBack(): void; /** The id is a team charge's batch id (?sprayTeam=). */ team?: boolean }) {
   const [o, setO] = useState<SprayOutcome | { kind: "timeout" } | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
@@ -61,7 +61,7 @@ export function SprayReturn({ roomId, sprayId, token, onBack }: { roomId: string
     const tick = async () => {
       if (stop) return;
       if (Date.now() - since > waitDeadlineMs("paying")) { setO({ kind: "timeout" }); return; }
-      const r = await getSprayStatus(roomId, sprayId, token);
+      const r = team ? await getSprayTeamStatus(roomId, sprayId, token) : await getSprayStatus(roomId, sprayId, token);
       if (stop) return;
       const out = outcomeOfStatus(r, sprayId);
       if (out.kind === "delivered" || out.kind === "failed") { setO(out); return; }
@@ -69,7 +69,7 @@ export function SprayReturn({ roomId, sprayId, token, onBack }: { roomId: string
     };
     void tick();
     return () => { stop = true; clearTimeout(t); };
-  }, [roomId, sprayId, token]);
+  }, [roomId, sprayId, token, team]);
   useEffect(() => { if (o) requestAnimationFrame(() => heading.current?.focus()); }, [o]);
 
   const closeWindow = () => { try { window.close(); } catch { /* not a window we opened: the link below still works */ } };
