@@ -68,7 +68,7 @@ test("worked check: team of 4, same spray: pool 53,414 / 4 = 13,353 r 2, feature
 });
 test("the remainder starts at the featured player, not at the first in the list", () => {
   const b = teamSprayBreakdown("bundle", plain(4), "p2");
-  assert.deepEqual(b.shares.map((s) => s.recipient), [13_353, 13_353, 13_354, 13_354]); // p2 then p3
+  assert.deepEqual(b.shares.map((s) => s.recipient), [13_354, 13_353, 13_354, 13_353]); // p2 (featured) first, then p0 in team order
   const none = teamSprayBreakdown("bundle", plain(4), null);
   assert.deepEqual(none.shares.map((s) => s.recipient), [13_354, 13_354, 13_353, 13_353]);
 });

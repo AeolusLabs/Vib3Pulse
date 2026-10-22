@@ -169,6 +169,8 @@ try {
   const joined = new Map<string, Awaited<ReturnType<typeof join>>>();
   for (const id of everyone) joined.set(id, await join(id, R));
   check("setup: everyone in", everyone.every((id) => joined.get(id)?.s?.type === "room:state"));
+  // Payer-owned limits are checked FIRST (no oracle), so the payers that spray a 10,000 naira bag need a higher room limit than the 2,000 naira default.
+  for (const id of [P3, P4]) await ss.setRoomLimit(R, id, 5_000_000);
   roomHub.setVoiceOn(R, true);
   roomHub.setLiveVideoOn(R, true);
   roomHub.setGameOn(R, true, { dropMs: 120_000, ageLane: null });
