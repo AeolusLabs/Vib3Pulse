@@ -61,6 +61,7 @@ import * as ss from "./sprayStorage";
 import { roomHub } from "./RoomHub";
 import { isKicked } from "./roomSocket";
 import { isGamePlayer } from "./stage";
+import { batchFinalizer } from "./sprayBatchHook";
 import { roomFeatures } from "./features";
 import { isHostFrozen, sprayAllowed } from "./roomControls";
 import { getRates } from "./roomRates";
@@ -556,15 +557,12 @@ function verifiedMatches(row: SprayPayment, v: SplitVerifyResult): boolean {
     && typeof v.currency === "string" && v.currency.toUpperCase() === "NGN";
 }
 
-// Team spray (teamSpray.ts registers it): a reference that belongs to a batch is finalized by the batch engine, under this
-// same lock. Registered to avoid an import cycle; unset (no team spray code loaded) means no batch is ever looked up.
-let batchFinalizer: ((c: PoolClient, reference: string, opts: FinalizeOpts) => Promise<FinalizeOutcome | null>) | null = null;
-export const registerBatchFinalizer = (fn: typeof batchFinalizer) => { batchFinalizer = fn; };
-
+// Team spray (teamSpray.ts registers it in sprayBatchHook.ts, a leaf module, so there is no init-order dependency between the two).
 async function finalizeLocked(c: PoolClient, reference: string, opts: FinalizeOpts): Promise<FinalizeOutcome> {
   const row = await ss.getSprayByRef(reference);
-  if (!row && batchFinalizer) {
-    const out = await batchFinalizer(c, reference, opts); // null: not a batch reference either
+  const finalizeBatch = batchFinalizer();
+  if (!row && finalizeBatch) {
+    const out = await finalizeBatch(c, reference, opts); // null: not a batch reference either
     if (out !== null) return out;
   }
   if (!row) {

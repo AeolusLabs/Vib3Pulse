@@ -44,8 +44,9 @@ import {
   effectiveDailyLimit, hasSprayInFlight, isNewHost, newHostReceiveCapKobo, payerPrecheck, roomLimitFor, windowStart,
 } from "./sprayLimits";
 import { isGamePlayer } from "./stage";
+import { registerBatchFinalizer } from "./sprayBatchHook";
 import {
-  REVERSAL_DEFAULT, REVERSAL_TEXT, SPRAY_UNAVAILABLE, finalizeSpray, maybeSaveCard, registerBatchFinalizer, runForPayer,
+  REVERSAL_DEFAULT, REVERSAL_TEXT, SPRAY_UNAVAILABLE, finalizeSpray, maybeSaveCard, runForPayer,
   shownReason, sprayClock, sprayGate, type FinalizeOpts, type FinalizeOutcome, type SprayFacts, type StoredReason,
 } from "./spray";
 
