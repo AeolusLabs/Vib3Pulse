@@ -33,6 +33,7 @@ import OpenLane from "@/components/rooms/game/OpenLane";
 import { laneForAge } from "@/lib/gameScreen";
 import { SprayReturn } from "@/components/rooms/spray/BankApproval";
 import { parseSprayBlock, searchWithoutSpray, sprayReturnId } from "@/lib/sprayUi";
+import { MINORS_LANE_WARNING } from "@shared/rooms";
 import { moneyEligibleRoom } from "@shared/roomRules";
 
 interface RoomDetail {
@@ -260,7 +261,7 @@ function RoomPageInner({ id }: { id: string }) {
     content = <div className="space-y-3"><Skeleton className="aspect-video w-full rounded-2xl" /><Skeleton className="h-40 w-full rounded-2xl" /></div>;
   } else if (minorsCode) {
     // The warning screen alone: no title, no host. Acknowledging records it, clears any socket refusal, reloads the room and joins.
-    content = <MinorsRoomWarning code={minorsCode} roomId={id} text={isMinorsDenied(raw) ? raw.warning : state.errorWarning ?? undefined} onAcknowledged={async () => {
+    content = <MinorsRoomWarning code={minorsCode} roomId={id} lane={(isMinorsDenied(raw) ? raw.warning : state.errorWarning) === MINORS_LANE_WARNING} onAcknowledged={async () => {
       if (state.phase === "denied") sock.leave();
       setJoinTapped(true);
       const r = await refetch();
@@ -269,7 +270,7 @@ function RoomPageInner({ id }: { id: string }) {
   } else if (isLaneDenied(raw)) {
     // A lane parent with nothing for this viewer: the server's own sentence, and (when they know their age group) a way to open it.
     const lane = laneForAge(myAge?.age);
-    content = <Panel title="You can't join this room" body={raw.warning ?? DENIED_MESSAGE[raw.laneDenied === "NO_LANE" ? "NOT_FOUND" : "AGE_LIMIT"] ?? "You can't join this room."}
+    content = <Panel title="You can't join this room" body={raw.warning === MINORS_LANE_WARNING ? MINORS_LANE_WARNING : DENIED_MESSAGE[raw.laneDenied === "NO_LANE" ? "NOT_FOUND" : "AGE_LIMIT"] ?? "You can't join this room."}
       action={<div className="space-y-3">{lane && raw.laneDenied === "NO_LANE" && <OpenLane parentId={id} lane={lane} onOpened={() => { void refetch(); }} say={(m) => toast({ title: m })} />}{back}</div>} />;
   } else if (ageUnknownDenied) {
     // No date of birth on file: the plain message only. No warning (they may be a teen) and no room details.
@@ -295,7 +296,7 @@ function RoomPageInner({ id }: { id: string }) {
     content = <RoomCodePanel code={state.error!} kickRemainingMs={state.error === "KICKED" ? kickRemainingAfter(kickedAt.current, Date.now()) : null} room={room} onRetry={() => { sock.leave(); void refetch(); }} />;
   } else if (state.phase === "denied") {
     const code = state.error ?? "NOT_FOUND";
-    content = <Panel title={code === "AGE_LIMIT" ? "This room has an age limit" : "You can't join this room"} body={code === "AGE_LIMIT" && state.room ? AGE_LIMIT_EVICTED_COPY : state.errorWarning ?? DENIED_MESSAGE[code] ?? "You can't join this room."} action={back} />;
+    content = <Panel title={code === "AGE_LIMIT" ? "This room has an age limit" : "You can't join this room"} body={code === "AGE_LIMIT" && state.room ? AGE_LIMIT_EVICTED_COPY : state.errorWarning === MINORS_LANE_WARNING ? MINORS_LANE_WARNING : DENIED_MESSAGE[code] ?? "You can't join this room."} action={back} />;
   } else if (room.status === "scheduled" && gate === "held" && ticketBlock) {
     bare = true;
     // The refund promise comes from the ticket block (a guest's room object does not carry refundBeforeStart).

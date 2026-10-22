@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { AlertTriangleIcon, Loader2Icon } from "@/components/ui/icons";
-import { MINORS_ROOM_WARNING, type MinorsRoomCode } from "@shared/rooms";
+import { MINORS_LANE_WARNING, MINORS_ROOM_WARNING, type MinorsRoomCode } from "@shared/rooms";
 import { acknowledgeMinorsRoom } from "@/lib/minorsRoomApi";
 import { ackAlreadyDone, acknowledgeErrorMessage, BACK_BUTTON, ENTER_BUTTON, RELOAD_FAILED_COPY, warningScreenFor, WARNING_TITLE } from "@/lib/minorsRoomUi";
 
@@ -12,15 +12,15 @@ interface Props {
   roomId: string;
   /** The warning was acknowledged (or already was): the page loads the room again and joins. Resolves false if the room could not be opened. */
   onAcknowledged(): Promise<boolean>;
-  /** The server's own warning text (a teen lane says "a minor or minors" and that misconduct is recorded and investigated). Falls back to the shared constant. */
-  text?: string;
+  /** A teen lane's refusal carried the lane warning: render the shared lane constant instead of the plain minors' room one. */
+  lane?: boolean;
 }
 
 /**
  * What an adult sees at the door of a room for under 18s. Deliberately knows nothing about the room: no title, no host, no
  * counts. The wording is the shared constant, so the screen, the API and the socket always say the same thing.
  */
-export default function MinorsRoomWarning({ code, roomId, onAcknowledged, text }: Props) {
+export default function MinorsRoomWarning({ code, roomId, onAcknowledged, lane }: Props) {
   const screen = warningScreenFor(code);
   const heading = useRef<HTMLHeadingElement>(null);
   const [busy, setBusy] = useState(false);
@@ -51,7 +51,7 @@ export default function MinorsRoomWarning({ code, roomId, onAcknowledged, text }
         <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-destructive/10 text-destructive"><AlertTriangleIcon className="h-5 w-5" aria-hidden /></span>
         <h1 id="minors-warning-title" ref={heading} tabIndex={-1} className="font-serif text-2xl font-bold leading-tight text-destructive focus:outline-none">{WARNING_TITLE}</h1>
       </div>
-      <p className="text-base leading-relaxed" data-testid="minors-warning-text">{text ?? MINORS_ROOM_WARNING}</p>
+      <p className="text-base leading-relaxed" data-testid="minors-warning-text">{lane ? MINORS_LANE_WARNING : MINORS_ROOM_WARNING}</p>
       {error && <p role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive" data-testid="minors-warning-error">{error}</p>}
       <div className="flex flex-col gap-2 sm:flex-row">
         {screen === "ack" && (

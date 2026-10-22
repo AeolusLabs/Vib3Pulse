@@ -1,6 +1,6 @@
 // Pure rules and words for the minors' room screens (no React, no network). The server is the gate; this only decides what to show.
 import { DENIED_MESSAGE } from "./roomsApi";
-import { MINORS_ROOM_CODES, type MinorsRoomCode } from "@shared/rooms";
+import { MINORS_ROOM_CODES, type MINORS_LANE_WARNING, type MinorsRoomCode } from "@shared/rooms";
 import { cleanWarning } from "./roomReducer";
 
 export const ADULT_LISTEN_LINE = "In this room adults can listen and chat.";
@@ -26,10 +26,10 @@ export function warningScreenFor(code: unknown): "refuse" | "ack" | null {
 }
 
 /** What the page keeps from a 403 on GET /api/rooms/:id: the code, nothing else (no title, host, counts or the body's text). */
-export interface MinorsDenied { minorsDenied: MinorsRoomCode; /** The server's warning text (a teen lane's wording differs from a plain minors' room's). */ warning?: string }
+export interface MinorsDenied { minorsDenied: MinorsRoomCode; /** Present only when the body's warning was exactly MINORS_LANE_WARNING; the screen renders the constant. */ warning?: typeof MINORS_LANE_WARNING }
 export interface AgeUnknownDenied { denied: "AGE_UNKNOWN" }
 /** A lane parent's door: no lane for this viewer (404 NO_LANE) or not their age group (403 AGE_LIMIT). The text is the server's. */
-export interface LaneDenied { laneDenied: "AGE_LIMIT" | "NO_LANE"; warning?: string }
+export interface LaneDenied { laneDenied: "AGE_LIMIT" | "NO_LANE"; warning?: typeof MINORS_LANE_WARNING }
 export type RoomDenial = MinorsDenied | AgeUnknownDenied | LaneDenied;
 export const isLaneDenied = (x: unknown): x is LaneDenied => !!x && typeof x === "object" && ((x as { laneDenied?: unknown }).laneDenied === "AGE_LIMIT" || (x as { laneDenied?: unknown }).laneDenied === "NO_LANE");
 export const isMinorsDenied = (x: unknown): x is MinorsDenied => !!x && typeof x === "object" && isMinorsCode((x as { minorsDenied?: unknown }).minorsDenied);

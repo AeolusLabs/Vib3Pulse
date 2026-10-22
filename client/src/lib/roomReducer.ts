@@ -1,7 +1,7 @@
 // Pure state machine for the room page. No React, no sockets: server messages and a few local events in, state out.
 // Terminal phases (ended, denied) ignore everything except an explicit reset/connecting, so a late message
 // after "the host ended the room" can never resurrect the room.
-import { validateChatReply, type ChatReply } from "@shared/rooms";
+import { MINORS_LANE_WARNING, validateChatReply, type ChatReply } from "@shared/rooms";
 import type { Screen } from "@shared/screen";
 import type { NowPlaying } from "@shared/playback";
 import { isSprayTier, type SprayTier } from "@shared/money";
@@ -53,7 +53,7 @@ export interface RoomState {
   /** Terminal failure code (AGE_LIMIT, BANNED, KICKED, ROOM_FULL ...). */
   error: string | null;
   /** The server's own warning text that came with a socket refusal (a minors' room or lane), shown instead of the bare constant. */
-  errorWarning: string | null;
+  errorWarning: typeof MINORS_LANE_WARNING | null;
   /** Last non-terminal rejection (RATE_LIMITED, MUTED, PRIVACY, SLOW_MODE ...); `n` changes on every notice so the UI can react to repeats. `retryMs` comes with SLOW_MODE. */
   notice: { code: string; n: number; retryMs?: number } | null;
   seq: number;
@@ -118,8 +118,11 @@ export type RoomClientEvent =
 
 export type RoomEvent = RoomServerMessage | RoomClientEvent;
 
-/** The server's warning text, kept only when it is a sentence of sensible size (never markup-sized or empty). */
-export const cleanWarning = (w: unknown): string | undefined => (typeof w === "string" && w.trim().length >= 20 && w.length <= 800 ? w.trim() : undefined);
+/**
+ * A refusal's `warning` is kept ONLY when it is exactly the shared lane warning (no-oracle rule: nothing but a code and known
+ * constants reaches the screen from a refusal). Anything else, including an almost-equal string, is dropped.
+ */
+export const cleanWarning = (w: unknown): typeof MINORS_LANE_WARNING | undefined => (w === MINORS_LANE_WARNING ? MINORS_LANE_WARNING : undefined);
 
 /** A game view from the wire, checked before it is kept: a malformed one is dropped, never rendered. */
 export function validGameView(g: unknown): g is GameView {

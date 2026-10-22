@@ -1,7 +1,8 @@
 // Pure rules and copy for the minors' room screens (no database, no browser): npx tsx scripts/test-rooms-unit-minorsui.ts
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { MINORS_ROOM_WARNING } from "../shared/rooms";
+import { MINORS_LANE_WARNING, MINORS_ROOM_WARNING } from "../shared/rooms";
+import { initialRoomState, roomReducer } from "../client/src/lib/roomReducer";
 import {
   ADULT_LISTEN_LINE, MINORS_UI_COPY, WARNING_TITLE, showListenLine, isAgeUnknownDenied, isRoomDenial, TEEN_HOST_NOTE, acknowledgeErrorMessage, ackAlreadyDone, inviteErrorMessage, inviteStatus,
   isMinorsCode, isMinorsDenied, listenOnlyHere, minorsCodeFor, parseRoomDenial, showAdultInvite, showTeenHostNote, warningScreenFor,
@@ -25,12 +26,19 @@ test("no other code, and nothing at all, ever gets the warning screen (so a teen
   }
 });
 test("a 403 keeps only the code of a minors' room refusal, nothing else from the body", () => {
-  const body = { code: "MINORS_ROOM", message: MINORS_ROOM_WARNING, warning: MINORS_ROOM_WARNING, title: "Secret", host: { id: "h" }, canJoin: { ok: false, code: "MINORS_ROOM" } };
+  const body = { code: "MINORS_ROOM", message: MINORS_ROOM_WARNING, warning: MINORS_ROOM_WARNING, title: "Secret", host: { id: "h" }, canJoin: { ok: false, code: "MINORS_ROOM" }, extra: "leak" };
   const kept = parseRoomDenial(403, body);
   assert.deepEqual(kept, { minorsDenied: "MINORS_ROOM" });
   assert.deepEqual(Object.keys(kept!), ["minorsDenied"]);
-  assert.equal(JSON.stringify(kept).includes("Secret"), false);
+  for (const leak of ["Secret", "leak", '"h"']) assert.equal(JSON.stringify(kept).includes(leak), false, leak);
   assert.deepEqual(parseRoomDenial(403, { code: "MINORS_ROOM_ACK" }), { minorsDenied: "MINORS_ROOM_ACK" });
+});
+test("the lane warning is kept only when it is exactly the shared constant", () => {
+  assert.deepEqual(parseRoomDenial(403, { code: "MINORS_ROOM_ACK", warning: MINORS_LANE_WARNING, title: "Secret" }), { minorsDenied: "MINORS_ROOM_ACK", warning: MINORS_LANE_WARNING });
+  for (const other of ["Any text the server likes to send, long enough to look like a warning.", MINORS_LANE_WARNING + " ", MINORS_LANE_WARNING.slice(0, -1), MINORS_LANE_WARNING.replace("minor", "child"), MINORS_LANE_WARNING.toLowerCase(), 42, null]) {
+    assert.deepEqual(parseRoomDenial(403, { code: "MINORS_ROOM_ACK", warning: other }), { minorsDenied: "MINORS_ROOM_ACK" }, String(other).slice(0, 30));
+  }
+  assert.deepEqual(parseRoomDenial(404, { code: "NO_LANE", warning: "something else entirely, a long sentence" }), { laneDenied: "NO_LANE" });
 });
 test("other answers are not minors denials", () => {
   assert.equal(isMinorsDenied(parseRoomDenial(403, { code: "AGE_UNKNOWN" })), false); // age-unknown is its own plain denial, never the warning
@@ -119,12 +127,23 @@ test("invite status: invited, acknowledged, revoked", () => {
 });
 
 // ---------------------------------------------------------------- copy
-test("the warning on every denial path is the shared constant, word for word", () => {
+test("the warning on every denial path is a shared constant, word for word", () => {
   assert.equal(DENIED_MESSAGE.MINORS_ROOM, MINORS_ROOM_WARNING);
   assert.equal(DENIED_MESSAGE.MINORS_ROOM_ACK, MINORS_ROOM_WARNING);
   const component = readFileSync(new URL("../client/src/components/rooms/MinorsRoomWarning.tsx", import.meta.url), "utf8");
-  assert.ok(component.includes("{MINORS_ROOM_WARNING}"), "the screen renders the shared constant");
+  assert.ok(component.includes("{lane ? MINORS_LANE_WARNING : MINORS_ROOM_WARNING}"), "the screen renders one of the two shared constants");
   assert.ok(!component.includes("under 18s. Adults can only"), "the screen does not carry its own copy of the text");
+  const page = readFileSync(new URL("../client/src/pages/RoomPage.tsx", import.meta.url), "utf8");
+  // HTTP and socket both resolve to a constant: the lane flag is a comparison with the constant, never the body string.
+  assert.ok(page.includes("=== MINORS_LANE_WARNING"), "the page only compares against the lane constant");
+  assert.ok(!page.includes("raw.warning ??") && !page.includes("state.errorWarning ??"), "no raw body string reaches a screen");
+  assert.ok(MINORS_LANE_WARNING.includes("minor or minors") && MINORS_LANE_WARNING.includes("recorded and investigated"));
+});
+test("a socket refusal keeps the lane warning only when it is exactly the constant", () => {
+  assert.equal(roomReducer(initialRoomState("u"), { type: "room:error", code: "MINORS_ROOM_ACK", warning: MINORS_LANE_WARNING }).errorWarning, MINORS_LANE_WARNING);
+  for (const other of ["Some other long sentence from the server.", MINORS_LANE_WARNING + "!", MINORS_ROOM_WARNING]) {
+    assert.equal(roomReducer(initialRoomState("u"), { type: "room:error", code: "MINORS_ROOM_ACK", warning: other }).errorWarning, null);
+  }
 });
 test("the warning screen never reads a room title or host", () => {
   const component = readFileSync(new URL("../client/src/components/rooms/MinorsRoomWarning.tsx", import.meta.url), "utf8");

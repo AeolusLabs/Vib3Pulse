@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { initialRoomState, roomReducer, type RoomState } from "../client/src/lib/roomReducer";
 import { countdownMs, featuredFor, formatCountdown, gameNoticeText, gameRefusalText, membersOf, playerIdOf, statusOf, statusText } from "../client/src/lib/gameScreen";
 import type { GameView } from "../shared/gameScreen";
+import { MINORS_LANE_WARNING } from "../shared/rooms";
 import { isLaneDenied, isMinorsDenied, parseRoomDenial } from "../client/src/lib/minorsRoomUi";
 import { laneBarTitle, laneForAge, openLaneLabel, otherLane } from "../client/src/lib/gameScreen";
 
@@ -127,18 +128,18 @@ test("refusals: a bare 'invalid' on another field is not ours, and no line menti
 
 // ---------------------------------------------------------------- lanes: the server's warning text and the lane door
 const LANE_TEXT = "You are entering a room with a minor or minors. Any misconduct is recorded and investigated.";
-test("denial: a minors' room refusal keeps the server's warning text", () => {
-  const d = parseRoomDenial(403, { code: "MINORS_ROOM_ACK", warning: LANE_TEXT, title: "secret" });
-  assert.deepEqual(d, { minorsDenied: "MINORS_ROOM_ACK", warning: LANE_TEXT });
+test("denial: only the exact lane warning constant is kept", () => {
+  assert.deepEqual(parseRoomDenial(403, { code: "MINORS_ROOM_ACK", warning: MINORS_LANE_WARNING, title: "secret" }), { minorsDenied: "MINORS_ROOM_ACK", warning: MINORS_LANE_WARNING });
+  assert.deepEqual(parseRoomDenial(403, { code: "MINORS_ROOM_ACK", warning: LANE_TEXT }), { minorsDenied: "MINORS_ROOM_ACK" });
 });
 test("denial: without a warning the shape is exactly as before", () => {
   assert.deepEqual(parseRoomDenial(403, { code: "MINORS_ROOM" }), { minorsDenied: "MINORS_ROOM" });
   assert.ok(isMinorsDenied(parseRoomDenial(403, { code: "MINORS_ROOM" })));
 });
 test("denial: NO_LANE (404) and AGE_LIMIT (403) at a lane parent are lane refusals with the server's text", () => {
-  const a = parseRoomDenial(404, { code: "NO_LANE", warning: LANE_TEXT });
+  const a = parseRoomDenial(404, { code: "NO_LANE", warning: MINORS_LANE_WARNING });
   assert.ok(isLaneDenied(a));
-  assert.equal((a as any).warning, LANE_TEXT);
+  assert.equal((a as any).warning, MINORS_LANE_WARNING);
   assert.ok(isLaneDenied(parseRoomDenial(403, { code: "AGE_LIMIT" })));
 });
 test("denial: any other 404, or a junk warning, is dropped", () => {
@@ -146,9 +147,9 @@ test("denial: any other 404, or a junk warning, is dropped", () => {
   assert.equal(parseRoomDenial(404, null), null);
   assert.deepEqual(parseRoomDenial(403, { code: "MINORS_ROOM", warning: "x" }), { minorsDenied: "MINORS_ROOM" });
 });
-test("reducer: a socket refusal carries the server's warning text; a fresh connect clears it", () => {
-  const s = roomReducer(initialRoomState("u"), { type: "room:error", code: "MINORS_ROOM_ACK", warning: LANE_TEXT });
-  assert.equal(s.errorWarning, LANE_TEXT);
+test("reducer: a socket refusal carries the lane warning constant only; a fresh connect clears it", () => {
+  const s = roomReducer(initialRoomState("u"), { type: "room:error", code: "MINORS_ROOM_ACK", warning: MINORS_LANE_WARNING });
+  assert.equal(s.errorWarning, MINORS_LANE_WARNING);
   assert.equal(roomReducer(s, { type: "client:connecting" }).errorWarning, null);
   assert.equal(roomReducer(initialRoomState("u"), { type: "room:error", code: "AGE_LIMIT" }).errorWarning, null);
 });
