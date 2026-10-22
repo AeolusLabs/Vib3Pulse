@@ -16,7 +16,8 @@
 //     status change is conditional (WHERE status IN (...)). Delivery and its ledger row commit together, under
 //     pg_advisory_xact_lock on the reference and on every person the money reaches (receive cap). The room:spray broadcast
 //     happens AFTER the commit and is never the source of truth.
-//  5. Reverse, never strand. Paid but undeliverable => 'reversing' (reason), the provider refund (lookup first, never twice),
+//  5. Reverse, never strand. Only the integrity guards reverse a taken payment (amount / currency mismatch, a late payment for
+//     a failed spray, the new-host cap at delivery): 'reversing' (reason), the provider refund (lookup first, never twice),
 //     'reversed' only once the provider says the refund is processed IN FULL. A lookup or refund failure stays 'reversing'
 //     and the sweep (sprayJobs.ts) tries again. The spend reservation is given back exactly once, by the winning transition.
 //  6. Secrets. Authorization codes are decrypted only to charge and encrypted at once when saved; never logged, never in a
@@ -25,7 +26,7 @@
 // !!! BLOCKING G3 QUESTION (owner ruling C1, 2026-10-19): SPLIT-REFUND SEMANTICS ARE UNVERIFIED. !!!
 // The split is made AT SOURCE: Paystack routes the host's (and a stage guest's) share to their subaccount when the card is
 // charged. Nobody has confirmed whose balance funds a refund of a split charge, or whether the subaccount's settled share is
-// pulled back. Until G3 answers it, EVERY reversal of a taken payment (RECIPIENT_LEFT, ROOM_ENDED, TIMEOUT, HOST_CAP,
+// pulled back. Until G3 answers it, EVERY reversal of a taken payment (HOST_CAP, since 2026-10-22 delivery problems no longer reverse: see deliverOrReverse,
 // NOT_DELIVERABLE, AMOUNT_MISMATCH, LATE_PAYMENT) writes host_clawbacks rows (origin 'reversal') for the host share and the
 // guest share, in the same transaction that moves the spray to 'reversing' (under the 'spray-recv' locks). Reversed sprays
 // count toward the new-host cap. OWNER DECISION (review r4 N4/N5): the receive ban is checked ONLY when a spray starts, and
@@ -111,17 +112,14 @@ export function sprayRequestHash(roomId: string, tier: string, targetId: string)
 
 // Reasons stored on the row. Only SPRAY_REASONS are ever shown to the payer; the others are for finance and logs.
 type InternalReason = "AMOUNT_MISMATCH" | "NOT_DELIVERABLE" | "HOST_CAP" | "LATE_PAYMENT";
-type StoredReason = (typeof SPRAY_REASONS)[number] | InternalReason;
-const shownReason = (r: string | null | undefined): string | undefined =>
+export type StoredReason = (typeof SPRAY_REASONS)[number] | InternalReason;
+export const shownReason = (r: string | null | undefined): string | undefined =>
   r && (SPRAY_REASONS as readonly string[]).includes(r) ? r : undefined;
 
 /** Plain words for the payer-only chat line after a reversal (no em dashes, no "cash"). */
-const REVERSAL_TEXT: Record<string, string> = {
-  RECIPIENT_LEFT: "They left the stage, so you were refunded in full.",
-  ROOM_ENDED: "The room ended before your spray landed, so you were refunded in full.",
-  TIMEOUT: "Your spray took too long to land, so you were refunded in full.",
-};
-const REVERSAL_DEFAULT = "Your spray could not be delivered, so you were refunded in full.";
+// Delivery problems no longer reverse a spray (the charge goes through); only the integrity guards do, with the default words.
+export const REVERSAL_TEXT: Record<string, string> = {};
+export const REVERSAL_DEFAULT = "Your spray could not be delivered, so you were refunded in full.";
 
 // ---------------------------------------------------------------- the gate (rule B1)
 export interface SprayFacts {
@@ -229,13 +227,6 @@ export async function sprayGate(roomId: string, payerId: string, recipientId: st
   };
 }
 
-/** Why a delivery failed, as a stored reason. */
-function reversalReasonFor(code: GateCode): StoredReason {
-  if (code === "ROOM_NOT_LIVE" || code === "ROOM_NOT_ELIGIBLE") return "ROOM_ENDED";
-  if (code === "RECIPIENT_NOT_ALLOWED" || code === "RECIPIENT_NOT_PAYABLE") return "RECIPIENT_LEFT";
-  return "NOT_DELIVERABLE"; // (OPEN_CLAWBACK never happens at delivery: the debt rule is start-only)
-}
-
 // ---------------------------------------------------------------- start (POST /api/rooms/:id/spray)
 export interface StartOutcome {
   status: number;
@@ -289,6 +280,8 @@ function replayOutcome(row: SprayPayment, requestHash: string): StartOutcome {
 
 /** Per payer, in this process, before a pool connection is taken (the advisory lock still serialises across processes). */
 const payerQueue = createKeyedQueue({ maxPending: 5 });
+/** Team spray (teamSpray.ts) reserves in the same per-payer queue as a single spray: one payer, one critical section. */
+export const runForPayer = <T>(payerId: string, fn: () => Promise<T>): Promise<T> => payerQueue.run(payerId, fn);
 /** Per reference, in this process, before the advisory-lock connection is taken. */
 const finalizeQueue = createKeyedQueue({ maxPending: 10 });
 
@@ -563,8 +556,17 @@ function verifiedMatches(row: SprayPayment, v: SplitVerifyResult): boolean {
     && typeof v.currency === "string" && v.currency.toUpperCase() === "NGN";
 }
 
+// Team spray (teamSpray.ts registers it): a reference that belongs to a batch is finalized by the batch engine, under this
+// same lock. Registered to avoid an import cycle; unset (no team spray code loaded) means no batch is ever looked up.
+let batchFinalizer: ((c: PoolClient, reference: string, opts: FinalizeOpts) => Promise<FinalizeOutcome | null>) | null = null;
+export const registerBatchFinalizer = (fn: typeof batchFinalizer) => { batchFinalizer = fn; };
+
 async function finalizeLocked(c: PoolClient, reference: string, opts: FinalizeOpts): Promise<FinalizeOutcome> {
   const row = await ss.getSprayByRef(reference);
+  if (!row && batchFinalizer) {
+    const out = await batchFinalizer(c, reference, opts); // null: not a batch reference either
+    if (out !== null) return out;
+  }
   if (!row) {
     // Owner ruling I4: the MAC only gates references we have NO row for. A well-formed reference without our MAC is someone
     // else's (ignored, 200). One WITH our MAC but no row should not exist (the row is inserted before the provider is ever
@@ -630,7 +632,7 @@ async function finalizeLocked(c: PoolClient, reference: string, opts: FinalizeOp
 }
 
 /** Rule B8: only with the payer's explicit saveCard AND a reusable card. Never fails the spray. */
-async function maybeSaveCard(row: SprayPayment, v: SplitVerifyResult): Promise<void> {
+export async function maybeSaveCard(row: Pick<SprayPayment, "payerId" | "provider">, v: SplitVerifyResult): Promise<void> {
   const a = v.authorization;
   if (v.metadata?.saveCard !== "1" || !a || a.reusable !== true || !a.authorizationCode || !a.signature) return;
   try {
@@ -644,29 +646,31 @@ async function maybeSaveCard(row: SprayPayment, v: SplitVerifyResult): Promise<v
   }
 }
 
-/** A paid spray: delivered if it still may be, else reversed. Caller holds the reference's advisory lock (c). */
+/**
+ * A paid spray is DELIVERED (owner rule 2026-10-22): the split reached the subaccounts when the card was charged, so a charge
+ * that went through is never undone for a delivery problem (room ended, recipient left, 60 s deadline); if the money did not
+ * arrive the PSP returns it. The room state only decides whether the animation is shown: when it cannot be (nobody there to
+ * see it) the spray is still marked delivered and the ledger rows are written, with no broadcast. A recipient that merely looks
+ * absent in this process's hub (a deploy overlap) is waited for until the deadline, so the animation still plays when it can.
+ * Still reversed (integrity guards, not delivery problems): the new-host receive cap at delivery here, and in finalizeLocked
+ * the amount / currency mismatch and a late payment for an already failed spray. Caller holds the reference's advisory lock (c).
+ */
 async function deliverOrReverse(c: PoolClient, row: SprayPayment): Promise<FinalizeOutcome> {
   const nowMs = sprayClock.now();
   const paidMs = row.paidAt ? new Date(row.paidAt).getTime() : nowMs;
   const pastDeadline = nowMs - paidMs > DELIVERY_DEADLINE_MS;
   const gate = await sprayGate(row.roomId, row.payerId, row.recipientId, "deliver");
-  if (!gate.ok) {
-    // Owner ruling 6: the recipient merely LOOKS absent (this process's hub may not know the room yet, for example during a
-    // deploy overlap): keep it paid and look again (the sweep, every pass) until the deadline. Anything the database says
-    // (banned, unverified, no payout account, room ended, blocked) reverses at once. A debt never does (review r4 N4).
-    if (gate.absentOnly && !pastDeadline) { logSpray(row.providerRef, "waiting:recipient_not_seen"); return "pending"; }
-    return reverse(c, row, reversalReasonFor(gate.code));
-  }
-  if (pastDeadline) return reverse(c, row, "TIMEOUT");
-  const f = gate.facts;
-  // The host changed, or the recipient's kind changed (the split was made for the other one): never deliver a wrong split.
-  if (f.room.hostId !== row.hostId || (f.kind === "host") !== (row.guestKobo === null)) return reverse(c, row, "NOT_DELIVERABLE");
+  if (!gate.ok && gate.absentOnly && !pastDeadline) { logSpray(row.providerRef, "waiting:recipient_not_seen"); return "pending"; }
+  // Shown only when the gate still passes and the split is the one this room's host and recipient kind were priced for.
+  const f = gate.ok && gate.facts.room.hostId === row.hostId && (gate.facts.kind === "host") === (row.guestKobo === null) ? gate.facts : null;
+  if (!f) logSpray(row.providerRef, "delivered_unseen"); // delivered all the same, no animation
+  const [hostUser, recipientUser] = f ? [f.host, f.recipient] : await Promise.all([storage.getUser(row.hostId), storage.getUser(row.recipientId)]);
 
   let refused: StoredReason | null = null;
   try {
     await c.query("BEGIN");
     await c.query("select pg_advisory_xact_lock(hashtext($1::text))", [`spray-ref:${row.providerRef}`]);
-    const people = capUsers(f.host, f.recipient);
+    const people = hostUser && recipientUser ? capUsers(hostUser, recipientUser) : [hostUser, recipientUser].filter((u): u is User => !!u);
     for (const u of people) await c.query("select pg_advisory_xact_lock(hashtext($1::text))", [capLockKey(u.id)]);
     // Review r4 N4: NO debt check here. The money is already split to the subaccounts; reversing a paid spray because its
     // host or recipient owes a clawback would refund the payer and add another unrecoverable clawback. The receive ban is
@@ -697,7 +701,7 @@ async function deliverOrReverse(c: PoolClient, row: SprayPayment): Promise<Final
   }
   if (refused) return reverse(c, row, refused);
   logSpray(row.providerRef, "delivered");
-  announceDelivery(row, f);
+  if (f) announceDelivery(row, f);
   // Phase 6: the people the money reached (the host's share; a stage guest's share). Batched per (person, room), never names
   // the payer, fire-and-forget (notify never rejects, so a notification failure never touches the delivered spray).
   void notifySprayReceived(row.hostId, row.roomId, row.hostKobo, row.id);
@@ -895,6 +899,9 @@ export async function sprayBlockFor(room: Room, viewerId: string): Promise<{ ena
   if (roomHub.get(room.id, room.hostId)) candidates.add(room.hostId);
   for (const m of roomHub.members(room.id)) if (m.role === "cohost") candidates.add(m.userId);
   for (const id of roomHub.stageOf(room.id).stage) candidates.add(id);
+  // Gaming: current game players are spray recipients too (isGamePlayer is false whenever ROOMS_GAMING is off).
+  const g = roomHub.gameOf(room.id);
+  for (const id of [...g.teams.A, ...g.teams.B]) if (isGamePlayer(room.id, id)) candidates.add(id);
   candidates.delete(viewerId);
   // Payer eligibility: checked against the host as the recipient but only the payer and room codes decide. If the viewer is
   // the host, against anyone (the payer and room rules do not depend on who).
