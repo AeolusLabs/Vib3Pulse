@@ -1168,6 +1168,8 @@ export const rooms = pgTable("rooms", {
   gameDropTimeoutMs: integer("game_drop_timeout_ms").notNull().default(120000),
   ageLane: text("age_lane"),
   parentRoomId: varchar("parent_room_id"),
+  // Spray opt-in (migrations/add_rooms_spray_enabled.sql): the host's per-room switch; new sprays need true.
+  sprayEnabled: boolean("spray_enabled").notNull().default(false),
 }, (t) => ({
   gameFormatCheck: check("rooms_game_format_check", sql`${t.gameFormat} IS NULL OR (${t.gameFormat} >= 1 AND ${t.gameFormat} <= 4)`),
   gameDropTimeoutCheck: check("rooms_game_drop_timeout_check", sql`${t.gameDropTimeoutMs} IN (0, 30000, 120000)`),

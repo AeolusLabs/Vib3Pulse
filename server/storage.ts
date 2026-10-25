@@ -477,6 +477,11 @@ CREATE TABLE IF NOT EXISTS room_members (
     const { ROOM_GAME_SCHEMA_SQL } = await import("./rooms/roomGameMigration");
     await pool.query(ROOM_GAME_SCHEMA_SQL);
   }
+  // Spray opt-in: rooms.spray_enabled. Same SQL as migrations/add_rooms_spray_enabled.sql.
+  {
+    const { ROOM_SPRAY_ENABLED_SCHEMA_SQL } = await import("./rooms/roomSprayEnabledMigration");
+    await pool.query(ROOM_SPRAY_ENABLED_SCHEMA_SQL);
+  }
   await pool.query(`
     ALTER TABLE venues ADD COLUMN IF NOT EXISTS building JSONB
   `);
