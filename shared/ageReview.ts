@@ -82,3 +82,10 @@ export function attemptState(
   if (attemptsLeft === 0) retry = Math.max(retry, declines[declines.length - MAX_DECLINES_PER_WINDOW] + DECLINE_WINDOW_MS);
   return { attemptsLeft, retryAfter: retry > t ? new Date(retry) : null };
 }
+
+export const CHECKLIST_KEYS = ["faceMatches", "codeMatches", "documentTypeMatches", "notExpired", "birthdateReadable", "noEditing"] as const;
+export type ChecklistKey = typeof CHECKLIST_KEYS[number];
+export const DECISION_OUTCOMES = ["verify", "teen_correction", "birthdate_change", "needs_more", "decline", "not_eligible_minor"] as const;
+export type DecisionOutcome = typeof DECISION_OUTCOMES[number];
+export const DECLINE_REASONS = ["unreadable", "expired", "face_mismatch", "code_missing", "looks_edited", "other"] as const;
+export type DeclineReason = typeof DECLINE_REASONS[number];

@@ -2628,6 +2628,7 @@ export const ageReviewRequests = pgTable("age_review_requests", {
   registeredDobSnapshot: text("registered_dob_snapshot"),
   reviewerId: varchar("reviewer_id"),
   secondApproverId: varchar("second_approver_id"),
+  proposedDob: text("proposed_dob"),
   outcome: text("outcome"),
   declineReason: text("decline_reason"),
   dobMatch: boolean("dob_match"),
