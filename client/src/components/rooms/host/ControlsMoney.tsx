@@ -11,11 +11,13 @@ import { MONEY_COPY, moneyRefusal, moneyView } from "@/lib/moneySection";
 
 export interface ControlsMoneyProps {
   roomId: string;
+  /** Called after a saved change so the room details upstream are refetched and every reader sees the saved value. */
+  onChanged?: () => void;
   room: { ageLimit: string; minorsRoom?: boolean; status?: string; sprayEnabled?: boolean; ticketPriceKobo?: number | null };
 }
 
-export default function ControlsMoney({ roomId, room }: ControlsMoneyProps) {
-  const { data: config } = useRoomsConfig();
+export default function ControlsMoney({ roomId, room, onChanged }: ControlsMoneyProps) {
+  const { data: config } = useRoomsConfig(true);
   const view = moneyView({ flags: config?.features, readiness: config?.hostMoneyReadiness, ageLimit: room.ageLimit, minorsRoom: room.minorsRoom });
   const [on, setOn] = useState(room.sprayEnabled === true);
   const [busy, setBusy] = useState(false);
@@ -28,11 +30,11 @@ export default function ControlsMoney({ roomId, room }: ControlsMoneyProps) {
     setBusy(true); setError(null);
     const res = await call<unknown>("PATCH", `/api/rooms/${encodeURIComponent(roomId)}`, { sprayEnabled: next });
     setBusy(false);
-    if (res.ok) setOn(next);
+    if (res.ok) { setOn(next); onChanged?.(); }
     else setError(moneyRefusal(res.code) ?? MONEY_COPY.saveFailed);
   };
   const change = (next: boolean) => {
-    if (!next && room.status === "live") setConfirmOff(true);
+    if (on && !next && room.status === "live") setConfirmOff(true);
     else void save(next);
   };
 

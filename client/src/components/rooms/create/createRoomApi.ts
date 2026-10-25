@@ -2,7 +2,7 @@
 // server's code and the field (apiRequest only keeps the message text), so the screens can word every refusal themselves.
 import { useQuery } from "@tanstack/react-query";
 import { ensureCsrfToken, refreshCsrfToken } from "@/lib/queryClient";
-import { fetchRoomsConfig, type RoomsConfig } from "@/lib/roomsApi";
+import { fetchRoomsConfig, moneyAwareStaleTime, type RoomsConfig } from "@/lib/roomsApi";
 import type { WizardHost, WizardState } from "@/lib/createRoomRules";
 import { buildCreatePayload, type ApiFailure, type RoomLink, type WizardExtras } from "@/lib/createRoomWizardUi";
 
@@ -79,7 +79,7 @@ export function useWizardHost(open: boolean, accountTooNew: boolean) {
   const me = useQuery<{ age: number | null }>({ queryKey: ["/api/users/me/room-privacy"], enabled: open });
   const verification = useQuery<{ verified: boolean; band: "adult" | "teen" | null }>({ queryKey: ["/api/users/me/age-verification"], enabled: open });
   // Same key and fetcher as useRoomsConfig in roomsApi, so it shares that cache; only the `enabled` gate is added.
-  const config = useQuery({ queryKey: ["/api/rooms/config"], queryFn: fetchRoomsConfig, staleTime: 5 * 60 * 1000, enabled: open });
+  const config = useQuery({ queryKey: ["/api/rooms/config"], queryFn: fetchRoomsConfig, staleTime: moneyAwareStaleTime, enabled: open });
   const hostConfig = (config.data as (RoomsConfig & { host?: HostConfig }) | undefined)?.host;
   const knownDays = typeof hostConfig?.accountAgeDays === "number" ? hostConfig.accountAgeDays : ASSUMED_ACCOUNT_DAYS;
   const minAccountAgeDays = typeof hostConfig?.minAccountAgeDays === "number" ? hostConfig.minAccountAgeDays : 0;

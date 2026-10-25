@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { stepsFor, wizardOptions, type WizardHost, type WizardState } from "../client/src/lib/createRoomRules";
 import { buildCreatePayload, defaultWizardState } from "../client/src/lib/createRoomWizardUi";
+import { moneyAwareStaleTime } from "../client/src/lib/roomsApi";
 import { MONEY_COPY, moneyRefusal, moneyView, type MoneyReadiness } from "../client/src/lib/moneySection";
 
 let passed = 0, failed = 0;
@@ -101,6 +102,23 @@ test("placeholder copy no longer used", () => {
     const t = src(p);
     assert.equal(/money-placeholder|moneyPlaceholder\b|not available here yet|moneyNote/.test(t.replace(/moneyPlaceholderVisible/g, "")), false, p);
   }
+});
+
+test("controls reflects the saved spray value after a PATCH", () => {
+  const f = src("../client/src/components/rooms/host/ControlsMoney.tsx");
+  assert.ok(f.includes("if (res.ok) { setOn(next); onChanged?.(); }"), "saved value kept and the room refetched");
+  assert.ok(f.includes('if (on && !next && room.status === "live")'), "confirm only when the saved value is on");
+  assert.ok(src("../client/src/components/rooms/host/ControlsSheet.tsx").includes("<ControlsMoney roomId={roomId} onChanged={onSprayChanged}"));
+  assert.ok(src("../client/src/components/rooms/shell/RoomShell.tsx").includes("onSprayChanged={onSprayChanged}"), "RoomShell passes the room refetch");
+});
+test("readiness refetches on open", () => {
+  const on = { state: { data: { features: { paidRooms: false, spray: true } } as any } };
+  const off = { state: { data: { features: { paidRooms: false, spray: false } } as any } };
+  assert.equal(moneyAwareStaleTime(on), 0, "a money flag is on: always stale, so open/mount refetches");
+  assert.equal(moneyAwareStaleTime(off), 5 * 60 * 1000, "both flags off: no extra requests");
+  assert.equal(moneyAwareStaleTime({ state: { data: undefined } }), 5 * 60 * 1000);
+  assert.match(src("../client/src/components/rooms/create/createRoomApi.ts"), /staleTime: moneyAwareStaleTime, enabled: open/);
+  assert.match(src("../client/src/components/rooms/host/ControlsMoney.tsx"), /useRoomsConfig\(true\)/);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -194,6 +194,14 @@ export async function fetchRoomsConfig(): Promise<RoomsConfig> {
   return (await res.json()) as RoomsConfig;
 }
 
-export function useRoomsConfig() {
-  return useQuery({ queryKey: ["/api/rooms/config"], queryFn: fetchRoomsConfig, staleTime: 5 * 60 * 1000 });
+const CONFIG_STALE_MS = 5 * 60 * 1000;
+/** Stale at once while a money flag is on (the host's readiness changes when they fix something elsewhere), else cached 5 minutes. */
+export const moneyAwareStaleTime = (q: { state: { data: RoomsConfig | undefined } }): number => {
+  const f = q.state.data?.features;
+  return f && (f.paidRooms || f.spray) ? 0 : CONFIG_STALE_MS;
+};
+
+/** `fresh`: refetch on mount when a money flag is on (wizard open, Controls), so the readiness checklist is never 5 minutes old. */
+export function useRoomsConfig(fresh = false) {
+  return useQuery({ queryKey: ["/api/rooms/config"], queryFn: fetchRoomsConfig, staleTime: fresh ? moneyAwareStaleTime : CONFIG_STALE_MS });
 }

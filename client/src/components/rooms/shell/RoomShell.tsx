@@ -566,7 +566,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
           roomId={id} inviteToken={token} role={role === "host" ? "host" : "cohost"}
           room={room} state={state} count={count} selfId={meId} sock={sock}
           holderAwayLeftMs={holderAwayLeftMs}
-          hostExtras={isHost ? hostControls : undefined}
+          hostExtras={isHost ? hostControls : undefined} onSprayChanged={onSprayChanged}
           gameConsole={gameOn && game && sock.gameAction ? {
             game, nameOf, onAction: (a, extra) => sock.gameAction?.(a, extra) ?? false,
             // A refusal comes back in words (TEAM_FULL, GAME_IN_PROGRESS ...), not as the server's raw text.

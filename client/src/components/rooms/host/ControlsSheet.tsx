@@ -42,6 +42,8 @@ export interface ControlsSheetProps {
   /** Dev fixture only: open on this tab. */
   startTab?: ControlsTab;
   /** Gamers live: present only for a game room with the flag on. Adds a Game tab; without it the sheet is exactly as before. */
+  /** Refetch the room details after the host changes spray. */
+  onSprayChanged?: () => void;
   gameConsole?: Omit<GameConsoleProps, "say" | "game"> & { game: NonNullable<RoomState["game"]> };
 }
 
@@ -52,7 +54,7 @@ const FOCUS = "focus-visible:outline focus-visible:outline-2 focus-visible:outli
  * The host's (and a co-host's) Controls: Requests, Stage, People, Settings. A co-host gets the actions they already have
  * and only the pinned message in Settings. Every action goes through the existing socket and REST endpoints; the server decides.
  */
-export default function ControlsSheet({ open, onOpenChange, roomId, inviteToken, role, room, state, count, selfId, sock, holderAwayLeftMs, hostExtras, returnFocusTo, startTab, gameConsole }: ControlsSheetProps) {
+export default function ControlsSheet({ open, onOpenChange, roomId, inviteToken, role, room, state, count, selfId, sock, holderAwayLeftMs, hostExtras, returnFocusTo, startTab, gameConsole, onSprayChanged }: ControlsSheetProps) {
   const can = controlsFor(role);
   const [tab, setTab] = useState<ControlsTab | "game">(startTab ?? "requests");
   const settings = readSettings(state.room, room as unknown as Record<string, unknown>);
@@ -181,7 +183,7 @@ export default function ControlsSheet({ open, onOpenChange, roomId, inviteToken,
               onSave={(patch) => sock.saveSettings(patch)}
               voiceEnabled={state.voiceEnabled} liveVideo={state.liveVideo}
               onSwitchVoice={(on) => sock.setVoice(on)} onSwitchLive={(on) => sock.setLiveVideo(on)}
-              money={role === "host" ? <ControlsMoney roomId={roomId} room={{ ...room, status: (state.room as { status?: string } | null)?.status ?? room.status }} /> : null}
+              money={role === "host" ? <ControlsMoney roomId={roomId} onChanged={onSprayChanged} room={{ ...room, status: (state.room as { status?: string } | null)?.status ?? room.status }} /> : null}
               hostExtras={hostExtras}
               onMessage={say}
             />
