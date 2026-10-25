@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, integer, smallint, boolean, unique, primaryKey, doublePrecision, check, jsonb, numeric, index, uniqueIndex, uuid, bigint } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, integer, smallint, boolean, unique, primaryKey, doublePrecision, check, jsonb, numeric, index, uniqueIndex, uuid, bigint, customType } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import type { AvatarConfig } from "./avatar";
@@ -1669,7 +1669,8 @@ export const adminRoles = [
   "user_support",
   "event_reviewer",
   "finance_manager",
-  "analytics_viewer"
+  "analytics_viewer",
+  "age_reviewer"
 ] as const;
 export type AdminRole = typeof adminRoles[number];
 
@@ -2611,3 +2612,51 @@ export const sprayEvents = pgTable("spray_events", {
   toStatusAtIdx: index("spray_events_to_status_at_idx").on(t.toStatus, t.at),
 }));
 export type SprayEvent = typeof sprayEvents.$inferSelect;
+
+// Manual age review (migrations/add_age_review.sql). Evidence is encrypted (server/identity/evidenceCrypto.ts) and never leaves the server as JSON.
+const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
+export const ageReviewRequests = pgTable("age_review_requests", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  method: text("method").notNull(),
+  status: text("status").notNull().default("draft"),
+  documentType: text("document_type"),
+  code: text("code"),
+  codeExpiresAt: timestamp("code_expires_at"),
+  documentFingerprint: text("document_fingerprint"),
+  registeredDobSnapshot: text("registered_dob_snapshot"),
+  reviewerId: varchar("reviewer_id"),
+  secondApproverId: varchar("second_approver_id"),
+  outcome: text("outcome"),
+  declineReason: text("decline_reason"),
+  dobMatch: boolean("dob_match"),
+  moreRequests: integer("more_requests").notNull().default(0),
+  liveInviteExpiresAt: timestamp("live_invite_expires_at"),
+  consentVersion: text("consent_version"),
+  consentedAt: timestamp("consented_at"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  submittedAt: timestamp("submitted_at"),
+  decidedAt: timestamp("decided_at"),
+  expiresAt: timestamp("expires_at").notNull().default(sql`now() + interval '7 days'`),
+}, (t) => ({
+  methodCheck: check("age_review_requests_method_check", sql`${t.method} IN ('upload', 'live')`),
+  statusCheck: check("age_review_requests_status_check", sql`${t.status} IN ('draft', 'submitted', 'in_review', 'needs_more', 'pending_second_approval', 'approved', 'declined', 'expired', 'cancelled', 'closed_minor')`),
+  oneOpenUniq: uniqueIndex("age_review_requests_one_open_uniq").on(t.userId).where(sql`status IN ('draft', 'submitted', 'in_review', 'needs_more', 'pending_second_approval')`),
+  statusCreatedIdx: index("age_review_requests_status_created_idx").on(t.status, t.createdAt),
+  userCreatedIdx: index("age_review_requests_user_created_idx").on(t.userId, t.createdAt),
+  fingerprintIdx: index("age_review_requests_fingerprint_idx").on(t.documentFingerprint).where(sql`document_fingerprint IS NOT NULL`),
+}));
+export type AgeReviewRequest = typeof ageReviewRequests.$inferSelect;
+
+export const ageReviewEvidence = pgTable("age_review_evidence", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  requestId: uuid("request_id").notNull().references(() => ageReviewRequests.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  mime: text("mime").notNull(),
+  bytesEnc: bytea("bytes_enc").notNull(),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+}, (t) => ({
+  kindCheck: check("age_review_evidence_kind_check", sql`${t.kind} IN ('document', 'selfie')`),
+  requestKindUniq: uniqueIndex("age_review_evidence_request_kind_uniq").on(t.requestId, t.kind),
+}));
+export type AgeReviewEvidence = typeof ageReviewEvidence.$inferSelect;

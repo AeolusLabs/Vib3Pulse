@@ -1,7 +1,8 @@
 // ID-verification seam. Pure; shared by server and client.
 import { ageFromDob, ageBand } from "./age";
 
-export type AgeVerificationMethod = "admin" | "provider";
+export const AGE_VERIFICATION_METHODS = ["admin", "provider", "admin_upload", "admin_live"] as const;
+export type AgeVerificationMethod = typeof AGE_VERIFICATION_METHODS[number];
 
 /** What the owner is told about their own verification. Never carries the birthdate. */
 export interface AgeVerification {
@@ -23,7 +24,7 @@ export function toAgeVerification(
   now: Date = new Date(),
 ): AgeVerification {
   const verified = !!u.ageVerifiedAt;
-  const method = u.ageVerifiedMethod === "admin" || u.ageVerifiedMethod === "provider" ? u.ageVerifiedMethod : null;
+  const method = (AGE_VERIFICATION_METHODS as readonly string[]).includes(u.ageVerifiedMethod ?? "") ? (u.ageVerifiedMethod as AgeVerificationMethod) : null;
   return {
     verified,
     band: verified ? ageBand(ageFromDob(u.dateOfBirth, now)) : null,

@@ -143,6 +143,11 @@ export const SENSITIVE_RESPONSE_KEYS = new Set<string>([
   // key itself is stripped, so a body that ever includes a verify result loses the card with it. No response uses this key
   // for anything else (authorizationUrl is a different key and is kept).
   "authorization",
+  // Age review evidence and the keyed document fingerprint. The selfie "code" is deliberately NOT here: the owner needs it.
+  "bytes_enc",
+  "bytesEnc",
+  "documentFingerprint",
+  "document_fingerprint",
   "sprayDailyLimitKobo",
   "spray_daily_limit_kobo",
   // Rooms payouts (phase 6): Paystack's raw bank-resolve / subaccount fields. The rooms routes never return them (last four

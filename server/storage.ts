@@ -1,3 +1,4 @@
+import type { AgeVerificationMethod } from "@shared/ageVerification";
 import { 
   type User, 
   type InsertUser,
@@ -492,6 +493,11 @@ CREATE TABLE IF NOT EXISTS room_members (
     const { SPRAY_EVENTS_SCHEMA_SQL } = await import("./rooms/sprayEventsMigration");
     await pool.query(SPRAY_EVENTS_SCHEMA_SQL);
   }
+  // Manual age review tables. Same SQL as migrations/add_age_review.sql.
+  {
+    const { AGE_REVIEW_SCHEMA_SQL } = await import("./identity/ageReviewMigration");
+    await pool.query(AGE_REVIEW_SCHEMA_SQL);
+  }
   // Ledger v2: spray_payments (created_at, id) index, spray_events.seq and clock_timestamp() default. migrations/add_spray_ledger_v2.sql.
   {
     const { SPRAY_LEDGER_V2_SCHEMA_SQL } = await import("./rooms/sprayLedgerV2Migration");
@@ -847,7 +853,7 @@ export interface IStorage {
   createUserFromGoogle(data: { email: string; googleId: string; displayName: string; avatarUrl?: string }): Promise<User>;
   linkGoogleId(userId: string, googleId: string): Promise<void>;
   updateUser(id: string, updates: Partial<InsertUser>): Promise<User>;
-  setAgeVerification(userId: string, v: { verified: boolean; method?: "admin" | "provider" }): Promise<User | undefined>;
+  setAgeVerification(userId: string, v: { verified: boolean; method?: AgeVerificationMethod }): Promise<User | undefined>;
   updateUserPassword(userId: string, hashedPassword: string): Promise<void>;
   updateUsername(userId: string, newUsername: string): Promise<User>;
   setPasswordResetToken(userId: string, token: string, expires: Date): Promise<void>;
@@ -1607,7 +1613,7 @@ export class DbStorage implements IStorage {
     return result[0];
   }
 
-  async setAgeVerification(userId: string, v: { verified: boolean; method?: "admin" | "provider" }): Promise<User | undefined> {
+  async setAgeVerification(userId: string, v: { verified: boolean; method?: AgeVerificationMethod }): Promise<User | undefined> {
     const set = v.verified
       ? { ageVerifiedAt: new Date(), ageVerifiedMethod: v.method ?? "admin" }
       : { ageVerifiedAt: null, ageVerifiedMethod: null };
