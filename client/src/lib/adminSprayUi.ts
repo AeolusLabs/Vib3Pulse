@@ -69,6 +69,16 @@ export function defaultRange(now: Date = new Date(), days = 7): { from: string; 
   return { from: ymd(new Date(now.getTime() - days * DAY_MS)), to: ymd(now) };
 }
 
+/**
+ * What the range picker must show: the range actually applied to the query (the default when none was picked), never "All time".
+ * The ledger API needs from and to and caps a range at 366 days, so there is no unbounded state on the Transactions tab.
+ */
+export function pickerRange(range: { from: string; to: string } | null, defaults: { from: string; to: string } = defaultRange()): { from: Date; to: Date } {
+  const r = range ?? defaults;
+  return { from: new Date(`${r.from}T00:00:00`), to: new Date(`${r.to}T00:00:00`) };
+}
+export const TX_PRESET_DAYS = [7, 30, 90, 366];
+
 /** icon names are resolved by the component; the text label is always shown beside it, so status never relies on colour. */
 export type StatusIcon = "clock" | "check" | "check-check" | "undo" | "x" | "alert";
 export interface StatusMeta { label: string; icon: StatusIcon; tone: "neutral" | "good" | "warn" | "bad" }

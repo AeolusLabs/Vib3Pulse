@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { SPRAY_STATUSES } from "../shared/spray";
 import {
-  appliedText, attentionCapNotes, buildTxQuery, defaultRange, koboToNairaText, pickedYmd, ymd, canBlock, canResume, canSeeTransactions, csvErrorMessage, csvUrl, funnelBuckets, mismatchBanner, statusLabel, TOO_MANY_ROWS_MESSAGE,
+  appliedText, attentionCapNotes, buildTxQuery, defaultRange, koboToNairaText, pickerRange, TX_PRESET_DAYS, pickedYmd, ymd, canBlock, canResume, canSeeTransactions, csvErrorMessage, csvUrl, funnelBuckets, mismatchBanner, statusLabel, TOO_MANY_ROWS_MESSAGE,
 } from "../client/src/lib/adminSprayUi";
 
 const bucket = (count: number, kobo: number) => ({ count, kobo });
@@ -105,4 +105,21 @@ test("ReasonDialog takes an explicit shownToHost prop, never a title regex", () 
   const src = readFileSync("client/src/components/admin/ReasonDialog.tsx", "utf8");
   assert.ok(src.includes("shownToHost"));
   assert.ok(!/strike\|ban|includes\("host"\)/.test(src));
+});
+
+test("picker shows the applied default range on first load", () => {
+  const d = defaultRange(new Date("2026-10-25T10:00:00Z"));
+  const p = pickerRange(null, d);
+  assert.equal(pickedYmd(p.from), d.from);
+  assert.equal(pickedYmd(p.to), d.to);
+  const picked = pickerRange({ from: "2026-09-01", to: "2026-09-30" }, d);
+  assert.equal(pickedYmd(picked.from), "2026-09-01");
+});
+
+test("the picker never shows All time on the Transactions tab", () => {
+  const p = pickerRange(null);
+  assert.ok(p.from instanceof Date && p.to instanceof Date && !Number.isNaN(p.from.getTime()));
+  assert.ok(TX_PRESET_DAYS.every((n) => n <= 366));
+  const tab = readFileSync("client/src/pages/admin/SprayTransactionsTab.tsx", "utf8");
+  assert.ok(tab.includes("hideAllTime"));
 });

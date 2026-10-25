@@ -12,6 +12,10 @@ interface AdminDateRangePickerProps {
   to?: Date;
   onChange: (range: { from?: Date; to?: Date }) => void;
   className?: string;
+  /** Hide the unbounded "All time" choice (for screens whose API needs a bounded range). */
+  hideAllTime?: boolean;
+  /** Preset lengths in days; default 7, 30, 90. */
+  presetDays?: number[];
 }
 
 const PRESETS: Array<{ label: string; days: number }> = [
@@ -20,7 +24,7 @@ const PRESETS: Array<{ label: string; days: number }> = [
   { label: "Last 90 days", days: 90 },
 ];
 
-export default function AdminDateRangePicker({ from, to, onChange, className }: AdminDateRangePickerProps) {
+export default function AdminDateRangePicker({ from, to, onChange, className, hideAllTime, presetDays }: AdminDateRangePickerProps) {
   const [open, setOpen] = useState(false);
   const range: DateRange | undefined = from ? { from, to } : undefined;
 
@@ -50,14 +54,16 @@ export default function AdminDateRangePicker({ from, to, onChange, className }: 
       <PopoverContent className="w-auto p-0" align="start">
         <div className="flex">
           <div className="flex flex-col gap-1 p-3 border-r">
-            {PRESETS.map((p) => (
+            {(presetDays ? presetDays.map((days) => ({ days, label: `Last ${days} days` })) : PRESETS).map((p) => (
               <Button key={p.days} variant="ghost" size="sm" className="justify-start" onClick={() => applyPreset(p.days)} data-testid={`button-preset-${p.days}d`}>
                 {p.label}
               </Button>
             ))}
-            <Button variant="ghost" size="sm" className="justify-start" onClick={() => { onChange({ from: undefined, to: undefined }); setOpen(false); }} data-testid="button-preset-all-time">
-              All time
-            </Button>
+            {!hideAllTime && (
+              <Button variant="ghost" size="sm" className="justify-start" onClick={() => { onChange({ from: undefined, to: undefined }); setOpen(false); }} data-testid="button-preset-all-time">
+                All time
+              </Button>
+            )}
           </div>
           <Calendar
             mode="range"

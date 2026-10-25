@@ -12,7 +12,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { AlertTriangleIcon, CheckCheckIcon, CheckIcon, ClockIcon, CopyIcon, DownloadIcon, Loader2Icon, RefreshCwIcon, SearchIcon, ShieldCheckIcon, XIcon } from "@/components/ui/icons";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { attentionCapNotes, buildTxQuery, csvErrorMessage, defaultRange, pickedYmd, csvUrl, funnelBuckets, mismatchBanner, STATUS_CHOICES, statusLabel, type StatusIcon, type TxFilters } from "@/lib/adminSprayUi";
+import { attentionCapNotes, buildTxQuery, csvErrorMessage, defaultRange, pickedYmd, pickerRange, TX_PRESET_DAYS, csvUrl, funnelBuckets, mismatchBanner, STATUS_CHOICES, statusLabel, type StatusIcon, type TxFilters } from "@/lib/adminSprayUi";
 import type { AttentionItem, LedgerDetail, LedgerRow, OutcomesResponse, ProviderCheckResult } from "@shared/sprayLedger";
 
 // Spray money ledger (finance roles). Read-only: the only things that leave the system are the CSV export and the Paystack look-up,
@@ -325,6 +325,7 @@ export default function SprayTransactionsTab() {
 
   const filtersNow = (): TxFilters => ({ ...(range ?? defaultRange()), status, q: q || undefined, ...names });
   const filters = filtersNow();
+  const picker = pickerRange(range, { from: filters.from!, to: filters.to! });
   const key = buildTxQuery(filters);
 
   const list = useInfiniteQuery<Page>({
@@ -372,7 +373,7 @@ export default function SprayTransactionsTab() {
           <h2 id="tx-h" className="text-lg font-semibold text-white">Transactions</h2>
           <p className="text-sm text-slate-400">Every spray and team-spray share, where it ended, and what the timeline says. Days are in UTC.</p>
         </div>
-        <AdminDateRangePicker from={range ? new Date(`${range.from}T00:00:00`) : undefined} to={range ? new Date(`${range.to}T00:00:00`) : undefined} onChange={(r) => setRange(r.from ? { from: pickedYmd(r.from), to: pickedYmd(r.to ?? r.from) } : null)} className="min-h-[44px] border-slate-600 bg-slate-800 text-slate-100" />
+        <AdminDateRangePicker hideAllTime presetDays={TX_PRESET_DAYS} from={picker.from} to={picker.to} onChange={(r) => setRange(r.from ? { from: pickedYmd(r.from), to: pickedYmd(r.to ?? r.from) } : null)} className="min-h-[44px] border-slate-600 bg-slate-800 text-slate-100" />
       </div>
 
       <AttentionPanel onOpen={(id) => open(id)} />

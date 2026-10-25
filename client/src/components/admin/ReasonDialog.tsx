@@ -37,7 +37,7 @@ export default function ReasonDialog({ open, title, description, confirmLabel, d
         <form onSubmit={(e) => { e.preventDefault(); if (ok && !busy) onConfirm(reason.trim()); }} className="space-y-3">
           <Label htmlFor="reason-text" className="text-slate-300">Reason (recorded in the audit log{shownToHost ? " and shown to the host" : ""})</Label>
           <Textarea id="reason-text" rows={4} maxLength={maxLength} value={reason} onChange={(e) => setReason(e.target.value)} autoFocus className="border-slate-600 bg-slate-700/50 text-white" data-testid="input-reason" />
-          <p className="text-xs text-slate-500">{reason.trim().length}/{minLength} characters minimum</p>
+          <p className="text-xs text-slate-400">{reason.trim().length}/{minLength} characters minimum</p>
           {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={onClose} className="text-slate-300">Cancel</Button>
