@@ -608,7 +608,7 @@ export function registerRoomRoutes(app: Express): void {
       let updated: Room;
       try {
         updated = !Object.keys(patch).length ? room
-          : settingsChanged || "sprayEnabled" in patch ? await writeRoomSettings(room.id, write)
+          : settingsChanged || ("sprayEnabled" in patch && roomFeatures.spray) ? await writeRoomSettings(room.id, write)
           : await write();
       } catch (e) {
         if (e instanceof TicketGuardError) return res.status(409).json({ message: TICKET_GUARD_MESSAGES[e.code], code: e.code });

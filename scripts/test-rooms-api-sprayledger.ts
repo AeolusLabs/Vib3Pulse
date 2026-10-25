@@ -375,6 +375,50 @@ try {
     await fetch(`${base}/api/admin/rooms/controls/tickets_paused`, { method: "POST", headers: { "content-type": "application/json", "x-test-admin": SA }, body: JSON.stringify({ on: false, reason: "x test" }) });
   }
 
+
+  // ---------------------------------------------------------------- final fix wave
+  {
+    // finance roles can find a room to block
+    const lv1 = await get(`/api/admin/rooms/live`, FIN), lv2 = await get(`/api/admin/rooms/live`, MOD), lv3 = await get(`/api/admin/rooms/live`, null);
+    check("GET /rooms/live allows finance and moderators, not anonymous", lv1.status === 200 && lv2.status === 200 && lv3.status === 401);
+
+    // a row whose user was deleted still lists, exports and reconciles with the outcomes
+    const GONE = await mk("gone");
+    const gone = await spray({ room: ROOM2, host: H, payer: GONE, status: "delivered", minutesAgo: 4 });
+    const c = await pool.connect();
+    let deleted = false;
+    try {
+      await c.query("set session_replication_role = replica");
+      await c.query(`delete from users where id = $1`, [GONE]);
+      deleted = true;
+    } catch { /* needs a superuser: the check below is then skipped */ } finally { await c.query("reset session_replication_role").catch(() => {}); c.release(); }
+    if (deleted) {
+      const O1 = await get(`/api/admin/rooms/sprays/outcomes?${range}`, FIN);
+      let n = 0, cur = "", sawGone = false;
+      do {
+        const pg = await get(`/api/admin/rooms/sprays/transactions?${range}&limit=100${cur ? `&cursor=${cur}` : ""}`, FIN);
+        n += pg.json.rows.length; sawGone ||= pg.json.rows.some((r: any) => r.id === gone.id && r.payerUsername === "[deleted]"); cur = pg.json.nextCursor ?? "";
+      } while (cur);
+      const csvGone = await get(`/api/admin/rooms/sprays/transactions.csv?${range}&roomId=${ROOM2}`, FIN);
+      check("a deleted user does not drop the row: list, CSV and outcomes reconcile", sawGone && n === O1.json.funnel.initiated.count && csvGone.text.includes("[deleted]"), `${n} vs ${O1.json.funnel.initiated.count}`);
+      madeUsers.splice(madeUsers.indexOf(GONE), 1);
+    } else console.log("SKIP deleted-user reconcile (needs a role that can set session_replication_role)");
+
+    // no audit row, no provider call
+    const { storage } = await import("../server/storage");
+    const orig = storage.logAdminActivity.bind(storage);
+    const callsBefore = mock.calls.filter((x) => x.method === "verifyCharge").length;
+    (storage as any).logAdminActivity = async () => { throw new Error("audit down (test)"); };
+    const origErr = console.error; console.error = () => {};
+    const noAudit = await call("POST", `/api/admin/rooms/sprays/transactions/${mine[0].id}/paystack-check`, SA);
+    console.error = origErr;
+    (storage as any).logAdminActivity = orig;
+    const callsAfter = mock.calls.filter((x) => x.method === "verifyCharge").length;
+    check("no audit row => no provider call", noAudit.status === 500 && noAudit.json?.code === "AUDIT_FAILED" && callsAfter === callsBefore, JSON.stringify([noAudit.status, noAudit.json]));
+    const reqd = await audits("room_spray.provider_check_requested");
+    check("every look-up writes a 'requested' audit row before the call", reqd.length >= 3);
+  }
+
   // roles
   const paths: [string, string][] = [
     ["GET", `/api/admin/rooms/sprays/transactions?${range}`], ["GET", `/api/admin/rooms/sprays/transactions.csv?${range}`], ["GET", `/api/admin/rooms/sprays/transactions/${mine[0].id}`],

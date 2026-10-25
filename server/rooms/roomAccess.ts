@@ -66,7 +66,8 @@ export function hostRoom(room: Room) {
     ...viewerRoom(room), ticketPriceKobo: room.ticketPriceKobo ?? null, ticketCapacity: room.ticketCapacity ?? null, refundBeforeStart: room.refundBeforeStart !== false,
     sprayEnabled: room.sprayEnabled === true,
     // Only the host learns an admin switched spraying off for the room (never the admin id or time).
-    sprayAdminBlocked: room.sprayAdminBlocked === true, sprayBlockReason: room.sprayAdminBlocked === true ? room.sprayBlockReason ?? null : null,
+    // The admin's internal reason never leaves the server. With ROOMS_SPRAY off the key is absent (the payload is what it always was).
+    ...(roomFeatures.spray ? { sprayAdminBlocked: room.sprayAdminBlocked === true } : {}),
     ...(roomFeatures.gaming ? { gameFormat: room.gameFormat ?? null, gameDropTimeoutMs: room.gameDropTimeoutMs } : {}),
   };
 }

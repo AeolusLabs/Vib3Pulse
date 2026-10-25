@@ -59,6 +59,7 @@ import { isBlockedEitherWay } from "../utils/blocks";
 import * as rs from "./roomStorage";
 import * as ss from "./sprayStorage";
 import { recordSprayEvent, withSpraySource } from "./sprayEvents";
+import { laneParentBlocked } from "./sprayState";
 import { roomHub } from "./RoomHub";
 import { isKicked } from "./roomSocket";
 import { isGamePlayer } from "./stage";
@@ -164,7 +165,7 @@ export async function sprayGate(roomId: string, payerId: string, recipientId: st
   const room = await rs.getRoom(roomId);
   if (!room) return fail("ROOM_NOT_LIVE");
   // The host's per-room opt-in gates new sprays only; a paid, in-flight one (phase "deliver") always delivers.
-  if (phase === "start" && (room.sprayEnabled !== true || room.sprayAdminBlocked === true)) return fail("ROOM_NOT_ELIGIBLE");
+  if (phase === "start" && (room.sprayEnabled !== true || room.sprayAdminBlocked === true || await laneParentBlocked(room))) return fail("ROOM_NOT_ELIGIBLE");
   const [payer, host, recipient, payerMember] = await Promise.all([
     storage.getUser(payerId), storage.getUser(room.hostId), storage.getUser(recipientId), rs.getMember(roomId, payerId),
   ]);
@@ -896,7 +897,7 @@ export async function getOwnSpray(roomId: string, sprayId: string, payerId: stri
  * (Accepted and documented: targets leave out people the viewer blocked or was blocked by, and people who owe a clawback.)
  */
 export async function sprayBlockFor(room: Room, viewerId: string): Promise<{ enabled: true; roomLimitKobo: number; roomSpentKobo: number; targets: string[] } | null> {
-  if (room.sprayEnabled !== true || room.sprayAdminBlocked === true || !(await sprayAllowed()) || room.status !== "live" || !moneyEligibleRoom(room) || roomHub.isMinorsRoom(room.id)) return null;
+  if (room.sprayEnabled !== true || room.sprayAdminBlocked === true || await laneParentBlocked(room) || !(await sprayAllowed()) || room.status !== "live" || !moneyEligibleRoom(room) || roomHub.isMinorsRoom(room.id)) return null;
   if (!roomHub.get(room.id, viewerId)) return null;
   const candidates = new Set<string>();
   if (roomHub.get(room.id, room.hostId)) candidates.add(room.hostId);

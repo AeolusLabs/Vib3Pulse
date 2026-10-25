@@ -175,7 +175,9 @@ async function mkLive(hostId: string, guests: string[], sprayEnabled: boolean) {
 const marks = (cs: Client[]) => cs.map((c) => c.msgs.length);
 const BLOCK_FIELDS = ["sprayAdminBlocked", "sprayBlockReason", "sprayBlockedBy", "sprayBlockedAt"];
 const liveOnSql = `select count(*)::int n from rooms r where status = 'live' and spray_enabled and not spray_admin_blocked
-                   and not exists (select 1 from room_host_freezes f where f.host_id = r.host_id)`;
+                   and not exists (select 1 from room_host_freezes f where f.host_id = r.host_id)
+                   and not exists (select 1 from rooms c where c.parent_room_id = r.id)
+                   and not exists (select 1 from rooms p where p.id = r.parent_room_id and p.spray_admin_blocked)`;
 
 try {
   roomFeatures.spray = true;
@@ -184,7 +186,7 @@ try {
 
   // ---- effective state, reason by reason (first failing wins)
   {
-    const room = (o: Record<string, unknown> = {}) => ({ hostId: H, sprayEnabled: true, sprayAdminBlocked: false, ...o }) as any;
+    const room = (o: Record<string, unknown> = {}) => ({ hostId: H, sprayEnabled: true, sprayAdminBlocked: false, ageLimit: "18+", minorsRoom: false, parentRoomId: null, ...o }) as any;
     const why = async (r: any) => { const e = await sprayEffectiveFor(r); return `${e.on}:${e.reason}`; };
     const seen: string[] = [];
     roomFeatures.spray = false;
@@ -285,7 +287,7 @@ try {
   check("admin block: gate refuses start, host PATCH on => 403 SPRAY_ADMIN_BLOCKED, host cannot clear it",
     !gate.ok && host403.status === 403 && host403.json?.code === "SPRAY_ADMIN_BLOCKED" && host403.json?.message === "Spray is turned off by the platform for this room."
     && hostOff.status === 200 && sneaky.status === 200 && row.spray_admin_blocked === true && row.spray_block_reason === "reported scam" && row.spray_blocked_by === FIN
-    && hostView?.sprayAdminBlocked === true && hostView?.sprayBlockReason === "reported scam" && !("sprayBlockedBy" in hostView), `${host403.status} ${JSON.stringify(row)}`);
+    && hostView?.sprayAdminBlocked === true && !("sprayBlockReason" in hostView) && !JSON.stringify(hostView).includes("reported scam") && !("sprayBlockedBy" in hostView), `${host403.status} ${JSON.stringify(row)}`);
   const unF = await admin("POST", `/api/admin/rooms/${K.id}/spray-block`, FIN, { on: false, reason: "mistake found" });
   check("unblock super_admin only (finance gets 403)", unF.status === 403 && unF.json?.code === "SUPER_ADMIN_ONLY"
     && (await q(`select spray_admin_blocked from rooms where id = $1`, [K.id]))[0].spray_admin_blocked === true, JSON.stringify(unF.json));
@@ -335,6 +337,68 @@ try {
   const stateMsg = (await join(await fresh(), K.id)).s;
   const dump = JSON.stringify([guestGet.json, guestList.json, stateMsg]);
   check("guest bodies never carry the four block fields", guestGet.status === 200 && BLOCK_FIELDS.every((f) => !dump.includes(`"${f}":`)) && !dump.includes("block mid payment"), BLOCK_FIELDS.filter((f) => dump.includes(`"${f}":`)).join());
+
+  // ---- final fix wave
+  {
+    const HH = await fresh({ payout: true });
+    const mkRow = async (host: string, o: { parent?: string | null; lane?: string | null; age?: string; minors?: boolean } = {}) => {
+      const id = (await q(`insert into rooms (host_id, title, kind, visibility, age_limit, status, started_at, spray_enabled, parent_room_id, age_lane, minors_room, created_at)
+        values ($1,$2,'party','public',$3,'live', now(), true, $4, $5, $6, now()) returning id`, [host, `sl final ${++seq}`, o.age ?? "18+", o.parent ?? null, o.lane ?? null, o.minors === true]))[0].id as string;
+      madeRooms.push(id); return id;
+    };
+    const parent = await mkRow(HH), lane1 = await mkRow(HH, { parent, lane: "adult" });
+    const blk = await admin("POST", `/api/admin/rooms/${parent}/spray-block`, FIN, { on: true, reason: "fraud suspected" });
+    const kids = await q(`select id, spray_admin_blocked, spray_block_reason, spray_blocked_by from rooms where id = any($1::varchar[])`, [[parent, lane1]]);
+    const au = await audits("room_spray.block", parent);
+    check("block on a game parent blocks its lanes", blk.status === 200 && blk.json?.changed === true && [parent, lane1].every((i) => blk.json?.roomIds?.includes(i))
+      && kids.length === 2 && kids.every((k: any) => k.spray_admin_blocked === true && k.spray_block_reason === "fraud suspected" && k.spray_blocked_by === FIN)
+      && au.length === 1 && au[0].details.includes(lane1), JSON.stringify([blk.json, kids]));
+    const lane2 = await mkRow(HH, { parent, lane: "adult" });
+    const row2 = (await q(`select spray_admin_blocked from rooms where id = $1`, [lane2]))[0];
+    const eff = await sprayEffectiveFor({ hostId: HH, sprayEnabled: true, sprayAdminBlocked: false, ageLimit: "18+", minorsRoom: false, parentRoomId: parent } as any);
+    const g2 = await sprayGate(lane2, await fresh(), HH, "start");
+    check("a lane opened after the block cannot spray", row2.spray_admin_blocked === false && eff.on === false && eff.reason === "ADMIN_BLOCKED" && !g2.ok);
+    const stB = await admin("GET", "/api/admin/rooms/spray-status", FIN);
+    check("live count not doubled (lane parents and lanes of a blocked parent are not counted)", stB.json?.liveRoomsSprayOn === (await q(liveOnSql))[0].n, JSON.stringify(stB.json?.liveRoomsSprayOn));
+    const un = await admin("POST", `/api/admin/rooms/${parent}/spray-block`, SA, { on: false, reason: "cleared" });
+    const after = await q(`select spray_admin_blocked, spray_block_reason, spray_blocked_by, spray_blocked_at from rooms where id = any($1::varchar[])`, [[parent, lane1]]);
+    check("unblock clears the lanes", un.status === 200 && un.json?.roomIds?.length >= 2 && after.every((k: any) => k.spray_admin_blocked === false && k.spray_block_reason === null && k.spray_blocked_by === null && k.spray_blocked_at === null));
+    const stC = await admin("GET", "/api/admin/rooms/spray-status", FIN);
+    check("live count counts the lane, not its game room", stC.json?.liveRoomsSprayOn === (await q(liveOnSql))[0].n);
+
+    const ne = await sprayEffectiveFor({ hostId: HH, sprayEnabled: true, sprayAdminBlocked: false, ageLimit: "all", minorsRoom: false, parentRoomId: null } as any);
+    const nm = await sprayEffectiveFor({ hostId: HH, sprayEnabled: true, sprayAdminBlocked: false, ageLimit: "18+", minorsRoom: true, parentRoomId: null } as any);
+    check("sprayOn is never true in a room that is not money eligible (ROOM_NOT_ELIGIBLE)", ne.reason === "ROOM_NOT_ELIGIBLE" && nm.reason === "ROOM_NOT_ELIGIBLE" && !ne.on && !nm.on);
+
+    // the host never learns the admin's reason
+    const HR = await fresh({ payout: true });
+    const R = await mkRoom(HR);
+    madeRooms.push(R.json.room.id);
+    await admin("POST", `/api/admin/rooms/${R.json.room.id}/spray-block`, FIN, { on: true, reason: "fraud suspected: internal note" });
+    const hv = await rest("GET", `/api/rooms/${R.json.room.id}`, HR);
+    const hp = await rest("PATCH", `/api/rooms/${R.json.room.id}`, HR, { title: "renamed" });
+    check("block reason never reaches the host", hv.status === 200 && hv.json.room.sprayAdminBlocked === true && !JSON.stringify([hv.json, hp.json]).includes("fraud suspected") && !("sprayBlockReason" in hv.json.room));
+    await admin("POST", `/api/admin/rooms/${R.json.room.id}/spray-block`, SA, { on: false, reason: "done" });
+
+    // flag off: nothing new reaches a client
+    const HO = await fresh({ payout: true }), GO = await fresh();
+    const lv = await mkLive(HO, [GO], true);
+    roomFeatures.spray = false;
+    const mk0 = marks(lv.all);
+    await admin("POST", "/api/admin/rooms/controls/sprays_paused", FIN, { on: true, reason: "flag off test" });
+    await admin("POST", "/api/admin/rooms/controls/sprays_paused", SA, { on: false, reason: "flag off test" });
+    await admin("POST", `/api/admin/rooms/hosts/${HO}/freeze`, FIN, { reason: "flag off test" });
+    await admin("POST", `/api/admin/rooms/hosts/${HO}/unfreeze`, SA, { reason: "flag off test" });
+    await admin("POST", `/api/admin/rooms/${lv.id}/spray-block`, FIN, { on: true, reason: "flag off test" });
+    await admin("POST", `/api/admin/rooms/${lv.id}/spray-block`, SA, { on: false, reason: "flag off test" });
+    await rest("PATCH", `/api/rooms/${lv.id}`, HO, { sprayEnabled: false });
+    await sleep(800);
+    const frames = lv.all.flatMap((c, i) => c.msgs.slice(mk0[i]).filter((m) => m.type === "room:settings"));
+    check("flag off: no room:settings frame on pause/freeze/block/PATCH", frames.length === 0, JSON.stringify(frames.slice(0, 2)));
+    const offView = (await rest("GET", `/api/rooms/${lv.id}`, HO)).json?.room ?? {};
+    check("flag off: hostRoom key set unchanged", !("sprayAdminBlocked" in offView) && !("sprayBlockReason" in offView) && !("sprayBlockedBy" in offView) && !("sprayBlockedAt" in offView), Object.keys(offView).join());
+    roomFeatures.spray = true;
+  }
 } catch (e: any) {
   failed++; console.log(`FAIL uncaught: ${e.stack || e}`);
 } finally {
@@ -350,6 +414,7 @@ try {
       await q(`delete from payment_transactions where provider_payment_id in (select provider_ref from spray_payments where payer_id = any($1::varchar[]))`, [created]);
       await q(`delete from payment_issues where provider_payment_id in (select provider_ref from spray_payments where payer_id = any($1::varchar[]))`, [created]);
       await q(`delete from spray_payments where payer_id = any($1::varchar[])`, [created]);
+      if (madeRooms.length) await q(`update rooms set parent_room_id = null where id = any($1::varchar[])`, [madeRooms]).catch(() => {});
       await q(`delete from users where id = any($1::varchar[])`, [created]);
     }
     if (madeAdmins.length) await q(`delete from admin_users where id = any($1::varchar[])`, [madeAdmins]);

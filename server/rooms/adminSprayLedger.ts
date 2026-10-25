@@ -30,17 +30,17 @@ const MIN_MS = 60_000;
 // Timestamps as UTC ISO text straight from Postgres: no JS timezone round trip, and microseconds kept for the keyset cursor.
 const iso = (col: string) => `to_char(${col}, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`;
 const SELECT_ROW = `
-  s.id, s.batch_id, s.room_id, r.title as room_title, s.host_id, hu.username as host_username, s.payer_id, pu.username as payer_username,
-  s.recipient_id, ru.username as recipient_username, s.tier, s.amount_kobo, s.status, s.reason,
+  s.id, s.batch_id, s.room_id, coalesce(r.title, '[deleted room]') as room_title, s.host_id, coalesce(hu.username, '[deleted]') as host_username, s.payer_id, coalesce(pu.username, '[deleted]') as payer_username,
+  s.recipient_id, coalesce(ru.username, '[deleted]') as recipient_username, s.tier, s.amount_kobo, s.status, s.reason,
   coalesce(b.provider_ref, s.provider_ref) as provider_ref,
   ${iso("s.created_at")} as created_at, ${iso("s.delivered_at")} as delivered_at, ${iso("s.reversed_at")} as reversed_at,
   to_char(s.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.US') as ck`;
 const FROM_ROW = `
   from spray_payments s
-  join rooms r on r.id = s.room_id
-  join users hu on hu.id = s.host_id
-  join users pu on pu.id = s.payer_id
-  join users ru on ru.id = s.recipient_id
+  left join rooms r on r.id = s.room_id
+  left join users hu on hu.id = s.host_id
+  left join users pu on pu.id = s.payer_id
+  left join users ru on ru.id = s.recipient_id
   left join spray_batches b on b.id = s.batch_id`;
 
 interface RawRow {
@@ -346,6 +346,10 @@ export function registerSprayLedgerRoutes(app: Express): void {
       const ours = r.batch_id
         ? { status: r.batch_status ?? r.status, amountKobo: Number(r.batch_amount_kobo ?? r.amount_kobo) }
         : { status: r.status, amountKobo: Number(r.amount_kobo) };
+      // The audit row comes FIRST: no audit row, no provider call (the result row below is appended afterwards).
+      if (!(await auditStrict(req, "room_spray.provider_check_requested", id, { id }))) {
+        return res.status(500).json({ message: "The look-up could not be recorded, so it was not made. Try again.", code: "AUDIT_FAILED" });
+      }
       let d: Awaited<ReturnType<ReturnType<typeof getSplitProvider>["verifyCharge"]>>;
       try { d = await getSplitProvider().verifyCharge(r.provider_ref); }
       catch (e) {

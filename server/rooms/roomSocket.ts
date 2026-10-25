@@ -102,7 +102,7 @@ export const roomSocketInternals = {
   hasSlowClock: (roomId: string) => slowChats.has(roomId),
 };
 
-type SprayRow = Pick<Room, "hostId" | "sprayEnabled" | "sprayAdminBlocked">;
+type SprayRow = Pick<Room, "hostId" | "sprayEnabled" | "sprayAdminBlocked" | "ageLimit" | "minorsRoom" | "parentRoomId">;
 /** The two spray keys, only while ROOMS_SPRAY is on (flag off: nothing is added, so the payload is what it always was). */
 async function sprayKeys(room: SprayRow): Promise<Pick<RoomSettings, "sprayOn" | "sprayBlockedByAdmin">> {
   if (!roomFeatures.spray) return {};

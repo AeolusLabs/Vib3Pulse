@@ -30,7 +30,7 @@ async function audit(req: Request, action: string, targetType: string, targetId:
 
 export function registerRoomsAdminRoutes(app: Express): void {
   registerSprayLedgerRoutes(app);
-  app.get("/api/admin/rooms/live", requireRole(...MODERATION), async (_req: Request, res: Response) => {
+  app.get("/api/admin/rooms/live", requireRole(...MODERATION, ...FINANCE), async (_req: Request, res: Response) => {
     try {
       res.json({ rooms: await listLiveRooms() });
     } catch (e) {
@@ -95,8 +95,8 @@ export function registerRoomsAdminRoutes(app: Express): void {
     try {
       const r = await setControl({ key, on, adminId: req.session.adminId!, reason: reason.data });
       if (r.changed) await audit(req, on ? "room_control.on" : "room_control.off", "room_control", key, reason.data, { key, on });
-      let liveRooms = 0;
-      if (key === "sprays_paused" && r.changed) liveRooms = await broadcastSprayStateAll(); // after setControl, so the fresh value is read
+      // After setControl and the audit row; the fan-out runs in the background, only the count is returned here.
+      const liveRooms = key === "sprays_paused" && r.changed ? broadcastSprayStateAll() : 0;
       res.json({ key, on, changed: r.changed, ...(key === "sprays_paused" ? { liveRooms } : {}) });
     } catch (e) {
       console.error("[ADMIN] room control failed:", (e as Error)?.message);
@@ -128,10 +128,10 @@ export function registerRoomsAdminRoutes(app: Express): void {
       if (!r.found) return res.status(404).json({ message: "Room not found" });
       if (r.ended) return res.status(409).json({ message: "This room has ended.", code: "ROOM_ENDED" });
       if (r.changed) {
-        await audit(req, on ? "room_spray.block" : "room_spray.unblock", "room", roomId, reason.data, { on });
-        await broadcastSprayState(roomId);
+        await audit(req, on ? "room_spray.block" : "room_spray.unblock", "room", roomId, reason.data, { on, roomIds: r.roomIds });
+        await Promise.all(r.roomIds.map(broadcastSprayState)); // the room and its lane rooms (only live ones have anyone to tell)
       }
-      res.json({ changed: r.changed });
+      res.json({ changed: r.changed, roomIds: r.roomIds });
     } catch (e) {
       console.error("[ADMIN] room spray block failed:", (e as Error)?.message);
       res.status(500).json({ message: "That did not work. Check the room's spray state before trying again." });
