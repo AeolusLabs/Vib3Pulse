@@ -197,7 +197,7 @@ export async function getDetail(admin: AdminRef, id: string) {
   const evidence = self ? [] : (await pool.query(`select id, kind, mime, greatest(octet_length(bytes_enc) - 31, 0) as bytes from age_review_evidence where request_id = $1 order by kind`, [id])).rows
     .map((e: { id: string; kind: string; mime: string; bytes: string | number }) => ({ id: e.id, kind: e.kind, mime: e.mime, bytes: Number(e.bytes) }));
   const open = row.status === "submitted" || row.status === "in_review";
-  const canSecondApprove = canSecondApproveView(admin, row, self);
+  const canSecondApprove = canSecondApproveView(admin, { status: row.status, reviewer_id: (row.reviewer_id as string | null | undefined) ?? null }, self);
   return {
     request: {
       ...itemOf(row),
