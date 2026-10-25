@@ -243,10 +243,12 @@ try {
   // ---- game-room lanes: the lane runs the game, so the opt-in must land on the creator's adult lane
   roomFeatures.gaming = true;
   const gameBody = { title: "so game", kind: "party", visibility: "public", ageLimit: "18+", capacity: 20, gameFormat: 2, lanes: true };
-  const gc = await rest("POST", "/api/rooms", H, { ...gameBody, sprayEnabled: true });
+  // a fresh host: H already has a live room and one live room per host is the limit
+  const LH = await mk("lanehost", { payout: true });
+  const gc = await rest("POST", "/api/rooms", LH, { ...gameBody, sprayEnabled: true });
   const adultLane = gc.json?.lane?.id as string | undefined;
   check("adult creator: the adult lane inherits sprayEnabled true", gc.status === 201 && !!adultLane && (await col(adultLane)) === true, JSON.stringify(gc.json));
-  const gcOff = await rest("POST", "/api/rooms", H, gameBody);
+  const gcOff = await rest("POST", "/api/rooms", LH, gameBody);
   check("adult creator without the switch: lane stays false", !!gcOff.json?.lane?.id && (await col(gcOff.json.lane.id)) === false);
   const teenUser = await storage.getUser(TEEN);
   const tl = await lanes.createGameRoomWithLane(teenUser!, { title: "so teen game", kind: "party", visibility: "public", ageLimit: "all", capacity: 20, gameFormat: 2, sprayEnabled: true } as any);
@@ -254,9 +256,9 @@ try {
   const fl = await lanes.openLane(tl.parent, (await storage.getUser(H))!, "adult", "public", true);
   check("a lane opened later by a friend keeps spray off", fl.ageLane === "adult" && (await col(fl.id)) === false);
   if (adultLane) {
-    check("setup: inheriting adult lane started", (await rest("POST", `/api/rooms/${adultLane}/start`, H)).status === 200);
-    await join(H, adultLane); await join(P, adultLane);
-    const ls = await rest("POST", `/api/rooms/${adultLane}/spray`, P, { tier: "note", targetId: H, idempotencyKey: key() });
+    check("setup: inheriting adult lane started", (await rest("POST", `/api/rooms/${gc.json.room.id}/start`, LH)).status === 200);
+    await join(LH, adultLane); await join(P, adultLane);
+    const ls = await rest("POST", `/api/rooms/${adultLane}/spray`, P, { tier: "note", targetId: LH, idempotencyKey: key() });
     check("a spray in the inheriting adult lane passes the gate", ls.status !== 403 && ls.json?.status === "delivered", JSON.stringify(ls.json));
   }
   roomFeatures.gaming = false;

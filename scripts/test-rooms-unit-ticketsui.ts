@@ -489,7 +489,7 @@ test("M4: review shows the ticket count; live video is off above liveVideoMax ti
   assert.equal(ticketsTooManyForVideo({ on: true, capacity: Number.NaN }), true);
   assert.equal(ticketsTooManyForVideo({ on: false, capacity: 150 }), false, "a free room is not touched");
   const wiz = src("../client/src/components/rooms/create/CreateRoomWizard.tsx");
-  assert.ok(wiz.includes("createRoom(withVideoRule(s)"), "live video is not requested");
+  assert.ok(wiz.includes("createRoom(withVideoRule({ ...s, sprayEnabled: sprayOn })"), "live video is not requested");
   assert.ok(wiz.includes("<StepReview state={withVideoRule(state)}"));
   assert.ok(wiz.includes("ticketCount={ticketKobo !== null ? ticket.capacity : null}"));
   assert.ok(wiz.includes("videoBlocked={videoOverTickets ? PRICE_COPY.videoNeedsFewer : null}"));
