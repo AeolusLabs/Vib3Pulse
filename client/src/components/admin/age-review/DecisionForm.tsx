@@ -9,7 +9,7 @@ import { Loader2Icon } from "@/components/ui/icons";
 import { ReviewApiError, decide, errText } from "@/lib/adminAgeReviewApi";
 import {
   CHECKLIST_LABEL, CONFIRM_TEXT, DECLINE_LABEL, DECLINE_REASONS, DOC_TYPES, DOC_TYPE_LABEL, OUTCOME_HELP, OUTCOME_LABEL, canOverrideDuplicate,
-  decisionBody, decisionReady, emptyChecklist, outcomesFor, requiredChecks, type DecisionForm as Form, type Outcome,
+  decisionBody, decisionReady, emptyChecklist, needsDocumentNumber, outcomesFor, requiredChecks, type DecisionForm as Form, type Outcome,
 } from "@/lib/adminAgeReviewUi";
 
 const FIELD = "min-h-[44px] border-slate-600 bg-slate-700/50 text-white";
@@ -86,7 +86,7 @@ export default function DecisionForm({ requestId, role, registeredDob, method, d
         </div>
       )}
 
-      {documentType === null && (f.outcome === "verify" || f.outcome === "teen_correction" || f.outcome === "birthdate_change") && (
+      {documentType === null && needsDocumentNumber(f.outcome) && (
         <div className="space-y-2">
           <Label htmlFor="doc-type" className="text-slate-300">Document type (required)</Label>
           <select id="doc-type" required value={f.documentType} onChange={(e) => set({ documentType: e.target.value })} className={`${FIELD} w-full rounded-md px-3 text-sm`} data-testid="select-document-type">
@@ -96,7 +96,7 @@ export default function DecisionForm({ requestId, role, registeredDob, method, d
         </div>
       )}
 
-      {f.outcome === "verify" && (
+      {needsDocumentNumber(f.outcome) && (
         <div className="space-y-2">
           <Label htmlFor="doc-number" className="text-slate-300">Document number</Label>
           <Input

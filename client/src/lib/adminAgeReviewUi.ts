@@ -55,7 +55,10 @@ export const outcomesFor = (method: ReviewMethod): Outcome[] =>
   (["verify", "teen_correction", "birthdate_change", "needs_more", "decline", "not_eligible_minor"] as Outcome[]).filter((o) => !(method === "live" && o === "needs_more"));
 export const DOC_TYPES = ["passport", "drivers_licence", "national_id", "nin_slip"] as const;
 export const DOC_TYPE_LABEL: Record<(typeof DOC_TYPES)[number], string> = { passport: "Passport", drivers_licence: "Driver's licence", national_id: "National ID card", nin_slip: "NIN slip" };
-const ID_OUTCOMES: Outcome[] = ["verify", "teen_correction", "birthdate_change"];
+/** Outcomes that read the document: they need its type. teen_correction does not (the server only uses the ID birthdate). */
+const ID_OUTCOMES: Outcome[] = ["verify", "birthdate_change"];
+/** verify and birthdate_change both fingerprint the document number, so they share the full checklist and the duplicate check. */
+export const needsDocumentNumber = (o: Outcome | null): boolean => o === "verify" || o === "birthdate_change";
 
 export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 export const isIsoDate = (s: string): boolean => {
@@ -80,9 +83,9 @@ export function decisionReady(f: DecisionForm, method: ReviewMethod = "upload"):
   if (f.outcome && ID_OUTCOMES.includes(f.outcome) && !(DOC_TYPES as readonly string[]).includes(f.documentType)) return false;
   if (f.outcome === "needs_more" && method === "live") return false;
   switch (f.outcome) {
-    case "verify": return checklistComplete(f.checklist, method) && isIsoDate(f.idBirthdate) && f.documentNumber.trim().length >= 3;
-    case "teen_correction":
-    case "birthdate_change": return isIsoDate(f.idBirthdate);
+    case "verify":
+    case "birthdate_change": return checklistComplete(f.checklist, method) && isIsoDate(f.idBirthdate) && f.documentNumber.trim().length >= 3;
+    case "teen_correction": return isIsoDate(f.idBirthdate);
     case "decline": return (DECLINE_REASONS as readonly string[]).includes(f.declineReason);
     case "needs_more":
     case "not_eligible_minor": return true;
@@ -92,11 +95,12 @@ export function decisionReady(f: DecisionForm, method: ReviewMethod = "upload"):
 
 export function decisionBody(f: DecisionForm, opts: { overrideAllowed: boolean }): Record<string, unknown> {
   const body: Record<string, unknown> = { outcome: f.outcome, checklist: f.checklist };
+  if (f.outcome === "teen_correction") body.idBirthdate = f.idBirthdate;
   if (f.outcome && ID_OUTCOMES.includes(f.outcome)) { body.idBirthdate = f.idBirthdate; body.documentType = f.documentType; }
-  if (f.outcome === "verify") body.documentNumber = f.documentNumber.trim();
+  if (needsDocumentNumber(f.outcome)) body.documentNumber = f.documentNumber.trim();
   if (f.outcome === "decline") body.declineReason = f.declineReason;
   if (f.note.trim()) body.note = f.note.trim();
-  if (f.outcome === "verify" && opts.overrideAllowed && f.overrideReason.trim().length >= 3) body.overrideDuplicate = { reason: f.overrideReason.trim() };
+  if (needsDocumentNumber(f.outcome) && opts.overrideAllowed && f.overrideReason.trim().length >= 3) body.overrideDuplicate = { reason: f.overrideReason.trim() };
   return body;
 }
 
@@ -232,4 +236,11 @@ export function approveDescription(approve: boolean, registeredDob: string, prop
 /** Makes a blob URL only if the screen is still there; a late reveal after close or unmount creates nothing to leak. */
 export function urlUnlessCancelled(blob: Blob, cancelled: () => boolean, create: (b: Blob) => string): string | null {
   return cancelled() ? null : create(blob);
+}
+
+/** The second approver's body: the override reason is sent only after the server answered 409 DUPLICATE_DOCUMENT, and only by a super admin. */
+export function secondApproveBody(approve: boolean, reason: string, override: { allowed: boolean; reason: string }): Record<string, unknown> {
+  const body: Record<string, unknown> = { approve, reason };
+  if (approve && override.allowed && override.reason.trim().length >= 3) body.overrideDuplicate = { reason: override.reason.trim() };
+  return body;
 }

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import {
   ADMIN_ERROR_CODES, AGE_REVIEW_PATH, CHECKLIST_KEYS, CHECKLIST_LABEL, CONFIRM_TEXT, OUTCOME_HELP, OUTCOME_LABEL, REBLUR_MS, STALE_TEXT, STATUS_META,
   adminErrorMessage, ageText, canOverrideDuplicate, canPurge, canSetPause, decisionBody, decisionReady, emptyChecklist, navAllowed, pauseDisabledReason,
-  purgeReady, registeredAge, approveDescription, isAgeReviewOff, OFF_PANEL, outcomesFor, requiredChecks, urlUnlessCancelled, startReblur, statusMeta, watermarkText, type DecisionForm,
+  purgeReady, registeredAge, needsDocumentNumber, secondApproveBody, approveDescription, isAgeReviewOff, OFF_PANEL, outcomesFor, requiredChecks, urlUnlessCancelled, startReblur, statusMeta, watermarkText, type DecisionForm,
 } from "../client/src/lib/adminAgeReviewUi";
 
 let passed = 0, failed = 0;
@@ -166,7 +166,7 @@ test("live verify sends documentType and is gated on it", () => {
   const body = decisionBody(live({ documentType: "nin_slip" }), { overrideAllowed: false });
   assert.equal(body.documentType, "nin_slip");
   assert.equal(body.documentNumber, "A1234567");
-  assert.equal(decisionReady(live({ outcome: "teen_correction", documentType: "" }), "live"), false);
+  assert.equal(decisionReady(live({ outcome: "birthdate_change", documentType: "" }), "live"), false);
   const f = read(`${dir}/DecisionForm.tsx`);
   assert.match(f, /documentType === null &&/);
   assert.match(f, /select-document-type/);
@@ -232,6 +232,50 @@ test("AGE_REVIEW_OFF panel", () => {
   assert.ok(!/[—–]/.test(OFF_PANEL.body));
   assert.match(read("client/src/pages/admin/AdminAgeReviews.tsx"), /data-testid="age-review-off"/);
   assert.equal(adminErrorMessage("AGE_REVIEW_OFF"), "Age review is not switched on.");
+});
+
+test("birthdate_change needs the same checks as verify", () => {
+  for (const method of ["upload", "live"] as const) {
+    const ticks = method === "live" ? { ...allTicked(), codeMatches: false } : allTicked();
+    const base = form({ outcome: "birthdate_change", checklist: ticks });
+    assert.equal(decisionReady(base, method), true, method);
+    assert.equal(decisionReady({ ...base, documentNumber: "ab" }, method), false);
+    assert.equal(decisionReady({ ...base, documentType: "" }, method), false);
+    assert.equal(decisionReady({ ...base, idBirthdate: "" }, method), false);
+    for (const k of requiredChecks(method)) assert.equal(decisionReady({ ...base, checklist: { ...ticks, [k]: false } }, method), false, `${method}/${k}`);
+  }
+  assert.equal(decisionReady(form({ outcome: "birthdate_change" })), false);
+  const body = decisionBody(form({ outcome: "birthdate_change", checklist: allTicked(), overrideReason: "same person" }), { overrideAllowed: true });
+  assert.equal(body.documentNumber, "A1234567");
+  assert.equal(body.documentType, "passport");
+  assert.deepEqual(body.overrideDuplicate, { reason: "same person" });
+  assert.ok(!("overrideDuplicate" in decisionBody(form({ outcome: "birthdate_change", checklist: allTicked(), overrideReason: "same person" }), { overrideAllowed: false })));
+  assert.equal(needsDocumentNumber("birthdate_change"), true);
+  const f = read(`${dir}/DecisionForm.tsx`);
+  assert.match(f, /needsDocumentNumber\(f\.outcome\) && \(\s*<div className="space-y-2">\s*<Label htmlFor="doc-number"/);
+  assert.match(f, /set\(\{ documentNumber: "" \}\)/);
+});
+
+test("teen_correction needs only the ID birthdate", () => {
+  const t = form({ outcome: "teen_correction", documentNumber: "", documentType: "", checklist: emptyChecklist(), idBirthdate: "2010-04-02" });
+  assert.equal(decisionReady(t), true);
+  assert.equal(decisionReady({ ...t, idBirthdate: "" }), false);
+  assert.equal(needsDocumentNumber("teen_correction"), false);
+  const body = decisionBody(t, { overrideAllowed: true });
+  assert.equal(body.idBirthdate, "2010-04-02");
+  assert.ok(!("documentNumber" in body) && !("documentType" in body) && !("overrideDuplicate" in body));
+  assert.ok(CONFIRM_TEXT.teen_correction);
+});
+
+test("second approve override only after a 409", () => {
+  assert.deepEqual(secondApproveBody(true, "checked the ID", { allowed: false, reason: "" }), { approve: true, reason: "checked the ID" });
+  assert.deepEqual(secondApproveBody(true, "checked the ID", { allowed: true, reason: "same person" }), { approve: true, reason: "checked the ID", overrideDuplicate: { reason: "same person" } });
+  assert.ok(!("overrideDuplicate" in secondApproveBody(true, "ok ok", { allowed: true, reason: "no" })));
+  assert.ok(!("overrideDuplicate" in secondApproveBody(false, "nope", { allowed: true, reason: "same person" })));
+  const d = read(`${dir}/DetailDrawer.tsx`);
+  assert.match(d, /e\.code === "DUPLICATE_DOCUMENT" && role === "super_admin"\) setDupe\(true\)/);
+  assert.match(d, /dupe \? overrideReason : ""/);
+  assert.match(d, /approve === true && dupe && role === "super_admin"/);
 });
 
 test("copy has no em or en dashes or the word cash", () => {

@@ -1,6 +1,6 @@
 // Fetch helpers for the reviewer API. Plain functions, no query cache: nothing returned here from the evidence routes is kept.
 import { ensureCsrfToken } from "@/lib/queryClient";
-import { adminErrorMessage, urlUnlessCancelled, type Checklist } from "@/lib/adminAgeReviewUi";
+import { adminErrorMessage, secondApproveBody, urlUnlessCancelled, type Checklist } from "@/lib/adminAgeReviewUi";
 
 export class ReviewApiError extends Error {
   constructor(readonly status: number, readonly code: string | undefined, readonly retryAfter?: string | null) {
@@ -49,7 +49,8 @@ export const listQueue = (status: string, cursor?: string) => {
 };
 export const getDetail = (id: string) => reviewCall<Detail>("GET", `/api/admin/age-reviews/${id}`);
 export const decide = (id: string, body: Record<string, unknown> & { checklist: Checklist }) => reviewCall<{ request: QueueItem }>("POST", `/api/admin/age-reviews/${id}/decide`, body);
-export const secondApprove = (id: string, approve: boolean, reason: string) => reviewCall<{ request: QueueItem }>("POST", `/api/admin/age-reviews/${id}/second-approve`, { approve, reason });
+export const secondApprove = (id: string, approve: boolean, reason: string, overrideReason = "") =>
+  reviewCall<{ request: QueueItem }>("POST", `/api/admin/age-reviews/${id}/second-approve`, secondApproveBody(approve, reason, { allowed: overrideReason.trim().length > 0, reason: overrideReason }));
 export const inviteLive = (id: string) => reviewCall<{ expiresAt: string }>("POST", `/api/admin/age-reviews/${id}/invite-live`);
 export const liveJoin = (id: string) => reviewCall<{ url: string; token: string; roomName: string }>("POST", `/api/admin/age-reviews/${id}/live-join`);
 export const getHealth = () => reviewCall<Health>("GET", "/api/admin/age-reviews/health");

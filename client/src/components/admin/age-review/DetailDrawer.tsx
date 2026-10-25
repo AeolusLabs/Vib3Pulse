@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { CameraIcon, Loader2Icon } from "@/components/ui/icons";
 import ReasonDialog from "@/components/admin/ReasonDialog";
 import { documentTypeLabel, minutesLeft, formatCode } from "@/lib/ageReview";
-import { getDetail, inviteLive, liveJoin, secondApprove, errText } from "@/lib/adminAgeReviewApi";
+import { ReviewApiError, getDetail, inviteLive, liveJoin, secondApprove, errText } from "@/lib/adminAgeReviewApi";
 import { approveDescription, methodLabel, registeredAge } from "@/lib/adminAgeReviewUi";
 import StatusChip from "./StatusChip";
 import EvidenceTile from "./EvidenceTile";
@@ -29,6 +29,8 @@ export default function DetailDrawer({ id, role, reviewer, onClose, onChanged }:
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [approve, setApprove] = useState<boolean | null>(null);
+  const [dupe, setDupe] = useState(false); // set only after the server answers 409 DUPLICATE_DOCUMENT
+  const [overrideReason, setOverrideReason] = useState("");
   const [now, setNow] = useState(() => new Date());
   const joinRef = useRef<HTMLButtonElement>(null);
   const hadCall = useRef(false);
@@ -140,11 +142,21 @@ export default function DetailDrawer({ id, role, reviewer, onClose, onChanged }:
         open={approve !== null} title={approve ? "Approve the birthdate change" : "Reject the birthdate change"}
         description={approveDescription(approve === true, r?.registeredDob ?? "", r?.proposedDob ?? null)}
         confirmLabel={approve ? "Approve" : "Reject"} destructive={approve === false} minLength={3} maxLength={300} busy={busy === "second"} error={msg}
-        onClose={() => setApprove(null)}
+        extra={approve === true && dupe && role === "super_admin" ? (
+          <div className="space-y-2 rounded-lg border border-amber-500/40 p-3" data-testid="second-override">
+            <label htmlFor="second-override-reason" className="text-sm text-amber-200">This document already verified another account. To approve anyway, give an override reason, then press Approve again.</label>
+            <textarea id="second-override-reason" rows={2} maxLength={300} value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} className="w-full rounded-md border border-slate-600 bg-slate-700/50 p-2 text-sm text-white" />
+          </div>
+        ) : undefined}
+        onClose={() => { setApprove(null); setDupe(false); setOverrideReason(""); }}
         onConfirm={async (reason) => {
           if (!r || approve === null) return;
           setBusy("second"); setMsg(null);
-          try { await secondApprove(r.id, approve, reason); setApprove(null); done(); } catch (e) { setMsg(errText(e)); } finally { setBusy(null); }
+          try { await secondApprove(r.id, approve, reason, dupe ? overrideReason : ""); setApprove(null); setDupe(false); setOverrideReason(""); done(); }
+          catch (e) {
+            if (e instanceof ReviewApiError && e.code === "DUPLICATE_DOCUMENT" && role === "super_admin") setDupe(true);
+            setMsg(errText(e));
+          } finally { setBusy(null); }
         }}
       />
 

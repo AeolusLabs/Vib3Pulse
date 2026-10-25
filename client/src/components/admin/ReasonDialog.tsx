@@ -19,11 +19,13 @@ type Props = {
   shownToHost?: boolean;
   busy?: boolean;
   error?: string | null;
+  /** Extra fields shown inside the form, above the buttons. */
+  extra?: React.ReactNode;
   onConfirm: (reason: string) => void;
   onClose: () => void;
 };
 
-export default function ReasonDialog({ open, title, description, confirmLabel, destructive, minLength = 5, maxLength = 500, shownToHost = false, busy, error, onConfirm, onClose }: Props) {
+export default function ReasonDialog({ open, title, description, confirmLabel, destructive, minLength = 5, maxLength = 500, shownToHost = false, busy, error, extra, onConfirm, onClose }: Props) {
   const [reason, setReason] = useState("");
   useEffect(() => { if (open) setReason(""); }, [open]);
   const ok = reason.trim().length >= minLength;
@@ -38,6 +40,7 @@ export default function ReasonDialog({ open, title, description, confirmLabel, d
           <Label htmlFor="reason-text" className="text-slate-300">Reason (recorded in the audit log{shownToHost ? " and shown to the host" : ""})</Label>
           <Textarea id="reason-text" rows={4} maxLength={maxLength} value={reason} onChange={(e) => setReason(e.target.value)} autoFocus className="border-slate-600 bg-slate-700/50 text-white" data-testid="input-reason" />
           <p className="text-xs text-slate-400">{reason.trim().length}/{minLength} characters minimum</p>
+          {extra}
           {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={onClose} className="text-slate-300">Cancel</Button>
