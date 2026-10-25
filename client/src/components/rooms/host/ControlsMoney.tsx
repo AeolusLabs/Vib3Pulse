@@ -8,7 +8,7 @@ import StepSpray from "@/components/rooms/create/StepSpray";
 import { call } from "@/components/rooms/create/createRoomApi";
 import { useRoomsConfig } from "@/lib/roomsApi";
 import { MONEY_COPY, moneyRefusal, moneyView } from "@/lib/moneySection";
-import { SPRAY_LIVE_COPY, sprayToggleRefusal } from "@/lib/sprayLive";
+import { SPRAY_LIVE_COPY, hostSprayLine, sprayToggleRefusal } from "@/lib/sprayLive";
 
 export interface ControlsMoneyProps {
   roomId: string;
@@ -32,14 +32,18 @@ export default function ControlsMoney({ roomId, room, onChanged }: ControlsMoney
   useEffect(() => { if (room.sprayBlockedByAdmin === false) setBlockSeen(false); }, [room.sprayBlockedByAdmin]);
   useEffect(() => { setOn(room.sprayEnabled === true); }, [room.sprayEnabled]);
   // The server's effective state wins over the saved choice (an admin block or a pause turns it off under the host).
-  const shownOn = !blocked && (typeof room.sprayOn === "boolean" ? room.sprayOn : on);
+  // A saved change shows as saved until the next settings event, so a success never looks like a failure.
+  const [override, setOverride] = useState<boolean | null>(null);
+  useEffect(() => { setOverride(null); }, [room.sprayOn]);
+  const platformLine = blocked ? null : hostSprayLine({ sprayOn: room.sprayOn, sprayEnabled: on });
+  const shownOn = !blocked && (platformLine ? true : override ?? (typeof room.sprayOn === "boolean" ? room.sprayOn : on));
   if (!view.visible) return null;
 
   const save = async (next: boolean) => {
     setBusy(true); setError(null);
     const res = await call<unknown>("PATCH", `/api/rooms/${encodeURIComponent(roomId)}`, { sprayEnabled: next });
     setBusy(false);
-    if (res.ok) { setOn(next); onChanged?.(); }
+    if (res.ok) { setOn(next); setOverride(next); onChanged?.(); }
     else {
       const live = sprayToggleRefusal(res);
       if (live?.adminBlocked) { setBlockSeen(true); onChanged?.(); }
@@ -54,7 +58,7 @@ export default function ControlsMoney({ roomId, room, onChanged }: ControlsMoney
   return (
     <>
       <StepSpray
-        view={view} testPrefix="controls-money" error={blocked ? null : error}
+        view={view} testPrefix="controls-money" error={blocked ? null : error ?? platformLine}
         paid={{ on: typeof room.ticketPriceKobo === "number" }}
         spray={{ on: shownOn, set: change, busy, blocked: blocked ? SPRAY_LIVE_COPY.adminBlocked : undefined }}
       />

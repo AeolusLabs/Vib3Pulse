@@ -2,7 +2,7 @@
 // refetch of the room details when spray comes on (the spray block is per-viewer and only the details route has it), and a
 // toast when it goes off or the button lands. Nothing runs while the flag is absent, so a flag-off server sees no new requests.
 import { useEffect, useRef } from "react";
-import { SPRAY_ON_MESSAGE, jitterMs, shouldRefetchSpray, sprayFlags, sprayOffMessage, sprayTransition } from "@/lib/sprayLive";
+import { SPRAY_ON_MESSAGE, jitterMs, nextSprayRefetchDelay, sprayFlags, sprayToastDecision } from "@/lib/sprayLive";
 
 export interface SprayLiveOptions {
   room: { id: string; [k: string]: unknown } | null;
@@ -32,22 +32,21 @@ export function useSprayLive({ room, hasBlock, isHost, refetch, say }: SprayLive
     if (sprayOn === undefined) return;
     const before = prev.current;
     prev.current = sprayOn;
-    // The first state of a session is the baseline: the live-phase refetch already covers it, and no toast for what was already so.
-    if (before === undefined) return;
-    const t = sprayTransition(before, sprayOn);
-    if (t === "off") {
+    const d = sprayToastDecision(before, sprayOn, { blockedByAdmin: fns.current.blocked, isHost: fns.current.isHost });
+    if (d.cancel) {
       if (timer.current) { clearTimeout(timer.current); timer.current = null; }
       awaitingButton.current = false;
-      // The host switched it themselves unless an admin did; they do not need telling.
-      if (!fns.current.isHost || fns.current.blocked) fns.current.say(sprayOffMessage(fns.current.blocked));
-    } else if (t === "on") {
+    }
+    if (d.toast) fns.current.say(d.toast);
+    if (d.schedule) {
       awaitingButton.current = true;
-      if (!shouldRefetchSpray(Date.now(), lastAt.current, timer.current !== null)) return;
+      const delay = nextSprayRefetchDelay(Date.now(), lastAt.current, timer.current !== null, jitterMs(Math.random()));
+      if (delay === null) return;
       timer.current = setTimeout(() => {
         timer.current = null;
         lastAt.current = Date.now();
         void fns.current.refetch();
-      }, jitterMs(Math.random()));
+      }, delay);
     }
   }, [sprayOn]);
 

@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { initialRoomState, roomReducer, type RoomState } from "../client/src/lib/roomReducer";
 import { IDLE, holdsSprayBlock, sprayFlow } from "../client/src/lib/sprayUi";
 import {
-  SPRAY_LIVE_COPY, jitterMs, shouldRefetchSpray, sprayFlags, sprayOffMessage, sprayToggleRefusal, sprayTransition, sprayVisible,
+  SPRAY_LIVE_COPY, hostSprayLine, jitterMs, nextSprayRefetchDelay, sprayFlags, sprayOffMessage, sprayToastDecision, sprayToggleRefusal, sprayTransition, sprayVisible,
 } from "../client/src/lib/sprayLive";
 
 const src = (rel: string) => readFileSync(new URL(`../client/src/${rel}`, import.meta.url), "utf8");
@@ -73,30 +73,51 @@ test("on schedules exactly one jittered refetch", () => {
   assert.equal(jitterMs(1), 3000);
   assert.equal(jitterMs(-1), 0);
   assert.equal(jitterMs(NaN), 0);
-  assert.equal(shouldRefetchSpray(10_000, null, false), true);
-  assert.equal(shouldRefetchSpray(10_000, null, true), false, "already scheduled");
+  assert.equal(nextSprayRefetchDelay(10_000, null, false, 1234), 1234);
+  assert.equal(nextSprayRefetchDelay(10_000, null, true, 1234), null, "already scheduled");
   const hook = src("hooks/useSprayLive.ts");
   assert.equal((hook.match(/setTimeout\(/g) ?? []).length, 1);
   assert.match(hook, /jitterMs\(Math\.random\(\)\)/);
 });
 
-test("repeated toggles within 2 s produce one refetch", () => {
-  assert.equal(shouldRefetchSpray(11_000, 10_000, false), false);
-  assert.equal(shouldRefetchSpray(11_999, 10_000, false), false);
-  assert.equal(shouldRefetchSpray(12_000, 10_000, false), true);
-  // Model of the hook: three ON signals while one is scheduled, then one shortly after it ran.
-  let scheduled = false, last: number | null = null, runs = 0;
-  const on = (now: number) => { if (shouldRefetchSpray(now, last, scheduled)) scheduled = true; };
-  const fire = (now: number) => { if (scheduled) { scheduled = false; last = now; runs++; } };
-  on(0); on(100); on(900); fire(1500); on(2000); fire(2100);
-  assert.equal(runs, 1);
+test("ON within 2 s of the last refetch is deferred, not dropped", () => {
+  assert.equal(nextSprayRefetchDelay(11_000, 10_000, false, 0), 1000);
+  assert.equal(nextSprayRefetchDelay(11_000, 10_000, false, 1500), 1500, "jitter wins when longer");
+  assert.equal(nextSprayRefetchDelay(12_000, 10_000, false, 0), 0);
 });
 
-test("first state of a session shows no toast", () => {
+test("OFF then ON at 3.0 s after a refetch at 2.9 s schedules at lastAt+2000", () => {
+  assert.equal(nextSprayRefetchDelay(3000, 2900, false, 0), 1900, "runs at 4.9 s = lastAt + 2000");
+});
+
+test("pending timer is not pushed later", () => {
+  assert.equal(nextSprayRefetchDelay(3000, 2900, true, 2500), null);
+});
+
+test("first state of a session never toasts", () => {
   const hook = src("hooks/useSprayLive.ts");
-  assert.match(hook, /if \(before === undefined\) return;/);
   assert.match(hook, /if \(sprayOn === undefined\) return;/);
-  assert.equal(sprayTransition(undefined, false), "off", "the helper alone would call it a change; the hook's baseline guard silences it");
+  for (const next of [true, false]) assert.deepEqual(sprayToastDecision(undefined, next, { blockedByAdmin: false, isHost: false }), { toast: null, schedule: false, cancel: false });
+});
+
+test("admin-blocked off toast text", () => {
+  assert.equal(sprayToastDecision(true, false, { blockedByAdmin: true, isHost: false }).toast, "Spray was turned off for this room");
+  assert.equal(sprayToastDecision(true, false, { blockedByAdmin: true, isHost: true }).toast, "Spray was turned off for this room");
+});
+
+test("host OFF toast text", () => {
+  assert.equal(sprayToastDecision(true, false, { blockedByAdmin: false, isHost: false }).toast, "The host turned spray off");
+  assert.equal(sprayToastDecision(true, false, { blockedByAdmin: false, isHost: true }).toast, null, "the host switched it themselves");
+  assert.equal(sprayToastDecision(false, true, { blockedByAdmin: false, isHost: false }).schedule, true);
+});
+
+test("host is told when the platform switched spray off under their setting", () => {
+  assert.equal(hostSprayLine({ sprayOn: false, sprayEnabled: true }), "Spray is switched off by the platform right now. Your setting is kept.");
+  assert.equal(hostSprayLine({ sprayOn: false, sprayEnabled: true, sprayBlockedByAdmin: true }), null);
+  assert.equal(hostSprayLine({ sprayOn: false, sprayEnabled: false }), null);
+  assert.equal(hostSprayLine({ sprayOn: true, sprayEnabled: true }), null);
+  assert.equal(hostSprayLine({ sprayEnabled: true }), null);
+  assert.match(src("components/rooms/host/ControlsMoney.tsx"), /setOverride\(next\)/, "a saved change shows until the next settings event");
 });
 
 test("host sees the admin-block message and a disabled switch", () => {

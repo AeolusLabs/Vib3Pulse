@@ -26,10 +26,31 @@ export function sprayTransition(prev: boolean | undefined, next: boolean | undef
   return next ? "on" : "off";
 }
 
-/** Ask for the room again only if none is scheduled and none ran in the last 2 s (lastRefetchAt null: never ran). */
-export function shouldRefetchSpray(now: number, lastRefetchAt: number | null, scheduled: boolean): boolean {
-  if (scheduled) return false;
-  return lastRefetchAt === null || now - lastRefetchAt >= SPRAY_REFETCH_COALESCE_MS;
+/**
+ * When to run the refetch for an ON signal, in ms from now; null when one is already pending (keep it, never push it later).
+ * An ON signal is never dropped: a refetch that ran under 2 s ago only defers this one to lastRefetchAt + 2 s.
+ */
+export function nextSprayRefetchDelay(now: number, lastRefetchAt: number | null, pending: boolean, jitter: number): number | null {
+  if (pending) return null;
+  const wait = lastRefetchAt === null ? 0 : Math.max(0, lastRefetchAt + SPRAY_REFETCH_COALESCE_MS - now);
+  return Math.max(jitter, wait);
+}
+
+/** What a change of the live flag means for the viewer: a toast (or none), and whether to schedule the ON refetch. */
+export function sprayToastDecision(
+  prev: boolean | undefined, next: boolean | undefined, o: { blockedByAdmin: boolean; isHost: boolean },
+): { toast: string | null; schedule: boolean; cancel: boolean } {
+  const none = { toast: null, schedule: false, cancel: false };
+  if (prev === undefined) return none; // first state of a session is the baseline: never a toast, never an extra request
+  const t = sprayTransition(prev, next);
+  if (t === "on") return { toast: null, schedule: true, cancel: false };
+  if (t === "off") return { toast: !o.isHost || o.blockedByAdmin ? sprayOffMessage(o.blockedByAdmin) : null, schedule: false, cancel: true };
+  return none;
+}
+
+/** Host line when the room is switched off under them while their own setting is on (platform pause or freeze). */
+export function hostSprayLine(r: { sprayOn?: boolean; sprayEnabled?: boolean; sprayBlockedByAdmin?: boolean }): string | null {
+  return r.sprayOn === false && r.sprayEnabled === true && r.sprayBlockedByAdmin !== true ? SPRAY_LIVE_COPY.platformOff : null;
 }
 
 /** A random 0..3000 ms so a full room does not ask at the same instant. */
@@ -44,6 +65,7 @@ export const sprayOffMessage = (blockedByAdmin: boolean): string =>
 export const SPRAY_ON_MESSAGE = "Spray is on";
 
 export const SPRAY_LIVE_COPY = {
+  platformOff: "Spray is switched off by the platform right now. Your setting is kept.",
   adminBlocked: "Spray is turned off by the platform for this room. Only an admin can turn it back on.",
   cooldown: "Wait a few seconds before switching again",
   cooldownSecs: (retryMs: number) => `Wait ${Math.max(1, Math.ceil(retryMs / 1000))} seconds before switching again`,
