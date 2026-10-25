@@ -8,7 +8,7 @@ import { db } from "../storage";
 import { sprayBatches, sprayPayments, type SprayBatch, type SprayPayment } from "@shared/schema";
 import { isSprayStatus, type SprayStatus } from "@shared/spray";
 import { UUID_RE, type SprayExec } from "./sprayStorage";
-import { recordSprayEvent } from "./sprayEvents";
+import { recordBatchTransition, recordSprayEvent } from "./sprayEvents";
 
 const x = (tx?: SprayExec): typeof db => (tx ?? db) as typeof db;
 
@@ -66,8 +66,7 @@ export async function markBatchStatus(
       .where(and(eq(sprayPayments.batchId, id), inArray(sprayPayments.status, [...from]))).returning({ id: sprayPayments.id });
     // One event for the batch and one per share row that moved with it (shares carry batch_id so either timeline finds them).
     const prev = from.length === 1 ? from[0] : null;
-    await recordSprayEvent({ batchId: id, roomId: row.roomId, from: prev, to, detail: patch.reason ?? null }, x(ex));
-    for (const sh of shares) await recordSprayEvent({ sprayId: sh.id, batchId: id, roomId: row.roomId, from: prev, to, detail: patch.reason ?? null }, x(ex));
+    await recordBatchTransition(row, shares.map((sh) => sh.id), prev, to, patch.reason ?? null, x(ex));
     return row;
   };
   return tx ? run(tx) : db.transaction((t) => run(t));

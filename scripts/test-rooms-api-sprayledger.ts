@@ -285,12 +285,37 @@ try {
   check("paystack-check: provider down is 502 PROVIDER_UNAVAILABLE with no detail", down.status === 502 && down.json?.code === "PROVIDER_UNAVAILABLE" && !/outage|mock/i.test(down.text), down.text);
   check("paystack-check: read-only (rows unchanged, no refund, no events)", (await snap()) === before && mock.refunds.length === refundsBefore && (await events(mine[0].id)).length === evBefore);
   const au = await audits("room_spray.provider_check");
-  check("paystack-check: audited", au.filter((a) => a.target_id === mine[0].id).length === 2 && au.some((a) => /"result":"mismatch"/.test(a.details)) && au.some((a) => /"result":"match"/.test(a.details)));
+  check("paystack-check: audited", au.filter((a) => a.target_id === mine[0].id).length === 3 && au.some((a) => /"result":"provider_unavailable"/.test(a.details)) && au.some((a) => /"result":"mismatch"/.test(a.details)) && au.some((a) => /"result":"match"/.test(a.details)));
   const rl = await mkAdmin("finance_manager");
   resetProviderCheckLimit();
   let limited = 0;
   for (let i = 0; i < PROVIDER_CHECKS_PER_MINUTE + 2; i++) if ((await call("POST", `/api/admin/rooms/sprays/transactions/${mine[0].id}/paystack-check`, rl)).status === 429) limited++;
   check("paystack-check: rate limited at 20 a minute per admin", limited === 2);
+
+
+  // events in one transaction come back in write order (seq), not by random id
+  {
+    const sq = await spray({ room: ROOM2, host: H, payer: P1, status: "created", minutesAgo: 3 });
+    const c = await pool.connect();
+    try {
+      await c.query("BEGIN");
+      for (const to of ["pending", "paid", "delivered", "reversing", "reversed"]) await ev.recordSprayEvent({ sprayId: sq.id, roomId: ROOM2, from: null, to, source: "api" }, c);
+      await c.query("COMMIT");
+    } finally { c.release(); }
+    const order = (await get(`/api/admin/rooms/sprays/transactions/${sq.id}`, FIN)).json.timeline.map((t: any) => t.toStatus).join(",");
+    check("two events in one transaction come back in write order", order === "pending,paid,delivered,reversing,reversed", order);
+  }
+
+  // 60 old disputes must not hide a new stuck pending (attention is capped and ordered per kind, newest first)
+  {
+    const R3 = await mkRoom(H, "sg attention room");
+    for (let i = 0; i < 60; i++) await spray({ room: R3, host: H, payer: P1, status: "disputed", minutesAgo: 600 + i, paidMinutesAgo: 600 + i });
+    const fresh = await spray({ room: R3, host: H, payer: P2, status: "pending", minutesAgo: 30 });
+    const A2 = await get(`/api/admin/rooms/sprays/attention`, FIN);
+    const disputed = (A2.json.items as any[]).filter((x) => x.kind === "disputed");
+    check("60 old disputes do not hide a new stuck pending", A2.status === 200 && (A2.json.items as any[]).some((x) => x.tx.id === fresh.id && x.kind === "pending")
+      && disputed.length === 50 && A2.json.capped.disputed === true && typeof A2.json.capped.pending === "boolean", JSON.stringify(A2.json.capped));
+  }
 
   // roles
   const paths: [string, string][] = [

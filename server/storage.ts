@@ -492,6 +492,11 @@ CREATE TABLE IF NOT EXISTS room_members (
     const { SPRAY_EVENTS_SCHEMA_SQL } = await import("./rooms/sprayEventsMigration");
     await pool.query(SPRAY_EVENTS_SCHEMA_SQL);
   }
+  // Ledger v2: spray_payments (created_at, id) index, spray_events.seq and clock_timestamp() default. migrations/add_spray_ledger_v2.sql.
+  {
+    const { SPRAY_LEDGER_V2_SCHEMA_SQL } = await import("./rooms/sprayLedgerV2Migration");
+    await pool.query(SPRAY_LEDGER_V2_SCHEMA_SQL);
+  }
   await pool.query(`
     ALTER TABLE venues ADD COLUMN IF NOT EXISTS building JSONB
   `);

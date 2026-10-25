@@ -1403,6 +1403,7 @@ export const sprayPayments = pgTable("spray_payments", {
   tierCheck: check("spray_payments_tier_check", sql`${t.tier} IN ('note', 'bundle', 'bag', 'rain')`),
   amountsCheck: check("spray_payments_amounts_check", sql`${t.amountKobo} >= 50000 AND ${t.v3c} = ${t.amountKobo} AND ${t.vatKobo} >= 0 AND ${t.feeKobo} >= 0 AND ${t.reserveKobo} >= 0 AND ${t.platformKobo} >= 0 AND ${t.hostKobo} >= 0 AND (${t.guestKobo} IS NULL OR ${t.guestKobo} >= 0) AND ${t.vatKobo} + ${t.feeKobo} + ${t.reserveKobo} + ${t.platformKobo} + ${t.hostKobo} + COALESCE(${t.guestKobo}, 0) = ${t.amountKobo}`),
   notSelfCheck: check("spray_payments_not_self_check", sql`${t.payerId} <> ${t.recipientId}`),
+  createdIdx: index("spray_payments_created_idx").on(t.createdAt, t.id),
   batchIdx: index("spray_payments_batch_idx").on(t.batchId).where(sql`${t.batchId} IS NOT NULL`),
   batchRecipientUnique: uniqueIndex("spray_payments_batch_recipient_key").on(t.batchId, t.recipientId).where(sql`${t.batchId} IS NOT NULL`),
   batchSubaccountCheck: check("spray_payments_batch_subaccount_check", sql`${t.batchId} IS NULL OR ${t.recipientSubaccount} IS NOT NULL`),
@@ -2594,7 +2595,9 @@ export const sprayEvents = pgTable("spray_events", {
   sprayId: uuid("spray_id"),
   batchId: uuid("batch_id"),
   roomId: varchar("room_id").notNull(),
-  at: timestamp("at").notNull().default(sql`now()`),
+  at: timestamp("at").notNull().default(sql`clock_timestamp()`),
+  // Write order within one transaction (at alone ties there); migrations/add_spray_ledger_v2.sql.
+  seq: bigint("seq", { mode: "number" }).generatedAlwaysAsIdentity(),
   fromStatus: text("from_status"),
   toStatus: text("to_status").notNull(),
   source: text("source").notNull(),

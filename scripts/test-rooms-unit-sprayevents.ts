@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, sep } from "node:path";
 import { SPRAY_EVENTS_SCHEMA_SQL } from "../server/rooms/sprayEventsMigration";
+import { SPRAY_LEDGER_V2_SCHEMA_SQL } from "../server/rooms/sprayLedgerV2Migration";
+import { recordBatchTransition, recordSprayEvent, sprayEventTestHooks } from "../server/rooms/sprayEvents";
 
 let passed = 0, failed = 0;
 const test = (name: string, fn: () => void) => {
@@ -26,6 +28,51 @@ test("spray_events migration is additive, idempotent and has the required shape"
   assert.ok(/source IN \('api', 'callback', 'sweep', 'admin', 'system'\)/.test(sql));
   assert.ok(/spray_id IS NOT NULL OR batch_id IS NOT NULL/.test(sql));
   assert.ok(/char_length\(detail\) <= 300/.test(sql));
+});
+
+
+test("spray ledger v2 migration SQL equals the .sql file, additive and idempotent", () => {
+  const file = readFileSync(join(root, "migrations/add_spray_ledger_v2.sql"), "utf8").replace(/\r\n/g, "\n");
+  const body = file.slice(file.indexOf("BEGIN;") + "BEGIN;".length, file.lastIndexOf("COMMIT;")).trim();
+  assert.equal(body, SPRAY_LEDGER_V2_SCHEMA_SQL.trim());
+  assert.ok(/spray_payments_created_idx ON spray_payments \(created_at, id\)/.test(body));
+  assert.ok(/ADD COLUMN IF NOT EXISTS seq bigint GENERATED ALWAYS AS IDENTITY/.test(body));
+  assert.ok(/SET DEFAULT clock_timestamp\(\)/.test(body));
+  assert.ok(!/drop|delete|truncate|rename/i.test(body));
+});
+
+class FakeClient {
+  log: Array<{ text: string; values?: unknown[] }> = [];
+  failInsert = false;
+  async query(text: string, values?: unknown[]) {
+    this.log.push({ text, values });
+    if (this.failInsert && /^insert/i.test(text)) throw new Error("boom");
+    return {};
+  }
+}
+
+test("a batch with N shares issues one INSERT and one savepoint", async () => {
+  for (const n of [0, 1, 5, 12]) {
+    const c = new FakeClient();
+    await recordBatchTransition({ id: "b1", roomId: "r1" }, Array.from({ length: n }, (_, i) => `s${i}`), "paid", "delivered", null, c);
+    assert.deepEqual(c.log.map((q) => q.text.split(" ")[0]), ["SAVEPOINT", "insert", "RELEASE"], `n=${n}`);
+    assert.equal((c.log[1].text.match(/\(\$/g) ?? []).length, n + 1, "one tuple for the batch and one per share");
+    assert.equal(c.log[1].values?.length, (n + 1) * 7);
+  }
+});
+
+test("a failed batch write rolls back to the savepoint, is swallowed and shouted", async () => {
+  const c = new FakeClient(); c.failInsert = true;
+  const errs: string[] = []; const orig = console.error; console.error = (...a: unknown[]) => { errs.push(a.join(" ")); };
+  let ok: boolean;
+  try { ok = await recordBatchTransition({ id: "b1", roomId: "r1" }, ["s1", "s2"], "paid", "delivered", null, c) as unknown as boolean; } finally { console.error = orig; }
+  assert.deepEqual(c.log.map((q) => q.text.split(" ")[0]), ["SAVEPOINT", "insert", "ROLLBACK"]);
+  assert.ok(errs.some((e) => e.includes("ALERT")));
+  sprayEventTestHooks.failWrite = () => true;
+  const c2 = new FakeClient(); const o2 = console.error; console.error = () => {};
+  try { assert.equal(await recordSprayEvent({ sprayId: "x", roomId: "r", to: "paid" }, c2), false); } finally { console.error = o2; sprayEventTestHooks.failWrite = undefined; }
+  assert.equal(c2.log.length, 0);
+  void ok;
 });
 
 // ---- structure test: every write of a status to spray_payments / spray_batches lives in a listed function that also logs.

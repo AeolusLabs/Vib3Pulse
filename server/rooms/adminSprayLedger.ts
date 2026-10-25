@@ -11,7 +11,7 @@ import { sanitizeMoneyError } from "@shared/roomRefunds";
 import { isSprayStatus, SPRAY_STATUSES } from "@shared/spray";
 import {
   CSV_COLUMNS, compareWithProvider, csvLine, endedAs, funnelBucket, ngn, syntheticTimeline,
-  type AttentionItem, type FunnelBucket, type LedgerDetail, type LedgerRow, type OutcomesResponse, type ProviderCheckResult, type TimelineEntry,
+  type AttentionItem, type AttentionKind, type FunnelBucket, type LedgerDetail, type LedgerRow, type OutcomesResponse, type ProviderCheckResult, type TimelineEntry,
 } from "@shared/sprayLedger";
 
 const FINANCE = ["super_admin", "finance_manager"] as const;
@@ -24,7 +24,7 @@ export const LEDGER_CSV_MAX_ROWS = 50_000;
 /** Test seam: the live CSV cap (tests lower it; production always uses LEDGER_CSV_MAX_ROWS). */
 export const ledgerTuning = { csvMaxRows: LEDGER_CSV_MAX_ROWS };
 export const PROVIDER_CHECKS_PER_MINUTE = 20;
-const ATTENTION_CAP = 200;
+const ATTENTION_PER_KIND = 50;
 const MIN_MS = 60_000;
 
 // Timestamps as UTC ISO text straight from Postgres: no JS timezone round trip, and microseconds kept for the keyset cursor.
@@ -235,30 +235,34 @@ export function registerSprayLedgerRoutes(app: Express): void {
   });
 
   // ------------------------------------------------------------ attention
+  // Capped and ordered PER KIND, newest problem first, so a pile of old disputes can never hide a fresh stuck payment.
   app.get("/api/admin/rooms/sprays/attention", requireRole(...FINANCE), async (_req: Request, res: Response) => {
     try {
       const now = Date.now();
       const p15 = new Date(now - 15 * MIN_MS).toISOString();
       const p5 = new Date(now - 5 * MIN_MS).toISOString();
-      const rows = (await adminQuery(
-        `select a.*, ${iso("a.since")} as since_iso from (
-           select ${SELECT_ROW},
-             case
-               when s.status = 'disputed' then 'Disputed: answer it in Paystack'
-               when s.status = 'reversing' and coalesce(s.refund_requested_at, s.created_at) < $1::timestamp then 'Refund still reversing after 15 minutes'
-               when s.status in ('created', 'pending') and s.created_at < $1::timestamp then 'Still pending after 15 minutes'
-               when s.status = 'paid' and coalesce(s.paid_at, s.created_at) < $2::timestamp then 'Paid but not delivered after 5 minutes'
-             end as why,
-             coalesce(s.refund_requested_at, s.paid_at, s.created_at) as since
-           ${FROM_ROW}
-          where s.status in ('created', 'pending', 'paid', 'reversing', 'disputed')
-            and (s.batch_id is null or not exists (select 1 from spray_payments o where o.batch_id = s.batch_id and o.id < s.id))
-         ) a where a.why is not null order by a.since asc limit ${ATTENTION_CAP}`,
-        [p15, p5],
-      )).rows as (RawRow & { why: string; since_iso: string })[];
-      const items: AttentionItem[] = rows.map((r) => ({ why: r.why, ageMinutes: Math.max(0, Math.floor((now - new Date(r.since_iso).getTime()) / MIN_MS)), tx: toLedgerRow(r) }));
+      const kinds: Record<AttentionKind, { cond: string; params: unknown[]; why: string; since: string }> = {
+        pending: { cond: `s.status in ('created', 'pending') and s.created_at < $1::timestamp`, params: [p15], why: "Still pending after 15 minutes", since: "s.created_at" },
+        reversing: { cond: `s.status = 'reversing' and coalesce(s.refund_requested_at, s.created_at) < $1::timestamp`, params: [p15], why: "Refund still reversing after 15 minutes", since: "coalesce(s.refund_requested_at, s.created_at)" },
+        paid_not_delivered: { cond: `s.status = 'paid' and coalesce(s.paid_at, s.created_at) < $1::timestamp`, params: [p5], why: "Paid but not delivered after 5 minutes", since: "coalesce(s.paid_at, s.created_at)" },
+        disputed: { cond: `s.status = 'disputed'`, params: [], why: "Disputed: answer it in Paystack", since: "s.created_at" },
+      };
+      const items: AttentionItem[] = [];
+      const capped = {} as Record<AttentionKind, boolean>;
+      await Promise.all((Object.keys(kinds) as AttentionKind[]).map(async (kind) => {
+        const k = kinds[kind];
+        const rows = (await adminQuery(
+          `select ${SELECT_ROW}, ${iso(k.since)} as since_iso ${FROM_ROW}
+            where ${k.cond} and (s.batch_id is null or not exists (select 1 from spray_payments o where o.batch_id = s.batch_id and o.id < s.id))
+            order by ${k.since} desc, s.id desc limit ${ATTENTION_PER_KIND + 1}`, k.params,
+        )).rows as (RawRow & { since_iso: string })[];
+        capped[kind] = rows.length > ATTENTION_PER_KIND;
+        for (const r of rows.slice(0, ATTENTION_PER_KIND)) {
+          items.push({ kind, why: k.why, ageMinutes: Math.max(0, Math.floor((now - new Date(r.since_iso).getTime()) / MIN_MS)), tx: toLedgerRow(r) });
+        }
+      }));
       noStore(res);
-      res.json({ items, capped: items.length >= ATTENTION_CAP });
+      res.json({ items, capped });
     } catch (e) { fail(res, "attention list", e); }
   });
 
@@ -285,7 +289,7 @@ export function registerSprayLedgerRoutes(app: Express): void {
       const r = await loadDetail(id);
       if (!r) return res.status(404).json({ message: "Transaction not found" });
       const events = (await adminQuery(
-        `select ${iso("spray_events.at")} as at, from_status, to_status, source, detail from spray_events where spray_id = $1::uuid order by spray_events.at asc, id asc limit 200`, [id],
+        `select ${iso("spray_events.at")} as at, from_status, to_status, source, detail from spray_events where spray_id = $1::uuid order by spray_events.at asc, spray_events.seq asc limit 200`, [id],
       )).rows as { at: string; from_status: string | null; to_status: string; source: string; detail: string | null }[];
       const base = toLedgerRow(r);
       const synthetic = events.length === 0;
@@ -330,6 +334,7 @@ export function registerSprayLedgerRoutes(app: Express): void {
       try { d = await getSplitProvider().verifyCharge(r.provider_ref); }
       catch (e) {
         console.error(`[ADMIN] paystack look-up unavailable for spray ${id}:`, sanitizeMoneyError(e));
+        await auditStrict(req, "room_spray.provider_check", id, { id, result: "provider_unavailable" });
         return res.status(502).json({ message: "Paystack could not be reached. Try again shortly.", code: "PROVIDER_UNAVAILABLE" });
       }
       const provider = d ? { status: d.status, amountKobo: d.amountKobo, paidAt: d.paidAt, feeKobo: d.feeKobo, refunded: d.refunded, refundedKobo: d.refundedKobo, split: d.split } : null;

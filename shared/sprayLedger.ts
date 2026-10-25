@@ -48,7 +48,8 @@ export interface OutcomesResponse {
   byDay: Array<{ day: string } & Record<"initiated" | "paid" | "delivered" | "failed" | "reversed" | "disputed" | "pending", FunnelBucket>>;
 }
 
-export interface AttentionItem { why: string; ageMinutes: number; tx: LedgerRow }
+export type AttentionKind = "pending" | "reversing" | "paid_not_delivered" | "disputed";
+export interface AttentionItem { kind: AttentionKind; why: string; ageMinutes: number; tx: LedgerRow }
 
 export interface ProviderCheckResult {
   ours: { status: string; amountKobo: number };
