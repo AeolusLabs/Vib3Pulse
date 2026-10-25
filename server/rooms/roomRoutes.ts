@@ -559,11 +559,10 @@ export function registerRoomRoutes(app: Express): void {
           const spray = await sprayCheck(host, { ageLimit: v.value.ageLimit, minorsRoom: room.minorsRoom });
           if (!spray.ok) return res.status(403).json({ message: SPRAY_ENABLE_MESSAGES[spray.code], code: spray.code });
         }
-        // Live rooms only: a flip is announced to everyone, so rapid flips are slowed. Marked now, with no await after the check.
-        if (room.status === "live") {
+        // Live rooms: only turning ON is slowed (OFF is never refused); the window starts after a successful write, below.
+        if (v.value.sprayEnabled && room.status === "live") {
           const retryMs = sprayToggleCooldown.retryMs(room.id);
           if (retryMs > 0) return res.status(429).json({ code: "SPRAY_TOGGLE_COOLDOWN", message: "You switched spraying a moment ago. Try again in a few seconds.", retryMs });
-          sprayToggleCooldown.mark(room.id);
         }
         patch.sprayEnabled = v.value.sprayEnabled;
       }
@@ -615,6 +614,7 @@ export function registerRoomRoutes(app: Express): void {
         if (e instanceof TicketGuardError) return res.status(409).json({ message: TICKET_GUARD_MESSAGES[e.code], code: e.code });
         throw e;
       }
+      if ("sprayEnabled" in patch && updated.status === "live") sprayToggleCooldown.mark(room.id);
       if ("screen" in patch && updated.status === "live") notifyScreen(room.id, patch.screen ?? null, updated.screenVersion);
       if (patch.ageLimit && updated.status === "live") await enforceAgeLimit(room.id); // raised: send out anyone now under it
       if (updated.status === "live" && ("gameFormat" in patch || "gameDropTimeoutMs" in patch)) await applyGameRoom(updated); // the hub follows

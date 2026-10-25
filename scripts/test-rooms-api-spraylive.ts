@@ -214,12 +214,26 @@ try {
   const t1 = await rest("PATCH", `/api/rooms/${A.id}`, H, { sprayEnabled: false });
   check("host toggle live broadcasts to every member", t1.status === 200 && await waitSpray(all, false, m), JSON.stringify(t1.json));
   const t2 = await rest("PATCH", `/api/rooms/${A.id}`, H, { sprayEnabled: true });
-  check("toggle within 3 s: 429 SPRAY_TOGGLE_COOLDOWN", t2.status === 429 && t2.json?.code === "SPRAY_TOGGLE_COOLDOWN" && t2.json?.retryMs > 0 && t2.json?.retryMs <= 3000
+  check("ON within 3 s of ON/OFF returns 429 SPRAY_TOGGLE_COOLDOWN with retryMs", t2.status === 429 && t2.json?.code === "SPRAY_TOGGLE_COOLDOWN" && t2.json?.retryMs > 0 && t2.json?.retryMs <= 3000
     && (await q(`select spray_enabled from rooms where id = $1`, [A.id]))[0].spray_enabled === false, JSON.stringify(t2.json));
   sprayToggleCooldown.clear(A.id);
   m = marks(all);
   const t3 = await rest("PATCH", `/api/rooms/${A.id}`, H, { sprayEnabled: true });
   check("after the cooldown the toggle works and broadcasts true", t3.status === 200 && await waitSpray(all, true, m), JSON.stringify(t3.json));
+  m = marks(all);
+  const t4 = await rest("PATCH", `/api/rooms/${A.id}`, H, { sprayEnabled: false });
+  check("OFF within 3 s of ON is allowed", t4.status === 200 && await waitSpray(all, false, m), JSON.stringify(t4.json));
+  const t5 = await rest("PATCH", `/api/rooms/${A.id}`, H, { sprayEnabled: true });
+  check("ON right after that OFF is still 429 (window restarted by the OFF)", t5.status === 429 && t5.json?.code === "SPRAY_TOGGLE_COOLDOWN", JSON.stringify(t5.json));
+  sprayToggleCooldown.clear(A.id);
+  await rest("PATCH", `/api/rooms/${A.id}`, H, { sprayEnabled: true });
+  sprayToggleCooldown.clear(A.id);
+  {
+    // Room "off" (host switch off, never toggled): a PATCH that fails after the spray block (409 NOT_SCHEDULED) must not start the window.
+    const failed1 = await rest("PATCH", `/api/rooms/${off.id}`, H3, { sprayEnabled: true, ticketPriceKobo: 100000, ticketCapacity: 20 });
+    const okAfter = await rest("PATCH", `/api/rooms/${off.id}`, H3, { sprayEnabled: true });
+    check("a failed PATCH does not start the window", failed1.status === 409 && okAfter.status === 200 && okAfter.json?.room?.sprayEnabled === true, `${failed1.status} ${okAfter.status} ${JSON.stringify(okAfter.json)}`);
+  }
 
   // ---- flag off: no spray keys at all
   {
@@ -320,7 +334,7 @@ try {
   const guestList = await rest("GET", "/api/rooms", PC);
   const stateMsg = (await join(await fresh(), K.id)).s;
   const dump = JSON.stringify([guestGet.json, guestList.json, stateMsg]);
-  check("guest bodies never carry the four block fields", guestGet.status === 200 && BLOCK_FIELDS.every((f) => !dump.includes(f)) && !dump.includes("block mid payment"), BLOCK_FIELDS.filter((f) => dump.includes(f)).join());
+  check("guest bodies never carry the four block fields", guestGet.status === 200 && BLOCK_FIELDS.every((f) => !dump.includes(`"${f}":`)) && !dump.includes("block mid payment"), BLOCK_FIELDS.filter((f) => dump.includes(`"${f}":`)).join());
 } catch (e: any) {
   failed++; console.log(`FAIL uncaught: ${e.stack || e}`);
 } finally {
