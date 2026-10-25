@@ -23,6 +23,7 @@ import { getVoiceService } from "./voice/voiceService";
 import { roomFeatures } from "./features";
 import { broadcastGame, gameLine, gameView, handleGame, isGamePlayer, nameOf, syncGameRoom } from "./game";
 import { playersOf } from "@shared/gameScreen";
+import { sprayEffectiveFor, sprayToggleCooldown } from "./sprayState";
 import { MEMBER_LIST_CAP, selectStateMembers, wantedMemberIds } from "./memberList";
 
 /** Injectable so tests can shorten the host grace period; rates are the documented limits. */
@@ -101,11 +102,20 @@ export const roomSocketInternals = {
   hasSlowClock: (roomId: string) => slowChats.has(roomId),
 };
 
+type SprayRow = Pick<Room, "hostId" | "sprayEnabled" | "sprayAdminBlocked">;
+/** The two spray keys, only while ROOMS_SPRAY is on (flag off: nothing is added, so the payload is what it always was). */
+async function sprayKeys(room: SprayRow): Promise<Pick<RoomSettings, "sprayOn" | "sprayBlockedByAdmin">> {
+  if (!roomFeatures.spray) return {};
+  return { sprayOn: (await sprayEffectiveFor(room)).on, sprayBlockedByAdmin: room.sprayAdminBlocked === true };
+}
+
 /** Tells everyone in the room the current settings (and records them for the chat and join paths). Call after every committed change. */
-export function notifySettings(room: Pick<Room, "id" | "pinnedMessage" | "slowModeSec" | "locked">): void {
+export async function notifySettings(room: Pick<Room, "id" | "pinnedMessage" | "slowModeSec" | "locked"> & SprayRow): Promise<void> {
   const s = settingsFromRow(room);
   rememberSettings(room.id, s);
-  roomHub.broadcast(room.id, { type: "room:settings", ...s });
+  // A late joiner never reads the spray keys from the live copy (sendState recomputes them), so a failed lookup only skips them here.
+  const spray = await sprayKeys(room).catch((e) => { console.error("[rooms] spray state lookup failed:", e?.message ?? e); return {}; });
+  roomHub.broadcast(room.id, { type: "room:settings", ...s, ...spray });
 }
 
 const settingsChains = new Map<string, Promise<void>>();
@@ -115,7 +125,7 @@ const settingsChains = new Map<string, Promise<void>>();
  */
 export async function writeRoomSettings(roomId: string, write: () => Promise<Room>): Promise<Room> {
   const prev = settingsChains.get(roomId) ?? Promise.resolve();
-  const run = prev.then(write).then((row) => { if (row?.status === "live") notifySettings(row); return row; });
+  const run = prev.then(write).then(async (row) => { if (row?.status === "live") await notifySettings(row); return row; });
   const tail = run.then(() => undefined, () => undefined);
   settingsChains.set(roomId, tail);
   try { return await run; } finally { if (settingsChains.get(roomId) === tail) settingsChains.delete(roomId); }
@@ -199,6 +209,7 @@ export async function endRoom(roomId: string, opts: { hostReview?: boolean } = {
     joinedSockets.delete(m.userId);
   }
   roomSettings.delete(roomId);
+  sprayToggleCooldown.clear(roomId);
   slowChats.delete(roomId);
   await rs.markAllLeft(roomId).catch(() => {});
   // Gaming: the last lane of a game room to end takes the game room with it (whatever the flag says now: never left live).
@@ -360,7 +371,7 @@ async function sendState(ws: RoomClient, room: Room, you: HubMember) {
   direct(ws, {
     type: "room:state",
     // The settings as the room has them now (a change that landed during the join is already in the live copy).
-    room: { ...viewerRoom(room), ...settingsOf(room) },
+    room: { ...viewerRoom(room), ...settingsOf(room), ...(await sprayKeys(room).catch(() => ({}))) },
     members: (() => {
       // A full free room is sent whole. Past that, the host must still see (and act on) everyone on stage or asking, and
       // everyone in the recent chat must resolve to a person, or their name would read "Someone" and could not be reported.

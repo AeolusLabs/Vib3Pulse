@@ -80,7 +80,11 @@ export function stripInvisible(text: string): string {
 }
 
 /** The three host settings as the room shows them (WS `room:settings` and inside `room:state.room`). */
-export interface RoomSettings { pinnedMessage: string | null; slowModeSec: number; locked: boolean }
+export interface RoomSettings {
+  pinnedMessage: string | null; slowModeSec: number; locked: boolean;
+  /** Only while ROOMS_SPRAY is on: whether spraying is on right now, and whether an admin is the reason it is off. */
+  sprayOn?: boolean; sprayBlockedByAdmin?: boolean;
+}
 
 // ---------------------------------------------------------------- minors' rooms
 /**

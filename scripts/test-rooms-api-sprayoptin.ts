@@ -34,6 +34,7 @@ const { finalizeSpray } = await import("../server/rooms/spray");
 const { stopSprayJob } = await import("../server/rooms/sprayJobs");
 const ss = await import("../server/rooms/sprayStorage");
 const lanes = await import("../server/rooms/gameLanes");
+const { sprayToggleCooldown } = await import("../server/rooms/sprayState");
 const { canEnableSpray } = await import("../shared/roomRules");
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
@@ -213,6 +214,7 @@ try {
   const prow = (await sprayRows(P2))[0];
   check("setup: a pending spray from a payer with no saved card", !!prow && prow.status !== "delivered", JSON.stringify(pending.json));
   mock.pay(prow.provider_ref);
+  sprayToggleCooldown.clear(R); // the on/off flips above are within the 3 s live-room toggle cooldown (sprayState.ts)
   const off = await rest("PATCH", `/api/rooms/${R}`, H, { sprayEnabled: false });
   check("PATCH off while live: stored false", off.status === 200 && off.json?.room?.sprayEnabled === false && (await col(R)) === false, JSON.stringify(off.json));
   check("PATCH off: no spray block, a new spray is refused", (await blockOf(P)) == null && (await spray(P)).status === 403);

@@ -30,6 +30,7 @@ import * as mr from "./minorsRoom";
 import { TokenBucket } from "./rateLimit";
 import { getVoiceService } from "./voice/voiceService";
 import { afterRoleChange, canCameraNow, canPublishNow, isGamePlayer, publishSourcesNow, shutdownVoice, stopAllLive } from "./stage";
+import { sprayToggleCooldown } from "./sprayState";
 import { applyMod, endRoom, enforceAgeLimit, enforceTicketFor, expectHost, interactionVerdict, isKicked, notifyScreen, removeFromMinorsRoom, writeRoomSettings } from "./roomSocket";
 import { roomHub } from "./RoomHub";
 import { GAME_PARTS, roomFeatures } from "./features";
@@ -550,9 +551,19 @@ export function registerRoomRoutes(app: Express): void {
       // Spray opt-in: turning it on needs the host checks (before the ticket ones); turning it off is always allowed. The spray
       // gate reads the row on every spray, so a live room follows at once; an in-flight paid spray still delivers.
       if ("sprayEnabled" in b && v.value.sprayEnabled !== undefined && v.value.sprayEnabled !== room.sprayEnabled) {
+        // An admin switch-off is the admin's alone to undo: a host can only turn spraying off, never on, while it stands.
+        if (v.value.sprayEnabled && room.sprayAdminBlocked === true) {
+          return res.status(403).json({ message: "Spray is turned off by the platform for this room.", code: "SPRAY_ADMIN_BLOCKED" });
+        }
         if (v.value.sprayEnabled) {
           const spray = await sprayCheck(host, { ageLimit: v.value.ageLimit, minorsRoom: room.minorsRoom });
           if (!spray.ok) return res.status(403).json({ message: SPRAY_ENABLE_MESSAGES[spray.code], code: spray.code });
+        }
+        // Live rooms only: a flip is announced to everyone, so rapid flips are slowed. Marked now, with no await after the check.
+        if (room.status === "live") {
+          const retryMs = sprayToggleCooldown.retryMs(room.id);
+          if (retryMs > 0) return res.status(429).json({ code: "SPRAY_TOGGLE_COOLDOWN", message: "You switched spraying a moment ago. Try again in a few seconds.", retryMs });
+          sprayToggleCooldown.mark(room.id);
         }
         patch.sprayEnabled = v.value.sprayEnabled;
       }
@@ -598,7 +609,7 @@ export function registerRoomRoutes(app: Express): void {
       let updated: Room;
       try {
         updated = !Object.keys(patch).length ? room
-          : settingsChanged ? await writeRoomSettings(room.id, write)
+          : settingsChanged || "sprayEnabled" in patch ? await writeRoomSettings(room.id, write)
           : await write();
       } catch (e) {
         if (e instanceof TicketGuardError) return res.status(409).json({ message: TICKET_GUARD_MESSAGES[e.code], code: e.code });

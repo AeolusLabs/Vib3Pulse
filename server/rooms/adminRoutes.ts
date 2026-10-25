@@ -7,6 +7,8 @@ import { pool, storage } from "../storage";
 import { requireRole } from "../services/adminSecurity";
 import { listLiveRooms, parseRange, roomsOverview, sprayBreakdown, ticketSalesBreakdown } from "./adminStats";
 import { CONTROL_KEYS, freezeHost, getControl, listFrozenHosts, setControl, unfreezeHost, type ControlKey } from "./roomControls";
+import { broadcastSprayStateAll, broadcastSprayStateForHost, broadcastSprayState } from "./sprayBroadcast";
+import { setRoomSprayBlock, sprayStatus } from "./sprayState";
 import { adminHoldAllPayoutsForHost } from "./settlement";
 import { adminEndRoom } from "./roomAdmin";
 import { getRates, listRateChanges, setRate } from "./roomRates";
@@ -91,10 +93,45 @@ export function registerRoomsAdminRoutes(app: Express): void {
     try {
       const r = await setControl({ key, on, adminId: req.session.adminId!, reason: reason.data });
       if (r.changed) await audit(req, on ? "room_control.on" : "room_control.off", "room_control", key, reason.data, { key, on });
+      if (key === "sprays_paused" && r.changed) await broadcastSprayStateAll(); // after setControl, so the fresh value is read
       res.json({ key, on, changed: r.changed });
     } catch (e) {
       console.error("[ADMIN] room control failed:", (e as Error)?.message);
       res.status(500).json({ message: "That did not work. Check the switch before trying again." });
+    }
+  });
+
+  // ---------------------------------------------------------------- spray status and per-room block (audited)
+  app.get("/api/admin/rooms/spray-status", requireRole(...FINANCE), async (_req: Request, res: Response) => {
+    try {
+      res.json(await sprayStatus());
+    } catch (e) {
+      console.error("[ADMIN] spray status failed:", (e as Error)?.message);
+      res.status(500).json({ message: "Failed to load the spray status" });
+    }
+  });
+
+  // Block: super_admin or finance_manager. Unblock: super_admin only (a host can never undo it). A repeat is a 200 with changed:false and no audit row.
+  app.post("/api/admin/rooms/:id/spray-block", requireRole(...FINANCE), async (req: Request, res: Response) => {
+    const roomId = String(req.params.id ?? "");
+    if (!UUID.test(roomId)) return res.status(404).json({ message: "Room not found" });
+    const reason = reasonSchema.safeParse(req.body?.reason);
+    if (!reason.success) return res.status(400).json(REASON_REQUIRED);
+    if (typeof req.body?.on !== "boolean") return res.status(400).json({ message: "on must be true or false", code: "BAD_REQUEST" });
+    const on = req.body.on as boolean;
+    if (!on && req.session.adminRole !== "super_admin") return res.status(403).json({ message: "Only a super-admin can turn spraying back on for a blocked room.", code: "SUPER_ADMIN_ONLY" });
+    try {
+      const r = await setRoomSprayBlock({ roomId, on, adminId: req.session.adminId!, reason: reason.data });
+      if (!r.found) return res.status(404).json({ message: "Room not found" });
+      if (r.ended) return res.status(409).json({ message: "This room has ended.", code: "ROOM_ENDED" });
+      if (r.changed) {
+        await audit(req, on ? "room_spray.block" : "room_spray.unblock", "room", roomId, reason.data, { on });
+        await broadcastSprayState(roomId);
+      }
+      res.json({ changed: r.changed });
+    } catch (e) {
+      console.error("[ADMIN] room spray block failed:", (e as Error)?.message);
+      res.status(500).json({ message: "That did not work. Check the room's spray state before trying again." });
     }
   });
 
@@ -120,6 +157,7 @@ export function registerRoomsAdminRoutes(app: Express): void {
         }
       }
       await audit(req, "room_host.freeze", "room_host", hostId, reason.data, { held, endedRooms, endLiveRooms });
+      await broadcastSprayStateForHost(hostId);
       res.json({ changed: true, held, endedRooms });
     } catch (e) {
       console.error("[ADMIN] host freeze failed:", (e as Error)?.message);
@@ -136,6 +174,7 @@ export function registerRoomsAdminRoutes(app: Express): void {
     try {
       const r = await unfreezeHost({ hostId, adminId: req.session.adminId! });
       if (r.changed) await audit(req, "room_host.unfreeze", "room_host", hostId, reason.data, {});
+      if (r.changed) await broadcastSprayStateForHost(hostId);
       res.json({ changed: r.changed });
     } catch (e) {
       console.error("[ADMIN] host unfreeze failed:", (e as Error)?.message);

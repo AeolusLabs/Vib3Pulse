@@ -109,6 +109,11 @@ export class RoomHub {
     return limit === undefined ? all : all.slice(0, limit);
   }
 
+  /** Rooms with someone in them (this process). */
+  roomIds(): string[] {
+    return Array.from(this.rooms.keys()).filter((id) => this.count(id) > 0);
+  }
+
   count(roomId: string): number {
     return this.rooms.get(roomId)?.size ?? 0;
   }
