@@ -26,7 +26,7 @@ async function gated<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-const adminQuery = (text: string, params?: unknown[]) => gated(() => pool.query(text, params as any[] | undefined));
+export const adminQuery = (text: string, params?: unknown[]) => gated(() => pool.query(text, params as any[] | undefined));
 /** For tests: the most queries the gate ever ran at once since the last reset. */
 export const adminQueryPeak = () => peakQueries;
 export const resetAdminQueryPeak = () => { peakQueries = activeQueries; };

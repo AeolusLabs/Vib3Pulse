@@ -12,6 +12,7 @@ import { setRoomSprayBlock, sprayStatus } from "./sprayState";
 import { adminHoldAllPayoutsForHost } from "./settlement";
 import { adminEndRoom } from "./roomAdmin";
 import { getRates, listRateChanges, setRate } from "./roomRates";
+import { registerSprayLedgerRoutes } from "./adminSprayLedger";
 import { DEFAULT_RATES, RATE_LIMITS, isRateKey, validateRate } from "@shared/money";
 
 const MODERATION = ["super_admin", "content_moderator"] as const;
@@ -28,6 +29,7 @@ async function audit(req: Request, action: string, targetType: string, targetId:
 }
 
 export function registerRoomsAdminRoutes(app: Express): void {
+  registerSprayLedgerRoutes(app);
   app.get("/api/admin/rooms/live", requireRole(...MODERATION), async (_req: Request, res: Response) => {
     try {
       res.json({ rooms: await listLiveRooms() });

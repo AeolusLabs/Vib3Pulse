@@ -26,7 +26,7 @@ import {
   PAYSTACK_UNAVAILABLE, getPaystackRefundState, refundPaystackPayment, paystackMetadataObject, type ProviderRefundState,
 } from "./paystack.js";
 import { looksLikeSprayReference, sprayRefundNote } from "./sprayReference.js";
-import type { ChargeFailure, ChargeResult, ProviderAuthorization, SplitPaymentProvider, SplitSpec, SplitVerifyResult } from "./splitProvider.js";
+import type { ChargeDetails, ChargeFailure, ChargeResult, ProviderAuthorization, SplitPaymentProvider, SplitSpec, SplitVerifyResult } from "./splitProvider.js";
 
 /** Rule B9: at or above this a saved card is never charged silently. The one constant: THREE_DS_AT_KOBO (shared/spray.ts). */
 export const THREE_DS_FLOOR_KOBO = THREE_DS_AT_KOBO;
@@ -261,6 +261,9 @@ type PaystackAuthorization = {
   authorization_code?: unknown; last4?: unknown; brand?: unknown; card_type?: unknown; bank?: unknown;
   reusable?: unknown; signature?: unknown; channel?: unknown;
 };
+type PaystackChargeRaw = {
+  status?: unknown; amount?: unknown; currency?: unknown; paid_at?: unknown; fees?: unknown; split?: unknown; subaccount?: unknown;
+};
 export type PaystackVerifyRaw = {
   status?: unknown; reference?: unknown; amount?: unknown; currency?: unknown; metadata?: unknown; authorization?: PaystackAuthorization | null;
 };
@@ -389,6 +392,34 @@ export function createPaystackSplitProvider(): SplitPaymentProvider {
     return mapVerifyData(reference, a.data ?? {});
   }
 
+  async function verifyCharge(reference: string): Promise<ChargeDetails | null> {
+    if (!looksLikeSprayReference(reference)) return null;
+    const a = await answer<PaystackChargeRaw>(`/transaction/verify/${encodeURIComponent(reference)}`);
+    if (!a.ok) {
+      if (isTransactionNotFound(a)) return null;
+      throw new Error(`Paystack error: verify refused (${a.message})`);
+    }
+    const d = a.data ?? {};
+    const amountKobo = typeof d.amount === "number" && Number.isSafeInteger(d.amount) && d.amount >= 0 ? d.amount : 0;
+    const status = typeof d.status === "string" ? d.status.toLowerCase() : "unknown";
+    // A full refund shows as status "reversed"; otherwise ask the refund list (throws on an outage, so this never guesses).
+    let refunded = status === "reversed";
+    if (!refunded && status === "success") refunded = (await getPaystackRefundState(reference, sprayRefundNote(reference), { fullKobo: amountKobo })) === "done";
+    const codes: unknown[] = [];
+    const subs = (d.split as { shares?: { subaccounts?: { subaccount?: unknown }[] } } | undefined)?.shares?.subaccounts;
+    if (Array.isArray(subs)) for (const s of subs) codes.push(s?.subaccount);
+    const one = (d.subaccount as { subaccount_code?: unknown } | undefined)?.subaccount_code;
+    if (typeof one === "string") codes.push(one);
+    const last4 = codes.filter((c): c is string => typeof c === "string" && c.length >= 4).map((c) => c.slice(-4));
+    return {
+      status, amountKobo, currency: typeof d.currency === "string" ? d.currency.toUpperCase() : "",
+      paidAt: typeof d.paid_at === "string" ? d.paid_at : null,
+      feeKobo: typeof d.fees === "number" && Number.isSafeInteger(d.fees) ? d.fees : null,
+      refunded, refundedKobo: refunded ? amountKobo : 0,
+      split: last4.length ? { subaccountLast4: last4 } : null,
+    };
+  }
+
   /** After an unclear charge answer: the provider's own record decides. refused = Paystack rejected our request outright. */
   async function settleUnclear(reference: string, refused: boolean): Promise<ChargeResult> {
     try {
@@ -439,6 +470,7 @@ export function createPaystackSplitProvider(): SplitPaymentProvider {
     },
 
     verify,
+    verifyCharge,
 
     async refund(reference: string): Promise<void> {
       if (!looksLikeSprayReference(reference)) throw new Error("BAD_REFERENCE");

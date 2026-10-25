@@ -59,6 +59,22 @@ export interface SplitVerifyResult {
   authorization?: ProviderAuthorization;
 }
 
+/**
+ * The provider's own record of one charge, for the admin look-up only (read-only; nothing here changes a row or moves money).
+ * status is the provider's word (success, failed, abandoned, reversed ...). Subaccount codes are reported as their last 4
+ * characters only. Null from verifyCharge = the provider has no such transaction; it THROWS when it cannot answer.
+ */
+export interface ChargeDetails {
+  status: string;
+  amountKobo: number;
+  currency: string;
+  paidAt: string | null;
+  feeKobo: number | null;
+  refunded: boolean;
+  refundedKobo: number;
+  split: { subaccountLast4: string[] } | null;
+}
+
 export interface SplitPaymentProvider {
   /** Hosted checkout (card only). The reference must be a spray reference (sprayReference.ts). */
   startFirstPayment(p: { reference: string; email: string; amountKobo: number; split: SplitSpec; metadata: Record<string, string>; callbackUrl: string }): Promise<{ url: string }>;
@@ -68,6 +84,8 @@ export interface SplitPaymentProvider {
    */
   chargeSaved(p: { reference: string; email: string; amountKobo: number; authorizationCode: string; split: SplitSpec; metadata: Record<string, string>; force3ds: boolean; callbackUrl?: string }): Promise<ChargeResult>;
   verify(reference: string): Promise<SplitVerifyResult | null>;
+  /** Read-only look-up of the provider's record of this charge (admin ledger). Never refunds, never changes anything. */
+  verifyCharge(reference: string): Promise<ChargeDetails | null>;
   /** Full refund. Idempotent: does nothing when a refund for this reference already exists. Throws on outage / refusal. */
   refund(reference: string): Promise<void>;
   /**

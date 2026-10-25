@@ -14,7 +14,7 @@
 import { buildChargeBody, THREE_DS_FLOOR_KOBO } from "./paystackSplit.js";
 import { PAYSTACK_UNAVAILABLE, type ProviderRefundState } from "./paystack.js";
 import { looksLikeSprayReference } from "./sprayReference.js";
-import type { ChargeResult, SplitPaymentProvider, SplitSpec, SplitVerifyResult } from "./splitProvider.js";
+import type { ChargeDetails, ChargeResult, SplitPaymentProvider, SplitSpec, SplitVerifyResult } from "./splitProvider.js";
 
 export type MockChargeOutcome = "success" | "declined" | "insufficient" | "not_reusable" | "network" | "network_but_charged" | "action_required";
 
@@ -30,7 +30,7 @@ interface MockTx {
   refund: ProviderRefundState;
 }
 
-export interface MockCall { method: "startFirstPayment" | "chargeSaved" | "verify" | "refund" | "refundState"; reference: string; amountKobo?: number; shares?: SplitSpec["shares"]; force3ds?: boolean }
+export interface MockCall { method: "startFirstPayment" | "chargeSaved" | "verify" | "verifyCharge" | "refund" | "refundState"; reference: string; amountKobo?: number; shares?: SplitSpec["shares"]; force3ds?: boolean }
 
 const MOCK_SPLIT_CODE = "SPL_mockmock01";
 
@@ -112,6 +112,22 @@ export class MockSplitProvider implements SplitPaymentProvider {
       currency: t.currency,
       metadata: { ...t.metadata },
       ...(paid ? { authorization: { authorizationCode: this.card.code, last4: this.card.last4, brand: this.card.brand, bank: this.card.bank, signature: this.card.signature, reusable: t.reusable } } : {}),
+    };
+  }
+
+  /** Admin look-up: deterministic, read-only. A tamper()ed amount shows here, which is the mismatch case for tests. */
+  async verifyCharge(reference: string): Promise<ChargeDetails | null> {
+    this.calls.push({ method: "verifyCharge", reference });
+    if (this.verifyMode === "outage") throw new Error(`${PAYSTACK_UNAVAILABLE}: mock outage`);
+    if (!looksLikeSprayReference(reference)) return null;
+    const t = this.txs.get(reference);
+    if (!t) return null;
+    const refunded = t.refund === "done";
+    return {
+      status: refunded ? "reversed" : t.state === "paid" ? "success" : t.state === "failed" ? "failed" : "abandoned",
+      amountKobo: t.amountKobo, currency: t.currency, paidAt: t.state === "paid" ? "2026-01-01T00:00:00.000Z" : null,
+      feeKobo: Math.round(t.amountKobo * 0.015), refunded, refundedKobo: refunded ? t.amountKobo : 0,
+      split: t.split.shares.length ? { subaccountLast4: t.split.shares.map((s) => s.subaccountCode.slice(-4)) } : null,
     };
   }
 
