@@ -15,13 +15,15 @@ type Props = {
   destructive?: boolean;
   minLength?: number;
   maxLength?: number;
+  /** True when the reason is shown to the host. Decided by the caller, never guessed from the title. */
+  shownToHost?: boolean;
   busy?: boolean;
   error?: string | null;
   onConfirm: (reason: string) => void;
   onClose: () => void;
 };
 
-export default function ReasonDialog({ open, title, description, confirmLabel, destructive, minLength = 5, maxLength = 500, busy, error, onConfirm, onClose }: Props) {
+export default function ReasonDialog({ open, title, description, confirmLabel, destructive, minLength = 5, maxLength = 500, shownToHost = false, busy, error, onConfirm, onClose }: Props) {
   const [reason, setReason] = useState("");
   useEffect(() => { if (open) setReason(""); }, [open]);
   const ok = reason.trim().length >= minLength;
@@ -33,7 +35,7 @@ export default function ReasonDialog({ open, title, description, confirmLabel, d
           {description && <DialogDescription className="text-slate-400">{description}</DialogDescription>}
         </DialogHeader>
         <form onSubmit={(e) => { e.preventDefault(); if (ok && !busy) onConfirm(reason.trim()); }} className="space-y-3">
-          <Label htmlFor="reason-text" className="text-slate-300">Reason (recorded in the audit log{title.toLowerCase().includes("host") || /strike|ban|warn|reject|hide|remove|edit/i.test(title) ? " and shown to the host" : ""})</Label>
+          <Label htmlFor="reason-text" className="text-slate-300">Reason (recorded in the audit log{shownToHost ? " and shown to the host" : ""})</Label>
           <Textarea id="reason-text" rows={4} maxLength={maxLength} value={reason} onChange={(e) => setReason(e.target.value)} autoFocus className="border-slate-600 bg-slate-700/50 text-white" data-testid="input-reason" />
           <p className="text-xs text-slate-500">{reason.trim().length}/{minLength} characters minimum</p>
           {error && <p role="alert" className="text-sm text-red-400">{error}</p>}

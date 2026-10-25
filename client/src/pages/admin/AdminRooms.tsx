@@ -29,7 +29,7 @@ type Tab = "live" | "reported" | "money" | "transactions" | "rates" | "controls"
 type Me = { role: string };
 type LiveRoom = { id: string; title: string; hostId: string; hostUsername: string; ageLimit: string; members: number; startedAt: string | null; ticketed: boolean; hostFrozen: boolean };
 type ReportedRoom = { roomId: string; title: string; status: string; ageLimit: string; hostId: string; host: { username?: string; displayName?: string } | null; reports: { id: string; reason: string; description?: string | null }[] };
-type SprayStatusInfo = { platformFlag: boolean; paused: boolean; frozenHosts: number; liveRoomsSprayOn: number; blockedRooms: { roomId: string; title: string; reason: string | null; byAdminId: string | null; at: string | null }[] };
+type SprayStatusInfo = { platformFlag: boolean; paused: boolean; pausedInfo?: { reason: string; byName: string | null; at: string } | null; frozenHosts: number; liveRoomsSprayOn: number; blockedRooms: { roomId: string; title: string; reason: string | null; byAdminId: string | null; byAdminName?: string | null; at: string | null }[] };
 type Controls = { spraysPaused: boolean; ticketsPaused: boolean; frozenHosts: { hostId: string; username: string; reason: string; frozenAt: string }[] };
 type Overview = {
   roomsCreated: number; roomsStarted: number; uniqueHosts: number; peakConcurrent: number; ticketsSold: number;
@@ -174,11 +174,14 @@ function LiveTab({ canFreeze, canEndRooms, role }: { canFreeze: boolean; canEndR
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button variant="outline" onClick={() => { setErr(null); setEnding(r); }} className="min-h-[44px] border-slate-600 text-slate-100" data-testid={`button-end-${r.id}`}>End room</Button>
-                {mayBlock && (blockedIds.has(r.id) ? (
-                  <span title={canResume(role) ? undefined : RESUME_DISABLED_REASON}>
+                {mayBlock && !status.data && (
+                  <p className="self-center text-sm text-slate-400" data-testid={`block-unknown-${r.id}`}>{status.isError ? "Block state unavailable" : "Checking block state..."}</p>
+                )}
+                {mayBlock && status.data && (blockedIds.has(r.id) ? (
+                  <div className="flex flex-col items-start gap-1">
                     <Button variant="outline" disabled={!canResume(role)} aria-describedby={canResume(role) ? undefined : `unblock-why-${r.id}`} onClick={() => { setErr(null); setBlocking({ room: r, on: false }); }} className="min-h-[44px] border-slate-600 text-slate-100" data-testid={`button-unblock-${r.id}`}>Unblock spray</Button>
-                    {!canResume(role) && <span id={`unblock-why-${r.id}`} className="sr-only">{RESUME_DISABLED_REASON}</span>}
-                  </span>
+                    {!canResume(role) && <p id={`unblock-why-${r.id}`} className="text-xs text-slate-400">{RESUME_DISABLED_REASON}</p>}
+                  </div>
                 ) : (
                   <Button variant="outline" onClick={() => { setErr(null); setBlocking({ room: r, on: true }); }} className="min-h-[44px] border-amber-500/60 text-amber-300 hover:bg-amber-950/40" data-testid={`button-block-${r.id}`}>Block spray</Button>
                 ))}
@@ -591,6 +594,13 @@ function ControlsTab({ isSuper }: { isSuper: boolean }) {
                 <div key={k}><dt className="text-xs uppercase tracking-wide text-slate-400">{k}</dt><dd className="mt-0.5 text-lg font-semibold tabular-nums text-white" data-testid={`spray-status-${k.toLowerCase().replace(/\s+/g, "-")}`}>{v}</dd></div>
               ))}
             </dl>
+            {spray.data.paused && (
+              <p className="mt-3 break-words text-sm text-amber-300" data-testid="paused-info">
+                {spray.data.pausedInfo
+                  ? `Paused by ${spray.data.pausedInfo.byName ?? "an admin"} on ${format(new Date(spray.data.pausedInfo.at), "d MMM yyyy, HH:mm")}: ${spray.data.pausedInfo.reason}`
+                  : "Paused. Who paused it and why was not recorded."}
+              </p>
+            )}
             <h4 className="mb-1 mt-4 text-sm font-semibold text-white">Rooms blocked by an admin</h4>
             {spray.data.blockedRooms.length === 0 ? <p className="text-sm text-slate-400">No rooms are blocked.</p> : (
               <ul className="divide-y divide-slate-700/60" data-testid="blocked-rooms">
@@ -598,7 +608,7 @@ function ControlsTab({ isSuper }: { isSuper: boolean }) {
                   <li key={b.roomId} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
                     <div className="min-w-0 flex-1 basis-56">
                       <p className="truncate font-medium text-white">{b.title}</p>
-                      <p className="mt-0.5 break-words text-sm text-slate-400">{b.reason ?? "No reason recorded"}{b.byAdminId ? ` · by admin ${b.byAdminId.slice(0, 8)}` : ""}{b.at ? ` · ${format(new Date(b.at), "d MMM yyyy, HH:mm")}` : ""}</p>
+                      <p className="mt-0.5 break-words text-sm text-slate-400">{b.reason ?? "No reason recorded"} · by {b.byAdminName ?? "an admin"}{b.at ? ` · ${format(new Date(b.at), "d MMM yyyy, HH:mm")}` : ""}</p>
                     </div>
                     <span title={isSuper ? undefined : RESUME_DISABLED_REASON}>
                       <Button variant="outline" disabled={!isSuper} aria-describedby={isSuper ? undefined : `blocked-why-${b.roomId}`} onClick={() => { setErr(null); setUnblock(b); }} className="min-h-[44px] border-slate-600 text-slate-100" data-testid={`button-unblock-room-${b.roomId}`}>Unblock</Button>
@@ -608,7 +618,7 @@ function ControlsTab({ isSuper }: { isSuper: boolean }) {
                 ))}
               </ul>
             )}
-            {!isSuper && spray.data.blockedRooms.length > 0 && <p className="mt-2 text-xs text-slate-500">{RESUME_DISABLED_REASON}</p>}
+            {!isSuper && spray.data.blockedRooms.length > 0 && <p className="mt-2 text-xs text-slate-400">{RESUME_DISABLED_REASON}</p>}
           </>
         )}
       </section>
@@ -620,7 +630,7 @@ function ControlsTab({ isSuper }: { isSuper: boolean }) {
               <p className="font-medium text-white">{i.label}</p>
               <p className="mt-0.5 text-sm text-slate-400">{i.help}</p>
               <p className={`mt-1 text-sm font-semibold ${i.paused ? "text-amber-300" : "text-emerald-300"}`}>{i.paused ? "Paused" : "Running"}</p>
-              {i.paused && !isSuper && <p className="mt-1 text-xs text-slate-500">Only a super-admin can resume this.</p>}
+              {i.paused && !isSuper && <p className="mt-1 text-xs text-slate-400">Only a super-admin can resume this.</p>}
             </div>
             <Switch
               checked={i.paused} disabled={i.paused && !isSuper} aria-label={i.label}
@@ -645,7 +655,7 @@ function ControlsTab({ isSuper }: { isSuper: boolean }) {
             ))}
           </ul>
         )}
-        {!isSuper && data.frozenHosts.length > 0 && <p className="mt-2 text-xs text-slate-500">Only a super-admin can unfreeze a host. Unfreezing does not release payouts; release those room by room in Finance.</p>}
+        {!isSuper && data.frozenHosts.length > 0 && <p className="mt-2 text-xs text-slate-400">Only a super-admin can unfreeze a host. Unfreezing does not release payouts; release those room by room in Finance.</p>}
       </div>
 
       <ReasonDialog

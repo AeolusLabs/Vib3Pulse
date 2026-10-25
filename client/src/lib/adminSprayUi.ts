@@ -1,6 +1,7 @@
 // Pure helpers behind the admin spray screens (Transactions tab, spray block). No DOM, no network.
 import { SPRAY_STATUSES } from "@shared/spray";
 import type { OutcomesResponse, ProviderCheckResult } from "@shared/sprayLedger";
+import { naira } from "../components/admin/charts/tokens";
 
 export interface TxFilters {
   from?: string; // yyyy-MM-dd (UTC day)
@@ -10,10 +11,15 @@ export interface TxFilters {
   hostId?: string;
   payerId?: string;
   recipientId?: string;
+  /** Exact usernames (case-insensitive) and a room-title prefix. */
+  host?: string;
+  payer?: string;
+  recipient?: string;
+  room?: string;
   q?: string;
 }
 
-const FILTER_KEYS = ["from", "to", "status", "roomId", "hostId", "payerId", "recipientId", "q"] as const;
+const FILTER_KEYS = ["from", "to", "status", "roomId", "hostId", "payerId", "recipientId", "room", "host", "payer", "recipient", "q"] as const;
 
 /** Query string (no leading "?") holding only the filters that are set. cursor/limit are paging, not filters. */
 export function buildTxQuery(filters: TxFilters, paging: { cursor?: string | null; limit?: number } = {}): string {
@@ -41,6 +47,26 @@ export function csvErrorMessage(status: number, body: { code?: string } | null):
   if (status === 413 || body?.code === "TOO_MANY_ROWS") return TOO_MANY_ROWS_MESSAGE;
   if (status === 403) return "Your role cannot export transactions.";
   return "The export did not work. Try again.";
+}
+
+/** The ledger and the copy count days in UTC, so a day string is always the UTC calendar day. */
+export const ymd = (d: Date): string => d.toISOString().slice(0, 10);
+const DAY_MS = 864e5;
+
+/**
+ * A day string for a date from the range picker. A calendar click is local midnight (take the day the admin clicked);
+ * any other instant (a "last N days" preset, now) is read in UTC.
+ */
+export function pickedYmd(d: Date): string {
+  const localMidnight = d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() === 0 && d.getMilliseconds() === 0;
+  if (!localMidnight) return ymd(d);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** Default range: the last `days` UTC days ending today. Call it per fetch so a long-open tab never freezes `to`. */
+export function defaultRange(now: Date = new Date(), days = 7): { from: string; to: string } {
+  return { from: ymd(new Date(now.getTime() - days * DAY_MS)), to: ymd(now) };
 }
 
 /** icon names are resolved by the component; the text label is always shown beside it, so status never relies on colour. */
@@ -94,10 +120,23 @@ export const canSeeTransactions = canBlock;
 export const BLOCK_CONFIRM = "Hosts and guests are told at once. Only an admin can turn it back on.";
 export const RESUME_DISABLED_REASON = "Only a super-admin can turn this back on.";
 
+/** The server words amounts as "1000 kobo"; admins read naira. */
+export const koboToNairaText = (line: string): string => line.replace(/(\d+) kobo/g, (_, k) => naira(Number(k)));
+
 export function mismatchBanner(r: Pick<ProviderCheckResult, "match" | "mismatches"> | null | undefined): { verdict: "MATCH" | "MISMATCH"; lines: string[] } {
   if (!r) return { verdict: "MISMATCH", lines: ["No result"] };
   if (r.match && r.mismatches.length === 0) return { verdict: "MATCH", lines: ["Our record and Paystack agree."] };
-  return { verdict: "MISMATCH", lines: r.mismatches.length ? [...r.mismatches] : ["The records differ."] };
+  return { verdict: "MISMATCH", lines: r.mismatches.length ? r.mismatches.map(koboToNairaText) : ["The records differ."] };
+}
+
+export const ATTENTION_KINDS = ["pending", "reversing", "paid_not_delivered", "disputed"] as const;
+export const ATTENTION_PER_KIND = 50;
+const ATTENTION_LABEL: Record<string, string> = { pending: "pending", reversing: "reversing", paid_not_delivered: "paid, not delivered", disputed: "disputed" };
+/** One note per kind that hit the 50 cap. Reads the per-kind record; an old boolean `true` means "some list was cut". */
+export function attentionCapNotes(capped: Record<string, boolean> | boolean | null | undefined): string[] {
+  if (capped === true) return [`Showing the newest ${ATTENTION_PER_KIND} of each kind`];
+  if (!capped) return [];
+  return ATTENTION_KINDS.filter((k) => capped[k]).map((k) => `Showing the newest ${ATTENTION_PER_KIND} ${ATTENTION_LABEL[k]}`);
 }
 
 /** "Applied to N live rooms" when the API reports a count, else "Applied". */

@@ -1,9 +1,10 @@
 // Admin spray screens: the pure helpers. No database.   npm run test:rooms
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
 import { SPRAY_STATUSES } from "../shared/spray";
 import {
-  appliedText, buildTxQuery, canBlock, canResume, canSeeTransactions, csvErrorMessage, csvUrl, funnelBuckets, mismatchBanner, statusLabel, TOO_MANY_ROWS_MESSAGE,
+  appliedText, attentionCapNotes, buildTxQuery, defaultRange, koboToNairaText, pickedYmd, ymd, canBlock, canResume, canSeeTransactions, csvErrorMessage, csvUrl, funnelBuckets, mismatchBanner, statusLabel, TOO_MANY_ROWS_MESSAGE,
 } from "../client/src/lib/adminSprayUi";
 
 const bucket = (count: number, kobo: number) => ({ count, kobo });
@@ -74,4 +75,34 @@ test("applied text shows a count only when the API gives one", () => {
   assert.equal(appliedText({}), "Applied");
   assert.equal(appliedText({ appliedTo: 3 }), "Applied to 3 live rooms");
   assert.equal(appliedText({ appliedTo: 1 }), "Applied to 1 live room");
+});
+
+test("ymd is the UTC day, and the default range is recomputed from the clock it is given", () => {
+  assert.equal(ymd(new Date("2026-10-05T23:30:00Z")), "2026-10-05");
+  assert.equal(ymd(new Date("2026-10-06T00:30:00+01:00")), "2026-10-05");
+  assert.deepEqual(defaultRange(new Date("2026-10-25T00:10:00Z")), { from: "2026-10-18", to: "2026-10-25" });
+  assert.equal(defaultRange(new Date("2026-10-26T00:10:00Z")).to, "2026-10-26");
+  assert.equal(pickedYmd(new Date(2026, 9, 5)), "2026-10-05"); // a calendar click (local midnight) keeps the clicked day
+});
+
+test("filter query building carries usernames and the room prefix", () => {
+  assert.equal(buildTxQuery({ from: "2026-10-01", host: "ada", payer: " bo ", recipient: "", room: "Urban" }), "from=2026-10-01&room=Urban&host=ada&payer=bo");
+  assert.equal(csvUrl({ host: "ada" }), "/api/admin/rooms/sprays/transactions.csv?host=ada");
+});
+
+test("attention capped record yields one note per capped kind", () => {
+  assert.deepEqual(attentionCapNotes({ pending: false, reversing: false, paid_not_delivered: false, disputed: false }), []);
+  assert.deepEqual(attentionCapNotes({ pending: true, reversing: false, paid_not_delivered: true, disputed: false }), ["Showing the newest 50 pending", "Showing the newest 50 paid, not delivered"]);
+  assert.deepEqual(attentionCapNotes(undefined), []);
+});
+
+test("mismatch amounts are shown in naira, not kobo", () => {
+  assert.equal(koboToNairaText("Amount differs: ours 150000 kobo, provider 200000 kobo"), "Amount differs: ours ₦1,500, provider ₦2,000");
+  assert.ok(!mismatchBanner({ match: false, mismatches: ["Amount differs: ours 1000 kobo, provider 2000 kobo"] }).lines[0].includes("kobo"));
+});
+
+test("ReasonDialog takes an explicit shownToHost prop, never a title regex", () => {
+  const src = readFileSync("client/src/components/admin/ReasonDialog.tsx", "utf8");
+  assert.ok(src.includes("shownToHost"));
+  assert.ok(!/strike\|ban|includes\("host"\)/.test(src));
 });

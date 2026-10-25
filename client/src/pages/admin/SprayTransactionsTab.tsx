@@ -12,7 +12,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { AlertTriangleIcon, CheckCheckIcon, CheckIcon, ClockIcon, CopyIcon, DownloadIcon, Loader2Icon, RefreshCwIcon, SearchIcon, ShieldCheckIcon, XIcon } from "@/components/ui/icons";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { buildTxQuery, csvErrorMessage, csvUrl, funnelBuckets, mismatchBanner, STATUS_CHOICES, statusLabel, type StatusIcon, type TxFilters } from "@/lib/adminSprayUi";
+import { attentionCapNotes, buildTxQuery, csvErrorMessage, defaultRange, pickedYmd, csvUrl, funnelBuckets, mismatchBanner, STATUS_CHOICES, statusLabel, type StatusIcon, type TxFilters } from "@/lib/adminSprayUi";
 import type { AttentionItem, LedgerDetail, LedgerRow, OutcomesResponse, ProviderCheckResult } from "@shared/sprayLedger";
 
 // Spray money ledger (finance roles). Read-only: the only things that leave the system are the CSV export and the Paystack look-up,
@@ -22,16 +22,19 @@ const BASE = "/api/admin/rooms/sprays";
 const panel = "rounded-xl border border-slate-700 bg-slate-800/50";
 const th = "sticky top-0 z-10 whitespace-nowrap bg-slate-800 px-2.5 py-2 text-left text-xs font-medium uppercase tracking-wide text-slate-400";
 const td = "px-2.5 py-2 text-sm text-slate-200";
-const ymd = (d: Date) => format(d, "yyyy-MM-dd");
 const TIER_LABEL: Record<string, string> = { note: "Note", bundle: "Bundle", bag: "Money bag", rain: "Rain" };
 const when = (iso: string | null) => (iso ? format(new Date(iso), "d MMM, HH:mm") : "time not recorded");
 const whenSec = (iso: string | null) => (iso ? format(new Date(iso), "d MMM, HH:mm:ss") : "time not recorded");
+
+class ApiError extends Error {
+  constructor(message: string, readonly code?: string) { super(message); }
+}
 
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url, { credentials: "include" });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
-    throw new Error(body?.message || `Request failed (${res.status})`);
+    throw new ApiError(body?.message || `Request failed (${res.status})`, body?.code);
   }
   return res.json();
 }
@@ -58,7 +61,7 @@ function StatusChip({ status }: { status: string }) {
 
 // ------------------------------------------------------------------ attention
 function AttentionPanel({ onOpen }: { onOpen: (id: string) => void }) {
-  const q = useQuery<{ items: AttentionItem[]; capped: boolean }>({ queryKey: [`${BASE}/attention`], queryFn: () => getJson(`${BASE}/attention`), refetchInterval: 30_000 });
+  const q = useQuery<{ items: AttentionItem[]; capped: Record<string, boolean> | boolean }>({ queryKey: [`${BASE}/attention`], queryFn: () => getJson(`${BASE}/attention`), refetchInterval: 30_000 });
   return (
     <section className={`${panel} p-4`} aria-labelledby="attn-h" data-testid="spray-attention">
       <h3 id="attn-h" className="flex items-center gap-2 text-base font-semibold text-white"><AlertTriangleIcon size={16} className="text-amber-400" aria-hidden />Needs attention</h3>
@@ -78,7 +81,7 @@ function AttentionPanel({ onOpen }: { onOpen: (id: string) => void }) {
               </li>
             ))}
           </ul>
-          {q.data.capped && <p className="mt-2 text-xs text-slate-400">Showing the oldest 200. Resolve these to see the rest.</p>}
+          {attentionCapNotes(q.data.capped).map((n) => <p key={n} className="mt-2 text-xs text-slate-400" data-testid="attention-capped">{n}. Resolve these to see older ones.</p>)}
         </>
       )}
     </section>
@@ -229,7 +232,7 @@ function DetailBody({ id, onFilter }: { id: string; onFilter: (patch: Partial<Tx
           {tx.recipientSubaccountLast4 && <KV k="Recipient payout account" v={`ending ${tx.recipientSubaccountLast4}`} />}
         </dl>
         <div className="mt-2 flex flex-wrap gap-2">
-          {([["Room", { roomId: tx.roomId }], ["Host", { hostId: tx.hostId }], ["Payer", { payerId: tx.payerId }], ["Recipient", { recipientId: tx.recipientId }]] as const).map(([l, patch]) => (
+          {([["Room", { room: tx.roomTitle }], ["Host", { host: tx.hostUsername }], ["Payer", { payer: tx.payerUsername }], ["Recipient", { recipient: tx.recipientUsername }]] as const).map(([l, patch]) => (
             <Button key={l} variant="outline" size="sm" onClick={() => onFilter(patch)} className="min-h-[44px] border-slate-600 text-slate-200" data-testid={`filter-by-${l.toLowerCase()}`}>All for this {l.toLowerCase()}</Button>
           ))}
         </div>
@@ -290,14 +293,29 @@ function DetailBody({ id, onFilter }: { id: string; onFilter: (patch: Partial<Tx
   );
 }
 
+// Applies on Enter or blur, so typing never fires a query per keystroke.
+function CommitInput({ id, label, hint, value, onCommit }: { id: string; label: string; hint: string; value: string; onCommit: (v: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => { setDraft(value); }, [value]);
+  const commit = () => { const v = draft.trim(); if (v !== value) onCommit(v); };
+  return (
+    <div>
+      <Label htmlFor={id} className="text-slate-300">{label} <span className="text-xs font-normal text-slate-400">({hint})</span></Label>
+      <Input id={id} value={draft} maxLength={64} onChange={(e) => setDraft(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } }}
+        className="mt-1 min-h-[44px] border-slate-600 bg-slate-700/50 text-white" data-testid={`input-tx-${id.replace("tx-", "")}`} />
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------ the tab
 type Page = { rows: LedgerRow[]; nextCursor: string | null };
 
 export default function SprayTransactionsTab() {
   const { toast } = useToast();
-  const [range, setRange] = useState<{ from?: Date; to?: Date }>(() => ({ from: new Date(Date.now() - 7 * 864e5), to: new Date() }));
+  // null = the default (last 7 UTC days ending today), recomputed on every fetch; a picked range is fixed.
+  const [range, setRange] = useState<{ from: string; to: string } | null>(null);
   const [status, setStatus] = useState<string | undefined>();
-  const [ids, setIds] = useState<Pick<TxFilters, "roomId" | "hostId" | "payerId" | "recipientId">>({});
+  const [names, setNames] = useState<Pick<TxFilters, "room" | "host" | "payer" | "recipient">>({});
   const [q, setQ] = useState("");
   const [qDraft, setQDraft] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
@@ -305,17 +323,14 @@ export default function SprayTransactionsTab() {
   const [exportErr, setExportErr] = useState<string | null>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
 
-  const filters: TxFilters = {
-    from: range.from ? ymd(range.from) : ymd(new Date(Date.now() - 7 * 864e5)),
-    to: range.to ? ymd(range.to) : ymd(new Date()),
-    status, q: q || undefined, ...ids,
-  };
+  const filtersNow = (): TxFilters => ({ ...(range ?? defaultRange()), status, q: q || undefined, ...names });
+  const filters = filtersNow();
   const key = buildTxQuery(filters);
 
   const list = useInfiniteQuery<Page>({
     queryKey: [`${BASE}/transactions`, key],
     initialPageParam: null as string | null,
-    queryFn: ({ pageParam }) => getJson<Page>(`${BASE}/transactions?${buildTxQuery(filters, { cursor: pageParam as string | null, limit: 50 })}`),
+    queryFn: ({ pageParam }) => getJson<Page>(`${BASE}/transactions?${buildTxQuery(filtersNow(), { cursor: pageParam as string | null, limit: 50 })}`),
     getNextPageParam: (last) => last.nextCursor,
     placeholderData: (p) => p,
     // Live view: only while the newest page is what is on screen and nobody is reading a detail.
@@ -326,9 +341,9 @@ export default function SprayTransactionsTab() {
   useEffect(() => { setExportErr(null); }, [key]);
 
   const open = (id: string, el?: HTMLElement | null) => { triggerRef.current = el ?? (document.activeElement as HTMLElement | null); setOpenId(id); };
-  const patchFilters = (patch: Partial<TxFilters>) => { setIds((cur) => ({ ...cur, ...patch })); setOpenId(null); };
-  const activeCount = [status, q, ...Object.values(ids)].filter(Boolean).length;
-  const clear = () => { setStatus(undefined); setQ(""); setQDraft(""); setIds({}); };
+  const patchFilters = (patch: Partial<TxFilters>) => { setNames((cur) => ({ ...cur, ...patch })); setOpenId(null); };
+  const activeCount = [status, q, ...Object.values(names)].filter(Boolean).length;
+  const clear = () => { setStatus(undefined); setQ(""); setQDraft(""); setNames({}); };
 
   const exportCsv = async () => {
     setExporting(true); setExportErr(null);
@@ -345,7 +360,10 @@ export default function SprayTransactionsTab() {
     } catch { setExportErr(csvErrorMessage(0, null)); } finally { setExporting(false); }
   };
 
-  const idFields: { k: keyof typeof ids; label: string }[] = [{ k: "roomId", label: "Room ID" }, { k: "hostId", label: "Host ID" }, { k: "payerId", label: "Payer ID" }, { k: "recipientId", label: "Recipient ID" }];
+  const nameFields: { k: keyof typeof names; label: string; hint: string }[] = [
+    { k: "room", label: "Room title", hint: "starts with" }, { k: "host", label: "Host", hint: "exact username" },
+    { k: "payer", label: "Payer", hint: "exact username" }, { k: "recipient", label: "Recipient", hint: "exact username" },
+  ];
 
   return (
     <section aria-labelledby="tx-h" className="space-y-6" data-testid="spray-transactions">
@@ -354,7 +372,7 @@ export default function SprayTransactionsTab() {
           <h2 id="tx-h" className="text-lg font-semibold text-white">Transactions</h2>
           <p className="text-sm text-slate-400">Every spray and team-spray share, where it ended, and what the timeline says. Days are in UTC.</p>
         </div>
-        <AdminDateRangePicker from={range.from} to={range.to} onChange={setRange} className="min-h-[44px] border-slate-600 bg-slate-800 text-slate-100" />
+        <AdminDateRangePicker from={range ? new Date(`${range.from}T00:00:00`) : undefined} to={range ? new Date(`${range.to}T00:00:00`) : undefined} onChange={(r) => setRange(r.from ? { from: pickedYmd(r.from), to: pickedYmd(r.to ?? r.from) } : null)} className="min-h-[44px] border-slate-600 bg-slate-800 text-slate-100" />
       </div>
 
       <AttentionPanel onOpen={(id) => open(id)} />
@@ -383,17 +401,11 @@ export default function SprayTransactionsTab() {
           })}
         </div>
 
-        <details className="text-sm">
-          <summary className="min-h-[44px] cursor-pointer py-3 text-slate-300">Filter by room, host, payer or recipient ID{Object.values(ids).some(Boolean) ? " (set)" : ""}</summary>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {idFields.map((f) => (
-              <div key={f.k}>
-                <Label htmlFor={`tx-${f.k}`} className="text-slate-300">{f.label}</Label>
-                <Input id={`tx-${f.k}`} value={ids[f.k] ?? ""} maxLength={64} onChange={(e) => setIds((c) => ({ ...c, [f.k]: e.target.value.trim() || undefined }))} className="mt-1 min-h-[44px] border-slate-600 bg-slate-700/50 text-white" data-testid={`input-tx-${f.k}`} />
-              </div>
-            ))}
-          </div>
-        </details>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {nameFields.map((f) => (
+            <CommitInput key={f.k} id={`tx-${f.k}`} label={f.label} hint={f.hint} value={names[f.k] ?? ""} onCommit={(v) => setNames((c) => ({ ...c, [f.k]: v || undefined }))} />
+          ))}
+        </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm text-slate-400" aria-live="polite">{list.isFetching && !list.isFetchingNextPage ? "Refreshing..." : `${rows.length}${list.hasNextPage ? "+" : ""} ${rows.length === 1 ? "spray" : "sprays"} shown`}</p>
@@ -404,10 +416,12 @@ export default function SprayTransactionsTab() {
         {exportErr && <p role="alert" className="text-sm text-red-400" data-testid="export-error">{exportErr}</p>}
       </div>
 
-      {list.error && !list.data && <Msg tone="error">Could not load transactions. <button className="underline" onClick={() => list.refetch()}>Try again</button></Msg>}
+      {list.error && (list.error instanceof ApiError && list.error.code === "BAD_FILTER"
+        ? <Msg tone="error">{list.error.message}</Msg>
+        : <Msg tone="error">Could not load transactions. <button className="underline" onClick={() => list.refetch()}>Try again</button></Msg>)}
       {list.isLoading && <Msg>Loading...</Msg>}
       {list.data && (
-        <div className={`${panel} max-h-[70vh] overflow-auto`} tabIndex={0} aria-label="Transactions table, scrolls inside this box" data-testid="tx-table-wrap">
+        <div role="region" className={`${panel} max-h-[70vh] overflow-auto transition-opacity ${list.isPlaceholderData ? "opacity-50" : ""}`} aria-busy={list.isPlaceholderData} tabIndex={0} aria-label="Transactions table, scrolls inside this box" data-testid="tx-table-wrap">
           <table className="w-full min-w-[56rem]">
             <caption className="sr-only">Spray transactions, newest first</caption>
             <thead>
@@ -438,8 +452,7 @@ export default function SprayTransactionsTab() {
           </table>
         </div>
       )}
-      {list.error && list.data && <Msg tone="error">Could not refresh. Showing the last load. <button className="underline" onClick={() => list.refetch()}>Try again</button></Msg>}
-      {list.hasNextPage && (
+      {list.hasNextPage && !list.isPlaceholderData && (
         <div className="text-center">
           <Button variant="outline" onClick={() => list.fetchNextPage()} disabled={list.isFetchingNextPage} className="min-h-[44px] border-slate-600 text-slate-100" data-testid="button-tx-more">
             {list.isFetchingNextPage && <Loader2Icon className="mr-2 h-4 w-4 animate-spin" aria-hidden />}Load more

@@ -231,7 +231,7 @@ export default function AdminModeration() {
       </div>
 
       {dialog && pending && (
-        <ReasonDialog open title={dialog.title} description={dialog.desc} confirmLabel={dialog.confirm} destructive={dialog.destructive} busy={run.isPending} error={dialogError}
+        <ReasonDialog open shownToHost={pending.kind === "action" || pending.kind === "appeal"} title={dialog.title} description={dialog.desc} confirmLabel={dialog.confirm} destructive={dialog.destructive} busy={run.isPending} error={dialogError}
           onConfirm={(reason) => run.mutate({ p: pending, reason })} onClose={() => { setPending(null); setDialogError(null); }} />
       )}
     </AdminLayout>

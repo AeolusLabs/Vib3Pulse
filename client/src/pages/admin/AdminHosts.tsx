@@ -203,7 +203,7 @@ export default function AdminHosts() {
       </div>
 
       {dlg && (
-        <ReasonDialog open title={dlgText(dlg).t} description={dlgText(dlg).n} confirmLabel={dlgText(dlg).c} destructive={dlgText(dlg).x} busy={run.isPending} error={err}
+        <ReasonDialog open shownToHost={["strike", "revoke", "ban", "lift", "appeal"].includes(dlg.kind)} title={dlgText(dlg).t} description={dlgText(dlg).n} confirmLabel={dlgText(dlg).c} destructive={dlgText(dlg).x} busy={run.isPending} error={err}
           onConfirm={(reason) => run.mutate({ d: dlg, reason })} onClose={() => { setDlg(null); setErr(null); }} />
       )}
     </AdminLayout>
