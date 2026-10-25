@@ -548,7 +548,13 @@ export default function LandingPage() {
 
           {/* Centre: nav links */}
           <nav className="flex items-center gap-5">
-            {["Privacy", "Terms", "Contact"].map((link) => (
+            <Link
+              href="/privacy"
+              className="font-sans text-white/25 hover:text-white/50 transition-colors text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-400 rounded-sm"
+            >
+              Privacy
+            </Link>
+            {["Terms", "Contact"].map((link) => (
               <span
                 key={link}
                 className="font-sans text-white/25 hover:text-white/50 transition-colors text-xs cursor-pointer"

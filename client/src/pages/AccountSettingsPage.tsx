@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import Navigation from "@/components/Navigation";
 import BottomNavigation from "@/components/BottomNavigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -528,6 +528,9 @@ export default function AccountSettingsPage() {
             </CardContent>
           </Card>
         </div>
+        <p className="mt-8 text-center text-sm text-muted-foreground">
+          <Link href="/privacy" className="inline-flex min-h-[44px] items-center underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary" data-testid="link-privacy-policy">Privacy policy</Link>
+        </p>
       </main>
 
       <BottomNavigation />

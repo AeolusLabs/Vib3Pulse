@@ -24,6 +24,7 @@ import EventCheckInPage from "@/pages/EventCheckInPage";
 import MyRsvpsPage from "@/pages/MyRsvpsPage";
 import LoginPage from "@/pages/LoginPage";
 import SignupPage from "@/pages/SignupPage";
+import PrivacyPolicyPage from "@/pages/PrivacyPolicyPage";
 import CompleteProfilePage from "@/pages/CompleteProfilePage";
 import SearchPage from "@/pages/SearchPage";
 import MessagesPage from "@/pages/MessagesPage";
@@ -103,6 +104,7 @@ function Router() {
       <Route path="/" component={LandingPage} />
       <Route path="/login" component={LoginPage} />
       <Route path="/signup" component={SignupPage} />
+      <Route path="/privacy" component={PrivacyPolicyPage} />
       <Route path="/forgot-password" component={ForgotPasswordPage} />
       <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/verify-email" component={VerifyEmailPage} />

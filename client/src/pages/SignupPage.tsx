@@ -647,7 +647,11 @@ export default function SignupPage() {
             </Form>
           )}
 
-          <p className="text-sm text-center text-white/25 mt-8 font-sans">
+          <p className="text-xs text-center text-white/30 mt-6 font-sans">
+            <Link href="/privacy" className="underline underline-offset-2 hover:text-white/60 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-400 rounded-sm" data-testid="link-privacy-policy">Privacy policy</Link>
+          </p>
+
+          <p className="text-sm text-center text-white/25 mt-4 font-sans">
             Already have an account?{" "}
             <Link href="/login" className="text-violet-400 hover:text-violet-300 transition-colors font-medium" data-testid="link-login">
               Sign in
