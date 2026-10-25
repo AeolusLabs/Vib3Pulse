@@ -87,7 +87,7 @@ export default function MessagesPage() {
       {/* A phone thread is full screen, so the top bar only shows on the inbox (and always on desktop). */}
       <div className={conversationId ? "hidden md:block" : ""}><Navigation onSearch={() => {}} /></div>
 
-      <div className={`mx-auto flex w-full max-w-[1200px] md:border-x ${conversationId ? "h-[calc(100dvh-4rem)]" : "h-[calc(100dvh-8rem)]"} md:h-[calc(100dvh-4rem)]`}>
+      <div data-fullheight className={`mx-auto flex w-full max-w-[1200px] pb-[var(--minibar-h,0px)] md:border-x ${conversationId ? "h-[calc(100dvh-4rem)]" : "h-[calc(100dvh-8rem)]"} md:h-[calc(100dvh-4rem)]`}>
         <section
           className={`min-h-0 w-full flex-col border-r md:flex md:w-[360px] md:flex-none lg:w-[400px] ${conversationId ? "hidden" : "flex"}`}
           aria-label="Conversations"

@@ -81,11 +81,25 @@ test("bar offset follows the bottom nav and never double-counts the safe area", 
   assert.ok(src("../client/src/index.css").includes(".room-minibar { bottom: calc(var(--bottom-nav-h) + var(--bottom-safe)); }"));
 });
 
-test("reserved space is phone-only and skips fixed-height pages", () => {
+test("reserved space is phone-only; the skip is an explicit marker, never a class-name substring", () => {
   const css = src("../client/src/index.css");
-  assert.match(css, /@media \(max-width: 767\.98px\) \{\s*body \{ padding-bottom: var\(--room-minibar-h\)/);
-  assert.match(css, /body:has\(\.h-screen/);
+  assert.match(css, /@media \(max-width: 767\.98px\) \{[^}]*\}\s*body \{ padding-bottom: var\(--minibar-h\)|@media \(max-width: 767\.98px\) \{\s*:root\[data-room-minibar="on"\] \{[^}]*\}\s*body \{ padding-bottom: var\(--minibar-h\)/);
+  assert.ok(css.includes("body:has([data-fullheight]) { padding-bottom: 0; }"));
   assert.doesNotMatch(css, /^body \{ padding-bottom/m, "no global body padding");
+  const skips = css.split(/\r?\n/).filter((l) => /:has\(/.test(l) && /padding-bottom/.test(l));
+  assert.ok(skips.length >= 1);
+  for (const l of skips) assert.doesNotMatch(l, /\[class\*=/, "no class substring skip");
+});
+
+test("fixed-height pages carry data-fullheight and inset by --minibar-h", () => {
+  for (const f of ["../client/src/pages/MessagesPage.tsx", "../client/src/components/PostDetailView.tsx"]) {
+    const t = src(f);
+    assert.match(t, /data-fullheight/, f);
+    assert.ok(t.includes("pb-[var(--minibar-h,0px)]"), f);
+  }
+  assert.doesNotMatch(src("../client/src/pages/MapPage.tsx"), /data-fullheight/, "panels and overlays never carry it");
+  assert.doesNotMatch(src("../client/src/components/EventDetailsModal.tsx"), /data-fullheight/);
+  assert.doesNotMatch(src("../client/src/components/rooms/create/CreateRoomWizard.tsx"), /data-fullheight/);
 });
 
 test("phone layout: three action buttons in the title row, host and match on their own row, info in the second row", () => {

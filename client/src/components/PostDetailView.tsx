@@ -245,7 +245,7 @@ export default function PostDetailView({
 
   return (
     <>
-      <div className="h-screen flex flex-col bg-background">
+      <div data-fullheight className="h-screen flex flex-col bg-background pb-[var(--minibar-h,0px)]">
         {/* Minimal header — just back + title, so the post itself is the
             focus rather than the app's global search/notification chrome */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-border flex-shrink-0">
