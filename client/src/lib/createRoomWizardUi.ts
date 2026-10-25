@@ -433,6 +433,7 @@ export function fieldSelectors(field: string): string[] {
     case "visibility": return radios("wiz-visibility");
     case "slowModeSec": return radios("wiz-slow");
     case "pinned": case "pinnedMessage": return ["#wiz-pinned"];
+    case "sprayEnabled": return ["#money-spray"];
     case "screenUrl": return ["#wiz-screen"];
     case "scheduledFor": case "when": return ["#wiz-schedule", ...radios("wiz-when")];
     default: return [];

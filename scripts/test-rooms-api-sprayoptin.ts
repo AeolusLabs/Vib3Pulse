@@ -33,6 +33,7 @@ const { encryptToken } = await import("../server/payments/tokenCrypto");
 const { finalizeSpray } = await import("../server/rooms/spray");
 const { stopSprayJob } = await import("../server/rooms/sprayJobs");
 const ss = await import("../server/rooms/sprayStorage");
+const lanes = await import("../server/rooms/gameLanes");
 const { canEnableSpray } = await import("../shared/roomRules");
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
@@ -239,6 +240,27 @@ try {
   const other = await rest("PATCH", `/api/rooms/${R}`, P, { sprayEnabled: false });
   check("only the host can change it", other.status === 403 && (await col(R)) === true);
 
+  // ---- game-room lanes: the lane runs the game, so the opt-in must land on the creator's adult lane
+  roomFeatures.gaming = true;
+  const gameBody = { title: "so game", kind: "party", visibility: "public", ageLimit: "18+", capacity: 20, gameFormat: 2, lanes: true };
+  const gc = await rest("POST", "/api/rooms", H, { ...gameBody, sprayEnabled: true });
+  const adultLane = gc.json?.lane?.id as string | undefined;
+  check("adult creator: the adult lane inherits sprayEnabled true", gc.status === 201 && !!adultLane && (await col(adultLane)) === true, JSON.stringify(gc.json));
+  const gcOff = await rest("POST", "/api/rooms", H, gameBody);
+  check("adult creator without the switch: lane stays false", !!gcOff.json?.lane?.id && (await col(gcOff.json.lane.id)) === false);
+  const teenUser = await storage.getUser(TEEN);
+  const tl = await lanes.createGameRoomWithLane(teenUser!, { title: "so teen game", kind: "party", visibility: "public", ageLimit: "all", capacity: 20, gameFormat: 2, sprayEnabled: true } as any);
+  check("a teen lane never inherits spray, even if the input asks", tl.lane.ageLane === "teen" && (await col(tl.lane.id)) === false);
+  const fl = await lanes.openLane(tl.parent, (await storage.getUser(H))!, "adult", "public", true);
+  check("a lane opened later by a friend keeps spray off", fl.ageLane === "adult" && (await col(fl.id)) === false);
+  if (adultLane) {
+    check("setup: inheriting adult lane started", (await rest("POST", `/api/rooms/${adultLane}/start`, H)).status === 200);
+    await join(H, adultLane); await join(P, adultLane);
+    const ls = await rest("POST", `/api/rooms/${adultLane}/spray`, P, { tier: "note", targetId: H, idempotencyKey: key() });
+    check("a spray in the inheriting adult lane passes the gate", ls.status !== 403 && ls.json?.status === "delivered", JSON.stringify(ls.json));
+  }
+  roomFeatures.gaming = false;
+
   // ---- config: the caller's own readiness
   const cfgH = await rest("GET", "/api/rooms/config", H);
   const cfgN = await rest("GET", "/api/rooms/config", NOPAY);
@@ -256,7 +278,7 @@ try {
 } catch (e: any) {
   failed++; console.log(`FAIL uncaught: ${e.stack || e}`);
 } finally {
-  roomFeatures.spray = false;
+  roomFeatures.spray = false; roomFeatures.gaming = false;
   setSplitProviderForTests(null);
   for (const c of conns) try { c.close(); } catch { /* ignore */ }
   try {

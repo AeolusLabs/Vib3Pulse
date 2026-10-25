@@ -110,5 +110,9 @@ test("phone layout: three action buttons in the title row, host and match on the
   assert.ok(bar.indexOf("room-minibar-info") > bar.indexOf("room-minibar-sub"));
 });
 
+test("the host-leave confirm resets whenever the bar is not shown", () => {
+  assert.match(readFileSync(new URL("../client/src/components/rooms/shell/RoomMiniBar.tsx", import.meta.url), "utf8"), /if \(!shown\) setConfirmHostLeave\(false\)/);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

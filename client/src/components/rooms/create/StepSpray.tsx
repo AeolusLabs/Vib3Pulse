@@ -1,6 +1,5 @@
 // The Money section: Paid room and Spray switches with one readiness checklist. Used by the create wizard (Features step)
 // and the Controls sheet. Always drawn while a platform money flag is on; a room that is not 18+/21+ sees it locked with the reason.
-import { Link } from "wouter";
 import { CheckIcon, CircleIcon, LockIcon } from "@/components/ui/icons";
 import { MONEY_COPY, type MoneyView } from "@/lib/moneySection";
 import { SwitchRow } from "./parts";
@@ -58,13 +57,13 @@ export default function StepSpray({ view, paid, spray, error = null, testPrefix 
                   <p className="font-medium">{it.label}<span className="sr-only">{it.met ? `, ${MONEY_COPY.met}` : `, ${MONEY_COPY.unmet}`}</span></p>
                   {!it.met && it.why && <p className="text-muted-foreground">{it.why}</p>}
                   {!it.met && it.fix && (
-                    <Link
-                      href={it.fix.href}
+                    <a
+                      href={it.fix.href} target="_blank" rel="noopener noreferrer"
                       className="inline-flex min-h-[44px] items-center font-medium text-primary underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                       data-testid={`${testPrefix}-fix-${it.id}`}
                     >
-                      {it.fix.label}
-                    </Link>
+                      {it.fix.label}<span className="sr-only"> ({MONEY_COPY.opensNewTab})</span>
+                    </a>
                   )}
                 </div>
               </li>

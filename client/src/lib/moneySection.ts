@@ -28,6 +28,7 @@ export const MONEY_COPY = {
   notSwitchedOn: "Not switched on yet",
   lockedAge: "Change the room to 18+ to sell tickets or take spray",
   checklistTitle: "What you need first",
+  opensNewTab: "opens in a new tab",
   met: "Done",
   unmet: "Needed",
   paidFixedInRoom: "The ticket price is set when the room is created.",

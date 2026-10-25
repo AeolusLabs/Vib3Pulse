@@ -203,5 +203,5 @@ export const moneyAwareStaleTime = (q: { state: { data: RoomsConfig | undefined 
 
 /** `fresh`: refetch on mount when a money flag is on (wizard open, Controls), so the readiness checklist is never 5 minutes old. */
 export function useRoomsConfig(fresh = false) {
-  return useQuery({ queryKey: ["/api/rooms/config"], queryFn: fetchRoomsConfig, staleTime: fresh ? moneyAwareStaleTime : CONFIG_STALE_MS });
+  return useQuery({ queryKey: ["/api/rooms/config"], queryFn: fetchRoomsConfig, staleTime: fresh ? moneyAwareStaleTime : CONFIG_STALE_MS, refetchOnWindowFocus: fresh }); // fix links open in a new tab; coming back re-reads readiness
 }

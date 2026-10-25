@@ -146,6 +146,8 @@ function RoomPageInner({ id }: { id: string }) {
   // A different room already live asks first (the provider's dialog); declining must not re-ask until they tap Join again.
   const [declined, setDeclined] = useState(false);
   const wasPending = useRef(false);
+  // Once the other room is gone the decline is moot; a stale one would block a later auto-join.
+  useEffect(() => { if (!session.active) setDeclined(false); }, [session.active]);
   useEffect(() => {
     const pending = session.pendingSwitch !== null;
     if (wasPending.current && !pending && session.viewing !== id) { setDeclined(true); setJoinTapped(false); }

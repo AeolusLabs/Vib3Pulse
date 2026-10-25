@@ -122,5 +122,9 @@ test("wiring: hooks live in the provider, not the page; unmount no longer ends t
   assert.ok(!/useEffect\(\(\) => \(\) => \{ if \(wantJoined\.current\)/.test(src("../client/src/hooks/useRoomSocket.ts")));
 });
 
+test("RoomPage clears a declined switch when the session ends", () => {
+  assert.match(src("../client/src/pages/RoomPage.tsx"), /if \(!session\.active\) setDeclined\(false\)/);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

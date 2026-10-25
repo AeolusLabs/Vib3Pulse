@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { stepsFor, wizardOptions, type WizardHost, type WizardState } from "../client/src/lib/createRoomRules";
-import { buildCreatePayload, defaultWizardState } from "../client/src/lib/createRoomWizardUi";
+import { buildCreatePayload, defaultWizardState, fieldSelectors } from "../client/src/lib/createRoomWizardUi";
 import { moneyAwareStaleTime } from "../client/src/lib/roomsApi";
 import { MONEY_COPY, moneyRefusal, moneyView, type MoneyReadiness } from "../client/src/lib/moneySection";
 
@@ -119,6 +119,18 @@ test("readiness refetches on open", () => {
   assert.equal(moneyAwareStaleTime({ state: { data: undefined } }), 5 * 60 * 1000);
   assert.match(src("../client/src/components/rooms/create/createRoomApi.ts"), /staleTime: moneyAwareStaleTime, enabled: open/);
   assert.match(src("../client/src/components/rooms/host/ControlsMoney.tsx"), /useRoomsConfig\(true\)/);
+});
+
+test("a sprayEnabled error focuses the Money spray switch (id matches StepSpray)", () => {
+  assert.deepEqual(fieldSelectors("sprayEnabled"), ["#money-spray"]);
+  assert.match(readFileSync(new URL("../client/src/components/rooms/create/StepSpray.tsx", import.meta.url), "utf8"), /id=\{`\$\{testPrefix\}-spray`\}/);
+});
+test("readiness fix links open in a new tab with a hint, and the config refetches on focus", () => {
+  const step = readFileSync(new URL("../client/src/components/rooms/create/StepSpray.tsx", import.meta.url), "utf8");
+  assert.match(step, /target="_blank" rel="noopener noreferrer"/);
+  assert.match(step, /MONEY_COPY\.opensNewTab/);
+  assert.equal(MONEY_COPY.opensNewTab, "opens in a new tab");
+  assert.match(readFileSync(new URL("../client/src/lib/roomsApi.ts", import.meta.url), "utf8"), /refetchOnWindowFocus: fresh/);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

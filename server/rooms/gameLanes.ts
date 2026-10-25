@@ -104,7 +104,8 @@ export async function createGameRoomWithLane(host: User, input: CreateRoomInput)
   return db.transaction(async (tx) => {
     const parent = await rs.createRoom(host.id, input, tx);
     // The same invite link works for the creator's lane (an invite-only game room routes its link holders to their lane).
-    const child = await rs.createRoom(host.id, laneInput(input, lane, { parentRoomId: parent.id, inviteTokenHash: input.inviteTokenHash, screen: input.screen ?? null }), tx);
+    // Spray is per lane and the lane is what runs the game; the create route already vetted this creator for spray.
+    const child = await rs.createRoom(host.id, laneInput(input, lane, { parentRoomId: parent.id, inviteTokenHash: input.inviteTokenHash, screen: input.screen ?? null, sprayEnabled: input.sprayEnabled === true && lane === "adult" }), tx);
     return { parent, lane: child };
   });
 }

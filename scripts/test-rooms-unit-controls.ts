@@ -231,7 +231,7 @@ test("copy: no em dashes, never the banned word, no anonymous guests setting", (
   assert.ok(!/anonymous/i.test(all));
   assert.equal(CONTROLS_COPY.kick, "Remove for 10 minutes");
 });
-test("files: icons only from the icon set, no em dashes, no anonymous setting, money controls not built", () => {
+test("files: icons only from the icon set, no em dashes, no anonymous setting, no ticket price editing", () => {
   const files = [
     "../client/src/lib/hostControls.ts",
     "../client/src/components/rooms/host/ControlsSheet.tsx", "../client/src/components/rooms/host/RequestsPanel.tsx",
@@ -244,7 +244,8 @@ test("files: icons only from the icon set, no em dashes, no anonymous setting, m
     assert.ok(!/\bcash\b/i.test(src), `${f}: banned word`);
     assert.ok(!/from "lucide-react"/.test(src), `${f}: icons must come from @/components/ui/icons`);
     assert.ok(!/anonymousAllowed|anonymous guests/i.test(src), `${f}: no anonymous setting`);
-    assert.ok(!/\bprice\b|ticketChip|sprayEnabled/i.test(src), `${f}: money controls are not built in this phase`);
+    // The spray opt-in and Money section are intentional; editing a ticket price here is still not built.
+    assert.ok(!/\bprice\b|ticketChip/i.test(src), `${f}: ticket price editing is not built here`);
   }
 });
 

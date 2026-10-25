@@ -17,6 +17,9 @@ export default function RoomMiniBar() {
   const [confirmHostLeave, setConfirmHostLeave] = useState(false);
   const shown = miniBarVisible(s.active, s.expanded, path) && !!s.sock;
 
+  // A confirm left open must not reappear when the bar next shows.
+  useEffect(() => { if (!shown) setConfirmHostLeave(false); }, [shown]);
+
   const st = s.sock?.state;
   const title = titleOf(st?.room) ?? "Live room";
   const host = st?.members.find((m) => m.role === "host");
