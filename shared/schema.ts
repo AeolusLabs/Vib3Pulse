@@ -2662,3 +2662,9 @@ export const ageReviewEvidence = pgTable("age_review_evidence", {
   requestKindUniq: uniqueIndex("age_review_evidence_request_kind_uniq").on(t.requestId, t.kind),
 }));
 export type AgeReviewEvidence = typeof ageReviewEvidence.$inferSelect;
+
+// Single-use evidence reveal tokens (migrations/add_age_review_v3.sql): the nonce is claimed with an insert, so a replay finds it taken.
+export const ageReviewRevealNonces = pgTable("age_review_reveal_nonces", {
+  nonce: text("nonce").primaryKey(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+}, (t) => ({ expiresIdx: index("age_review_reveal_nonces_expires_idx").on(t.expiresAt) }));

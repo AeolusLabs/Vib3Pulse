@@ -70,11 +70,14 @@ await test("emergency purge deletes all evidence in one transaction, super_admin
   });
   const s = src("server/identity/ageReviewControls.ts");
   const fn = s.slice(s.indexOf("export async function emergencyPurge"));
-  const order = ['client.query("begin")', "delete from age_review_evidence returning request_id", "update age_review_requests set", 'client.query("commit")'].map((x) => fn.indexOf(x));
+  const order = ['client.query("begin")', "for update", "delete from age_review_evidence returning request_id", "update age_review_requests set", 'client.query("commit")'].map((x) => fn.indexOf(x));
   assert.ok(order.every((i) => i >= 0) && order.join() === [...order].sort((a, b) => a - b).join(), "delete and status move in one transaction");
   assert.ok(!/more_requests/.test(fn), "not counted as a more round");
   assert.ok(/deleted=\$\{deleted\}/.test(fn), "audit carries the count only");
-  assert.ok(/notifyAgeReview\(id, "update"\)/.test(fn));
+  assert.ok(/try \{ await notifyAgeReview\(id, "update"\); \} catch/.test(fn), "a failing notice cannot turn a done purge into an error");
+  assert.ok(fn.includes("where status in (${OPEN}) order by id for update"), "every open request is locked before the delete");
+  assert.ok(fn.includes("ids.length") && fn.includes("= any($1::uuid[])"), "the status move runs for exactly the locked ids");
+  assert.ok(src("server/identity/ageReviewControls.ts").includes("date_trunc('day', now() at time zone 'utc')"), "reveals today are counted per UTC day");
 });
 
 await test("health counts and stale evidence invariant (structure + roles)", async () => {
@@ -132,17 +135,22 @@ const SENSITIVE = /\b(bytes|bytesEnc|bytes_enc|buf|plain|plaintext|decrypted|bas
 // Each entry: "<file>|<exact call text>" -> why it is safe.
 const ALLOW: Record<string, string> = {
   "server/routes/age-review-routes.ts|res.json(await putEvidence(uid(req), idParam(req), b))": "returns only { kind, received: true }; `b` is the upload body but never reaches the output",
+  "server/identity/ageReviewReveal.ts|.end(plain)": "the decrypted image itself: the one legitimate output of evidence, sent only after the token, limit and header checks",
+  "server/routes/age-review-admin-routes.ts|.json({ message: e.message, code: e.code, ...e.extra })": "AgeReviewError.extra only ever holds retryAfter / attemptsLeft (dates and counts) built in the service",
+  "server/routes/age-review-routes.ts|.json({ message: e.message, code: e.code, ...e.extra })": "same: AgeReviewError.extra is dates and counts only",
   "server/routes/age-review-routes.ts|res.json(await getMe(uid(req)))": "the owner's own state; no evidence fields exist in it",
 };
 function sinks(text: string): string[] {
   const out: string[] = [];
-  const re = /(console\.(?:log|error|warn|info|debug)|\bres\.json|\.json|new AgeReviewError|logAdminActivity|\baudit|\bauditReveal)\(/g;
+  const re = /(console\.(?:log|error|warn|info|debug)|\blogger\.\w+|\bres\.json|\.json|\bres\.send|\bres\.end|\.end|new AgeReviewError|new Error|logAdminActivity|\baudit|\bauditReveal)\(/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
     let depth = 1, i = re.lastIndex;
     while (i < text.length && depth > 0) { const ch = text[i++]; if (ch === "(") depth++; else if (ch === ")") depth--; }
     out.push(text.slice(m.index, i));
   }
+  // `throw <expression>;` statements too (a thrown message ends up in a log or a response).
+  for (const t of Array.from(text.matchAll(/\bthrow\s+([^;]*);/g))) if (!/^new (AgeReviewError|Error)\(/.test(t[1])) out.push(`throw ${t[1]}`);
   return out;
 }
 
@@ -158,9 +166,12 @@ await test("logger structure test", () => {
       const flat = call.replace(/\s+/g, " ");
       // Strip string literals' words ("... data ...") and comments before looking for identifiers.
       const code = flat.replace(/"(?:[^"\\]|\\.)*"/g, '""').replace(/`[^`$]*`/g, "``").replace(/\/\/.*$/g, "");
-      if (SENSITIVE.test(code) && !ALLOW[`${f}|${flat}`]) hits.push(`${f}: ${flat.slice(0, 160)}`);
+      // A spread of a whole row, error or body can carry anything, whatever its fields are called.
+      const spread = /\.\.\.\s*(row|r|err|error|e|raw|body|req\.body|input|plain|buf|decrypted)\b/.test(code);
+      if ((SENSITIVE.test(code) || spread) && !ALLOW[`${f}|${flat}`]) hits.push(`${f}: ${flat.slice(0, 160)}`);
     }
   }
+  if (hits.length) console.log(["UNLISTED SINKS:", ...hits].join(String.fromCharCode(10)));
   assert.deepEqual(hits, [], "unlisted sinks reference evidence-like identifiers");
   // Every allow-list entry must still exist (a stale entry would hide a future leak).
   for (const key of Object.keys(ALLOW)) {

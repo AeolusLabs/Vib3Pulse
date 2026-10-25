@@ -28,6 +28,7 @@ export async function sweepExpiredAgeReviews(): Promise<{ expired: number; userI
       `delete from age_review_evidence e using age_review_requests r
        where e.request_id = r.id and (r.status in ('expired', 'cancelled', 'approved', 'declined', 'closed_minor') or r.expires_at < now())`,
     );
+    await client.query(`delete from age_review_reveal_nonces where expires_at < now()`);
     await client.query("commit");
     lastSweepAt = new Date();
     return { expired: exp.length, userIds: Array.from(new Set(exp.map((r) => r.user_id))), evidenceDeleted: del.rowCount ?? 0, staleFound };

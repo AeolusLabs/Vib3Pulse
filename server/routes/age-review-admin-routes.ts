@@ -8,7 +8,7 @@ import { AgeReviewError } from "../identity/ageReviewService";
 import { decide, getDetail, isSelfReview, isUuid, listQueue, secondApprove, type AdminRef } from "../identity/ageReviewAdmin";
 import { inviteLiveCheck, reviewerLiveJoin } from "../identity/ageReviewLive";
 import { emergencyPurge, getHealth, setPause } from "../identity/ageReviewControls";
-import { consumeRevealToken, issueRevealToken, revealLimitReached, sendEvidence } from "../identity/ageReviewReveal";
+import { claimReveal, consumeRevealToken, issueRevealToken, sendEvidence } from "../identity/ageReviewReveal";
 import { CHECKLIST_KEYS, DECISION_OUTCOMES, DECLINE_REASONS } from "../../shared/ageReview";
 
 const REVIEWERS = ["super_admin", "admin", "age_reviewer"] as const;
@@ -107,22 +107,19 @@ export function registerAgeReviewAdminRoutes(app: Express): void {
       [evidenceId, requestId])).rows[0] as { kind: string; user_email: string | null } | undefined;
     if (!row) throw new AgeReviewError(404, "WRONG_STATE", "That photo is no longer available.");
     if (isSelfReview(me(req), { email: row.user_email, dateOfBirth: null })) throw new AgeReviewError(403, "SELF_REVIEW", "You cannot review your own age check.");
-    const recent = Number((await pool.query(
-      `select count(*)::int as n from admin_activity_logs where admin_id = $1 and action = 'age_review.reveal' and created_at > now() - interval '1 hour'`, [req.admin!.id])).rows[0].n);
-    if (revealLimitReached(recent)) {
+    // Count and record in one transaction under a per-reviewer lock: parallel requests cannot all pass the check. No audit row, no token.
+    if (!(await claimReveal(pool, { adminId: req.admin!.id, requestId, kind: row.kind, ip: req.ip }))) {
       console.error(`[AGE-REVIEW] ALERT reveal limit reached by reviewer ${req.admin!.id}`);
-      await auditReveal(req, "age_review.reveal_limit", requestId, `request=${requestId}`).catch(() => {});
+      await auditReveal(req, "age_review.reveal_limit", requestId, `request=${requestId}`).catch(() => console.error("[AGE-REVIEW] ALERT the reveal limit audit row could not be written"));
       throw new AgeReviewError(429, "REVEAL_LIMIT", "You have opened too many photos this hour.");
     }
-    // The audit row comes first: no token exists for a reveal that could not be recorded.
-    await auditReveal(req, "age_review.reveal", requestId, `request=${requestId} kind=${row.kind}`);
     res.json({ token: issueRevealToken({ adminId: req.admin!.id, requestId, evidenceId }), expiresInSec: 60 });
   }));
 
   app.get(`${base}/:id/evidence/:evidenceId`, requireRole(...REVIEWERS), withId(async (req, res) => {
     const { requestId, evidenceId } = evidenceIds(req);
     if (!isUuid(evidenceId)) throw new AgeReviewError(404, "NOT_FOUND", "Not found");
-    consumeRevealToken(req.query.token, { adminId: req.admin!.id, requestId, evidenceId });
+    await consumeRevealToken(req.query.token, { adminId: req.admin!.id, requestId, evidenceId });
     const { pool } = await import("../storage");
     const row = (await pool.query(`select id, request_id, kind, mime, bytes_enc from age_review_evidence where id = $1 and request_id = $2`, [evidenceId, requestId])).rows[0];
     if (!row) throw new AgeReviewError(404, "WRONG_STATE", "That photo is no longer available.");

@@ -11,7 +11,7 @@ process.env.AGE_EVIDENCE_KEY = crypto.randomBytes(32).toString("base64");
 delete process.env.AGE_REVIEW;
 const { storage } = await import("../server/storage");
 const { registerAgeReviewAdminRoutes } = await import("../server/routes/age-review-admin-routes");
-const { issueRevealToken, consumeRevealToken, evidenceHeaders, sendEvidence, revealLimitReached, revealTestHooks } = await import("../server/identity/ageReviewReveal");
+const { issueRevealToken, consumeRevealToken, evidenceHeaders, sendEvidence, revealLimitReached, claimReveal, setNonceStoreForTests } = await import("../server/identity/ageReviewReveal");
 const { encryptEvidence } = await import("../server/identity/evidenceCrypto");
 
 let passed = 0, failed = 0;
@@ -22,39 +22,42 @@ const test = async (name: string, fn: () => void | Promise<void>) => {
 const root = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 const src = (p: string) => readFileSync(join(root, p), "utf8");
 const claims = { adminId: "a1", requestId: "r1", evidenceId: "e1" };
-const code = (fn: () => void) => { try { fn(); return "none"; } catch (e: any) { return e.code as string; } };
+// The database store is replaced by one that behaves like "insert ... on conflict do nothing returning nonce".
+let taken = new Set<string>();
+setNonceStoreForTests({ claim: async (n) => { if (taken.has(n)) return false; taken.add(n); return true; } });
+const code = async (fn: () => Promise<void>) => { try { await fn(); return "none"; } catch (e: any) { return e.code as string; } };
 
-await test("reveal token is single use", () => {
-  revealTestHooks.clear();
+await test("reveal token is single use (and a restart does not reset it: the claim is in the database)", async () => {
+  taken = new Set();
   const t = issueRevealToken(claims);
-  assert.equal(code(() => consumeRevealToken(t, claims)), "none");
-  assert.equal(code(() => consumeRevealToken(t, claims)), "TOKEN_INVALID");
+  assert.equal(await code(() => consumeRevealToken(t, claims)), "none");
+  assert.equal(await code(() => consumeRevealToken(t, claims)), "TOKEN_INVALID");
   const t2 = issueRevealToken(claims);
   assert.notEqual(t, t2);
 });
 
-await test("reveal token expires at 60 s", () => {
+await test("reveal token expires at 60 s", async () => {
   const t0 = 1_000_000_000_000;
   const t = issueRevealToken(claims, t0);
-  assert.equal(code(() => consumeRevealToken(t, claims, t0 + 60_000)), "TOKEN_INVALID");
+  assert.equal(await code(() => consumeRevealToken(t, claims, t0 + 60_000)), "TOKEN_INVALID");
   const t2 = issueRevealToken(claims, t0);
-  assert.equal(code(() => consumeRevealToken(t2, claims, t0 + 59_999)), "none");
+  assert.equal(await code(() => consumeRevealToken(t2, claims, t0 + 59_999)), "none");
 });
 
-await test("reveal token for another admin or another evidence id is refused (and not burned)", () => {
+await test("reveal token for another admin or another evidence id is refused (and not burned)", async () => {
   const t = issueRevealToken(claims);
-  assert.equal(code(() => consumeRevealToken(t, { ...claims, adminId: "a2" })), "TOKEN_INVALID");
-  assert.equal(code(() => consumeRevealToken(t, { ...claims, evidenceId: "e2" })), "TOKEN_INVALID");
-  assert.equal(code(() => consumeRevealToken(t, { ...claims, requestId: "r2" })), "TOKEN_INVALID");
-  assert.equal(code(() => consumeRevealToken(t, claims)), "none", "a refused attempt does not burn the owner's token");
+  assert.equal(await code(() => consumeRevealToken(t, { ...claims, adminId: "a2" })), "TOKEN_INVALID");
+  assert.equal(await code(() => consumeRevealToken(t, { ...claims, evidenceId: "e2" })), "TOKEN_INVALID");
+  assert.equal(await code(() => consumeRevealToken(t, { ...claims, requestId: "r2" })), "TOKEN_INVALID");
+  assert.equal(await code(() => consumeRevealToken(t, claims)), "none", "a refused attempt does not burn the owner's token");
   const forged = issueRevealToken(claims).split(".")[0] + ".AAAA";
-  assert.equal(code(() => consumeRevealToken(forged, claims)), "TOKEN_INVALID");
-  for (const junk of [undefined, null, "", "x", "a.b.c", 42, "x".repeat(2000)]) assert.equal(code(() => consumeRevealToken(junk, claims)), "TOKEN_INVALID");
+  assert.equal(await code(() => consumeRevealToken(forged, claims)), "TOKEN_INVALID");
+  for (const junk of [undefined, null, "", "x", "a.b.c", 42, "x".repeat(2000)]) assert.equal(await code(() => consumeRevealToken(junk, claims)), "TOKEN_INVALID");
   // A token signed under a different key is refused.
   const t3 = issueRevealToken(claims);
   const keep = process.env.AGE_EVIDENCE_KEY;
   process.env.AGE_EVIDENCE_KEY = crypto.randomBytes(32).toString("base64");
-  try { assert.equal(code(() => consumeRevealToken(t3, claims)), "TOKEN_INVALID"); } finally { process.env.AGE_EVIDENCE_KEY = keep; }
+  try { assert.equal(await code(() => consumeRevealToken(t3, claims)), "TOKEN_INVALID"); } finally { process.env.AGE_EVIDENCE_KEY = keep; }
 });
 
 await test("GET without a token never returns the image", async () => {
@@ -124,14 +127,16 @@ await test("reveal limit 60 per hour per reviewer and ALERT", () => {
   assert.equal(revealLimitReached(59), false); assert.equal(revealLimitReached(60), true);
   const r = src("server/routes/age-review-admin-routes.ts");
   assert.ok(/ALERT reveal limit reached/.test(r) && /age_review\.reveal_limit/.test(r) && /"REVEAL_LIMIT"/.test(r));
-  assert.ok(/interval '1 hour'/.test(r), "counted from the audit log, so it holds across processes");
+  assert.ok(/interval '1 hour'/.test(src("server/identity/ageReviewReveal.ts")), "counted from the audit log, so it holds across processes");
+  assert.ok(r.includes('.catch(() => console.error("[AGE-REVIEW] ALERT the reveal limit audit row could not be written"))'), "a failed limit audit is shouted, not swallowed");
 });
 
 await test("every reveal is audited without content (structure)", () => {
   const r = src("server/routes/age-review-admin-routes.ts");
-  const i = r.indexOf('await auditReveal(req, "age_review.reveal"');
+  const i = r.indexOf("await claimReveal(pool");
   assert.ok(i > 0 && i < r.indexOf("issueRevealToken({"), "audit row first, then the token");
-  const details = [...r.matchAll(/auditReveal\(req, "[^"]+", requestId, `([^`]*)`/g)].map((m) => m[1]);
+  const rv = src("server/identity/ageReviewReveal.ts");
+  const details = [...rv.matchAll(/const details = `([^`]*)`/g), ...[...r.matchAll(/auditReveal\(req, "[^"]+", requestId, `([^`]*)`/g)]].map((m) => m[1]);
   assert.equal(details.length, 2);
   for (const d of details) assert.ok(!/bytes|plain|decrypt|token|data|mime|documentNumber|fingerprint/i.test(d), d);
 });
@@ -150,6 +155,39 @@ await test("flag off: reveal routes 404", async () => {
       assert.equal(res.status, 404, p);
     }
   } finally { server.close(); }
+});
+
+await test("reveal limit is atomic: lock, count, insert, commit in one transaction; at 60 nothing is inserted", async () => {
+  const run = async (count: number) => {
+    const log: string[] = [];
+    const client = {
+      release: () => log.push("release"),
+      query: async (q: string) => {
+        log.push(q.trim().split(/\s+/).slice(0, 3).join(" "));
+        return { rows: q.includes("count(*)") ? [{ n: count }] : [] };
+      },
+    };
+    const ok = await claimReveal({ connect: async () => client }, { adminId: "a1", requestId: "r1", kind: "document" });
+    return { ok, log };
+  };
+  const fine = await run(59);
+  assert.equal(fine.ok, true);
+  assert.deepEqual(fine.log, ["begin", "select pg_advisory_xact_lock(hashtext($1))", "select count(*)::int as", "insert into admin_activity_logs", "commit", "release"]);
+  const full = await run(60);
+  assert.equal(full.ok, false);
+  assert.ok(!full.log.some((l) => l.startsWith("insert")) && full.log.includes("rollback") && full.log.at(-1) === "release");
+  assert.ok(/pg_advisory_xact_lock\(hashtext\(\$1\)\)/.test(src("server/identity/ageReviewReveal.ts")) && src("server/identity/ageReviewReveal.ts").includes("age-review-reveal:${a.adminId}"));
+});
+
+await test("nonce claim is a database insert; expired nonces are swept; migration v3 matches its file", async () => {
+  const r = src("server/identity/ageReviewReveal.ts");
+  assert.ok(r.includes("insert into age_review_reveal_nonces (nonce, expires_at) values ($1, $2) on conflict do nothing returning nonce"));
+  assert.ok(!/new Map|new Set/.test(r), "no in-memory used-nonce state is left");
+  assert.ok(src("server/identity/ageReviewSweep.ts").includes("delete from age_review_reveal_nonces where expires_at < now()"));
+  const { AGE_REVIEW_V3_SCHEMA_SQL } = await import("../server/identity/ageReviewMigrationV3");
+  const file = src("migrations/add_age_review_v3.sql").replace(/\r\n/g, "\n");
+  assert.equal(file.slice(file.indexOf("BEGIN;") + 6, file.lastIndexOf("COMMIT;")).trim(), AGE_REVIEW_V3_SCHEMA_SQL.trim());
+  assert.ok(src("server/storage.ts").includes("AGE_REVIEW_V3_SCHEMA_SQL"));
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

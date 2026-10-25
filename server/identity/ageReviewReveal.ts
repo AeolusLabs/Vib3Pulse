@@ -1,6 +1,6 @@
 // Evidence reveal: single-use 60 second tokens, the image response headers and the per-reviewer reveal limit.
-// Tokens live only in memory (HMAC signed, key derived from AGE_EVIDENCE_KEY with its own HKDF info string); a restart
-// invalidates every outstanding token, which is the safe direction.
+// Tokens are HMAC signed (key derived from AGE_EVIDENCE_KEY with its own HKDF info string). Single use is enforced in the
+// DATABASE (age_review_reveal_nonces): a restart or a second server instance cannot replay a consumed token.
 import crypto from "crypto";
 import { EVIDENCE_MIMES, REVEAL_LIMIT_PER_HOUR, REVEAL_TOKEN_TTL_SEC } from "../../shared/ageReview";
 import { AgeReviewError } from "./ageReviewService";
@@ -9,7 +9,19 @@ import { EVIDENCE_KEY_MISSING, decryptEvidence, parseEvidenceKey } from "./evide
 const TOKEN_INFO = "vib3pulse:age-review:reveal-token:v1";
 export type RevealClaims = { adminId: string; requestId: string; evidenceId: string };
 
-const used = new Map<string, number>();
+/** claim() is true exactly once per nonce. */
+export interface NonceStore { claim(nonce: string, expiresAtMs: number): Promise<boolean> }
+
+const dbStore: NonceStore = {
+  async claim(nonce, expiresAtMs) {
+    const { pool } = await import("../storage");
+    const r = await pool.query(`insert into age_review_reveal_nonces (nonce, expires_at) values ($1, $2) on conflict do nothing returning nonce`, [nonce, new Date(expiresAtMs)]);
+    return (r.rowCount ?? 0) > 0;
+  },
+};
+let store: NonceStore = dbStore;
+/** Test hook: an in-memory store, or null to go back to the database. */
+export function setNonceStoreForTests(s: NonceStore | null): void { store = s ?? dbStore; }
 
 function tokenKey(env: NodeJS.ProcessEnv = process.env): Buffer {
   const k = parseEvidenceKey(env);
@@ -23,10 +35,9 @@ export function issueRevealToken(c: RevealClaims, now: number = Date.now()): str
   return `${body}.${sign(body)}`;
 }
 
-/** Throws TOKEN_INVALID unless signature, expiry, admin and ids all match; a valid token is consumed on first use. */
-export function consumeRevealToken(token: unknown, expect: RevealClaims, now: number = Date.now()): void {
+/** Throws TOKEN_INVALID unless signature, expiry, admin and ids all match; a valid token is consumed on first use ("no row inserted" = replay). */
+export async function consumeRevealToken(token: unknown, expect: RevealClaims, now: number = Date.now()): Promise<void> {
   const bad = () => new AgeReviewError(403, "TOKEN_INVALID", "This link is no longer valid.");
-  for (const [n, exp] of Array.from(used)) if (exp <= now) used.delete(n);
   if (typeof token !== "string" || token.length > 1024) throw bad();
   const [body, sig, extra] = token.split(".");
   if (!body || !sig || extra !== undefined) throw bad();
@@ -36,13 +47,38 @@ export function consumeRevealToken(token: unknown, expect: RevealClaims, now: nu
   try { p = JSON.parse(Buffer.from(body, "base64url").toString("utf8")); } catch { throw bad(); }
   if (typeof p.exp !== "number" || p.exp <= now || typeof p.nonce !== "string") throw bad();
   if (p.adminId !== expect.adminId || p.requestId !== expect.requestId || p.evidenceId !== expect.evidenceId) throw bad();
-  if (used.has(p.nonce)) throw bad();
-  used.set(p.nonce, p.exp);
+  if (!(await store.claim(p.nonce, p.exp))) throw bad();
 }
 
-/** Pure: the limit check. The count comes from the audit log so it holds across processes. */
+/** Pure: the limit check. */
 export function revealLimitReached(revealsLastHour: number): boolean {
   return revealsLastHour >= REVEAL_LIMIT_PER_HOUR;
+}
+
+type Tx = { query: (q: string, p?: unknown[]) => Promise<{ rows: any[] }> };
+
+/**
+ * Counts this reviewer's reveals in the last hour and records the new one in ONE transaction under a per-reviewer advisory lock,
+ * so 60 parallel requests cannot all pass the count. The audit row is the record the count reads. Returns false at the limit.
+ */
+export async function claimReveal(db: { connect: () => Promise<Tx & { release: () => void }> }, a: { adminId: string; requestId: string; kind: string; ip?: string }): Promise<boolean> {
+  const c = await db.connect();
+  try {
+    await c.query("begin");
+    await c.query(`select pg_advisory_xact_lock(hashtext($1))`, [`age-review-reveal:${a.adminId}`]);
+    const n = Number((await c.query(`select count(*)::int as n from admin_activity_logs where admin_id = $1 and action = 'age_review.reveal' and created_at > now() - interval '1 hour'`, [a.adminId])).rows[0].n);
+    if (revealLimitReached(n)) { await c.query("rollback"); return false; }
+    const details = `request=${a.requestId} kind=${a.kind}`;
+    await c.query(
+      `insert into admin_activity_logs (admin_id, action, target_type, target_id, details, reason, ip_address) values ($1, 'age_review.reveal', 'age_review_request', $2, $3, $3, $4)`,
+      [a.adminId, a.requestId, details, a.ip ?? null],
+    );
+    await c.query("commit");
+    return true;
+  } catch (e) {
+    await c.query("rollback").catch(() => {});
+    throw e;
+  } finally { c.release(); }
 }
 
 /** Headers for an evidence image. null when the stored type is not one of the three allowed image types. */
@@ -72,5 +108,3 @@ export function sendEvidence(res: Resp, row: { id: string; request_id: string; k
   res.removeHeader("ETag"); res.removeHeader("Last-Modified");
   res.status(200).end(plain);
 }
-
-export const revealTestHooks = { usedSize: () => used.size, clear: () => used.clear() };

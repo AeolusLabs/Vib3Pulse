@@ -26,7 +26,7 @@ export async function getHealth() {
     pool.query(`select extract(epoch from (now() - min(created_at))) / 3600 as h from age_review_evidence`),
     pool.query(
       `select a.username as reviewer, count(*)::int as count from admin_activity_logs l join admin_users a on a.id = l.admin_id
-        where l.action = 'age_review.reveal' and l.created_at >= date_trunc('day', now()) group by a.username order by count desc, a.username`),
+        where l.action = 'age_review.reveal' and l.created_at >= date_trunc('day', now() at time zone 'utc') group by a.username order by count desc, a.username`),
     ageReviewPaused(),
   ]);
   const h = oldest.rows[0]?.h;
@@ -59,16 +59,21 @@ export async function emergencyPurge(admin: { id: string; role: string }, reason
   let userIds: string[] = [];
   try {
     await client.query("begin");
+    // Every open request is locked first (putEvidence needs the same row lock), so no upload can land mid-purge: it either
+    // finished before this point and is deleted below, or waits and is stored after the commit.
+    const locked = (await client.query(`select id, user_id, status from age_review_requests where status in (${OPEN}) order by id for update`)).rows as { id: string; user_id: string; status: string }[];
     const del = (await client.query(`delete from age_review_evidence returning request_id`)).rows as { request_id: string }[];
     deleted = del.length;
-    const ids = Array.from(new Set(del.map((d) => d.request_id)));
+    const had = new Set(del.map((d) => d.request_id));
+    const affected = locked.filter((l) => had.has(l.id));
+    const ids = affected.map((l) => l.id);
     if (ids.length) {
-      const moved = (await client.query(
+      await client.query(
         `update age_review_requests set proposed_dob = case when status = 'pending_second_approval' then null else proposed_dob end,
                 status = case when status in ('submitted', 'in_review', 'pending_second_approval') then 'needs_more' else status end
-          where id = any($1::uuid[]) and status in (${OPEN}) returning user_id`, [ids])).rows as { user_id: string }[];
-      userIds = Array.from(new Set(moved.map((m) => m.user_id)));
+          where id = any($1::uuid[])`, [ids]);
     }
+    userIds = Array.from(new Set(affected.map((l) => l.user_id)));
     await client.query("commit");
   } catch (e) {
     await client.query("rollback").catch(() => {});
@@ -76,6 +81,9 @@ export async function emergencyPurge(admin: { id: string; role: string }, reason
   } finally { client.release(); }
   await audit(admin.id, "age_review.emergency_purge", `deleted=${deleted}`, reason, ip);
   const { notifyAgeReview } = await import("./ageReviewNotify");
-  for (const id of userIds) await notifyAgeReview(id, "update");
+  // The purge has happened and is audited: a notice that fails must never turn it into an error.
+  for (const id of userIds) {
+    try { await notifyAgeReview(id, "update"); } catch { console.error("[AGE-REVIEW] ALERT a purge notice could not be sent"); }
+  }
   return { deleted };
 }
