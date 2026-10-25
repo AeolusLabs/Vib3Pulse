@@ -7,6 +7,7 @@ import { ageReviewEnabled } from "../identity/ageReviewFeatures";
 import { AgeReviewError } from "../identity/ageReviewService";
 import { decide, getDetail, isSelfReview, isUuid, listQueue, secondApprove, type AdminRef } from "../identity/ageReviewAdmin";
 import { inviteLiveCheck, reviewerLiveJoin } from "../identity/ageReviewLive";
+import { emergencyPurge, getHealth, setPause } from "../identity/ageReviewControls";
 import { consumeRevealToken, issueRevealToken, revealLimitReached, sendEvidence } from "../identity/ageReviewReveal";
 import { CHECKLIST_KEYS, DECISION_OUTCOMES, DECLINE_REASONS } from "../../shared/ageReview";
 
@@ -72,6 +73,23 @@ export function registerAgeReviewAdminRoutes(app: Express): void {
 
   app.post(`${base}/:id/invite-live`, requireRole(...REVIEWERS), withId(async (req, res) => { res.json(await inviteLiveCheck(me(req), String(req.params.id))); }));
   app.post(`${base}/:id/live-join`, requireRole(...REVIEWERS), withId(async (req, res) => { res.json(await reviewerLiveJoin(me(req), String(req.params.id))); }));
+
+  // ---- guardrail controls. Not request ids, so withId is not used; the :id routes pass these through (next("route")).
+  app.get(`${base}/health`, requireRole("super_admin", "admin"), async (_req, res) => {
+    try { res.json(await getHealth()); } catch (e) { fail(res, e); }
+  });
+  app.post(`${base}/pause`, requireRole("super_admin", "admin"), async (req, res) => {
+    try {
+      const b = z.object({ on: z.boolean(), reason: z.string().trim().min(3).max(300) }).parse(req.body);
+      res.json(await setPause(me(req), b, req.ip));
+    } catch (e) { fail(res, e); }
+  });
+  app.post(`${base}/emergency-purge`, requireRole("super_admin"), async (req, res) => {
+    try {
+      const b = z.object({ reason: z.string().trim().min(3).max(300) }).parse(req.body);
+      res.json(await emergencyPurge(me(req), b.reason, req.ip));
+    } catch (e) { fail(res, e); }
+  });
 
   // ---- evidence: a POST issues a one-time 60 second token, the GET needs it. A plain GET never returns an image.
   const evidenceIds = (req: Request) => ({ requestId: String(req.params.id), evidenceId: String(req.params.evidenceId) });

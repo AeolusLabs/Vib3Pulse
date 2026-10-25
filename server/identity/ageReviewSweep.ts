@@ -10,11 +10,15 @@ export function ageReviewSweepStatus(): { lastSweepAt: string | null } {
 }
 
 /** Open requests past expires_at become expired and their evidence goes, in ONE transaction. Returns the affected users. */
-export async function sweepExpiredAgeReviews(): Promise<{ expired: number; userIds: string[]; evidenceDeleted: number }> {
+export async function sweepExpiredAgeReviews(): Promise<{ expired: number; userIds: string[]; evidenceDeleted: number; staleFound?: number }> {
   const { pool } = await import("../storage");
   const client = await pool.connect();
   try {
     await client.query("begin");
+    // Counted BEFORE this run cleans up: evidence that survived its request (final, or 2 hours past expiry = a missed sweep) means a bug.
+    const staleFound = Number((await client.query(
+      `select count(*)::int n from age_review_evidence e join age_review_requests r on r.id = e.request_id
+        where r.status in ('approved', 'declined', 'expired', 'cancelled', 'closed_minor') or r.expires_at < now() - interval '2 hours'`)).rows[0].n);
     const exp = (await client.query(
       `update age_review_requests set status = 'expired', decided_at = now()
        where expires_at < now() and status in ('draft', 'submitted', 'in_review', 'needs_more', 'pending_second_approval')
@@ -26,7 +30,7 @@ export async function sweepExpiredAgeReviews(): Promise<{ expired: number; userI
     );
     await client.query("commit");
     lastSweepAt = new Date();
-    return { expired: exp.length, userIds: Array.from(new Set(exp.map((r) => r.user_id))), evidenceDeleted: del.rowCount ?? 0 };
+    return { expired: exp.length, userIds: Array.from(new Set(exp.map((r) => r.user_id))), evidenceDeleted: del.rowCount ?? 0, staleFound };
   } catch (e) {
     await client.query("rollback").catch(() => {});
     throw e;
@@ -34,7 +38,7 @@ export async function sweepExpiredAgeReviews(): Promise<{ expired: number; userI
 }
 
 type SweepDeps = {
-  sweep: () => Promise<{ expired: number; userIds: string[]; evidenceDeleted: number }>;
+  sweep: () => Promise<{ expired: number; userIds: string[]; evidenceDeleted: number; staleFound?: number }>;
   notify: (userId: string, kind: "expired") => Promise<void>;
   closeRooms: () => Promise<unknown>;
 };
@@ -49,6 +53,7 @@ export async function runSweepWith(d: SweepDeps = realDeps): Promise<void> {
   try {
     const r = await d.sweep();
     if (r.expired || r.evidenceDeleted) console.log(`[AGE-REVIEW] sweep: expired ${r.expired}, evidence rows deleted ${r.evidenceDeleted}`);
+    if (r.staleFound) console.error(`[AGE-REVIEW] ALERT age review evidence outlived its request: ${r.staleFound}`);
     for (const id of r.userIds) await d.notify(id, "expired");
   } catch {
     console.error("[AGE-REVIEW] ALERT sweep failed");

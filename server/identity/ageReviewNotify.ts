@@ -1,5 +1,5 @@
 // In-app notification + email for age review outcomes. Never throws, never logs user data or evidence.
-export type AgeReviewNoticeKind = "approved" | "declined" | "needs_more" | "teen_moved" | "live_invite" | "expired";
+export type AgeReviewNoticeKind = "approved" | "declined" | "needs_more" | "teen_moved" | "live_invite" | "expired" | "update";
 
 export const AGE_REVIEW_NOTICE_COPY: Record<AgeReviewNoticeKind, { title: string; message: string }> = {
   approved: { title: "Your age is verified", message: "You can now use the adult only features, like tipping and tickets. Your photos have been deleted." },
@@ -7,6 +7,7 @@ export const AGE_REVIEW_NOTICE_COPY: Record<AgeReviewNoticeKind, { title: string
   needs_more: { title: "We need one more photo", message: "A reviewer asked for another photo. Open Vib3Pulse to add it." },
   teen_moved: { title: "Your account has been updated", message: "We moved your account to the right age group. Your photos have been deleted." },
   live_invite: { title: "Your live age check is ready", message: "A reviewer is waiting. Join within 15 minutes. Nothing is recorded." },
+  update: { title: "Your age review has an update", message: "Open Vib3Pulse to see what to do next. Your photos may need to be added again." },
   expired: { title: "Your age check expired", message: "Nobody reviewed it in time and your photos were deleted. You can start again any time." },
 };
 
