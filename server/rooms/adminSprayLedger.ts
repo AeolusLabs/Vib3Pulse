@@ -151,11 +151,11 @@ async function auditStrict(req: Request, action: string, targetId: string, detai
 const checkHits = new Map<string, number[]>();
 /** 20 provider look-ups per minute per admin (a sliding window, in memory per process). */
 export function providerCheckAllowed(adminId: string, now: number = Date.now()): boolean {
-  const hits = (checkHits.get(adminId) ?? []).filter((t) => now - t < MIN_MS);
+  const hits = (checkHits.get(adminId) ?? []).filter((t: number) => now - t < MIN_MS);
   if (hits.length >= PROVIDER_CHECKS_PER_MINUTE) { checkHits.set(adminId, hits); return false; }
   hits.push(now);
   checkHits.set(adminId, hits);
-  if (checkHits.size > 1000) for (const [k, v] of checkHits) if (v.every((t) => now - t >= MIN_MS)) checkHits.delete(k);
+  if (checkHits.size > 1000) checkHits.forEach((v, k) => { if (v.every((t: number) => now - t >= MIN_MS)) checkHits.delete(k); });
   return true;
 }
 export const resetProviderCheckLimit = () => checkHits.clear();

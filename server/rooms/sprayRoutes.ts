@@ -83,7 +83,8 @@ export function registerSprayRoutes(app: Express): void {
       if (!row) return res.status(404).json({ message: "Not found" });
       const recentFailure = row.status === "failed" && Date.now() - new Date(row.createdAt).getTime() < POLL_FAILED_RECHECK_MS;
       if ((row.status === "created" || row.status === "pending" || row.status === "paid" || recentFailure) && take(`sprayfin:${req.user!.id}`, 1 / 3, 3)) {
-        await withSpraySource("api", () => finalizeSpray(row.providerRef, { waitMs: 0 })).catch((e) => console.error("[rooms:spray] finalize on poll failed:", sanitizeMoneyError(e)));
+        const ref = row.providerRef; // (a const keeps the null check above in force inside the callback)
+        await withSpraySource("api", () => finalizeSpray(ref, { waitMs: 0 })).catch((e) => console.error("[rooms:spray] finalize on poll failed:", sanitizeMoneyError(e)));
         row = (await ss.getSprayById(row.id)) ?? row;
       }
       res.json(sprayStatusView(row));
@@ -120,7 +121,8 @@ export function registerSprayRoutes(app: Express): void {
       if (!b) return res.status(404).json({ message: "Not found" });
       const recentFailure = b.status === "failed" && Date.now() - new Date(b.createdAt).getTime() < POLL_FAILED_RECHECK_MS;
       if ((b.status === "created" || b.status === "pending" || b.status === "paid" || recentFailure) && take(`sprayfin:${req.user!.id}`, 1 / 3, 3)) {
-        await withSpraySource("api", () => finalizeSpray(b.providerRef, { waitMs: 0 })).catch((e) => console.error("[rooms:spray] finalize on team poll failed:", sanitizeMoneyError(e)));
+        const ref = b.providerRef;
+        await withSpraySource("api", () => finalizeSpray(ref, { waitMs: 0 })).catch((e) => console.error("[rooms:spray] finalize on team poll failed:", sanitizeMoneyError(e)));
         b = (await bs.getBatchById(b.id)) ?? b;
       }
       res.json(await batchStatusView(b));
