@@ -17,6 +17,8 @@ import { registerVenueRoutes } from "./routes/venue-routes";
 import { registerVenueSavedRoutes } from "./routes/venue-saved-routes";
 import { registerMapRoutes } from "./routes/map-routes";
 import { registerRoomRoutes } from "./rooms/roomRoutes";
+import { registerAgeReviewRoutes } from "./routes/age-review-routes";
+import { startAgeReviewSweep } from "./identity/ageReviewSweep";
 import { registerBlockRoutes } from "./routes/block-routes";
 import { registerVenueSocialRoutes } from "./routes/venue-social-routes";
 import { registerDoorRoutes } from "./routes/door-routes";
@@ -70,6 +72,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerSocialPlanRoutes(app);
   registerZernioWebhook(app);
 
+  registerAgeReviewRoutes(app);
+  startAgeReviewSweep();
   startSafetyTimerJob();
   startBuddyScheduler();
   startEventGroupDissolveJob();

@@ -1717,6 +1717,8 @@ export class DbStorage implements IStorage {
     await db.execute(sql`DELETE FROM user_locations WHERE user_id = ${userId}`);
     await db.execute(sql`DELETE FROM map_allowed_viewers WHERE user_id = ${userId} OR viewer_id = ${userId}`);
     await db.execute(sql`DELETE FROM map_sharing_prefs WHERE user_id = ${userId}`);
+    // ID evidence must not outlive the account (a soft delete never fires the foreign-key cascade).
+    await (await import("./identity/ageReviewSweep")).purgeUserAgeReview(userId);
   }
 
   async getEvents(): Promise<(Event & { minPrice: number; maxPrice: number; ticketsRemaining: number })[]> {

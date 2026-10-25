@@ -20,6 +20,7 @@ import { setupVite, serveStatic, log } from "./vite";
 import { storage, ensureSchema } from "./storage";
 import { comparePassword, userToSessionUser, type SessionUser } from "./auth";
 import { wsManager } from "./websocket";
+import { logsBody } from "./identity/ageReviewLogPolicy";
 import { setupAdminRoutes } from "./admin-routes";
 import {
   csrfProtection,
@@ -281,7 +282,7 @@ app.use((req, res, next) => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
+      if (capturedJsonResponse && logsBody(path)) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }
 

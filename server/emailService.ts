@@ -306,6 +306,33 @@ Renew any time: ${link}
   }
 }
 
+export async function sendAgeReviewEmail({ to, userName, subject, body, link }: {
+  to: string; userName?: string; subject: string; body: string; link: string;
+}): Promise<boolean> {
+  try {
+    const { error } = await resend.emails.send({
+      from: `${APP_NAME} <${FROM_EMAIL}>`,
+      to: [to],
+      subject,
+      text: `Hi${userName ? ` ${userName}` : ""},
+
+${body}
+
+${link}
+`,
+      html: `<p>Hi${userName ? ` ${userName}` : ""},</p><p>${body}</p><p><a href="${link}">Open Vib3Pulse</a></p>`,
+    });
+    if (error) {
+      console.error("[EMAIL] Age review email failed");
+      return false;
+    }
+    return true;
+  } catch {
+    console.error("[EMAIL] Age review email error");
+    return false;
+  }
+}
+
 export async function sendSocialPlansNoticeEmail({ to, userName, platforms, cutoff, link }: {
   to: string; userName?: string; platforms: string[]; cutoff: Date; link: string;
 }): Promise<boolean> {

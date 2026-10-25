@@ -1846,6 +1846,7 @@ export const notificationTypes = [
   "room_ticket", // a paid room ticket was issued to the buyer
   "spray_received", // sprays delivered to a host or stage guest, ONE per (recipient, room) batch; never names the payer
   "payout_paid", // a room payout Paystack confirmed as sent
+  "age_review", // a decision or invite in manual age review (server/identity/ageReviewNotify.ts); copy never names documents
 ] as const;
 export type NotificationType = typeof notificationTypes[number];
 
