@@ -1,7 +1,7 @@
 // Room mini-bar: pure helpers + Media Session + source wiring (no database, no browser): npx tsx scripts/test-rooms-unit-minibar.ts
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { leaveFromBar, matchLine, miniBarVisible, showMute, switchCopy } from "../client/src/lib/miniBar";
+import { bottomVars, leaveFromBar, matchLine, miniBarVisible, showMute, switchCopy } from "../client/src/lib/miniBar";
 import { setMediaSession } from "../client/src/lib/mediaSession";
 import { HOST_LEAVE_CONFIRM } from "../client/src/lib/roomSessionRules";
 import { newGame } from "../shared/gameScreen";
@@ -70,6 +70,30 @@ test("mini-bar and switch dialog are mounted once in App; the provider no longer
   assert.equal(app.match(/<RoomMiniBar \/>/g)?.length, 1);
   assert.equal(app.match(/<SwitchRoomDialog \/>/g)?.length, 1);
   assert.doesNotMatch(src("../client/src/lib/roomSession.tsx"), /AlertDialog/);
+});
+
+test("bar offset follows the bottom nav and never double-counts the safe area", () => {
+  assert.deepEqual(bottomVars(true), { navH: "4rem", safe: "0px" });
+  assert.deepEqual(bottomVars(false), { navH: "0px", safe: "env(safe-area-inset-bottom, 0px)" });
+  const nav = src("../client/src/components/BottomNavigation.tsx");
+  assert.match(nav, /bottomVars\(true\)/);
+  assert.match(nav, /removeProperty\("--bottom-nav-h"\)/, "cleared on unmount");
+  assert.ok(src("../client/src/index.css").includes(".room-minibar { bottom: calc(var(--bottom-nav-h) + var(--bottom-safe)); }"));
+});
+
+test("reserved space is phone-only and skips fixed-height pages", () => {
+  const css = src("../client/src/index.css");
+  assert.match(css, /@media \(max-width: 767\.98px\) \{\s*body \{ padding-bottom: var\(--room-minibar-h\)/);
+  assert.match(css, /body:has\(\.h-screen/);
+  assert.doesNotMatch(css, /^body \{ padding-bottom/m, "no global body padding");
+});
+
+test("phone layout: three action buttons in the title row, host and match on their own row, info in the second row", () => {
+  const bar = src("../client/src/components/rooms/shell/RoomMiniBar.tsx");
+  const row1 = bar.slice(bar.indexOf("room-minibar-open"), bar.indexOf("room-minibar-sub"));
+  assert.match(row1, /room-minibar-mute/); assert.match(row1, /room-minibar-expand/); assert.match(row1, /room-minibar-leave/);
+  assert.doesNotMatch(row1, /room-minibar-info/);
+  assert.ok(bar.indexOf("room-minibar-info") > bar.indexOf("room-minibar-sub"));
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

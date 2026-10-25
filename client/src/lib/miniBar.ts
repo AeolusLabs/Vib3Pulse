@@ -36,3 +36,8 @@ export const titleOf = (room: unknown): string | null => {
   const t = (room as { title?: unknown } | null | undefined)?.title;
   return typeof t === "string" && t.trim() ? t : null;
 };
+
+/** Where the bar sits: on top of the bottom nav (h-16, which has no safe-area padding of its own), or on the safe-area edge when there is no nav. */
+export function bottomVars(hasNav: boolean): { navH: string; safe: string } {
+  return hasNav ? { navH: "4rem", safe: "0px" } : { navH: "0px", safe: "env(safe-area-inset-bottom, 0px)" };
+}

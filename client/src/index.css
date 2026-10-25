@@ -372,10 +372,16 @@
   to { opacity: 1; transform: scale(1); }
 }
 
-/* Room mini-bar: space is reserved by a data flag on <html>, so content never sits under the bar. */
-:root { --room-minibar-h: 0px; }
-:root[data-room-minibar="on"] { --room-minibar-h: 4.5rem; }
-body { padding-bottom: var(--room-minibar-h); }
+/* Room mini-bar. --bottom-nav-h / --bottom-safe are set by BottomNavigation while it is mounted (see bottomVars in lib/miniBar.ts). */
+:root { --bottom-nav-h: 0px; --bottom-safe: env(safe-area-inset-bottom, 0px); --room-minibar-h: 0px; }
+.room-minibar { bottom: calc(var(--bottom-nav-h) + var(--bottom-safe)); }
+@media (min-width: 768px) { .room-minibar { bottom: 1rem; } }
+/* Phones only: leave room under scrolling pages. Fixed-height pages (100dvh/100vh/h-screen) are skipped so they get no scrollbar; the bar overlays them. */
+:root[data-room-minibar="on"] { --room-minibar-h: 5.25rem; }
+@media (max-width: 767.98px) {
+  body { padding-bottom: var(--room-minibar-h); }
+  body:has(.h-screen, [class*="100dvh"], [class*="100vh"]) { padding-bottom: 0; }
+}
 .room-minibar-dot.is-speaking { opacity: 1; }
 @media (prefers-reduced-motion: no-preference) {
   .room-minibar { animation: room-minibar-in 200ms cubic-bezier(.23, 1, .32, 1); }

@@ -1,5 +1,7 @@
 
+import { useEffect } from "react";
 import { Link, useLocation } from "wouter";
+import { bottomVars } from "@/lib/miniBar";
 import { useUnreadMessagesCount } from "@/hooks/useUnreadMessagesCount";
 import { useAuth } from "@/hooks/useAuth";
 import { CompassIcon, EyeIcon, LayoutGridIcon, MapPinIcon, MessageCircleIcon, TicketIcon } from "@/components/ui/icons";
@@ -10,6 +12,12 @@ interface BottomNavigationProps {
 
 export default function BottomNavigation({ onCreateClick }: BottomNavigationProps) {
   const [location] = useLocation();
+  // Tells the room mini-bar a nav is present (it sits on top of it) and removes the safe-area double count.
+  useEffect(() => {
+    const root = document.documentElement, v = bottomVars(true);
+    root.style.setProperty("--bottom-nav-h", v.navH); root.style.setProperty("--bottom-safe", v.safe);
+    return () => { root.style.removeProperty("--bottom-nav-h"); root.style.removeProperty("--bottom-safe"); };
+  }, []);
   const { data: unreadMessageCount = 0 } = useUnreadMessagesCount();
   const { data: user } = useAuth();
   // Safety (Lookout) is a social-account feature; organizers keep Tickets in that slot.
