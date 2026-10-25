@@ -47,7 +47,7 @@ export function publicRoom(room: Room) {
   // peakMembers is a host-only recap number (phase 6): it reaches the host only through GET /api/rooms/:id/recap.
   // Gaming columns never ride on a room object either (so a flag-off payload is exactly what it was before they existed): the
   // host gets gameFormat / gameDropTimeoutMs (and sprayEnabled, anyone else learns spray from the `spray` block) through hostRoom, a lane's own members get their lane through viewerRoom.
-  const { inviteTokenHash, pinnedMessage, reminderNotifiedAt, ticketPriceKobo, ticketCapacity, refundBeforeStart, peakMembers, sprayEnabled, gameFormat, gameDropTimeoutMs, ageLane, parentRoomId, ...rest } = room;
+  const { inviteTokenHash, pinnedMessage, reminderNotifiedAt, ticketPriceKobo, ticketCapacity, refundBeforeStart, peakMembers, sprayEnabled, sprayAdminBlocked, sprayBlockReason, sprayBlockedBy, sprayBlockedAt, gameFormat, gameDropTimeoutMs, ageLane, parentRoomId, ...rest } = room;
   return rest;
 }
 
@@ -65,6 +65,8 @@ export function hostRoom(room: Room) {
   return {
     ...viewerRoom(room), ticketPriceKobo: room.ticketPriceKobo ?? null, ticketCapacity: room.ticketCapacity ?? null, refundBeforeStart: room.refundBeforeStart !== false,
     sprayEnabled: room.sprayEnabled === true,
+    // Only the host learns an admin switched spraying off for the room (never the admin id or time).
+    sprayAdminBlocked: room.sprayAdminBlocked === true, sprayBlockReason: room.sprayAdminBlocked === true ? room.sprayBlockReason ?? null : null,
     ...(roomFeatures.gaming ? { gameFormat: room.gameFormat ?? null, gameDropTimeoutMs: room.gameDropTimeoutMs } : {}),
   };
 }

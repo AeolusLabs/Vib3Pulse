@@ -1170,6 +1170,11 @@ export const rooms = pgTable("rooms", {
   parentRoomId: varchar("parent_room_id"),
   // Spray opt-in (migrations/add_rooms_spray_enabled.sql): the host's per-room switch; new sprays need true.
   sprayEnabled: boolean("spray_enabled").notNull().default(false),
+  // Admin spray block (migrations/add_rooms_spray_admin_block.sql): only an admin sets or clears it; never sent to guests.
+  sprayAdminBlocked: boolean("spray_admin_blocked").notNull().default(false),
+  sprayBlockReason: text("spray_block_reason"),
+  sprayBlockedBy: varchar("spray_blocked_by"),
+  sprayBlockedAt: timestamp("spray_blocked_at"),
 }, (t) => ({
   gameFormatCheck: check("rooms_game_format_check", sql`${t.gameFormat} IS NULL OR (${t.gameFormat} >= 1 AND ${t.gameFormat} <= 4)`),
   gameDropTimeoutCheck: check("rooms_game_drop_timeout_check", sql`${t.gameDropTimeoutMs} IN (0, 30000, 120000)`),
