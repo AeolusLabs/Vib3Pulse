@@ -4,13 +4,16 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   COPY, ERROR_CODES, PRIVACY, cardView, consentRequired, continueEnabled, documentTypeLabel, errorMessage, fitWithin, formatCode,
-  minutesLeft, whatHappens, DOCUMENT_TYPES, type AgeReviewMe, type AgeReviewState,
+  minutesLeft, whatHappens, cardMode, cancelOffered, startLiveRequest, openRequest, DOCUMENT_TYPES, type AgeReviewMe, type AgeReviewState,
 } from "../client/src/lib/ageReview";
 
 let passed = 0, failed = 0;
-const test = (name: string, fn: () => void) => {
-  try { fn(); passed++; console.log(`PASS ${name}`); }
-  catch (e: any) { failed++; console.log(`FAIL ${name}  ${String(e.message).split("\n")[0]}`); }
+const pending: Promise<void>[] = [];
+const test = (name: string, fn: () => void | Promise<void>) => {
+  const ok = () => { passed++; console.log(`PASS ${name}`); };
+  const bad = (e: any) => { failed++; console.log(`FAIL ${name}  ${String(e.message).split("
+")[0]}`); };
+  try { const r = fn(); if (r) pending.push(r.then(ok, bad)); else ok(); } catch (e) { bad(e); }
 };
 const root = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 const NOW = new Date("2026-10-25T12:00:00Z");
@@ -98,6 +101,56 @@ test("What we keep mentions the one-way code and drops the old sentence", () => 
   assert.ok(!PRIVACY.keep.p.includes("Never your photos, the name on the document or the document number"));
   assert.ok(PRIVACY.keep.p.endsWith("We never keep your photos, the name on the document or the number itself."));
   assert.ok(!BAD.test(PRIVACY.keep.p));
+});
+
+const reqOf = (o: Partial<NonNullable<AgeReviewMe["request"]>>): NonNullable<AgeReviewMe["request"]> => ({
+  id: "r1", method: "upload", status: "draft", documentType: null, canCancel: true, needsMore: false, hasDocument: false, hasSelfie: false,
+  code: null, codeExpiresAt: null, liveInviteExpiresAt: null, submittedAt: null, declineReason: null, consentedAt: null, ...o,
+});
+
+test("live create then submit", async () => {
+  const calls: string[] = [];
+  await startLiveRequest({
+    create: async (v) => { calls.push(`create:${v.method}:${v.consentVersion}`); return { request: { id: "abc" } }; },
+    submit: async (id) => { calls.push(`submit:${id}`); },
+  }, "2026-10-v1");
+  assert.deepEqual(calls, ["create:live:2026-10-v1", "submit:abc"]);
+  const seen: string[] = [];
+  await assert.rejects(startLiveRequest({ create: async () => { throw new Error("x"); }, submit: async () => { seen.push("submit"); } }, "v"));
+  assert.deepEqual(seen, []);
+});
+
+test("card with state none and a draft shows the resume flow, never the choice buttons", () => {
+  assert.equal(cardMode(me("none")), "choose");
+  assert.equal(cardMode(me("none", { request: reqOf({ status: "draft", method: "upload" }) })), "resume_upload");
+  assert.equal(cardMode(me("none", { request: reqOf({ status: "draft", method: "live" }) })), "live");
+  assert.equal(cardMode(me("in_review", { request: reqOf({ status: "in_review", method: "live" }) })), "live");
+  assert.equal(cardMode(me("in_review", { request: reqOf({ status: "submitted" }) })), "waiting");
+  assert.equal(cardMode(me("needs_more", { request: reqOf({ status: "needs_more", needsMore: true }) })), "resume_upload");
+  for (const status of ["draft", "submitted", "in_review", "needs_more", "pending_second_approval"]) {
+    for (const method of ["upload", "live"] as const) {
+      assert.notEqual(cardMode(me("none", { request: reqOf({ status, method }) })), "choose", `${status}/${method}`);
+    }
+  }
+  assert.equal(cardMode(me("declined", { request: reqOf({ status: "declined" }) })), "choose");
+  assert.equal(openRequest(me("verified", { request: reqOf({ status: "approved" }) })), null);
+});
+
+test("cancel offered when canCancel", () => {
+  for (const status of ["draft", "needs_more", "submitted", "in_review"]) assert.equal(cancelOffered(me("none", { request: reqOf({ status }) })), true, status);
+  assert.equal(cancelOffered(me("none", { request: reqOf({ status: "draft", canCancel: false }) })), false);
+  assert.equal(cancelOffered(me("none")), false);
+  assert.equal(cancelOffered(me("declined", { request: reqOf({ status: "declined" }) })), false);
+});
+
+test("payload not retained", () => {
+  const hook = readFileSync(join(root, "client/src/hooks/useAgeReview.ts"), "utf8");
+  assert.ok(!/uploadEvidence:\s*useMutation/.test(hook));
+  assert.ok(!/useMutation\(\{[^}]*\.data/s.test(hook));
+  const flow = readFileSync(join(root, "client/src/components/age-review/UploadFlow.tsx"), "utf8");
+  assert.ok(!/uploadEvidence\.mutate/.test(flow));
+  const card = readFileSync(join(root, "client/src/components/age-review/VerifyAgeCard.tsx"), "utf8");
+  assert.ok(!/\.variables/.test(card));
 });
 
 test("formatCode groups six characters", () => {

@@ -17,8 +17,11 @@ function LiveCall({ join, onEnd }: { join: Join; onEnd: (problem: string | null)
   const audioBox = useRef<HTMLDivElement>(null);
   const roomRef = useRef<Room | null>(null);
   const [status, setStatus] = useState<"connecting" | "waiting" | "live">("connecting");
+  const leave = useRef<HTMLButtonElement>(null);
   const endRef = useRef(onEnd);
   endRef.current = onEnd;
+
+  useEffect(() => { leave.current?.focus(); }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,7 +56,8 @@ function LiveCall({ join, onEnd }: { join: Join; onEnd: (problem: string | null)
   }, [join]);
 
   return createPortal(
-    <div role="dialog" aria-modal="true" aria-label="Private live check" className="fixed inset-0 z-[100] flex flex-col bg-background" data-testid="age-live-call">
+    <div role="dialog" aria-modal="true" aria-label="Private live check" className="fixed inset-0 z-[100] flex flex-col bg-background" data-testid="age-live-call"
+      onKeyDown={(e) => { if (e.key === "Tab") { e.preventDefault(); leave.current?.focus(); } }}>
       <div className="relative min-h-0 flex-1 bg-black/90">
         <video ref={remote} autoPlay playsInline className="h-full w-full object-cover" aria-label="Reviewer video" />
         <div ref={audioBox} className="hidden" />
@@ -68,7 +72,7 @@ function LiveCall({ join, onEnd }: { join: Join; onEnd: (problem: string | null)
         </span>
       </div>
       <div className="flex justify-center p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <Button variant="destructive" className="min-h-[44px] rounded-full px-6" onClick={() => roomRef.current ? roomRef.current.disconnect() : onEnd(null)} data-testid="age-leave">
+        <Button ref={leave} variant="destructive" className="min-h-[44px] rounded-full px-6" onClick={() => roomRef.current ? roomRef.current.disconnect() : onEnd(null)} data-testid="age-leave">
           <LogOutIcon className="mr-2 h-4 w-4" aria-hidden />Leave the call
         </Button>
       </div>
@@ -91,6 +95,8 @@ export default function LiveCheckFlow({ request, onHowHandled }: { request: AgeR
   }, []);
 
   const invited = liveInviteActive(request, now);
+  const draft = request.status === "draft";
+  const joinBtn = useRef<HTMLButtonElement>(null);
 
   const doJoin = async () => {
     setBusy(true); setNote(null);
@@ -102,20 +108,32 @@ export default function LiveCheckFlow({ request, onHowHandled }: { request: AgeR
     } finally { setBusy(false); }
   };
 
+  const sendRequest = async () => {
+    setBusy(true); setNote(null);
+    try { await api.submit.mutateAsync(request.id); }
+    catch (e) { setNote(e instanceof AgeReviewError ? errorMessage(e.code, { retryAfter: e.retryAfter }) : errorMessage(undefined)); }
+    finally { setBusy(false); }
+  };
+
   return (
     <div className="space-y-3" data-testid="age-live-flow">
       <p className="flex items-start gap-2 text-sm text-muted-foreground" aria-live="polite">
         <ClockIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-        <span>{invited ? `${COPY.joinReady} ${minutesLeft(request.liveInviteExpiresAt, now)} min left.` : COPY.waiting}</span>
+        <span>{draft ? "Your live check is not sent yet. Send it so a reviewer can invite you." : invited ? `${COPY.joinReady} ${minutesLeft(request.liveInviteExpiresAt, now)} min left.` : COPY.waiting}</span>
       </p>
-      {invited && (
-        <Button className={BTN} onClick={() => void doJoin()} disabled={busy} data-testid="age-join">
+      {draft && (
+        <Button className={BTN} onClick={() => void sendRequest()} disabled={busy} data-testid="age-live-send">
+          {busy && <Loader2Icon className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />}Send live check request
+        </Button>
+      )}
+      {invited && !draft && (
+        <Button ref={joinBtn} className={BTN} onClick={() => void doJoin()} disabled={busy} data-testid="age-join">
           {busy && <Loader2Icon className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />}Join the live check
         </Button>
       )}
       <p role="alert" className={note ? "text-sm text-destructive" : "sr-only"}>{note ?? ""}</p>
       <button type="button" onClick={onHowHandled} className="min-h-[44px] text-sm font-medium text-primary underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">{COPY.howHandled}</button>
-      {join && <LiveCall join={join} onEnd={(problem) => { setJoin(null); if (problem) setNote(problem); void api.refresh(); }} />}
+      {join && <LiveCall join={join} onEnd={(problem) => { setJoin(null); if (problem) setNote(problem); void api.refresh(); window.setTimeout(() => joinBtn.current?.focus(), 0); }} />}
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { CameraIcon, CheckCircleIcon, ClockIcon, Loader2Icon, ShieldCheckIcon, UploadIcon } from "@/components/ui/icons";
 import { useToast } from "@/hooks/use-toast";
 import { AgeReviewError, useAgeReview } from "@/hooks/useAgeReview";
-import { COPY, cardView, errorMessage, type AgeReviewMethod, type CardTone } from "@/lib/ageReview";
+import { COPY, cancelOffered, cardMode, cardView, errorMessage, startLiveRequest, type AgeReviewMethod, type CardTone } from "@/lib/ageReview";
 import PrivacyNotice from "./PrivacyNotice";
 import UploadFlow from "./UploadFlow";
 import LiveCheckFlow from "./LiveCheckFlow";
@@ -19,7 +19,8 @@ const TONE_BORDER: Record<CardTone, string> = {
 
 /** Account settings card. Renders nothing while the AGE_REVIEW flag is off (the server answers 404). */
 export default function VerifyAgeCard() {
-  const { me, create, cancel } = useAgeReview();
+  const { me, create, submit, cancel } = useAgeReview();
+  const [starting, setStarting] = useState(false);
   const { toast } = useToast();
   const [flow, setFlow] = useState<"upload" | null>(null);
   const [notice, setNotice] = useState<{ mode: "consent" | "readonly"; method: AgeReviewMethod } | null>(null);
@@ -37,9 +38,8 @@ export default function VerifyAgeCard() {
   if (!me) return null;
   const view = cardView(me);
   const req = me.request;
-  const draftUpload = req?.method === "upload" && (req.status === "draft" || req.needsMore);
-  const canPick = view.action?.id === "start" && !draftUpload;
-  const busy = create.isPending || cancel.isPending;
+  const mode = cardMode(me);
+  const busy = starting || create.isPending || submit.isPending || cancel.isPending;
 
   const fail = (e: unknown) => setError(e instanceof AgeReviewError ? errorMessage(e.code, { retryAfter: e.retryAfter }) : errorMessage(undefined));
 
@@ -56,10 +56,12 @@ export default function VerifyAgeCard() {
   const onContinue = async () => {
     if (!notice) return;
     if (notice.method === "upload") { setAccepted(me.consentVersion); setFlow("upload"); setNotice(null); return; }
+    setStarting(true);
     try {
-      await create.mutateAsync({ method: "live", consentVersion: me.consentVersion });
+      await startLiveRequest({ create: (v) => create.mutateAsync(v), submit: (id) => submit.mutateAsync(id) }, me.consentVersion);
       setNotice(null);
-    } catch (e) { setNotice(null); fail(e); }
+      window.setTimeout(() => anchor.current?.focus(), 0); // the choice buttons are gone; keep focus inside the card
+    } catch (e) { setNotice(null); fail(e); } finally { setStarting(false); }
   };
   const doCancel = async () => {
     if (!req) return;
@@ -70,7 +72,7 @@ export default function VerifyAgeCard() {
   const Icon = view.tone === "success" ? CheckCircleIcon : view.tone === "pending" ? ClockIcon : ShieldCheckIcon;
 
   return (
-    <div id="verify-age" ref={anchor} className="scroll-mt-20" data-testid="verify-age-card">
+    <div id="verify-age" ref={anchor} tabIndex={-1} className="scroll-mt-20 outline-none" data-testid="verify-age-card">
       <Card className={TONE_BORDER[view.tone]}>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><Icon className="h-5 w-5" aria-hidden />{view.title}</CardTitle>
@@ -85,11 +87,11 @@ export default function VerifyAgeCard() {
             />
           )}
 
-          {flow === null && req?.method === "live" && me.state === "in_review" && (
+          {flow === null && mode === "live" && req && (
             <LiveCheckFlow request={req} onHowHandled={() => setNotice({ mode: "readonly", method: "live" })} />
           )}
 
-          {flow === null && canPick && (
+          {flow === null && mode === "choose" && (
             <div className="grid gap-2">
               <button
                 type="button" disabled={busy} onClick={(e) => choose("upload", e.currentTarget)}
@@ -104,19 +106,19 @@ export default function VerifyAgeCard() {
                 className={`flex min-h-[56px] items-center gap-3 rounded-2xl border border-border bg-muted/40 px-4 text-left transition-colors hover:border-primary/40 disabled:opacity-50 ${FOCUS}`}
                 data-testid="age-choose-live"
               >
-                {busy && create.variables?.method === "live" ? <Loader2Icon className="h-5 w-5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden /> : <CameraIcon className="h-5 w-5 shrink-0 text-primary" aria-hidden />}
+                {starting ? <Loader2Icon className="h-5 w-5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden /> : <CameraIcon className="h-5 w-5 shrink-0 text-primary" aria-hidden />}
                 <span className="min-w-0"><span className="block text-sm font-medium">{COPY.choiceLive}</span><span className="block text-xs text-muted-foreground">{COPY.choiceLiveHint}</span></span>
               </button>
             </div>
           )}
 
-          {flow === null && (view.action?.id === "continue" || (draftUpload && req?.status === "draft")) && (
+          {flow === null && mode === "resume_upload" && (
             <Button className="min-h-[44px] rounded-full" onClick={() => { setError(null); setFlow("upload"); }} data-testid="age-continue">
-              {view.action?.id === "continue" ? view.action.label : "Continue your upload"}
+              {me.state === "needs_more" ? "Add a photo" : "Continue your upload"}
             </Button>
           )}
 
-          {flow === null && me.state === "in_review" && req?.canCancel && (
+          {flow === null && req && cancelOffered(me) && (
             <Button variant="ghost" className="min-h-[44px] rounded-full" disabled={busy} onClick={() => void doCancel()} data-testid="age-cancel">{COPY.cancel}</Button>
           )}
 

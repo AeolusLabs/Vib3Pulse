@@ -241,4 +241,38 @@ export const liveInviteActive = (r: Pick<AgeReviewRequest, "liveInviteExpiresAt"
 export const shouldPoll = (me: AgeReviewMe | null | undefined, now: Date = new Date()): boolean =>
   !!me && (me.state === "in_review" || liveInviteActive(me.request, now));
 
+const OPEN_STATUSES = ["draft", "submitted", "in_review", "needs_more", "pending_second_approval"];
+/** The request that blocks starting another one (the server allows a single open request per user). */
+export const openRequest = (me: Pick<AgeReviewMe, "request">): AgeReviewRequest | null =>
+  me.request && OPEN_STATUSES.includes(me.request.status) ? me.request : null;
+
+export type CardMode = "choose" | "resume_upload" | "live" | "waiting" | "none";
+/**
+ * What the card body shows. The server reports a draft as state "none" WITH a request, so the state alone is not enough:
+ * the choice buttons appear only when no request is open.
+ */
+export function cardMode(me: AgeReviewMe): CardMode {
+  const r = openRequest(me);
+  if (r) {
+    if (r.method === "live") return "live";
+    return r.status === "draft" || r.needsMore || r.status === "needs_more" ? "resume_upload" : "waiting";
+  }
+  return cardView(me).action?.id === "start" ? "choose" : "none";
+}
+
+/** Cancel is offered whenever the server says this request can be cancelled (draft, needs_more, submitted, in_review). */
+export const cancelOffered = (me: Pick<AgeReviewMe, "request">): boolean => !!openRequest(me)?.canCancel;
+
+/** A live check has nothing to upload, so it is submitted right after it is created. */
+export async function startLiveRequest(
+  deps: {
+    create(v: { method: "live"; consentVersion: string }): Promise<{ request: { id: string } }>;
+    submit(id: string): Promise<unknown>;
+  },
+  consentVersion: string,
+): Promise<void> {
+  const { request } = await deps.create({ method: "live", consentVersion });
+  await deps.submit(request.id);
+}
+
 export const VERIFY_HREF = "/account/settings#verify-age";

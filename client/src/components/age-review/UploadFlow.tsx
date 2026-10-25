@@ -21,7 +21,8 @@ const FOCUS = "focus-visible:outline focus-visible:outline-2 focus-visible:outli
 
 export default function UploadFlow({ me, consentVersion, onClose, onHowHandled }: Props) {
   const api = useAgeReview();
-  const resumed = me.request && me.request.method === "upload" ? me.request : null;
+  // Fixed at mount: once create succeeds `me` gains a request, which must not turn a fresh flow into a resumed one.
+  const [resumed] = useState(() => (me.request && me.request.method === "upload" ? me.request : null));
   const [request, setRequest] = useState<AgeReviewRequest | null>(resumed);
   const [docType, setDocType] = useState<string | null>(resumed?.documentType ?? null);
   const [step, setStep] = useState<Step>(resumed ? "document" : "type");
@@ -63,7 +64,7 @@ export default function UploadFlow({ me, consentVersion, onClose, onHowHandled }
     try {
       const img = await prepareImage(file);
       try {
-        await api.uploadEvidence.mutateAsync({ id: request.id, kind, mime: img.mime, data: img.data });
+        await api.uploadEvidence({ id: request.id, kind, mime: img.mime, data: img.data });
       } catch (e) { URL.revokeObjectURL(img.previewUrl); throw e; }
       setThumbs((t) => { if (t[kind]) URL.revokeObjectURL(t[kind]!); return { ...t, [kind]: img.previewUrl }; });
       setRequest((r) => (r ? { ...r, [kind === "document" ? "hasDocument" : "hasSelfie"]: true } : r));
@@ -83,7 +84,7 @@ export default function UploadFlow({ me, consentVersion, onClose, onHowHandled }
   };
 
   const cancelDraft = async () => {
-    if (request && !resumed) { try { await api.cancel.mutateAsync(request.id); } catch { /* the card shows the real state next */ } }
+    if (request) { try { await api.cancel.mutateAsync(request.id); } catch { /* the card shows the real state next */ } }
     onClose();
   };
 
@@ -188,7 +189,8 @@ export default function UploadFlow({ me, consentVersion, onClose, onHowHandled }
             Send to a reviewer
           </Button>
         )}
-        <Button variant="ghost" className={BTN} disabled={busy !== null} onClick={() => void cancelDraft()}>{resumed ? "Close" : "Cancel"}</Button>
+        {resumed && <Button variant="ghost" className={BTN} disabled={busy !== null} onClick={onClose}>Close</Button>}
+        <Button variant="ghost" className={BTN} disabled={busy !== null} onClick={() => void cancelDraft()} data-testid="age-flow-cancel">{request ? "Cancel request" : "Cancel"}</Button>
       </div>
       <button type="button" onClick={onHowHandled} className={`min-h-[44px] text-sm font-medium text-primary underline underline-offset-2 ${FOCUS}`}>{COPY.howHandled}</button>
     </section>

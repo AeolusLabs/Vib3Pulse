@@ -50,11 +50,9 @@ export function useAgeReview() {
       mutationFn: (v: { method: AgeReviewMethod; documentType?: string; consentVersion: string }) => call<{ request: AgeReviewRequest }>("POST", "/api/age-review/requests", v),
       ...withRefresh,
     }),
-    // Evidence upload deliberately skips the me refresh: the card re-reads once the user submits.
-    uploadEvidence: useMutation({
-      mutationFn: (v: { id: string; kind: "document" | "selfie"; mime: string; data: string }) =>
-        call<{ kind: string; received: true }>("POST", `/api/age-review/requests/${v.id}/evidence`, { kind: v.kind, mime: v.mime, data: v.data }),
-    }),
+    // A plain function, not a mutation: TanStack would keep the base64 image in its mutation cache.
+    uploadEvidence: (v: { id: string; kind: "document" | "selfie"; mime: string; data: string }) =>
+      call<{ kind: string; received: true }>("POST", `/api/age-review/requests/${v.id}/evidence`, { kind: v.kind, mime: v.mime, data: v.data }),
     submit: useMutation({ mutationFn: (id: string) => req(id, "submit"), ...withRefresh }),
     cancel: useMutation({ mutationFn: (id: string) => req(id, "cancel"), ...withRefresh }),
     newCode: useMutation({ mutationFn: (id: string) => req(id, "new-code"), ...withRefresh }),

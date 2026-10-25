@@ -7,9 +7,9 @@ export default function VerifyAgeLink({ className = "" }: { className?: string }
   if (!me || me.state === "verified" || me.state === "not_offered") return null;
   return (
     <a
-      href={VERIFY_HREF}
+      href={VERIFY_HREF} target="_blank" rel="noopener noreferrer"
       className={`inline-flex min-h-[44px] items-center text-sm font-medium text-primary underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${className}`}
       data-testid="link-verify-age"
-    >{COPY.verifyLink}</a>
+    >{COPY.verifyLink}<span className="sr-only"> (opens in a new tab)</span></a>
   );
 }
