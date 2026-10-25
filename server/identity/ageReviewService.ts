@@ -200,9 +200,3 @@ export async function newCode(userId: string, id: string, now: Date = new Date()
     return toRequestDto(row, await kindsOf(req.id, c), now);
   });
 }
-
-// Completed in Task 3 (LiveKit room + token).
-export async function liveJoin(userId: string, id: string): Promise<never> {
-  await loadOwned(userId, id);
-  throw new AgeReviewError(409, "WRONG_STATE", "No live check is open for this request.");
-}

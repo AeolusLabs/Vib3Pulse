@@ -43,6 +43,11 @@ export interface VoiceService {
   /** Who LiveKit currently has in the room's session, and whether they can publish. Used to sweep out anyone the room should not have. */
   /** `hasCamera`: they are publishing a camera track right now (a permission change alone does not prove it stopped). */
   listParticipants(roomId: string): Promise<VoiceParticipant[]>;
+  /** Age review live check: a 20 minute token for a room by exact name, camera + microphone only, no data channel. */
+  mintAgeCheckToken(a: { roomName: string; identity: string; name: string }): Promise<string>;
+  /** Age review live check: creates the named room capped at 2 participants (idempotent). Nothing here ever records or egresses. */
+  ensureAgeCheckRoom(roomName: string): Promise<void>;
+  deleteNamedRoom(roomName: string): Promise<void>;
   /** Ends the whole session for everyone. */
   deleteRoom(roomId: string): Promise<void>;
   /**

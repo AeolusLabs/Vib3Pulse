@@ -4,6 +4,7 @@ import { authenticator } from "otplib";
 import QRCode from "qrcode";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db, storage } from "../storage";
+import { parseFlag } from "../rooms/features";
 import { adminActivityLogs, adminMfa, adminRoles, type AdminRole, type AdminUser } from "@shared/schema";
 
 declare module "express-session" {
@@ -67,6 +68,12 @@ export async function withAudit<T>(e: AuditEntry, fn: () => Promise<T>): Promise
 // super-admin differently from any other admin, and the MFA endpoints refuse to start enrolment.
 export const mfaRequired = (): boolean => process.env.ADMIN_MFA_REQUIRED === "true";
 
+/** Super-admins follow ADMIN_MFA_REQUIRED; the roles that can open ID evidence (admin, age_reviewer) need it whenever AGE_REVIEW is on. */
+export function mfaRequiredFor(role: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (role === "super_admin") return env.ADMIN_MFA_REQUIRED === "true";
+  return (role === "admin" || role === "age_reviewer") && parseFlag(env.AGE_REVIEW, false);
+}
+
 export type GateOpts = { roles?: readonly AdminRole[]; allowPendingMfa?: boolean };
 
 export function adminGate(opts: GateOpts = {}) {
@@ -80,7 +87,7 @@ export function adminGate(opts: GateOpts = {}) {
         return res.status(401).json({ message: "Admin authentication required" });
       }
       req.session.adminRole = admin.role as AdminRole;
-      if (mfaRequired() && admin.role === "super_admin" && !opts.allowPendingMfa && !req.session.mfaVerified) {
+      if (mfaRequiredFor(admin.role) && !opts.allowPendingMfa && !req.session.mfaVerified) {
         const enrolled = await isMfaEnrolled(admin.id);
         return res.status(403).json({ message: "Two-factor authentication required", code: "MFA_REQUIRED", mfa: enrolled ? "verify" : "enroll" });
       }

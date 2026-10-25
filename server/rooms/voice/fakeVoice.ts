@@ -1,6 +1,6 @@
 import type { GameIngress, PublishSource, VoiceParticipant, VoiceService } from "./voiceService";
 
-export interface VoiceCall { op: "mint" | "setCanPublish" | "setPublishSources" | "remove" | "delete" | "createIngress" | "deleteIngress"; ingressId?: string; roomId: string; userId?: string; canPublish?: boolean; camera?: boolean; sources?: PublishSource[] }
+export interface VoiceCall { op: "mint" | "setCanPublish" | "setPublishSources" | "remove" | "delete" | "createIngress" | "deleteIngress" | "mintAgeCheck" | "ensureAgeCheckRoom" | "deleteNamed"; ingressId?: string; maxParticipants?: number; ttlSeconds?: number; egress?: false; roomId: string; userId?: string; canPublish?: boolean; camera?: boolean; sources?: PublishSource[] }
 
 /** In-memory stand-in used by tests: records every call, and its tokens decode (`fake.<base64url json>.sig`). */
 export class FakeVoice implements VoiceService {
@@ -36,6 +36,12 @@ export class FakeVoice implements VoiceService {
       ...(p.sources ? { sources: [...p.sources] } : {}), ...(p.publishing ? { publishing: [...p.publishing] } : {}),
     }));
   }
+  async mintAgeCheckToken(a: { roomName: string; identity: string; name: string }): Promise<string> {
+    this.calls.push({ op: "mintAgeCheck", roomId: a.roomName, userId: a.identity, canPublish: true, sources: ["microphone", "camera"], ttlSeconds: 20 * 60 });
+    return `fake.${Buffer.from(JSON.stringify(a)).toString("base64url")}.sig`;
+  }
+  async ensureAgeCheckRoom(roomName: string) { this.calls.push({ op: "ensureAgeCheckRoom", roomId: roomName, maxParticipants: 2, egress: false }); }
+  async deleteNamedRoom(roomName: string) { this.calls.push({ op: "deleteNamed", roomId: roomName }); }
   async deleteRoom(roomId: string) { this.calls.push({ op: "delete", roomId }); }
   /** Gaming: live fake ingresses by `${roomId}:${userId}` (the call log never records a stream key). */
   ingresses = new Map<string, GameIngress>();

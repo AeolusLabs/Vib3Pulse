@@ -37,6 +37,7 @@ async function runSweep(): Promise<void> {
   try {
     const r = await sweepExpiredAgeReviews();
     if (r.expired || r.evidenceDeleted) console.log(`[AGE-REVIEW] sweep: expired ${r.expired}, evidence rows deleted ${r.evidenceDeleted}`);
+    await (await import("./ageReviewLive")).closeStaleAgeCheckRooms().catch(() => {});
     const { notifyAgeReview } = await import("./ageReviewNotify");
     for (const id of r.userIds) await notifyAgeReview(id, "expired");
   } catch {

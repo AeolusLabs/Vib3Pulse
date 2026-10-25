@@ -5,7 +5,7 @@ import { db, storage } from "../storage";
 import { hostTrustTiers, moderationAppeals, type AdminRole } from "@shared/schema";
 import { checkLoginThrottle, recordLoginAttempt, clearLoginAttempts, logSecurityEvent } from "../security";
 import {
-  audit, beginMfaSetup, confirmMfaSetup, resetMfa, verifyMfaLogin, isMfaEnrolled, mfaRequired,
+  audit, beginMfaSetup, confirmMfaSetup, resetMfa, verifyMfaLogin, isMfaEnrolled, mfaRequiredFor,
   requireAdminPending, requireRole, requireSuperAdmin, HOST_ADMIN_ROLES, MODERATION_ROLES, MODERATOR_ROLES, withAudit,
 } from "../services/adminSecurity";
 import { applyBulk, applyModerationAction, dismissReport, getModerationQueue, getSocialMetrics, listEventReports, listOpenAppeals, markAbusiveReporter, resolveAppeal } from "../services/moderationQueue";
@@ -39,13 +39,12 @@ const h = (fn: Handler) => async (req: Request, res: Response) => {
 export function registerAdminSocialRoutes(app: Express) {
   // ------------------------------------------------------------------ MFA
   app.get("/api/admin/mfa/status", requireAdminPending, h(async (req, res) => {
-    const required = mfaRequired() && req.admin!.role === "super_admin";
+    const required = mfaRequiredFor(req.admin!.role);
     res.json({ required, enrolled: required ? await isMfaEnrolled(req.admin!.id) : false, verified: !!req.session.mfaVerified });
   }));
 
   app.post("/api/admin/mfa/setup", requireAdminPending, h(async (req, res) => {
-    if (!mfaRequired()) return res.status(400).json({ message: "Two-factor authentication is switched off.", code: "MFA_DISABLED" });
-    if (req.admin!.role !== "super_admin") return res.status(400).json({ message: "Two-factor authentication is only required for super-admin accounts" });
+    if (!mfaRequiredFor(req.admin!.role)) return res.status(400).json({ message: "Two-factor authentication is switched off.", code: "MFA_DISABLED" });
     // Only a not-yet-verified session may (re)start enrolment. Once enrolled, setup is closed.
     const r = await beginMfaSetup(req.admin!.id, req.admin!.email);
     if (!r.ok) return res.status(409).json({ message: "Two-factor authentication is already set up", code: "ALREADY_ENROLLED" });

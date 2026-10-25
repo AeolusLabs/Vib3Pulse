@@ -5,6 +5,8 @@ export const roomNameFor = (roomId: string) => `vp-${roomId}`;
 // Short on purpose: LiveKit refreshes the token of a connected participant itself, and the server sweeps (stage.ts sweepVoice)
 // anyone it should not have, but a replayed old token stops working after a minute.
 const TOKEN_TTL_SECONDS = 60;
+// Age review live check: one token covers the whole call (the room itself is capped at 20 minutes by the server).
+const AGE_CHECK_TTL_SECONDS = 20 * 60;
 // Speakers publish audio only: no camera, no screen share (bandwidth and cost, and nothing in the UI shows them).
 const MIC_ONLY = [TrackSource.MICROPHONE];
 // The holder of the room's live screen also gets the camera. Never screen share.
@@ -52,6 +54,20 @@ export class LiveKitVoice implements VoiceService {
     const canPublish = sources.length > 0;
     // Same shape as setCanPublish; with nothing to publish the list stays MIC_ONLY (canPublish false wins), never empty (= any).
     await this.rooms().updateParticipant(roomNameFor(roomId), userId, undefined, { canSubscribe: true, canPublish, canPublishData: false, canPublishSources: canPublish ? sources.map((s) => TO_LK[s]) : MIC_ONLY }).catch(ignoreMissing);
+  }
+
+  async mintAgeCheckToken(a: { roomName: string; identity: string; name: string }): Promise<string> {
+    const t = new AccessToken(this.apiKey, this.apiSecret, { identity: a.identity, name: a.name, ttl: AGE_CHECK_TTL_SECONDS });
+    t.addGrant({ roomJoin: true, room: a.roomName, canSubscribe: true, canPublish: true, canPublishData: false, canPublishSources: MIC_AND_CAMERA });
+    return t.toJwt();
+  }
+
+  async ensureAgeCheckRoom(roomName: string): Promise<void> {
+    await this.rooms().createRoom({ name: roomName, maxParticipants: 2, emptyTimeout: 120, departureTimeout: 30 });
+  }
+
+  async deleteNamedRoom(roomName: string): Promise<void> {
+    await this.rooms().deleteRoom(roomName).catch(ignoreMissing);
   }
 
   async removeParticipant(roomId: string, userId: string): Promise<void> {

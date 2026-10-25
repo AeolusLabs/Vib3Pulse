@@ -4,7 +4,8 @@ import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { z } from "zod";
 import { requireAuth } from "../middleware";
 import { ageReviewEnabled } from "../identity/ageReviewFeatures";
-import { AgeReviewError, cancelRequest, createRequest, getMe, liveJoin, newCode, putEvidence, submitRequest } from "../identity/ageReviewService";
+import { userLiveJoin } from "../identity/ageReviewLive";
+import { AgeReviewError, cancelRequest, createRequest, getMe, newCode, putEvidence, submitRequest } from "../identity/ageReviewService";
 
 const keyGenerator = (req: Request) => (req.user as any)?.id ?? ipKeyGenerator(req.ip ?? "");
 const limited = (windowMs: number, max: number) => rateLimit({
@@ -62,6 +63,6 @@ export function registerAgeReviewRoutes(app: Express): void {
     try { res.json({ request: await newCode(uid(req), idParam(req)) }); } catch (e) { fail(res, e); }
   });
   app.post(`${base}/requests/:id/live-join`, requireAuth, async (req, res) => {
-    try { res.json(await liveJoin(uid(req), idParam(req))); } catch (e) { fail(res, e); }
+    try { res.json(await userLiveJoin(uid(req), idParam(req))); } catch (e) { fail(res, e); }
   });
 }

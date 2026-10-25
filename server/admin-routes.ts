@@ -10,7 +10,9 @@ import { invalidateCache, postsCache, eventsCache, storiesCache } from "./cache"
 import { insertAdminUserSchema, adminRoles, type AdminRole } from "@shared/schema";
 import { z } from "zod";
 import { getSocialPlanAdminStats } from "./services/socialAdminStats";
-import { requireAdmin, requireStaffNotReviewer, requireAdminPending, requireRole, requireSuperAdmin, isMfaEnrolled, mfaRequired } from "./services/adminSecurity";
+import { registerAgeReviewAdminRoutes } from "./routes/age-review-admin-routes";
+import { ageReviewEnabled } from "./identity/ageReviewFeatures";
+import { requireAdmin, requireStaffNotReviewer, requireAdminPending, requireRole, requireSuperAdmin, isMfaEnrolled, mfaRequiredFor } from "./services/adminSecurity";
 import { registerSprayClawbackAdminRoutes } from "./rooms/clawbacks";
 import { registerRoomsAdminRoutes } from "./rooms/adminRoutes";
 import { registerRoomRecapAdminRoute } from "./rooms/recap";
@@ -56,8 +58,10 @@ async function logActivity(adminId: string, action: string, targetType?: string,
 }
 
 export function registerAgeVerificationAdminRoute(app: Express) {
-  app.post("/api/admin/users/:id/age-verification", requireRole("super_admin", "admin", "user_support"), async (req: Request, res: Response) => {
+  app.post("/api/admin/users/:id/age-verification", requireRole("super_admin", "admin", "age_reviewer"), async (req: Request, res: Response) => {
     try {
+      const reasonCheck = z.string().trim().min(3).max(300).safeParse(req.body?.reason);
+      if (!reasonCheck.success) return res.status(400).json({ message: "A reason (3 to 300 characters) is required", code: "REASON_REQUIRED" });
       const { verified, reason } = z.object({ verified: z.boolean(), reason: z.string().trim().min(3).max(300) }).parse(req.body);
       const { ageVerifier } = await import("./identity/ageVerification");
       const user = await storage.getUser(req.params.id);
@@ -80,6 +84,26 @@ export function registerAgeVerificationAdminRoute(app: Express) {
     } catch (error) {
       if (error instanceof z.ZodError) return res.status(400).json({ message: "verified (true or false) and a reason (3 to 300 characters) are required" });
       res.status(500).json({ message: "Failed to update age verification" });
+    }
+  });
+
+  // Clears a verification found suspect later (chargeback, report). Part of age review, so it follows the AGE_REVIEW flag.
+  app.post("/api/admin/users/:id/age-verification/revoke", requireRole("super_admin", "admin", "age_reviewer"), async (req: Request, res: Response) => {
+    try {
+      if (!ageReviewEnabled()) return res.status(404).json({ message: "Not found" });
+      const reason = z.string().trim().min(3).max(300).safeParse(req.body?.reason);
+      if (!reason.success) return res.status(400).json({ message: "A reason (3 to 300 characters) is required", code: "REASON_REQUIRED" });
+      const { ageVerifier } = await import("./identity/ageVerification");
+      const user = await storage.getUser(req.params.id);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      await storage.logAdminActivity({
+        adminId: req.session.adminId!, action: "age_review.revoke", targetType: "user", targetId: user.id,
+        details: `Cleared ID verification (revoke). Reason: ${reason.data}`, reason: reason.data, ipAddress: req.ip,
+      }).catch((error) => console.error("Failed to log admin activity:", error));
+      await storage.setAgeVerification(user.id, { verified: false });
+      res.json(await ageVerifier.status(user.id));
+    } catch {
+      res.status(500).json({ message: "Failed to revoke age verification" });
     }
   });
 }
@@ -453,7 +477,7 @@ export function setupAdminRoutes(app: Express) {
       req.session.adminId = admin.id;
       req.session.adminRole = admin.role as AdminRole;
       // Super-admins must pass MFA (or enrol) before any admin route works; enforced in the gate.
-      const needsMfa = mfaRequired() && admin.role === "super_admin"; // off by default: password-only sign-in
+      const needsMfa = mfaRequiredFor(admin.role); // off by default (super_admin: ADMIN_MFA_REQUIRED; admin and age_reviewer: AGE_REVIEW)
       req.session.mfaVerified = !needsMfa;
       const mfaState = needsMfa ? ((await isMfaEnrolled(admin.id)) ? "verify" : "enroll") : null;
 
@@ -499,7 +523,7 @@ export function setupAdminRoutes(app: Express) {
         return res.status(404).json({ message: "Admin not found" });
       }
       const adminWithoutPassword = toPublicAdminUser(admin);
-      const required = mfaRequired() && admin.role === "super_admin";
+      const required = mfaRequiredFor(admin.role);
       res.json({ ...adminWithoutPassword, mfa: { required, enrolled: required ? await isMfaEnrolled(admin.id) : false, verified: !!req.session.mfaVerified } });
     } catch (error) {
       res.status(500).json({ message: "Failed to get admin" });
@@ -831,6 +855,7 @@ export function setupAdminRoutes(app: Express) {
 
   // Mark (or unmark) a user as ID-verified. Admin roles only; a user can never call this, even on themself.
   registerAgeVerificationAdminRoute(app);
+  registerAgeReviewAdminRoutes(app);
 
   // ---- Rooms (alpha): reported rooms, end any room, change a room's age limit. All audited, reason required.
   app.get("/api/admin/rooms/reported", requireRole("super_admin", "content_moderator"), async (_req: Request, res: Response) => {
