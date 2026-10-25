@@ -60,7 +60,11 @@ export function toLedgerRow(r: RawRow): LedgerRow {
 }
 
 // ---------------------------------------------------------------- filters
-interface Filters { range: Range; status?: string; roomId?: string; hostId?: string; payerId?: string; recipientId?: string; q?: string }
+interface Filters {
+  range: Range; status?: string; roomId?: string; hostId?: string; payerId?: string; recipientId?: string; q?: string;
+  /** Exact usernames (case-insensitive) and a room-title prefix. */
+  host?: string; payer?: string; recipient?: string; room?: string;
+}
 type Parsed = { ok: true; f: Filters } | { ok: false; message: string; code: string };
 
 function one(v: unknown): string | undefined | null { // undefined: absent; null: present but not a single string
@@ -77,8 +81,16 @@ export function parseFilters(query: Request["query"]): Parsed {
   if (status) f.status = status;
   for (const k of ["roomId", "hostId", "payerId", "recipientId"] as const) {
     const v = one(query[k]);
-    if (v === null || (v !== undefined && v !== "" && !ID.test(v))) return { ok: false, message: `${k} is not valid`, code: "BAD_FILTER" };
+    if (v === null || (v !== undefined && v !== "" && !ID.test(v))) return { ok: false, message: `${k} must be an id of up to 64 letters, numbers, dashes or underscores.`, code: "BAD_FILTER" };
     if (v) f[k] = v;
+  }
+  for (const [k, max] of [["host", 64], ["payer", 64], ["recipient", 64], ["room", 100]] as const) {
+    const v = one(query[k]);
+    if (v === null) return { ok: false, message: `${k} must be a single piece of text.`, code: "BAD_FILTER" };
+    const t = v?.trim();
+    if (t && t.length > max) return { ok: false, message: `${k} must be at most ${max} characters.`, code: "BAD_FILTER" };
+    if (t && /[\u0000-\u001f]/.test(t)) return { ok: false, message: `${k} must not contain control characters.`, code: "BAD_FILTER" };
+    if (t) f[k] = t;
   }
   const q = one(query.q);
   if (q === null) return { ok: false, message: "q is not valid", code: "BAD_FILTER" };
@@ -98,6 +110,10 @@ function whereFor(f: Filters, cursor?: { k: string; id: string }): { sql: string
   if (f.hostId) conds.push(`s.host_id = ${p(f.hostId)}`);
   if (f.payerId) conds.push(`s.payer_id = ${p(f.payerId)}`);
   if (f.recipientId) conds.push(`s.recipient_id = ${p(f.recipientId)}`);
+  if (f.host) conds.push(`lower(hu.username) = lower(${p(f.host)})`);
+  if (f.payer) conds.push(`lower(pu.username) = lower(${p(f.payer)})`);
+  if (f.recipient) conds.push(`lower(ru.username) = lower(${p(f.recipient)})`);
+  if (f.room) conds.push(`lower(r.title) like ${p(`${escapeLike(f.room.toLowerCase())}%`)} escape '\\'`);
   if (f.q) {
     const exact = p(f.q);
     const like = p(`${escapeLike(f.q.toLowerCase())}%`);
@@ -188,7 +204,7 @@ export function registerSprayLedgerRoutes(app: Express): void {
         `select ${SELECT_ROW}, s.vat_kobo, s.fee_kobo, s.reserve_kobo, s.platform_kobo, s.host_kobo, s.guest_kobo ${FROM_ROW}
           where ${w.sql} order by s.created_at desc, s.id desc limit ${ledgerTuning.csvMaxRows}`, w.params,
       )).rows as (RawRow & { vat_kobo: number; fee_kobo: number; reserve_kobo: number; platform_kobo: number; host_kobo: number; guest_kobo: number | null })[];
-      const filters = { from: parsed.f.range.from.toISOString(), to: parsed.f.range.to.toISOString(), status: parsed.f.status, roomId: parsed.f.roomId, hostId: parsed.f.hostId, payerId: parsed.f.payerId, recipientId: parsed.f.recipientId, q: parsed.f.q, rows: rows.length };
+      const filters = { from: parsed.f.range.from.toISOString(), to: parsed.f.range.to.toISOString(), status: parsed.f.status, roomId: parsed.f.roomId, hostId: parsed.f.hostId, payerId: parsed.f.payerId, recipientId: parsed.f.recipientId, host: parsed.f.host, payer: parsed.f.payer, recipient: parsed.f.recipient, room: parsed.f.room, q: parsed.f.q, rows: rows.length };
       if (!(await auditStrict(req, "room_spray.export", "csv", filters))) return res.status(500).json({ message: "The export could not be recorded, so it was not produced. Try again." });
       const lines = [csvLine(CSV_COLUMNS)];
       for (const r of rows) {

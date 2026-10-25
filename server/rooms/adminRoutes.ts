@@ -95,8 +95,9 @@ export function registerRoomsAdminRoutes(app: Express): void {
     try {
       const r = await setControl({ key, on, adminId: req.session.adminId!, reason: reason.data });
       if (r.changed) await audit(req, on ? "room_control.on" : "room_control.off", "room_control", key, reason.data, { key, on });
-      if (key === "sprays_paused" && r.changed) await broadcastSprayStateAll(); // after setControl, so the fresh value is read
-      res.json({ key, on, changed: r.changed });
+      let liveRooms = 0;
+      if (key === "sprays_paused" && r.changed) liveRooms = await broadcastSprayStateAll(); // after setControl, so the fresh value is read
+      res.json({ key, on, changed: r.changed, ...(key === "sprays_paused" ? { liveRooms } : {}) });
     } catch (e) {
       console.error("[ADMIN] room control failed:", (e as Error)?.message);
       res.status(500).json({ message: "That did not work. Check the switch before trying again." });

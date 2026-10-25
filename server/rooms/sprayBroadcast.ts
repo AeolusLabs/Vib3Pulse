@@ -16,8 +16,10 @@ export async function broadcastSprayState(roomId: string): Promise<void> {
 }
 
 /** Platform pause / resume: every room with someone in it, in this process. */
-export async function broadcastSprayStateAll(): Promise<void> {
-  await Promise.all(roomHub.roomIds().map(broadcastSprayState));
+export async function broadcastSprayStateAll(): Promise<number> {
+  const ids = roomHub.roomIds();
+  await Promise.all(ids.map(broadcastSprayState));
+  return ids.length;
 }
 
 /** Host freeze / unfreeze: that host's live rooms that have someone in them. */

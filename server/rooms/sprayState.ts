@@ -53,25 +53,34 @@ export async function setRoomSprayBlock(p: { roomId: string; on: boolean; adminI
 
 export interface SprayStatus {
   platformFlag: boolean; paused: boolean; frozenHosts: number; liveRoomsSprayOn: number;
-  blockedRooms: { roomId: string; title: string; reason: string | null; byAdminId: string | null; at: string | null }[];
+  blockedRooms: { roomId: string; title: string; reason: string | null; byAdminId: string | null; byAdminName: string | null; at: string | null }[];
+  /** Why the platform pause is on, who set it and when; null when not paused. */
+  pausedInfo: { reason: string; byName: string | null; at: string } | null;
 }
 
 export async function sprayStatus(): Promise<SprayStatus> {
   const paused = await getControl("sprays_paused");
-  const [frozen, live, blocked] = await Promise.all([
+  const [frozen, live, blocked, pauseRow] = await Promise.all([
     pool.query(`select count(*)::int as n from room_host_freezes`),
     roomFeatures.spray && !paused
       ? pool.query(`select count(*)::int as n from rooms r where r.status = 'live' and r.spray_enabled and not r.spray_admin_blocked
                     and not exists (select 1 from room_host_freezes f where f.host_id = r.host_id)`)
       : Promise.resolve({ rows: [{ n: 0 }] }),
-    pool.query(`select id, title, spray_block_reason, spray_blocked_by, spray_blocked_at from rooms
-                 where spray_admin_blocked and status <> 'ended' order by spray_blocked_at desc nulls last`),
+    pool.query(`select r.id, r.title, r.spray_block_reason, r.spray_blocked_by, r.spray_blocked_at, coalesce(a.display_name, a.username) as by_name
+                  from rooms r left join admin_users a on a.id = r.spray_blocked_by
+                 where r.spray_admin_blocked and r.status <> 'ended' order by r.spray_blocked_at desc nulls last`),
+    paused
+      ? pool.query(`select c.reason, c.updated_at, coalesce(a.display_name, a.username) as by_name
+                      from room_controls c left join admin_users a on a.id = c.updated_by where c.key = 'sprays_paused'`)
+      : Promise.resolve({ rows: [] as any[] }),
   ]);
+  const pr = pauseRow.rows[0] as { reason: string | null; updated_at: Date | null; by_name: string | null } | undefined;
   return {
     platformFlag: roomFeatures.spray === true, paused,
+    pausedInfo: paused ? { reason: pr?.reason ?? "", byName: pr?.by_name ?? null, at: pr?.updated_at ? new Date(pr.updated_at).toISOString() : new Date(0).toISOString() } : null,
     frozenHosts: frozen.rows[0].n, liveRoomsSprayOn: live.rows[0].n,
     blockedRooms: blocked.rows.map((r: any) => ({
-      roomId: r.id, title: r.title, reason: r.spray_block_reason ?? null, byAdminId: r.spray_blocked_by ?? null,
+      roomId: r.id, title: r.title, reason: r.spray_block_reason ?? null, byAdminId: r.spray_blocked_by ?? null, byAdminName: r.by_name ?? null,
       at: r.spray_blocked_at ? new Date(r.spray_blocked_at).toISOString() : null,
     })),
   };

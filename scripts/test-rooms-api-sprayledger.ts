@@ -317,6 +317,64 @@ try {
       && disputed.length === 50 && A2.json.capped.disputed === true && typeof A2.json.capped.pending === "boolean", JSON.stringify(A2.json.capped));
   }
 
+
+  // ---------------------------------------------------------------- fix round 2: username / title filters
+  {
+    const hostName = (await q(`select username from users where id = $1`, [H]))[0].username as string;
+    const p1Name = (await q(`select username from users where id = $1`, [P1]))[0].username as string;
+    const list = (qs: string) => get(`/api/admin/rooms/sprays/transactions?${range}&limit=100&${qs}`, FIN);
+    const byPayer = await list(`roomId=${ROOM2}&payer=${encodeURIComponent(` ${p1Name.toUpperCase()} `)}`);
+    check("filter payer: exact username, case-insensitive, trimmed", byPayer.status === 200 && byPayer.json.rows.length > 0 && byPayer.json.rows.every((r: any) => r.payerUsername === p1Name));
+    const prefixOnly = await list(`roomId=${ROOM2}&payer=${encodeURIComponent(p1Name.slice(0, 6))}`);
+    check("filter payer is exact, not a prefix", prefixOnly.status === 200 && prefixOnly.json.rows.length === 0);
+    const byHost = await list(`roomId=${ROOM2}&host=${encodeURIComponent(hostName)}&recipient=${encodeURIComponent(hostName)}&status=delivered`);
+    check("filters host + recipient by username", byHost.json.rows.length === 1);
+    const unknown = await list(`payer=no_such_user_${stamp}`);
+    check("an unknown username is an empty result, not an error", unknown.status === 200 && unknown.json.rows.length === 0);
+    const byRoom = await list(`room=${encodeURIComponent("SG LEDGER")}`);
+    check("filter room: title prefix, case-insensitive", byRoom.status === 200 && byRoom.json.rows.every((r: any) => r.roomId === ROOM2) && byRoom.json.rows.length > 0);
+    const byRoomMid = await list(`room=${encodeURIComponent("ledger room")}`);
+    check("filter room is a prefix, not a substring", byRoomMid.json.rows.length === 0);
+    const pct = await list(`room=${encodeURIComponent("%")}`), under = await list(`room=${encodeURIComponent("sg_ledger")}`), upct = await list(`payer=${encodeURIComponent("%")}`);
+    check("% and _ are literal in username and title filters", pct.json.rows.length === 0 && under.json.rows.length === 0 && upct.json.rows.length === 0);
+    const both = await list(`room=${encodeURIComponent("sg ledger")}&payerId=${P2}&payer=${encodeURIComponent(p1Name)}`);
+    check("username filters combine with id filters (AND)", both.status === 200 && both.json.rows.length === 0);
+    const csv = await get(`/api/admin/rooms/sprays/transactions.csv?${range}&room=${encodeURIComponent("sg ledger")}&payer=${encodeURIComponent(p1Name)}`, FIN);
+    check("the CSV honours the same username / title filters", csv.status === 200 && csv.text.trim().split("\r\n").length > 1 && csv.text.trim().split("\r\n").slice(1).every((l) => l.includes(p1Name)));
+    const bad = [
+      await list(`payer=${"x".repeat(65)}`), await list(`room=${"x".repeat(101)}`), await list(`host=a&host=b`), await list(`host=${encodeURIComponent("a\u0001b")}`),
+      await list(`hostId=${encodeURIComponent("bad id!")}`),
+    ];
+    check("a malformed filter is 400 BAD_FILTER and the message names it", bad.every((b) => b.status === 400 && b.json?.code === "BAD_FILTER")
+      && /payer/.test(bad[0].json.message) && /room/.test(bad[1].json.message) && /host/.test(bad[2].json.message) && /host/.test(bad[3].json.message) && /hostId/.test(bad[4].json.message), JSON.stringify(bad.map((b) => b.json)));
+  }
+
+  // ---------------------------------------------------------------- fix round 2: spray-status owner visibility, pause liveRooms
+  {
+    const st0 = await get(`/api/admin/rooms/spray-status`, FIN);
+    check("spray-status: pausedInfo is null when not paused", st0.status === 200 && st0.json.paused === false && st0.json.pausedInfo === null);
+    const blk = await call("POST", `/api/admin/rooms/${ROOM2}/spray-block`, FIN);
+    void blk; // (needs a JSON body; done below with fetch)
+    await fetch(`${base}/api/admin/rooms/${ROOM2}/spray-block`, { method: "POST", headers: { "content-type": "application/json", "x-test-admin": FIN }, body: JSON.stringify({ on: true, reason: "ledger test block" }) });
+    const pz = await fetch(`${base}/api/admin/rooms/controls/sprays_paused`, { method: "POST", headers: { "content-type": "application/json", "x-test-admin": FIN }, body: JSON.stringify({ on: true, reason: "ledger test pause" }) });
+    const pzj: any = await pz.json();
+    check("pausing returns liveRooms (a number)", pz.status === 200 && typeof pzj.liveRooms === "number" && pzj.liveRooms >= 0, JSON.stringify(pzj));
+    const st = await get(`/api/admin/rooms/spray-status`, FIN);
+    const finName = (await q(`select coalesce(display_name, username) n from admin_users where id = $1`, [FIN]))[0].n as string;
+    const mineBlocked = (st.json.blockedRooms as any[]).find((b) => b.roomId === ROOM2);
+    check("spray-status: pausedInfo has reason, byName and an ISO time", st.json.paused === true && st.json.pausedInfo?.reason === "ledger test pause" && st.json.pausedInfo.byName === finName
+      && !Number.isNaN(Date.parse(st.json.pausedInfo.at)), JSON.stringify(st.json.pausedInfo));
+    check("spray-status: blocked rooms carry byAdminName and keep byAdminId", mineBlocked?.byAdminName === finName && mineBlocked.byAdminId === FIN && mineBlocked.reason === "ledger test block", JSON.stringify(mineBlocked));
+    check("spray-status never returns admin email or password fields", !/@t\.dev|password|email/i.test(st.text));
+    const resume = await fetch(`${base}/api/admin/rooms/controls/sprays_paused`, { method: "POST", headers: { "content-type": "application/json", "x-test-admin": SA }, body: JSON.stringify({ on: false, reason: "ledger test resume" }) });
+    const rj: any = await resume.json();
+    check("resuming also returns liveRooms; other keys do not", typeof rj.liveRooms === "number");
+    const tk = await fetch(`${base}/api/admin/rooms/controls/tickets_paused`, { method: "POST", headers: { "content-type": "application/json", "x-test-admin": FIN }, body: JSON.stringify({ on: true, reason: "x test" }) });
+    const tkj: any = await tk.json();
+    check("tickets_paused has no liveRooms", tkj.liveRooms === undefined);
+    await fetch(`${base}/api/admin/rooms/controls/tickets_paused`, { method: "POST", headers: { "content-type": "application/json", "x-test-admin": SA }, body: JSON.stringify({ on: false, reason: "x test" }) });
+  }
+
   // roles
   const paths: [string, string][] = [
     ["GET", `/api/admin/rooms/sprays/transactions?${range}`], ["GET", `/api/admin/rooms/sprays/transactions.csv?${range}`], ["GET", `/api/admin/rooms/sprays/transactions/${mine[0].id}`],
