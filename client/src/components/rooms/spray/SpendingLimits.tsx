@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Loader2Icon, Trash2Icon } from "@/components/ui/icons";
 import { formatNaira } from "@/lib/roomTickets";
 import { deleteMethod, putDailyLimit } from "@/lib/sprayApi";
+import VerifyAgeLink from "@/components/age-review/VerifyAgeLink";
 import { SPRAY_COPY, cardLabel, dailyChoices, limitErrorText, type SprayMe } from "@/lib/sprayUi";
 
 interface Props {
@@ -65,6 +66,7 @@ export default function SpendingLimits({ me, onChanged, onClose }: Props) {
           })}
         </div>
         <p className="text-xs text-muted-foreground">{SPRAY_COPY.dailyNote}</p>
+        {me?.verified !== true && <VerifyAgeLink />}
       </fieldset>
       {card && (
         <div className="flex min-h-[56px] items-center justify-between gap-2 rounded-xl border border-border px-3">

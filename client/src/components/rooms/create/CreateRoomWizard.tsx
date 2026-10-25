@@ -3,6 +3,7 @@
 // Full screen on phones (footer pinned above the keyboard and the home bar), a centred panel from the sm breakpoint.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
+import { useAgeReview } from "@/hooks/useAgeReview";
 import { useQuery } from "@tanstack/react-query";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { DialogOverlay, DialogPortal } from "@/components/ui/dialog";
@@ -127,7 +128,7 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
 
   // Money section: Paid room and Spray, always drawn while a platform flag is on (locked with the reason for a room that is
   // not 18+/21+). The price step follows only when Paid room is available and switched on; spray is sent only when available.
-  const money = moneyView({ flags, readiness, ageLimit: state.ageLimit });
+  const money = moneyView({ flags, readiness, ageLimit: state.ageLimit, ageReview: useAgeReview().enabled });
   const priceAvailable = priceStepAvailable(flags.paidRooms, options?.moneyLocked) && money.paid.available;
   const priceStepOn = priceAvailable && ticket.on;
   const sprayOn = flags.spray && money.spray.available && state.sprayEnabled === true;

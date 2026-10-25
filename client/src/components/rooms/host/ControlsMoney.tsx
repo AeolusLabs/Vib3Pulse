@@ -7,6 +7,7 @@ import {
 import StepSpray from "@/components/rooms/create/StepSpray";
 import { call } from "@/components/rooms/create/createRoomApi";
 import { useRoomsConfig } from "@/lib/roomsApi";
+import { useAgeReview } from "@/hooks/useAgeReview";
 import { MONEY_COPY, moneyRefusal, moneyView } from "@/lib/moneySection";
 import { SPRAY_LIVE_COPY, hostSprayLine, sprayToggleRefusal } from "@/lib/sprayLive";
 
@@ -21,7 +22,8 @@ export interface ControlsMoneyProps {
 
 export default function ControlsMoney({ roomId, room, onChanged }: ControlsMoneyProps) {
   const { data: config } = useRoomsConfig(true);
-  const view = moneyView({ flags: config?.features, readiness: config?.hostMoneyReadiness, ageLimit: room.ageLimit, minorsRoom: room.minorsRoom });
+  const ageReviewOn = useAgeReview().enabled;
+  const view = moneyView({ flags: config?.features, readiness: config?.hostMoneyReadiness, ageLimit: room.ageLimit, minorsRoom: room.minorsRoom, ageReview: ageReviewOn });
   const [on, setOn] = useState(room.sprayEnabled === true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

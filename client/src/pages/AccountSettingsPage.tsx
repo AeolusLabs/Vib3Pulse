@@ -26,6 +26,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { Switch } from "@/components/ui/switch";
+import VerifyAgeCard from "@/components/age-review/VerifyAgeCard";
 import BlockedUsersCard from "@/components/BlockedUsersCard";
 import RoomPrivacyCard from "@/components/RoomPrivacyCard";
 import type { User as UserType } from "@shared/schema";
@@ -205,6 +206,7 @@ export default function AccountSettingsPage() {
         <h1 className="text-2xl font-bold mb-6">Account Settings</h1>
 
         <div className="space-y-6">
+          <VerifyAgeCard />
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">

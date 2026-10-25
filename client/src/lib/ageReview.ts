@@ -1,0 +1,244 @@
+// Pure helpers for the "Verify your age" screens. No DOM, no network. Copy here must never contain dashes or the word "cash".
+
+export type AgeReviewState = "none" | "in_review" | "needs_more" | "verified" | "declined" | "cooldown" | "not_offered";
+export type AgeReviewMethod = "upload" | "live";
+export type DocumentType = "passport" | "drivers_licence" | "national_id" | "nin_slip";
+
+export interface AgeReviewRequest {
+  id: string;
+  method: AgeReviewMethod;
+  status: string;
+  documentType: string | null;
+  canCancel: boolean;
+  needsMore: boolean;
+  hasDocument: boolean;
+  hasSelfie: boolean;
+  code: string | null;
+  codeExpiresAt: string | null;
+  liveInviteExpiresAt: string | null;
+  submittedAt: string | null;
+  declineReason: string | null;
+  consentedAt: string | null;
+}
+
+export interface AgeReviewMe {
+  enabled: true;
+  paused: boolean;
+  consentVersion: string;
+  state: AgeReviewState;
+  verified: { method: "admin" | "admin_upload" | "admin_live"; at: string } | null;
+  request: AgeReviewRequest | null;
+  retryAfter: string | null;
+  attemptsLeft: number;
+}
+
+export type CardTone = "neutral" | "pending" | "success" | "warning";
+export interface CardAction { id: "start" | "continue"; label: string }
+export interface CardView { title: string; body: string; action: CardAction | null; tone: CardTone }
+
+export const DOCUMENT_TYPES: readonly DocumentType[] = ["passport", "drivers_licence", "national_id", "nin_slip"];
+const DOC_LABEL: Record<string, string> = {
+  passport: "Passport",
+  drivers_licence: "Driver's licence",
+  national_id: "National ID card",
+  nin_slip: "NIN slip",
+};
+export const documentTypeLabel = (t: string | null | undefined): string => (t && DOC_LABEL[t]) || "Document";
+
+const DECLINE_LABEL: Record<string, string> = {
+  unreadable: "the photo was hard to read",
+  expired: "the document had expired",
+  face_mismatch: "the face did not match the selfie",
+  code_missing: "the code was not in the selfie",
+  looks_edited: "the document looked edited",
+  other: "the reviewer could not confirm it",
+};
+const VERIFY_LABEL: Record<string, string> = { admin: "a reviewer check", admin_upload: "a photo check", admin_live: "a live check" };
+
+export const COPY = {
+  cardTitle: "Verify your age",
+  scopeNote: "Verification is only needed for tipping, buying tickets and hosting paid rooms. You can use the rest of Vib3Pulse without it.",
+  choiceUpload: "Upload an ID photo and a selfie",
+  choiceLive: "Private live check with a reviewer",
+  choiceLiveHint: "Nothing is recorded or saved.",
+  choiceUploadHint: "Your photos are deleted when a decision is made.",
+  cancel: "Cancel my request",
+  howHandled: "How your ID is handled",
+  paused: "Age checks are paused for a short while. Please try again later.",
+  verifyLink: "Verify your age",
+  notRecorded: "Not recorded",
+  guidance: "You can cover everything except your photo, name and date of birth.",
+  waiting: "Waiting for a reviewer. We will tell you here and in your notifications when it is time to join.",
+  joinReady: "A reviewer is ready. Join within the time shown.",
+} as const;
+
+export const PRIVACY = {
+  title: "Before you verify your age",
+  why: { h: "Why we ask", p: "Tipping, buying tickets and hosting paid rooms are for adults only. We check once. You can use the rest of Vib3Pulse without it." },
+  who: { h: "Who sees it", p: "Only trained Vib3Pulse age reviewers. No other staff and no other members." },
+  whatUpload: "A reviewer compares your document with the birthdate you gave when you signed up. We delete your photos as soon as a decision is made, or after 7 days if nobody has looked.",
+  whatLive: "A reviewer compares your document with the birthdate you gave when you signed up. Nothing is recorded or saved.",
+  whatHeading: "What happens",
+  keep: { h: "What we keep", p: "Only the result: verified or not, the date, the type of document, and whether the birthdate matched. Never your photos, the name on the document or the document number." },
+  choices: { h: "Your choices", p: "Cover everything except your photo, name and date of birth. Cancel any time before a decision and your photos are deleted. Choose the live check instead of uploading. Saying no only means the adult only features stay off." },
+  safety: { h: "Your safety", p: "If your document shows you are under 18, we will move your account to the right age group." },
+  tick: "I understand how my information is used",
+  cont: "Continue",
+  notNow: "Not now",
+  close: "Close",
+  policy: "Read the full privacy policy",
+  ask: "Ask about your data",
+  policyHref: "/privacy",
+  askHref: "mailto:info@aeoluslabsltd.com",
+} as const;
+
+export const whatHappens = (m: AgeReviewMethod): string => (m === "live" ? PRIVACY.whatLive : PRIVACY.whatUpload);
+
+const dateLabel = (iso: string) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+};
+
+/** "in about 5 hours" style wait; never negative. */
+export function waitLabel(iso: string | null, now: Date = new Date()): string {
+  if (!iso) return "later";
+  const ms = new Date(iso).getTime() - now.getTime();
+  if (!Number.isFinite(ms) || ms <= 60_000) return "in a moment";
+  const mins = Math.ceil(ms / 60_000);
+  if (mins < 60) return `in about ${mins} minute${mins === 1 ? "" : "s"}`;
+  const hours = Math.ceil(mins / 60);
+  if (hours < 48) return `in about ${hours} hour${hours === 1 ? "" : "s"}`;
+  return `on ${dateLabel(iso)}`;
+}
+
+export function cardView(me: AgeReviewMe, now: Date = new Date()): CardView {
+  const canStart: CardAction | null = me.paused ? null : { id: "start", label: "Start verification" };
+  const pausedNote = me.paused ? ` ${COPY.paused}` : "";
+  switch (me.state) {
+    case "verified":
+      return {
+        title: "Age verified",
+        body: `You were verified${me.verified ? ` on ${dateLabel(me.verified.at)} by ${VERIFY_LABEL[me.verified.method] ?? "a reviewer check"}` : ""}. Tipping, tickets and paid rooms are open to you.`,
+        action: null,
+        tone: "success",
+      };
+    case "in_review":
+      return {
+        title: "A reviewer is looking at it",
+        body: me.request?.method === "live"
+          ? "Your live check is requested. A reviewer will invite you to join a private call."
+          : "Your photos are with a reviewer. You do not need to do anything else. You can cancel while it is open.",
+        action: null,
+        tone: "pending",
+      };
+    case "needs_more":
+      return {
+        title: "One more photo, please",
+        body: "The reviewer needs a clearer photo to decide. Add it and send it again.",
+        action: { id: "continue", label: "Add a photo" },
+        tone: "warning",
+      };
+    case "declined": {
+      const why = me.request?.declineReason ? DECLINE_LABEL[me.request.declineReason] ?? DECLINE_LABEL.other : null;
+      return {
+        title: "We could not verify you",
+        body: `${why ? `The reviewer said ${why}. ` : ""}${me.attemptsLeft > 0 ? "You can try again with a new photo." : "You have no tries left right now."}${pausedNote}`,
+        action: me.attemptsLeft > 0 && canStart ? { id: "start", label: "Try again" } : null,
+        tone: "warning",
+      };
+    }
+    case "cooldown":
+      return {
+        title: "Please wait before trying again",
+        body: `You can try again ${waitLabel(me.retryAfter, now)}.`,
+        action: null,
+        tone: "neutral",
+      };
+    case "not_offered":
+      return {
+        title: "Not available on this account",
+        body: "Adult verification is not offered on accounts registered as under 18.",
+        action: null,
+        tone: "neutral",
+      };
+    default:
+      return {
+        title: COPY.cardTitle,
+        body: `Tipping, buying tickets and hosting paid rooms are for adults only. We check once.${pausedNote}`,
+        action: canStart,
+        tone: "neutral",
+      };
+  }
+}
+
+export const ERROR_CODES = [
+  "CONSENT_REQUIRED", "AGE_REVIEW_PAUSED", "OPEN_REQUEST_EXISTS", "RATE_LIMITED", "NOT_OFFERED", "BAD_FILE", "TOO_LARGE",
+  "EVIDENCE_INCOMPLETE", "WRONG_STATE", "CODE_EXPIRED", "NOT_ALLOWED", "SECOND_APPROVER_MUST_DIFFER", "SELF_REVIEW",
+  "CHECKLIST_INCOMPLETE", "DUPLICATE_DOCUMENT", "REVEAL_LIMIT", "TOKEN_INVALID", "REASON_REQUIRED",
+] as const;
+
+const GENERIC_STAFF = "Something went wrong with this request. Please try again later.";
+const ERROR_TEXT: Record<(typeof ERROR_CODES)[number], string> = {
+  CONSENT_REQUIRED: "Please read and accept how your information is used, then try again.",
+  AGE_REVIEW_PAUSED: "Age checks are paused for a short while. Please try again later.",
+  OPEN_REQUEST_EXISTS: "You already have a request open. Finish or cancel it first.",
+  RATE_LIMITED: "You have tried too many times. Please wait a bit.",
+  NOT_OFFERED: "Adult verification is not offered on accounts registered as under 18.",
+  BAD_FILE: "That file could not be used. Please take a new photo (JPEG, PNG or WebP).",
+  TOO_LARGE: "That photo is too large. Please take it again.",
+  EVIDENCE_INCOMPLETE: "Add both the document photo and the selfie before you send.",
+  WRONG_STATE: "This request has changed. Refresh and try again.",
+  CODE_EXPIRED: "Your code ran out. Get a new code and take the selfie again.",
+  NOT_ALLOWED: "You cannot do that on this request.",
+  SECOND_APPROVER_MUST_DIFFER: GENERIC_STAFF,
+  SELF_REVIEW: GENERIC_STAFF,
+  CHECKLIST_INCOMPLETE: GENERIC_STAFF,
+  DUPLICATE_DOCUMENT: GENERIC_STAFF,
+  REVEAL_LIMIT: GENERIC_STAFF,
+  TOKEN_INVALID: "That link has expired. Please start again.",
+  REASON_REQUIRED: GENERIC_STAFF,
+};
+
+export function errorMessage(code: string | undefined | null, extra?: { retryAfter?: string | null; now?: Date }): string {
+  if (code === "RATE_LIMITED" && extra?.retryAfter) return `You have tried too many times. You can try again ${waitLabel(extra.retryAfter, extra.now)}.`;
+  if (code && Object.prototype.hasOwnProperty.call(ERROR_TEXT, code)) return ERROR_TEXT[code as keyof typeof ERROR_TEXT];
+  return "Something went wrong. Please try again.";
+}
+
+/** Longest edge capped at `max`; never enlarges. */
+export function fitWithin(w: number, h: number, max = 1600): { w: number; h: number } {
+  if (!(w > 0) || !(h > 0)) return { w: 0, h: 0 };
+  const longest = Math.max(w, h);
+  if (longest <= max) return { w: Math.round(w), h: Math.round(h) };
+  const k = max / longest;
+  return { w: Math.max(1, Math.round(w * k)), h: Math.max(1, Math.round(h * k)) };
+}
+
+/** True when the user has not accepted the copy version the server currently wants. */
+export const consentRequired = (me: Pick<AgeReviewMe, "consentVersion">, acceptedVersion: string | null | undefined): boolean =>
+  acceptedVersion !== me.consentVersion;
+
+/** Continue stays disabled until the box is ticked (and while a request is in flight). */
+export const continueEnabled = (ticked: boolean, busy = false): boolean => ticked && !busy;
+
+/** "K7M29P" becomes "K7 M2 9P". */
+export function formatCode(code: string | null | undefined): string {
+  const c = (code ?? "").replace(/\s+/g, "").toUpperCase();
+  return c.replace(/(.{2})(?=.)/g, "$1 ");
+}
+
+/** Whole minutes left, rounded up, never below zero. */
+export function minutesLeft(iso: string | null | undefined, now: Date = new Date()): number {
+  if (!iso) return 0;
+  const ms = new Date(iso).getTime() - now.getTime();
+  return Number.isFinite(ms) && ms > 0 ? Math.ceil(ms / 60_000) : 0;
+}
+
+export const liveInviteActive = (r: Pick<AgeReviewRequest, "liveInviteExpiresAt"> | null | undefined, now: Date = new Date()): boolean =>
+  minutesLeft(r?.liveInviteExpiresAt, now) > 0;
+
+/** Poll only while something can change without the user doing anything. */
+export const shouldPoll = (me: AgeReviewMe | null | undefined, now: Date = new Date()): boolean =>
+  !!me && (me.state === "in_review" || liveInviteActive(me.request, now));
+
+export const VERIFY_HREF = "/account/settings#verify-age";

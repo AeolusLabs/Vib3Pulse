@@ -8,11 +8,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MinusIcon, PlusIcon } from "@/components/ui/icons";
 import {
-  AMBER, PRICE_COPY, TICKET_LIMITS, clampPriceNaira, clampTicketCapacity, earningsEstimate, estimateText, isPriceStepField,
+  AMBER, PRICE_COPY, TICKET_CREATE_ERROR, TICKET_LIMITS, clampPriceNaira, clampTicketCapacity, earningsEstimate, estimateText, isPriceStepField,
   ticketsTooManyForVideo, type TicketDraft,
 } from "@/lib/roomTickets";
 import { DEFAULT_RATES } from "@shared/money";
 import { useRoomsConfig } from "@/lib/roomsApi";
+import VerifyAgeLink from "@/components/age-review/VerifyAgeLink";
 import { SwitchRow } from "./parts";
 import { FieldErr, type FieldError } from "./StepBasics";
 
@@ -42,7 +43,7 @@ export default function StepPrice({ draft, set, error, liveVideo = false }: Prop
   const generalErr = error && !isPriceStepField(error.field) ? error.reason : null;
   return (
     <div className="space-y-5" data-testid="step-price">
-      {generalErr && <p role="alert" className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm" data-testid="price-general-error">{generalErr}</p>}
+      {generalErr && <p role="alert" className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm" data-testid="price-general-error">{generalErr}{generalErr === TICKET_CREATE_ERROR.HOST_NOT_VERIFIED && <> <VerifyAgeLink /></>}</p>}
       <div className="space-y-2">
         <Label htmlFor="wiz-price">{PRICE_COPY.priceLabel}</Label>
         <div className="flex items-center gap-2 rounded-2xl bg-muted/50 p-2">

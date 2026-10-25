@@ -5,6 +5,7 @@ import { useState } from "react";
 import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Loader2Icon } from "@/components/ui/icons";
+import VerifyAgeLink from "@/components/age-review/VerifyAgeLink";
 import type { SprayTier } from "@shared/money";
 import { sprayPrice } from "@shared/spray";
 import { formatNaira } from "@/lib/roomTickets";
@@ -61,6 +62,7 @@ export default function RoomLimitSheet({ roomId, token, block, tier, verified, o
         })}
       </div>
       <p className="text-xs text-muted-foreground">{SPRAY_COPY.limitNote}</p>
+      <VerifyAgeLink />
       {error && <p role="alert" className="text-sm text-destructive" data-testid="spray-limit-error">{error}</p>}
       <Button variant="ghost" className="min-h-[44px]" onClick={onClose} data-testid="spray-limit-close">{SPRAY_COPY.done}</Button>
     </div>
