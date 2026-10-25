@@ -250,7 +250,7 @@ try {
   const C = await get(`/api/admin/rooms/sprays/transactions.csv?${range}&roomId=${ROOM2}`, FIN);
   const lines = C.text.trim().split("\r\n");
   check("csv: columns", C.status === 200 && lines[0] === "id,created_at,status,ended_as,room,host,payer,recipient,tier,amount_ngn,vat,fee,reserve,platform,host_share,recipient_share,provider_ref,batch_id");
-  check("csv: attachment, one row per spray", /attachment/.test(C.headers.get("content-disposition") ?? "") && /text\/csv/.test(C.headers.get("content-type") ?? "") && lines.length === 9);
+  check("csv: attachment, one row per spray", /attachment/.test(C.headers.get("content-disposition") ?? "") && /text\/csv/.test(C.headers.get("content-type") ?? "") && lines.length === 10, String(lines.length)); // 8 seeded + the `tl` spray added in the detail section + the header
   const C2 = await get(`/api/admin/rooms/sprays/transactions.csv?${range}&roomId=${ROOM}&status=delivered`, FIN);
   check("csv: a cell with a comma and quotes is quoted and doubled", C2.text.includes(`"sg room =1+1,""x"""`), C2.text);
   const injected = await mkRoom(H, "=cmd|' /C calc'!A0");
@@ -262,7 +262,7 @@ try {
   ledgerTuning.csvMaxRows = 50_000;
   check("csv: over the cap is a 413 TOO_MANY_ROWS with no data", C4.status === 413 && C4.json?.code === "TOO_MANY_ROWS" && !C4.text.includes("id,created_at"));
   const ex = await audits("room_spray.export");
-  check("csv export audited", ex.length >= 3 && /"rows":8/.test(ex.find((a) => a.details.includes(ROOM2))?.details ?? ""), JSON.stringify(ex[0]));
+  check("csv export audited", ex.length >= 3 && /"rows":9/.test(ex.find((a) => a.details.includes(ROOM2))?.details ?? ""), JSON.stringify(ex[0]));
 
   // Paystack look-up (read-only)
   const vref = mine[0].ref;
@@ -328,7 +328,7 @@ try {
     const prefixOnly = await list(`roomId=${ROOM2}&payer=${encodeURIComponent(p1Name.slice(0, 6))}`);
     check("filter payer is exact, not a prefix", prefixOnly.status === 200 && prefixOnly.json.rows.length === 0);
     const byHost = await list(`roomId=${ROOM2}&host=${encodeURIComponent(hostName)}&recipient=${encodeURIComponent(hostName)}&status=delivered`);
-    check("filters host + recipient by username", byHost.json.rows.length === 1);
+    check("filters host + recipient by username", byHost.json.rows.length === 2 && byHost.json.rows.every((r: any) => r.status === "delivered"), String(byHost.json.rows.length)); // mine[0] and the `tl` spray
     const unknown = await list(`payer=no_such_user_${stamp}`);
     check("an unknown username is an empty result, not an error", unknown.status === 200 && unknown.json.rows.length === 0);
     const byRoom = await list(`room=${encodeURIComponent("SG LEDGER")}`);

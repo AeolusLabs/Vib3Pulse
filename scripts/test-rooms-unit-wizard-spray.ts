@@ -106,8 +106,8 @@ test("placeholder copy no longer used", () => {
 
 test("controls reflects the saved spray value after a PATCH", () => {
   const f = src("../client/src/components/rooms/host/ControlsMoney.tsx");
-  assert.ok(f.includes("if (res.ok) { setOn(next); onChanged?.(); }"), "saved value kept and the room refetched");
-  assert.ok(f.includes('if (on && !next && room.status === "live")'), "confirm only when the saved value is on");
+  assert.ok(f.includes("if (res.ok) { setOn(next); setOverride(next); onChanged?.(); }"), "saved value kept (until the next sprayOn event) and the room refetched");
+  assert.ok(f.includes('if (shownOn && !next && room.status === "live")'), "confirm only when spraying is shown on");
   assert.ok(src("../client/src/components/rooms/host/ControlsSheet.tsx").includes("<ControlsMoney roomId={roomId} onChanged={onSprayChanged}"));
   assert.ok(src("../client/src/components/rooms/shell/RoomShell.tsx").includes("onSprayChanged={onSprayChanged}"), "RoomShell passes the room refetch");
 });

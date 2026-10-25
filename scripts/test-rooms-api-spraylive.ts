@@ -278,9 +278,13 @@ try {
   const got = await K.gs[0].waitFor((x) => settingsMsg(x) && x.sprayOn === false && x.sprayBlockedByAdmin === true && K.gs[0].msgs.indexOf(x) >= m[1], 8000);
   check("admin block: broadcast carries sprayOn false and sprayBlockedByAdmin true", bl.status === 200 && bl.json?.changed === true && !!got, JSON.stringify(bl.json));
   const gate = await sprayGate(K.id, PC, H4, "start");
-  const host403 = await rest("PATCH", `/api/rooms/${K.id}`, H4, { sprayEnabled: true });
+  // The room has spraying ON, so a host PATCH "on" now would be a no-op (200). The refusal matters once the host has turned it off:
+  // first off (always allowed), then "on" again must be refused while the admin block stands.
   sprayToggleCooldown.clear(K.id);
   const hostOff = await rest("PATCH", `/api/rooms/${K.id}`, H4, { sprayEnabled: false });
+  sprayToggleCooldown.clear(K.id);
+  const host403 = await rest("PATCH", `/api/rooms/${K.id}`, H4, { sprayEnabled: true });
+  sprayToggleCooldown.clear(K.id);
   const sneaky = await rest("PATCH", `/api/rooms/${K.id}`, H4, { sprayAdminBlocked: false, sprayBlockReason: "x" });
   const hostView = (await rest("GET", `/api/rooms/${K.id}`, H4)).json?.room;
   const row = (await q(`select spray_admin_blocked, spray_block_reason, spray_blocked_by from rooms where id = $1`, [K.id]))[0];

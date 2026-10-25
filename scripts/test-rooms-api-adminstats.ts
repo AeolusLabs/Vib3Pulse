@@ -144,7 +144,7 @@ try {
   const lrow = rows.find((r) => r.id === live);
   check("live rooms: title, host username, age limit, member count, ticketed and hostFrozen are present", lrow?.title === "as live room" && lrow.hostUsername.startsWith("as_host") && lrow.ageLimit === "18+" && typeof lrow.members === "number" && lrow.ticketed === true && lrow.hostFrozen === false, JSON.stringify(lrow));
   check("live rooms: a frozen host's room is flagged", rows.find((r) => r.id === live2)?.hostFrozen === true);
-  check("live rooms: super_admin allowed, finance_manager 403, user_support 403, signed out 401", (await get("/api/admin/rooms/live", SA)).status === 200 && (await get("/api/admin/rooms/live", FIN)).status === 403 && (await get("/api/admin/rooms/live", SUP)).status === 403 && (await get("/api/admin/rooms/live", null)).status === 401);
+  check("live rooms: super_admin and finance_manager allowed, user_support 403, signed out 401", (await get("/api/admin/rooms/live", SA)).status === 200 && (await get("/api/admin/rooms/live", FIN)).status === 200 && (await get("/api/admin/rooms/live", SUP)).status === 403 && (await get("/api/admin/rooms/live", null)).status === 401);
 
   // ---- spray breakdown
   const sp = await get(`/api/admin/rooms/sprays?${range}`, FIN);
