@@ -10,8 +10,6 @@
 import type { ProviderRefundState } from "./paystack.js";
 import { roomFeatures } from "../rooms/features";
 import { assertPaymentTokenKeyForBoot } from "./tokenCrypto.js";
-import { assertEvidenceKeyForBoot } from "../identity/evidenceCrypto.js";
-import { ageReviewEnabled } from "../identity/ageReviewFeatures.js";
 import { createPaystackSplitProvider } from "./paystackSplit.js";
 import { MockSplitProvider } from "./mockSplitProvider.js";
 
@@ -100,8 +98,6 @@ export interface SplitPaymentProvider {
 // Rule B8: production with the spray flag ON and no PAYMENT_TOKEN_KEY refuses to start. This module is loaded at boot by
 // the spray routes, so the check runs at boot. With the flag OFF (today) it never throws.
 assertPaymentTokenKeyForBoot(roomFeatures.spray, process.env);
-// Same rule for AGE_EVIDENCE_KEY when AGE_REVIEW is on.
-assertEvidenceKeyForBoot(ageReviewEnabled(), process.env);
 
 let testOverride: SplitPaymentProvider | null = null;
 let cached: SplitPaymentProvider | null = null;

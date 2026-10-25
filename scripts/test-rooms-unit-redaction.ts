@@ -41,5 +41,12 @@ test("existing credential keys are still stripped (list not weakened)", () => {
   }
 });
 
+test("age review evidence and fingerprint keys are stripped, the selfie code is kept", () => {
+  const out = redact({ id: "r1", code: "ABC234", bytes_enc: "x", bytesEnc: "x", documentFingerprint: "f", document_fingerprint: "f", nested: [{ code: "Z", bytesEnc: "y", documentFingerprint: "g" }] });
+  assert.deepEqual(out, { id: "r1", code: "ABC234", nested: [{ code: "Z" }] });
+  for (const k of ["bytes_enc", "bytesEnc", "documentFingerprint", "document_fingerprint"]) assert.ok(SENSITIVE_RESPONSE_KEYS.has(k), k);
+  assert.ok(!SENSITIVE_RESPONSE_KEYS.has("code"));
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

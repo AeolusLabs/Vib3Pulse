@@ -6,6 +6,8 @@ import { parseFlag } from "../rooms/features";
 export const AGE_REVIEW_PAUSED_KEY = "age_review_paused";
 const CACHE_MS = 5000;
 let cache: { v: boolean; at: number } | null = null;
+// Bumped on every write: a read that started before it must not repopulate the cache with the old value.
+let generation = 0;
 
 /** Exactly "1" or "true" turns it on; read each call so tests can flip it. */
 export function ageReviewEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -14,10 +16,11 @@ export function ageReviewEnabled(env: NodeJS.ProcessEnv = process.env): boolean 
 
 export async function ageReviewPaused(): Promise<boolean> {
   if (cache && Date.now() - cache.at < CACHE_MS) return cache.v;
+  const gen = generation;
   const { pool } = await import("../storage");
   const row = (await pool.query(`select enabled from room_controls where key = $1`, [AGE_REVIEW_PAUSED_KEY])).rows[0] as { enabled: boolean } | undefined;
   const v = row?.enabled === true;
-  cache = { v, at: Date.now() };
+  if (gen === generation) cache = { v, at: Date.now() };
   return v;
 }
 
@@ -32,6 +35,7 @@ export async function setAgeReviewPaused(p: { on: boolean; adminId: string; reas
      select coalesce((select enabled from prev), false) as was from up`,
     [AGE_REVIEW_PAUSED_KEY, p.on, p.reason, p.adminId],
   );
+  generation++;
   cache = null;
   return { changed: (r.rows[0]?.was === true) !== p.on };
 }

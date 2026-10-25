@@ -10,7 +10,7 @@ import { invalidateCache, postsCache, eventsCache, storiesCache } from "./cache"
 import { insertAdminUserSchema, adminRoles, type AdminRole } from "@shared/schema";
 import { z } from "zod";
 import { getSocialPlanAdminStats } from "./services/socialAdminStats";
-import { requireAdmin, requireAdminPending, requireRole, requireSuperAdmin, isMfaEnrolled, mfaRequired } from "./services/adminSecurity";
+import { requireAdmin, requireStaffNotReviewer, requireAdminPending, requireRole, requireSuperAdmin, isMfaEnrolled, mfaRequired } from "./services/adminSecurity";
 import { registerSprayClawbackAdminRoutes } from "./rooms/clawbacks";
 import { registerRoomsAdminRoutes } from "./rooms/adminRoutes";
 import { registerRoomRecapAdminRoute } from "./rooms/recap";
@@ -676,7 +676,7 @@ export function setupAdminRoutes(app: Express) {
   // ============================================
 
   // Get platform stats
-  app.get("/api/admin/stats", requireAdmin, async (req: Request, res: Response) => {
+  app.get("/api/admin/stats", requireStaffNotReviewer, async (req: Request, res: Response) => {
     try {
       const stats = await storage.getPlatformStats();
       res.json(stats);
@@ -688,7 +688,7 @@ export function setupAdminRoutes(app: Express) {
   // Time-series dashboard analytics — date-ranged, optionally filtered by
   // currency/country, with period-over-period totals so the UI can show
   // growth %. Defaults to the last 30 days.
-  app.get("/api/admin/analytics/overview", requireAdmin, async (req: Request, res: Response) => {
+  app.get("/api/admin/analytics/overview", requireStaffNotReviewer, async (req: Request, res: Response) => {
     try {
       const to = req.query.to ? new Date(req.query.to as string) : new Date();
       const from = req.query.from ? new Date(req.query.from as string) : new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
@@ -706,7 +706,7 @@ export function setupAdminRoutes(app: Express) {
   });
 
   // Dropdown options for the currency/country filters across the admin panel.
-  app.get("/api/admin/meta/filters", requireAdmin, async (req: Request, res: Response) => {
+  app.get("/api/admin/meta/filters", requireStaffNotReviewer, async (req: Request, res: Response) => {
     try {
       const options = await storage.getAdminFilterOptions();
       res.json(options);
@@ -717,7 +717,7 @@ export function setupAdminRoutes(app: Express) {
 
   // Real health check — DB connectivity + payment provider configuration.
   // Replaces a previously-hardcoded "all systems operational" card.
-  app.get("/api/admin/health", requireAdmin, async (req: Request, res: Response) => {
+  app.get("/api/admin/health", requireStaffNotReviewer, async (req: Request, res: Response) => {
     const health: Record<string, { status: "ok" | "down"; detail?: string }> = {};
     try {
       await pool.query("SELECT 1");
@@ -1317,7 +1317,7 @@ export function setupAdminRoutes(app: Express) {
   });
 
   // Cache stats — any admin, read-only
-  app.get("/api/admin/cache-stats", requireAdmin, async (req: Request, res: Response) => {
+  app.get("/api/admin/cache-stats", requireStaffNotReviewer, async (req: Request, res: Response) => {
     try {
       res.json({
         posts:     postsCache.stats(),
@@ -1408,7 +1408,7 @@ export function setupAdminRoutes(app: Express) {
 
   // GET /api/admin/social/dashboard
   // Overview stats + daily posts/cost series + platform breakdown for last 30 days.
-  app.get("/api/admin/social/dashboard", requireAdmin, async (req, res) => {
+  app.get("/api/admin/social/dashboard", requireStaffNotReviewer, async (req, res) => {
     try {
       const dateFrom = thirtyDaysAgo();
       const [stats, daily, byPlatform] = await Promise.all([
@@ -1443,7 +1443,7 @@ export function setupAdminRoutes(app: Express) {
 
   // GET /api/admin/social/organizers?limit=50&offset=0
   // Organizer list with aggregate post + cost stats. No individual email or PII.
-  app.get("/api/admin/social/organizers", requireAdmin, async (req, res) => {
+  app.get("/api/admin/social/organizers", requireStaffNotReviewer, async (req, res) => {
     try {
       const limit  = Math.min(parseInt((req.query.limit  as string) || "50", 10), 200);
       const offset = Math.max(parseInt((req.query.offset as string) || "0",  10), 0);
@@ -1464,7 +1464,7 @@ export function setupAdminRoutes(app: Express) {
 
   // GET /api/admin/social/costs
   // Daily cost series, platform split, month-to-date total, and linear projection.
-  app.get("/api/admin/social/costs", requireAdmin, async (req, res) => {
+  app.get("/api/admin/social/costs", requireStaffNotReviewer, async (req, res) => {
     try {
       const dateFrom    = thirtyDaysAgo();
       const [stats, daily, byPlatform] = await Promise.all([
@@ -1519,7 +1519,7 @@ export function setupAdminRoutes(app: Express) {
 
   // GET /api/admin/social/platforms
   // Per-platform connection counts and post/cost stats for the last 30 days.
-  app.get("/api/admin/social/platforms", requireAdmin, async (req, res) => {
+  app.get("/api/admin/social/platforms", requireStaffNotReviewer, async (req, res) => {
     try {
       const dateFrom   = thirtyDaysAgo();
       const breakdown  = await storage.getSocialPlatformBreakdown(dateFrom);
@@ -1539,7 +1539,7 @@ export function setupAdminRoutes(app: Express) {
   // Connected accounts with no successful blast in 60 days — these cost
   // Zernio's per-connected-account fee with no offsetting revenue and will be
   // auto-disconnected by the nightly cleanup job (server/socialCleanupScheduler.ts).
-  app.get("/api/admin/social/stale-connections", requireAdmin, async (req, res) => {
+  app.get("/api/admin/social/stale-connections", requireStaffNotReviewer, async (req, res) => {
     try {
       const stale = await storage.getStaleConnectedSocials(60);
       res.json(stale.map((c) => ({

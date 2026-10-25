@@ -16,6 +16,7 @@ const test = (name: string, fn: () => void) => {
   catch (e: any) { failed++; console.log(`FAIL ${name}  ${e.message.split("\n")[0]}`); }
 };
 const root = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+const AAD = "11111111-1111-1111-1111-111111111111:document";
 const KEY_A = crypto.randomBytes(32).toString("base64");
 const KEY_B = crypto.randomBytes(32).toString("base64");
 const withKey = <T>(k: string | undefined, fn: () => T): T => {
@@ -35,31 +36,51 @@ test("age review schema SQL equals the .sql file", () => {
 test("evidence crypto round trip", () => {
   withKey(KEY_A, () => {
     const plain = crypto.randomBytes(5000);
-    const enc = encryptEvidence(plain);
+    const enc = encryptEvidence(plain, AAD);
     assert.equal(enc.subarray(0, 3).toString(), "v1:");
     assert.ok(!enc.includes(plain.subarray(0, 32)));
-    assert.deepEqual(decryptEvidence(enc), plain);
-    assert.notDeepEqual(encryptEvidence(plain), enc);
+    assert.deepEqual(decryptEvidence(enc, AAD), plain);
+    assert.notDeepEqual(encryptEvidence(plain, AAD), enc);
   });
 });
 
 test("tamper is detected", () => {
   withKey(KEY_A, () => {
-    const enc = encryptEvidence(Buffer.from("hello evidence"));
+    const enc = encryptEvidence(Buffer.from("hello evidence"), AAD);
     for (const i of [5, 20, enc.length - 1]) {
       const bad = Buffer.from(enc); bad[i] ^= 1;
-      assert.throws(() => decryptEvidence(bad), new RegExp(EVIDENCE_DECRYPT_FAILED));
+      assert.throws(() => decryptEvidence(bad, AAD), new RegExp(EVIDENCE_DECRYPT_FAILED));
     }
-    assert.throws(() => decryptEvidence(enc.subarray(0, 10)), new RegExp(EVIDENCE_DECRYPT_FAILED));
-    assert.throws(() => decryptEvidence(Buffer.concat([Buffer.from("v2:"), enc.subarray(3)])), new RegExp(EVIDENCE_DECRYPT_FAILED));
+    assert.throws(() => decryptEvidence(enc.subarray(0, 10), AAD), new RegExp(EVIDENCE_DECRYPT_FAILED));
+    assert.throws(() => decryptEvidence(Buffer.concat([Buffer.from("v2:"), enc.subarray(3)]), AAD), new RegExp(EVIDENCE_DECRYPT_FAILED));
   });
 });
 
+test("ciphertext moved to another row or kind fails closed", () => {
+  withKey(KEY_A, () => {
+    const enc = encryptEvidence(Buffer.from("selfie bytes"), "req-1:selfie");
+    assert.deepEqual(decryptEvidence(enc, "req-1:selfie"), Buffer.from("selfie bytes"));
+    assert.throws(() => decryptEvidence(enc, "req-1:document"), new RegExp(EVIDENCE_DECRYPT_FAILED));
+    assert.throws(() => decryptEvidence(enc, "req-2:selfie"), new RegExp(EVIDENCE_DECRYPT_FAILED));
+    assert.throws(() => encryptEvidence(Buffer.from("x"), ""), /bad input/);
+  });
+});
+
+test("boot rule is called from server/index.ts, not only from a lazily loaded module", () => {
+  const idx = readFileSync(join(root, "server/index.ts"), "utf8");
+  assert.ok(/assertEvidenceKeyForBoot\(ageReviewEnabled\(\), process\.env\)/.test(idx));
+});
+
+test("pause cache ignores a read that started before a write (structure)", () => {
+  const f = readFileSync(join(root, "server/identity/ageReviewFeatures.ts"), "utf8");
+  assert.ok(/const gen = generation;/.test(f) && /if \(gen === generation\) cache =/.test(f) && /generation\+\+;/.test(f));
+});
+
 test("wrong key fails closed", () => {
-  const enc = withKey(KEY_A, () => encryptEvidence(Buffer.from("secret image")));
-  assert.throws(() => withKey(KEY_B, () => decryptEvidence(enc)), new RegExp(EVIDENCE_DECRYPT_FAILED));
-  assert.throws(() => withKey(undefined, () => decryptEvidence(enc)), /AGE_EVIDENCE_KEY/);
-  assert.throws(() => withKey(undefined, () => encryptEvidence(Buffer.from("x"))), /AGE_EVIDENCE_KEY/);
+  const enc = withKey(KEY_A, () => encryptEvidence(Buffer.from("secret image"), AAD));
+  assert.throws(() => withKey(KEY_B, () => decryptEvidence(enc, AAD)), new RegExp(EVIDENCE_DECRYPT_FAILED));
+  assert.throws(() => withKey(undefined, () => decryptEvidence(enc, AAD)), /AGE_EVIDENCE_KEY/);
+  assert.throws(() => withKey(undefined, () => encryptEvidence(Buffer.from("x"), AAD)), /AGE_EVIDENCE_KEY/);
 });
 
 test("boot refuses in production with flag on and no key, allows flag off", () => {

@@ -21,6 +21,8 @@ import { storage, ensureSchema } from "./storage";
 import { comparePassword, userToSessionUser, type SessionUser } from "./auth";
 import { wsManager } from "./websocket";
 import { logsBody } from "./identity/ageReviewLogPolicy";
+import { assertEvidenceKeyForBoot } from "./identity/evidenceCrypto";
+import { ageReviewEnabled } from "./identity/ageReviewFeatures";
 import { setupAdminRoutes } from "./admin-routes";
 import {
   csrfProtection,
@@ -30,6 +32,9 @@ import {
   logSecurityEvent,
   redactSensitiveFields
 } from "./security";
+
+// Production with AGE_REVIEW on and no valid AGE_EVIDENCE_KEY refuses to start (independent of which modules load).
+assertEvidenceKeyForBoot(ageReviewEnabled(), process.env);
 
 const app = express();
 

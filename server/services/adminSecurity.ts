@@ -4,7 +4,7 @@ import { authenticator } from "otplib";
 import QRCode from "qrcode";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db, storage } from "../storage";
-import { adminActivityLogs, adminMfa, type AdminRole, type AdminUser } from "@shared/schema";
+import { adminActivityLogs, adminMfa, adminRoles, type AdminRole, type AdminUser } from "@shared/schema";
 
 declare module "express-session" {
   interface SessionData {
@@ -99,6 +99,8 @@ export function adminGate(opts: GateOpts = {}) {
 export const requireAdmin = adminGate();
 export const requireAdminPending = adminGate({ allowPendingMfa: true }); // /me, /logout and the MFA endpoints themselves
 export const requireRole = (...roles: AdminRole[]) => adminGate({ roles });
+// Every staff role except the single-purpose age_reviewer, for dashboards and stats that reviewer has no need to see.
+export const requireStaffNotReviewer = adminGate({ roles: adminRoles.filter((r) => r !== "age_reviewer") });
 export const requireSuperAdmin = adminGate({ roles: ["super_admin"] });
 
 export const MODERATOR_ROLES: AdminRole[] = ["content_moderator", "event_reviewer"];
