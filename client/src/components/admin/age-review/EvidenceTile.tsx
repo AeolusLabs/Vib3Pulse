@@ -25,6 +25,7 @@ export default function EvidenceTile({ requestId, evidence, reviewer, revealedId
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<{ cancel: () => void } | null>(null);
   const urlRef = useRef<string | null>(null);
+  const gone = useRef(false);
 
   const drop = useCallback(() => {
     timer.current?.cancel(); timer.current = null;
@@ -32,13 +33,14 @@ export default function EvidenceTile({ requestId, evidence, reviewer, revealedId
     setSrc(null);
   }, []);
 
-  useEffect(() => drop, [drop]);
+  useEffect(() => { gone.current = false; return () => { gone.current = true; drop(); }; }, [drop]);
   useEffect(() => { if (revealedId !== evidence.id && urlRef.current) drop(); }, [revealedId, evidence.id, drop]);
 
   const reveal = async () => {
     setBusy(true); setError(null);
     try {
-      const url = await revealEvidence(requestId, evidence.id);
+      const url = await revealEvidence(requestId, evidence.id, () => gone.current);
+      if (url === null || gone.current) { if (url) URL.revokeObjectURL(url); return; }
       drop();
       urlRef.current = url;
       setStamp(watermarkText(reviewer, requestId));
@@ -46,9 +48,10 @@ export default function EvidenceTile({ requestId, evidence, reviewer, revealedId
       onReveal(evidence.id);
       timer.current = startReblur(() => { drop(); onReveal(null); }, REBLUR_MS);
     } catch (e) {
+      if (gone.current) return;
       setError(errText(e));
       if (e instanceof ReviewApiError && (e.code === "WRONG_STATE" || e.code === "NOT_FOUND")) { setError("The user cancelled or it expired."); onGone(); }
-    } finally { setBusy(false); }
+    } finally { if (!gone.current) setBusy(false); }
   };
 
   return (
@@ -56,7 +59,7 @@ export default function EvidenceTile({ requestId, evidence, reviewer, revealedId
       <div className="relative grid aspect-[4/3] place-items-center overflow-hidden rounded-xl border border-slate-700 bg-slate-900">
         {src ? (
           <>
-            <img src={src} alt={`${KIND[evidence.kind]} (revealed)`} className="h-full w-full object-contain" draggable={false} />
+            <img src={src} alt={`${KIND[evidence.kind]} (revealed)`} className="h-full w-full object-contain" draggable={false} referrerPolicy="no-referrer" />
             <span aria-hidden className="pointer-events-none absolute inset-0 grid place-items-center overflow-hidden text-center text-xs font-medium tabular-nums text-white/40 [text-shadow:0_0_2px_#000] [transform:rotate(-18deg)]">
               {Array.from({ length: 6 }, (_, i) => <span key={i} className="block w-full whitespace-nowrap py-3">{stamp}</span>)}
             </span>

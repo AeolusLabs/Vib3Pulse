@@ -5,7 +5,7 @@ import { join } from "node:path";
 import {
   ADMIN_ERROR_CODES, AGE_REVIEW_PATH, CHECKLIST_KEYS, CHECKLIST_LABEL, CONFIRM_TEXT, OUTCOME_HELP, OUTCOME_LABEL, REBLUR_MS, STALE_TEXT, STATUS_META,
   adminErrorMessage, ageText, canOverrideDuplicate, canPurge, canSetPause, decisionBody, decisionReady, emptyChecklist, navAllowed, pauseDisabledReason,
-  purgeReady, registeredAge, startReblur, statusMeta, watermarkText, type DecisionForm,
+  purgeReady, registeredAge, approveDescription, isAgeReviewOff, OFF_PANEL, outcomesFor, requiredChecks, urlUnlessCancelled, startReblur, statusMeta, watermarkText, type DecisionForm,
 } from "../client/src/lib/adminAgeReviewUi";
 
 let passed = 0, failed = 0;
@@ -18,7 +18,7 @@ const read = (p: string) => readFileSync(join(root, p), "utf8");
 const dir = "client/src/components/admin/age-review";
 const files = [...readdirSync(join(root, dir)).map((f) => `${dir}/${f}`), "client/src/pages/admin/AdminAgeReviews.tsx", "client/src/lib/adminAgeReviewApi.ts", "client/src/lib/adminAgeReviewUi.ts"];
 
-const form = (o: Partial<DecisionForm> = {}): DecisionForm => ({ outcome: "verify", checklist: emptyChecklist(), idBirthdate: "2000-05-01", documentNumber: "A1234567", declineReason: "", note: "", overrideReason: "", ...o });
+const form = (o: Partial<DecisionForm> = {}): DecisionForm => ({ outcome: "verify", checklist: emptyChecklist(), idBirthdate: "2000-05-01", documentNumber: "A1234567", documentType: "passport", declineReason: "", note: "", overrideReason: "", ...o });
 const allTicked = () => Object.fromEntries(CHECKLIST_KEYS.map((k) => [k, true])) as DecisionForm["checklist"];
 
 test("status labels have a non-colour cue", () => {
@@ -156,6 +156,82 @@ test("no image data in query cache (source check)", () => {
   assert.match(drawer, /gcTime: 0/);
   const all = files.map(read).join("\n");
   assert.ok(!/queryFn:[^\n]*revealEvidence/.test(all));
+});
+
+test("live verify sends documentType and is gated on it", () => {
+  const live = (o: Partial<DecisionForm> = {}) => form({ checklist: { ...allTicked(), codeMatches: false }, documentType: "", ...o });
+  assert.equal(decisionReady(live(), "live"), false);
+  assert.equal(decisionReady(live({ documentType: "nin_slip" }), "live"), true);
+  assert.equal(decisionReady(live({ documentType: "bogus" }), "live"), false);
+  const body = decisionBody(live({ documentType: "nin_slip" }), { overrideAllowed: false });
+  assert.equal(body.documentType, "nin_slip");
+  assert.equal(body.documentNumber, "A1234567");
+  assert.equal(decisionReady(live({ outcome: "teen_correction", documentType: "" }), "live"), false);
+  const f = read(`${dir}/DecisionForm.tsx`);
+  assert.match(f, /documentType === null &&/);
+  assert.match(f, /select-document-type/);
+  assert.match(read(`${dir}/DetailDrawer.tsx`), /documentType=\{r\.documentType\}/);
+});
+
+test("live checklist needs five checks", () => {
+  assert.deepEqual([...requiredChecks("live")], ["faceMatches", "documentTypeMatches", "notExpired", "birthdateReadable", "noEditing"]);
+  assert.equal(requiredChecks("upload").length, 6);
+  const five = { ...allTicked(), codeMatches: false };
+  assert.equal(decisionReady(form({ checklist: five }), "live"), true);
+  assert.equal(decisionReady(form({ checklist: five }), "upload"), false);
+  for (const k of requiredChecks("live")) { const c = { ...five, [k]: false }; assert.equal(decisionReady(form({ checklist: c }), "live"), false, k); }
+  const src = read(`${dir}/DecisionForm.tsx`);
+  assert.ok(!/no code is needed/i.test(src));
+  assert.match(src, /requiredChecks\(method\)\.map/);
+});
+
+test("needs_more hidden for live", () => {
+  assert.ok(!outcomesFor("live").includes("needs_more"));
+  assert.ok(outcomesFor("upload").includes("needs_more"));
+  assert.equal(outcomesFor("live").length, 5);
+  assert.equal(decisionReady(form({ outcome: "needs_more" }), "live"), false);
+  assert.equal(decisionReady(form({ outcome: "needs_more" }), "upload"), true);
+});
+
+test("second approver sees the proposed birthdate", () => {
+  assert.equal(approveDescription(true, "2001-02-03", "1999-12-31"), "Change 2001-02-03 to 1999-12-31 and verify the account.");
+  assert.match(approveDescription(false, "2001-02-03", "1999-12-31"), /declined/);
+  const d = read(`${dir}/DetailDrawer.tsx`);
+  assert.match(d, /Proposed birthdate \(from the ID\)/);
+  assert.match(d, /approveDescription\(approve === true/);
+});
+
+test("sheet closes while the call is up (source check)", () => {
+  const d = read(`${dir}/DetailDrawer.tsx`);
+  assert.match(d, /<Sheet open=\{!!id && !call\}/);
+  assert.match(d, /joinRef\.current\?\.focus\(\)/);
+  const c = read(`${dir}/ReviewerCall.tsx`);
+  assert.match(c, /pointer-events-auto/);
+  assert.match(c, /e\.key === "Escape"/);
+  assert.match(read(`${dir}/EvidenceTile.tsx`), /referrerPolicy="no-referrer"/);
+});
+
+test("late reveal after unmount creates no blob", () => {
+  let made = 0;
+  const create = () => { made++; return "blob:x"; };
+  assert.equal(urlUnlessCancelled(new Blob(["x"]), () => true, create), null);
+  assert.equal(made, 0);
+  assert.equal(urlUnlessCancelled(new Blob(["x"]), () => false, create), "blob:x");
+  assert.equal(made, 1);
+  const tile = read(`${dir}/EvidenceTile.tsx`);
+  assert.match(tile, /revealEvidence\(requestId, evidence\.id, \(\) => gone\.current\)/);
+  assert.match(tile, /gone\.current = true/);
+  assert.match(read("client/src/lib/adminAgeReviewApi.ts"), /urlUnlessCancelled\(await res\.blob\(\), cancelled/);
+});
+
+test("AGE_REVIEW_OFF panel", () => {
+  assert.equal(isAgeReviewOff({ status: 404, code: "AGE_REVIEW_OFF" }), true);
+  assert.equal(isAgeReviewOff({ status: 404, code: "NOT_FOUND" }), false);
+  assert.equal(isAgeReviewOff(null), false);
+  assert.equal(OFF_PANEL.title, "Age review is not switched on");
+  assert.ok(!/[—–]/.test(OFF_PANEL.body));
+  assert.match(read("client/src/pages/admin/AdminAgeReviews.tsx"), /data-testid="age-review-off"/);
+  assert.equal(adminErrorMessage("AGE_REVIEW_OFF"), "Age review is not switched on.");
 });
 
 test("copy has no em or en dashes or the word cash", () => {

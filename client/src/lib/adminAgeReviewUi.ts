@@ -13,7 +13,11 @@ export const CHECKLIST_LABEL: Record<ChecklistKey, string> = {
   noEditing: "There are no signs of editing",
 };
 export const emptyChecklist = (): Checklist => ({ faceMatches: false, codeMatches: false, documentTypeMatches: false, notExpired: false, birthdateReadable: false, noEditing: false });
-export const checklistComplete = (c: Partial<Checklist>): boolean => CHECKLIST_KEYS.every((k) => c[k] === true);
+export type ReviewMethod = "upload" | "live";
+/** A live check has no selfie code, so the server asks for the other five checks only. */
+export const requiredChecks = (method: ReviewMethod = "upload"): readonly ChecklistKey[] =>
+  method === "live" ? CHECKLIST_KEYS.filter((k) => k !== "codeMatches") : CHECKLIST_KEYS;
+export const checklistComplete = (c: Partial<Checklist>, method: ReviewMethod = "upload"): boolean => requiredChecks(method).every((k) => c[k] === true);
 
 export type Outcome = "verify" | "teen_correction" | "birthdate_change" | "needs_more" | "decline" | "not_eligible_minor";
 export const OUTCOME_LABEL: Record<Outcome, string> = {
@@ -47,6 +51,12 @@ export const CONFIRM_TEXT: Partial<Record<Outcome, string>> = {
   birthdate_change: "This asks a different super admin to approve a new birthdate. Nothing changes until they do.",
 };
 
+export const outcomesFor = (method: ReviewMethod): Outcome[] =>
+  (["verify", "teen_correction", "birthdate_change", "needs_more", "decline", "not_eligible_minor"] as Outcome[]).filter((o) => !(method === "live" && o === "needs_more"));
+export const DOC_TYPES = ["passport", "drivers_licence", "national_id", "nin_slip"] as const;
+export const DOC_TYPE_LABEL: Record<(typeof DOC_TYPES)[number], string> = { passport: "Passport", drivers_licence: "Driver's licence", national_id: "National ID card", nin_slip: "NIN slip" };
+const ID_OUTCOMES: Outcome[] = ["verify", "teen_correction", "birthdate_change"];
+
 export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 export const isIsoDate = (s: string): boolean => {
   if (!DATE_RE.test(s)) return false;
@@ -59,15 +69,18 @@ export interface DecisionForm {
   checklist: Checklist;
   idBirthdate: string;
   documentNumber: string;
+  documentType: string;
   declineReason: string;
   note: string;
   overrideReason: string;
 }
 
 /** Whether the submit button is enabled. Verify stays off until all six checks are ticked. */
-export function decisionReady(f: DecisionForm): boolean {
+export function decisionReady(f: DecisionForm, method: ReviewMethod = "upload"): boolean {
+  if (f.outcome && ID_OUTCOMES.includes(f.outcome) && !(DOC_TYPES as readonly string[]).includes(f.documentType)) return false;
+  if (f.outcome === "needs_more" && method === "live") return false;
   switch (f.outcome) {
-    case "verify": return checklistComplete(f.checklist) && isIsoDate(f.idBirthdate) && f.documentNumber.trim().length >= 3;
+    case "verify": return checklistComplete(f.checklist, method) && isIsoDate(f.idBirthdate) && f.documentNumber.trim().length >= 3;
     case "teen_correction":
     case "birthdate_change": return isIsoDate(f.idBirthdate);
     case "decline": return (DECLINE_REASONS as readonly string[]).includes(f.declineReason);
@@ -79,7 +92,7 @@ export function decisionReady(f: DecisionForm): boolean {
 
 export function decisionBody(f: DecisionForm, opts: { overrideAllowed: boolean }): Record<string, unknown> {
   const body: Record<string, unknown> = { outcome: f.outcome, checklist: f.checklist };
-  if (f.outcome === "verify" || f.outcome === "teen_correction" || f.outcome === "birthdate_change") body.idBirthdate = f.idBirthdate;
+  if (f.outcome && ID_OUTCOMES.includes(f.outcome)) { body.idBirthdate = f.idBirthdate; body.documentType = f.documentType; }
   if (f.outcome === "verify") body.documentNumber = f.documentNumber.trim();
   if (f.outcome === "decline") body.declineReason = f.declineReason;
   if (f.note.trim()) body.note = f.note.trim();
@@ -174,7 +187,7 @@ export const ADMIN_ERROR_CODES = [
   "CONSENT_REQUIRED", "AGE_REVIEW_PAUSED", "OPEN_REQUEST_EXISTS", "RATE_LIMITED", "NOT_OFFERED", "BAD_FILE", "TOO_LARGE",
   "EVIDENCE_INCOMPLETE", "WRONG_STATE", "CODE_EXPIRED", "NOT_ALLOWED", "SECOND_APPROVER_MUST_DIFFER", "SELF_REVIEW",
   "CHECKLIST_INCOMPLETE", "DUPLICATE_DOCUMENT", "REVEAL_LIMIT", "TOKEN_INVALID", "REASON_REQUIRED",
-  "BIRTHDATE_MISMATCH", "EVIDENCE_UNAVAILABLE", "NOT_FOUND", "BAD_REQUEST", "VOICE_UNAVAILABLE",
+  "BIRTHDATE_MISMATCH", "EVIDENCE_UNAVAILABLE", "NOT_FOUND", "BAD_REQUEST", "VOICE_UNAVAILABLE", "AGE_REVIEW_OFF",
 ] as const;
 const ADMIN_ERROR: Record<(typeof ADMIN_ERROR_CODES)[number], string> = {
   CONSENT_REQUIRED: "The user has not accepted the privacy notice yet.",
@@ -200,9 +213,23 @@ const ADMIN_ERROR: Record<(typeof ADMIN_ERROR_CODES)[number], string> = {
   NOT_FOUND: "That request no longer exists.",
   BAD_REQUEST: "Something in the form is not valid. Check the fields and try again.",
   VOICE_UNAVAILABLE: "Live video is not available right now.",
+  AGE_REVIEW_OFF: "Age review is not switched on.",
 };
 export function adminErrorMessage(code: string | undefined | null, extra?: { retryAfter?: string | null }): string {
   if (code === "RATE_LIMITED" && extra?.retryAfter) return "Too many attempts. Please wait a bit and try again.";
   if (code && Object.prototype.hasOwnProperty.call(ADMIN_ERROR, code)) return ADMIN_ERROR[code as keyof typeof ADMIN_ERROR];
   return "Something went wrong. Please try again.";
+}
+
+export const OFF_PANEL = { title: "Age review is not switched on", body: "Nothing is wrong. Ask a super admin to switch the age review feature on when you are ready to use it." } as const;
+export const isAgeReviewOff = (e: { status?: number; code?: string } | null | undefined): boolean => !!e && e.code === "AGE_REVIEW_OFF";
+
+export function approveDescription(approve: boolean, registeredDob: string, proposedDob: string | null): string {
+  if (!approve) return "Nothing changes and the request is declined.";
+  return proposedDob ? `Change ${registeredDob || "the registered birthdate"} to ${proposedDob} and verify the account.` : "The birthdate is corrected to the one on the ID and the account is verified.";
+}
+
+/** Makes a blob URL only if the screen is still there; a late reveal after close or unmount creates nothing to leak. */
+export function urlUnlessCancelled(blob: Blob, cancelled: () => boolean, create: (b: Blob) => string): string | null {
+  return cancelled() ? null : create(blob);
 }

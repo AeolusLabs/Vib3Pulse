@@ -8,24 +8,23 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Loader2Icon } from "@/components/ui/icons";
 import { ReviewApiError, decide, errText } from "@/lib/adminAgeReviewApi";
 import {
-  CHECKLIST_KEYS, CHECKLIST_LABEL, CONFIRM_TEXT, DECLINE_LABEL, DECLINE_REASONS, OUTCOME_HELP, OUTCOME_LABEL, canOverrideDuplicate,
-  decisionBody, decisionReady, emptyChecklist, type DecisionForm as Form, type Outcome,
+  CHECKLIST_LABEL, CONFIRM_TEXT, DECLINE_LABEL, DECLINE_REASONS, DOC_TYPES, DOC_TYPE_LABEL, OUTCOME_HELP, OUTCOME_LABEL, canOverrideDuplicate,
+  decisionBody, decisionReady, emptyChecklist, outcomesFor, requiredChecks, type DecisionForm as Form, type Outcome,
 } from "@/lib/adminAgeReviewUi";
 
-const OUTCOMES: Outcome[] = ["verify", "teen_correction", "birthdate_change", "needs_more", "decline", "not_eligible_minor"];
 const FIELD = "min-h-[44px] border-slate-600 bg-slate-700/50 text-white";
 
-interface Props { requestId: string; role: string; registeredDob: string; method: "upload" | "live"; onDone: () => void }
+interface Props { requestId: string; role: string; registeredDob: string; method: "upload" | "live"; documentType: string | null; onDone: () => void }
 
-export default function DecisionForm({ requestId, role, registeredDob, method, onDone }: Props) {
-  const [f, setF] = useState<Form>({ outcome: null, checklist: emptyChecklist(), idBirthdate: "", documentNumber: "", declineReason: "", note: "", overrideReason: "" });
+export default function DecisionForm({ requestId, role, registeredDob, method, documentType, onDone }: Props) {
+  const [f, setF] = useState<Form>({ outcome: null, checklist: emptyChecklist(), idBirthdate: "", documentNumber: "", documentType: documentType ?? "", declineReason: "", note: "", overrideReason: "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needsOverride, setNeedsOverride] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const set = (p: Partial<Form>) => setF((x) => ({ ...x, ...p }));
   const overrideAllowed = canOverrideDuplicate(role);
-  const ready = decisionReady(f) && (!needsOverride || !overrideAllowed || f.overrideReason.trim().length >= 3);
+  const ready = decisionReady(f, method) && (!needsOverride || !overrideAllowed || f.overrideReason.trim().length >= 3);
 
   const send = async () => {
     setBusy(true); setError(null); setConfirm(false);
@@ -57,10 +56,10 @@ export default function DecisionForm({ requestId, role, registeredDob, method, o
 
       <fieldset className="space-y-2">
         <legend className="mb-1 text-sm font-medium text-slate-300">Checks</legend>
-        {CHECKLIST_KEYS.map((k) => (
+        {requiredChecks(method).map((k) => (
           <label key={k} className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-lg border border-slate-700 px-3 text-sm text-slate-200">
             <Checkbox checked={f.checklist[k]} onCheckedChange={(v) => set({ checklist: { ...f.checklist, [k]: v === true } })} className="h-5 w-5 border-slate-400" />
-            {k === "codeMatches" && method === "live" ? "Live check: no code is needed (tick to confirm)" : CHECKLIST_LABEL[k]}
+            {CHECKLIST_LABEL[k]}
           </label>
         ))}
       </fieldset>
@@ -68,7 +67,7 @@ export default function DecisionForm({ requestId, role, registeredDob, method, o
       <fieldset className="space-y-2">
         <legend className="mb-1 text-sm font-medium text-slate-300">Outcome</legend>
         <div role="radiogroup" aria-label="Outcome" className="grid gap-2 sm:grid-cols-2">
-          {OUTCOMES.map((o) => (
+          {outcomesFor(method).map((o) => (
             <button
               key={o} type="button" role="radio" aria-checked={f.outcome === o} onClick={() => set({ outcome: o })}
               className={`min-h-[44px] rounded-lg border px-3 text-left text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-400 ${f.outcome === o ? "border-purple-400 bg-purple-500/15 text-white" : "border-slate-700 text-slate-300 hover:border-slate-500"}`}
@@ -84,6 +83,16 @@ export default function DecisionForm({ requestId, role, registeredDob, method, o
           <Label htmlFor="id-birthdate" className="text-slate-300">ID birthdate</Label>
           <Input id="id-birthdate" type="date" value={f.idBirthdate} onChange={(e) => set({ idBirthdate: e.target.value })} className={`${FIELD} max-w-[12rem] tabular-nums`} data-testid="input-id-birthdate" />
           <p className="text-xs text-slate-400">Registered birthdate is <span className="tabular-nums">{registeredDob || "not on file"}</span>.</p>
+        </div>
+      )}
+
+      {documentType === null && (f.outcome === "verify" || f.outcome === "teen_correction" || f.outcome === "birthdate_change") && (
+        <div className="space-y-2">
+          <Label htmlFor="doc-type" className="text-slate-300">Document type (required)</Label>
+          <select id="doc-type" required value={f.documentType} onChange={(e) => set({ documentType: e.target.value })} className={`${FIELD} w-full rounded-md px-3 text-sm`} data-testid="select-document-type">
+            <option value="">Choose the document shown</option>
+            {DOC_TYPES.map((t) => <option key={t} value={t}>{DOC_TYPE_LABEL[t]}</option>)}
+          </select>
         </div>
       )}
 

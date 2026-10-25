@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -6,7 +6,7 @@ import { CameraIcon, Loader2Icon } from "@/components/ui/icons";
 import ReasonDialog from "@/components/admin/ReasonDialog";
 import { documentTypeLabel, minutesLeft, formatCode } from "@/lib/ageReview";
 import { getDetail, inviteLive, liveJoin, secondApprove, errText } from "@/lib/adminAgeReviewApi";
-import { methodLabel, registeredAge } from "@/lib/adminAgeReviewUi";
+import { approveDescription, methodLabel, registeredAge } from "@/lib/adminAgeReviewUi";
 import StatusChip from "./StatusChip";
 import EvidenceTile from "./EvidenceTile";
 import DecisionForm from "./DecisionForm";
@@ -30,7 +30,14 @@ export default function DetailDrawer({ id, role, reviewer, onClose, onChanged }:
   const [msg, setMsg] = useState<string | null>(null);
   const [approve, setApprove] = useState<boolean | null>(null);
   const [now, setNow] = useState(() => new Date());
+  const joinRef = useRef<HTMLButtonElement>(null);
+  const hadCall = useRef(false);
   useEffect(() => { setRevealed(null); setMsg(null); }, [id]);
+  // The sheet closes while the call is up, so its focus trap and outside-click handling cannot fight the call; focus comes back to Join.
+  useEffect(() => {
+    if (call) { hadCall.current = true; return; }
+    if (hadCall.current) { hadCall.current = false; const t = window.setTimeout(() => joinRef.current?.focus(), 120); return () => window.clearTimeout(t); }
+  }, [call]);
   useEffect(() => { const t = window.setInterval(() => setNow(new Date()), 15_000); return () => window.clearInterval(t); }, []);
 
   const d = q.data;
@@ -52,7 +59,7 @@ export default function DetailDrawer({ id, role, reviewer, onClose, onChanged }:
 
   return (
     <>
-      <Sheet open={!!id} onOpenChange={(o) => !o && onClose()}>
+      <Sheet open={!!id && !call} onOpenChange={(o) => !o && onClose()}>
         <SheetContent side="right" className="w-full overflow-y-auto border-slate-700 bg-slate-900 text-white sm:max-w-xl" data-testid="age-review-drawer">
           <SheetHeader className="text-left">
             <SheetTitle className="text-white">{r ? r.displayName : "Age review"}</SheetTitle>
@@ -68,6 +75,7 @@ export default function DetailDrawer({ id, role, reviewer, onClose, onChanged }:
                 <Row k="Status"><StatusChip status={r.status} /></Row>
                 <Row k="Method">{methodLabel(r.method)}</Row>
                 <Row k="Registered birthdate">{r.registeredDob || "Not on file"}{registeredAge(r.registeredDob) !== null && <span className="text-slate-400"> (age {registeredAge(r.registeredDob)})</span>}</Row>
+                {r.proposedDob && <Row k="Proposed birthdate (from the ID)"><span className="text-amber-200">{r.proposedDob}</span></Row>}
                 <Row k="Document type">{documentTypeLabel(r.documentType)}</Row>
                 {r.method === "upload" && (
                   <Row k="Selfie code">
@@ -98,7 +106,7 @@ export default function DetailDrawer({ id, role, reviewer, onClose, onChanged }:
                     <Button onClick={() => void invite()} disabled={busy !== null} variant="outline" className="min-h-[44px] border-slate-600 text-slate-200" data-testid="button-invite-live">
                       {busy === "invite" && <Loader2Icon className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />}Invite to live check
                     </Button>
-                    <Button onClick={() => void join()} disabled={busy !== null || !invited} className="min-h-[44px] bg-purple-600 hover:bg-purple-700" data-testid="button-join-live">
+                    <Button ref={joinRef} onClick={() => void join()} disabled={busy !== null || !invited} className="min-h-[44px] bg-purple-600 hover:bg-purple-700" data-testid="button-join-live">
                       {busy === "join" ? <Loader2Icon className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <CameraIcon className="mr-2 h-4 w-4" aria-hidden />}Join the call
                     </Button>
                   </div>
@@ -107,7 +115,7 @@ export default function DetailDrawer({ id, role, reviewer, onClose, onChanged }:
 
               <p role="status" className={msg ? "text-sm text-slate-300" : "sr-only"}>{msg ?? ""}</p>
 
-              {d.canDecide && <DecisionForm key={r.id} requestId={r.id} role={role} registeredDob={r.registeredDob} method={r.method} onDone={done} />}
+              {d.canDecide && <DecisionForm key={r.id} requestId={r.id} role={role} registeredDob={r.registeredDob} method={r.method} documentType={r.documentType} onDone={done} />}
               {!d.canDecide && r.status !== "pending_second_approval" && <p className="text-sm text-slate-400">This request cannot be decided by you right now.</p>}
 
               {r.status === "pending_second_approval" && (
@@ -130,7 +138,7 @@ export default function DetailDrawer({ id, role, reviewer, onClose, onChanged }:
 
       <ReasonDialog
         open={approve !== null} title={approve ? "Approve the birthdate change" : "Reject the birthdate change"}
-        description={approve ? "The birthdate is corrected to the one on the ID and the account is verified." : "Nothing changes and the request is declined."}
+        description={approveDescription(approve === true, r?.registeredDob ?? "", r?.proposedDob ?? null)}
         confirmLabel={approve ? "Approve" : "Reject"} destructive={approve === false} minLength={3} maxLength={300} busy={busy === "second"} error={msg}
         onClose={() => setApprove(null)}
         onConfirm={async (reason) => {

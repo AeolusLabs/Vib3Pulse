@@ -23,6 +23,11 @@ export default function ReviewerCall({ join, registeredDob, onEnd }: Props) {
 
   useEffect(() => { leave.current?.focus(); }, []);
   useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); if (roomRef.current) roomRef.current.disconnect(); else endRef.current(null); } };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+  useEffect(() => {
     let cancelled = false;
     let room: Room | null = null;
     (async () => {
@@ -56,7 +61,7 @@ export default function ReviewerCall({ join, registeredDob, onEnd }: Props) {
 
   return createPortal(
     <div
-      role="dialog" aria-modal="true" aria-label="Private live check" className="fixed inset-0 z-[100] flex flex-col bg-slate-950 text-white md:flex-row"
+      role="dialog" aria-modal="true" aria-label="Private live check" className="pointer-events-auto fixed inset-0 z-[100] flex flex-col bg-slate-950 text-white md:flex-row"
       onKeyDown={(e) => { if (e.key === "Tab") { e.preventDefault(); leave.current?.focus(); } }}
       data-testid="reviewer-call"
     >

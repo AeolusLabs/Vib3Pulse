@@ -7,8 +7,8 @@ import DetailDrawer from "@/components/admin/age-review/DetailDrawer";
 import HealthStrip from "@/components/admin/age-review/HealthStrip";
 import StatusChip from "@/components/admin/age-review/StatusChip";
 import { documentTypeLabel } from "@/lib/ageReview";
-import { errText, listQueue, type QueueItem } from "@/lib/adminAgeReviewApi";
-import { QUEUE_FILTERS, canReview, canSecondApprove, canSeeHealth, methodLabel } from "@/lib/adminAgeReviewUi";
+import { ReviewApiError, errText, listQueue, type QueueItem } from "@/lib/adminAgeReviewApi";
+import { OFF_PANEL, QUEUE_FILTERS, canReview, isAgeReviewOff, canSecondApprove, canSeeHealth, methodLabel } from "@/lib/adminAgeReviewUi";
 
 type Tab = "queue" | "second" | "health";
 type Me = { role: string; displayName?: string; username?: string };
@@ -29,6 +29,14 @@ function QueueTable({ status, openId, onOpen }: { status: string; openId: string
   const rows: QueueItem[] = q.data?.pages.flatMap((p) => p.items) ?? [];
 
   if (q.isLoading) return <p role="status" className="py-10 text-center text-sm text-slate-400">Loading the queue</p>;
+  if (q.error && q.error instanceof ReviewApiError && isAgeReviewOff(q.error)) {
+    return (
+      <div role="status" className="mx-auto max-w-md rounded-xl border border-slate-700 bg-slate-800/50 p-8 text-center" data-testid="age-review-off">
+        <p className="font-medium text-white">{OFF_PANEL.title}</p>
+        <p className="mt-1 text-sm text-slate-400">{OFF_PANEL.body}</p>
+      </div>
+    );
+  }
   if (q.error) return <p role="alert" className="py-10 text-center text-sm text-red-400">{errText(q.error)}</p>;
   if (rows.length === 0) return <p role="status" className="py-10 text-center text-sm text-slate-400">Nothing waiting here.</p>;
 

@@ -1,6 +1,6 @@
 // Fetch helpers for the reviewer API. Plain functions, no query cache: nothing returned here from the evidence routes is kept.
 import { ensureCsrfToken } from "@/lib/queryClient";
-import { adminErrorMessage, type Checklist } from "@/lib/adminAgeReviewUi";
+import { adminErrorMessage, urlUnlessCancelled, type Checklist } from "@/lib/adminAgeReviewUi";
 
 export class ReviewApiError extends Error {
   constructor(readonly status: number, readonly code: string | undefined, readonly retryAfter?: string | null) {
@@ -30,7 +30,7 @@ export interface QueueItem {
   displayName: string; documentType: string | null; registeredAge: number | null; needsMore: boolean; awaitingSecondApproval: boolean;
 }
 export interface Detail {
-  request: QueueItem & { registeredDob: string; code: string | null; codeExpiresAt: string | null; moreRequests: number; consentRecorded: boolean; liveInviteExpiresAt: string | null };
+  request: QueueItem & { registeredDob: string; proposedDob?: string | null; code: string | null; codeExpiresAt: string | null; moreRequests: number; consentRecorded: boolean; liveInviteExpiresAt: string | null };
   evidence: { id: string; kind: "document" | "selfie"; mime: string; bytes: number }[];
   checklist: string[];
   canDecide: boolean;
@@ -59,10 +59,10 @@ export const markVerified = (userId: string, verified: boolean, reason: string) 
 export const revokeVerification = (userId: string, reason: string) => reviewCall<unknown>("POST", `/api/admin/users/${userId}/age-verification/revoke`, { reason });
 
 /** Reveal, then fetch the bytes with the one time token. Returns a blob URL the caller must revoke. The URL with the token is never put in the DOM. */
-export async function revealEvidence(requestId: string, evidenceId: string): Promise<string> {
+export async function revealEvidence(requestId: string, evidenceId: string, cancelled: () => boolean = () => false): Promise<string | null> {
   const base = `/api/admin/age-reviews/${requestId}/evidence/${evidenceId}`;
   const { token } = await reviewCall<{ token: string; expiresInSec: number }>("POST", `${base}/reveal`);
   const res = await fetch(`${base}?token=${encodeURIComponent(token)}`, { credentials: "include", cache: "no-store" });
   if (!res.ok) throw await parseError(res);
-  return URL.createObjectURL(await res.blob());
+  return urlUnlessCancelled(await res.blob(), cancelled, (b) => URL.createObjectURL(b));
 }
