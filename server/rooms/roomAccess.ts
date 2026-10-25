@@ -46,8 +46,8 @@ export function publicRoom(room: Room) {
   // viewers (GET /api/rooms/:id `ticket`, list `priceMinor`); the host gets all three through hostRoom.
   // peakMembers is a host-only recap number (phase 6): it reaches the host only through GET /api/rooms/:id/recap.
   // Gaming columns never ride on a room object either (so a flag-off payload is exactly what it was before they existed): the
-  // host gets gameFormat / gameDropTimeoutMs through hostRoom, a lane's own members get their lane through viewerRoom.
-  const { inviteTokenHash, pinnedMessage, reminderNotifiedAt, ticketPriceKobo, ticketCapacity, refundBeforeStart, peakMembers, gameFormat, gameDropTimeoutMs, ageLane, parentRoomId, ...rest } = room;
+  // host gets gameFormat / gameDropTimeoutMs (and sprayEnabled, anyone else learns spray from the `spray` block) through hostRoom, a lane's own members get their lane through viewerRoom.
+  const { inviteTokenHash, pinnedMessage, reminderNotifiedAt, ticketPriceKobo, ticketCapacity, refundBeforeStart, peakMembers, sprayEnabled, gameFormat, gameDropTimeoutMs, ageLane, parentRoomId, ...rest } = room;
   return rest;
 }
 
@@ -64,6 +64,7 @@ export function viewerRoom(room: Room) {
 export function hostRoom(room: Room) {
   return {
     ...viewerRoom(room), ticketPriceKobo: room.ticketPriceKobo ?? null, ticketCapacity: room.ticketCapacity ?? null, refundBeforeStart: room.refundBeforeStart !== false,
+    sprayEnabled: room.sprayEnabled === true,
     ...(roomFeatures.gaming ? { gameFormat: room.gameFormat ?? null, gameDropTimeoutMs: room.gameDropTimeoutMs } : {}),
   };
 }

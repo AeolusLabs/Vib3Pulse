@@ -15,8 +15,8 @@ import { getConfig } from "../services/moderationConfig";
 import { events, follows, users, venues, type Room, type User } from "@shared/schema";
 import { ageFromDob, minAgeForLimit } from "@shared/age";
 import { resolveScreen } from "@shared/screen";
-import { ROOM_LIMITS, resolveRoomPrivacy, validateRoomInput, validateRoomPrivacy } from "@shared/rooms";
-import { canHostRoom, canJoinRoom, canSellTickets, isMinorsRoomHost, isTicketedRoom, roomCapacity, ticketEligible, type TicketSaleCode } from "@shared/roomRules";
+import { ROOM_LIMITS, SPRAY_ENABLE_MESSAGES, resolveRoomPrivacy, validateRoomInput, validateRoomPrivacy } from "@shared/rooms";
+import { canEnableSpray, canHostRoom, canJoinRoom, canSellTickets, isMinorsRoomHost, isTicketedRoom, roomCapacity, ticketEligible, type TicketSaleCode } from "@shared/roomRules";
 import { isIdVerifiedAdult } from "@shared/ageVerification";
 import * as rs from "./roomStorage";
 import { canViewRoom, hostRoom, hostSummary, mutualFollow, pinnedPlainText, plainText, publicRoom, sha256, viewerRoom, viewRoom } from "./roomAccess";
@@ -119,6 +119,12 @@ async function sellCheck(host: User, room: { ageLimit: string; minorsRoom: boole
   return canSellTickets({ age: ageFromDob(host.dateOfBirth), idVerified: isIdVerifiedAdult(host), hasPayoutAccount }, room, roomFeatures);
 }
 
+/** May this host turn spray on? Checked before any ticket rule. The payout lookup only happens while the spray switch is on. */
+async function sprayCheck(host: User, room: { ageLimit: string; minorsRoom: boolean }) {
+  const hasPayoutAccount = roomFeatures.spray ? await hostPayoutReady(host.id) : false;
+  return canEnableSpray({ age: ageFromDob(host.dateOfBirth), idVerified: isIdVerifiedAdult(host), hasPayoutAccount }, room, roomFeatures);
+}
+
 /** The ticket block of GET /api/rooms/:id (eligible viewers only). Counts and the refund promise only for a ticketed room. */
 type TicketBlock = {
   required: boolean; priceKobo: number; held: boolean; soldOut: boolean;
@@ -148,6 +154,13 @@ async function hostCheck(host: User, input: { visibility: Room["visibility"]; ag
 async function ticketRatesForClients(): Promise<{ ticketPlatformPct: number; ticketReservePct: number }> {
   const r = await getRates();
   return { ticketPlatformPct: r.ticket_platform, ticketReservePct: r.ticket_reserve };
+}
+
+async function hostMoneyReadiness(userId: string): Promise<{ adult: boolean; idVerified: boolean; payoutAccount: boolean }> {
+  const u = await storage.getUser(userId);
+  if (!u) return { adult: false, idVerified: false, payoutAccount: false };
+  const age = ageFromDob(u.dateOfBirth);
+  return { adult: age !== null && age >= 18, idVerified: isIdVerifiedAdult(u), payoutAccount: await hostPayoutReady(userId) };
 }
 
 async function hostingInfo(userId: string): Promise<{ accountAgeDays: number; minAccountAgeDays: number }> {
@@ -222,6 +235,10 @@ export function registerRoomRoutes(app: Express): void {
       if (!hc.ok) return res.status(403).json({ message: HOST_MESSAGES[hc.code], code: hc.code });
       // Paid room: only an adult, ID-verified host with a payout account, only with paid rooms switched on.
       const minorsRoom = isMinorsRoomHost(ageFromDob(host.dateOfBirth));
+      if (v.value.sprayEnabled === true) {
+        const spray = await sprayCheck(host, { ageLimit: v.value.ageLimit, minorsRoom });
+        if (!spray.ok) return res.status(403).json({ message: SPRAY_ENABLE_MESSAGES[spray.code], code: spray.code });
+      }
       if (typeof v.value.ticketPriceKobo === "number") {
         const sell = await sellCheck(host, { ageLimit: v.value.ageLimit, minorsRoom });
         if (!sell.ok) return res.status(403).json({ message: TICKET_SALE_MESSAGES[sell.code], code: sell.code });
@@ -318,15 +335,18 @@ export function registerRoomRoutes(app: Express): void {
   // never secrets or provider keys.
   app.get("/api/rooms/config", requireAuth, async (req, res) => {
     try {
+      const paidRooms = await ticketSalesAllowed(), spray = await sprayAllowed();
       res.json({
         // `gaming` only appears while ROOMS_GAMING is on, so the flag-off body stays byte-identical.
-        features: { paidRooms: await ticketSalesAllowed(), spray: await sprayAllowed(), ...(roomFeatures.gaming ? { gaming: true } : {}) },
+        features: { paidRooms, spray, ...(roomFeatures.gaming ? { gaming: true } : {}) },
         limits: ROOM_LIMITS,
         currency: "NGN",
         region: "NG",
         // Only the two ticket rates the host screens need for their earnings estimate; no spray rate and nothing else.
         rates: await ticketRatesForClients(),
         host: await hostingInfo(req.user!.id),
+        // The caller's own readiness to take money (paid rooms and spray), absent while both switches are off.
+        ...(roomFeatures.paidRooms || roomFeatures.spray ? { hostMoneyReadiness: await hostMoneyReadiness(req.user!.id) } : {}),
         // Gaming capabilities, only while ROOMS_GAMING is on (absent otherwise, so the flag-off body is unchanged).
         ...(roomFeatures.gaming ? { game: await gameCapabilities() } : {}),
       });
@@ -477,6 +497,7 @@ export function registerRoomRoutes(app: Express): void {
         ticketPriceKobo: "ticketPriceKobo" in b ? b.ticketPriceKobo : room.ticketPriceKobo ?? null,
         ticketCapacity: "ticketCapacity" in b ? b.ticketCapacity : room.ticketCapacity ?? null,
         refundBeforeStart: "refundBeforeStart" in b ? b.refundBeforeStart : undefined,
+        sprayEnabled: "sprayEnabled" in b ? b.sprayEnabled : undefined,
       };
       const v = validateRoomInput(merged);
       if (!v.ok) return res.status(400).json({ message: `Invalid ${v.field}`, field: v.field });
@@ -525,6 +546,15 @@ export function registerRoomRoutes(app: Express): void {
           patch.gameFormat = g.value.gameFormat;
         }
         if (g.value.gameDropTimeoutMs !== undefined) patch.gameDropTimeoutMs = g.value.gameDropTimeoutMs;
+      }
+      // Spray opt-in: turning it on needs the host checks (before the ticket ones); turning it off is always allowed. The spray
+      // gate reads the row on every spray, so a live room follows at once; an in-flight paid spray still delivers.
+      if ("sprayEnabled" in b && v.value.sprayEnabled !== undefined && v.value.sprayEnabled !== room.sprayEnabled) {
+        if (v.value.sprayEnabled) {
+          const spray = await sprayCheck(host, { ageLimit: v.value.ageLimit, minorsRoom: room.minorsRoom });
+          if (!spray.ok) return res.status(403).json({ message: SPRAY_ENABLE_MESSAGES[spray.code], code: spray.code });
+        }
+        patch.sprayEnabled = v.value.sprayEnabled;
       }
       // Paid rooms. Selling (or changing a sale) needs the same host checks as creating. Once any ticket is sold the price,
       // the free/paid switch, the age limit and the refund promise are fixed, and the ticket capacity never goes below the

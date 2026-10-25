@@ -45,6 +45,7 @@ export async function createRoom(hostId: string, input: CreateRoomInput, exec: P
     ticketPriceKobo: input.ticketPriceKobo ?? null,
     ticketCapacity: input.ticketCapacity ?? null,
     refundBeforeStart: input.refundBeforeStart ?? true,
+    sprayEnabled: input.sprayEnabled === true,
     // Gaming: the column defaults when not a game room (null, 120000, null, null).
     gameFormat: input.gameFormat ?? null,
     gameDropTimeoutMs: input.gameDropTimeoutMs ?? 120_000,
@@ -60,7 +61,7 @@ export async function getRoom(id: string): Promise<Room | null> {
 }
 
 /** pinnedMessage must already be plain text cut to 200 (pinnedPlainText); slowModeSec one of SLOW_MODES. minorsRoom is never patchable. */
-export type RoomPatch = Partial<Pick<Room, "title" | "description" | "ageLimit" | "screen" | "noDirectInteractions" | "capacity" | "moderationStatus" | "scheduledFor" | "inviteTokenHash" | "pinnedMessage" | "slowModeSec" | "locked" | "ticketPriceKobo" | "ticketCapacity" | "refundBeforeStart" | "gameFormat" | "gameDropTimeoutMs">>;
+export type RoomPatch = Partial<Pick<Room, "title" | "description" | "ageLimit" | "screen" | "noDirectInteractions" | "capacity" | "moderationStatus" | "scheduledFor" | "inviteTokenHash" | "pinnedMessage" | "slowModeSec" | "locked" | "ticketPriceKobo" | "ticketCapacity" | "refundBeforeStart" | "sprayEnabled" | "gameFormat" | "gameDropTimeoutMs">>;
 
 /** The SET clause for a room patch (shared with the ticket-guarded write in ticketStorage.ts). */
 export function roomPatchSet(patch: RoomPatch): Record<string, unknown> {

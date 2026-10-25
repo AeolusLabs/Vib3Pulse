@@ -50,7 +50,7 @@ const savedSpray = roomFeatures.spray, savedGaming = roomFeatures.gaming;
 try {
   roomFeatures.spray = true;
   const H = await mk("host"), P = await mk("payer"), X = await mk("player"), Y = await mk("plain");
-  const room = await rs.createRoom(H, { title: "GS", kind: "party", visibility: "public", ageLimit: "18+", capacity: 20 } as any);
+  const room = await rs.createRoom(H, { title: "GS", kind: "party", visibility: "public", ageLimit: "18+", capacity: 20, sprayEnabled: true } as any);
   await rs.setStatus(room.id, "live");
   const R = room.id as string;
   for (const [id, role] of [[H, "host"], [P, "guest"], [X, "guest"], [Y, "guest"]] as const) roomHub.join(R, member(id, role));

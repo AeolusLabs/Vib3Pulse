@@ -89,6 +89,23 @@ export function canSellTickets(
 }
 
 /**
+ * May this host turn spray on for this room? Same rules and order as canSellTickets, with the spray switch instead of the
+ * paidRooms one. `features` defaults to OFF, so a caller that forgets it is refused (fail closed).
+ */
+export function canEnableSpray(
+  host: { age: number | null; idVerified: boolean; hasPayoutAccount: boolean },
+  room: { ageLimit: string; minorsRoom?: boolean | null },
+  features: { spray: boolean } = { spray: false },
+): Check<TicketSaleCode> {
+  if (!features.spray) return no("FEATURE_OFF");
+  if (host.age === null || host.age < 18) return no("HOST_NOT_ADULT");
+  if (!host.idVerified) return no("HOST_NOT_VERIFIED");
+  if (!host.hasPayoutAccount) return no("NO_PAYOUT_ACCOUNT");
+  if (!moneyEligibleRoom(room)) return no("ROOM_NOT_ADULT");
+  return OK;
+}
+
+/**
  * May this viewer see a ticket price and buy a ticket for this room? An ID-verified adult (isIdVerifiedAdult), in a
  * money-eligible room (18+ / 21+, not a minors' room), who also meets the room's own age limit (a 19-year-old never sees the
  * price of a 21+ room). Under 18s, unknown age and unverified people: always false.

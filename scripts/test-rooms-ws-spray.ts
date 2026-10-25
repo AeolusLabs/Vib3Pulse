@@ -152,7 +152,7 @@ try {
   const G = await mk("stage", { payout: true });
   const BY = await mk("bystander");
   const P = await mk("payer", { card: true });
-  const cr = await rest("POST", "/api/rooms", H, { title: "sw room", kind: "party", visibility: "public", ageLimit: "18+" });
+  const cr = await rest("POST", "/api/rooms", H, { title: "sw room", kind: "party", visibility: "public", ageLimit: "18+", sprayEnabled: true });
   const R = cr.json?.room?.id as string;
   check("setup: room started", (await rest("POST", `/api/rooms/${R}/start`, H)).status === 200);
   const h = await join(H, R), g = await join(G, R), by = await join(BY, R), p = await join(P, R);

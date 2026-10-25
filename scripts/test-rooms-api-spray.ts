@@ -231,7 +231,7 @@ const spentIn = async (roomId: string, userId: string) => Number((await q(`selec
 /** Seeds a saved reusable card for this payer (as a first payment with saveCard would). */
 const seedCard = (userId: string) => ss.saveMethod({ userId, provider: "paystack", authEnc: encryptToken(SECRET_CODE), last4: "4242", brand: "visa", bank: null, reusable: true, signature: `${SECRET_SIG}_${userId}` });
 async function mkRoom(hostId: string, ageLimit = "18+") {
-  const cr = await rest("POST", "/api/rooms", hostId, { title: `sp room ${++seq}`, kind: "party", visibility: "public", ageLimit });
+  const cr = await rest("POST", "/api/rooms", hostId, { title: `sp room ${++seq}`, kind: "party", visibility: "public", ageLimit, sprayEnabled: true });
   const id = cr.json?.room?.id as string;
   madeRooms.push(id);
   await rest("POST", `/api/rooms/${id}/start`, hostId);

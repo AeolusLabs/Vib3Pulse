@@ -103,6 +103,17 @@ export const minorsWarningFor = (room: { ageLane?: string | null } | null | unde
 export const MINORS_ROOM_CODES = ["MINORS_ROOM", "MINORS_ROOM_ACK"] as const;
 export type MinorsRoomCode = (typeof MINORS_ROOM_CODES)[number];
 
+/** Why a host cannot turn spray on for a room (canEnableSpray), with the sentence the host sees. */
+export const SPRAY_ENABLE_CODES = ["FEATURE_OFF", "HOST_NOT_ADULT", "HOST_NOT_VERIFIED", "NO_PAYOUT_ACCOUNT", "ROOM_NOT_ADULT"] as const;
+export type SprayEnableCode = (typeof SPRAY_ENABLE_CODES)[number];
+export const SPRAY_ENABLE_MESSAGES: Record<SprayEnableCode, string> = {
+  FEATURE_OFF: "Spray isn't available yet.",
+  HOST_NOT_ADULT: "You need to be 18 or over to turn on spray.",
+  HOST_NOT_VERIFIED: "Verify your ID to turn on spray.",
+  NO_PAYOUT_ACCOUNT: "Add a bank account on the Payout account page (/rooms/payouts) to turn on spray.",
+  ROOM_NOT_ADULT: "Spray can only be turned on in 18+ or 21+ rooms.",
+};
+
 // ---------------------------------------------------------------- privacy
 export const INTERACTION_MODES = ["everyone", "mutuals", "none"] as const;
 export type InteractionMode = (typeof INTERACTION_MODES)[number];
@@ -188,6 +199,8 @@ export interface RoomInput {
   ticketCapacity?: number | null;
   /** Buyers may refund themselves before the start (default true). undefined = not sent. */
   refundBeforeStart?: boolean;
+  /** Spray opt-in (host switch, default off). undefined = not sent. Shape only: whether this host may turn it on is the server's call. */
+  sprayEnabled?: boolean;
 }
 
 /** A ticket field as sent: undefined (not sent), null (free) or an integer within [min, max]; false when invalid. */
@@ -266,6 +279,8 @@ export function validateRoomInput(input: unknown, now = new Date()): Validated<R
   if (priced && ageLimit !== "18+" && ageLimit !== "21+") return fail("ageLimit");
   if (input.refundBeforeStart !== undefined && typeof input.refundBeforeStart !== "boolean") return fail("refundBeforeStart");
   const refundBeforeStart = input.refundBeforeStart as boolean | undefined;
+  if (input.sprayEnabled !== undefined && typeof input.sprayEnabled !== "boolean") return fail("sprayEnabled");
+  const sprayEnabled = input.sprayEnabled as boolean | undefined;
 
   return {
     ok: true,
@@ -277,6 +292,7 @@ export function validateRoomInput(input: unknown, now = new Date()): Validated<R
       ...(ticketPriceKobo !== undefined ? { ticketPriceKobo } : {}),
       ...(ticketCapacity !== undefined ? { ticketCapacity } : {}),
       ...(refundBeforeStart !== undefined ? { refundBeforeStart } : {}),
+      ...(sprayEnabled !== undefined ? { sprayEnabled } : {}),
     },
   };
 }

@@ -162,7 +162,7 @@ try {
   const P = await mk("payer", { card: true });       // charges the saved card at once
   const P2 = await mk("payer2");                      // no card: the bank page, then pay
   const P3 = await mk("payer3", { card: true }), P4 = await mk("payer4"), P5 = await mk("payer5", { card: true }), P6 = await mk("payer6");
-  const cr = await rest("POST", "/api/rooms", H, { title: "gt room", kind: "party", visibility: "public", ageLimit: "18+" });
+  const cr = await rest("POST", "/api/rooms", H, { title: "gt room", kind: "party", visibility: "public", ageLimit: "18+", sprayEnabled: true });
   const R = cr.json?.room?.id as string;
   check("setup: room started", (await rest("POST", `/api/rooms/${R}/start`, H)).status === 200);
   const everyone = [H, A1, A2, A3, B1, B2, B3, B4, P, P2, P3, P4, P5, P6];
@@ -192,6 +192,12 @@ try {
   const bad2 = await team(P, R, { tier: "gold", side: "A", idempotencyKey: key() });
   const bad3 = await team(P, R, { tier: "bundle", side: "A", idempotencyKey: "x" });
   check("bad side / tier / key: 400 BAD_REQUEST", [bad, bad2, bad3].every((r) => r.status === 400 && r.json?.code === "BAD_REQUEST"), [bad.raw, bad2.raw, bad3.raw].join(" "));
+
+  // ---- spray opt-in: the host's room switch gates a team spray like a single one
+  await q(`update rooms set spray_enabled = false where id = $1`, [R]);
+  const optOff = await team(P, R, { tier: "bundle", side: "A", idempotencyKey: key() });
+  await q(`update rooms set spray_enabled = true where id = $1`, [R]);
+  check("team spray refused when off: the generic 403, no batch, no charge", optOff.status === 403 && (await batchesOf(P)).length === 0 && mock.charges === 0, optOff.raw);
 
   // ---- the happy path: Team A of 2 (A1 featured), the 1,000 naira bundle, saved card -> charged and delivered at once
   reset();
