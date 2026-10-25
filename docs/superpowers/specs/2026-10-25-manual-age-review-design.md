@@ -46,7 +46,7 @@ Users can prove they are 18 or over without being forced to hand a government ID
   - **Why we ask:** Tipping, buying tickets and hosting paid rooms are for adults only. We check once. You can use the rest of Vib3Pulse without it.
   - **Who sees it:** Only trained Vib3Pulse age reviewers. No other staff and no other members.
   - **What happens:** A reviewer compares your document with the birthdate you gave when you signed up. Upload: we delete your photos as soon as a decision is made, or after 7 days if nobody has looked. Live check: nothing is recorded or saved.
-  - **What we keep:** Only the result: verified or not, the date, the type of document, and whether the birthdate matched. Never your photos, the name on the document or the document number.
+  - **What we keep:** Only the result: verified or not, the date, the type of document, and whether the birthdate matched. We also keep a one-way code made from your document number. It cannot be turned back into the number and only stops the same document being used on several accounts. We never keep your photos, the name on the document or the number itself.
   - **Your choices:** Cover everything except your photo, name and date of birth. Cancel any time before a decision and your photos are deleted. Choose the live check instead of uploading. Saying no only means the adult only features stay off.
   - **Your safety:** If your document shows you are under 18, we will move your account to the right age group.
   - **Links:** "Read the full privacy policy" and "Ask about your data".
