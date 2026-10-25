@@ -18,15 +18,18 @@ import { RankedBars, StackedBar, type BarRow, type SplitPart } from "@/component
 import { StatTile, pctChange } from "@/components/admin/charts/StatTile";
 import { COLOR_MONEY, COLOR_USAGE, SERIES, compactCount, compactNaira, daysBetween, naira } from "@/components/admin/charts/tokens";
 import RoomRatesTab from "./RoomRatesTab";
+import SprayTransactionsTab from "./SprayTransactionsTab";
+import { BLOCK_CONFIRM, RESUME_DISABLED_REASON, appliedText, canBlock, canResume, canSeeTransactions } from "@/lib/adminSprayUi";
 
 // Rooms admin (rooms admin plan, task 6). One screen for what an admin needs when something looks wrong: who is live right now,
 // where the money went, and the switches that stop new money. A pause or freeze stops NEW money only; money already settled to a
 // bank cannot be recalled from here. Every action asks for a reason and is audit-logged by the server.
 
-type Tab = "live" | "reported" | "money" | "rates" | "controls";
+type Tab = "live" | "reported" | "money" | "transactions" | "rates" | "controls";
 type Me = { role: string };
 type LiveRoom = { id: string; title: string; hostId: string; hostUsername: string; ageLimit: string; members: number; startedAt: string | null; ticketed: boolean; hostFrozen: boolean };
 type ReportedRoom = { roomId: string; title: string; status: string; ageLimit: string; hostId: string; host: { username?: string; displayName?: string } | null; reports: { id: string; reason: string; description?: string | null }[] };
+type SprayStatusInfo = { platformFlag: boolean; paused: boolean; frozenHosts: number; liveRoomsSprayOn: number; blockedRooms: { roomId: string; title: string; reason: string | null; byAdminId: string | null; at: string | null }[] };
 type Controls = { spraysPaused: boolean; ticketsPaused: boolean; frozenHosts: { hostId: string; username: string; reason: string; frozenAt: string }[] };
 type Overview = {
   roomsCreated: number; roomsStarted: number; uniqueHosts: number; peakConcurrent: number; ticketsSold: number;
@@ -89,7 +92,7 @@ function useAction(invalidate: string[]) {
       return { json: await res.json().catch(() => ({})), done: a.done };
     },
     onSuccess: ({ json, done }) => {
-      toast({ title: json?.changed === false ? "Nothing changed, it was already in that state" : done });
+      toast({ title: json?.changed === false ? "Nothing changed, it was already in that state" : done === "Applied" ? appliedText(json) : done });
       for (const k of invalidate) void qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith(k) });
     },
   });
@@ -138,12 +141,17 @@ function FreezeHostDialog({ host, canEndRooms, busy, error, onConfirm, onClose }
   );
 }
 
-function LiveTab({ canFreeze, canEndRooms }: { canFreeze: boolean; canEndRooms: boolean }) {
+function LiveTab({ canFreeze, canEndRooms, role }: { canFreeze: boolean; canEndRooms: boolean; role: string }) {
   const { data, isLoading, error, refetch } = useQuery<{ rooms: LiveRoom[] }>({ queryKey: ["/api/admin/rooms/live"], refetchInterval: 15_000 });
   const act = useAction(["/api/admin/rooms"]);
   const [ending, setEnding] = useState<LiveRoom | null>(null);
   const [freezing, setFreezing] = useState<LiveRoom | null>(null);
+  const [blocking, setBlocking] = useState<{ room: LiveRoom; on: boolean } | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // The live list does not carry the block flag; the spray-status list (finance roles) does.
+  const mayBlock = canBlock(role);
+  const status = useQuery<SprayStatusInfo>({ queryKey: ["/api/admin/rooms/spray-status"], enabled: mayBlock, refetchInterval: 15_000 });
+  const blockedIds = new Set((status.data?.blockedRooms ?? []).map((b) => b.roomId));
 
   if (isLoading) return <Msg>Loading live rooms...</Msg>;
   if (error) return <Msg tone="error">Could not load live rooms. <button className="underline" onClick={() => refetch()}>Try again</button></Msg>;
@@ -162,9 +170,18 @@ function LiveTab({ canFreeze, canEndRooms }: { canFreeze: boolean; canEndRooms: 
                   Host {r.hostUsername} · {r.ageLimit} · {r.members} {r.members === 1 ? "person" : "people"} inside{r.ticketed ? " · ticketed" : ""}
                 </p>
                 {r.hostFrozen && <p className="mt-1 inline-flex items-center gap-1.5 text-sm font-medium text-amber-300"><LockIcon className="h-3.5 w-3.5" aria-hidden />Host frozen</p>}
+                {blockedIds.has(r.id) && <p className="mt-1 inline-flex items-center gap-1.5 text-sm font-medium text-amber-300" data-testid={`chip-spray-blocked-${r.id}`}><PauseIcon className="h-3.5 w-3.5" aria-hidden />Spray blocked</p>}
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button variant="outline" onClick={() => { setErr(null); setEnding(r); }} className="min-h-[44px] border-slate-600 text-slate-100" data-testid={`button-end-${r.id}`}>End room</Button>
+                {mayBlock && (blockedIds.has(r.id) ? (
+                  <span title={canResume(role) ? undefined : RESUME_DISABLED_REASON}>
+                    <Button variant="outline" disabled={!canResume(role)} aria-describedby={canResume(role) ? undefined : `unblock-why-${r.id}`} onClick={() => { setErr(null); setBlocking({ room: r, on: false }); }} className="min-h-[44px] border-slate-600 text-slate-100" data-testid={`button-unblock-${r.id}`}>Unblock spray</Button>
+                    {!canResume(role) && <span id={`unblock-why-${r.id}`} className="sr-only">{RESUME_DISABLED_REASON}</span>}
+                  </span>
+                ) : (
+                  <Button variant="outline" onClick={() => { setErr(null); setBlocking({ room: r, on: true }); }} className="min-h-[44px] border-amber-500/60 text-amber-300 hover:bg-amber-950/40" data-testid={`button-block-${r.id}`}>Block spray</Button>
+                ))}
                 {canFreeze && !r.hostFrozen && (
                   <Button variant="outline" onClick={() => { setErr(null); setFreezing(r); }} className="min-h-[44px] border-red-500/60 text-red-300 hover:bg-red-950/40" data-testid={`button-freeze-${r.id}`}>Freeze host</Button>
                 )}
@@ -177,6 +194,13 @@ function LiveTab({ canFreeze, canEndRooms }: { canFreeze: boolean; canEndRooms: 
         open={!!ending} title={`End "${ending?.title ?? ""}"`} description="This cuts the stream now and cannot be undone. People inside are told the room has ended."
         confirmLabel="End room" destructive busy={act.isPending} error={err} onClose={() => setEnding(null)}
         onConfirm={(reason) => act.mutate({ method: "POST", url: `/api/admin/rooms/${ending!.id}/end`, body: { reason }, done: "Room ended" }, { onSuccess: () => setEnding(null), onError: (e) => setErr(errText(e)) })}
+      />
+      <ReasonDialog
+        open={!!blocking} minLength={3} maxLength={300}
+        title={blocking?.on ? `Block spray in "${blocking.room.title}"` : `Unblock spray in "${blocking?.room.title ?? ""}"`}
+        description={blocking?.on ? BLOCK_CONFIRM : "Spraying can start again in this room if the host has it on."}
+        confirmLabel={blocking?.on ? "Block spray" : "Unblock spray"} destructive={blocking?.on} busy={act.isPending} error={err} onClose={() => setBlocking(null)}
+        onConfirm={(reason) => act.mutate({ method: "POST", url: `/api/admin/rooms/${blocking!.room.id}/spray-block`, body: { on: blocking!.on, reason }, done: blocking!.on ? "Spray blocked" : "Spray unblocked" }, { onSuccess: () => setBlocking(null), onError: (e) => setErr(errText(e)) })}
       />
       <FreezeHostDialog
         host={freezing ? { id: freezing.hostId, name: freezing.hostUsername } : null} canEndRooms={canEndRooms} busy={act.isPending} error={err} onClose={() => setFreezing(null)}
@@ -531,7 +555,9 @@ function ControlsTab({ isSuper }: { isSuper: boolean }) {
   const act = useAction(["/api/admin/rooms"]);
   const [toggle, setToggle] = useState<{ key: "sprays_paused" | "tickets_paused"; on: boolean } | null>(null);
   const [unfreeze, setUnfreeze] = useState<{ hostId: string; username: string } | null>(null);
+  const [unblock, setUnblock] = useState<SprayStatusInfo["blockedRooms"][number] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const spray = useQuery<SprayStatusInfo>({ queryKey: ["/api/admin/rooms/spray-status"], refetchInterval: 15_000 });
   if (isLoading) return <Msg>Loading controls...</Msg>;
   if (error || !data) return <Msg tone="error">Could not load the controls. <button className="underline" onClick={() => refetch()}>Try again</button></Msg>;
 
@@ -548,6 +574,44 @@ function ControlsTab({ isSuper }: { isSuper: boolean }) {
           <span>A pause stops new money only. Money already settled to a bank cannot be recalled here.</span>
         </p>
       </div>
+
+      <section aria-labelledby="spray-status-h" className={`${panel} p-4`} data-testid="spray-status">
+        <h3 id="spray-status-h" className="text-base font-semibold text-white">Spray status</h3>
+        {spray.isLoading && <Msg>Loading...</Msg>}
+        {spray.error && <Msg tone="error">Could not load the spray status. <button className="underline" onClick={() => spray.refetch()}>Try again</button></Msg>}
+        {spray.data && (
+          <>
+            <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
+              {([
+                ["Platform switch", spray.data.platformFlag ? "On" : "Off"],
+                ["Spraying", spray.data.paused ? "Paused" : "Running"],
+                ["Frozen hosts", String(spray.data.frozenHosts)],
+                ["Live rooms with spray on", String(spray.data.liveRoomsSprayOn)],
+              ] as const).map(([k, v]) => (
+                <div key={k}><dt className="text-xs uppercase tracking-wide text-slate-400">{k}</dt><dd className="mt-0.5 text-lg font-semibold tabular-nums text-white" data-testid={`spray-status-${k.toLowerCase().replace(/\s+/g, "-")}`}>{v}</dd></div>
+              ))}
+            </dl>
+            <h4 className="mb-1 mt-4 text-sm font-semibold text-white">Rooms blocked by an admin</h4>
+            {spray.data.blockedRooms.length === 0 ? <p className="text-sm text-slate-400">No rooms are blocked.</p> : (
+              <ul className="divide-y divide-slate-700/60" data-testid="blocked-rooms">
+                {spray.data.blockedRooms.map((b) => (
+                  <li key={b.roomId} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
+                    <div className="min-w-0 flex-1 basis-56">
+                      <p className="truncate font-medium text-white">{b.title}</p>
+                      <p className="mt-0.5 break-words text-sm text-slate-400">{b.reason ?? "No reason recorded"}{b.byAdminId ? ` · by admin ${b.byAdminId.slice(0, 8)}` : ""}{b.at ? ` · ${format(new Date(b.at), "d MMM yyyy, HH:mm")}` : ""}</p>
+                    </div>
+                    <span title={isSuper ? undefined : RESUME_DISABLED_REASON}>
+                      <Button variant="outline" disabled={!isSuper} aria-describedby={isSuper ? undefined : `blocked-why-${b.roomId}`} onClick={() => { setErr(null); setUnblock(b); }} className="min-h-[44px] border-slate-600 text-slate-100" data-testid={`button-unblock-room-${b.roomId}`}>Unblock</Button>
+                      {!isSuper && <span id={`blocked-why-${b.roomId}`} className="sr-only">{RESUME_DISABLED_REASON}</span>}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {!isSuper && spray.data.blockedRooms.length > 0 && <p className="mt-2 text-xs text-slate-500">{RESUME_DISABLED_REASON}</p>}
+          </>
+        )}
+      </section>
 
       <ul className={`${panel} divide-y divide-slate-700`}>
         {items.map((i) => (
@@ -587,8 +651,13 @@ function ControlsTab({ isSuper }: { isSuper: boolean }) {
       <ReasonDialog
         open={!!toggle} title={toggle?.on ? (toggle.key === "sprays_paused" ? "Pause all spraying" : "Pause all ticket sales") : "Resume"}
         description={toggle?.on ? "New money stops within a few seconds. Money already settled to a bank is not affected." : "New money starts again for everyone within a few seconds."}
-        confirmLabel={toggle?.on ? "Pause" : "Resume"} destructive={toggle?.on} busy={act.isPending} error={err} minLength={3} onClose={() => setToggle(null)}
-        onConfirm={(reason) => act.mutate({ method: "POST", url: `/api/admin/rooms/controls/${toggle!.key}`, body: { on: toggle!.on, reason }, done: toggle!.on ? "Paused" : "Resumed" }, { onSuccess: () => setToggle(null), onError: (e) => setErr(errText(e)) })}
+        confirmLabel={toggle?.on ? "Pause" : "Resume"} destructive={toggle?.on} busy={act.isPending} error={err} minLength={3} maxLength={300} onClose={() => setToggle(null)}
+        onConfirm={(reason) => act.mutate({ method: "POST", url: `/api/admin/rooms/controls/${toggle!.key}`, body: { on: toggle!.on, reason }, done: toggle!.key === "sprays_paused" ? "Applied" : toggle!.on ? "Paused" : "Resumed" }, { onSuccess: () => setToggle(null), onError: (e) => setErr(errText(e)) })}
+      />
+      <ReasonDialog
+        open={!!unblock} title={`Unblock spray in "${unblock?.title ?? ""}"`} description="Spraying can start again in this room if the host has it on."
+        confirmLabel="Unblock spray" busy={act.isPending} error={err} minLength={3} maxLength={300} onClose={() => setUnblock(null)}
+        onConfirm={(reason) => act.mutate({ method: "POST", url: `/api/admin/rooms/${unblock!.roomId}/spray-block`, body: { on: false, reason }, done: "Spray unblocked" }, { onSuccess: () => setUnblock(null), onError: (e) => setErr(errText(e)) })}
       />
       <ReasonDialog
         open={!!unfreeze} title={`Unfreeze ${unfreeze?.username ?? ""}`} description="They can receive sprays and sell tickets again. Held payouts stay held until you release them."
@@ -609,6 +678,7 @@ export default function AdminRooms() {
     canMod && { id: "live" as const, label: "Live now" },
     canMod && { id: "reported" as const, label: "Reported" },
     canMoney && { id: "money" as const, label: "Money" },
+    canSeeTransactions(role) && { id: "transactions" as const, label: "Transactions" },
     canMoney && { id: "rates" as const, label: "Rates" },
     canMoney && { id: "controls" as const, label: "Controls" },
   ].filter(Boolean)) as { id: Tab; label: string }[];
@@ -648,9 +718,10 @@ export default function AdminRooms() {
               ))}
             </div>
             <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} className="mt-6">
-              {tab === "live" && <LiveTab canFreeze={canMoney} canEndRooms={role === "super_admin"} />}
+              {tab === "live" && <LiveTab canFreeze={canMoney} canEndRooms={role === "super_admin"} role={role} />}
               {tab === "reported" && <ReportedTab />}
               {tab === "money" && <MoneyTab />}
+              {tab === "transactions" && <SprayTransactionsTab />}
               {tab === "rates" && <RoomRatesTab isSuper={role === "super_admin"} />}
               {tab === "controls" && <ControlsTab isSuper={role === "super_admin"} />}
             </div>
