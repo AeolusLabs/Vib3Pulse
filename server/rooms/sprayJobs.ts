@@ -18,6 +18,7 @@ import type { SprayBatch, SprayPayment } from "@shared/schema";
 import * as ss from "./sprayStorage";
 import * as bs from "./sprayBatchStorage";
 import "./teamSpray"; // registers the batch finalizer: the sweep drives team sprays through the same finalizeSpray
+import { withSpraySource } from "./sprayEvents";
 import { finalizeSpray, sprayClock, UNPAID_EXPIRY_MS, type FinalizeOutcome } from "./spray";
 
 export const sprayJobTuning = {
@@ -74,7 +75,7 @@ export async function sweepPendingSprays(now: number = sprayClock.now()): Promis
     const runBatch = async (row: SprayBatch, expireUnpaid: boolean) => {
       const ref = row.providerRef;
       out.checked++;
-      try { out.outcomes[ref] = await finalizeSpray(ref, { expireUnpaid, waitMs: 0 }); }
+      try { out.outcomes[ref] = await withSpraySource("sweep", () => finalizeSpray(ref, { expireUnpaid, waitMs: 0 })); }
       catch (e) {
         out.outcomes[ref] = "error";
         console.error(`[rooms:spray] sweep: team ref=${ref.slice(0, 12)}... failed, a later pass retries:`, sanitizeMoneyError(e));
@@ -85,7 +86,7 @@ export async function sweepPendingSprays(now: number = sprayClock.now()): Promis
     const run = async (row: SprayPayment, expireUnpaid: boolean) => {
       const ref = row.providerRef;
       out.checked++;
-      try { out.outcomes[ref] = await finalizeSpray(ref, { expireUnpaid, waitMs: 0 }); }
+      try { out.outcomes[ref] = await withSpraySource("sweep", () => finalizeSpray(ref, { expireUnpaid, waitMs: 0 })); }
       catch (e) {
         out.outcomes[ref] = "error";
         console.error(`[rooms:spray] sweep: ref=${ref.slice(0, 12)}... failed, a later pass retries:`, sanitizeMoneyError(e));

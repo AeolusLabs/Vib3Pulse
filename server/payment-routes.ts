@@ -44,6 +44,7 @@ import { looksLikeSprayReference } from "./payments/sprayReference.js";
 import { finalizeSpray, handleSprayChargeWebhook, QueueFullError as SprayQueueFullError } from "./rooms/spray.js";
 import { disputeReference, handleSprayDispute, handleSprayDisputeResolved } from "./rooms/clawbacks.js";
 import { sanitizeMoneyError } from "@shared/roomRefunds";
+import { withSpraySource } from "./rooms/sprayEvents.js";
 
 function requireAuth(req: Request, res: Response, next: Function) {
   if (!req.isAuthenticated() || !req.user) {
@@ -1066,7 +1067,7 @@ export function registerPaymentRoutes(app: Express): void {
         const d = (payload.data && typeof payload.data === "object" ? payload.data : {}) as Record<string, any>;
         const sprayRef = [d.transaction_reference, d.transaction?.reference, d.reference].find((v) => looksLikeSprayReference(v));
         if (sprayRef) {
-          const out = await finalizeSpray(sprayRef);
+          const out = await withSpraySource("callback", () => finalizeSpray(sprayRef));
           if (out === "busy") throw new Error("spray reference is busy; retry the refund webhook");
         } else {
           await handleRoomRefundWebhook(payload.data);

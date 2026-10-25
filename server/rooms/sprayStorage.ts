@@ -10,6 +10,7 @@ import {
   type HostClawback, type InsertSprayPayment, type SprayPayment, type UserPaymentMethod,
 } from "@shared/schema";
 import { SPRAY_SPEND_STATUSES, isSprayStatus, type SprayStatus } from "@shared/spray";
+import { recordSprayEvent } from "./sprayEvents";
 
 export type SprayTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 /** The database or a transaction. */
@@ -28,7 +29,11 @@ const isPosInt = (n: unknown): n is number => typeof n === "number" && Number.is
 export async function insertSprayIfNew(row: InsertSprayPayment, tx?: SprayExec): Promise<{ row: SprayPayment; created: boolean }> {
   const ex = x(tx);
   const inserted = await ex.insert(sprayPayments).values(row).onConflictDoNothing().returning();
-  if (inserted.length > 0) return { row: inserted[0], created: true };
+  if (inserted.length > 0) {
+    const r = inserted[0];
+    await recordSprayEvent({ sprayId: r.id, batchId: r.batchId, roomId: r.roomId, from: null, to: r.status }, ex);
+    return { row: r, created: true };
+  }
   const [existing] = await ex.select().from(sprayPayments)
     .where(and(eq(sprayPayments.payerId, row.payerId), eq(sprayPayments.idempotencyKey, row.idempotencyKey))).limit(1);
   // A conflict that is not on (payer_id, idempotency_key) can only be a provider_ref collision: refuse loudly, never guess.
@@ -68,6 +73,8 @@ export async function markSprayStatus(
   }
   const [row] = await x(tx).update(sprayPayments).set(set as Partial<SprayPayment>)
     .where(and(eq(sprayPayments.id, id), inArray(sprayPayments.status, [...from]))).returning();
+  // from_status is only known when the caller named one; a "created or pending" move logs null rather than guess.
+  if (row) await recordSprayEvent({ sprayId: row.id, batchId: row.batchId, roomId: row.roomId, from: from.length === 1 ? from[0] : null, to, detail: patch.reason ?? null }, x(tx));
   return row ?? null;
 }
 

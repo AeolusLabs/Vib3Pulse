@@ -15,6 +15,7 @@ import * as ss from "./sprayStorage";
 import { canViewRoom } from "./roomAccess";
 import { roomFeatures } from "./features";
 import { TokenBucket } from "./rateLimit";
+import { withSpraySource } from "./sprayEvents";
 import { SPRAY_UNAVAILABLE, finalizeSpray, getOwnSpray, sprayStatusView, startSpray } from "./spray";
 import { batchStatusView, getOwnBatch, startTeamSpray } from "./teamSpray";
 import * as bs from "./sprayBatchStorage";
@@ -58,12 +59,12 @@ export function registerSprayRoutes(app: Express): void {
   // ------------------------------------------------------------ spray (pay at the moment you throw)
   app.post("/api/rooms/:id/spray", requireAuth, sprayIpLimiter, roomLimiter, async (req: Request, res: Response) => {
     try {
-      const out = await startSpray({
+      const out = await withSpraySource("api", () => startSpray({
         roomId: String(req.params.id ?? ""),
         payerId: req.user!.id, // the session's, never the body's
         body: req.body,
         devOrigin: `${req.protocol}://${req.headers.host}`,
-      });
+      }));
       if (out.retryAfterSec) res.setHeader("Retry-After", String(out.retryAfterSec));
       res.status(out.status).json(out.body);
     } catch (e) {
@@ -82,7 +83,7 @@ export function registerSprayRoutes(app: Express): void {
       if (!row) return res.status(404).json({ message: "Not found" });
       const recentFailure = row.status === "failed" && Date.now() - new Date(row.createdAt).getTime() < POLL_FAILED_RECHECK_MS;
       if ((row.status === "created" || row.status === "pending" || row.status === "paid" || recentFailure) && take(`sprayfin:${req.user!.id}`, 1 / 3, 3)) {
-        await finalizeSpray(row.providerRef, { waitMs: 0 }).catch((e) => console.error("[rooms:spray] finalize on poll failed:", sanitizeMoneyError(e)));
+        await withSpraySource("api", () => finalizeSpray(row.providerRef, { waitMs: 0 })).catch((e) => console.error("[rooms:spray] finalize on poll failed:", sanitizeMoneyError(e)));
         row = (await ss.getSprayById(row.id)) ?? row;
       }
       res.json(sprayStatusView(row));
@@ -97,12 +98,12 @@ export function registerSprayRoutes(app: Express): void {
   app.post("/api/rooms/:id/spray/team", requireAuth, sprayIpLimiter, roomLimiter, async (req: Request, res: Response) => {
     if (!roomFeatures.gaming) return res.status(404).json({ message: "Not found" });
     try {
-      const out = await startTeamSpray({
+      const out = await withSpraySource("api", () => startTeamSpray({
         roomId: String(req.params.id ?? ""),
         payerId: req.user!.id, // the session's, never the body's
         body: req.body,
         devOrigin: `${req.protocol}://${req.headers.host}`,
-      });
+      }));
       if (out.retryAfterSec) res.setHeader("Retry-After", String(out.retryAfterSec));
       res.status(out.status).json(out.body);
     } catch (e) {
@@ -119,7 +120,7 @@ export function registerSprayRoutes(app: Express): void {
       if (!b) return res.status(404).json({ message: "Not found" });
       const recentFailure = b.status === "failed" && Date.now() - new Date(b.createdAt).getTime() < POLL_FAILED_RECHECK_MS;
       if ((b.status === "created" || b.status === "pending" || b.status === "paid" || recentFailure) && take(`sprayfin:${req.user!.id}`, 1 / 3, 3)) {
-        await finalizeSpray(b.providerRef, { waitMs: 0 }).catch((e) => console.error("[rooms:spray] finalize on team poll failed:", sanitizeMoneyError(e)));
+        await withSpraySource("api", () => finalizeSpray(b.providerRef, { waitMs: 0 })).catch((e) => console.error("[rooms:spray] finalize on team poll failed:", sanitizeMoneyError(e)));
         b = (await bs.getBatchById(b.id)) ?? b;
       }
       res.json(await batchStatusView(b));

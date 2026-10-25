@@ -43,6 +43,7 @@ import { requireRole } from "../services/adminSecurity";
 import { BUSY, openPaymentIssue, withAdvisoryLock } from "./refunds";
 import { LOCK_SPRAY, sprayClock } from "./spray";
 import { capLockKey } from "./sprayLimits";
+import { recordSprayEvent, withSpraySource } from "./sprayEvents";
 
 type Queryable = { query: (text: string, values?: any[]) => Promise<{ rows: any[]; rowCount?: number | null }> };
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -84,7 +85,7 @@ async function loadRow(c: PoolClient, reference: string): Promise<DisputeRow | u
  * The payload is never trusted for amounts: the clawbacks are the stored host and guest shares of the row.
  */
 export async function handleSprayDispute(reference: string): Promise<DisputeOutcome> {
-  const r = await withAdvisoryLock(LOCK_SPRAY, reference, (c) => disputeLocked(c, reference), 8000);
+  const r = await withSpraySource("callback", () => withAdvisoryLock(LOCK_SPRAY, reference, (c) => disputeLocked(c, reference), 8000));
   if (r === BUSY) throw new Error("spray reference is busy; retry the dispute webhook");
   return r;
 }
@@ -127,6 +128,7 @@ async function disputeLocked(c: PoolClient, reference: string): Promise<DisputeO
       [row.id, row.status],
     );
     if (!won.rowCount) { await c.query("ROLLBACK"); return "already"; }
+    await recordSprayEvent({ sprayId: row.id, roomId: row.room_id, from: row.status, to: "disputed", detail: "DISPUTED" }, c);
     // Review r4 m3: a spray that was still holding the payer's room-limit reservation (created, pending, paid) gives it
     // back: it will never be delivered. (failed already released it; delivered spent it for real.)
     if (row.status === "created" || row.status === "pending" || row.status === "paid") {

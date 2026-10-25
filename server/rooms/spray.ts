@@ -58,6 +58,7 @@ import { notifySprayReceived } from "./notify";
 import { isBlockedEitherWay } from "../utils/blocks";
 import * as rs from "./roomStorage";
 import * as ss from "./sprayStorage";
+import { recordSprayEvent, withSpraySource } from "./sprayEvents";
 import { roomHub } from "./RoomHub";
 import { isKicked } from "./roomSocket";
 import { isGamePlayer } from "./stage";
@@ -684,6 +685,7 @@ async function deliverOrReverse(c: PoolClient, row: SprayPayment): Promise<Final
         [row.id, iso(nowMs)],
       );
       if (!won.rowCount) { await c.query("ROLLBACK"); return "already"; }
+      await recordSprayEvent({ sprayId: row.id, roomId: row.roomId, from: "paid", to: "delivered" }, c);
       if (testing() && sprayTestHooks.failDeliveryLedger?.(row.id)) throw new Error("injected ledger failure (test)");
       await c.query(
         `insert into payment_transactions (type, provider, provider_payment_id, currency, buyer_user_id, organizer_id, ticket_id,
@@ -807,6 +809,7 @@ async function confirmReversed(c: PoolClient, row: SprayPayment): Promise<"rever
     );
     won = !!r.rowCount;
     if (won) {
+      await recordSprayEvent({ sprayId: row.id, roomId: row.roomId, from: "reversing", to: "reversed", detail: row.reason }, c);
       await c.query(
         `insert into payment_transactions (type, provider, provider_payment_id, currency, buyer_user_id, organizer_id, ticket_id,
                                            gross_amount, platform_fee_amount, net_to_organizer_amount, status, created_at)
@@ -862,7 +865,7 @@ async function tellPayerReversed(row: SprayPayment): Promise<void> {
  * Paystack retries.
  */
 export async function handleSprayChargeWebhook(reference: string): Promise<void> {
-  const out = await finalizeSpray(reference);
+  const out = await withSpraySource("callback", () => finalizeSpray(reference));
   if (out === "busy") throw new Error("spray reference is busy; retry the webhook");
   if (out === "unknown") logSpray(reference, "webhook_ignored");
 }

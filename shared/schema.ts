@@ -2587,3 +2587,24 @@ export const roomRateChanges = pgTable("room_rate_changes", {
   adminId: varchar("admin_id").notNull(),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 }, (t) => ({ createdIdx: index("room_rate_changes_created_idx").on(t.createdAt) }));
+
+// Append-only status log for sprays and team-spray batches (migrations/add_spray_events.sql). No foreign keys on purpose.
+export const sprayEvents = pgTable("spray_events", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  sprayId: uuid("spray_id"),
+  batchId: uuid("batch_id"),
+  roomId: varchar("room_id").notNull(),
+  at: timestamp("at").notNull().default(sql`now()`),
+  fromStatus: text("from_status"),
+  toStatus: text("to_status").notNull(),
+  source: text("source").notNull(),
+  detail: text("detail"),
+}, (t) => ({
+  sourceCheck: check("spray_events_source_check", sql`${t.source} IN ('api', 'callback', 'sweep', 'admin', 'system')`),
+  subjectCheck: check("spray_events_subject_check", sql`${t.sprayId} IS NOT NULL OR ${t.batchId} IS NOT NULL`),
+  sprayAtIdx: index("spray_events_spray_at_idx").on(t.sprayId, t.at),
+  batchAtIdx: index("spray_events_batch_at_idx").on(t.batchId, t.at),
+  roomAtIdx: index("spray_events_room_at_idx").on(t.roomId, t.at),
+  toStatusAtIdx: index("spray_events_to_status_at_idx").on(t.toStatus, t.at),
+}));
+export type SprayEvent = typeof sprayEvents.$inferSelect;

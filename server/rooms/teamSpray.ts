@@ -32,6 +32,7 @@ import { deliverNotification } from "../notifications";
 import { notifySprayReceived } from "./notify";
 import * as ss from "./sprayStorage";
 import * as bs from "./sprayBatchStorage";
+import { recordBatchTransition } from "./sprayEvents";
 import { roomHub } from "./RoomHub";
 import { roomFeatures } from "./features";
 import { sprayAllowed } from "./roomControls";
@@ -424,6 +425,7 @@ async function deliverBatch(c: PoolClient, b: SprayBatch): Promise<FinalizeOutco
       const won = await c.query(`update spray_batches set status = 'delivered', delivered_at = $2::timestamp where id = $1 and status = 'paid' returning id`, [b.id, iso(nowMs)]);
       if (!won.rowCount) { await c.query("ROLLBACK"); return "already"; }
       await c.query(`update spray_payments set status = 'delivered', delivered_at = $2::timestamp where batch_id = $1 and status = 'paid'`, [b.id, iso(nowMs)]);
+      await recordBatchTransition(b, shares.map((s) => s.id), "paid", "delivered", null, c);
       for (const s of shares) {
         await c.query(
           `insert into payment_transactions (type, provider, provider_payment_id, currency, buyer_user_id, organizer_id, ticket_id,
@@ -524,7 +526,9 @@ async function confirmBatchReversed(c: PoolClient, b: SprayBatch): Promise<"reve
     won = !!r.rowCount;
     if (won) {
       await c.query(`update spray_payments set status = 'reversed', reversed_at = $2::timestamp where batch_id = $1 and status = 'reversing'`, [b.id, iso(nowMs)]);
-      for (const s of await bs.sharesOf(b.id)) {
+      const reversedShares = await bs.sharesOf(b.id);
+      await recordBatchTransition(b, reversedShares.map((s) => s.id), "reversing", "reversed", b.reason, c);
+      for (const s of reversedShares) {
         await c.query(
           `insert into payment_transactions (type, provider, provider_payment_id, currency, buyer_user_id, organizer_id, ticket_id,
                                              gross_amount, platform_fee_amount, net_to_organizer_amount, status, created_at)
@@ -593,6 +597,7 @@ export async function disputeBatchLocked(c: PoolClient, reference: string): Prom
     const won = await c.query(`update spray_batches set status = 'disputed', reason = 'DISPUTED' where id = $1 and status = $2 returning id`, [b.id, b.status]);
     if (!won.rowCount) { await c.query("ROLLBACK"); return "already"; }
     await c.query(`update spray_payments set status = 'disputed', reason = 'DISPUTED' where batch_id = $1 and status = $2`, [b.id, b.status]);
+    await recordBatchTransition(b, shares.map((s) => s.id), b.status, "disputed", "DISPUTED", c);
     if (b.status === "created" || b.status === "pending" || b.status === "paid") {
       await c.query(`update room_spend set spent_kobo = greatest(spent_kobo - $3::int, 0) where room_id = $1 and user_id = $2`, [b.roomId, b.payerId, b.amountKobo]);
     }

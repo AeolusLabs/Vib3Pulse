@@ -8,6 +8,7 @@ import { db } from "../storage";
 import { sprayBatches, sprayPayments, type SprayBatch, type SprayPayment } from "@shared/schema";
 import { isSprayStatus, type SprayStatus } from "@shared/spray";
 import { UUID_RE, type SprayExec } from "./sprayStorage";
+import { recordSprayEvent } from "./sprayEvents";
 
 const x = (tx?: SprayExec): typeof db => (tx ?? db) as typeof db;
 
@@ -34,6 +35,7 @@ export async function getBatchById(id: string, tx?: SprayExec): Promise<SprayBat
 /** The batch row, unless the payer already used this key (then null: the caller re-reads it and replays). */
 export async function insertBatchIfNew(row: InsertSprayBatch, tx: SprayExec): Promise<SprayBatch | null> {
   const inserted = await x(tx).insert(sprayBatches).values(row).onConflictDoNothing().returning();
+  if (inserted[0]) await recordSprayEvent({ batchId: inserted[0].id, roomId: inserted[0].roomId, from: null, to: inserted[0].status }, x(tx));
   return inserted[0] ?? null;
 }
 
@@ -60,8 +62,12 @@ export async function markBatchStatus(
     const [row] = await x(ex).update(sprayBatches).set(set as Partial<SprayBatch>)
       .where(and(eq(sprayBatches.id, id), inArray(sprayBatches.status, [...from]))).returning();
     if (!row) return null;
-    await x(ex).update(sprayPayments).set(set as Partial<SprayPayment>)
-      .where(and(eq(sprayPayments.batchId, id), inArray(sprayPayments.status, [...from])));
+    const shares = await x(ex).update(sprayPayments).set(set as Partial<SprayPayment>)
+      .where(and(eq(sprayPayments.batchId, id), inArray(sprayPayments.status, [...from]))).returning({ id: sprayPayments.id });
+    // One event for the batch and one per share row that moved with it (shares carry batch_id so either timeline finds them).
+    const prev = from.length === 1 ? from[0] : null;
+    await recordSprayEvent({ batchId: id, roomId: row.roomId, from: prev, to, detail: patch.reason ?? null }, x(ex));
+    for (const sh of shares) await recordSprayEvent({ sprayId: sh.id, batchId: id, roomId: row.roomId, from: prev, to, detail: patch.reason ?? null }, x(ex));
     return row;
   };
   return tx ? run(tx) : db.transaction((t) => run(t));
