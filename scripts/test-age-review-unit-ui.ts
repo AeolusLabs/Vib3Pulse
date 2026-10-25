@@ -93,6 +93,13 @@ test("privacy copy matches the spec wording", () => {
   assert.equal(PRIVACY.policyHref, "/privacy");
 });
 
+test("What we keep mentions the one-way code and drops the old sentence", () => {
+  assert.match(PRIVACY.keep.p, /one-way code/);
+  assert.ok(!PRIVACY.keep.p.includes("Never your photos, the name on the document or the document number"));
+  assert.ok(PRIVACY.keep.p.endsWith("We never keep your photos, the name on the document or the number itself."));
+  assert.ok(!BAD.test(PRIVACY.keep.p));
+});
+
 test("formatCode groups six characters", () => {
   assert.equal(formatCode("K7M29P"), "K7 M2 9P");
   assert.equal(formatCode("k7 m2 9p"), "K7 M2 9P");

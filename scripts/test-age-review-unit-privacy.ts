@@ -59,6 +59,12 @@ test("age review section matches the pop-up facts", () => {
   assert.match(t, /only trained Vib3Pulse age reviewers/i);
 });
 
+test("age review section says the one-way code, like the pop-up", () => {
+  const t = PRIVACY_POLICY.sections.find((s) => s.id === "age-review")!.paragraphs.join(" ");
+  assert.match(t, /one-way code made from your document number/);
+  assert.ok(!t.includes("Never your photos"));
+});
+
 test("account deletion section states the limits honestly", () => {
   const t = PRIVACY_POLICY.sections.find((s) => s.id === "deleting-your-account")!.paragraphs.join(" ");
   assert.match(t, /Deleted user/);

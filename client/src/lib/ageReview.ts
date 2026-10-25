@@ -79,7 +79,7 @@ export const PRIVACY = {
   whatUpload: "A reviewer compares your document with the birthdate you gave when you signed up. We delete your photos as soon as a decision is made, or after 7 days if nobody has looked.",
   whatLive: "A reviewer compares your document with the birthdate you gave when you signed up. Nothing is recorded or saved.",
   whatHeading: "What happens",
-  keep: { h: "What we keep", p: "Only the result: verified or not, the date, the type of document, and whether the birthdate matched. Never your photos, the name on the document or the document number." },
+  keep: { h: "What we keep", p: "Only the result: verified or not, the date, the type of document, and whether the birthdate matched. We also keep a one-way code made from your document number. It cannot be turned back into the number and only stops the same document being used on several accounts. We never keep your photos, the name on the document or the number itself." },
   choices: { h: "Your choices", p: "Cover everything except your photo, name and date of birth. Cancel any time before a decision and your photos are deleted. Choose the live check instead of uploading. Saying no only means the adult only features stay off." },
   safety: { h: "Your safety", p: "If your document shows you are under 18, we will move your account to the right age group." },
   tick: "I understand how my information is used",
