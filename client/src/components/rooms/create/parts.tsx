@@ -77,21 +77,21 @@ export function ChipGroup<V extends string | number>(props: {
 }
 
 /** A labelled switch row. A disabled switch says why under its help line. */
-export function SwitchRow(props: { id: string; label: string; help?: string; checked: boolean; onChange(v: boolean): void; disabledReason?: string; testId?: string }) {
-  const { id, label, help, checked, onChange, disabledReason, testId } = props;
+export function SwitchRow(props: { id: string; label: string; help?: string; checked: boolean; onChange(v: boolean): void; disabledReason?: string; testId?: string; quietReason?: boolean }) {
+  const { id, label, help, checked, onChange, disabledReason, testId, quietReason } = props;
   const off = !!disabledReason;
   return (
     <div className={`flex min-h-[44px] items-center justify-between gap-4 rounded-xl border border-border p-3 ${off ? "opacity-60" : ""}`}>
       <div className="min-w-0 text-sm">
         <label htmlFor={id} className="block font-medium">{label}</label>
         {help && <p id={`${id}-help`} className="text-muted-foreground">{help}</p>}
-        {off && <p id={`${id}-why`} className="text-foreground">{disabledReason}</p>}
+        {off && !quietReason && <p id={`${id}-why`} className="text-foreground">{disabledReason}</p>}
       </div>
       {/* The shared switch is small; the wrapper gives it a 44 px tap area. */}
       <span className="grid min-h-[44px] min-w-[44px] shrink-0 place-items-center">
         <Switch
           id={id} checked={checked} disabled={off} onCheckedChange={onChange}
-          aria-describedby={[help ? `${id}-help` : "", off ? `${id}-why` : ""].filter(Boolean).join(" ") || undefined}
+          aria-describedby={[help ? `${id}-help` : "", off && !quietReason ? `${id}-why` : ""].filter(Boolean).join(" ") || undefined}
           data-testid={testId}
         />
       </span>

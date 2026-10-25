@@ -26,6 +26,7 @@ import {
   PRICE_COPY, TICKET_FIELDS, defaultTicketDraft, formatNaira, isTicketFailure, priceKoboOf, priceStepAvailable, ticketCreateMessage,
   ticketDraftProblem, ticketFieldSelectors, ticketsTooManyForVideo, type TicketDraft,
 } from "@/lib/roomTickets";
+import { moneyRefusal, moneyView } from "@/lib/moneySection";
 import { createRoom, useWizardHost } from "./createRoomApi";
 import StepBasics, { type FieldError } from "./StepBasics";
 import StepAudience from "./StepAudience";
@@ -53,7 +54,7 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const [accountTooNew, setAccountTooNew] = useState(false);
-  const { host, flags, gaming, gameLanes, minAccountAgeDays, failed: hostFailed } = useWizardHost(open, accountTooNew);
+  const { host, flags, readiness, gaming, gameLanes, minAccountAgeDays, failed: hostFailed } = useWizardHost(open, accountTooNew);
   // Public is closed when the account is younger than the server's minimum (known from the config, or from a refusal).
   const publicBlocked = accountTooNew || (!!host && accountTooNewFor(host, minAccountAgeDays));
   const { data: myEvents = [] } = useQuery<{ id: string; title: string }[]>({ queryKey: ["/api/events/my-events"], enabled: open });
@@ -124,10 +125,12 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
   const visibilityOptions = useMemo(() => (options?.visibilityOptions ?? []).map((o) =>
     accountTooNew && o.value === "public" && !o.disabledReason ? { ...o, disabledReason: HOST_REFUSAL.ACCOUNT_TOO_NEW } : o), [options, accountTooNew]);
 
-  // Paid room: the switch shows only with the paidRooms flag on and money unlocked for this room (18+/21+, adult host);
-  // the price step only when it is also switched on. With the flag off none of it exists, and nothing is sent.
-  const priceAvailable = priceStepAvailable(flags.paidRooms, options?.moneyLocked);
+  // Money section: Paid room and Spray, always drawn while a platform flag is on (locked with the reason for a room that is
+  // not 18+/21+). The price step follows only when Paid room is available and switched on; spray is sent only when available.
+  const money = moneyView({ flags, readiness, ageLimit: state.ageLimit });
+  const priceAvailable = priceStepAvailable(flags.paidRooms, options?.moneyLocked) && money.paid.available;
   const priceStepOn = priceAvailable && ticket.on;
+  const sprayOn = flags.spray && money.spray.available && state.sprayEnabled === true;
   // Live video is refused above ROOM_LIMITS.liveVideoMax people (lane S1): with more tickets than that, the switch is off
   // with the reason, the price step says so, and live video is not asked for (review and create both drop it).
   const videoOverTickets = priceStepOn && ticketsTooManyForVideo(ticket);
@@ -144,7 +147,6 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
   const adultHost = !!host && host.age !== null && host.age >= 18;
   const showNote = !!host && !!options && Boolean(options.teenHostNote) && showTeenHostNote(host.age) && !noteGone;
   const dismissNote = () => { setNoteGone(true); try { localStorage.setItem(TEEN_NOTE_KEY, "1"); } catch { /* shows again next time */ } };
-  const moneyPlaceholder = (flags.paidRooms || flags.spray) && adultHost && (state.ageLimit === "18+" || state.ageLimit === "21+") && options?.moneyLocked === null;
 
   const heading = done ? DONE_COPY[done.kind].title : uiStepTitle(current);
 
@@ -217,14 +219,15 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
 
   const submit = async (s: WizardState) => {
     setBusy(true); setSubmitError(null);
-    const res = await createRoom(withVideoRule(s), { noDirectInteractions: !direct, screenUrl: LINK_SCREENS ? screenUrl : undefined, ticket, ticketsEnabled: priceStepOn }, parseLinkChoice(linkChoice));
+    const res = await createRoom(withVideoRule({ ...s, sprayEnabled: sprayOn }), { noDirectInteractions: !direct, screenUrl: LINK_SCREENS ? screenUrl : undefined, ticket, ticketsEnabled: priceStepOn, sprayFlag: sprayOn }, parseLinkChoice(linkChoice));
     setBusy(false);
     if (!res.ok) {
       if (res.code === "ACCOUNT_TOO_NEW") setAccountTooNew(true);
-      const msg = ticketCreateMessage(res) ?? createErrorMessage(res);
-      const target: UiStep | null = isTicketFailure(res) ? (steps.includes("money") ? "money" : "features") : stepForFailure(res);
+      const sprayMsg = sprayOn && !priceStepOn ? moneyRefusal(res.code) : null;
+      const msg = sprayMsg ?? ticketCreateMessage(res) ?? createErrorMessage(res);
+      const target: UiStep | null = sprayMsg ? "features" : isTicketFailure(res) ? (steps.includes("money") ? "money" : "features") : stepForFailure(res);
       const t = target ? steps.indexOf(target) : -1;
-      const field = fieldForFailure(res);
+      const field = sprayMsg ? "sprayEnabled" : fieldForFailure(res);
       // A ticket code with no field (NO_PAYOUT_ACCOUNT, HOST_NOT_VERIFIED, ...) keeps field "": the price step shows it in
       // its general alert box (StepPrice), so it is never invisible.
       if (t >= 0 && t < idx) { setStepIdx(t); setError({ field, reason: msg }); if (field) focusField(field); }
@@ -327,8 +330,8 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
               ) : current === "features" ? (
                 <StepFeatures
                   state={state} set={set} error={error} directInteractions={direct} setDirectInteractions={setDirect}
-                  screenUrl={screenUrl} setScreenUrl={setScreenUrl} moneyPlaceholder={moneyPlaceholder && !priceAvailable}
-                  paid={priceAvailable ? { on: ticket.on, set: (on) => setTicket({ on }), needsId: !host?.idVerifiedAdult } : null}
+                  screenUrl={screenUrl} setScreenUrl={setScreenUrl}
+                  money={{ view: money, paid: { on: priceAvailable && ticket.on, set: (on) => setTicket({ on }) }, spray: { on: sprayOn, set: (on) => set({ sprayEnabled: on }) } }}
                   videoBlocked={videoOverTickets ? PRICE_COPY.videoNeedsFewer : null}
                   gaming={gaming} gameLanes={gameLanes}
                 />

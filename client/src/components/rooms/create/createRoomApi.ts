@@ -90,5 +90,6 @@ export function useWizardHost(open: boolean, accountTooNew: boolean) {
   // Gamers live: the game-format choice is offered only while the server says the flag is on (the key is absent when off).
   const gaming = config.data?.features.gaming === true;
   const gameLanes = gaming && config.data?.game?.lanes === true;
-  return { host, flags, gaming, gameLanes, minAccountAgeDays, loading: me.isLoading, failed: me.isError };
+  const readiness = config.data?.hostMoneyReadiness;
+  return { host, flags, readiness, gaming, gameLanes, minAccountAgeDays, loading: me.isLoading, failed: me.isError };
 }

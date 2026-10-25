@@ -190,8 +190,6 @@ export const CONTROLS_COPY = {
   lockNote: "No one new can join. People here now stay. Someone who left can come back within 2 minutes.",
   voiceLabel: "Voice",
   liveLabel: "Live video",
-  moneyLabel: "Paid entry and spray",
-  moneyNote: "Not available yet.",
   endButton: "End room",
   cohostSettingsNote: "Only the host can change slow mode, the lock and the switches.",
   peopleEmpty: "No one else is here yet.",

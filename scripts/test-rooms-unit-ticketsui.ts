@@ -478,9 +478,9 @@ test("wizard wires the price step through the shared rules and sends tickets onl
   assert.ok(wiz.includes("const priceStepOn = priceAvailable && ticket.on;"));
   assert.ok(wiz.includes("ticketsEnabled: priceStepOn"));
   assert.ok(/current === "money" && priceStepOn \?/.test(wiz));
-  assert.ok(wiz.includes("moneyPlaceholder={moneyPlaceholder && !priceAvailable}"));
+  assert.ok(wiz.includes("money={{ view: money,"), "the Money section replaces the old placeholder");
   const features = src("../client/src/components/rooms/create/StepFeatures.tsx");
-  assert.ok(/\{paid && \(/.test(features), "the Paid room switch exists only when the page passes it");
+  assert.ok(/\{money && \(/.test(features), "the Money section (Paid room and Spray) exists only when the page passes it");
 });
 test("M4: review shows the ticket count; live video is off above liveVideoMax tickets and not asked for", () => {
   assert.equal(ROOM_LIMITS.liveVideoMax, 50);

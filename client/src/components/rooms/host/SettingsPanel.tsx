@@ -18,8 +18,8 @@ export interface SettingsPanelProps {
   liveVideo: boolean;
   onSwitchVoice(on: boolean): Promise<boolean>;
   onSwitchLive(on: boolean): Promise<boolean>;
-  /** The money placeholder (moneyPlaceholderVisible). False renders nothing. */
-  showMoney: boolean;
+  /** The host's Money section (ControlsMoney). Null renders nothing. */
+  money?: ReactNode;
   /** Host only: the existing host block (invite link, Invite an adult in a minors' room, waves switch). */
   hostExtras?: ReactNode;
   /** One plain line for a failure. */
@@ -36,7 +36,7 @@ const ROW_LABEL = `${ROW} cursor-pointer`;
  * Room settings. Changes show at once and settle on the server's room:settings (which everyone in the room gets); if that
  * has not arrived within about a second the server's value shows again, and a refused save puts it back with a plain line.
  */
-export default function SettingsPanel({ role, settings, onSave, voiceEnabled, liveVideo, onSwitchVoice, onSwitchLive, showMoney, hostExtras, onMessage }: SettingsPanelProps) {
+export default function SettingsPanel({ role, settings, onSave, voiceEnabled, liveVideo, onSwitchVoice, onSwitchLive, money = null, hostExtras, onMessage }: SettingsPanelProps) {
   const can = controlsFor(role);
   const ids = useId();
   const [pending, setPending] = useState<SettingsPatch | null>(null);
@@ -175,16 +175,7 @@ export default function SettingsPanel({ role, settings, onSave, voiceEnabled, li
         </label>
       )}
 
-      {showMoney && (
-        // Placeholder only: money controls are not built in this phase. Never rendered while the money flags are off.
-        <div className={`${ROW} opacity-60`} aria-disabled="true" data-testid="money-placeholder">
-          <div className="min-w-0">
-            <span className="block font-semibold">{CONTROLS_COPY.moneyLabel}</span>
-            <span className="block text-xs text-muted-foreground">{CONTROLS_COPY.moneyNote}</span>
-          </div>
-          <Switch checked={false} disabled aria-label={CONTROLS_COPY.moneyLabel} />
-        </div>
-      )}
+      {money}
 
       {can.hostExtras && hostExtras}
     </div>

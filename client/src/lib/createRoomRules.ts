@@ -29,6 +29,8 @@ export interface WizardState {
   gameDropTimeoutMs?: 30000 | 120000 | 0;
   /** Separate age groups: the room becomes a parent with a lane per group. Only offered while the server's config allows lanes. */
   lanes?: boolean;
+  /** Spray switched on for this room (Money section). Optional so every existing state stays valid; sent only while the spray flag is on. */
+  sprayEnabled?: boolean;
 }
 
 export interface WizardFlags { paidRooms: boolean; spray: boolean }

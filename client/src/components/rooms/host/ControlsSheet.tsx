@@ -9,8 +9,9 @@ import RequestsPanel from "@/components/rooms/host/RequestsPanel";
 import PeoplePanel from "@/components/rooms/host/PeoplePanel";
 import SettingsPanel from "@/components/rooms/host/SettingsPanel";
 import EndRoomDialog from "@/components/rooms/host/EndRoomDialog";
-import { NOTICE_MESSAGE, useRoomsConfig } from "@/lib/roomsApi";
-import { CONTROLS_COPY, TAB_LABEL, controlsFor, moneyPlaceholderVisible, readSettings, requestQueue, roleChange, settingsErrorMessage, type ControlsRole, type ControlsTab } from "@/lib/hostControls";
+import ControlsMoney from "@/components/rooms/host/ControlsMoney";
+import { NOTICE_MESSAGE } from "@/lib/roomsApi";
+import { CONTROLS_COPY, TAB_LABEL, controlsFor, readSettings, requestQueue, roleChange, settingsErrorMessage, type ControlsRole, type ControlsTab } from "@/lib/hostControls";
 import type { useRoomSocket } from "@/hooks/useRoomSocket";
 import type { RoomMemberView, RoomState } from "@/lib/roomReducer";
 import GameConsole, { type GameConsoleProps } from "@/components/rooms/game/GameConsole";
@@ -27,7 +28,7 @@ export interface ControlsSheetProps {
   inviteToken?: string;
   role: ControlsRole;
   /** The room details (age limit, minors' room, and the settings until the socket's room record carries them). */
-  room: { ageLimit: string; minorsRoom?: boolean };
+  room: { ageLimit: string; minorsRoom?: boolean; status?: string; sprayEnabled?: boolean; ticketPriceKobo?: number | null };
   state: RoomState;
   /** Everyone in the room, the host included. */
   count: number;
@@ -54,9 +55,7 @@ const FOCUS = "focus-visible:outline focus-visible:outline-2 focus-visible:outli
 export default function ControlsSheet({ open, onOpenChange, roomId, inviteToken, role, room, state, count, selfId, sock, holderAwayLeftMs, hostExtras, returnFocusTo, startTab, gameConsole }: ControlsSheetProps) {
   const can = controlsFor(role);
   const [tab, setTab] = useState<ControlsTab | "game">(startTab ?? "requests");
-  const { data: config } = useRoomsConfig();
   const settings = readSettings(state.room, room as unknown as Record<string, unknown>);
-  const showMoney = moneyPlaceholderVisible({ role, flags: config?.features, ageLimit: room.ageLimit, minorsRoom: room.minorsRoom });
   // Requests already tapped are hidden here and in the badge alike, until the server's next list or a refusal (a notice) brings them back.
   const [acted, setActed] = useState<Set<string>>(new Set());
   const noticeN = state.notice?.n ?? 0;
@@ -182,7 +181,7 @@ export default function ControlsSheet({ open, onOpenChange, roomId, inviteToken,
               onSave={(patch) => sock.saveSettings(patch)}
               voiceEnabled={state.voiceEnabled} liveVideo={state.liveVideo}
               onSwitchVoice={(on) => sock.setVoice(on)} onSwitchLive={(on) => sock.setLiveVideo(on)}
-              showMoney={showMoney}
+              money={role === "host" ? <ControlsMoney roomId={roomId} room={{ ...room, status: (state.room as { status?: string } | null)?.status ?? room.status }} /> : null}
               hostExtras={hostExtras}
               onMessage={say}
             />

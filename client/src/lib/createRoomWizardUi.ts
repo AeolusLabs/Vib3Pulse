@@ -4,6 +4,7 @@ import { gameRefusalText } from "@/lib/gameScreen";
 import type { RoomVisibility } from "@shared/rooms";
 import { ROOM_LIMITS, SLOW_MODES } from "@shared/rooms";
 import type { WizardState } from "@/lib/createRoomRules";
+import { sprayPayload } from "./moneySection";
 import { PRICE_COPY, ticketPayload, type TicketDraft, type TicketPayload } from "./roomTickets";
 
 /** The steps this UI knows how to draw. stepsFor() may name others later (a price step); unknown names are skipped. */
@@ -80,7 +81,6 @@ export const COPY = {
   screenPlaceholder: "Paste a YouTube, Vimeo, Spotify, Apple Music or SoundCloud link",
   screenHelp: "Everyone plays it from the provider with their own account. Nothing is recorded or relayed.",
   screenBad: "That link can't be used on the screen.",
-  moneyPlaceholder: "Paid rooms and spray notes are not available here yet.",
   whenNow: "Go live now",
   whenLater: "Schedule",
   whenInputLabel: "Start time",
@@ -214,7 +214,7 @@ export function stepOfField(field: string): WizardStep | null {
   switch (field) {
     case "title": case "description": case "kind": case "capacity": case "eventId": case "venueId": return "basics";
     case "ageLimit": case "visibility": return "audience";
-    case "gameFormat": case "gameDropTimeoutMs": case "lanes": case "voice": case "liveVideo": case "slowModeSec": case "pinned": case "pinnedMessage": case "screenUrl": case "noDirectInteractions": return "features";
+    case "gameFormat": case "gameDropTimeoutMs": case "lanes": case "voice": case "liveVideo": case "slowModeSec": case "pinned": case "pinnedMessage": case "screenUrl": case "noDirectInteractions": case "sprayEnabled": return "features";
     case "when": case "scheduledFor": return "when";
     default: return null;
   }
@@ -249,6 +249,8 @@ export interface WizardExtras {
   /** Paid room draft from the price step; sent only when `ticketsEnabled` is true (flag on, money unlocked, switched on). */
   ticket?: TicketDraft;
   ticketsEnabled?: boolean;
+  /** True while the platform spray flag is on; spray is sent only then and only when the host switched it on. */
+  sprayFlag?: boolean;
 }
 
 export interface CreateRoomPayload {
@@ -308,6 +310,7 @@ export function buildCreatePayload(s: WizardState, extras: WizardExtras = {}, li
     ...(eventId ? { eventId } : {}),
     ...(venueId ? { venueId } : {}),
     ...ticketPayload(extras.ticket, extras.ticketsEnabled === true),
+    ...sprayPayload(s.sprayEnabled, extras.sprayFlag === true),
     // A game room needs voice and live video; a stale format left in the state after switching them off is not sent.
     ...(s.gameFormat && s.voice && s.liveVideo
       ? { gameFormat: s.gameFormat, gameDropTimeoutMs: s.gameDropTimeoutMs ?? 120_000, ...(s.lanes ? { lanes: true as const } : {}) }
@@ -325,6 +328,7 @@ export function defaultWizardState(defaults: Partial<WizardState> = {}): WizardS
     visibility: "public",
     voice: true,
     liveVideo: false,
+    sprayEnabled: false,
     slowModeSec: 0,
     pinned: "",
     capacity: ROOM_LIMITS.capacityDefault,

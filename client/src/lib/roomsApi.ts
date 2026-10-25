@@ -56,6 +56,8 @@ export interface RoomView {
   /** Paid rooms (phase 4). Optional: older payloads and free rooms leave them out. Never read as a price for a viewer: see `ticket`. */
   ticketCapacity?: number | null;
   refundBeforeStart?: boolean;
+  /** Host and co-host views only. */
+  sprayEnabled?: boolean;
 }
 
 /**
@@ -182,6 +184,8 @@ export interface RoomsConfig {
   host?: { accountAgeDays: number; minAccountAgeDays: number };
   /** The saved ticket rates (percent) the host's earnings estimate uses. Optional so older fixtures still type-check. */
   rates?: { ticketPlatformPct: number; ticketReservePct: number };
+  /** The caller's own money readiness; present only while paid rooms or spray is on. */
+  hostMoneyReadiness?: { adult: boolean; idVerified: boolean; payoutAccount: boolean };
 }
 
 export async function fetchRoomsConfig(): Promise<RoomsConfig> {
