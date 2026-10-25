@@ -5,8 +5,9 @@ import { z } from "zod";
 import { requireRole } from "../services/adminSecurity";
 import { ageReviewEnabled } from "../identity/ageReviewFeatures";
 import { AgeReviewError } from "../identity/ageReviewService";
-import { decide, getDetail, isUuid, listQueue, secondApprove, type AdminRef } from "../identity/ageReviewAdmin";
+import { decide, getDetail, isSelfReview, isUuid, listQueue, secondApprove, type AdminRef } from "../identity/ageReviewAdmin";
 import { inviteLiveCheck, reviewerLiveJoin } from "../identity/ageReviewLive";
+import { consumeRevealToken, issueRevealToken, revealLimitReached, sendEvidence } from "../identity/ageReviewReveal";
 import { CHECKLIST_KEYS, DECISION_OUTCOMES, DECLINE_REASONS } from "../../shared/ageReview";
 
 const REVIEWERS = ["super_admin", "admin", "age_reviewer"] as const;
@@ -71,4 +72,42 @@ export function registerAgeReviewAdminRoutes(app: Express): void {
 
   app.post(`${base}/:id/invite-live`, requireRole(...REVIEWERS), withId(async (req, res) => { res.json(await inviteLiveCheck(me(req), String(req.params.id))); }));
   app.post(`${base}/:id/live-join`, requireRole(...REVIEWERS), withId(async (req, res) => { res.json(await reviewerLiveJoin(me(req), String(req.params.id))); }));
+
+  // ---- evidence: a POST issues a one-time 60 second token, the GET needs it. A plain GET never returns an image.
+  const evidenceIds = (req: Request) => ({ requestId: String(req.params.id), evidenceId: String(req.params.evidenceId) });
+  const auditReveal = async (req: Request, action: string, requestId: string, details: string) => {
+    const { storage } = await import("../storage");
+    await storage.logAdminActivity({ adminId: req.admin!.id, action, targetType: "age_review_request", targetId: requestId, details, reason: details, ipAddress: req.ip });
+  };
+
+  app.post(`${base}/:id/evidence/:evidenceId/reveal`, requireRole(...REVIEWERS), withId(async (req, res) => {
+    const { requestId, evidenceId } = evidenceIds(req);
+    if (!isUuid(evidenceId)) throw new AgeReviewError(404, "NOT_FOUND", "Not found");
+    const { pool } = await import("../storage");
+    const row = (await pool.query(
+      `select e.kind, u.email as user_email from age_review_evidence e join age_review_requests r on r.id = e.request_id join users u on u.id = r.user_id where e.id = $1 and e.request_id = $2`,
+      [evidenceId, requestId])).rows[0] as { kind: string; user_email: string | null } | undefined;
+    if (!row) throw new AgeReviewError(404, "WRONG_STATE", "That photo is no longer available.");
+    if (isSelfReview(me(req), { email: row.user_email, dateOfBirth: null })) throw new AgeReviewError(403, "SELF_REVIEW", "You cannot review your own age check.");
+    const recent = Number((await pool.query(
+      `select count(*)::int as n from admin_activity_logs where admin_id = $1 and action = 'age_review.reveal' and created_at > now() - interval '1 hour'`, [req.admin!.id])).rows[0].n);
+    if (revealLimitReached(recent)) {
+      console.error(`[AGE-REVIEW] ALERT reveal limit reached by reviewer ${req.admin!.id}`);
+      await auditReveal(req, "age_review.reveal_limit", requestId, `request=${requestId}`).catch(() => {});
+      throw new AgeReviewError(429, "REVEAL_LIMIT", "You have opened too many photos this hour.");
+    }
+    // The audit row comes first: no token exists for a reveal that could not be recorded.
+    await auditReveal(req, "age_review.reveal", requestId, `request=${requestId} kind=${row.kind}`);
+    res.json({ token: issueRevealToken({ adminId: req.admin!.id, requestId, evidenceId }), expiresInSec: 60 });
+  }));
+
+  app.get(`${base}/:id/evidence/:evidenceId`, requireRole(...REVIEWERS), withId(async (req, res) => {
+    const { requestId, evidenceId } = evidenceIds(req);
+    if (!isUuid(evidenceId)) throw new AgeReviewError(404, "NOT_FOUND", "Not found");
+    consumeRevealToken(req.query.token, { adminId: req.admin!.id, requestId, evidenceId });
+    const { pool } = await import("../storage");
+    const row = (await pool.query(`select id, request_id, kind, mime, bytes_enc from age_review_evidence where id = $1 and request_id = $2`, [evidenceId, requestId])).rows[0];
+    if (!row) throw new AgeReviewError(404, "WRONG_STATE", "That photo is no longer available.");
+    sendEvidence(res, row);
+  }));
 }

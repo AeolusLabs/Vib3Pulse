@@ -38,7 +38,7 @@ await test("queue and detail: role matrix (user_support, content_moderator, fina
   for (const r of ["admin", "age_reviewer", "super_admin"]) { role = r; assert.equal(await run(gate), 200, r); }
   const s = src("server/routes/age-review-admin-routes.ts");
   assert.ok(/const REVIEWERS = \["super_admin", "admin", "age_reviewer"\] as const;/.test(s));
-  assert.equal((s.match(/requireRole\(\.\.\.REVIEWERS\)/g) ?? []).length, 5);
+  assert.equal((s.match(/requireRole\(\.\.\.REVIEWERS\)/g) ?? []).length, 7);
   assert.ok(/second-approve`, requireRole\("super_admin"\)/.test(s));
 });
 
