@@ -24,6 +24,7 @@ function QueueTable({ status, openId, onOpen }: { status: string; openId: string
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (l) => l.nextCursor ?? undefined,
     refetchInterval: openId ? false : 20_000,
+    gcTime: 0,
     retry: false,
   });
   const rows: QueueItem[] = q.data?.pages.flatMap((p) => p.items) ?? [];

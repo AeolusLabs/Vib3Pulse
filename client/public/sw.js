@@ -1,8 +1,13 @@
 // v3: the activate step deletes every older cache, which also clears map tiles and /api/map responses stored by earlier versions.
+// api-v4: age review. Older API caches may hold admin detail responses (birthdates) or ID photos, so they are purged on activate.
 const CACHE_NAME = "vibepulse-v3";
-const API_CACHE = "vibepulse-api-v3";
+const API_CACHE = "vibepulse-api-v4";
 const API_MAX_AGE_MS = 5 * 60 * 1000;
 const NETWORK_TIMEOUT_MS = 10000;
+
+// The service worker must not touch these at all (plain network passthrough). /api/map: friends' live locations.
+// /api/admin and /api/age-review: reviewer data, birthdates and ID photos.
+const NEVER_CACHE_PREFIXES = ["/api/auth", "/api/stripe", "/api/webhooks", "/api/map/", "/api/admin", "/api/age-review"];
 
 const STATIC_ASSETS = [
   "/offline.html",
@@ -49,7 +54,16 @@ async function getFromApiCache(request) {
   return cached;
 }
 
+// A response that asks not to be stored, or that was fetched with a one time token in the URL, is never kept.
+function isStorable(request, response) {
+  const cc = (response.headers.get("Cache-Control") || "").toLowerCase();
+  if (cc.includes("no-store") || cc.includes("private")) return false;
+  try { if (new URL(request.url).searchParams.has("token")) return false; } catch (e) { return false; }
+  return true;
+}
+
 async function putInApiCache(request, response) {
+  if (!isStorable(request, response)) return;
   const cache = await caches.open(API_CACHE);
   const body = await response.arrayBuffer();
   const headers = new Headers(response.headers);
@@ -121,16 +135,9 @@ self.addEventListener("fetch", (event) => {
 
   if (event.request.method !== "GET") return;
 
-  if (
-    url.pathname.startsWith("/api/auth") ||
-    url.pathname.startsWith("/api/stripe") ||
-    url.pathname.startsWith("/api/webhooks") ||
-    // Live locations of friends: never kept here. A cached copy could show one person's friends to the next person on a shared phone,
-    // or a friend who has since stopped sharing.
-    url.pathname.startsWith("/api/map/")
-  ) {
-    return;
-  }
+  // Live locations of friends must never be kept here: a cached copy could show one person's friends to the next person on a
+  // shared phone, or a friend who has since stopped sharing. The same goes for reviewer pages and ID photos.
+  if (NEVER_CACHE_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))) return;
 
   // Map tiles, styles and fonts come from OpenFreeMap (and OpenStreetMap as a fallback): the browser's own HTTP cache already keeps them
   // for the day they are valid. Storing them here too would grow without limit and download every revisited area twice.
