@@ -350,9 +350,20 @@ try {
     const blk = await admin("POST", `/api/admin/rooms/${parent}/spray-block`, FIN, { on: true, reason: "fraud suspected" });
     const kids = await q(`select id, spray_admin_blocked, spray_block_reason, spray_blocked_by from rooms where id = any($1::varchar[])`, [[parent, lane1]]);
     const au = await audits("room_spray.block", parent);
-    check("block on a game parent blocks its lanes", blk.status === 200 && blk.json?.changed === true && [parent, lane1].every((i) => blk.json?.roomIds?.includes(i))
-      && kids.length === 2 && kids.every((k: any) => k.spray_admin_blocked === true && k.spray_block_reason === "fraud suspected" && k.spray_blocked_by === FIN)
+    const lane1Row = (await q(`select * from rooms where id = $1`, [lane1]))[0];
+    const lane1Eff = await sprayEffectiveFor({ hostId: HH, sprayEnabled: true, sprayAdminBlocked: lane1Row.spray_admin_blocked, ageLimit: "18+", minorsRoom: false, parentRoomId: parent } as any);
+    check("block on a game parent blocks its lanes (derived: only the parent row is written)", blk.status === 200 && blk.json?.changed === true && [parent, lane1].every((i) => blk.json?.roomIds?.includes(i))
+      && kids.find((k: any) => k.id === parent)?.spray_admin_blocked === true && kids.find((k: any) => k.id === lane1)?.spray_admin_blocked === false
+      && lane1Eff.on === false && lane1Eff.reason === "ADMIN_BLOCKED" && !(await sprayGate(lane1, await fresh(), HH, "start")).ok
       && au.length === 1 && au[0].details.includes(lane1), JSON.stringify([blk.json, kids]));
+    // a lane blocked only via its parent reads as admin-blocked to its host
+    const laneHostView = await rest("GET", `/api/rooms/${lane1}`, HH);
+    check("a lane blocked via its parent shows sprayBlockedByAdmin true to its host", laneHostView.status === 200 && laneHostView.json?.room?.sprayAdminBlocked === true && !JSON.stringify(laneHostView.json).includes("fraud suspected"), JSON.stringify(laneHostView.json?.room));
+    // unblocking the lane directly while the parent is blocked
+    await admin("POST", `/api/admin/rooms/${lane1}/spray-block`, FIN, { on: true, reason: "lane own reason" });
+    const unLane = await admin("POST", `/api/admin/rooms/${lane1}/spray-block`, SA, { on: false, reason: "lane cleared" });
+    check("unblock lane while parent blocked => stillBlockedByParent true", unLane.status === 200 && unLane.json?.changed === true && unLane.json?.stillBlockedByParent === true
+      && (await q(`select spray_admin_blocked from rooms where id = $1`, [lane1]))[0].spray_admin_blocked === false, JSON.stringify(unLane.json));
     const lane2 = await mkRow(HH, { parent, lane: "adult" });
     const row2 = (await q(`select spray_admin_blocked from rooms where id = $1`, [lane2]))[0];
     const eff = await sprayEffectiveFor({ hostId: HH, sprayEnabled: true, sprayAdminBlocked: false, ageLimit: "18+", minorsRoom: false, parentRoomId: parent } as any);
@@ -362,7 +373,16 @@ try {
     check("live count not doubled (lane parents and lanes of a blocked parent are not counted)", stB.json?.liveRoomsSprayOn === (await q(liveOnSql))[0].n, JSON.stringify(stB.json?.liveRoomsSprayOn));
     const un = await admin("POST", `/api/admin/rooms/${parent}/spray-block`, SA, { on: false, reason: "cleared" });
     const after = await q(`select spray_admin_blocked, spray_block_reason, spray_blocked_by, spray_blocked_at from rooms where id = any($1::varchar[])`, [[parent, lane1]]);
-    check("unblock clears the lanes", un.status === 200 && un.json?.roomIds?.length >= 2 && after.every((k: any) => k.spray_admin_blocked === false && k.spray_block_reason === null && k.spray_blocked_by === null && k.spray_blocked_at === null));
+    const laneAfter = await sprayEffectiveFor({ hostId: HH, sprayEnabled: true, sprayAdminBlocked: false, ageLimit: "18+", minorsRoom: false, parentRoomId: parent } as any);
+    check("unblock clears the lanes (they have no block of their own, so unblocking the parent frees them)", un.status === 200 && un.json?.roomIds?.length >= 2 && un.json?.stillBlockedByParent === false
+      && after.every((k: any) => k.spray_admin_blocked === false && k.spray_block_reason === null && k.spray_blocked_by === null && k.spray_blocked_at === null) && laneAfter.on === true);
+    // a lane an admin blocked separately stays blocked when its parent is blocked and then unblocked
+    const laneS = await mkRow(HH, { parent, lane: "adult" });
+    await admin("POST", `/api/admin/rooms/${laneS}/spray-block`, FIN, { on: true, reason: "separate lane reason" });
+    await admin("POST", `/api/admin/rooms/${parent}/spray-block`, FIN, { on: true, reason: "parent again" });
+    await admin("POST", `/api/admin/rooms/${parent}/spray-block`, SA, { on: false, reason: "parent cleared" });
+    const sep = (await q(`select spray_admin_blocked, spray_block_reason from rooms where id = $1`, [laneS]))[0];
+    check("unblocking the parent does not clear a separately blocked lane", sep.spray_admin_blocked === true && sep.spray_block_reason === "separate lane reason", JSON.stringify(sep));
     const stC = await admin("GET", "/api/admin/rooms/spray-status", FIN);
     check("live count counts the lane, not its game room", stC.json?.liveRoomsSprayOn === (await q(liveOnSql))[0].n);
 

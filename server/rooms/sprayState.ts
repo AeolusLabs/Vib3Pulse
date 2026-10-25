@@ -46,21 +46,25 @@ export const sprayToggleCooldown = {
 
 // ---------------------------------------------------------------- admin per-room block
 /**
- * found false: no such room. changed false: already in that state (nothing written). roomIds: every room written (the room and
- * its not-ended lane children, which are separate rows where sprays actually happen).
+ * found false: no such room. changed false: already in that state (nothing written). Only THIS room's row is written.
+ * roomIds: this room and its not-ended lane children (to broadcast to). stillBlockedByParent: an unblock of a lane whose game room is blocked.
  */
-export async function setRoomSprayBlock(p: { roomId: string; on: boolean; adminId: string; reason: string }): Promise<{ found: boolean; ended: boolean; changed: boolean; roomIds: string[] }> {
+export async function setRoomSprayBlock(p: { roomId: string; on: boolean; adminId: string; reason: string }): Promise<{ found: boolean; ended: boolean; changed: boolean; roomIds: string[]; stillBlockedByParent: boolean }> {
   const cur = (await pool.query(`select status from rooms where id = $1`, [p.roomId])).rows[0] as { status: string } | undefined;
-  if (!cur) return { found: false, ended: false, changed: false, roomIds: [] };
-  if (cur.status === "ended") return { found: true, ended: true, changed: false, roomIds: [] };
+  if (!cur) return { found: false, ended: false, changed: false, roomIds: [], stillBlockedByParent: false };
+  if (cur.status === "ended") return { found: true, ended: true, changed: false, roomIds: [], stillBlockedByParent: false };
   const r = p.on
     ? await pool.query(
       `update rooms set spray_admin_blocked = true, spray_block_reason = $2, spray_blocked_by = $3, spray_blocked_at = now()
-        where (id = $1 or parent_room_id = $1) and status <> 'ended' and spray_admin_blocked = false returning id`, [p.roomId, p.reason, p.adminId])
+        where id = $1 and spray_admin_blocked = false returning id`, [p.roomId, p.reason, p.adminId])
     : await pool.query(
       `update rooms set spray_admin_blocked = false, spray_block_reason = null, spray_blocked_by = null, spray_blocked_at = null
-        where (id = $1 or parent_room_id = $1) and status <> 'ended' and spray_admin_blocked = true returning id`, [p.roomId]);
-  return { found: true, ended: false, changed: (r.rowCount ?? 0) > 0, roomIds: r.rows.map((x: { id: string }) => x.id) };
+        where id = $1 and spray_admin_blocked = true returning id`, [p.roomId]);
+  // Lane rows are never written: a lane is blocked through laneParentBlocked (a live read of this row), so unblocking a game
+  // room cannot clear a lane an admin blocked separately. The ids are who to tell (this room and its lanes).
+  const lanes = await pool.query(`select id from rooms where parent_room_id = $1 and status <> 'ended'`, [p.roomId]);
+  const stillBlockedByParent = !p.on && await laneParentBlocked({ parentRoomId: (await pool.query(`select parent_room_id from rooms where id = $1`, [p.roomId])).rows[0]?.parent_room_id ?? null });
+  return { found: true, ended: false, changed: (r.rowCount ?? 0) > 0, roomIds: [p.roomId, ...lanes.rows.map((x: { id: string }) => x.id)], stillBlockedByParent };
 }
 
 export interface SprayStatus {

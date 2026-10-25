@@ -61,13 +61,14 @@ export function viewerRoom(room: Room) {
 }
 
 /** The host's own view of their room (create, PATCH and GET by the host): the viewer room plus the ticket settings. */
-export function hostRoom(room: Room) {
+/** parentBlocked: this lane's game room is admin-blocked (a lane is blocked through its parent without its own flag being set). */
+export function hostRoom(room: Room, parentBlocked = false) {
   return {
     ...viewerRoom(room), ticketPriceKobo: room.ticketPriceKobo ?? null, ticketCapacity: room.ticketCapacity ?? null, refundBeforeStart: room.refundBeforeStart !== false,
     sprayEnabled: room.sprayEnabled === true,
     // Only the host learns an admin switched spraying off for the room (never the admin id or time).
     // The admin's internal reason never leaves the server. With ROOMS_SPRAY off the key is absent (the payload is what it always was).
-    ...(roomFeatures.spray ? { sprayAdminBlocked: room.sprayAdminBlocked === true } : {}),
+    ...(roomFeatures.spray ? { sprayAdminBlocked: room.sprayAdminBlocked === true || parentBlocked } : {}),
     ...(roomFeatures.gaming ? { gameFormat: room.gameFormat ?? null, gameDropTimeoutMs: room.gameDropTimeoutMs } : {}),
   };
 }

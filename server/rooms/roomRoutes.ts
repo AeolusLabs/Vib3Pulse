@@ -30,7 +30,7 @@ import * as mr from "./minorsRoom";
 import { TokenBucket } from "./rateLimit";
 import { getVoiceService } from "./voice/voiceService";
 import { afterRoleChange, canCameraNow, canPublishNow, isGamePlayer, publishSourcesNow, shutdownVoice, stopAllLive } from "./stage";
-import { sprayToggleCooldown } from "./sprayState";
+import { laneParentBlocked, sprayToggleCooldown } from "./sprayState";
 import { applyMod, endRoom, enforceAgeLimit, enforceTicketFor, expectHost, interactionVerdict, isKicked, notifyScreen, removeFromMinorsRoom, writeRoomSettings } from "./roomSocket";
 import { roomHub } from "./RoomHub";
 import { GAME_PARTS, roomFeatures } from "./features";
@@ -413,7 +413,7 @@ export function registerRoomRoutes(app: Express): void {
       // Spraying (phase 5): present ONLY for a viewer who passes payer eligibility in a live money room; never enabled: false.
       const spray = await sprayBlockFor(room, req.user!.id).catch((e) => { console.error("[rooms:spray] spray block failed:", e?.message ?? e); return null; });
       res.json({
-        room: self ? hostRoom(room) : viewerRoom(room), host: host ? hostSummary(host) : null, canJoin, memberCount: roomHub.count(room.id), peek: peekOf(room.id, 8),
+        room: self ? hostRoom(room, roomFeatures.spray && await laneParentBlocked(room)) : viewerRoom(room), host: host ? hostSummary(host) : null, canJoin, memberCount: roomHub.count(room.id), peek: peekOf(room.id, 8),
         you: self ? { role: "host" } : member && !member.banned ? { role: member.role } : null,
         reminderSet: await hasReminder(routed?.parentRoomId ?? room.id, req.user!.id), // this viewer's own flag only (a game room's reminder is the game room's)
         ...(ticket ? { ticket } : {}),
@@ -552,7 +552,7 @@ export function registerRoomRoutes(app: Express): void {
       // gate reads the row on every spray, so a live room follows at once; an in-flight paid spray still delivers.
       if ("sprayEnabled" in b && v.value.sprayEnabled !== undefined && v.value.sprayEnabled !== room.sprayEnabled) {
         // An admin switch-off is the admin's alone to undo: a host can only turn spraying off, never on, while it stands.
-        if (v.value.sprayEnabled && room.sprayAdminBlocked === true) {
+        if (v.value.sprayEnabled && (room.sprayAdminBlocked === true || await laneParentBlocked(room))) {
           return res.status(403).json({ message: "Spray is turned off by the platform for this room.", code: "SPRAY_ADMIN_BLOCKED" });
         }
         if (v.value.sprayEnabled) {
@@ -619,7 +619,7 @@ export function registerRoomRoutes(app: Express): void {
       if (patch.ageLimit && updated.status === "live") await enforceAgeLimit(room.id); // raised: send out anyone now under it
       if (updated.status === "live" && ("gameFormat" in patch || "gameDropTimeoutMs" in patch)) await applyGameRoom(updated); // the hub follows
       // The ticket settings go back to the host only (a co-host editing the pinned message gets the viewer room).
-      res.json({ room: { ...(uid === room.hostId ? hostRoom(updated) : viewerRoom(updated)), host: hostSummary(host) } });
+      res.json({ room: { ...(uid === room.hostId ? hostRoom(updated, roomFeatures.spray && await laneParentBlocked(updated)) : viewerRoom(updated)), host: hostSummary(host) } });
     } catch (e) {
       console.error("[rooms] patch failed:", e);
       res.status(500).json({ message: "Failed to update room" });
@@ -746,7 +746,7 @@ export function registerRoomRoutes(app: Express): void {
       const ownToken = lane === "teen" && vis === "invite" ? newInviteToken() : undefined;
       const tokenHash = ownToken ? sha256(ownToken) : vis === "invite" ? parent.inviteTokenHash ?? undefined : undefined;
       const made = await lanes.openLane(parent, me, lane, vis, me.id === parent.hostId || (await mutualFollow(me.id, parent.hostId)), tokenHash);
-      res.status(201).json({ room: { ...hostRoom(made), host: hostSummary(me) }, ...(ownToken ? { inviteLink: `/rooms/${made.id}?token=${ownToken}` } : {}) });
+      res.status(201).json({ room: { ...hostRoom(made, roomFeatures.spray && await laneParentBlocked(made)), host: hostSummary(me) }, ...(ownToken ? { inviteLink: `/rooms/${made.id}?token=${ownToken}` } : {}) });
     } catch (e) {
       if (e instanceof lanes.LaneError) return res.status(e.status).json(e.body);
       console.error("[rooms] open lane failed:", e);

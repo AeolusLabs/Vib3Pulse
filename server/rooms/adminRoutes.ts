@@ -131,7 +131,7 @@ export function registerRoomsAdminRoutes(app: Express): void {
         await audit(req, on ? "room_spray.block" : "room_spray.unblock", "room", roomId, reason.data, { on, roomIds: r.roomIds });
         await Promise.all(r.roomIds.map(broadcastSprayState)); // the room and its lane rooms (only live ones have anyone to tell)
       }
-      res.json({ changed: r.changed, roomIds: r.roomIds });
+      res.json({ changed: r.changed, roomIds: r.roomIds, stillBlockedByParent: r.stillBlockedByParent });
     } catch (e) {
       console.error("[ADMIN] room spray block failed:", (e as Error)?.message);
       res.status(500).json({ message: "That did not work. Check the room's spray state before trying again." });

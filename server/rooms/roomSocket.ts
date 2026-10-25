@@ -23,7 +23,7 @@ import { getVoiceService } from "./voice/voiceService";
 import { roomFeatures } from "./features";
 import { broadcastGame, gameLine, gameView, handleGame, isGamePlayer, nameOf, syncGameRoom } from "./game";
 import { playersOf } from "@shared/gameScreen";
-import { sprayEffectiveFor, sprayToggleCooldown } from "./sprayState";
+import { laneParentBlocked, sprayEffectiveFor, sprayToggleCooldown } from "./sprayState";
 import { MEMBER_LIST_CAP, selectStateMembers, wantedMemberIds } from "./memberList";
 
 /** Injectable so tests can shorten the host grace period; rates are the documented limits. */
@@ -106,7 +106,8 @@ type SprayRow = Pick<Room, "hostId" | "sprayEnabled" | "sprayAdminBlocked" | "ag
 /** The two spray keys, only while ROOMS_SPRAY is on (flag off: nothing is added, so the payload is what it always was). */
 async function sprayKeys(room: SprayRow): Promise<Pick<RoomSettings, "sprayOn" | "sprayBlockedByAdmin">> {
   if (!roomFeatures.spray) return {};
-  return { sprayOn: (await sprayEffectiveFor(room)).on, sprayBlockedByAdmin: room.sprayAdminBlocked === true };
+  // A lane blocked only through its game room still reads as admin-blocked to its host and members.
+  return { sprayOn: (await sprayEffectiveFor(room)).on, sprayBlockedByAdmin: room.sprayAdminBlocked === true || await laneParentBlocked(room) };
 }
 
 /** Tells everyone in the room the current settings (and records them for the chat and join paths). Call after every committed change. */
