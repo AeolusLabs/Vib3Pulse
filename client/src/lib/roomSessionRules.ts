@@ -74,3 +74,13 @@ export function leaveNeedsConfirm(isHost: boolean, roomLive: boolean): boolean {
 }
 
 export const HOST_LEAVE_CONFIRM = "You're hosting this live room. Leave and end your seat?";
+
+/** A room's page when a different room is already live: after declining the switch it shows a panel, not a lobby. */
+export function pageMode(active: ActiveRef | null, pageRoomId: string, declined: boolean): "own" | "other-live" {
+  return active && active.roomId !== pageRoomId && declined ? "other-live" : "own";
+}
+
+/** `expanded` is true only on the page of the room the session holds. */
+export function expandedFor(viewing: string | null, pageRoomId: string): boolean {
+  return viewing !== null && viewing === pageRoomId;
+}

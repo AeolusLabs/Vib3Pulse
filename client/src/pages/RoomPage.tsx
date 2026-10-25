@@ -22,7 +22,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { initialRoomState } from "@/hooks/useRoomSocket";
 import { useRoomSession } from "@/lib/roomSession";
-import { HOST_LEAVE_CONFIRM, leaveNeedsConfirm } from "@/lib/roomSessionRules";
+import { HOST_LEAVE_CONFIRM, expandedFor, leaveNeedsConfirm, pageMode } from "@/lib/roomSessionRules";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { showsShell } from "@/lib/roomIntegration";
 import { AGE_LIMIT_EVICTED_COPY, DENIED_MESSAGE, HOST_REVIEW_COPY, KIND_LABEL, type PeekMember, VISIBILITY_LABEL, ageLimitLabel, fetchRooms, hostName, type RoomHostSummary, type RoomTicketView, type RoomView } from "@/lib/roomsApi";
@@ -114,7 +114,9 @@ function RoomPageInner({ id }: { id: string }) {
   const idleState = useMemo(() => initialRoomState(me?.id ?? null), [me?.id]);
   const state = sock?.state ?? idleState;
   const { open: openSession, setExpanded } = session;
-  useEffect(() => { setExpanded(true); return () => setExpanded(false); }, [setExpanded]);
+  // Only the joined room's own page counts as "expanded"; another room's page must not hide the bar of the live one.
+  const isExpanded = expandedFor(session.viewing, id);
+  useEffect(() => { if (!isExpanded) return; setExpanded(true); return () => setExpanded(false); }, [isExpanded, setExpanded]);
   const detail = isRoomDenial(raw) ? null : raw;
   const ageUnknownDenied = isAgeUnknownDenied(raw);
   // Invites taken back this session. Lives here, not in the Controls sheet, so the "Revoked" rows survive the sheet closing.
@@ -142,17 +144,17 @@ function RoomPageInner({ id }: { id: string }) {
     setSprayBack(null);
   };
   // A different room already live asks first (the provider's dialog); declining must not re-ask until they tap Join again.
-  const declined = useRef(false);
+  const [declined, setDeclined] = useState(false);
   const wasPending = useRef(false);
   useEffect(() => {
     const pending = session.pendingSwitch !== null;
-    if (wasPending.current && !pending && session.viewing !== id) { declined.current = true; setJoinTapped(false); }
+    if (wasPending.current && !pending && session.viewing !== id) { setDeclined(true); setJoinTapped(false); }
     wasPending.current = pending;
   }, [session.pendingSwitch, session.viewing, id]);
   useEffect(() => {
-    if (declined.current || sprayBack || !live || !canJoin || state.phase !== "idle" || !(goesStraightIn || joinTapped)) return;
+    if (declined || sprayBack || !live || !canJoin || state.phase !== "idle" || !(goesStraightIn || joinTapped)) return;
     openSession(id, { inviteToken: token ?? undefined, enabledVoice: true, voiceRoomId: detail?.lane?.roomId });
-  }, [sprayBack, live, canJoin, state.phase, goesStraightIn, joinTapped]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sprayBack, live, canJoin, state.phase, goesStraightIn, joinTapped, declined]); // eslint-disable-line react-hooks/exhaustive-deps
   // Tapping Join was the gesture that lets the browser play sound: start room audio as soon as the room has voice, no second tap.
   useEffect(() => {
     if (joinTapped && state.phase === "live" && state.voiceEnabled && voice?.status === "needs-tap") void voice.unlock();
@@ -307,7 +309,7 @@ function RoomPageInner({ id }: { id: string }) {
     // The warning screen alone: no title, no host. Acknowledging records it, clears any socket refusal, reloads the room and joins.
     content = <MinorsRoomWarning code={minorsCode} roomId={id} lane={(isMinorsDenied(raw) ? raw.warning : state.errorWarning) === MINORS_LANE_WARNING} onAcknowledged={async () => {
       if (state.phase === "denied") session.leave();
-      declined.current = false;
+      setDeclined(false);
       setJoinTapped(true);
       const r = await refetch();
       return !r.isError && !isRoomDenial(r.data); // still refused or failed: the screen says so
@@ -354,10 +356,17 @@ function RoomPageInner({ id }: { id: string }) {
         {ticketed && <HostSales room={room} capacity={room.ticketCapacity ?? ticketBlock?.capacity ?? null} token={token} onChanged={() => { void refetch(); }} />}
       </div>
     );
+  } else if (pageMode(session.active, id, declined) === "other-live") {
+    // They said no to leaving their live room for this one: say so, instead of a lobby that spins forever.
+    content = <Panel title="You're in another live room" body="You can go back to it, or leave it and join this one."
+      action={<div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
+        <Button className="min-h-11" onClick={() => navigate(`/rooms/${encodeURIComponent(session.active!.roomId)}`)}>Return to your live room</Button>
+        <Button className="min-h-11" variant="outline" onClick={() => { setDeclined(false); setJoinTapped(true); }}>Leave it and join this one</Button>
+      </div>} />;
   } else {
     // idle or connecting: the lobby (the room shell takes over once the socket is live).
     content = (
-      <RoomLobby room={room} host={detail.host} peek={detail.peek ?? []} memberCount={detail.memberCount} joining={joinTapped || goesStraightIn} invitedLanding={!goesStraightIn} onJoin={() => { declined.current = false; setJoinTapped(true); }} />
+      <RoomLobby room={room} host={detail.host} peek={detail.peek ?? []} memberCount={detail.memberCount} joining={joinTapped || goesStraightIn} invitedLanding={!goesStraightIn} onJoin={() => { setDeclined(false); setJoinTapped(true); }} />
     );
   }
 

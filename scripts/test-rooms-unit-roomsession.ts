@@ -1,7 +1,7 @@
 // The persistent room session: pure rules plus source wiring (no database, no browser): npx tsx scripts/test-rooms-unit-roomsession.ts
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { HOST_LEAVE_CONFIRM, initialSession, leaveNeedsConfirm, sessionAction, sessionStep, shouldEnd, type SessionEffect, type SessionEvent, type SessionState } from "../client/src/lib/roomSessionRules";
+import { HOST_LEAVE_CONFIRM, expandedFor, pageMode, initialSession, leaveNeedsConfirm, sessionAction, sessionStep, shouldEnd, type SessionEffect, type SessionEvent, type SessionState } from "../client/src/lib/roomSessionRules";
 
 let passed = 0, failed = 0;
 const test = (name: string, fn: () => void) => {
@@ -93,6 +93,20 @@ test("host warning only for a host on a live room", () => {
   assert.equal(leaveNeedsConfirm(true, false), false);
   assert.equal(leaveNeedsConfirm(false, true), false);
   assert.equal(HOST_LEAVE_CONFIRM, "You're hosting this live room. Leave and end your seat?");
+});
+
+test("declined switch shows the in-another-room panel", () => {
+  assert.equal(pageMode(A, "b", true), "other-live");
+  assert.equal(pageMode(A, "b", false), "own", "before declining, the normal screens");
+  assert.equal(pageMode(A, "a", true), "own", "the active room's own page");
+  assert.equal(pageMode(null, "b", true), "own");
+});
+
+test("expanded is true only for the active room's page", () => {
+  assert.equal(expandedFor("a", "a"), true);
+  assert.equal(expandedFor("a", "b"), false);
+  assert.equal(expandedFor(null, "b"), false);
+  assert.ok(src("../client/src/pages/RoomPage.tsx").includes("expandedFor(session.viewing, id)"));
 });
 
 test("wiring: hooks live in the provider, not the page; unmount no longer ends the session", () => {
