@@ -25,10 +25,10 @@ const run = (cmd, args, env) => new Promise((resolve) => {
 });
 const admin = async (sql) => { const c = new pg.Client({ connectionString: adminUrl }); await c.connect(); try { await c.query(sql); } finally { await c.end(); } };
 
-// Every scripts/test-rooms-<kind>*.ts runs, so parallel work adds a new file instead of editing a shared one.
-// The original file for each kind sorts first.
+// Every scripts/test-rooms-<kind>*.ts and scripts/test-age-review-<kind>*.ts runs, so parallel work adds a new file
+// instead of editing a shared one. The original rooms file for each kind sorts first; age review files follow.
 const testFiles = (kind) => readdirSync(join(root, "scripts"))
-  .filter((f) => new RegExp(`^test-rooms-${kind}(-.+)?\\.ts$`).test(f))
+  .filter((f) => new RegExp(`^test-(rooms|age-review)-${kind}(-.+)?\\.ts$`).test(f))
   .sort((a, b) => (a === `test-rooms-${kind}.ts` ? -1 : b === `test-rooms-${kind}.ts` ? 1 : a.localeCompare(b)))
   .map((f) => `scripts/${f}`);
 
