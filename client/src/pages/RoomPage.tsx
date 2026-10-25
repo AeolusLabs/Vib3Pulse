@@ -20,8 +20,10 @@ import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
-import { useRoomSocket } from "@/hooks/useRoomSocket";
-import { useRoomVoice } from "@/hooks/useRoomVoice";
+import { initialRoomState } from "@/hooks/useRoomSocket";
+import { useRoomSession } from "@/lib/roomSession";
+import { HOST_LEAVE_CONFIRM, leaveNeedsConfirm } from "@/lib/roomSessionRules";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { showsShell } from "@/lib/roomIntegration";
 import { AGE_LIMIT_EVICTED_COPY, DENIED_MESSAGE, HOST_REVIEW_COPY, KIND_LABEL, type PeekMember, VISIBILITY_LABEL, ageLimitLabel, fetchRooms, hostName, type RoomHostSummary, type RoomTicketView, type RoomView } from "@/lib/roomsApi";
 import { inviteTokenFor, parseTicketBlock, returnRef, searchWithoutRef, showsPrice, ticketGate } from "@/lib/roomTickets";
@@ -104,15 +106,20 @@ function RoomPageInner({ id }: { id: string }) {
     gcTime: 0, // a refusal or a room is not kept around once the page closes
   });
 
-  const sock = useRoomSocket(id, { inviteToken: token });
-  const { state } = sock;
+  // The socket and voice live in the app-level session (they outlive this page); here they are only read.
+  const session = useRoomSession();
+  const attached = session.viewing === id;
+  const sock = attached ? session.sock : null;
+  const voice = attached ? session.voice : null;
+  const idleState = useMemo(() => initialRoomState(me?.id ?? null), [me?.id]);
+  const state = sock?.state ?? idleState;
+  const { open: openSession, setExpanded } = session;
+  useEffect(() => { setExpanded(true); return () => setExpanded(false); }, [setExpanded]);
   const detail = isRoomDenial(raw) ? null : raw;
   const ageUnknownDenied = isAgeUnknownDenied(raw);
   // Invites taken back this session. Lives here, not in the Controls sheet, so the "Revoked" rows survive the sheet closing.
   const [revokedInvites, setRevokedInvites] = useState<Map<string, AdultInvite>>(new Map());
   const minorsCode = minorsCodeFor(isMinorsDenied(raw) ? raw : null, state); // one screen, whether the refusal came over HTTP or the socket
-  // "reconnecting" counts as live: a blip in the app connection must not hang up the media (that ended the stream by our own hand).
-  const voice = useRoomVoice(detail?.lane?.roomId ?? id, { enabled: state.voiceEnabled && (state.phase === "live" || state.phase === "reconnecting"), inviteToken: token, onCameraLost: () => sock.liveAction("stop"), game: !!state.game });
   const room = detail?.room;
   // The room that is actually joined: the viewer's lane when the URL is a lane parent, else the URL's own id.
   const roomId = detail?.lane?.roomId ?? id;
@@ -134,13 +141,22 @@ function RoomPageInner({ id }: { id: string }) {
     try { window.history.replaceState(window.history.state, "", `${window.location.pathname}${searchWithoutSpray(window.location.search)}${window.location.hash}`); } catch { /* harmless */ }
     setSprayBack(null);
   };
+  // A different room already live asks first (the provider's dialog); declining must not re-ask until they tap Join again.
+  const declined = useRef(false);
+  const wasPending = useRef(false);
   useEffect(() => {
-    if (!sprayBack && live && canJoin && state.phase === "idle" && (goesStraightIn || joinTapped)) sock.join();
+    const pending = session.pendingSwitch !== null;
+    if (wasPending.current && !pending && session.viewing !== id) { declined.current = true; setJoinTapped(false); }
+    wasPending.current = pending;
+  }, [session.pendingSwitch, session.viewing, id]);
+  useEffect(() => {
+    if (declined.current || sprayBack || !live || !canJoin || state.phase !== "idle" || !(goesStraightIn || joinTapped)) return;
+    openSession(id, { inviteToken: token ?? undefined, enabledVoice: true, voiceRoomId: detail?.lane?.roomId });
   }, [sprayBack, live, canJoin, state.phase, goesStraightIn, joinTapped]); // eslint-disable-line react-hooks/exhaustive-deps
   // Tapping Join was the gesture that lets the browser play sound: start room audio as soon as the room has voice, no second tap.
   useEffect(() => {
-    if (joinTapped && state.phase === "live" && state.voiceEnabled && voice.status === "needs-tap") void voice.unlock();
-  }, [joinTapped, state.phase, state.voiceEnabled, voice.status]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (joinTapped && state.phase === "live" && state.voiceEnabled && voice?.status === "needs-tap") void voice.unlock();
+  }, [joinTapped, state.phase, state.voiceEnabled, voice?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Adults only listen and chat in a minors' room. The age is the viewer's own, read from their own settings; the server enforces it regardless.
   const minorsRoom = detail?.room.minorsRoom === true || state.room?.minorsRoom === true;
@@ -193,19 +209,38 @@ function RoomPageInner({ id }: { id: string }) {
 
   // The screen was taken back (host stopped it, an adult arrived, voice went off): switch the camera off here too.
   useEffect(() => {
-    if ((voice.onAir || voice.cameraOn || voice.videoPaused) && state.phase === "live" && state.holder !== me?.id) void voice.stopCamera(); // not while reconnecting: the room state is only paused, not changed
-  }, [voice.onAir, voice.cameraOn, voice.videoPaused, state.phase, state.holder, me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (voice && (voice.onAir || voice.cameraOn || voice.videoPaused) && state.phase === "live" && state.holder !== me?.id) void voice.stopCamera(); // not while reconnecting: the room state is only paused, not changed
+  }, [voice?.onAir, voice?.cameraOn, voice?.videoPaused, state.phase, state.holder, me?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The server says nothing about how long a removal lasts, so the clock starts when the removal reaches us here.
   const kickedAt = useRef<number | null>(null);
   if (state.phase === "denied" && state.error === "KICKED") { if (kickedAt.current === null) kickedAt.current = Date.now(); } else kickedAt.current = null;
 
-  const leave = () => { sock.leave(); navigate("/rooms"); };
+  // Back keeps the session alive (minimise); only an explicit Leave ends it, and a host's Leave asks first.
+  const [confirmHostLeave, setConfirmHostLeave] = useState(false);
+  const endAndLeave = () => { session.leave(); navigate("/rooms"); };
+  const leave = () => { if (leaveNeedsConfirm(isHost, live && state.phase === "live")) setConfirmHostLeave(true); else endAndLeave(); };
+  const minimiseAndBack = () => { session.minimise(); navigate("/rooms"); };
   const back = <Button asChild variant="outline"><Link href="/rooms">Back to Rooms</Link></Button>;
 
   // ---------------------------------------------------------------- the room itself (chat-first shell)
   // A failed refetch keeps the last details (react-query keeps data on error), so the live room stays; it says so in a line.
   const inRoom = showsShell({ isLoading, hasDetail: !!detail && !!room, roomStatus: room?.status ?? "", canJoin: detail?.canJoin.ok === true, phase: state.phase });
+
+  const hostLeaveDialog = (
+    <AlertDialog open={confirmHostLeave} onOpenChange={setConfirmHostLeave}>
+      <AlertDialogContent data-testid="dialog-host-leave">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Leave this room?</AlertDialogTitle>
+          <AlertDialogDescription>{HOST_LEAVE_CONFIRM}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="min-h-11">Stay</AlertDialogCancel>
+          <AlertDialogAction className="min-h-11" onClick={endAndLeave}>Leave</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
 
   const sprayBlock = parseSprayBlock(detail?.spray, room, { listenOnly });
   // The spray block is only sent to a viewer the server already has in the room's hub, and the first GET always runs
@@ -216,8 +251,9 @@ function RoomPageInner({ id }: { id: string }) {
     if (state.phase === "live" && sprayRoom) void refetch();
   }, [state.phase, sprayRoom]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (inRoom && detail && room && !sprayBack) {
+  if (inRoom && detail && room && !sprayBack && sock && voice) {
     return (
+      <>
       <RoomShell
         id={roomId}
         token={token}
@@ -237,12 +273,15 @@ function RoomPageInner({ id }: { id: string }) {
           {ticketed && <HostSales room={room} capacity={room.ticketCapacity ?? ticketBlock?.capacity ?? null} token={token} onChanged={() => { void refetch(); }} />}
         </>}
         onLeave={leave}
+        onBack={minimiseAndBack}
         detailsError={!!error}
         listenOnly={listenOnly}
         listenLine={listenLine}
         spray={sprayBlock}
         onSprayChanged={() => { void refetch(); }}
       />
+      {hostLeaveDialog}
+      </>
     );
   }
 
@@ -267,7 +306,8 @@ function RoomPageInner({ id }: { id: string }) {
   } else if (minorsCode) {
     // The warning screen alone: no title, no host. Acknowledging records it, clears any socket refusal, reloads the room and joins.
     content = <MinorsRoomWarning code={minorsCode} roomId={id} lane={(isMinorsDenied(raw) ? raw.warning : state.errorWarning) === MINORS_LANE_WARNING} onAcknowledged={async () => {
-      if (state.phase === "denied") sock.leave();
+      if (state.phase === "denied") session.leave();
+      declined.current = false;
       setJoinTapped(true);
       const r = await refetch();
       return !r.isError && !isRoomDenial(r.data); // still refused or failed: the screen says so
@@ -298,7 +338,7 @@ function RoomPageInner({ id }: { id: string }) {
       ? <RoomCodePanel code={code} room={room} onRetry={() => { void refetch(); }} />
       : <Panel title={code === "AGE_LIMIT" ? "This room has an age limit" : "You can't join this room"} body={DENIED_MESSAGE[code] ?? "You can't join this room."} action={back} />;
   } else if (state.phase === "denied" && stateForCode(state.error)) {
-    content = <RoomCodePanel code={state.error!} kickRemainingMs={state.error === "KICKED" ? kickRemainingAfter(kickedAt.current, Date.now()) : null} room={room} onRetry={() => { sock.leave(); void refetch(); }} />;
+    content = <RoomCodePanel code={state.error!} kickRemainingMs={state.error === "KICKED" ? kickRemainingAfter(kickedAt.current, Date.now()) : null} room={room} onRetry={() => { session.leave(); void refetch(); }} />;
   } else if (state.phase === "denied") {
     const code = state.error ?? "NOT_FOUND";
     content = <Panel title={code === "AGE_LIMIT" ? "This room has an age limit" : "You can't join this room"} body={code === "AGE_LIMIT" && state.room ? AGE_LIMIT_EVICTED_COPY : state.errorWarning === MINORS_LANE_WARNING ? MINORS_LANE_WARNING : DENIED_MESSAGE[code] ?? "You can't join this room."} action={back} />;
@@ -317,7 +357,7 @@ function RoomPageInner({ id }: { id: string }) {
   } else {
     // idle or connecting: the lobby (the room shell takes over once the socket is live).
     content = (
-      <RoomLobby room={room} host={detail.host} peek={detail.peek ?? []} memberCount={detail.memberCount} joining={joinTapped || goesStraightIn} invitedLanding={!goesStraightIn} onJoin={() => setJoinTapped(true)} />
+      <RoomLobby room={room} host={detail.host} peek={detail.peek ?? []} memberCount={detail.memberCount} joining={joinTapped || goesStraightIn} invitedLanding={!goesStraightIn} onJoin={() => { declined.current = false; setJoinTapped(true); }} />
     );
   }
 
@@ -328,7 +368,7 @@ function RoomPageInner({ id }: { id: string }) {
       <main className="mx-auto max-w-2xl space-y-4 px-4 py-4">
         {showHeader && (
           <header className="flex items-start gap-3" data-testid="room-header">
-            <Button asChild variant="ghost" size="icon" className="h-11 w-11 shrink-0" aria-label="Back to Rooms"><Link href="/rooms" onClick={() => sock.leave()}><ArrowLeftIcon className="h-5 w-5" /></Link></Button>
+            <Button asChild variant="ghost" size="icon" className="h-11 w-11 shrink-0" aria-label="Back to Rooms"><Link href="/rooms" onClick={() => session.minimise()}><ArrowLeftIcon className="h-5 w-5" /></Link></Button>
             <div className="min-w-0 flex-1">
               <h1 className="truncate font-serif text-2xl font-bold leading-tight" data-testid="text-room-title">{room!.title}</h1>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
@@ -344,7 +384,7 @@ function RoomPageInner({ id }: { id: string }) {
           </header>
         )}
         {bare && (
-          <Button asChild variant="ghost" size="icon" className="h-11 w-11" aria-label="Back to Rooms"><Link href="/rooms" onClick={() => sock.leave()}><ArrowLeftIcon className="h-5 w-5" /></Link></Button>
+          <Button asChild variant="ghost" size="icon" className="h-11 w-11" aria-label="Back to Rooms"><Link href="/rooms" onClick={() => session.minimise()}><ArrowLeftIcon className="h-5 w-5" /></Link></Button>
         )}
         {content}
       </main>

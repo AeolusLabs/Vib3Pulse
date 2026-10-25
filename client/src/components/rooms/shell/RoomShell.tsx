@@ -82,6 +82,8 @@ export interface RoomShellProps {
   /** Dev fixture only: open the Controls sheet on load (on its Requests tab). */
   startControlsOpen?: boolean;
   onLeave(): void;
+  /** The top bar's back arrow. Defaults to onLeave; the room page passes minimise so the session keeps running. */
+  onBack?(): void;
   /** The last refetch of the room details failed. The room carries on with the details it has; a small line says so. */
   detailsError?: boolean;
   /** An adult in a room for under 18s: they listen and chat. No mic, hand, or camera offers, and a short line says why. */
@@ -122,7 +124,7 @@ const byTestId = (id: string | null) => (id ? document.querySelector<HTMLElement
  * immersive). Crossing 1024 px or switching views only changes classes, so the picture, the camera choice, the composer
  * draft and the chat scroll survive. People are always addressed by RoomMemberView.userId, never by username.
  */
-export default function RoomShell({ id, token, room, host, fallbackCount, isHost, role, meId, state, sock, voice, myRoomId, nav, hostControls, onLeave, startView, startControlsOpen = false, detailsError = false, listenOnly = false, listenLine = false, spray = null, onSprayChanged, sprayFixture, gameTracksFixture, gameSheetFixture }: RoomShellProps) {
+export default function RoomShell({ id, token, room, host, fallbackCount, isHost, role, meId, state, sock, voice, myRoomId, nav, hostControls, onLeave, onBack, startView, startControlsOpen = false, detailsError = false, listenOnly = false, listenLine = false, spray = null, onSprayChanged, sprayFixture, gameTracksFixture, gameSheetFixture }: RoomShellProps) {
   const { toast } = useToast();
 
   const [hidden, setHidden] = useState<Set<string>>(new Set()); // people the viewer muted for themselves
@@ -510,7 +512,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
       subtitle={topBarSubtitle({ immersive, holderName, count, away: state.holderAwayUntil !== null || holderLeftMs !== null, self: isHolder })}
       count={count}
       immersive={immersive}
-      onBack={onLeave}
+      onBack={onBack ?? onLeave}
       onPeople={() => setPeopleOpen(true)}
       onMore={() => setMoreOpen(true)}
       onControls={isCoHostOrHost ? () => { setControlsFrom(null); setControlsOpen(true); } : undefined}

@@ -78,6 +78,7 @@ import AdminSocialMetrics from "@/pages/admin/AdminSocialMetrics";
 import SocialEventsPage from "@/pages/SocialEventsPage";
 import SocialEventCreatePage from "@/pages/SocialEventCreatePage";
 import SocialEventHostPage from "@/pages/SocialEventHostPage";
+import { RoomSessionProvider } from "@/lib/roomSession";
 import { SafetyTriggersProvider } from "@/components/safety/SafetyTriggersProvider";
 
 // Dev-only fixture page: the condition is a build-time constant, so production bundles drop the route and its chunk.
@@ -409,7 +410,9 @@ function App() {
           <Toaster />
           <SWUpdatePrompt />
           <SafetyTriggersProvider />
-          <Router />
+          <RoomSessionProvider>
+            <Router />
+          </RoomSessionProvider>
         </TooltipProvider>
       </WebSocketProvider>
     </QueryClientProvider>

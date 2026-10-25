@@ -81,7 +81,10 @@ export interface RoomVoice {
 
 export interface CameraDevices { cameraId?: string; micId?: string; profile?: VideoProfile; /** No echo cancellation, noise suppression or auto gain on the mic. */ musicMode?: boolean }
 
-export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteToken?: string; /** The holder's camera or microphone went away mid-stream: tell the room to take the screen back. */ onCameraLost?: () => void; /** A game room: screen feeds are left to useGameTracks and are not auto-subscribed. */ game?: boolean }): RoomVoice {
+/** What the session provider needs beyond the screen's view: end the media session for good (mic released). */
+export type RoomVoiceSession = RoomVoice & { hangUp(): void };
+
+export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteToken?: string; /** The holder's camera or microphone went away mid-stream: tell the room to take the screen back. */ onCameraLost?: () => void; /** A game room: screen feeds are left to useGameTracks and are not auto-subscribed. */ game?: boolean }): RoomVoiceSession {
   const [unlocked, setUnlocked] = useState(false);
   const [connected, setConnected] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -228,8 +231,8 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
     if (unlocked && !lk.current) void connect();
   }, [opts.enabled, unlocked, connect, hangUp]);
 
-  useEffect(() => hangUp, [hangUp]); // leaving the page ends the session
-  useEffect(() => () => { intendedLive.current = null; }, []); // ...and ends any attempt to get back on air
+  // No hangUp on unmount: the app-level RoomSessionProvider owns this hook and ends the session (leave()).
+  useEffect(() => () => { intendedLive.current = null; }, []); // ...but an unmounted hook never tries to get back on air
 
   const resuming = useRef(false);
   const videoPausedRef = useRef(false);
@@ -367,5 +370,5 @@ export function useRoomVoice(roomId: string, opts: { enabled: boolean; inviteTok
   }, [connect, startCamera]);
   resumeRef.current = resumeLive;
 
-  return { status: voiceStatus({ voiceEnabled: opts.enabled, unlocked, connected, failed, canPublish, micOn }), unlock, canPublish, micOn, toggleMic, activeSpeakers: active, error, micError, video, localVideo, cameraOn, cameraError, reconnecting, comingBack, startCamera, stopCamera, onAir, videoPaused, pauseVideo, resumeVideo, audioOnly, setAudioOnly, linkQuality, linkPoorSince, room: roomObj };
+  return { status: voiceStatus({ voiceEnabled: opts.enabled, unlocked, connected, failed, canPublish, micOn }), unlock, canPublish, micOn, toggleMic, activeSpeakers: active, error, micError, video, localVideo, cameraOn, cameraError, reconnecting, comingBack, startCamera, stopCamera, onAir, videoPaused, pauseVideo, resumeVideo, audioOnly, setAudioOnly, linkQuality, linkPoorSince, room: roomObj, hangUp };
 }

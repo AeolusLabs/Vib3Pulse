@@ -61,7 +61,7 @@ export function useRoomSocket(roomId: string, opts: { inviteToken?: string } = {
     return () => clearInterval(t);
   }, [animating]);
 
-  useEffect(() => () => { if (wantJoined.current) ws?.send({ type: "room:leave" }); wantJoined.current = false; }, [ws]);
+  // No room:leave on unmount: the app-level RoomSessionProvider owns this hook and sends it from leave().
 
   const status: RoomSocketStatus = state.phase === "idle" ? "connecting" : state.phase;
 
