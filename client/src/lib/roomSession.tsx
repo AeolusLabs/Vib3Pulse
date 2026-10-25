@@ -1,7 +1,6 @@
 // The app-level room session: one joined room per user per tab. The socket and voice hooks live here, not in the page,
 // so the room (and its audio) keeps running while the user moves around the app. Decisions are in roomSessionRules.ts.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useAuth } from "@/hooks/useAuth";
 import { useRoomSocket } from "@/hooks/useRoomSocket";
 import { useRoomVoice, type RoomVoice } from "@/hooks/useRoomVoice";
@@ -119,18 +118,6 @@ export function RoomSessionProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={value}>
       {children}
-      <AlertDialog open={!!st.pendingSwitch} onOpenChange={(o) => { if (!o) cancelSwitch(); }}>
-        <AlertDialogContent data-testid="dialog-room-switch">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Switch rooms?</AlertDialogTitle>
-            <AlertDialogDescription>You're in a live room. Leave it and join this one?</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="min-h-11">Stay in my room</AlertDialogCancel>
-            <AlertDialogAction className="min-h-11" onClick={confirmSwitch}>Switch rooms</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </Ctx.Provider>
   );
 }

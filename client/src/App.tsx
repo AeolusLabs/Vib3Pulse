@@ -79,6 +79,8 @@ import SocialEventsPage from "@/pages/SocialEventsPage";
 import SocialEventCreatePage from "@/pages/SocialEventCreatePage";
 import SocialEventHostPage from "@/pages/SocialEventHostPage";
 import { RoomSessionProvider } from "@/lib/roomSession";
+import RoomMiniBar from "@/components/rooms/shell/RoomMiniBar";
+import SwitchRoomDialog from "@/components/rooms/shell/SwitchRoomDialog";
 import { SafetyTriggersProvider } from "@/components/safety/SafetyTriggersProvider";
 
 // Dev-only fixture page: the condition is a build-time constant, so production bundles drop the route and its chunk.
@@ -412,6 +414,8 @@ function App() {
           <SafetyTriggersProvider />
           <RoomSessionProvider>
             <Router />
+            <RoomMiniBar />
+            <SwitchRoomDialog />
           </RoomSessionProvider>
         </TooltipProvider>
       </WebSocketProvider>
