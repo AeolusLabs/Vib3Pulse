@@ -55,11 +55,11 @@
 
 **Interfaces:**
 - Consumes: `sprayAllowed()`, `moneyEligibleRoom`, `isIdVerifiedAdult`, `subaccountOf(userId)`.
-- Produces: `canEnableSpray(host, room): Check<"FEATURE_OFF"|"HOST_NOT_ADULT"|"HOST_NOT_VERIFIED"|"NO_PAYOUT_ACCOUNT"|"ROOM_NOT_ADULT">` in `shared/roomRules.ts` (pure, fails closed, same order as `canSellTickets`); `GET /api/rooms/config` gains `features.spray` unchanged plus `hostSprayReadiness` only for the signed-in host: `{ adult: boolean; idVerified: boolean; payoutAccount: boolean }`.
+- Produces: `canEnableSpray(host, room): Check<"FEATURE_OFF"|"HOST_NOT_ADULT"|"HOST_NOT_VERIFIED"|"NO_PAYOUT_ACCOUNT"|"ROOM_NOT_ADULT">` in `shared/roomRules.ts` (pure, fails closed, same order as `canSellTickets`); `GET /api/rooms/config` gains `features.spray` unchanged plus `hostMoneyReadiness` only for the signed-in host: `{ adult: boolean; idVerified: boolean; payoutAccount: boolean }`.
 
 - [ ] Tests (names): `create with sprayEnabled by an eligible host stores true`; `create refused with code per failing rule (flag off, teen host, unverified, no payout, 13+ room, minors room)`; `unknown or non-boolean sprayEnabled is a 400 on field sprayEnabled`; `PATCH toggles on and off while live and hub follows`; `sprayBlockFor is null when spray_enabled is false even with every other rule met`; `in-flight spray still delivers after the host turns it off`; `team spray refused when off`; `default for a room created without the field is false`.
 - [ ] Implement `canEnableSpray` and wire create + PATCH to it (check before ticket checks; 403 `{code, message}`), set the column, gate `sprayGate` at phase "start" only (phase "deliver" must still pass).
-- [ ] Add `hostSprayReadiness` to the config response for the host only; verify no other viewer's body changes (assert byte-equality for a guest).
+- [ ] Add `hostMoneyReadiness` to the config response for the host only; verify no other viewer's body changes (assert byte-equality for a guest).
 - [ ] Commit.
 
 ### Task 3: Wizard switch, checklist and Controls toggle (frontend)
@@ -70,7 +70,7 @@
 - Test: `scripts/test-rooms-unit-wizard-spray.ts`
 
 **Interfaces:**
-- Consumes: Task 2 config `hostSprayReadiness`, create/PATCH `sprayEnabled`, error codes of `canEnableSpray`.
+- Consumes: Task 2 config `hostMoneyReadiness`, create/PATCH `sprayEnabled`, error codes of `canEnableSpray`.
 - Produces: `WizardState.sprayEnabled: boolean` (default false); `StepSpray({ value, onChange, readiness, ageLimit })`.
 
 - [ ] Tests: `stepsFor includes "money" when only spray flag on and host/room eligible`; `excludes it for a teen host or a 13+ room`; `payload sends sprayEnabled only when true and the flag is on`; `checklist lists each missing item with its fix link`; `switch is disabled with a reason until readiness is met`.
@@ -123,3 +123,7 @@
 - [ ] Add the five new suites to the runner; run `npm run test:rooms` once (scratch DB in UTC), `tsc` against the 10-error baseline, `npm run build`.
 - [ ] Browser pass (desktop, phone-width): create a room with spray on, join as a second adult, navigate across the app with the bar, switch rooms with the confirm, host warning, kicked-while-minimised. Real-device iOS/Android audio is reported as unverified if not run.
 - [ ] Update `memory/project_rooms_gaming.md` or add `project_rooms_persistent_session.md` with outcomes and open items, then push after the build is verified.
+
+## Amendment (2026-10-25, owner: "I did not see anywhere to start a paid room")
+
+Paid rooms were also invisible: the "Paid room" switch sits in the Features step and renders only when ROOMS_PAID is on, the host is an adult and the room is 18+/21+; otherwise nothing or a vague placeholder shows. Task 3 therefore builds ONE always-visible **Money** section in the wizard (adult rooms): two switches, "Paid room" (ticket price step follows) and "Spray", plus a shared readiness checklist (adult, ID verified, payout account, 18+/21+ room, feature switched on by the platform) where every unmet item says why and links to the fix. Hosts of non-adult rooms see the section locked with the reason ("Change the room to 18+ to sell tickets or take spray"). The config field is named `hostMoneyReadiness` (covers both). The old placeholder copy is removed. The Controls sheet shows the same two states for a scheduled room.
