@@ -54,7 +54,7 @@ await test("flag off: every admin route 404", async () => {
     for (const [m, p] of routes) {
       const res = await fetch(base + p, { method: m, headers: { "content-type": "application/json" }, body: m === "POST" ? "{}" : undefined });
       assert.equal(res.status, 404, `${m} ${p}`);
-      assert.deepEqual(await res.json(), { message: "Not found" });
+      assert.deepEqual(await res.json(), { message: "Not found", code: "AGE_REVIEW_OFF" });
     }
   } finally { server.close(); }
 });

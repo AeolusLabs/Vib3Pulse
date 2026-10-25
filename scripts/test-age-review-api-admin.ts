@@ -120,7 +120,7 @@ check("teen correction moves the account and clears verification", (await http("
 const u4 = await mkUser("arvu4", dob);
 const r4 = await mkReq(u4, dob);
 const newDob = yearsAgo(33);
-const bc = await http("POST", `/api/admin/age-reviews/${r4}/decide`, rev, { outcome: "birthdate_change", idBirthdate: newDob });
+const bc = await http("POST", `/api/admin/age-reviews/${r4}/decide`, rev, { outcome: "birthdate_change", checklist: full, documentNumber: "BC" + stamp, idBirthdate: newDob });
 check("birthdate change waits, nothing changes, evidence kept", bc.status === 200 && (await q(`select status from age_review_requests where id = $1`, [r4]))[0].status === "pending_second_approval" && (await evCount(r4)) === 2 && (await q(`select date_of_birth::text d from users where id = $1`, [u4]))[0].d.slice(0, 10) === dob);
 check("second approve: not super_admin refused", (await http("POST", `/api/admin/age-reviews/${r4}/second-approve`, rev, { approve: true, reason: "ok" })).status === 403);
 await q(`update age_review_requests set reviewer_id = $2 where id = $1`, [r4, sup1]);
@@ -130,7 +130,7 @@ check("approve applies the correction then verifies", (await http("POST", `/api/
 
 const u5 = await mkUser("arvu5", dob);
 const r5 = await mkReq(u5, dob);
-await http("POST", `/api/admin/age-reviews/${r5}/decide`, rev, { outcome: "birthdate_change", idBirthdate: newDob });
+await http("POST", `/api/admin/age-reviews/${r5}/decide`, rev, { outcome: "birthdate_change", checklist: full, documentNumber: "BC" + stamp, idBirthdate: newDob });
 await q(`update age_review_requests set reviewer_id = $2 where id = $1`, [r5, sup1]);
 check("reject leaves the account unchanged", (await http("POST", `/api/admin/age-reviews/${r5}/second-approve`, sup2, { approve: false, reason: "not convincing" })).status === 200
   && (await q(`select date_of_birth::text d from users where id = $1`, [u5]))[0].d.slice(0, 10) === dob && (await q(`select status from age_review_requests where id = $1`, [r5]))[0].status === "declined");

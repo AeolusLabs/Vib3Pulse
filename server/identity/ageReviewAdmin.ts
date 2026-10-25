@@ -38,9 +38,14 @@ export type Plan = {
   bumpMore: boolean;
   deleteEvidence: boolean;
   notify: "approved" | "declined" | "needs_more" | "teen_moved" | null;
+  /** Set when a super_admin knowingly verified a document that already verified another account. */
+  overrideReason: string | null;
 };
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** A live check has no code selfie, so codeMatches is not required there. */
+export const requiredChecklist = (method: string): readonly string[] => (method === "live" ? CHECKLIST_KEYS.filter((k) => k !== "codeMatches") : CHECKLIST_KEYS);
 
 export function isSelfReview(admin: AdminRef, user: UserCtx): boolean {
   return !!user.email && !!admin.email && admin.email.trim().toLowerCase() === user.email.trim().toLowerCase();
@@ -62,9 +67,11 @@ export async function planDecision(a: {
   if (!DECISION_OUTCOMES.includes(body.outcome)) throw new AgeReviewError(400, "BAD_REQUEST", "Unknown outcome.");
   const base: Plan = {
     outcome: body.outcome, finalStatus: "declined", account: null, declineReason: null, dobMatch: false, proposedDob: null,
-    fingerprint: null, documentType: null, bumpMore: false, deleteEvidence: true, notify: null,
+    fingerprint: null, documentType: null, bumpMore: false, deleteEvidence: true, notify: null, overrideReason: null,
   };
 
+  const checklistFull = () => requiredChecklist(req.method).every((k) => body.checklist?.[k] === true);
+  let overrideReason: string | null = null;
   const fingerprintFor = async (): Promise<{ fp: string; type: string }> => {
     const type = req.document_type ?? body.documentType ?? null;
     if (!type || !body.documentNumber?.trim()) throw new AgeReviewError(400, "BAD_REQUEST", "The document type and number are required.");
@@ -72,13 +79,14 @@ export async function planDecision(a: {
     if (await a.isDuplicate(fp)) {
       if (!body.overrideDuplicate) throw new AgeReviewError(409, "DUPLICATE_DOCUMENT", "This document already verified another account.");
       if (admin.role !== "super_admin") throw new AgeReviewError(403, "NOT_ALLOWED", "Only a super admin can override a duplicate document.");
+      overrideReason = body.overrideDuplicate.reason;
     }
     return { fp, type };
   };
 
   switch (body.outcome) {
     case "verify": {
-      if (!CHECKLIST_KEYS.every((k) => body.checklist?.[k] === true)) throw new AgeReviewError(400, "CHECKLIST_INCOMPLETE", "Tick every item on the checklist first.");
+      if (!checklistFull()) throw new AgeReviewError(400, "CHECKLIST_INCOMPLETE", "Tick every item on the checklist first.");
       const idDob = needBirthdate(body);
       if (!req.registered_dob_snapshot || user.dateOfBirth?.slice(0, 10) !== req.registered_dob_snapshot.slice(0, 10)) {
         throw new AgeReviewError(409, "WRONG_STATE", "The registered birthdate changed since this request started.");
@@ -88,7 +96,7 @@ export async function planDecision(a: {
         throw new AgeReviewError(400, "BIRTHDATE_MISMATCH", "The ID birthdate does not match the registered one or is under 18. Use teen correction or birthdate change.");
       }
       const { fp, type } = await fingerprintFor();
-      return { ...base, finalStatus: "approved", outcome: "verified", account: { kind: "verify", method: req.method === "live" ? "admin_live" : "admin_upload" }, dobMatch: true, fingerprint: fp, documentType: type, notify: "approved" };
+      return { ...base, finalStatus: "approved", outcome: "verified", account: { kind: "verify", method: req.method === "live" ? "admin_live" : "admin_upload" }, dobMatch: true, fingerprint: fp, documentType: type, notify: "approved", overrideReason };
     }
     case "teen_correction": {
       const idDob = needBirthdate(body);
@@ -97,14 +105,15 @@ export async function planDecision(a: {
       return { ...base, finalStatus: "declined", outcome: "teen_correction", account: { kind: "correct_dob", dob: idDob, reason: "age review: ID shows under 18" }, dobMatch: false, notify: "teen_moved" };
     }
     case "birthdate_change": {
+      // Checked as fully as verify, so the second approver is approving a complete case.
+      if (!checklistFull()) throw new AgeReviewError(400, "CHECKLIST_INCOMPLETE", "Tick every item on the checklist first.");
       const idDob = needBirthdate(body);
       const age = ageFromDob(idDob, now);
       if (age === null || age < 18) throw new AgeReviewError(400, "BIRTHDATE_MISMATCH", "The ID birthdate must be an adult birthdate. Use teen correction.");
       if (idDob === req.registered_dob_snapshot?.slice(0, 10)) throw new AgeReviewError(400, "BIRTHDATE_MISMATCH", "The ID birthdate matches the registered one. Use verify.");
-      let fp: string | null = null, type: string | null = req.document_type ?? body.documentType ?? null;
-      if (body.documentNumber?.trim()) ({ fp, type } = await fingerprintFor());
+      const { fp, type } = await fingerprintFor();
       // Evidence stays until the second approver has decided.
-      return { ...base, finalStatus: "pending_second_approval", outcome: "birthdate_change", proposedDob: idDob, fingerprint: fp, documentType: type, deleteEvidence: false };
+      return { ...base, finalStatus: "pending_second_approval", outcome: "birthdate_change", proposedDob: idDob, fingerprint: fp, documentType: type, deleteEvidence: false, overrideReason };
     }
     case "needs_more":
       if (req.method !== "upload") throw new AgeReviewError(409, "WRONG_STATE", "A live check cannot ask for more photos.");
@@ -113,8 +122,13 @@ export async function planDecision(a: {
     case "decline":
       if (!body.declineReason || !DECLINE_REASONS.includes(body.declineReason)) throw new AgeReviewError(400, "REASON_REQUIRED", "Choose a reason for declining.");
       return { ...base, finalStatus: "declined", outcome: "declined", declineReason: body.declineReason, notify: "declined" };
-    case "not_eligible_minor":
+    case "not_eligible_minor": {
+      // Only for an ID that matches the registered birthdate and shows under 18; it must not be a way to dump any request.
+      const idDob = needBirthdate(body);
+      const age = ageFromDob(idDob, now);
+      if (idDob !== req.registered_dob_snapshot?.slice(0, 10) || age === null || age >= 18) throw new AgeReviewError(400, "BIRTHDATE_MISMATCH", "The ID must match the registered birthdate and show under 18.");
       return { ...base, finalStatus: "closed_minor", outcome: "not_eligible_minor", dobMatch: true, notify: "declined" };
+    }
   }
 }
 
@@ -164,6 +178,10 @@ export async function listQueue(q: { status?: string; cursor?: string; limit?: n
   return { items: page.map((r) => itemOf(r)), nextCursor: rows.length > limit && last ? encodeCursor(last.ck!, last.id) : null };
 }
 
+/** The one condition under which a proposed birthdate is shown and a second approval offered. */
+export const canSecondApproveView = (admin: AdminRef, row: { status: string; reviewer_id: string | null }, self: boolean): boolean =>
+  row.status === "pending_second_approval" && admin.role === "super_admin" && row.reviewer_id !== admin.id && !self;
+
 /** Detail for a reviewer. Opening a submitted request claims it (moves to in_review, records the reviewer). Never returns evidence bytes. */
 export async function getDetail(admin: AdminRef, id: string) {
   const pool = await getPool();
@@ -179,10 +197,13 @@ export async function getDetail(admin: AdminRef, id: string) {
   const evidence = self ? [] : (await pool.query(`select id, kind, mime, greatest(octet_length(bytes_enc) - 31, 0) as bytes from age_review_evidence where request_id = $1 order by kind`, [id])).rows
     .map((e: { id: string; kind: string; mime: string; bytes: string | number }) => ({ id: e.id, kind: e.kind, mime: e.mime, bytes: Number(e.bytes) }));
   const open = row.status === "submitted" || row.status === "in_review";
+  const canSecondApprove = canSecondApproveView(admin, row, self);
   return {
     request: {
       ...itemOf(row),
       registeredDob: row.registered_dob_snapshot ?? "",
+      // The second approver must see what they are approving; nobody else ever does.
+      proposedDob: canSecondApprove ? row.proposed_dob ?? null : null,
       code: row.method === "upload" ? row.code ?? null : null,
       codeExpiresAt: row.method === "upload" ? iso(row.code_expires_at) : null,
       moreRequests: Number(row.more_requests),
@@ -192,7 +213,7 @@ export async function getDetail(admin: AdminRef, id: string) {
     evidence,
     checklist: [...CHECKLIST_KEYS],
     canDecide: open && !self,
-    canSecondApprove: row.status === "pending_second_approval" && admin.role === "super_admin" && row.reviewer_id !== admin.id && !self,
+    canSecondApprove,
   };
 }
 
@@ -207,11 +228,11 @@ async function withLock<T>(id: string, fn: (c: { query: (q: string, p?: any[]) =
   }
 }
 
-async function loadLocked(c: { query: (q: string, p?: any[]) => Promise<any> }, id: string) {
+async function loadLocked(c: { query: (q: string, p?: any[]) => Promise<any> }, id: string, forUpdate = false) {
   const r = (await c.query(
-    `select r.id, r.user_id, r.method, r.status, r.document_type, r.registered_dob_snapshot, r.more_requests, r.reviewer_id, r.proposed_dob, r.second_approver_id,
+    `select r.id, r.user_id, r.method, r.status, r.document_type, r.registered_dob_snapshot, r.more_requests, r.reviewer_id, r.proposed_dob, r.second_approver_id, r.document_fingerprint,
             u.email as user_email, u.date_of_birth as user_dob
-       from age_review_requests r join users u on u.id = r.user_id where r.id = $1`, [id])).rows[0] as (RequestCtx & { user_email: string | null; user_dob: string | null }) | undefined;
+       from age_review_requests r join users u on u.id = r.user_id where r.id = $1 ${forUpdate ? "for update of r" : ""}`, [id])).rows[0] as (RequestCtx & { user_email: string | null; user_dob: string | null; document_fingerprint: string | null }) | undefined;
   if (!r) throw new AgeReviewError(404, "NOT_FOUND", "Not found");
   return r;
 }
@@ -243,78 +264,106 @@ async function audit(adminId: string, action: string, id: string, details: strin
 
 export async function decide(admin: AdminRef, id: string, body: DecideBody, ip?: string) {
   const result = await withLock(id, async (c) => {
-    const r = await loadLocked(c, id);
-    const plan = await planDecision({
-      admin, req: r, user: { email: r.user_email, dateOfBirth: r.user_dob }, body,
-      isDuplicate: async (fp) => ((await c.query(`select 1 from age_review_requests where document_fingerprint = $1 and status = 'approved' and user_id <> $2 limit 1`, [fp, r.user_id])).rowCount ?? 0) > 0,
-    });
-    if (plan.account) await applyAccount(admin.id, r.user_id, plan.account, ip);
+    let applied: Plan["account"] = null;
+    let r: Awaited<ReturnType<typeof loadLocked>> | null = null;
     try {
       await c.query("begin");
-      const cur = (await c.query(`select status from age_review_requests where id = $1 for update`, [id])).rows[0] as { status: string } | undefined;
-      if (!cur || !["submitted", "in_review"].includes(cur.status)) throw new AgeReviewError(409, "WRONG_STATE", "This request is no longer waiting for a decision.");
+      // The row lock is held from here to the commit: cancel, submit and the expiry sweep all need it, so none can slip in between
+      // the status check, the account change and the request update.
+      r = await loadLocked(c, id, true);
+      const req = r;
+      const plan = await planDecision({
+        admin, req, user: { email: req.user_email, dateOfBirth: req.user_dob }, body,
+        isDuplicate: async (fp) => ((await c.query(`select 1 from age_review_requests where document_fingerprint = $1 and status = 'approved' and user_id <> $2 limit 1`, [fp, req.user_id])).rowCount ?? 0) > 0,
+      });
+      if (plan.account) { await applyAccount(admin.id, req.user_id, plan.account, ip); applied = plan.account; }
       if (plan.deleteEvidence) await c.query(`delete from age_review_evidence where request_id = $1`, [id]);
       await c.query(
-        `update age_review_requests set status = $2, outcome = $3, decline_reason = $4, dob_match = $5, proposed_dob = coalesce($6, proposed_dob),
+        `update age_review_requests set status = $2, outcome = $3, decline_reason = $4, dob_match = $5,
+                proposed_dob = case when $2 in ('approved', 'declined', 'closed_minor') then null else coalesce($6, proposed_dob) end,
                 document_fingerprint = coalesce($7, document_fingerprint), document_type = coalesce(document_type, $8), reviewer_id = $9,
                 more_requests = more_requests + $10, decided_at = case when $2 in ('needs_more', 'pending_second_approval') then decided_at else now() end
           where id = $1`,
         [id, plan.finalStatus, plan.outcome, plan.declineReason, plan.dobMatch, plan.proposedDob, plan.fingerprint, plan.documentType, admin.id, plan.bumpMore ? 1 : 0],
       );
       await c.query("commit");
+      return { plan, userId: req.user_id, method: req.method };
     } catch (e) {
       await c.query("rollback").catch(() => {});
-      if (plan.account) console.error(`[AGE-REVIEW] ALERT account change applied but the request update failed (${id}); request left open for retry`);
+      if (applied && r) await compensateAccountChange(id, r.user_id, applied);
       throw e;
     }
-    return { plan, userId: r.user_id };
   });
-  await audit(admin.id, "age_review.decide", id, `outcome=${result.plan.outcome} request=${id}`, ip);
+  await audit(admin.id, "age_review.decide", id, `outcome=${result.plan.outcome} request=${id}${body.note?.trim() ? ` note=${body.note.trim().slice(0, 300)}` : ""}`, ip);
+  if (result.plan.overrideReason) await audit(admin.id, "age_review.duplicate_override", id, `request=${id} reason=${result.plan.overrideReason}`, ip);
+  if (result.method === "live") await closeRoomQuietly(id);
   if (result.plan.notify) { const { notifyAgeReview } = await import("./ageReviewNotify"); await notifyAgeReview(result.userId, result.plan.notify); }
-  return (await getDetailRequestOnly(id));
+  return getDetailRequestOnly(id);
+}
+
+/** The request update failed after the account was changed. Verification can be taken back; a corrected birthdate cannot, so it is flagged. */
+export async function compensateAccountChange(id: string, userId: string, account: NonNullable<Plan["account"]>) {
+  try {
+    const { storage } = await import("../storage");
+    await storage.setAgeVerification(userId, { verified: false });
+    console.error(`[AGE-REVIEW] ALERT account change was undone because the request update failed (${id})`);
+  } catch {
+    console.error(`[AGE-REVIEW] ALERT account change could not be undone after a failed request update (${id})`);
+  }
+  if (account.kind === "correct_dob") console.error(`[AGE-REVIEW] ALERT birthdate correction stays applied; the request is left open (${id})`);
+}
+
+async function closeRoomQuietly(id: string) {
+  try { await (await import("./ageReviewLive")).closeAgeCheckRoom(id); } catch { /* the timer and the sweep close it too */ }
 }
 
 export async function secondApprove(admin: AdminRef, id: string, body: { approve: boolean; reason: string }, ip?: string) {
   const result = await withLock(id, async (c) => {
-    const r = await loadLocked(c, id);
-    if (admin.role !== "super_admin") throw new AgeReviewError(403, "NOT_ALLOWED", "Only a super admin can give a second approval.");
-    if (isSelfReview(admin, { email: r.user_email, dateOfBirth: null })) throw new AgeReviewError(403, "SELF_REVIEW", "You cannot review your own age check.");
-    if (r.status !== "pending_second_approval" || !r.proposed_dob) throw new AgeReviewError(409, "WRONG_STATE", "This request is not waiting for a second approval.");
-    if (r.reviewer_id === admin.id) throw new AgeReviewError(403, "SECOND_APPROVER_MUST_DIFFER", "A different super admin must give the second approval.");
-    if (body.approve) {
-      await applyAccount(admin.id, r.user_id, { kind: "correct_dob", dob: r.proposed_dob, reason: `age review second approval: ${body.reason}`.slice(0, 300) }, ip);
-      const { storage } = await import("../storage");
-      await storage.setAgeVerification(r.user_id, { verified: true, method: r.method === "live" ? "admin_live" : "admin_upload" });
-    }
+    let applied = false;
+    let r: Awaited<ReturnType<typeof loadLocked>> | null = null;
     try {
       await c.query("begin");
-      const cur = (await c.query(`select status from age_review_requests where id = $1 for update`, [id])).rows[0] as { status: string } | undefined;
-      if (cur?.status !== "pending_second_approval") throw new AgeReviewError(409, "WRONG_STATE", "This request is not waiting for a second approval.");
+      r = await loadLocked(c, id, true);
+      if (admin.role !== "super_admin") throw new AgeReviewError(403, "NOT_ALLOWED", "Only a super admin can give a second approval.");
+      if (isSelfReview(admin, { email: r.user_email, dateOfBirth: null })) throw new AgeReviewError(403, "SELF_REVIEW", "You cannot review your own age check.");
+      if (r.status !== "pending_second_approval" || !r.proposed_dob) throw new AgeReviewError(409, "WRONG_STATE", "This request is not waiting for a second approval.");
+      if (r.reviewer_id === admin.id) throw new AgeReviewError(403, "SECOND_APPROVER_MUST_DIFFER", "A different super admin must give the second approval.");
+      if (body.approve) {
+        // Another account may have been verified with this document while the case waited.
+        if (r.document_fingerprint && ((await c.query(`select 1 from age_review_requests where document_fingerprint = $1 and status = 'approved' and user_id <> $2 limit 1`, [r.document_fingerprint, r.user_id])).rowCount ?? 0) > 0) {
+          throw new AgeReviewError(409, "DUPLICATE_DOCUMENT", "This document has since verified another account.");
+        }
+        await applyAccount(admin.id, r.user_id, { kind: "correct_dob", dob: r.proposed_dob, reason: `age review second approval: ${body.reason}`.slice(0, 300) }, ip);
+        applied = true;
+        const { storage } = await import("../storage");
+        await storage.setAgeVerification(r.user_id, { verified: true, method: r.method === "live" ? "admin_live" : "admin_upload" });
+      }
       await c.query(`delete from age_review_evidence where request_id = $1`, [id]);
       await c.query(
-        `update age_review_requests set status = $2, outcome = $3, second_approver_id = $4, decided_at = now() where id = $1`,
+        `update age_review_requests set status = $2, outcome = $3, second_approver_id = $4, proposed_dob = null, decided_at = now() where id = $1`,
         [id, body.approve ? "approved" : "declined", body.approve ? "birthdate_changed" : "birthdate_rejected", admin.id],
       );
       await c.query("commit");
+      return { userId: r.user_id, method: r.method };
     } catch (e) {
       await c.query("rollback").catch(() => {});
-      if (body.approve) console.error(`[AGE-REVIEW] ALERT account change applied but the request update failed (${id}); request left open for retry`);
+      if (applied && r) await compensateAccountChange(id, r.user_id, { kind: "correct_dob", dob: "", reason: "" });
       throw e;
     }
-    return r.user_id;
   });
   await audit(admin.id, "age_review.second_approve", id, `approve=${body.approve} request=${id}`, ip);
+  if (result.method === "live") await closeRoomQuietly(id);
   const { notifyAgeReview } = await import("./ageReviewNotify");
-  await notifyAgeReview(result, body.approve ? "approved" : "declined");
+  await notifyAgeReview(result.userId, body.approve ? "approved" : "declined");
   return getDetailRequestOnly(id);
 }
 
 async function getDetailRequestOnly(id: string) {
   const pool = await getPool();
   const row = (await pool.query(`select r.*, u.display_name, u.username from age_review_requests r join users u on u.id = r.user_id where r.id = $1`, [id])).rows[0] as ItemRow & Record<string, any>;
+  // The registered birthdate and a proposed one are only ever in the detail view.
   return {
     ...itemOf(row),
-    registeredDob: row.registered_dob_snapshot ?? "",
     code: null, codeExpiresAt: null,
     moreRequests: Number(row.more_requests),
     consentRecorded: !!row.consent_version && !!row.consented_at,

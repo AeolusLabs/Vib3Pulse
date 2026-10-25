@@ -69,10 +69,10 @@ await test("teen correction moves the account and clears verification", async ()
 });
 
 await test("birthdate change waits for a different super_admin", async () => {
-  const p = await plan({ outcome: "birthdate_change", idBirthdate: "1988-02-02" });
+  const p = await plan({ outcome: "birthdate_change", checklist: full, documentNumber: "A1", idBirthdate: "1988-02-02" });
   assert.equal(p.finalStatus, "pending_second_approval"); assert.equal(p.account, null); assert.equal(p.proposedDob, "1988-02-02"); assert.equal(p.deleteEvidence, false);
-  assert.equal(await code(plan({ outcome: "birthdate_change", idBirthdate: REG })), "BIRTHDATE_MISMATCH");
-  assert.equal(await code(plan({ outcome: "birthdate_change", idBirthdate: "2012-02-02" })), "BIRTHDATE_MISMATCH");
+  assert.equal(await code(plan({ outcome: "birthdate_change", checklist: full, documentNumber: "A1", idBirthdate: REG })), "BIRTHDATE_MISMATCH");
+  assert.equal(await code(plan({ outcome: "birthdate_change", checklist: full, documentNumber: "A1", idBirthdate: "2012-02-02" })), "BIRTHDATE_MISMATCH");
 });
 
 await test("second approver must differ", () => {
@@ -85,11 +85,11 @@ await test("second approver must differ", () => {
 await test("approve applies the correction then verifies; reject leaves the account unchanged", () => {
   const s = src("server/identity/ageReviewAdmin.ts");
   const fn = s.slice(s.indexOf("export async function secondApprove"), s.indexOf("async function getDetailRequestOnly"));
-  const i = [fn.indexOf("if (body.approve) {"), fn.indexOf('kind: "correct_dob"'), fn.indexOf("setAgeVerification(r.user_id, { verified: true"), fn.indexOf('client') >= 0 ? 0 : 0, fn.indexOf('c.query("begin")')];
-  assert.ok(i[0] >= 0 && i[1] > i[0] && i[2] > i[1] && i[4] > i[2], "correction, then verify, then the transaction");
+  const i = [fn.indexOf("if (body.approve) {"), fn.indexOf('kind: "correct_dob"'), fn.indexOf("setAgeVerification(r.user_id, { verified: true"), 0, fn.indexOf('c.query("commit")')];
+  assert.ok(i[0] >= 0 && i[1] > i[0] && i[2] > i[1] && i[4] > i[2], "correction, then verify, then the commit");
   // Account calls sit only inside the approve branch.
   assert.equal((fn.match(/applyAccount\(/g) ?? []).length, 1);
-  assert.ok(fn.indexOf("applyAccount(") > fn.indexOf("if (body.approve) {") && fn.indexOf("applyAccount(") < fn.indexOf('c.query("begin")'));
+  assert.ok(fn.indexOf("applyAccount(") > fn.indexOf("if (body.approve) {") && fn.indexOf('c.query("begin")') < fn.indexOf("applyAccount("), "inside the approve branch, after the lock");
 });
 
 await test("needs_more max 2", async () => {
@@ -104,20 +104,20 @@ await test("decline requires a reason code", async () => {
   assert.equal(await code(plan({ outcome: "decline", declineReason: "nope" })), "REASON_REQUIRED");
   const p = await plan({ outcome: "decline", declineReason: "looks_edited" });
   assert.equal(p.finalStatus, "declined"); assert.equal(p.declineReason, "looks_edited"); assert.equal(p.deleteEvidence, true);
-  const m = await plan({ outcome: "not_eligible_minor" });
+  const m = await plan({ outcome: "not_eligible_minor", idBirthdate: "2012-01-01" }, { req: { registered_dob_snapshot: "2012-01-01" } });
   assert.equal(m.finalStatus, "closed_minor"); assert.equal(m.deleteEvidence, true);
 });
 
 await test("every final outcome deletes evidence in the same transaction (structure)", async () => {
-  for (const o of [{ outcome: "verify", checklist: full, idBirthdate: REG, documentNumber: "A1" }, { outcome: "teen_correction", idBirthdate: "2012-01-01" }, { outcome: "decline", declineReason: "other" }, { outcome: "not_eligible_minor" }]) {
-    assert.equal((await plan(o)).deleteEvidence, true, o.outcome);
+  for (const o of [{ outcome: "verify", checklist: full, idBirthdate: REG, documentNumber: "A1" }, { outcome: "teen_correction", idBirthdate: "2012-01-01" }, { outcome: "decline", declineReason: "other" }, { outcome: "not_eligible_minor", idBirthdate: "2012-01-01" }]) {
+    assert.equal((await plan(o, { req: { registered_dob_snapshot: o.outcome === "not_eligible_minor" ? "2012-01-01" : REG } })).deleteEvidence, true, o.outcome);
   }
   const s = src("server/identity/ageReviewAdmin.ts");
   const fn = s.slice(s.indexOf("export async function decide"), s.indexOf("export async function secondApprove"));
   const order = ['c.query("begin")', "delete from age_review_evidence", "update age_review_requests set status", 'c.query("commit")'].map((x) => fn.indexOf(x));
   assert.ok(order.every((i) => i >= 0) && order.join() === [...order].sort((a, b) => a - b).join());
-  assert.ok(/rollback/.test(fn) && /ALERT account change applied but the request update failed/.test(fn), "a failure rolls everything back and shouts");
-  assert.ok(fn.indexOf("applyAccount(") < fn.indexOf('c.query("begin")'), "account change first, under the advisory lock");
+  assert.ok(/rollback/.test(fn) && /compensateAccountChange\(id, r\.user_id, applied\)/.test(fn), "a failure rolls everything back and compensates");
+  assert.ok(fn.indexOf('c.query("begin")') < fn.indexOf("loadLocked(c, id, true)") && fn.indexOf("loadLocked(c, id, true)") < fn.indexOf("applyAccount("), "row lock first, then the account change");
   assert.ok(/pg_advisory_lock/.test(s));
 });
 
@@ -131,8 +131,8 @@ await test("self review refused", async () => {
 await test("decisions audited without birthdates or numbers (structure)", () => {
   const s = src("server/identity/ageReviewAdmin.ts");
   const calls = [...s.matchAll(/audit\(admin\.id, "([^"]+)", id, `([^`]*)`/g)];
-  assert.equal(calls.length, 2);
-  for (const c of calls) assert.ok(!/idBirthdate|documentNumber|fingerprint|proposed|dob|note/i.test(c[2]), c[2]);
+  assert.equal(calls.length, 3);
+  for (const c of calls) assert.ok(!/idBirthdate|documentNumber|fingerprint|proposed|dob/i.test(c[2]), c[2]);
   assert.ok(/age_review\.decide/.test(s));
 });
 
@@ -141,6 +141,92 @@ await test("v2 migration SQL equals the .sql file and is additive", () => {
   const body = file.slice(file.indexOf("BEGIN;") + 6, file.lastIndexOf("COMMIT;")).trim();
   assert.equal(body, AGE_REVIEW_V2_SCHEMA_SQL.trim());
   assert.ok(/ADD COLUMN IF NOT EXISTS proposed_dob text/.test(body) && !/drop|delete/i.test(body));
+});
+
+await test("cancel racing a decide never leaves a verified account with a cancelled request", () => {
+  const s = src("server/identity/ageReviewAdmin.ts");
+  const fn = s.slice(s.indexOf("export async function decide"), s.indexOf("export async function compensateAccountChange"));
+  const i = ['c.query("begin")', "loadLocked(c, id, true)", "planDecision(", "applyAccount(", "update age_review_requests set status", 'c.query("commit")'].map((x) => fn.indexOf(x));
+  assert.ok(i.every((x) => x >= 0) && i.join() === [...i].sort((a, b) => a - b).join(), "lock the row, check, change the account, update, commit");
+  assert.ok(/for update of r/.test(s), "the lock is a row lock cancel, submit and the sweep also need");
+  const sa = s.slice(s.indexOf("export async function secondApprove"), s.indexOf("async function getDetailRequestOnly"));
+  assert.ok(sa.indexOf("loadLocked(c, id, true)") < sa.indexOf("applyAccount("));
+});
+
+await test("failed request update after a verify undoes the verification (compensation)", async () => {
+  const { storage } = await import("../server/storage");
+  const { compensateAccountChange } = await import("../server/identity/ageReviewAdmin");
+  const calls: unknown[] = [];
+  const keep = (storage as any).setAgeVerification;
+  const errs: string[] = [];
+  const origErr = console.error; console.error = (...a: unknown[]) => { errs.push(a.join(" ")); };
+  try {
+    (storage as any).setAgeVerification = async (id: string, v: unknown) => { calls.push([id, v]); };
+    await compensateAccountChange("r1", "u1", { kind: "verify", method: "admin_upload" });
+    assert.deepEqual(calls, [["u1", { verified: false }]]);
+    assert.ok(errs.some((e) => e.includes("ALERT")) && !errs.join(" ").includes("u1"), "ALERT without the user id");
+    errs.length = 0;
+    await compensateAccountChange("r1", "u1", { kind: "correct_dob", dob: "2012-01-01", reason: "x" });
+    assert.ok(errs.some((e) => e.includes("birthdate correction stays applied")));
+    errs.length = 0;
+    (storage as any).setAgeVerification = async () => { throw new Error("db down"); };
+    await compensateAccountChange("r1", "u1", { kind: "verify", method: "admin_live" });
+    assert.ok(errs.some((e) => e.includes("could not be undone")), "a failed compensation still ALERTs and does not throw");
+  } finally { (storage as any).setAgeVerification = keep; console.error = origErr; }
+});
+
+await test("birthdate change needs the full checklist and a document number, and runs the duplicate check", async () => {
+  const b = { outcome: "birthdate_change", checklist: full, idBirthdate: "1988-02-02", documentNumber: "A1" };
+  assert.equal(await code(plan({ ...b, checklist: { ...full, notExpired: false } })), "CHECKLIST_INCOMPLETE");
+  assert.equal(await code(plan({ ...b, documentNumber: undefined })), "BAD_REQUEST");
+  assert.equal(await code(plan(b, { dup: true })), "DUPLICATE_DOCUMENT");
+  const ok = await plan({ ...b, overrideDuplicate: { reason: "same person new account" } }, { dup: true, admin: superA });
+  assert.equal(ok.overrideReason, "same person new account");
+  assert.match(ok.fingerprint ?? "", /^[0-9a-f]{64}$/);
+});
+
+await test("live checks need five checklist items (no codeMatches); needs_more stays refused for live", async () => {
+  const { codeMatches, ...five } = full as Record<string, boolean>;
+  const live = { req: { method: "live" } };
+  assert.equal((await plan({ outcome: "verify", checklist: five, idBirthdate: REG, documentNumber: "A1" }, live)).finalStatus, "approved");
+  assert.equal(await code(plan({ outcome: "verify", checklist: five, idBirthdate: REG, documentNumber: "A1" })), "CHECKLIST_INCOMPLETE", "upload still needs all six");
+  assert.equal(await code(plan({ outcome: "verify", checklist: { ...five, faceMatches: false }, idBirthdate: REG, documentNumber: "A1" }, live)), "CHECKLIST_INCOMPLETE");
+  assert.equal(await code(plan({ outcome: "needs_more" }, live)), "WRONG_STATE");
+});
+
+await test("not_eligible_minor needs an ID that matches the registered birthdate and is under 18", async () => {
+  const minor = { req: { registered_dob_snapshot: "2012-01-01" } };
+  assert.equal(await code(plan({ outcome: "not_eligible_minor" }, minor)), "BAD_REQUEST");
+  assert.equal(await code(plan({ outcome: "not_eligible_minor", idBirthdate: "2012-06-06" }, minor)), "BIRTHDATE_MISMATCH");
+  assert.equal(await code(plan({ outcome: "not_eligible_minor", idBirthdate: REG })), "BIRTHDATE_MISMATCH", "an adult request cannot be dumped this way");
+  assert.equal((await plan({ outcome: "not_eligible_minor", idBirthdate: "2012-01-01" }, minor)).finalStatus, "closed_minor");
+});
+
+await test("the proposed birthdate is shown only to the second approver", async () => {
+  const { canSecondApproveView } = await import("../server/identity/ageReviewAdmin");
+  const pend = { status: "pending_second_approval", reviewer_id: "s1" };
+  assert.equal(canSecondApproveView({ id: "s2", email: "", role: "super_admin" }, pend, false), true);
+  assert.equal(canSecondApproveView({ id: "s1", email: "", role: "super_admin" }, pend, false), false, "the first reviewer");
+  assert.equal(canSecondApproveView({ id: "s2", email: "", role: "admin" }, pend, false), false);
+  assert.equal(canSecondApproveView({ id: "s2", email: "", role: "age_reviewer" }, pend, false), false);
+  assert.equal(canSecondApproveView({ id: "s2", email: "", role: "super_admin" }, pend, true), false, "the user themselves");
+  for (const status of ["submitted", "in_review", "approved", "declined", "needs_more"]) assert.equal(canSecondApproveView({ id: "s2", email: "", role: "super_admin" }, { status, reviewer_id: "s1" }, false), false, status);
+  const s = src("server/identity/ageReviewAdmin.ts");
+  assert.ok(s.includes("proposedDob: canSecondApprove ? row.proposed_dob ?? null : null"));
+  const only = s.slice(s.indexOf("async function getDetailRequestOnly"));
+  assert.ok(!/registeredDob|proposedDob|proposed_dob/.test(only), "decide and second-approve responses carry neither birthdate");
+});
+
+await test("duplicate override and reviewer note are audited; final statuses clear proposed_dob (structure)", () => {
+  const s = src("server/identity/ageReviewAdmin.ts");
+  assert.ok(s.includes('"age_review.duplicate_override"') && s.includes("reason=${result.plan.overrideReason}"));
+  assert.ok(s.includes("note=${body.note.trim().slice(0, 300)}"));
+  assert.ok(s.includes("when $2 in ('approved', 'declined', 'closed_minor') then null"));
+  assert.ok(/status = \$2, outcome = \$3, second_approver_id = \$4, proposed_dob = null/.test(s));
+  assert.ok(src("server/identity/ageReviewSweep.ts").includes("status = 'expired', proposed_dob = null"));
+  assert.ok(src("server/identity/ageReviewControls.ts").includes("proposed_dob = case when status = 'pending_second_approval' then null"));
+  assert.ok(s.includes("closeRoomQuietly(id)"), "the live room closes at the decision");
+  assert.ok(src("server/routes/age-review-admin-routes.ts").includes("note: z.string().max(300).optional()"));
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

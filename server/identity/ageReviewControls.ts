@@ -64,7 +64,8 @@ export async function emergencyPurge(admin: { id: string; role: string }, reason
     const ids = Array.from(new Set(del.map((d) => d.request_id)));
     if (ids.length) {
       const moved = (await client.query(
-        `update age_review_requests set status = case when status in ('submitted', 'in_review', 'pending_second_approval') then 'needs_more' else status end
+        `update age_review_requests set proposed_dob = case when status = 'pending_second_approval' then null else proposed_dob end,
+                status = case when status in ('submitted', 'in_review', 'pending_second_approval') then 'needs_more' else status end
           where id = any($1::uuid[]) and status in (${OPEN}) returning user_id`, [ids])).rows as { user_id: string }[];
       userIds = Array.from(new Set(moved.map((m) => m.user_id)));
     }

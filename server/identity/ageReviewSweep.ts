@@ -20,7 +20,7 @@ export async function sweepExpiredAgeReviews(): Promise<{ expired: number; userI
       `select count(*)::int n from age_review_evidence e join age_review_requests r on r.id = e.request_id
         where r.status in ('approved', 'declined', 'expired', 'cancelled', 'closed_minor') or r.expires_at < now() - interval '2 hours'`)).rows[0].n);
     const exp = (await client.query(
-      `update age_review_requests set status = 'expired', decided_at = now()
+      `update age_review_requests set status = 'expired', proposed_dob = null, decided_at = now()
        where expires_at < now() and status in ('draft', 'submitted', 'in_review', 'needs_more', 'pending_second_approval')
        returning id, user_id`,
     )).rows as { id: string; user_id: string }[];

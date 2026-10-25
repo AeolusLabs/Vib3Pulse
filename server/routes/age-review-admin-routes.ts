@@ -14,7 +14,7 @@ import { CHECKLIST_KEYS, DECISION_OUTCOMES, DECLINE_REASONS } from "../../shared
 const REVIEWERS = ["super_admin", "admin", "age_reviewer"] as const;
 
 function flagGate(_req: Request, res: Response, next: NextFunction) {
-  if (!ageReviewEnabled()) return res.status(404).json({ message: "Not found" });
+  if (!ageReviewEnabled()) return res.status(404).json({ message: "Not found", code: "AGE_REVIEW_OFF" });
   next();
 }
 
@@ -35,7 +35,7 @@ export const decideSchema = z.object({
   documentNumber: z.string().trim().min(3).max(40).optional(),
   documentType: z.enum(["passport", "drivers_licence", "national_id", "nin_slip"]).optional(),
   declineReason: z.enum(DECLINE_REASONS).optional(),
-  note: z.string().max(500).optional(),
+  note: z.string().max(300).optional(),
   overrideDuplicate: z.object({ reason: z.string().trim().min(3).max(300) }).optional(),
 });
 

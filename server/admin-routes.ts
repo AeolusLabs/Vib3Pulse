@@ -90,7 +90,7 @@ export function registerAgeVerificationAdminRoute(app: Express) {
   // Clears a verification found suspect later (chargeback, report). Part of age review, so it follows the AGE_REVIEW flag.
   app.post("/api/admin/users/:id/age-verification/revoke", requireRole("super_admin", "admin", "age_reviewer"), async (req: Request, res: Response) => {
     try {
-      if (!ageReviewEnabled()) return res.status(404).json({ message: "Not found" });
+      if (!ageReviewEnabled()) return res.status(404).json({ message: "Not found", code: "AGE_REVIEW_OFF" });
       const reason = z.string().trim().min(3).max(300).safeParse(req.body?.reason);
       if (!reason.success) return res.status(400).json({ message: "A reason (3 to 300 characters) is required", code: "REASON_REQUIRED" });
       const { ageVerifier } = await import("./identity/ageVerification");

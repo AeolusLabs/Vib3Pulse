@@ -70,7 +70,7 @@ await test("emergency purge deletes all evidence in one transaction, super_admin
   });
   const s = src("server/identity/ageReviewControls.ts");
   const fn = s.slice(s.indexOf("export async function emergencyPurge"));
-  const order = ['client.query("begin")', "delete from age_review_evidence returning request_id", "update age_review_requests set status", 'client.query("commit")'].map((x) => fn.indexOf(x));
+  const order = ['client.query("begin")', "delete from age_review_evidence returning request_id", "update age_review_requests set", 'client.query("commit")'].map((x) => fn.indexOf(x));
   assert.ok(order.every((i) => i >= 0) && order.join() === [...order].sort((a, b) => a - b).join(), "delete and status move in one transaction");
   assert.ok(!/more_requests/.test(fn), "not counted as a more round");
   assert.ok(/deleted=\$\{deleted\}/.test(fn), "audit carries the count only");

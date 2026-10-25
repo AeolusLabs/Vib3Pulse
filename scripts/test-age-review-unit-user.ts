@@ -128,7 +128,7 @@ await test("notices: neutral push, escaped email, no relative link, purge before
 
 await test("decide and second-approve lock the row and recheck the status inside the transaction (structure)", () => {
   const a = src("server/identity/ageReviewAdmin.ts");
-  assert.equal((a.match(/select status from age_review_requests where id = \$1 for update/g) ?? []).length, 2);
+  assert.equal((a.match(/loadLocked\(c, id, true\)/g) ?? []).length, 2);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
