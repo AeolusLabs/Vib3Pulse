@@ -141,6 +141,20 @@ await q(`update users set age_verified_at = now(), age_verified_method = 'admin_
 const ver = await http("GET", "/api/age-review/me", adult);
 check("me state per case: verified", ver.json.state === "verified" && ver.json.verified.method === "admin_upload");
 
+// race: an upload fired together with a cancel must never leave evidence on the cancelled request
+{
+  const racer = await mk("arv_racer", yearsAgo(28));
+  const rr = (await http("POST", "/api/age-review/requests", racer, { method: "upload", documentType: "passport", ...consent })).json.request;
+  const results = await Promise.all([
+    http("POST", `/api/age-review/requests/${rr.id}/evidence`, racer, { kind: "document", mime: "image/png", data: PNG }),
+    http("POST", `/api/age-review/requests/${rr.id}/cancel`, racer),
+    http("POST", `/api/age-review/requests/${rr.id}/evidence`, racer, { kind: "selfie", mime: "image/png", data: PNG }),
+  ]);
+  const st = (await q(`select status from age_review_requests where id = $1`, [rr.id]))[0].status;
+  const left = (await q(`select 1 from age_review_evidence where request_id = $1`, [rr.id])).length;
+  check("upload racing cancel never leaves evidence on a cancelled request", st === "cancelled" && left === 0 && results.every((r) => [200, 409].includes(r.status)), `${st} ${left}`);
+}
+
 // account deletion purge
 const doomed = await mk("arv_doomed", yearsAgo(40));
 const d = (await http("POST", "/api/age-review/requests", doomed, { method: "upload", documentType: "passport", ...consent })).json.request;

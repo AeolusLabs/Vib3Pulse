@@ -151,15 +151,17 @@ export async function putEvidence(userId: string, id: string, input: { kind: str
     throw new AgeReviewError(400, "BAD_FILE", "That file is not a supported image.");
   }
   const enc = encryptEvidence(buf, `${req.id}:${input.kind}`);
-  const pool = await getPool();
-  // Conditional on the status in the same statement, so an upload racing a cancel cannot leave a row behind.
-  const r = await pool.query(
-    `insert into age_review_evidence (request_id, kind, mime, bytes_enc)
-     select id, $2, $3, $4 from age_review_requests where id = $1 and status in ('draft', 'needs_more')
-     on conflict (request_id, kind) do update set mime = excluded.mime, bytes_enc = excluded.bytes_enc, created_at = now()`,
-    [req.id, input.kind, detected.mime, enc],
-  );
-  if (!r.rowCount) throw new AgeReviewError(409, "WRONG_STATE", "This request cannot take photos now.");
+  // The request row is locked (the same lock cancel and submit take) and its status re-checked before the insert, so an
+  // upload racing a cancel either lands first and is deleted by the cancel, or sees "cancelled" and stores nothing.
+  await inTx(async (c) => {
+    const locked = await loadOwned(userId, id, c, true);
+    if (locked.method !== "upload" || !["draft", "needs_more"].includes(locked.status)) throw new AgeReviewError(409, "WRONG_STATE", "This request cannot take photos now.");
+    await c.query(
+      `insert into age_review_evidence (request_id, kind, mime, bytes_enc) values ($1, $2, $3, $4)
+       on conflict (request_id, kind) do update set mime = excluded.mime, bytes_enc = excluded.bytes_enc, created_at = now()`,
+      [locked.id, input.kind, detected.mime, enc],
+    );
+  });
   return { kind: input.kind as "document" | "selfie", received: true as const };
 }
 

@@ -1693,6 +1693,8 @@ export class DbStorage implements IStorage {
   // activity) or, where cascade is set, silently destroy other users' data
   // (their tickets, DMs, comments referencing this account).
   async softDeleteUser(userId: string): Promise<void> {
+    // ID evidence must not outlive the account, and goes first: if this throws, the account is not marked deleted and the call can be retried.
+    await (await import("./identity/ageReviewSweep")).purgeUserAgeReview(userId);
     await db.update(users).set({
       deletedAt: new Date(),
       email: `deleted-${userId}@deleted.vib3pulse.local`,
@@ -1719,8 +1721,6 @@ export class DbStorage implements IStorage {
     await db.execute(sql`DELETE FROM user_locations WHERE user_id = ${userId}`);
     await db.execute(sql`DELETE FROM map_allowed_viewers WHERE user_id = ${userId} OR viewer_id = ${userId}`);
     await db.execute(sql`DELETE FROM map_sharing_prefs WHERE user_id = ${userId}`);
-    // ID evidence must not outlive the account (a soft delete never fires the foreign-key cascade).
-    await (await import("./identity/ageReviewSweep")).purgeUserAgeReview(userId);
   }
 
   async getEvents(): Promise<(Event & { minPrice: number; maxPrice: number; ticketsRemaining: number })[]> {

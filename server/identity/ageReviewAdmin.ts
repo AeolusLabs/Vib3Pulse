@@ -251,6 +251,8 @@ export async function decide(admin: AdminRef, id: string, body: DecideBody, ip?:
     if (plan.account) await applyAccount(admin.id, r.user_id, plan.account, ip);
     try {
       await c.query("begin");
+      const cur = (await c.query(`select status from age_review_requests where id = $1 for update`, [id])).rows[0] as { status: string } | undefined;
+      if (!cur || !["submitted", "in_review"].includes(cur.status)) throw new AgeReviewError(409, "WRONG_STATE", "This request is no longer waiting for a decision.");
       if (plan.deleteEvidence) await c.query(`delete from age_review_evidence where request_id = $1`, [id]);
       await c.query(
         `update age_review_requests set status = $2, outcome = $3, decline_reason = $4, dob_match = $5, proposed_dob = coalesce($6, proposed_dob),
@@ -286,6 +288,8 @@ export async function secondApprove(admin: AdminRef, id: string, body: { approve
     }
     try {
       await c.query("begin");
+      const cur = (await c.query(`select status from age_review_requests where id = $1 for update`, [id])).rows[0] as { status: string } | undefined;
+      if (cur?.status !== "pending_second_approval") throw new AgeReviewError(409, "WRONG_STATE", "This request is not waiting for a second approval.");
       await c.query(`delete from age_review_evidence where request_id = $1`, [id]);
       await c.query(
         `update age_review_requests set status = $2, outcome = $3, second_approver_id = $4, decided_at = now() where id = $1`,

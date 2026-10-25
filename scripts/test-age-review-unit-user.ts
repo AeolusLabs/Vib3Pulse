@@ -86,5 +86,50 @@ await test("cancel deletes evidence atomically (structure)", () => {
   assert.ok(/inTx\(/.test(fn) && fn.indexOf("delete from age_review_evidence") < fn.indexOf("status = 'cancelled'"));
 });
 
+await test("upload racing cancel never leaves evidence on a cancelled request (structure)", () => {
+  const s = src("server/identity/ageReviewService.ts");
+  const fn = s.slice(s.indexOf("export async function putEvidence"), s.indexOf("export async function submitRequest"));
+  const tx = fn.slice(fn.indexOf("await inTx("));
+  const lock = tx.indexOf("loadOwned(userId, id, c, true)");
+  assert.ok(lock >= 0 && lock < tx.indexOf("insert into age_review_evidence"), "lock the request row, then insert");
+  assert.ok(/WRONG_STATE/.test(tx.slice(0, tx.indexOf("insert into"))), "status re-checked under the lock");
+  assert.ok(/for update/.test(s.slice(s.indexOf("async function loadOwned"), s.indexOf("async function kindsOf"))));
+});
+
+await test("sweep: a failing room close never skips the expiry notices, and runs after them", async () => {
+  const { runSweepWith } = await import("../server/identity/ageReviewSweep");
+  const log: string[] = [];
+  const origErr = console.error; console.error = () => {};
+  try {
+    await runSweepWith({
+      sweep: async () => ({ expired: 2, userIds: ["u1", "u2"], evidenceDeleted: 3 }),
+      notify: async (id) => { log.push("notify:" + id); },
+      closeRooms: async () => { log.push("close"); throw new Error("livekit down"); },
+    });
+    assert.deepEqual(log, ["notify:u1", "notify:u2", "close"]);
+    log.length = 0;
+    await runSweepWith({ sweep: async () => { throw new Error("db"); }, notify: async () => { log.push("n"); }, closeRooms: async () => { log.push("close"); } });
+    assert.deepEqual(log, ["close"], "housekeeping still runs when the sweep itself failed");
+  } finally { console.error = origErr; }
+});
+
+await test("notices: neutral push, escaped email, no relative link, purge before soft delete (structure)", () => {
+  const n = src("server/identity/ageReviewNotify.ts");
+  assert.ok(n.includes('push: { title: "Vib3Pulse", body: "Your age review has an update" }'));
+  assert.ok(n.includes("link: base ? base + link : undefined"));
+  const e = src("server/emailService.ts");
+  const em = e.slice(e.indexOf("export async function sendAgeReviewEmail"), e.indexOf("export async function sendSocialPlansNoticeEmail"));
+  assert.ok(em.includes("esc(userName)") && em.includes("${esc(body)}") && em.includes("link ? "));
+  const st = src("server/storage.ts");
+  const fn = st.slice(st.indexOf("async softDeleteUser"), st.indexOf("async softDeleteUser") + 700);
+  assert.ok(fn.indexOf("purgeUserAgeReview") > 0 && fn.indexOf("purgeUserAgeReview") < fn.indexOf("db.update(users)"));
+  assert.ok(src("server/notifications.ts").includes("push?.title ?? params.title"));
+});
+
+await test("decide and second-approve lock the row and recheck the status inside the transaction (structure)", () => {
+  const a = src("server/identity/ageReviewAdmin.ts");
+  assert.equal((a.match(/select status from age_review_requests where id = \$1 for update/g) ?? []).length, 2);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

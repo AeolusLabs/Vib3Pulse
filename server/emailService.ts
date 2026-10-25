@@ -307,8 +307,9 @@ Renew any time: ${link}
 }
 
 export async function sendAgeReviewEmail({ to, userName, subject, body, link }: {
-  to: string; userName?: string; subject: string; body: string; link: string;
+  to: string; userName?: string; subject: string; body: string; link?: string;
 }): Promise<boolean> {
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   try {
     const { error } = await resend.emails.send({
       from: `${APP_NAME} <${FROM_EMAIL}>`,
@@ -317,10 +318,10 @@ export async function sendAgeReviewEmail({ to, userName, subject, body, link }: 
       text: `Hi${userName ? ` ${userName}` : ""},
 
 ${body}
-
+${link ? `
 ${link}
-`,
-      html: `<p>Hi${userName ? ` ${userName}` : ""},</p><p>${body}</p><p><a href="${link}">Open Vib3Pulse</a></p>`,
+` : ""}`,
+      html: `<p>Hi${userName ? ` ${esc(userName)}` : ""},</p><p>${esc(body)}</p>${link ? `<p><a href="${esc(link)}">Open Vib3Pulse</a></p>` : ""}`,
     });
     if (error) {
       console.error("[EMAIL] Age review email failed");

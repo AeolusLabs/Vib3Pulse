@@ -33,17 +33,29 @@ export async function sweepExpiredAgeReviews(): Promise<{ expired: number; userI
   } finally { client.release(); }
 }
 
-async function runSweep(): Promise<void> {
+type SweepDeps = {
+  sweep: () => Promise<{ expired: number; userIds: string[]; evidenceDeleted: number }>;
+  notify: (userId: string, kind: "expired") => Promise<void>;
+  closeRooms: () => Promise<unknown>;
+};
+const realDeps: SweepDeps = {
+  sweep: sweepExpiredAgeReviews,
+  notify: async (id, kind) => (await import("./ageReviewNotify")).notifyAgeReview(id, kind),
+  closeRooms: async () => (await import("./ageReviewLive")).closeStaleAgeCheckRooms(),
+};
+
+/** Exported for tests. Closing live rooms is housekeeping: it runs last, in its own try, and can never skip the expiry notices. */
+export async function runSweepWith(d: SweepDeps = realDeps): Promise<void> {
   try {
-    const r = await sweepExpiredAgeReviews();
+    const r = await d.sweep();
     if (r.expired || r.evidenceDeleted) console.log(`[AGE-REVIEW] sweep: expired ${r.expired}, evidence rows deleted ${r.evidenceDeleted}`);
-    await (await import("./ageReviewLive")).closeStaleAgeCheckRooms().catch(() => {});
-    const { notifyAgeReview } = await import("./ageReviewNotify");
-    for (const id of r.userIds) await notifyAgeReview(id, "expired");
+    for (const id of r.userIds) await d.notify(id, "expired");
   } catch {
     console.error("[AGE-REVIEW] ALERT sweep failed");
   }
+  try { await d.closeRooms(); } catch { console.error("[AGE-REVIEW] closing stale live rooms failed"); }
 }
+const runSweep = () => runSweepWith();
 
 /** One sweep now, then hourly. Only when the flag is on. */
 export function startAgeReviewSweep(): void {

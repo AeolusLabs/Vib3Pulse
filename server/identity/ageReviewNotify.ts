@@ -16,7 +16,7 @@ export async function notifyAgeReview(userId: string, kind: AgeReviewNoticeKind,
   const message = detail ? `${c.message} ${detail}` : c.message;
   try {
     const { deliverNotification } = await import("../notifications");
-    await deliverNotification({ userId, type: "age_review", title: c.title, message, link });
+    await deliverNotification({ userId, type: "age_review", title: c.title, message, link, push: { title: "Vib3Pulse", body: "Your age review has an update" } }); // neutral: a lock screen must not show the outcome
   } catch {
     console.error(`[AGE-REVIEW] in-app notice failed (${kind})`);
   }
@@ -26,7 +26,8 @@ export async function notifyAgeReview(userId: string, kind: AgeReviewNoticeKind,
     if (u?.email && !u.deletedAt) {
       const { sendAgeReviewEmail } = await import("../emailService");
       const base = (process.env.APP_URL || "").replace(/\/+$/, "");
-      await sendAgeReviewEmail({ to: u.email, userName: u.displayName ?? undefined, subject: c.title, body: message, link: base + link });
+      // Without a known site address there is no link at all: a relative link in an email goes nowhere.
+      await sendAgeReviewEmail({ to: u.email, userName: u.displayName ?? undefined, subject: c.title, body: message, link: base ? base + link : undefined });
     }
   } catch {
     console.error(`[AGE-REVIEW] email notice failed (${kind})`);
