@@ -77,7 +77,16 @@ export function pickerRange(range: { from: string; to: string } | null, defaults
   const r = range ?? defaults;
   return { from: new Date(`${r.from}T00:00:00`), to: new Date(`${r.to}T00:00:00`) };
 }
-export const TX_PRESET_DAYS = [7, 30, 90, 366];
+// The server adds a day to a date-only `to`, so a 366-day preset is 367 days and is refused: 365 is the longest that works.
+export const TX_PRESET_DAYS = [7, 30, 90, 365];
+export const SERVER_RANGE_CAP_DAYS = 366;
+
+/** Error codes whose server message is plain enough to show as is. */
+export const showServerMessage = (code: string | undefined): boolean => code === "BAD_FILTER" || code === "BAD_RANGE";
+
+/** Which tabs a role sees. Live is shown to finance too (read-only plus block); end-room and freeze stay with their own checks. */
+export const canSeeLive = (role: string | null | undefined): boolean => role === "super_admin" || role === "content_moderator" || role === "finance_manager";
+export const canEndRoom = (role: string | null | undefined): boolean => role === "super_admin" || role === "content_moderator";
 
 /** icon names are resolved by the component; the text label is always shown beside it, so status never relies on colour. */
 export type StatusIcon = "clock" | "check" | "check-check" | "undo" | "x" | "alert";

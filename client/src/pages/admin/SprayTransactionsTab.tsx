@@ -12,7 +12,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { AlertTriangleIcon, CheckCheckIcon, CheckIcon, ClockIcon, CopyIcon, DownloadIcon, Loader2Icon, RefreshCwIcon, SearchIcon, ShieldCheckIcon, XIcon } from "@/components/ui/icons";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { attentionCapNotes, buildTxQuery, csvErrorMessage, defaultRange, pickedYmd, pickerRange, TX_PRESET_DAYS, csvUrl, funnelBuckets, mismatchBanner, STATUS_CHOICES, statusLabel, type StatusIcon, type TxFilters } from "@/lib/adminSprayUi";
+import { attentionCapNotes, buildTxQuery, csvErrorMessage, defaultRange, pickedYmd, pickerRange, showServerMessage, TX_PRESET_DAYS, csvUrl, funnelBuckets, mismatchBanner, STATUS_CHOICES, statusLabel, type StatusIcon, type TxFilters } from "@/lib/adminSprayUi";
 import type { AttentionItem, LedgerDetail, LedgerRow, OutcomesResponse, ProviderCheckResult } from "@shared/sprayLedger";
 
 // Spray money ledger (finance roles). Read-only: the only things that leave the system are the CSV export and the Paystack look-up,
@@ -417,7 +417,7 @@ export default function SprayTransactionsTab() {
         {exportErr && <p role="alert" className="text-sm text-red-400" data-testid="export-error">{exportErr}</p>}
       </div>
 
-      {list.error && (list.error instanceof ApiError && list.error.code === "BAD_FILTER"
+      {list.error && (list.error instanceof ApiError && showServerMessage(list.error.code)
         ? <Msg tone="error">{list.error.message}</Msg>
         : <Msg tone="error">Could not load transactions. <button className="underline" onClick={() => list.refetch()}>Try again</button></Msg>)}
       {list.isLoading && <Msg>Loading...</Msg>}

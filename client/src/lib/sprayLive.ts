@@ -64,6 +64,21 @@ export const sprayOffMessage = (blockedByAdmin: boolean): string =>
 
 export const SPRAY_ON_MESSAGE = "Spray is on";
 
+export const SPRAY_SLOT_TIMEOUT_MS = 6000;
+
+/**
+ * Keep the 92px gap where the Spray button will land only while that is still expected: spray is on and the viewer has no
+ * block yet, the ON refetch has not settled, and we have not waited past the timeout. Once any of those ends the gap closes.
+ */
+export function spraySlotReserved(o: { possible: boolean; sprayOn: boolean | undefined; hasBlock: boolean; settled: boolean; waitedMs: number }): boolean {
+  return o.possible && o.sprayOn === true && !o.hasBlock && !o.settled && o.waitedMs < SPRAY_SLOT_TIMEOUT_MS;
+}
+
+/** The "Spray is on" toast: only for a viewer, only while still awaiting the ON refetch, and only if that refetch delivered a block. */
+export function sprayButtonToast(awaiting: boolean, hasBlock: boolean, isHost: boolean): string | null {
+  return awaiting && hasBlock && !isHost ? SPRAY_ON_MESSAGE : null;
+}
+
 export const SPRAY_LIVE_COPY = {
   platformOff: "Spray is switched off by the platform right now. Your setting is kept.",
   adminBlocked: "Spray is turned off by the platform for this room. Only an admin can turn it back on.",

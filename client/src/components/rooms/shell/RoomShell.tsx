@@ -51,6 +51,7 @@ import SprayFlow, { type Sub as SpraySub } from "@/components/rooms/spray/SprayF
 import SprayEffects, { useSprayQuiet } from "@/components/rooms/spray/SprayEffects";
 import { snd } from "@/components/rooms/spray/sound";
 import { sprayFlags } from "@/lib/sprayLive";
+import { useSpraySlot } from "@/hooks/useSprayLive";
 import { sprayTargets, type SprayBlock, type SprayFlow as SprayFlowState } from "@/lib/sprayUi";
 import { moneyEligibleRoom } from "@shared/roomRules";
 import type { SprayTier } from "@shared/money";
@@ -61,6 +62,8 @@ export type RoomShellSocket = Pick<ReturnType<typeof useRoomSocket>,
   & Partial<Pick<ReturnType<typeof useRoomSocket>, "gameAction">>;
 
 export interface RoomShellProps {
+  /** The ON refetch for the spray button has finished (a block, or not). Closes the reserved gap. Default true. */
+  spraySettled?: boolean;
   id: string;
   /** Invite token from the URL (private rooms); report and share pass it through. */
   token?: string;
@@ -125,7 +128,7 @@ const byTestId = (id: string | null) => (id ? document.querySelector<HTMLElement
  * immersive). Crossing 1024 px or switching views only changes classes, so the picture, the camera choice, the composer
  * draft and the chat scroll survive. People are always addressed by RoomMemberView.userId, never by username.
  */
-export default function RoomShell({ id, token, room, host, fallbackCount, isHost, role, meId, state, sock, voice, myRoomId, nav, hostControls, onLeave, onBack, startView, startControlsOpen = false, detailsError = false, listenOnly = false, listenLine = false, spray = null, onSprayChanged, sprayFixture, gameTracksFixture, gameSheetFixture }: RoomShellProps) {
+export default function RoomShell({ id, token, room, host, fallbackCount, isHost, role, meId, state, sock, voice, myRoomId, nav, hostControls, onLeave, onBack, startView, startControlsOpen = false, detailsError = false, listenOnly = false, listenLine = false, spray = null, spraySettled = true, onSprayChanged, sprayFixture, gameTracksFixture, gameSheetFixture }: RoomShellProps) {
   const { toast } = useToast();
 
   const [hidden, setHidden] = useState<Set<string>>(new Set()); // people the viewer muted for themselves
@@ -227,6 +230,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
   // block and its targets (it decides who is payable). Not only when a block exists: a block that was absent because the
   // viewer was alone or nobody was on stage must appear once someone is (review C1, M18). Only where spraying could exist.
   const sprayPossible = !listenOnly && room.status === "live" && moneyEligibleRoom(room);
+  const slotOpen = useSpraySlot(sprayPossible && sprayFlags(state.room).sprayOn === true && !sprayBlock, spraySettled);
   const hostHere = state.members.some((m) => m.userId === room.hostId);
   const stageKey = sprayPossible ? `${state.stage.join("|")}#${cohostIds.join("|")}#${gamePlayers.join("|")}#${hostHere ? 1 : 0}#${(state.memberCount || fallbackCount) > 1 ? 1 : 0}` : "";
   const firstStage = useRef(true);
@@ -474,7 +478,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
       immersive={immersive}
       hype={<HypeBar store={hype.store} />}
       tray={<ReactionTray emojis={TRAY_EMOJIS} open={trayOpen} onClose={() => setTrayOpen(false)} onPick={sendReaction} />}
-      spraySlot={sprayPossible && sprayFlags(state.room).sprayOn === true && !sprayBlock}
+      spraySlot={slotOpen}
       spray={sprayBlock && sprayTo.length > 0 ? { onOpen: () => {
         snd.unlock();
         sprayOpener.current = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : byTestId("dock-spray");

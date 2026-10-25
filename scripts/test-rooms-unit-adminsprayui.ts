@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { SPRAY_STATUSES } from "../shared/spray";
 import {
-  appliedText, attentionCapNotes, buildTxQuery, defaultRange, koboToNairaText, pickerRange, TX_PRESET_DAYS, pickedYmd, ymd, canBlock, canResume, canSeeTransactions, csvErrorMessage, csvUrl, funnelBuckets, mismatchBanner, statusLabel, TOO_MANY_ROWS_MESSAGE,
+  appliedText, attentionCapNotes, buildTxQuery, defaultRange, canEndRoom, canSeeLive, koboToNairaText, pickerRange, SERVER_RANGE_CAP_DAYS, showServerMessage, TX_PRESET_DAYS, pickedYmd, ymd, canBlock, canResume, canSeeTransactions, csvErrorMessage, csvUrl, funnelBuckets, mismatchBanner, statusLabel, TOO_MANY_ROWS_MESSAGE,
 } from "../client/src/lib/adminSprayUi";
 
 const bucket = (count: number, kobo: number) => ({ count, kobo });
@@ -122,4 +122,33 @@ test("the picker never shows All time on the Transactions tab", () => {
   assert.ok(TX_PRESET_DAYS.every((n) => n <= 366));
   const tab = readFileSync("client/src/pages/admin/SprayTransactionsTab.tsx", "utf8");
   assert.ok(tab.includes("hideAllTime"));
+});
+
+test("no preset exceeds the server range cap", () => {
+  // the server adds a day to a date-only `to`, so a preset of N days is N + 1 days on the wire
+  for (const n of TX_PRESET_DAYS) assert.ok(n + 1 <= SERVER_RANGE_CAP_DAYS, `${n}-day preset is refused`);
+});
+
+test("BAD_RANGE message is shown", () => {
+  assert.equal(showServerMessage("BAD_RANGE"), true);
+  assert.equal(showServerMessage("BAD_FILTER"), true);
+  assert.equal(showServerMessage("X"), false);
+  assert.equal(showServerMessage(undefined), false);
+});
+
+test("role matrix: finance sees Live and can block but not end rooms or unblock", () => {
+  assert.equal(canSeeLive("finance_manager"), true);
+  assert.equal(canBlock("finance_manager"), true);
+  assert.equal(canEndRoom("finance_manager"), false);
+  assert.equal(canResume("finance_manager"), false);
+  assert.equal(canSeeLive("content_moderator"), true);
+  assert.equal(canBlock("content_moderator"), false);
+  assert.equal(canEndRoom("content_moderator"), true);
+  assert.equal(canEndRoom("super_admin") && canResume("super_admin") && canBlock("super_admin"), true);
+  assert.equal(canSeeLive("user_support"), false);
+});
+
+test("block dialog never claims the host sees the reason", () => {
+  const src = readFileSync("client/src/pages/admin/AdminRooms.tsx", "utf8");
+  assert.ok(!/ReasonDialog[^>]*shownToHost/.test(src));
 });

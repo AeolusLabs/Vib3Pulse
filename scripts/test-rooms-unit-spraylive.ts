@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { initialRoomState, roomReducer, type RoomState } from "../client/src/lib/roomReducer";
 import { IDLE, holdsSprayBlock, sprayFlow } from "../client/src/lib/sprayUi";
 import {
-  SPRAY_LIVE_COPY, hostSprayLine, jitterMs, nextSprayRefetchDelay, sprayFlags, sprayOffMessage, sprayToastDecision, sprayToggleRefusal, sprayTransition, sprayVisible,
+  SPRAY_LIVE_COPY, SPRAY_SLOT_TIMEOUT_MS, hostSprayLine, sprayButtonToast, spraySlotReserved, jitterMs, nextSprayRefetchDelay, sprayFlags, sprayOffMessage, sprayToastDecision, sprayToggleRefusal, sprayTransition, sprayVisible,
 } from "../client/src/lib/sprayLive";
 
 const src = (rel: string) => readFileSync(new URL(`../client/src/${rel}`, import.meta.url), "utf8");
@@ -76,7 +76,7 @@ test("on schedules exactly one jittered refetch", () => {
   assert.equal(nextSprayRefetchDelay(10_000, null, false, 1234), 1234);
   assert.equal(nextSprayRefetchDelay(10_000, null, true, 1234), null, "already scheduled");
   const hook = src("hooks/useSprayLive.ts");
-  assert.equal((hook.match(/setTimeout\(/g) ?? []).length, 1);
+  assert.equal((hook.match(/timer\.current = setTimeout\(/g) ?? []).length, 1);
   assert.match(hook, /jitterMs\(Math\.random\(\)\)/);
 });
 
@@ -147,7 +147,26 @@ test("flag off: no new requests", () => {
   assert.equal(sprayFlags(s.room).sprayOn, undefined);
   assert.match(src("hooks/useSprayLive.ts"), /if \(sprayOn === undefined\) return;/, "no flag, no timer, no refetch, no toast");
   assert.equal(sprayVisible(s.room, "block"), "block");
-  assert.match(src("components/rooms/shell/RoomShell.tsx"), /spraySlot=\{sprayPossible && sprayFlags\(state\.room\)\.sprayOn === true && !sprayBlock\}/);
+  assert.match(src("components/rooms/shell/RoomShell.tsx"), /spraySlot=\{slotOpen\}/);
+  assert.match(src("components/rooms/shell/RoomShell.tsx"), /useSpraySlot\(sprayPossible && sprayFlags\(state\.room\)\.sprayOn === true && !sprayBlock, spraySettled\)/);
+});
+
+test("slot clears after the refetch settles with no block", () => {
+  const base = { possible: true, sprayOn: true as boolean | undefined, hasBlock: false, settled: false, waitedMs: 100 };
+  assert.equal(spraySlotReserved(base), true);
+  assert.equal(spraySlotReserved({ ...base, settled: true }), false);
+  assert.equal(spraySlotReserved({ ...base, waitedMs: SPRAY_SLOT_TIMEOUT_MS }), false);
+  assert.equal(spraySlotReserved({ ...base, hasBlock: true }), false);
+  assert.equal(spraySlotReserved({ ...base, sprayOn: undefined }), false);
+  assert.match(src("components/rooms/shell/RoomDock.tsx"), /dock-spray-slot-immersive/, "the immersive composer row reserves the slot too");
+});
+
+test("stale Spray is on toast: only when the ON refetch delivered a block", () => {
+  assert.equal(sprayButtonToast(true, true, false), "Spray is on");
+  assert.equal(sprayButtonToast(false, true, false), null, "awaiting cleared after the refetch settled without a block");
+  assert.equal(sprayButtonToast(true, false, false), null);
+  assert.equal(sprayButtonToast(true, true, true), null, "never for the host");
+  assert.match(src("hooks/useSprayLive.ts"), /\.finally\(\(\) => \{[\s\S]*awaitingButton\.current = false/);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

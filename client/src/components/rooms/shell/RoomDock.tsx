@@ -191,7 +191,7 @@ export default function RoomDock({ muted, reply, replyName, onCancelReply, onSen
           className={`min-w-0 flex-1 rounded-full border px-[18px] text-base outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60 ${immersive ? "h-11 border-transparent bg-white/15 text-white placeholder:text-white/75" : "h-12 border-border bg-muted text-foreground placeholder:text-muted-foreground"}`}
           data-testid="dock-input"
         />
-        {immersive && !trimmed && sprayBtn}
+        {immersive && !trimmed && (sprayBtn ?? (spraySlot ? <span aria-hidden className="h-11 w-11 shrink-0" data-testid="dock-spray-slot-immersive" /> : null))}
         {immersive && !trimmed && (
           <button type="button" onClick={onToggleTray} aria-label="React" aria-expanded={trayOpen} className={`grid h-11 w-11 shrink-0 place-items-center rounded-full ${trayOpen ? rbOn : "bg-white/15 text-white"} ${FOCUS} ${PRESS}`} data-testid="dock-heart">
             <HeartIcon className="h-5 w-5" aria-hidden />

@@ -19,7 +19,7 @@ import { StatTile, pctChange } from "@/components/admin/charts/StatTile";
 import { COLOR_MONEY, COLOR_USAGE, SERIES, compactCount, compactNaira, daysBetween, naira } from "@/components/admin/charts/tokens";
 import RoomRatesTab from "./RoomRatesTab";
 import SprayTransactionsTab from "./SprayTransactionsTab";
-import { BLOCK_CONFIRM, RESUME_DISABLED_REASON, appliedText, canBlock, canResume, canSeeTransactions } from "@/lib/adminSprayUi";
+import { BLOCK_CONFIRM, RESUME_DISABLED_REASON, appliedText, canBlock, canEndRoom, canResume, canSeeLive, canSeeTransactions } from "@/lib/adminSprayUi";
 
 // Rooms admin (rooms admin plan, task 6). One screen for what an admin needs when something looks wrong: who is live right now,
 // where the money went, and the switches that stop new money. A pause or freeze stops NEW money only; money already settled to a
@@ -173,7 +173,7 @@ function LiveTab({ canFreeze, canEndRooms, role }: { canFreeze: boolean; canEndR
                 {blockedIds.has(r.id) && <p className="mt-1 inline-flex items-center gap-1.5 text-sm font-medium text-amber-300" data-testid={`chip-spray-blocked-${r.id}`}><PauseIcon className="h-3.5 w-3.5" aria-hidden />Spray blocked</p>}
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button variant="outline" onClick={() => { setErr(null); setEnding(r); }} className="min-h-[44px] border-slate-600 text-slate-100" data-testid={`button-end-${r.id}`}>End room</Button>
+                {canEndRoom(role) && <Button variant="outline" onClick={() => { setErr(null); setEnding(r); }} className="min-h-[44px] border-slate-600 text-slate-100" data-testid={`button-end-${r.id}`}>End room</Button>}
                 {mayBlock && !status.data && (
                   <p className="self-center text-sm text-slate-400" data-testid={`block-unknown-${r.id}`}>{status.isError ? "Block state unavailable" : "Checking block state..."}</p>
                 )}
@@ -685,7 +685,7 @@ export default function AdminRooms() {
   const canMod = MOD_ROLES.includes(role);
   const controls = useQuery<Controls>({ queryKey: ["/api/admin/rooms/controls"], enabled: canMoney });
   const tabs = ([
-    canMod && { id: "live" as const, label: "Live now" },
+    canSeeLive(role) && { id: "live" as const, label: "Live now" },
     canMod && { id: "reported" as const, label: "Reported" },
     canMoney && { id: "money" as const, label: "Money" },
     canSeeTransactions(role) && { id: "transactions" as const, label: "Transactions" },

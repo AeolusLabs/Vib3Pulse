@@ -251,7 +251,7 @@ function RoomPageInner({ id }: { id: string }) {
   const parsedSprayBlock = parseSprayBlock(detail?.spray, room, { listenOnly });
   // Spray switched off in the room hides the button at once; switched on, the block follows from one jittered refetch.
   const sprayBlock = sprayVisible(state.room, parsedSprayBlock);
-  useSprayLive({ room: state.room, hasBlock: sprayBlock !== null, isHost, refetch, say: (title) => toast({ title }) });
+  const { settled: spraySettled } = useSprayLive({ room: state.room, hasBlock: sprayBlock !== null, isHost, refetch, say: (title) => toast({ title }) });
   // The spray block is only sent to a viewer the server already has in the room's hub, and the first GET always runs
   // before the socket joins. So ask again each time the socket becomes live: after the join, and after every reconnect
   // (review C1). Only where spraying could exist at all, so other rooms make no extra request.
@@ -264,6 +264,7 @@ function RoomPageInner({ id }: { id: string }) {
     return (
       <>
       <RoomShell
+        spraySettled={spraySettled}
         id={roomId}
         token={token}
         room={room}
