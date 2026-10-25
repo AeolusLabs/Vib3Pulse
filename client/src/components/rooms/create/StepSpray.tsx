@@ -8,7 +8,7 @@ export interface MoneySectionProps {
   view: MoneyView;
   /** `set` omitted: the switch is shown but cannot be changed here (the Controls sheet; the price is set at creation). */
   paid: { on: boolean; set?(on: boolean): void; note?: string };
-  spray: { on: boolean; set(on: boolean): void; busy?: boolean };
+  spray: { on: boolean; set(on: boolean): void; busy?: boolean; /** An admin turned spray off for this room: the switch is final, this is the line shown under it. */ blocked?: string };
   /** A refusal from the server, in plain words. */
   error?: string | null;
   testPrefix?: string;
@@ -19,7 +19,7 @@ export default function StepSpray({ view, paid, spray, error = null, testPrefix 
   const locked = view.lockedReason !== null;
   const paidFixed = !paid.set && !locked && view.paid.available;
   // Turning a switch off is always allowed, even if the host is no longer ready to turn it on.
-  const sprayReason = spray.busy ? "Saving" : spray.on && !locked ? undefined : locked || !view.spray.available ? view.spray.reason ?? undefined : undefined;
+  const sprayReason = spray.blocked ? spray.blocked : spray.busy ? "Saving" : spray.on && !locked ? undefined : locked || !view.spray.available ? view.spray.reason ?? undefined : undefined;
   const paidReason = paidFixed ? paid.note ?? MONEY_COPY.paidFixedInRoom : locked || !view.paid.available ? view.paid.reason ?? undefined : undefined;
   return (
     <section aria-labelledby={`${testPrefix}-title`} className="space-y-3 rounded-2xl border border-border p-3" data-testid={`${testPrefix}-section`}>
@@ -38,7 +38,7 @@ export default function StepSpray({ view, paid, spray, error = null, testPrefix 
         onChange={(v) => paid.set?.(v)} disabledReason={paidReason} quietReason={locked} testId="switch-room-paid"
       />
       <SwitchRow
-        id={`${testPrefix}-spray`} label={MONEY_COPY.sprayLabel} help={MONEY_COPY.sprayHelp} checked={spray.on && !locked}
+        id={`${testPrefix}-spray`} label={MONEY_COPY.sprayLabel} help={MONEY_COPY.sprayHelp} checked={spray.on && !locked && !spray.blocked}
         onChange={spray.set} disabledReason={sprayReason} quietReason={locked} testId="switch-room-spray"
       />
       <p className="text-xs text-muted-foreground">{MONEY_COPY.sprayNote}</p>

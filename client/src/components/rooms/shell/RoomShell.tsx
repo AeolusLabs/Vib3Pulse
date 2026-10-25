@@ -50,6 +50,7 @@ import type { ChatItem, RoomMemberView, RoomState } from "@/lib/roomReducer";
 import SprayFlow, { type Sub as SpraySub } from "@/components/rooms/spray/SprayFlow";
 import SprayEffects, { useSprayQuiet } from "@/components/rooms/spray/SprayEffects";
 import { snd } from "@/components/rooms/spray/sound";
+import { sprayFlags } from "@/lib/sprayLive";
 import { sprayTargets, type SprayBlock, type SprayFlow as SprayFlowState } from "@/lib/sprayUi";
 import { moneyEligibleRoom } from "@shared/roomRules";
 import type { SprayTier } from "@shared/money";
@@ -212,6 +213,12 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
   const lastSprayBlock = useRef<SprayBlock | null>(null);
   if (sprayBlock) lastSprayBlock.current = sprayBlock;
   const flowBlock = sprayBlock ?? (sprayHold ? lastSprayBlock.current : null);
+  // Spray went off while the tray or the confirm sheet was open and no money is in motion: the flow unmounts with the block,
+  // so the open flag must not survive to pop the tray open when spray comes back. A payment in motion keeps its flow (sprayHold).
+  useEffect(() => {
+    if (sprayFixture) return;
+    if (!sprayBlock && !sprayHold) { setSprayOpen(false); setTeamSprayOpen(false); }
+  }, [sprayBlock, sprayHold]);
   const cohostIds = state.members.filter((m) => m.role === "cohost").map((m) => m.userId);
   const gamePlayers = state.game ? allPlayers(state.game) : [];
   const sprayStage = [...state.stage, ...cohostIds, ...gamePlayers];
@@ -467,6 +474,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
       immersive={immersive}
       hype={<HypeBar store={hype.store} />}
       tray={<ReactionTray emojis={TRAY_EMOJIS} open={trayOpen} onClose={() => setTrayOpen(false)} onPick={sendReaction} />}
+      spraySlot={sprayPossible && sprayFlags(state.room).sprayOn === true && !sprayBlock}
       spray={sprayBlock && sprayTo.length > 0 ? { onOpen: () => {
         snd.unlock();
         sprayOpener.current = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : byTestId("dock-spray");

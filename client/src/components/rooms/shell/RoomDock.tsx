@@ -65,6 +65,8 @@ export interface RoomDockProps {
    * in a live 18+ room that is not a minors' room) and someone can be sprayed. Absent: no button, no hint of spraying.
    */
   spray?: { onOpen(): void };
+  /** Spray was just switched on and its block is on the way: keep the button's place so the reactions do not jump when it lands. */
+  spraySlot?: boolean;
 }
 
 const HOVER = "[@media(hover:hover)_and_(pointer:fine)]:hover:border-primary";
@@ -72,7 +74,7 @@ const FOCUS = "focus-visible:outline focus-visible:outline-2 focus-visible:outli
 const PRESS = "motion-safe:transition-transform motion-safe:active:scale-[0.97]";
 
 /** Bottom of the room: reply chip, reactions, mic, camera, the composer and send. Sits above the safe-area inset. */
-export default function RoomDock({ muted, reply, replyName, onCancelReply, onSend, onReact, trayOpen, onToggleTray, voice, cam, immersive, slowModeSec, onWave, hype, tray, spray }: RoomDockProps) {
+export default function RoomDock({ muted, reply, replyName, onCancelReply, onSend, onReact, trayOpen, onToggleTray, voice, cam, immersive, slowModeSec, onWave, hype, tray, spray, spraySlot }: RoomDockProps) {
   const { toast } = useToast();
   const [text, setText] = useState("");
   const [waitUntil, setWaitUntil] = useState(0);
@@ -155,7 +157,7 @@ export default function RoomDock({ muted, reply, replyName, onCancelReply, onSen
           {onWave && (
             <button type="button" onClick={onWave} className={`min-h-[44px] shrink-0 rounded-full border border-border bg-muted px-3.5 text-sm font-medium ${HOVER} ${FOCUS} ${PRESS}`} data-testid="dock-wave">Wave <span aria-hidden>👋</span></button>
           )}
-          {sprayBtn}
+          {sprayBtn ?? (spraySlot ? <span aria-hidden className="h-11 w-[92px] shrink-0" data-testid="dock-spray-slot" /> : null)}
           {DOCK_REACTIONS.map((e) => (
             <button key={e} type="button" onClick={() => onReact(e)} aria-label={`React with ${e}`} className={`grid h-11 w-11 shrink-0 place-items-center rounded-full border border-border bg-muted text-[22px] ${HOVER} ${FOCUS} ${PRESS}`} data-testid={`react-${e}`}>{e}</button>
           ))}

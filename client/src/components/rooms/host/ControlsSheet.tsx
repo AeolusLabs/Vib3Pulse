@@ -11,6 +11,7 @@ import SettingsPanel from "@/components/rooms/host/SettingsPanel";
 import EndRoomDialog from "@/components/rooms/host/EndRoomDialog";
 import ControlsMoney from "@/components/rooms/host/ControlsMoney";
 import { NOTICE_MESSAGE } from "@/lib/roomsApi";
+import { sprayFlags } from "@/lib/sprayLive";
 import { CONTROLS_COPY, TAB_LABEL, controlsFor, readSettings, requestQueue, roleChange, settingsErrorMessage, type ControlsRole, type ControlsTab } from "@/lib/hostControls";
 import type { useRoomSocket } from "@/hooks/useRoomSocket";
 import type { RoomMemberView, RoomState } from "@/lib/roomReducer";
@@ -183,7 +184,7 @@ export default function ControlsSheet({ open, onOpenChange, roomId, inviteToken,
               onSave={(patch) => sock.saveSettings(patch)}
               voiceEnabled={state.voiceEnabled} liveVideo={state.liveVideo}
               onSwitchVoice={(on) => sock.setVoice(on)} onSwitchLive={(on) => sock.setLiveVideo(on)}
-              money={role === "host" ? <ControlsMoney roomId={roomId} onChanged={onSprayChanged} room={{ ...room, status: (state.room as { status?: string } | null)?.status ?? room.status }} /> : null}
+              money={role === "host" ? <ControlsMoney roomId={roomId} onChanged={onSprayChanged} room={{ ...room, status: (state.room as { status?: string } | null)?.status ?? room.status, ...sprayFlags(state.room) }} /> : null}
               hostExtras={hostExtras}
               onMessage={say}
             />

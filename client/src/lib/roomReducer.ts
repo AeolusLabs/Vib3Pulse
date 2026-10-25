@@ -6,6 +6,7 @@ import type { Screen } from "@shared/screen";
 import type { NowPlaying } from "@shared/playback";
 import { isSprayTier, type SprayTier } from "@shared/money";
 import type { GameView } from "@shared/gameScreen";
+import { sprayFlags } from "./sprayLive";
 
 export type RoomPhase = "idle" | "connecting" | "live" | "reconnecting" | "ended" | "denied";
 export type MemberRole = "host" | "cohost" | "guest";
@@ -101,7 +102,7 @@ export type RoomServerMessage =
   | { type: "room:live"; holder: string | null; asks: string[]; away?: number | null }
   | { type: "room:livevideo"; enabled: boolean }
   | { type: "room:game"; game: GameView | null }
-  | { type: "room:settings"; pinnedMessage: string | null; slowModeSec: number; locked: boolean }
+  | { type: "room:settings"; pinnedMessage: string | null; slowModeSec: number; locked: boolean; sprayOn?: unknown; sprayBlockedByAdmin?: unknown }
   | { type: "room:playback"; nowPlaying: NowPlaying | null; serverNowMs: number }
   | { type: "room:mod"; action: "mute" | "unmute" | "kick" | "ban" | "role"; targetId: string; role?: MemberRole }
   | { type: "room:ended" }
@@ -122,6 +123,12 @@ export type RoomEvent = RoomServerMessage | RoomClientEvent;
  * A refusal's `warning` is kept ONLY when it is exactly the shared lane warning (no-oracle rule: nothing but a code and known
  * constants reaches the screen from a refusal). Anything else, including an almost-equal string, is dropped.
  */
+/** room:state's room with the two live-spray flags kept only when they are booleans. */
+const withSprayFlags = <R extends { id: string }>(room: R): R => {
+  const { sprayOn: _on, sprayBlockedByAdmin: _blocked, ...rest } = room as R & { sprayOn?: unknown; sprayBlockedByAdmin?: unknown };
+  return { ...(rest as R), ...sprayFlags(room as unknown as Record<string, unknown>) };
+};
+
 export const cleanWarning = (w: unknown): typeof MINORS_LANE_WARNING | undefined => (w === MINORS_LANE_WARNING ? MINORS_LANE_WARNING : undefined);
 
 /** A game view from the wire, checked before it is kept: a malformed one is dropped, never rendered. */
@@ -153,7 +160,7 @@ export function roomReducer(state: RoomState, event: RoomEvent, now: () => numbe
     case "room:state": {
       const sameRoom = state.room?.id === event.room.id;
       return {
-        ...state, phase: "live", error: null, room: event.room, members: event.members, memberCount: event.memberCount,
+        ...state, phase: "live", error: null, room: withSprayFlags(event.room), members: event.members, memberCount: event.memberCount,
         screen: event.screen ?? null, you: event.you,
         voiceEnabled: event.voiceEnabled === true, stage: event.stage ?? [], hands: event.hands ?? [], invitedYou: false, liveVideo: (event.room as { liveVideo?: boolean }).liveVideo === true, holder: event.holder ?? null, asks: event.asks ?? [], holderAwayUntil: event.away ?? null, nowPlaying: event.nowPlaying ?? null,
         game: validGameView(event.game) ? event.game : null,
@@ -244,7 +251,7 @@ export function roomReducer(state: RoomState, event: RoomEvent, now: () => numbe
       if (!state.room) return state;
       const pinnedMessage = typeof event.pinnedMessage === "string" && event.pinnedMessage ? event.pinnedMessage : null;
       const slowModeSec = typeof event.slowModeSec === "number" && event.slowModeSec > 0 ? event.slowModeSec : 0;
-      return { ...state, room: { ...state.room, pinnedMessage, slowModeSec, locked: event.locked === true } };
+      return { ...state, room: { ...state.room, pinnedMessage, slowModeSec, locked: event.locked === true, ...sprayFlags(event as unknown as Record<string, unknown>) } };
     }
     case "room:notice": {
       const retryMs = typeof event.retryMs === "number" && event.retryMs > 0 ? event.retryMs : undefined;

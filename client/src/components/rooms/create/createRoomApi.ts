@@ -25,7 +25,8 @@ export async function call<T>(method: string, url: string, data?: unknown): Prom
       const reason = typeof b.reason === "string" ? b.reason : undefined;
       // A stale CSRF token answers 403 with no code: fetch a fresh one and try once more, like apiRequest does.
       if (res.status === 403 && attempt === 0 && (!code || text.includes("CSRF"))) continue;
-      return { ok: false, status: res.status, code, field, reason };
+      const retryMs = typeof b.retryMs === "number" && b.retryMs > 0 ? b.retryMs : undefined;
+      return { ok: false, status: res.status, code, field, reason, ...(retryMs !== undefined ? { retryMs } : {}) };
     }
   } catch {
     return { ok: false, status: 0 };

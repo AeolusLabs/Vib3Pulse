@@ -8,12 +8,15 @@ import StepSpray from "@/components/rooms/create/StepSpray";
 import { call } from "@/components/rooms/create/createRoomApi";
 import { useRoomsConfig } from "@/lib/roomsApi";
 import { MONEY_COPY, moneyRefusal, moneyView } from "@/lib/moneySection";
+import { SPRAY_LIVE_COPY, sprayToggleRefusal } from "@/lib/sprayLive";
 
 export interface ControlsMoneyProps {
   roomId: string;
   /** Called after a saved change so the room details upstream are refetched and every reader sees the saved value. */
   onChanged?: () => void;
-  room: { ageLimit: string; minorsRoom?: boolean; status?: string; sprayEnabled?: boolean; ticketPriceKobo?: number | null };
+  room: { ageLimit: string; minorsRoom?: boolean; status?: string; sprayEnabled?: boolean; ticketPriceKobo?: number | null;
+    /** What the room says right now (room:settings): spray effectively on, and whether an admin blocked it. Absent with the flag off. */
+    sprayOn?: boolean; sprayBlockedByAdmin?: boolean };
 }
 
 export default function ControlsMoney({ roomId, room, onChanged }: ControlsMoneyProps) {
@@ -23,7 +26,13 @@ export default function ControlsMoney({ roomId, room, onChanged }: ControlsMoney
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmOff, setConfirmOff] = useState(false);
+  // A refused switch (403) is learned from the answer before the socket says so; the room flag takes over once it arrives.
+  const [blockSeen, setBlockSeen] = useState(false);
+  const blocked = room.sprayBlockedByAdmin === true || blockSeen;
+  useEffect(() => { if (room.sprayBlockedByAdmin === false) setBlockSeen(false); }, [room.sprayBlockedByAdmin]);
   useEffect(() => { setOn(room.sprayEnabled === true); }, [room.sprayEnabled]);
+  // The server's effective state wins over the saved choice (an admin block or a pause turns it off under the host).
+  const shownOn = !blocked && (typeof room.sprayOn === "boolean" ? room.sprayOn : on);
   if (!view.visible) return null;
 
   const save = async (next: boolean) => {
@@ -31,19 +40,23 @@ export default function ControlsMoney({ roomId, room, onChanged }: ControlsMoney
     const res = await call<unknown>("PATCH", `/api/rooms/${encodeURIComponent(roomId)}`, { sprayEnabled: next });
     setBusy(false);
     if (res.ok) { setOn(next); onChanged?.(); }
-    else setError(moneyRefusal(res.code) ?? MONEY_COPY.saveFailed);
+    else {
+      const live = sprayToggleRefusal(res);
+      if (live?.adminBlocked) { setBlockSeen(true); onChanged?.(); }
+      setError(live ? live.text : moneyRefusal(res.code) ?? MONEY_COPY.saveFailed);
+    }
   };
   const change = (next: boolean) => {
-    if (on && !next && room.status === "live") setConfirmOff(true);
+    if (shownOn && !next && room.status === "live") setConfirmOff(true);
     else void save(next);
   };
 
   return (
     <>
       <StepSpray
-        view={view} testPrefix="controls-money" error={error}
+        view={view} testPrefix="controls-money" error={blocked ? null : error}
         paid={{ on: typeof room.ticketPriceKobo === "number" }}
-        spray={{ on, set: change, busy }}
+        spray={{ on: shownOn, set: change, busy, blocked: blocked ? SPRAY_LIVE_COPY.adminBlocked : undefined }}
       />
       <AlertDialog open={confirmOff} onOpenChange={setConfirmOff}>
         <AlertDialogContent>

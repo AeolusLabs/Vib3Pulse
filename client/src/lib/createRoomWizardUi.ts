@@ -171,7 +171,7 @@ export const FIELD_ERROR: Record<string, string> = {
 export const OFFLINE_ERROR = "Couldn't reach Vib3Pulse. Check your connection and try again.";
 export const GENERIC_CREATE_ERROR = "Couldn't create the room. Try again.";
 
-export interface ApiFailure { status: number; code?: string; field?: string; reason?: string }
+export interface ApiFailure { status: number; code?: string; field?: string; reason?: string; retryMs?: number }
 
 /** Plain words for a refused create or start. Never the server's raw text, so every line follows the copy rules. */
 export function createErrorMessage(f: ApiFailure): string {
