@@ -130,7 +130,9 @@ check("approve applies the correction then verifies", (await http("POST", `/api/
 
 const u5 = await mkUser("arvu5", dob);
 const r5 = await mkReq(u5, dob);
-await http("POST", `/api/admin/age-reviews/${r5}/decide`, rev, { outcome: "birthdate_change", checklist: full, documentNumber: "BC" + stamp, idBirthdate: newDob });
+// A different document number: r4's document is already approved on another account, so reusing it would (correctly) be a duplicate.
+const q5 = await http("POST", `/api/admin/age-reviews/${r5}/decide`, rev, { outcome: "birthdate_change", checklist: full, documentNumber: "BD" + stamp, idBirthdate: newDob });
+check("second birthdate change is queued for a second approver", q5.status === 200, JSON.stringify(q5.json));
 await q(`update age_review_requests set reviewer_id = $2 where id = $1`, [r5, sup1]);
 check("reject leaves the account unchanged", (await http("POST", `/api/admin/age-reviews/${r5}/second-approve`, sup2, { approve: false, reason: "not convincing" })).status === 200
   && (await q(`select date_of_birth::text d from users where id = $1`, [u5]))[0].d.slice(0, 10) === dob && (await q(`select status from age_review_requests where id = $1`, [r5]))[0].status === "declined");
