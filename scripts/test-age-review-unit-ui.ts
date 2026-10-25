@@ -11,8 +11,7 @@ let passed = 0, failed = 0;
 const pending: Promise<void>[] = [];
 const test = (name: string, fn: () => void | Promise<void>) => {
   const ok = () => { passed++; console.log(`PASS ${name}`); };
-  const bad = (e: any) => { failed++; console.log(`FAIL ${name}  ${String(e.message).split("
-")[0]}`); };
+  const bad = (e: any) => { failed++; console.log(`FAIL ${name}  ${String(e.message).split("\n")[0]}`); };
   try { const r = fn(); if (r) pending.push(r.then(ok, bad)); else ok(); } catch (e) { bad(e); }
 };
 const root = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
@@ -183,5 +182,6 @@ test("no code path logs image data", () => {
   assert.ok(/image\/jpeg/.test(img) && /0\.85/.test(img) && /fitWithin/.test(img));
 });
 
+await Promise.all(pending);
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
