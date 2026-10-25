@@ -9,9 +9,10 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { UsersIcon, CalendarIcon, ImageIcon, FlagIcon, DollarSignIcon, ShieldIcon, ActivityIcon, LogOutIcon, MenuIcon, XIcon, ChevronRightIcon, AlertTriangleIcon, MegaphoneIcon, SettingsIcon, LockIcon } from "@/components/ui/icons";
 import AdminMfaGate from "./AdminMfaGate";
+import { AGE_REVIEW_PATH, navAllowed } from "@/lib/adminAgeReviewUi";
 import { LayoutDashboard } from "lucide-react";
 
-type AdminRole = "super_admin" | "admin" | "content_moderator" | "user_support" | "event_reviewer" | "finance_manager" | "analytics_viewer";
+type AdminRole = "super_admin" | "admin" | "content_moderator" | "user_support" | "event_reviewer" | "finance_manager" | "analytics_viewer" | "age_reviewer";
 
 interface AdminUser {
   id: string;
@@ -129,6 +130,12 @@ const navItems: NavItem[] = [
     roles: ["super_admin", "finance_manager", "analytics_viewer"],
   },
   {
+    label: "Age reviews",
+    path: "/admin/age-reviews",
+    icon: <ShieldIcon className="w-5 h-5" />,
+    roles: ["super_admin", "admin", "age_reviewer"],
+  },
+  {
     label: "Settings",
     path: "/admin/settings",
     icon: <SettingsIcon className="w-5 h-5" />,
@@ -144,6 +151,7 @@ const roleLabels: Record<AdminRole, string> = {
   event_reviewer: "Event Reviewer",
   finance_manager: "Finance Manager",
   analytics_viewer: "Analytics Viewer",
+  age_reviewer: "Age reviewer",
 };
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -171,6 +179,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     },
   });
 
+  // An age reviewer only has the Age reviews page: send them there from anywhere else in the panel.
+  useEffect(() => {
+    if (admin?.role === "age_reviewer" && location.startsWith("/admin/") && location !== AGE_REVIEW_PATH && location !== "/admin/setup") setLocation(AGE_REVIEW_PATH);
+  }, [admin?.role, location, setLocation]);
+
   useEffect(() => {
     if (error && location !== "/admin") {
       setLocation("/admin");
@@ -194,9 +207,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     return <AdminMfaGate enrolled={admin.mfa.enrolled} onLogout={() => logoutMutation.mutate()} />;
   }
 
-  const filteredNavItems = navItems.filter(item => 
-    item.roles.includes(admin.role)
-  );
+  const filteredNavItems = navItems.filter(item => navAllowed(admin.role, item.path, item.roles));
 
   // Direct URLs to the social-event admin pages: say so plainly instead of rendering an empty shell
   // (the server refuses these roles regardless; this is just the friendly side of that).

@@ -74,6 +74,7 @@ import AdminModeration from "@/pages/admin/AdminModeration";
 import AdminHosts from "@/pages/admin/AdminHosts";
 import AdminModerationSettings from "@/pages/admin/AdminModerationSettings";
 import AdminRooms from "@/pages/admin/AdminRooms";
+import AdminAgeReviews from "@/pages/admin/AdminAgeReviews";
 import AdminRevealAccess from "@/pages/admin/AdminRevealAccess";
 import AdminSocialMetrics from "@/pages/admin/AdminSocialMetrics";
 import SocialEventsPage from "@/pages/SocialEventsPage";
@@ -354,6 +355,7 @@ function Router() {
       <Route path="/admin/setup" component={AdminSetup} />
       <Route path="/admin/dashboard" component={AdminDashboard} />
       <Route path="/admin/users" component={AdminUsers} />
+      <Route path="/admin/age-reviews" component={AdminAgeReviews} />
       <Route path="/admin/events" component={AdminEvents} />
       <Route path="/admin/stories" component={AdminStories} />
       <Route path="/admin/reports" component={AdminReports} />

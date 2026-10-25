@@ -27,6 +27,7 @@ import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import AdminLayout from "./AdminLayout";
+import AgeVerificationActions from "@/components/admin/age-review/AgeVerificationActions";
 import AdminFilterBar from "@/components/admin/AdminFilterBar";
 import AdminPagination from "@/components/admin/AdminPagination";
 import { exportToCsv } from "@/lib/exportToCsv";
@@ -337,6 +338,7 @@ export default function AdminUsers() {
                               <BanIcon className="w-4 h-4" />
                             </Button>
                           )}
+                          <AgeVerificationActions userId={user.id} username={user.username} />
                           <Button
                             size="sm"
                             variant="ghost"
