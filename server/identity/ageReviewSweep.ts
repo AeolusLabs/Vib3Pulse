@@ -20,8 +20,9 @@ export async function sweepExpiredAgeReviews(): Promise<{ expired: number; userI
       `select count(*)::int n from age_review_evidence e join age_review_requests r on r.id = e.request_id
         where r.status in ('approved', 'declined', 'expired', 'cancelled', 'closed_minor') or r.expires_at < now() - interval '2 hours'`)).rows[0].n);
     const exp = (await client.query(
+      // Rows are locked in id order (as the emergency purge does) so the two can never deadlock; a row someone else holds waits for the next sweep.
       `update age_review_requests set status = 'expired', proposed_dob = null, decided_at = now()
-       where expires_at < now() and status in ('draft', 'submitted', 'in_review', 'needs_more', 'pending_second_approval')
+       where id in (select id from age_review_requests where expires_at < now() and status in ('draft', 'submitted', 'in_review', 'needs_more', 'pending_second_approval') order by id for update skip locked)
        returning id, user_id`,
     )).rows as { id: string; user_id: string }[];
     const del = await client.query(
@@ -64,6 +65,8 @@ export async function runSweepWith(d: SweepDeps = realDeps): Promise<void> {
 const runSweep = () => runSweepWith();
 
 /** One sweep now, then hourly. Only when the flag is on. */
+// With the flag off nothing here runs on purpose: no reveal token can be issued, so age_review_reveal_nonces stays empty. If the
+// flag is switched off after use, the few leftover rows (tens of bytes each) wait for the next time it is on.
 export function startAgeReviewSweep(): void {
   if (!ageReviewEnabled() || timer) return;
   void runSweep();

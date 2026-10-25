@@ -131,7 +131,7 @@ await test("self review refused", async () => {
 await test("decisions audited without birthdates or numbers (structure)", () => {
   const s = src("server/identity/ageReviewAdmin.ts");
   const calls = [...s.matchAll(/audit\(admin\.id, "([^"]+)", id, `([^`]*)`/g)];
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 4);
   for (const c of calls) assert.ok(!/idBirthdate|documentNumber|fingerprint|proposed|dob/i.test(c[2]), c[2]);
   assert.ok(/age_review\.decide/.test(s));
 });
@@ -227,6 +227,25 @@ await test("duplicate override and reviewer note are audited; final statuses cle
   assert.ok(src("server/identity/ageReviewControls.ts").includes("proposed_dob = case when status = 'pending_second_approval' then null"));
   assert.ok(s.includes("closeRoomQuietly(id)"), "the live room closes at the decision");
   assert.ok(src("server/routes/age-review-admin-routes.ts").includes("note: z.string().max(300).optional()"));
+});
+
+await test("second approval with an override approves a duplicate document; without it returns 409; reject always works (structure)", () => {
+  const s = src("server/identity/ageReviewAdmin.ts");
+  const fn = s.slice(s.indexOf("export async function secondApprove"), s.indexOf("async function getDetailRequestOnly"));
+  const dup = fn.slice(fn.indexOf("document_fingerprint = $1"), fn.indexOf("await applyAccount("));
+  assert.ok(dup.includes("if (!body.overrideDuplicate) throw new AgeReviewError(409, \"DUPLICATE_DOCUMENT\"") && dup.includes("overrideReason = body.overrideDuplicate.reason"));
+  assert.ok(fn.indexOf("if (body.approve) {") < fn.indexOf("document_fingerprint = $1"), "the duplicate check sits inside the approve branch, so a reject never meets it");
+  assert.ok(fn.includes('"age_review.duplicate_override"') && fn.includes("reason=${overrideReason}"));
+  assert.ok(fn.includes("admin.role !== \"super_admin\""), "only a super_admin reaches the override");
+  assert.ok(src("server/routes/age-review-admin-routes.ts").includes("overrideDuplicate: z.object({ reason: z.string().trim().min(3).max(300) }).optional()"));
+});
+
+await test("a failing notice never turns a committed decision into an error; lock order and release", () => {
+  const s = src("server/identity/ageReviewAdmin.ts");
+  assert.ok(s.includes("async function notifyQuietly") && !/await notifyAgeReview\(/.test(s.replace(/async function notifyQuietly[\s\S]*?\r?\n}\r?\n/, "")));
+  assert.ok(s.includes("client.release(unlocked ? undefined : true)"), "a connection whose advisory unlock failed is destroyed");
+  const sw = src("server/identity/ageReviewSweep.ts");
+  assert.ok(sw.includes("order by id for update skip locked"), "id-ordered locking, same as the purge");
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

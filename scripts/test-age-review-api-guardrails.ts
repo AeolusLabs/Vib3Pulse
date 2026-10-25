@@ -151,7 +151,7 @@ check("emergency purge audit carries the count only", (await q(`select details f
 {
   const racer = await mkUser("argu8");
   const rq = (await http("POST", "/api/age-review/requests", { user: racer }, { method: "upload", documentType: "passport", ...consent })).json.request;
-  const startedAt = (await q(`select now() as t`))[0].t as Date;
+  const startedAt = (await q(`select now()::timestamp as t`))[0].t as Date;
   await new Promise((r) => setTimeout(r, 20));
   await Promise.all([
     http("POST", "/api/admin/age-reviews/emergency-purge", { admin: sup }, { reason: "race drill" }),

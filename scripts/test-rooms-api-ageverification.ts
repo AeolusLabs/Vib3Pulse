@@ -122,10 +122,17 @@ try {
     check(`reason ${label}: 400 and nothing changed`, r.status === 400 && (await q(`select age_verified_at from users where id=$1`, [other]))[0].age_verified_at === null, JSON.stringify(r));
   }
 
+  // user_support was removed from this route (age review): refused for both directions, nothing changes.
   const supportClear = await http("POST", `/api/admin/users/${user}/age-verification`, { admin: support }, { verified: false, reason: "test reason" });
-  check("user_support can clear it", supportClear.status === 200 && supportClear.json?.verified === false, JSON.stringify(supportClear));
-  await http("POST", `/api/admin/users/${user}/age-verification`, { admin: support }, { verified: true, reason: "test reason" });
-  check("user_support can set it again", (await http("GET", "/api/users/me/age-verification", { user })).json?.verified === true);
+  check("user_support is refused (403) when clearing, and the verification is unchanged", supportClear.status === 403 && (await http("GET", "/api/users/me/age-verification", { user })).json?.verified === true, JSON.stringify(supportClear));
+  const supportSet = await http("POST", `/api/admin/users/${other}/age-verification`, { admin: support }, { verified: true, reason: "test reason" });
+  check("user_support is refused (403) when setting, and nothing changes", supportSet.status === 403 && (await q(`select age_verified_at from users where id=$1`, [other]))[0].age_verified_at === null, JSON.stringify(supportSet));
+  const regularAdmin = await mkAdmin("av_adm2", "admin");
+  const reviewer = await mkAdmin("av_rev", "age_reviewer");
+  const adminClear = await http("POST", `/api/admin/users/${user}/age-verification`, { admin: regularAdmin }, { verified: false, reason: "test reason" });
+  check("admin can clear it", adminClear.status === 200 && adminClear.json?.verified === false, JSON.stringify(adminClear));
+  const reviewerSet = await http("POST", `/api/admin/users/${user}/age-verification`, { admin: reviewer }, { verified: true, reason: "test reason" });
+  check("age_reviewer can set it again", reviewerSet.status === 200 && (await http("GET", "/api/users/me/age-verification", { user })).json?.verified === true, JSON.stringify(reviewerSet));
 
   // DOB correction clears it (the service behind PUT /api/admin/users/:id/date-of-birth)
   const fix = await correctDateOfBirth({ adminId: admin, userId: user, dateOfBirth: yearsAgo(31), reason: "typo" });

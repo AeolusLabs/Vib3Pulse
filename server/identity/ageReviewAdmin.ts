@@ -223,8 +223,10 @@ async function withLock<T>(id: string, fn: (c: { query: (q: string, p?: any[]) =
     await client.query(`select pg_advisory_lock(hashtext($1))`, [`age_review:${id}`]);
     return await fn(client);
   } finally {
-    await client.query(`select pg_advisory_unlock(hashtext($1))`, [`age_review:${id}`]).catch(() => {});
-    client.release();
+    // A session-level advisory lock that could not be released must not go back to the pool with the connection.
+    let unlocked = true;
+    await client.query(`select pg_advisory_unlock(hashtext($1))`, [`age_review:${id}`]).catch(() => { unlocked = false; });
+    client.release(unlocked ? undefined : true);
   }
 }
 
@@ -297,7 +299,7 @@ export async function decide(admin: AdminRef, id: string, body: DecideBody, ip?:
   await audit(admin.id, "age_review.decide", id, `outcome=${result.plan.outcome} request=${id}${body.note?.trim() ? ` note=${body.note.trim().slice(0, 300)}` : ""}`, ip);
   if (result.plan.overrideReason) await audit(admin.id, "age_review.duplicate_override", id, `request=${id} reason=${result.plan.overrideReason}`, ip);
   if (result.method === "live") await closeRoomQuietly(id);
-  if (result.plan.notify) { const { notifyAgeReview } = await import("./ageReviewNotify"); await notifyAgeReview(result.userId, result.plan.notify); }
+  if (result.plan.notify) await notifyQuietly(result.userId, result.plan.notify);
   return getDetailRequestOnly(id);
 }
 
@@ -313,11 +315,18 @@ export async function compensateAccountChange(id: string, userId: string, accoun
   if (account.kind === "correct_dob") console.error(`[AGE-REVIEW] ALERT birthdate correction stays applied; the request is left open (${id})`);
 }
 
+/** The decision is committed: a notice that fails must never turn it into an error. */
+async function notifyQuietly(userId: string, kind: "approved" | "declined" | "needs_more" | "teen_moved") {
+  try { const { notifyAgeReview } = await import("./ageReviewNotify"); await notifyAgeReview(userId, kind); }
+  catch { console.error("[AGE-REVIEW] ALERT a decision notice could not be sent"); }
+}
+
 async function closeRoomQuietly(id: string) {
   try { await (await import("./ageReviewLive")).closeAgeCheckRoom(id); } catch { /* the timer and the sweep close it too */ }
 }
 
-export async function secondApprove(admin: AdminRef, id: string, body: { approve: boolean; reason: string }, ip?: string) {
+export async function secondApprove(admin: AdminRef, id: string, body: { approve: boolean; reason: string; overrideDuplicate?: { reason: string } }, ip?: string) {
+  let overrideReason: string | null = null;
   const result = await withLock(id, async (c) => {
     let applied = false;
     let r: Awaited<ReturnType<typeof loadLocked>> | null = null;
@@ -331,7 +340,9 @@ export async function secondApprove(admin: AdminRef, id: string, body: { approve
       if (body.approve) {
         // Another account may have been verified with this document while the case waited.
         if (r.document_fingerprint && ((await c.query(`select 1 from age_review_requests where document_fingerprint = $1 and status = 'approved' and user_id <> $2 limit 1`, [r.document_fingerprint, r.user_id])).rowCount ?? 0) > 0) {
-          throw new AgeReviewError(409, "DUPLICATE_DOCUMENT", "This document has since verified another account.");
+          // The second approver is a super_admin, the role the override needs; a reject never reaches this check.
+          if (!body.overrideDuplicate) throw new AgeReviewError(409, "DUPLICATE_DOCUMENT", "This document has since verified another account.");
+          overrideReason = body.overrideDuplicate.reason;
         }
         await applyAccount(admin.id, r.user_id, { kind: "correct_dob", dob: r.proposed_dob, reason: `age review second approval: ${body.reason}`.slice(0, 300) }, ip);
         applied = true;
@@ -352,9 +363,9 @@ export async function secondApprove(admin: AdminRef, id: string, body: { approve
     }
   });
   await audit(admin.id, "age_review.second_approve", id, `approve=${body.approve} request=${id}`, ip);
+  if (overrideReason) await audit(admin.id, "age_review.duplicate_override", id, `request=${id} reason=${overrideReason}`, ip);
   if (result.method === "live") await closeRoomQuietly(id);
-  const { notifyAgeReview } = await import("./ageReviewNotify");
-  await notifyAgeReview(result.userId, body.approve ? "approved" : "declined");
+  await notifyQuietly(result.userId, body.approve ? "approved" : "declined");
   return getDetailRequestOnly(id);
 }
 

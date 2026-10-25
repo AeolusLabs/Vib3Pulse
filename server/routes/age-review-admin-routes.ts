@@ -67,7 +67,7 @@ export function registerAgeReviewAdminRoutes(app: Express): void {
   }));
 
   app.post(`${base}/:id/second-approve`, requireRole("super_admin"), withId(async (req, res) => {
-    const body = z.object({ approve: z.boolean(), reason: z.string().trim().min(3).max(300) }).parse(req.body);
+    const body = z.object({ approve: z.boolean(), reason: z.string().trim().min(3).max(300), overrideDuplicate: z.object({ reason: z.string().trim().min(3).max(300) }).optional() }).parse(req.body);
     res.json({ request: await secondApprove(me(req), String(req.params.id), body, req.ip) });
   }));
 

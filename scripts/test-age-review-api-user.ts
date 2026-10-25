@@ -163,7 +163,7 @@ await storage.softDeleteUser(doomed);
 check("account deletion purges evidence", (await q(`select 1 from age_review_evidence where request_id = $1`, [d.id])).length === 0 && (await q(`select 1 from age_review_requests where user_id = $1`, [doomed])).length === 0);
 await purgeUserAgeReview(doomed);
 
-await q(`delete from users where username like $1`, [`arv_%${stamp}`]);
+await q(`delete from users where username like $1 or id = $2`, [`arv_%${stamp}`, doomed]); // the soft-deleted account no longer matches the name pattern
 server.close();
 await pool.end();
 console.log(`\n${passed} passed, ${failed} failed`);
