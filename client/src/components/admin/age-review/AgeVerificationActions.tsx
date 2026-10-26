@@ -5,7 +5,7 @@ import { ShieldIcon } from "@/components/ui/icons";
 import ReasonDialog from "@/components/admin/ReasonDialog";
 import { useToast } from "@/hooks/use-toast";
 import { errText, markVerified, revokeVerification } from "@/lib/adminAgeReviewApi";
-import { canMarkVerified } from "@/lib/adminAgeReviewUi";
+import { canMarkVerified, canRevoke } from "@/lib/adminAgeReviewUi";
 
 type Action = "verify" | "revoke" | null;
 
@@ -16,13 +16,14 @@ export default function AgeVerificationActions({ userId, username }: { userId: s
   const [action, setAction] = useState<Action>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  if (!me || !canMarkVerified(me.role)) return null;
+  if (!me || !canRevoke(me.role)) return null;
+  const mark = canMarkVerified(me.role);
 
   return (
     <>
-      <Button size="sm" variant="ghost" className="min-h-[44px] text-emerald-400 hover:text-emerald-300" onClick={() => { setError(null); setAction("verify"); }} aria-label={`Mark ${username} as age verified`} data-testid={`button-mark-verified-${userId}`}>
+      {mark && <Button size="sm" variant="ghost" className="min-h-[44px] text-emerald-400 hover:text-emerald-300" onClick={() => { setError(null); setAction("verify"); }} aria-label={`Mark ${username} as age verified`} data-testid={`button-mark-verified-${userId}`}>
         <ShieldIcon className="h-4 w-4" aria-hidden />
-      </Button>
+      </Button>}
       <Button size="sm" variant="ghost" className="min-h-[44px] text-xs text-slate-300 hover:text-white" onClick={() => { setError(null); setAction("revoke"); }} data-testid={`button-revoke-verification-${userId}`}>
         Revoke
       </Button>

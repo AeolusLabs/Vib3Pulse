@@ -1,6 +1,6 @@
 // Fetch helpers for the reviewer API. Plain functions, no query cache: nothing returned here from the evidence routes is kept.
 import { ensureCsrfToken } from "@/lib/queryClient";
-import { adminErrorMessage, secondApproveBody, urlUnlessCancelled, type Checklist } from "@/lib/adminAgeReviewUi";
+import { adminErrorMessage, isAgeReviewOff, secondApproveBody, urlUnlessCancelled, type Checklist } from "@/lib/adminAgeReviewUi";
 
 export class ReviewApiError extends Error {
   constructor(readonly status: number, readonly code: string | undefined, readonly retryAfter?: string | null) {
@@ -66,4 +66,10 @@ export async function revealEvidence(requestId: string, evidenceId: string, canc
   const res = await fetch(`${base}?token=${encodeURIComponent(token)}`, { credentials: "include", cache: "no-store" });
   if (!res.ok) throw await parseError(res);
   return urlUnlessCancelled(await res.blob(), cancelled, (b) => URL.createObjectURL(b));
+}
+
+/** True unless the server says the feature is off (404 AGE_REVIEW_OFF). Other errors count as on so a hiccup does not hide the page. */
+export async function ageReviewSwitchedOn(): Promise<boolean> {
+  try { await reviewCall("GET", "/api/admin/age-reviews?limit=1"); return true; }
+  catch (e) { return !(e instanceof ReviewApiError && isAgeReviewOff(e)); }
 }

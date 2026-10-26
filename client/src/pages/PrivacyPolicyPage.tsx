@@ -1,6 +1,6 @@
-import { Fragment, useEffect } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Link } from "wouter";
-import { PRIVACY_POLICY, policyBadge } from "@shared/privacyPolicy";
+import { PRIVACY_POLICY, policyBadge, visibleSections } from "@shared/privacyPolicy";
 import { ArrowLeftIcon } from "@/components/ui/icons";
 
 const FOCUS = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-400 rounded-sm";
@@ -22,15 +22,26 @@ function Text({ children }: { children: string }) {
 }
 
 export default function PrivacyPolicyPage() {
-  const { version, lastUpdated, sections, status, contactEmail } = PRIVACY_POLICY;
+  const { version, lastUpdated, status, contactEmail } = PRIVACY_POLICY;
   const badge = policyBadge(status);
+  // The age review text appears only once the feature is live. Loading or any failure counts as off, so the policy never promises a feature that is not there.
+  const [ageReviewOn, setAgeReviewOn] = useState(false);
+  useEffect(() => {
+    let live = true;
+    fetch("/api/age-review/enabled", { credentials: "same-origin" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (live) setAgeReviewOn(j?.enabled === true); })
+      .catch(() => { if (live) setAgeReviewOn(false); });
+    return () => { live = false; };
+  }, []);
+  const sections = visibleSections(PRIVACY_POLICY, ageReviewOn);
 
   // Public page with anchor links: honour #section on first load, since sections render after hydration.
   useEffect(() => {
     document.title = "Privacy policy | Vib3Pulse";
     const id = window.location.hash.slice(1);
     if (id) document.getElementById(id)?.scrollIntoView();
-  }, []);
+  }, [ageReviewOn]);
 
   return (
     <div className="min-h-screen overflow-x-clip bg-[#090909] font-sans text-white/80" data-testid="page-privacy">
@@ -77,6 +88,7 @@ export default function PrivacyPolicyPage() {
                       {s.bullets.map((b, i) => <li key={i} className="pl-1"><Text>{b}</Text></li>)}
                     </ul>
                   )}
+                  {s.afterBullets?.map((p, i) => <p key={`a${i}`}><Text>{p}</Text></p>)}
                 </div>
               </section>
             ))}

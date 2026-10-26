@@ -4,7 +4,7 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { PRIVACY, continueEnabled, whatHappens, type AgeReviewMethod } from "@/lib/ageReview";
+import { PRIVACY, continueEnabled, whatHappens, whoSees, type AgeReviewMethod } from "@/lib/ageReview";
 
 interface Props {
   open: boolean;
@@ -22,7 +22,7 @@ function Body({ mode, method, busy, onContinue, onClose }: Omit<Props, "open">) 
   const [ticked, setTicked] = useState(false);
   const tickId = useId();
   const consent = mode === "consent";
-  const sections = [PRIVACY.why, PRIVACY.who, { h: PRIVACY.whatHeading, p: whatHappens(method) }, PRIVACY.keep, PRIVACY.choices, PRIVACY.safety];
+  const sections = [PRIVACY.why, { h: PRIVACY.who.h, p: whoSees(method) }, { h: PRIVACY.whatHeading, p: whatHappens(method) }, PRIVACY.keep, PRIVACY.choices, PRIVACY.safety];
   return (
     <>
       <dl className="space-y-4 text-sm leading-relaxed">

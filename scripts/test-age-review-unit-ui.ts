@@ -4,7 +4,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   COPY, ERROR_CODES, PRIVACY, cardView, consentRequired, continueEnabled, documentTypeLabel, errorMessage, fitWithin, formatCode,
-  minutesLeft, whatHappens, cardMode, cancelOffered, startLiveRequest, openRequest, DOCUMENT_TYPES, type AgeReviewMe, type AgeReviewState,
+  minutesLeft, whatHappens, whoSees, cardMode, cancelOffered, startLiveRequest, openRequest, DOCUMENT_TYPES, type AgeReviewMe, type AgeReviewState,
 } from "../client/src/lib/ageReview";
 
 let passed = 0, failed = 0;
@@ -95,16 +95,28 @@ test("privacy copy matches the spec wording", () => {
   assert.equal(PRIVACY.policyHref, "/privacy");
 });
 
-test("What we keep mentions the one-way code and drops the old sentence", () => {
-  assert.match(PRIVACY.keep.p, /one-way code/);
-  assert.ok(!PRIVACY.keep.p.includes("Never your photos, the name on the document or the document number"));
-  assert.ok(PRIVACY.keep.p.endsWith("We never keep your photos, the name on the document or the number itself."));
-  assert.ok(!BAD.test(PRIVACY.keep.p));
-});
-
 const reqOf = (o: Partial<NonNullable<AgeReviewMe["request"]>>): NonNullable<AgeReviewMe["request"]> => ({
   id: "r1", method: "upload", status: "draft", documentType: null, canCancel: true, needsMore: false, hasDocument: false, hasSelfie: false,
   code: null, codeExpiresAt: null, liveInviteExpiresAt: null, submittedAt: null, declineReason: null, consentedAt: null, ...o,
+});
+
+test("What we keep is honest: record of the decision, one-way code, no old sentence", () => {
+  const k = PRIVACY.keep.p;
+  assert.ok(k.startsWith("We keep a record of the decision:"));
+  assert.match(k, /one-way code/);
+  assert.match(k, /without our secret key/);
+  assert.match(k, /Notifications and emails about the result do not contain your documents\.$/);
+  assert.ok(!/never/i.test(k));
+  assert.ok(!k.includes("Never your photos, the name on the document or the document number"));
+  assert.ok(!BAD.test(k));
+  assert.equal(PRIVACY.who.p, "Only Vib3Pulse staff who review ages (administrators and age reviewers). Your images are encrypted in our database and are opened one at a time, with every viewing logged.");
+  assert.equal(PRIVACY.whoLive, "A reviewer sees you on a private call. Nothing is recorded or saved.");
+  assert.equal(whoSees("live"), PRIVACY.whoLive);
+  assert.equal(whoSees("upload"), PRIVACY.who.p);
+  assert.match(whatHappens("upload"), /after the final decision, or after 7 days if nobody looks\. If a second approval is needed, they are kept until that is decided\./);
+  assert.ok(!/as soon as a decision is made/.test(JSON.stringify(COPY) + whatHappens("upload")));
+  assert.match(COPY.choiceUploadHint, /after the final decision/);
+  assert.match(cardView(me("in_review", { request: reqOf({ status: "in_review" }) }), NOW).body, /cancel at any time before the final decision/);
 });
 
 test("live create then submit", async () => {
@@ -136,7 +148,7 @@ test("card with state none and a draft shows the resume flow, never the choice b
 });
 
 test("cancel offered when canCancel", () => {
-  for (const status of ["draft", "needs_more", "submitted", "in_review"]) assert.equal(cancelOffered(me("none", { request: reqOf({ status }) })), true, status);
+  for (const status of ["draft", "needs_more", "submitted", "in_review", "pending_second_approval"]) assert.equal(cancelOffered(me("none", { request: reqOf({ status }) })), true, status);
   assert.equal(cancelOffered(me("none", { request: reqOf({ status: "draft", canCancel: false }) })), false);
   assert.equal(cancelOffered(me("none")), false);
   assert.equal(cancelOffered(me("declined", { request: reqOf({ status: "declined" }) })), false);

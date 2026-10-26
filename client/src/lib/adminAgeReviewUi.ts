@@ -149,7 +149,12 @@ export const canSeeHealth = (role: string) => role === "super_admin" || role ===
 export const canSecondApprove = (role: string) => role === "super_admin";
 export const canPurge = (role: string) => role === "super_admin";
 export const canOverrideDuplicate = (role: string) => role === "super_admin";
-export const canMarkVerified = (role: string) => REVIEW_ROLES.includes(role);
+/** Marking a user verified is an override: super admin and admin only. Revoking is also open to age reviewers. */
+export const canMarkVerified = (role: string) => role === "super_admin" || role === "admin";
+export const canRevoke = (role: string) => REVIEW_ROLES.includes(role);
+/** The Age reviews nav item shows only when the role may use it and the feature is switched on (unknown counts as off). */
+export const navVisible = (role: string, itemPath: string, itemRoles: readonly string[], ageReviewOn: boolean | undefined): boolean =>
+  navAllowed(role, itemPath, itemRoles) && (itemPath !== AGE_REVIEW_PATH || ageReviewOn === true);
 
 /** Pausing: super_admin or admin. Resuming: super_admin only. */
 export const canSetPause = (role: string, on: boolean) => (on ? role === "super_admin" || role === "admin" : role === "super_admin");

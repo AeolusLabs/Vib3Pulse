@@ -5,7 +5,7 @@ import { join } from "node:path";
 import {
   ADMIN_ERROR_CODES, AGE_REVIEW_PATH, CHECKLIST_KEYS, CHECKLIST_LABEL, CONFIRM_TEXT, OUTCOME_HELP, OUTCOME_LABEL, REBLUR_MS, STALE_TEXT, STATUS_META,
   adminErrorMessage, ageText, canOverrideDuplicate, canPurge, canSetPause, decisionBody, decisionReady, emptyChecklist, navAllowed, pauseDisabledReason,
-  purgeReady, registeredAge, needsDocumentNumber, secondApproveBody, approveDescription, isAgeReviewOff, OFF_PANEL, outcomesFor, requiredChecks, urlUnlessCancelled, startReblur, statusMeta, watermarkText, type DecisionForm,
+  purgeReady, registeredAge, navVisible, canMarkVerified, canRevoke, needsDocumentNumber, secondApproveBody, approveDescription, isAgeReviewOff, OFF_PANEL, outcomesFor, requiredChecks, urlUnlessCancelled, startReblur, statusMeta, watermarkText, type DecisionForm,
 } from "../client/src/lib/adminAgeReviewUi";
 
 let passed = 0, failed = 0;
@@ -276,6 +276,23 @@ test("second approve override only after a 409", () => {
   assert.match(d, /e\.code === "DUPLICATE_DOCUMENT" && role === "super_admin"\) setDupe\(true\)/);
   assert.match(d, /dupe \? overrideReason : ""/);
   assert.match(d, /approve === true && dupe && role === "super_admin"/);
+});
+
+test("nav hides Age reviews when the feature is off; mark verified and revoke roles", () => {
+  const roles = ["super_admin", "admin", "age_reviewer"];
+  assert.equal(navVisible("admin", AGE_REVIEW_PATH, roles, true), true);
+  assert.equal(navVisible("admin", AGE_REVIEW_PATH, roles, false), false);
+  assert.equal(navVisible("admin", AGE_REVIEW_PATH, roles, undefined), false);
+  assert.equal(navVisible("age_reviewer", AGE_REVIEW_PATH, roles, false), false);
+  assert.equal(navVisible("user_support", "/admin/users", ["super_admin", "user_support"], false), true);
+  assert.equal(canMarkVerified("super_admin") && canMarkVerified("admin"), true);
+  assert.equal(canMarkVerified("age_reviewer"), false);
+  assert.equal(canRevoke("age_reviewer") && canRevoke("admin") && canRevoke("super_admin"), true);
+  assert.equal(canRevoke("user_support"), false);
+  const layout = read("client/src/pages/admin/AdminLayout.tsx");
+  assert.match(layout, /navVisible\(admin\.role, item\.path, item\.roles, ageOn\)/);
+  assert.match(layout, /ageReviewSwitchedOn/);
+  assert.match(read(`${dir}/AgeVerificationActions.tsx`), /\{mark && </);
 });
 
 test("copy has no em or en dashes or the word cash", () => {

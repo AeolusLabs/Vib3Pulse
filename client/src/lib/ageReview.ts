@@ -61,7 +61,7 @@ export const COPY = {
   choiceUpload: "Upload an ID photo and a selfie",
   choiceLive: "Private live check with a reviewer",
   choiceLiveHint: "Nothing is recorded or saved.",
-  choiceUploadHint: "Your photos are deleted when a decision is made.",
+  choiceUploadHint: "Your photos are deleted after the final decision.",
   cancel: "Cancel my request",
   howHandled: "How your ID is handled",
   paused: "Age checks are paused for a short while. Please try again later.",
@@ -75,11 +75,12 @@ export const COPY = {
 export const PRIVACY = {
   title: "Before you verify your age",
   why: { h: "Why we ask", p: "Tipping, buying tickets and hosting paid rooms are for adults only. We check once. You can use the rest of Vib3Pulse without it." },
-  who: { h: "Who sees it", p: "Only trained Vib3Pulse age reviewers. No other staff and no other members." },
-  whatUpload: "A reviewer compares your document with the birthdate you gave when you signed up. We delete your photos as soon as a decision is made, or after 7 days if nobody has looked.",
+  who: { h: "Who sees it", p: "Only Vib3Pulse staff who review ages (administrators and age reviewers). Your images are encrypted in our database and are opened one at a time, with every viewing logged." },
+  whoLive: "A reviewer sees you on a private call. Nothing is recorded or saved.",
+  whatUpload: "A reviewer compares your document with the birthdate you gave when you signed up. We delete your photos after the final decision, or after 7 days if nobody looks. If a second approval is needed, they are kept until that is decided.",
   whatLive: "A reviewer compares your document with the birthdate you gave when you signed up. Nothing is recorded or saved.",
   whatHeading: "What happens",
-  keep: { h: "What we keep", p: "Only the result: verified or not, the date, the type of document, and whether the birthdate matched. We also keep a one-way code made from your document number. It cannot be turned back into the number and only stops the same document being used on several accounts. We never keep your photos, the name on the document or the number itself." },
+  keep: { h: "What we keep", p: "We keep a record of the decision: who made it, when, the type of document, whether the birthdate matched, and the reason if it was declined. We also keep the birthdate you registered with at the time, and a one-way code made from your document number. The code cannot be turned back into the number without our secret key, and it only stops the same document being used on several accounts. We do not keep your photos or the document number itself. Notifications and emails about the result do not contain your documents." },
   choices: { h: "Your choices", p: "Cover everything except your photo, name and date of birth. Cancel any time before a decision and your photos are deleted. Choose the live check instead of uploading. Saying no only means the adult only features stay off." },
   safety: { h: "Your safety", p: "If your document shows you are under 18, we will move your account to the right age group." },
   tick: "I understand how my information is used",
@@ -92,6 +93,7 @@ export const PRIVACY = {
   askHref: "mailto:info@aeoluslabsltd.com",
 } as const;
 
+export const whoSees = (m: AgeReviewMethod): string => (m === "live" ? PRIVACY.whoLive : PRIVACY.who.p);
 export const whatHappens = (m: AgeReviewMethod): string => (m === "live" ? PRIVACY.whatLive : PRIVACY.whatUpload);
 
 const dateLabel = (iso: string) => {
@@ -127,7 +129,7 @@ export function cardView(me: AgeReviewMe, now: Date = new Date()): CardView {
         title: "A reviewer is looking at it",
         body: me.request?.method === "live"
           ? "Your live check is requested. A reviewer will invite you to join a private call."
-          : "Your photos are with a reviewer. You do not need to do anything else. You can cancel while it is open.",
+          : "Your photos are with a reviewer. You do not need to do anything else. You can cancel at any time before the final decision.",
         action: null,
         tone: "pending",
       };
@@ -260,7 +262,7 @@ export function cardMode(me: AgeReviewMe): CardMode {
   return cardView(me).action?.id === "start" ? "choose" : "none";
 }
 
-/** Cancel is offered whenever the server says this request can be cancelled (draft, needs_more, submitted, in_review). */
+/** Cancel is offered whenever the server says this request can be cancelled (draft, needs_more, submitted, in_review, pending_second_approval). */
 export const cancelOffered = (me: Pick<AgeReviewMe, "request">): boolean => !!openRequest(me)?.canCancel;
 
 /** A live check has nothing to upload, so it is submitted right after it is created. */

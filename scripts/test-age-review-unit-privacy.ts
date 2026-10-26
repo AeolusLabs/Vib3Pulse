@@ -2,8 +2,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PRIVACY_POLICY, policyBadge } from "../shared/privacyPolicy";
-import { PRIVACY } from "../client/src/lib/ageReview";
+import { PRIVACY_POLICY, policyBadge, visibleSections } from "../shared/privacyPolicy";
+import { PRIVACY, whatHappens } from "../client/src/lib/ageReview";
 
 let passed = 0, failed = 0;
 const test = (name: string, fn: () => void) => {
@@ -12,7 +12,7 @@ const test = (name: string, fn: () => void) => {
 };
 const root = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 const read = (p: string) => readFileSync(join(root, p), "utf8");
-const allText = [PRIVACY_POLICY.contactEmail, ...PRIVACY_POLICY.sections.flatMap((s) => [s.title, ...s.paragraphs, ...(s.bullets ?? [])])].join("\n");
+const allText = [PRIVACY_POLICY.contactEmail, ...PRIVACY_POLICY.sections.flatMap((s) => [s.title, ...s.paragraphs, ...(s.bullets ?? []), ...(s.afterBullets ?? []), ...(s.whenAgeReview?.paragraphs ?? []), ...(s.whenAgeReview?.bullets ?? [])])].join("\n");
 
 test("policy has every required section id", () => {
   const ids = PRIVACY_POLICY.sections.map((s) => s.id);
@@ -21,7 +21,7 @@ test("policy has every required section id", () => {
   }
   assert.equal(new Set(ids).size, ids.length);
   for (const s of PRIVACY_POLICY.sections) assert.ok(s.title && s.paragraphs.length > 0, s.id);
-  assert.equal(PRIVACY_POLICY.version, "2026-10-v1");
+  assert.equal(PRIVACY_POLICY.version, "2026-10-v2");
 });
 
 test("contact email is info@aeoluslabsltd.com everywhere", () => {
@@ -52,23 +52,52 @@ test("status draft shows the badge helper", () => {
   assert.match(read("client/src/pages/PrivacyPolicyPage.tsx"), /policyBadge\(status\)/);
 });
 
-test("age review section matches the pop-up facts", () => {
-  const t = PRIVACY_POLICY.sections.find((s) => s.id === "age-review")!.paragraphs.join(" ");
+test("age review section matches the pop-up wording", () => {
+  const t = PRIVACY_POLICY.sections.find((x) => x.id === "age-review")!.paragraphs.join(" ");
   assert.match(t, /7 days/);
-  assert.match(t, /not recorded or saved/);
-  assert.match(t, /only trained Vib3Pulse age reviewers/i);
+  assert.match(t, /Nothing is recorded or saved/);
+  assert.ok(t.includes(PRIVACY.who.p), "who sees it");
+  assert.ok(t.includes(PRIVACY.whoLive.replace("A reviewer sees you", "a reviewer sees you")), "live who sees it");
+  assert.ok(t.includes(PRIVACY.keep.p), "what we keep, same words as the pop-up");
+  assert.ok(t.includes(PRIVACY.choices.p) && t.includes(PRIVACY.safety.p));
+  assert.ok(t.includes("one-way code") && t.includes("record of the decision"));
+  assert.ok(!/never/i.test(t));
+  assert.ok(whatHappens("upload").includes("after the final decision, or after 7 days if nobody looks"));
+  assert.ok(t.includes("after the final decision, or after 7 days if nobody looks"));
 });
 
-test("age review section says the one-way code, like the pop-up", () => {
-  const t = PRIVACY_POLICY.sections.find((s) => s.id === "age-review")!.paragraphs.join(" ");
-  assert.match(t, /one-way code made from your document number/);
-  assert.ok(!t.includes("Never your photos"));
+test("the age review section and its sentences appear only when age review is on", () => {
+  const off = visibleSections(PRIVACY_POLICY, false);
+  const on = visibleSections(PRIVACY_POLICY, true);
+  assert.ok(!off.some((x) => x.id === "age-review"));
+  assert.ok(on.some((x) => x.id === "age-review"));
+  const offText = off.flatMap((x) => [x.title, ...x.paragraphs, ...(x.bullets ?? []), ...(x.afterBullets ?? [])]).join("\n").toLowerCase();
+  for (const w of ["age review", "age verification", "id photos", "age reviewer", "selfie", "proving you are an adult", "check that people who tip"]) assert.ok(!offText.includes(w), w);
+  const onText = on.flatMap((x) => [...x.paragraphs, ...(x.bullets ?? [])]).join("\n").toLowerCase();
+  assert.ok(onText.includes("proving you are an adult") && onText.includes("id photos"));
+  assert.equal(off.length, PRIVACY_POLICY.sections.length - 1);
+  for (const x of off) assert.ok(x.paragraphs.length > 0, x.id);
+  const page = read("client/src/pages/PrivacyPolicyPage.tsx");
+  assert.match(page, /\/api\/age-review\/enabled/);
+  assert.match(page, /useState\(false\)/);
+  assert.match(page, /visibleSections\(PRIVACY_POLICY, ageReviewOn\)/);
+  assert.match(page, /catch\(\(\) => \{ if \(live\) setAgeReviewOn\(false\)/);
 });
 
-test("account deletion section states the limits honestly", () => {
-  const t = PRIVACY_POLICY.sections.find((s) => s.id === "deleting-your-account")!.paragraphs.join(" ");
+test("data claims: Nominatim and Sentry wording", () => {
+  assert.match(allText, /Nominatim/);
+  assert.match(allText, /if we have switched error monitoring on/);
+  assert.ok(!/we use sentry|sentry is/i.test(allText));
+});
+
+test("account deletion section lists what stays, honestly", () => {
+  const sec = PRIVACY_POLICY.sections.find((x) => x.id === "deleting-your-account")!;
+  const t = [...sec.paragraphs, ...(sec.bullets ?? []), ...(sec.afterBullets ?? [])].join(" ");
   assert.match(t, /Deleted user/);
   assert.match(t, /no tool for exporting/);
+  assert.match(t, /ask us to remove more by emailing info@aeoluslabsltd\.com/);
+  for (const w of ["posts, comments and stories", "direct messages and group messages", "uploaded photos and videos", "followed or blocked", "notifications and browser push", "Safety Buddy contacts", "phone numbers", "location coordinates", "delivery records", "reports", "saved card", "connected social accounts", "money records"]) assert.ok(t.includes(w), w);
+  assert.ok(!/removes (all|everything)/i.test(t));
 });
 
 test("routes: /privacy is registered outside auth", () => {
