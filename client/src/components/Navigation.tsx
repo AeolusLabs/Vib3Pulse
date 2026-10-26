@@ -203,9 +203,9 @@ export default function Navigation({ onSearch }: NavigationProps) {
                 )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild data-testid="menu-account-settings">
-                  <Link href="/account/settings">
+                  <Link href="/settings">
                     <SettingsIcon className="mr-2 h-4 w-4" />
-                    Account Settings
+                    Settings
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleLogout} data-testid="menu-logout">

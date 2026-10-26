@@ -3,7 +3,7 @@ import { pgTable, text, varchar, timestamp, integer, smallint, boolean, unique, 
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import type { AvatarConfig } from "./avatar";
-import type { RoomPrivacy } from "./rooms";
+import type { RoomDefaults, RoomPrivacy } from "./rooms";
 import type { Screen } from "./screen";
 import type { NowPlaying } from "./playback";
 import { validateBuildingConfig, type BuildingConfig } from "./building";
@@ -44,6 +44,7 @@ export const users = pgTable("users", {
   avatar: jsonb("avatar").$type<AvatarConfig | null>(),
   // Per-user room privacy (see shared/rooms.ts resolveRoomPrivacy). Null = defaults.
   roomPrivacy: jsonb("room_privacy").$type<RoomPrivacy | null>(),
+  roomDefaults: jsonb("room_defaults").$type<RoomDefaults | null>(),
   // The real photo, parked while the avatar is the picture (avatarUrl then points at /api/avatar-img/...). See shared/avatar.ts.
   profilePhotoUrl: text("profile_photo_url"),
   bannerMode: text("banner_mode"),
@@ -92,7 +93,7 @@ export const users = pgTable("users", {
 }));
 
 // avatar is typed loosely here on purpose: the PATCH route runs it through sanitizeAvatarConfig before storing.
-export const insertUserSchema = createInsertSchema(users, { avatar: z.custom<AvatarConfig>().nullable().optional(), roomPrivacy: z.custom<RoomPrivacy>().nullable().optional() }).omit({
+export const insertUserSchema = createInsertSchema(users, { avatar: z.custom<AvatarConfig>().nullable().optional(), roomPrivacy: z.custom<RoomPrivacy>().nullable().optional(), roomDefaults: z.custom<RoomDefaults>().nullable().optional() }).omit({
   id: true,
   createdAt: true,
 });

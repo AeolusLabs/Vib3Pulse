@@ -148,7 +148,7 @@ export default function ControlsSheet({ open, onOpenChange, roomId, inviteToken,
             />
             <section aria-label="Co-hosts" className="space-y-2 rounded-2xl border p-3" data-testid="cohost-list">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Co-hosts ({cohosts.length})</h3>
-              {cohosts.length === 0 ? <p className="py-1 text-sm text-muted-foreground">{can.makeCohost ? "None yet. Make someone on the mic a co-host." : "None yet."}</p> : (
+              {cohosts.length === 0 ? <p className="py-1 text-sm text-muted-foreground">{can.makeCohost ? "None yet. Open People and make a guest a co-host." : "None yet."}</p> : (
                 <ul className="space-y-1">
                   {cohosts.map((m) => (
                     <li key={m.userId} className="flex items-center gap-2" data-testid={`cohost-${m.userId}`}>

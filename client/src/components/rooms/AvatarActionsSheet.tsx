@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import HostAvatar from "@/components/rooms/HostAvatar";
 import { leavesRoomHint, profilePath, showViewProfile } from "@/lib/profilePath";
+import { CONTROLS_COPY, roleChange } from "@/lib/hostControls";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { ROOM_REACTIONS } from "@shared/rooms";
@@ -35,6 +36,8 @@ interface Props {
   voiceOn?: boolean;
   stage?: string[];
   onStage?: (action: "accept" | "remove", targetId: string) => void;
+  /** Host only: make a guest a co-host, or a co-host a guest again. */
+  onRole?: (targetId: string, to: "cohost" | "guest") => void;
   /** Caller override: false hides the "View profile" row whatever the server says. Defaults to true. */
   canViewProfile?: boolean;
   /** Opened from another sheet (People): where focus goes when this closes. Null keeps Radix's default (the avatar tapped). */
@@ -53,7 +56,7 @@ const nameOf = (m: RoomMemberView) => m.displayName || m.organizationName || m.u
  * What you can do to someone in the room. The list of social actions comes from the server (it knows ages, follows and
  * privacy settings; the client doesn't and shouldn't), and the server re-checks every action again when it is used.
  */
-export default function AvatarActionsSheet({ open, onOpenChange, roomId, target, you, myRoomId, onInteract, onMod, locallyMuted, onToggleLocalMute, voiceOn, stage = [], onStage, canViewProfile = true, returnFocusTo, onSpray }: Props) {
+export default function AvatarActionsSheet({ open, onOpenChange, roomId, target, you, myRoomId, onInteract, onMod, locallyMuted, onToggleLocalMute, voiceOn, stage = [], onStage, onRole, canViewProfile = true, returnFocusTo, onSpray }: Props) {
   const { toast } = useToast();
   const [, navigate] = useLocation();
   const [picking, setPicking] = useState(false);
@@ -105,6 +108,7 @@ export default function AvatarActionsSheet({ open, onOpenChange, roomId, target,
 
   if (!target) return null;
   const canModerate = !self && !!you && ((you.role === "host" && target.role !== "host") || (you.role === "cohost" && target.role === "guest"));
+  const roleAct = onRole && you ? roleChange(you.role === "host" ? "host" : "cohost", target, you.userId) : null;
   const rowCls = "flex min-h-[44px] w-full items-center justify-start gap-3 rounded-lg px-3 text-sm";
 
   return (
@@ -169,6 +173,7 @@ export default function AvatarActionsSheet({ open, onOpenChange, roomId, target,
             {canModerate && (
               <div className="mt-2 space-y-1 border-t pt-2" data-testid="mod-actions">
                 <p className="px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Host controls</p>
+                {roleAct && <Button variant="ghost" className={rowCls} onClick={() => { onRole!(target.userId, roleAct === "make-cohost" ? "cohost" : "guest"); close(); }} data-testid="action-role"><UserIcon className="h-4 w-4" />{roleAct === "make-cohost" ? CONTROLS_COPY.makeCohost : CONTROLS_COPY.removeCohost}</Button>}
                 {voiceOn && onStage && target.role === "guest" && (stage.includes(target.userId)
                   ? <Button variant="ghost" className={rowCls} onClick={() => { onStage("remove", target.userId); close(); }} data-testid="action-take-mic"><VolumeXIcon className="h-4 w-4" />Take mic away</Button>
                   : <Button variant="ghost" className={rowCls} onClick={() => { onStage("accept", target.userId); close(); }} data-testid="action-give-mic"><span aria-hidden>🎤</span>Give speaking rights</Button>)}

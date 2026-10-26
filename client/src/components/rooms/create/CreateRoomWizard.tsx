@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { useAgeReview } from "@/hooks/useAgeReview";
 import { useQuery } from "@tanstack/react-query";
+import type { RoomDefaults } from "@shared/rooms";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { DialogOverlay, DialogPortal } from "@/components/ui/dialog";
 import {
@@ -61,6 +62,8 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
   const { data: myEvents = [] } = useQuery<{ id: string; title: string }[]>({ queryKey: ["/api/events/my-events"], enabled: open });
   const { data: myVenues = [] } = useQuery<{ id: string; name: string }[]>({ queryKey: ["/api/my-venues"], enabled: open });
 
+  const { data: saved } = useQuery<{ roomDefaults: RoomDefaults }>({ queryKey: ["/api/users/me/room-defaults"], enabled: open });
+  const mine = saved?.roomDefaults;
   const [state, setState] = useState<WizardState>(() => defaultWizardState(defaults));
   const [linkChoice, setLinkChoiceRaw] = useState(() => linkChoiceOf(link));
   const [direct, setDirectRaw] = useState(true);
@@ -91,10 +94,15 @@ export default function CreateRoomWizard({ open, onOpenChange, defaults, link, r
   // the host effect below only runs when the host changes, so it would leave a default public pick in place.
   useEffect(() => {
     if (!open) return;
-    const fresh = defaultWizardState(defaults);
+    const fresh = defaultWizardState({ ...mine, ...defaults });
     setState(host ? fit(fresh) : fresh); setLinkChoiceRaw(linkChoiceOf(link)); setDirectRaw(true); setScreenUrlRaw(""); setTicketRaw(defaultTicketDraft());
     setStepIdx(0); setError(null); setSubmitError(null); setBusy(false); setDone(null); setTouched(false); setConfirmClose(false); setFocusReq(null);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Saved defaults that arrive after the form opened apply until the host has touched anything.
+  useEffect(() => {
+    if (mine && !touched) setState((s) => fit({ ...s, ...mine, ...defaults }));
+  }, [mine]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Once we know who is hosting, force a legal combination (no age limit above the host, teen: no public, new account: no
   // public). Not on every keystroke: normalizeWizard also clamps capacity, which would fight someone typing "15".

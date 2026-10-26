@@ -21,6 +21,9 @@ import RoomFrame from "@/components/rooms/shell/RoomFrame";
 import RoomTopBar from "@/components/rooms/shell/RoomTopBar";
 import RoomDock from "@/components/rooms/shell/RoomDock";
 import PeopleSheet from "@/components/rooms/shell/PeopleSheet";
+import { HostRequestCard, ViewerAskCard } from "@/components/rooms/shell/StageRequests";
+import { readSettings } from "@/lib/hostControls";
+import QuickControlsSheet from "@/components/rooms/shell/QuickControlsSheet";
 import RoomMoreSheet, { RoomReportSheet, RoomSafetySheet } from "@/components/rooms/shell/RoomMoreSheet";
 import ImmersiveRail from "@/components/rooms/shell/ImmersiveRail";
 import { ChatLog } from "@/components/rooms/chat/ChatLog";
@@ -147,6 +150,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
   const [reportOpen, setReportOpen] = useState(false);
   const [controlsOpen, setControlsOpen] = useState(startControlsOpen);
   const [liveControlsOpen, setLiveControlsOpen] = useState(false);
+  const [quickOpen, setQuickOpen] = useState(false);
   // Opening a sheet from another sheet: wait for the first one's close animation so focus return doesn't fight the new trap.
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   useEffect(() => () => { timers.current.forEach(clearTimeout); }, []);
@@ -495,6 +499,17 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
       <SprayEffects sprays={state.sprays} nameOf={nameOf} quiet={quiet} serverOffsetMs={state.serverOffsetMs} videoActive={videoActive}
         selfId={meId} onThank={!muted && !listenOnly ? (text) => { sock.chat(text); } : undefined} maxNotes={gameOn ? GAME_MAX_NOTES : undefined} />
       <HypeBurst burst={hype.burst} layout={layout} />
+      {isCoHostOrHost && state.phase === "live" && (
+        <HostRequestCard
+          members={state.members} hands={state.hands} asks={state.asks} liveVideo={state.liveVideo}
+          onAccept={(i) => (i.kind === "hand" ? sock.stageAction("accept", i.userId) : sock.liveAction("grant", i.userId))}
+          onDecline={(i) => (i.kind === "hand" ? sock.stageAction("remove", i.userId) : true)}
+          onUndo={(uid) => sock.stageAction("remove", uid)}
+        />
+      )}
+      {role === "guest" && !listenOnly && (
+        <ViewerAskCard hasHand={!!meId && state.hands.includes(meId)} spot={meId ? state.hands.indexOf(meId) + 1 : 0} onStage={onStageNow} onCancel={() => sock.stageAction("lower")} />
+      )}
       <div role="status" aria-live="polite" className={`pointer-events-none absolute top-[calc(68px+env(safe-area-inset-top,0px))] z-[13] w-max -translate-x-1/2 ${layout === "rail" ? "left-[calc((100%-360px)/2)] max-w-[calc((100%-360px)*0.9)]" : "left-1/2 max-w-[90%]"}`} data-testid="room-status-line">
         {line && <p className="rounded-full bg-foreground px-4 py-2 text-center text-sm font-medium text-background shadow-lg">{line}</p>}
       </div>
@@ -510,6 +525,8 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
           isHolder={isHolder}
           action={rail}
           onAction={rail?.kind === "stop" ? stopLive : rail?.kind === "ask" ? askLive : withdrawLive}
+          onOptions={() => (isCoHostOrHost ? setQuickOpen(true) : setMoreOpen(true))}
+          waiting={isCoHostOrHost ? state.hands.length + (state.liveVideo ? state.asks.length : 0) : 0}
         />
       )}
     </>
@@ -565,6 +582,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
         onReport={() => after(() => setReportOpen(true))}
         onLeave={onLeave}
         onControls={isCoHostOrHost ? () => { setControlsFrom("more"); after(() => setControlsOpen(true)); } : undefined}
+        onAsk={role === "guest" && !listenOnly && state.voiceEnabled && !onStageNow && !(meId && state.hands.includes(meId)) ? () => { sock.stageAction("raise"); toast({ title: "Request sent" }); } : undefined}
       />
       <MediaIssueSheet
         issue={mediaKey && mediaKey !== mediaDismissed ? mediaIssue : null}
@@ -574,6 +592,17 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
       />
       <RoomSafetySheet open={safetyOpen} onOpenChange={setSafetyOpen} ageLimit={room.ageLimit} ageLabel={ageLabel} returnFocusTo={() => byTestId("room-more")} />
       <RoomReportSheet open={reportOpen} onOpenChange={setReportOpen} roomId={id} inviteToken={token} returnFocusTo={() => byTestId("room-more")} />
+      {isCoHostOrHost && (
+        <QuickControlsSheet
+          open={quickOpen} onOpenChange={setQuickOpen} isHost={isHost}
+          settings={readSettings(state.room, room as unknown as Record<string, unknown>)} onSave={(patch) => sock.saveSettings(patch)}
+          mic={!listenOnly && voiceUp && voice.canPublish ? { on: voice.micOn, onToggle: () => void voice.toggleMic() } : undefined}
+          coHosts={state.members.filter((m) => m.role === "cohost").length}
+          waiting={state.hands.length + (state.liveVideo ? state.asks.length : 0)}
+          onAddCoHost={() => setPeopleOpen(true)} onAll={() => { setControlsFrom(null); setControlsOpen(true); }}
+          onMessage={(title) => toast({ title })}
+        />
+      )}
       {isCoHostOrHost && (
         <ControlsSheet
           open={controlsOpen} onOpenChange={setControlsOpen}
@@ -599,6 +628,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
         onInteract={sock.interact} onMod={sock.mod}
         locallyMuted={!!picked && hidden.has(picked.userId)} onToggleLocalMute={toggleHidden}
         voiceOn={state.voiceEnabled} stage={state.stage} onStage={(action, target) => sock.stageAction(action, target)}
+        onRole={role === "host" ? async (uid, to) => { const err = await sock.setRole(uid, to); toast({ title: err === null ? (to === "cohost" ? "Made a co-host" : "Made a guest") : "Couldn't change their role. Try again." }); } : undefined}
         returnFocusTo={() => byTestId(returnFocusTestId(actionsFrom))}
         onSpray={picked && sprayBlock && sprayTo.includes(picked.userId) ? () => {
           snd.unlock();

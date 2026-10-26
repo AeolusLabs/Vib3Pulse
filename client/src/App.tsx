@@ -41,6 +41,9 @@ import RoomPayoutsPage from "@/pages/RoomPayoutsPage";
 import RoomPaymentsPage from "@/pages/RoomPaymentsPage";
 import DistressAlertsPage from "@/pages/DistressAlertsPage";
 import AccountSettingsPage from "@/pages/AccountSettingsPage";
+import SettingsPage from "@/pages/SettingsPage";
+import HostingDefaultsPage from "@/pages/HostingDefaultsPage";
+import SpraySettingsPage from "@/pages/SpraySettingsPage";
 import ManageVenuesPage from "@/pages/ManageVenuesPage";
 import OrganizerAnalyticsPage from "@/pages/OrganizerAnalyticsPage";
 import VenueDetailPage from "@/pages/VenueDetailPage";
@@ -281,6 +284,24 @@ function Router() {
         </AuthenticatedLayout>
       </Route>
       
+      <Route path="/settings">
+        <AuthenticatedLayout>
+          <SettingsPage />
+        </AuthenticatedLayout>
+      </Route>
+
+      <Route path="/settings/hosting">
+        <AuthenticatedLayout>
+          <HostingDefaultsPage />
+        </AuthenticatedLayout>
+      </Route>
+
+      <Route path="/settings/spray">
+        <AuthenticatedLayout>
+          <SpraySettingsPage />
+        </AuthenticatedLayout>
+      </Route>
+
       <Route path="/account/settings">
         <AuthenticatedLayout>
           <AccountSettingsPage />
