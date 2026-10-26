@@ -194,6 +194,16 @@ await test("live checks need five checklist items (no codeMatches); needs_more s
   assert.equal(await code(plan({ outcome: "needs_more" }, live)), "WRONG_STATE");
 });
 
+await test("a live check verifies with no document type or number, and records none (no duplicate check)", async () => {
+  const { codeMatches, ...five } = full as Record<string, boolean>;
+  const live = { req: { method: "live", document_type: null }, dup: true };
+  const p = await plan({ outcome: "verify", checklist: five, idBirthdate: REG }, live);
+  assert.equal(p.finalStatus, "approved");
+  assert.equal(p.fingerprint, null);
+  assert.equal(p.documentType, null);
+  assert.equal(await code(plan({ outcome: "verify", checklist: full, idBirthdate: REG }, { req: { method: "upload", document_type: null } })), "BAD_REQUEST", "upload still needs the document");
+});
+
 await test("not_eligible_minor needs an ID that matches the registered birthdate and is under 18", async () => {
   const minor = { req: { registered_dob_snapshot: "2012-01-01" } };
   assert.equal(await code(plan({ outcome: "not_eligible_minor" }, minor)), "BAD_REQUEST");

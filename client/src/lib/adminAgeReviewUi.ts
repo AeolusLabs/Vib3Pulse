@@ -58,7 +58,9 @@ export const DOC_TYPE_LABEL: Record<(typeof DOC_TYPES)[number], string> = { pass
 /** Outcomes that read the document: they need its type. teen_correction does not (the server only uses the ID birthdate). */
 const ID_OUTCOMES: Outcome[] = ["verify", "birthdate_change"];
 /** verify and birthdate_change both fingerprint the document number, so they share the full checklist and the duplicate check. */
-export const needsDocumentNumber = (o: Outcome | null): boolean => o === "verify" || o === "birthdate_change";
+export const isIdOutcome = (o: Outcome | null): boolean => o === "verify" || o === "birthdate_change";
+/** A live check has no uploaded document, so it asks for no document type or number (the reviewer sees the ID on camera). */
+export const needsDocumentNumber = (o: Outcome | null, method: ReviewMethod = "upload"): boolean => method !== "live" && isIdOutcome(o);
 
 export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 export const isIsoDate = (s: string): boolean => {
@@ -105,12 +107,12 @@ export const LEGAL_NAME_HINT = "Letters, spaces, hyphens, apostrophes and dots, 
 /** Shown under the field once something is typed and it is not usable yet. */
 export const legalNameProblem = (raw: string): string | null => (raw.trim() === "" || legalNameValid(raw) ? null : LEGAL_NAME_HINT);
 export function decisionReady(f: DecisionForm, method: ReviewMethod = "upload", wantsPayouts = false): boolean {
-  if (wantsPayouts && needsDocumentNumber(f.outcome) && !legalNameValid(f.legalName)) return false;
-  if (f.outcome && ID_OUTCOMES.includes(f.outcome) && !(DOC_TYPES as readonly string[]).includes(f.documentType)) return false;
+  if (wantsPayouts && isIdOutcome(f.outcome) && !legalNameValid(f.legalName)) return false;
+  if (needsDocumentNumber(f.outcome, method) && !(DOC_TYPES as readonly string[]).includes(f.documentType)) return false;
   if (f.outcome === "needs_more" && method === "live") return false;
   switch (f.outcome) {
     case "verify":
-    case "birthdate_change": return checklistComplete(f.checklist, method) && isIsoDate(f.idBirthdate) && f.documentNumber.trim().length >= 3;
+    case "birthdate_change": return checklistComplete(f.checklist, method) && isIsoDate(f.idBirthdate) && (method === "live" || f.documentNumber.trim().length >= 3);
     case "teen_correction": return isIsoDate(f.idBirthdate);
     case "decline": return (DECLINE_REASONS as readonly string[]).includes(f.declineReason);
     case "needs_more":
@@ -119,16 +121,17 @@ export function decisionReady(f: DecisionForm, method: ReviewMethod = "upload", 
   }
 }
 
-export function decisionBody(f: DecisionForm, opts: { overrideAllowed: boolean; wantsPayouts?: boolean }): Record<string, unknown> {
+export function decisionBody(f: DecisionForm, opts: { overrideAllowed: boolean; wantsPayouts?: boolean; method?: ReviewMethod }): Record<string, unknown> {
+  const method = opts.method ?? "upload";
   const body: Record<string, unknown> = { outcome: f.outcome, checklist: f.checklist };
   if (f.outcome === "teen_correction") body.idBirthdate = f.idBirthdate;
-  if (f.outcome && ID_OUTCOMES.includes(f.outcome)) { body.idBirthdate = f.idBirthdate; body.documentType = f.documentType; }
-  if (needsDocumentNumber(f.outcome)) body.documentNumber = f.documentNumber.trim();
+  if (f.outcome && ID_OUTCOMES.includes(f.outcome)) { body.idBirthdate = f.idBirthdate; if (method !== "live") body.documentType = f.documentType; }
+  if (needsDocumentNumber(f.outcome, method)) body.documentNumber = f.documentNumber.trim();
   // Only for a request that asked for payouts; otherwise the server answers NAME_NOT_REQUESTED.
-  if (opts.wantsPayouts === true && needsDocumentNumber(f.outcome)) body.legalName = normaliseLegalName(f.legalName) ?? f.legalName.trim();
+  if (opts.wantsPayouts === true && isIdOutcome(f.outcome)) body.legalName = normaliseLegalName(f.legalName) ?? f.legalName.trim();
   if (f.outcome === "decline") body.declineReason = f.declineReason;
   if (f.note.trim()) body.note = f.note.trim();
-  if (needsDocumentNumber(f.outcome) && opts.overrideAllowed && f.overrideReason.trim().length >= 3) body.overrideDuplicate = { reason: f.overrideReason.trim() };
+  if (needsDocumentNumber(f.outcome, method) && opts.overrideAllowed && f.overrideReason.trim().length >= 3) body.overrideDuplicate = { reason: f.overrideReason.trim() };
   return body;
 }
 

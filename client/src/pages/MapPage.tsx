@@ -18,15 +18,15 @@ import { buildingSvg } from "@shared/avatar-render/building";
 import { resolveBuilding, type BuildingConfig } from "@shared/building";
 import type { AvatarConfig } from "@shared/avatar";
 import BottomNavigation from "@/components/BottomNavigation";
-import { Building2Icon, CalendarIcon, EyeIcon, EyeOffIcon, Navigation2Icon, SearchIcon, XIcon } from "@/components/ui/icons";
+import { Building2Icon, CalendarIcon, EyeIcon, EyeOffIcon, Navigation2Icon, SearchIcon, ShieldIcon, XIcon } from "@/components/ui/icons";
 
-interface MapFriend { id: string; username: string; displayName: string | null; avatarUrl: string | null; avatar?: AvatarConfig | null; latitude: number; longitude: number; updatedAt: string }
+interface MapFriend { id: string; username: string; displayName: string | null; avatarUrl: string | null; avatar?: AvatarConfig | null; latitude: number; longitude: number; updatedAt: string; /** A confirmed safety buddy who chose to share with buddies (set client-side). */ buddy?: boolean }
 interface Going { id: string; displayName: string | null; username: string; avatarUrl: string | null }
 interface MapEvent { friendsGoing?: { count: number; sample: Going[] }; id: string; title: string; eventDate: string; eventEndDate: string | null; latitude: number; longitude: number; imageUrl: string | null; location: string; category: string; ticketPrice: number; currency: string; building?: BuildingConfig | null; isPromoted?: boolean }
 interface MapVenue { id: string; name: string; category: string; imageUrl: string | null; address: string | null; latitude: number; longitude: number; building?: BuildingConfig | null; isVerified?: boolean; isPromoted?: boolean }
 interface Audience { audience: "friends" | "selected"; viewerIds: string[]; friends: { id: string; username: string; displayName: string | null; avatarUrl: string | null }[] }
 interface SearchResults { events?: any[]; venues?: any[] }
-interface Nearby { friends: MapFriend[]; events: MapEvent[]; venues: MapVenue[] }
+interface Nearby { friends: MapFriend[]; buddies?: MapFriend[]; events: MapEvent[]; venues: MapVenue[] }
 
 type Filter = "all" | "friends" | "tonight" | "venues";
 type Selected = { type: "friend"; item: MapFriend } | { type: "event"; item: MapEvent } | { type: "venue"; item: MapVenue } | null;
@@ -66,6 +66,8 @@ const fmtDist = (d: number) => (d < 1 ? `${Math.max(50, Math.round(d * 10) * 100
 const friendName = (f: MapFriend) => f.displayName || f.username;
 
 const SHADOW = "box-shadow:0 4px 12px rgba(0,0,0,.45)";
+// A safety buddy's pin carries a small shield so it never reads as a mutual follower.
+const BUDDY_BADGE = `<span style="position:absolute;right:-4px;top:-4px;width:18px;height:18px;border-radius:50%;background:#f7f7f7;display:grid;place-items:center;box-shadow:0 1px 3px rgba(0,0,0,.5)"><svg width="11" height="11" viewBox="0 0 24 24" fill="#141414" aria-hidden="true"><path d="M12 2l8 3v6c0 5-3.4 9.3-8 11-4.6-1.7-8-6-8-11V5z"/></svg></span>`;
 function friendIcon(f: MapFriend, selected: boolean) {
   // A friend with an avatar is a pin badge (tail points at the spot); otherwise photo, then initial.
   const pin = avatarPinSvg(f.avatar);
@@ -74,7 +76,7 @@ function friendIcon(f: MapFriend, selected: boolean) {
     return L.divIcon({
       className: "vp-pin",
       iconSize: [0, 0],
-      html: `<div title="${esc(friendName(f))}" style="transform:translate(-50%,-100%);width:${selected ? 52 : 44}px;filter:${glow}">${pin}</div>`,
+      html: `<div title="${esc(friendName(f))}" style="position:relative;transform:translate(-50%,-100%);width:${selected ? 52 : 44}px;filter:${glow}">${pin}${f.buddy ? BUDDY_BADGE : ""}</div>`,
     });
   }
   const ring = selected ? "#fff" : "#9B6FEF";
@@ -84,7 +86,7 @@ function friendIcon(f: MapFriend, selected: boolean) {
   return L.divIcon({
     className: "vp-pin",
     iconSize: [0, 0],
-    html: `<div style="transform:translate(-50%,-50%);width:40px;height:40px;border-radius:50%;display:grid;place-items:center;background:#5b3aa8;color:#fff;font:600 15px Jost,sans-serif;border:2.5px solid ${ring};${SHADOW};overflow:hidden">${inner}</div>`,
+    html: `<div style="position:relative;transform:translate(-50%,-50%);width:40px;height:40px"><div style="width:100%;height:100%;border-radius:50%;display:grid;place-items:center;background:#5b3aa8;color:#fff;font:600 15px Jost,sans-serif;border:2.5px solid ${ring};${SHADOW};overflow:hidden">${inner}</div>${f.buddy ? BUDDY_BADGE : ""}</div>`,
   });
 }
 function eventIcon(e: MapEvent, selected: boolean) {
@@ -240,9 +242,21 @@ export default function MapPage() {
   const { data } = useQuery<Nearby>({ queryKey: [nearbyUrl], enabled: !!center, refetchInterval: 60_000 });
   // Every friend sharing with me (not only the 5 km box): feeds the pins, the strip and the friend search.
   const { data: friendsData } = useQuery<{ friends: MapFriend[] }>({ queryKey: ["/api/map/friends"], refetchInterval: 60_000 });
-  const allFriends = friendsData?.friends ?? data?.friends ?? [];
-  const { data: me } = useQuery<{ sharing: boolean }>({ queryKey: ["/api/map/me"] });
+  // Safety buddies sharing with me: their own row in the tray and a shield on their pin. A buddy who is also a mutual follow shows once, as a buddy.
+  const { data: buddiesData } = useQuery<{ buddies: MapFriend[] }>({ queryKey: ["/api/map/buddies"], refetchInterval: 60_000 });
+  const buddyList = useMemo(() => (buddiesData?.buddies ?? data?.buddies ?? []).map((b) => ({ ...b, buddy: true })), [buddiesData, data]);
+  const mutualList = useMemo(() => {
+    const buddyIds = new Set(buddyList.map((b) => b.id));
+    return (friendsData?.friends ?? data?.friends ?? []).filter((f) => !buddyIds.has(f.id));
+  }, [friendsData, data, buddyList]);
+  const allFriends = useMemo(() => [...buddyList, ...mutualList], [buddyList, mutualList]);
+  const { data: me } = useQuery<{ sharing: boolean; shareWithBuddies?: boolean }>({ queryKey: ["/api/map/me"] });
   const sharing = !!me?.sharing;
+  const saveBuddySharing = useMutation({
+    mutationFn: (enabled: boolean) => apiRequest("PUT", "/api/map/buddy-sharing", { enabled }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/map/me"] }),
+    onError: () => toast({ title: "Couldn't save that", variant: "destructive" }),
+  });
 
   const { data: aud } = useQuery<Audience>({ queryKey: ["/api/map/audience"], enabled: panel });
   const saveAudience = useMutation({
@@ -471,7 +485,8 @@ export default function MapPage() {
   useEffect(() => {
     if (friendsData && selected?.type === "friend" && !allFriends.some((f) => f.id === selected.item.id)) setSelected(null);
   }, [friendsData, allFriends, selected]);
-  const stripFriends = useMemo(() => sortFriendsForStrip(allFriends, located ? center : null), [allFriends, center, located]);
+  const stripFriends = useMemo(() => sortFriendsForStrip(mutualList, located ? center : null), [mutualList, center, located]);
+  const stripBuddies = useMemo(() => sortFriendsForStrip(buddyList, located ? center : null), [buddyList, center, located]);
   useEffect(() => { if (selected) setSnap((v) => Math.max(v, 1)); }, [selected]);
   const focus = (s: Selected, lat: number, lng: number) => { setSelected(s); mapRef.current?.flyTo([lat, lng], Math.max(mapRef.current.getZoom(), 15), { duration: 0.6 }); };
 
@@ -584,6 +599,18 @@ export default function MapPage() {
                 {sharing ? "Stop sharing" : "Share with friends"}
               </Button>
 
+              <label className="flex min-h-[44px] cursor-pointer items-start gap-3 border-t pt-3" data-testid="map-buddy-sharing">
+                <input
+                  type="checkbox" className="mt-0.5 h-5 w-5 shrink-0 accent-primary"
+                  checked={me?.shareWithBuddies === true} disabled={saveBuddySharing.isPending}
+                  onChange={(e) => saveBuddySharing.mutate(e.target.checked)}
+                />
+                <span>
+                  <span className="block text-xs font-medium">Safety buddies can see me</span>
+                  <span className="block text-xs text-muted-foreground">Your confirmed safety buddies with an account see you on their map while you share, even if you don't follow each other.</span>
+                </span>
+              </label>
+
               <div className="space-y-2 border-t pt-3" data-testid="map-audience">
                 <p className="text-xs font-medium">Who can see you</p>
                 <div className="grid grid-cols-2 gap-1 rounded-full border p-0.5 text-xs font-medium">
@@ -673,6 +700,7 @@ export default function MapPage() {
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4 md:pt-3">
             <FriendsStrip
               innerRef={stripRef}
+              buddies={stripBuddies}
               friends={stripFriends}
               me={authUser ?? undefined}
               selectedId={selected?.type === "friend" ? selected.item.id : null}
@@ -708,34 +736,50 @@ export default function MapPage() {
   );
 }
 
-/** Friends who share their position with me, as round avatars: tap one to fly the map to them, wherever they are. */
-function FriendsStrip({ friends, me, selectedId, onPick, onMe, innerRef }: {
+/** Safety buddies and mutual followers who share their position with me, as round avatars: tap one to fly the map to them, wherever they are. */
+function FriendsStrip({ buddies, friends, me, selectedId, onPick, onMe, innerRef }: {
   innerRef?: React.Ref<HTMLDivElement>;
+  buddies: MapFriend[];
   friends: MapFriend[];
   me: { avatar?: unknown; avatarUrl?: string | null; displayName?: string | null; organizationName?: string | null; username?: string | null } | undefined;
   selectedId: string | null;
   onPick: (f: MapFriend) => void;
   onMe: () => void;
 }) {
+  const chip = "flex min-h-[44px] w-16 flex-col items-center gap-1 rounded-xl py-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary";
+  const label = "mb-1 text-[0.65rem] font-medium uppercase tracking-[0.2em] text-muted-foreground";
+  const person = (f: MapFriend) => (
+    <li key={f.id} className="shrink-0">
+      <button onClick={() => onPick(f)} className={chip} aria-label={`Show ${friendName(f)} on the map`} aria-current={selectedId === f.id ? "true" : undefined} data-testid={`map-strip-${f.id}`}>
+        <span className="relative">
+          <HostAvatar person={f} className={`h-12 w-12 rounded-full bg-primary/10 ring-2 ${selectedId === f.id ? "ring-primary" : "ring-border"}`} />
+          {f.buddy && <span className="absolute -bottom-1 -right-1 grid h-[18px] w-[18px] place-items-center rounded-full bg-foreground text-background" aria-hidden="true"><ShieldIcon size={11} /></span>}
+        </span>
+        <span className="w-full truncate text-center text-[0.7rem]">{firstName(friendName(f))}</span>
+      </button>
+    </li>
+  );
   return (
-    <div ref={innerRef} className="mb-3" data-testid="map-friends-strip">
-      <ul className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none]" aria-label="Friends sharing their location with you">
-        <li className="shrink-0">
-          <button onClick={onMe} className="flex min-h-[44px] w-16 flex-col items-center gap-1 rounded-xl py-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" aria-label="Centre the map on me" data-testid="map-strip-me">
-            <HostAvatar person={me ?? {}} className="h-12 w-12 rounded-full bg-primary/10 ring-2 ring-border" />
-            <span className="w-full truncate text-center text-[0.7rem] text-muted-foreground">You</span>
-          </button>
-        </li>
-        {friends.map((f) => (
-          <li key={f.id} className="shrink-0">
-            <button onClick={() => onPick(f)} className="flex min-h-[44px] w-16 flex-col items-center gap-1 rounded-xl py-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" aria-label={`Show ${friendName(f)} on the map`} aria-current={selectedId === f.id ? "true" : undefined} data-testid={`map-strip-${f.id}`}>
-              <HostAvatar person={f} className={`h-12 w-12 rounded-full bg-primary/10 ring-2 ${selectedId === f.id ? "ring-primary" : "ring-border"}`} />
-              <span className="w-full truncate text-center text-[0.7rem]">{firstName(friendName(f))}</span>
+    <div ref={innerRef} className="mb-3 space-y-2" data-testid="map-friends-strip">
+      <section data-testid="map-buddies-row">
+        <h2 className={label}>Safety buddies</h2>
+        {buddies.length > 0
+          ? <ul className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none]" aria-label="Safety buddies sharing their location with you">{buddies.map(person)}</ul>
+          : <p className="text-xs text-muted-foreground" data-testid="map-buddies-empty">Safety buddies who share with you will show up here.</p>}
+      </section>
+      <section data-testid="map-mutuals-row">
+        <h2 className={label}>Mutual followers</h2>
+        <ul className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none]" aria-label="Mutual followers sharing their location with you">
+          <li className="shrink-0">
+            <button onClick={onMe} className={chip} aria-label="Centre the map on me" data-testid="map-strip-me">
+              <HostAvatar person={me ?? {}} className="h-12 w-12 rounded-full bg-primary/10 ring-2 ring-border" />
+              <span className="w-full truncate text-center text-[0.7rem] text-muted-foreground">You</span>
             </button>
           </li>
-        ))}
-      </ul>
-      {friends.length === 0 && <p className="text-xs text-muted-foreground" data-testid="map-strip-empty">Friends who share their location with you will show up here.</p>}
+          {friends.map(person)}
+        </ul>
+        {friends.length === 0 && <p className="text-xs text-muted-foreground" data-testid="map-strip-empty">Mutual followers who share their location with you will show up here.</p>}
+      </section>
     </div>
   );
 }
@@ -744,7 +788,7 @@ function titleOf(s: NonNullable<Selected>) {
   return s.type === "friend" ? friendName(s.item) : s.type === "event" ? s.item.title : s.item.name;
 }
 function subOf(s: NonNullable<Selected>) {
-  if (s.type === "friend") return "Friend · out now";
+  if (s.type === "friend") return s.item.buddy ? "Safety buddy · out now" : "Friend · out now";
   if (s.type === "event") return `${eventWhen(s.item)} · ${s.item.location}`;
   return s.item.address || s.item.category;
 }

@@ -142,5 +142,26 @@ test("stepSnap (keyboard): arrows move one position, never out of range", () => 
   assert.equal(stepSnap(0, -1, 2), 0);
 });
 
+// ---------------------------------------------------------------- safety buddies on the map (source guards, no database)
+import { readFileSync } from "node:fs";
+const mapRoutes = readFileSync("server/routes/map-routes.ts", "utf8");
+test("buddies are opt-in: off by default in the schema and the migration", () => {
+  assert.match(readFileSync("shared/schema.ts", "utf8"), /share_with_buddies"\)\.notNull\(\)\.default\(false\)/);
+  assert.match(readFileSync("migrations/add_map_buddy_sharing.sql", "utf8"), /share_with_buddies boolean NOT NULL DEFAULT false/);
+});
+test("a buddy is only served when confirmed, an app user, unblocked, fresh and opted in", () => {
+  assert.match(mapRoutes, /confirmationStatus, "confirmed"/);
+  assert.match(mapRoutes, /isNotNull\(safetyBuddies\.buddyUserId\)/);
+  assert.match(mapRoutes, /blockedWith\(meId\)/);
+  assert.match(mapRoutes, /eq\(mapSharingPrefs\.shareWithBuddies, true\)/);
+  assert.match(mapRoutes, /buddiesSharingWithMe[\s\S]*?fresh\(\)/);
+});
+test("map tray splits safety buddies from mutual followers, each row labelled and tappable", () => {
+  const page = readFileSync("client/src/pages/MapPage.tsx", "utf8");
+  assert.ok(page.includes("Safety buddies") && page.includes("Mutual followers"));
+  assert.ok(page.includes('data-testid="map-buddies-row"') && page.includes('data-testid="map-mutuals-row"'));
+  assert.match(page, /onPick=\{\(f\) => focus\(/);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

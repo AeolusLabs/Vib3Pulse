@@ -5,7 +5,7 @@ import { and, eq, gte, lte, lt, gt, or, isNull, isNotNull, sql, inArray, type SQ
 import { db } from "../storage";
 import { requireAuth } from "../middleware";
 import { blockedWith } from "../utils/blocks";
-import { events, venues, users, follows, userLocations, tickets, rsvps, mapSharingPrefs, mapAllowedViewers } from "@shared/schema";
+import { events, venues, users, follows, userLocations, tickets, rsvps, mapSharingPrefs, mapAllowedViewers, safetyBuddies } from "@shared/schema";
 
 const STALE_MINUTES = 30;
 const MAX_RADIUS_KM = 25;
@@ -23,6 +23,25 @@ async function friendIdsOf(meId: string): Promise<string[]> {
     blockedWith(meId),
   ]);
   return mutual.map((r) => r.id).filter((id) => !blocked.has(id));
+}
+
+// Confirmed safety buddies who have an account, in either direction (I named them, or they named me), minus blocks and
+// deleted accounts. Phone-only buddies have no account and never appear. Seeing someone still needs THEIR opt-in.
+export async function buddyIdsOf(meId: string): Promise<string[]> {
+  const [rows, blocked] = await Promise.all([
+    db.select({ userId: safetyBuddies.userId, buddyUserId: safetyBuddies.buddyUserId }).from(safetyBuddies).where(and(
+      eq(safetyBuddies.confirmationStatus, "confirmed"),
+      isNotNull(safetyBuddies.buddyUserId),
+      or(eq(safetyBuddies.userId, meId), eq(safetyBuddies.buddyUserId, meId)),
+    )),
+    blockedWith(meId),
+  ]);
+  const ids = new Set<string>();
+  for (const r of rows) {
+    const other = r.userId === meId ? r.buddyUserId : r.userId;
+    if (other && other !== meId && !blocked.has(other)) ids.add(other);
+  }
+  return Array.from(ids);
 }
 
 export function registerMapRoutes(app: Express): void {
@@ -47,12 +66,23 @@ export function registerMapRoutes(app: Express): void {
       ),
     )) : Promise.resolve([] as never[]);
 
+  // Buddies who opted in to be seen by their safety buddies and have a fresh position. No audience list: the opt-in is the consent.
+  const buddiesSharingWithMe = (buddyIds: string[], within?: SQL) => buddyIds.length ? db.select({
+    id: users.id, username: users.username, displayName: users.displayName, avatarUrl: users.avatarUrl, avatar: users.avatar,
+    latitude: userLocations.latitude, longitude: userLocations.longitude, updatedAt: userLocations.updatedAt,
+  }).from(userLocations)
+    .innerJoin(users, eq(users.id, userLocations.userId))
+    .innerJoin(mapSharingPrefs, eq(mapSharingPrefs.userId, userLocations.userId))
+    .where(and(inArray(userLocations.userId, buddyIds), isNull(users.deletedAt), fresh(), within, eq(mapSharingPrefs.shareWithBuddies, true)))
+    : Promise.resolve([] as never[]);
+
   // Is the current user sharing right now?
   app.get("/api/map/me", requireAuth, async (req, res) => {
     try {
       const [row] = await db.select({ updatedAt: userLocations.updatedAt }).from(userLocations)
         .where(and(eq(userLocations.userId, req.user!.id), fresh()));
-      res.json({ sharing: !!row });
+      const [prefs] = await db.select({ shareWithBuddies: mapSharingPrefs.shareWithBuddies }).from(mapSharingPrefs).where(eq(mapSharingPrefs.userId, req.user!.id));
+      res.json({ sharing: !!row, shareWithBuddies: prefs?.shareWithBuddies === true });
     } catch (error) {
       console.error("Map me error:", error);
       res.status(500).json({ message: "Failed to load sharing status" });
@@ -85,6 +115,33 @@ export function registerMapRoutes(app: Express): void {
     } catch (error) {
       console.error("Map stop sharing error:", error);
       res.status(500).json({ message: "Failed to stop sharing" });
+    }
+  });
+
+  // Let my confirmed safety buddies see my position on the map (off until I turn it on).
+  app.put("/api/map/buddy-sharing", requireAuth, async (req, res) => {
+    try {
+      const body = z.object({ enabled: z.boolean() }).parse(req.body);
+      const meId = req.user!.id;
+      await db.insert(mapSharingPrefs).values({ userId: meId, shareWithBuddies: body.enabled })
+        .onConflictDoUpdate({ target: mapSharingPrefs.userId, set: { shareWithBuddies: body.enabled } });
+      res.json({ shareWithBuddies: body.enabled });
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Invalid sharing settings" });
+      console.error("Map buddy sharing error:", error);
+      res.status(500).json({ message: "Failed to save sharing settings" });
+    }
+  });
+
+  // Safety buddies sharing with me right now, however far away: feeds the buddies row on the map tray.
+  app.get("/api/map/buddies", requireAuth, async (req, res) => {
+    try {
+      const buddies = await buddiesSharingWithMe(await buddyIdsOf(req.user!.id));
+      buddies.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+      res.json({ buddies: buddies.slice(0, 50) });
+    } catch (error) {
+      console.error("Map buddies error:", error);
+      res.status(500).json({ message: "Failed to load safety buddies" });
     }
   });
 
@@ -172,7 +229,7 @@ export function registerMapRoutes(app: Express): void {
 
       const friendIds = await friendIdsOf(meId);
 
-      const [friends, nearEvents, nearVenues] = await Promise.all([
+      const [friends, nearEvents, nearVenues, buddiesNear] = await Promise.all([
         friendsSharingWithMe(meId, friendIds, box(userLocations.latitude, userLocations.longitude)),
 
         db.select({
@@ -194,7 +251,12 @@ export function registerMapRoutes(app: Express): void {
           address: venues.address, latitude: venues.latitude, longitude: venues.longitude,
           building: venues.building, isVerified: venues.isVerified, isPromoted: venues.isPromoted,
         }).from(venues).where(box(venues.latitude, venues.longitude)).limit(60),
+
+        buddyIdsOf(meId).then((ids) => buddiesSharingWithMe(ids, box(userLocations.latitude, userLocations.longitude))),
       ]);
+      // One pin per person: a buddy who is also a mutual friend already has a friend pin.
+      const friendPinned = new Set(friends.map((f) => f.id));
+      const buddies = buddiesNear.filter((b) => !friendPinned.has(b.id));
 
       // Mutual friends holding a confirmed ticket or RSVP for each event.
       type Going = { id: string; displayName: string | null; username: string; avatarUrl: string | null };
@@ -218,6 +280,7 @@ export function registerMapRoutes(app: Express): void {
 
       res.json({
         friends,
+        buddies,
         events: nearEvents.map((e) => {
           const g = Array.from(going.get(e.id)?.values() ?? []);
           return { ...e, friendsGoing: { count: g.length, sample: g.slice(0, 3) } };

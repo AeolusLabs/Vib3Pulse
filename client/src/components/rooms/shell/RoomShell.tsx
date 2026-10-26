@@ -544,7 +544,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
           live={state.liveVideo}
           top={top}
           zone={zone}
-          chat={<ChatLog chat={state.chat} nameOf={nameOf} selfId={meId} hidden={hidden} immersive={immersive} onReply={onReply} onHeart={onHeart} onWave={onWave} onPickAuthor={onPickAuthor} />}
+          chat={<ChatLog chat={state.chat} nameOf={nameOf} selfId={meId} hidden={hidden} immersive={immersive} serverOffsetMs={state.serverOffsetMs} onReply={onReply} onHeart={onHeart} onWave={onWave} onPickAuthor={onPickAuthor} />}
           dock={dock}
           floating={floating}
         />

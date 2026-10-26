@@ -44,6 +44,17 @@ test("role visibility: age_reviewer sees only the age reviews page", () => {
   assert.ok(/value="age_reviewer"/.test(staff) && /age_reviewer: "Age reviewer"/.test(staff));
 });
 
+test("live verify needs no document type or number and sends none", () => {
+  const { codeMatches, ...five } = allTicked() as Record<string, boolean>;
+  const f = form({ checklist: five as any, documentNumber: "", documentType: "" });
+  assert.equal(decisionReady(f, "live"), true);
+  assert.equal(decisionReady(f, "upload"), false);
+  const body = decisionBody(f, { overrideAllowed: false, method: "live" });
+  assert.equal("documentNumber" in body, false);
+  assert.equal("documentType" in body, false);
+  assert.equal(body.idBirthdate, f.idBirthdate);
+});
+
 test("verify disabled until all six checks are ticked", () => {
   assert.equal(decisionReady(form()), false);
   for (const k of CHECKLIST_KEYS) {
@@ -158,15 +169,17 @@ test("no image data in query cache (source check)", () => {
   assert.ok(!/queryFn:[^\n]*revealEvidence/.test(all));
 });
 
-test("live verify sends documentType and is gated on it", () => {
-  const live = (o: Partial<DecisionForm> = {}) => form({ checklist: { ...allTicked(), codeMatches: false }, documentType: "", ...o });
-  assert.equal(decisionReady(live(), "live"), false);
-  assert.equal(decisionReady(live({ documentType: "nin_slip" }), "live"), true);
-  assert.equal(decisionReady(live({ documentType: "bogus" }), "live"), false);
-  const body = decisionBody(live({ documentType: "nin_slip" }), { overrideAllowed: false });
-  assert.equal(body.documentType, "nin_slip");
-  assert.equal(body.documentNumber, "A1234567");
-  assert.equal(decisionReady(live({ outcome: "birthdate_change", documentType: "" }), "live"), false);
+test("live verify is not gated on a document; upload still is", () => {
+  const live = (o: Partial<DecisionForm> = {}) => form({ checklist: { ...allTicked(), codeMatches: false }, documentType: "", documentNumber: "", ...o });
+  assert.equal(decisionReady(live(), "live"), true);
+  assert.equal(decisionReady(live({ outcome: "birthdate_change" }), "live"), true);
+  assert.equal(decisionReady(live({ idBirthdate: "" }), "live"), false, "the ID birthdate is still required");
+  const body = decisionBody(live(), { overrideAllowed: false, method: "live" });
+  assert.equal("documentType" in body, false);
+  assert.equal("documentNumber" in body, false);
+  const up = form({ documentType: "", documentNumber: "A1234567" });
+  assert.equal(decisionReady(up, "upload"), false, "an upload review still needs the document type");
+  assert.equal(decisionBody(form({ documentType: "nin_slip" }), { overrideAllowed: false }).documentType, "nin_slip");
   const f = read(`${dir}/DecisionForm.tsx`);
   assert.match(f, /documentType === null &&/);
   assert.match(f, /select-document-type/);
@@ -239,8 +252,10 @@ test("birthdate_change needs the same checks as verify", () => {
     const ticks = method === "live" ? { ...allTicked(), codeMatches: false } : allTicked();
     const base = form({ outcome: "birthdate_change", checklist: ticks });
     assert.equal(decisionReady(base, method), true, method);
-    assert.equal(decisionReady({ ...base, documentNumber: "ab" }, method), false);
-    assert.equal(decisionReady({ ...base, documentType: "" }, method), false);
+    if (method === "upload") {
+      assert.equal(decisionReady({ ...base, documentNumber: "ab" }, method), false);
+      assert.equal(decisionReady({ ...base, documentType: "" }, method), false);
+    }
     assert.equal(decisionReady({ ...base, idBirthdate: "" }, method), false);
     for (const k of requiredChecks(method)) assert.equal(decisionReady({ ...base, checklist: { ...ticks, [k]: false } }, method), false, `${method}/${k}`);
   }
@@ -252,7 +267,8 @@ test("birthdate_change needs the same checks as verify", () => {
   assert.ok(!("overrideDuplicate" in decisionBody(form({ outcome: "birthdate_change", checklist: allTicked(), overrideReason: "same person" }), { overrideAllowed: false })));
   assert.equal(needsDocumentNumber("birthdate_change"), true);
   const f = read(`${dir}/DecisionForm.tsx`);
-  assert.match(f, /needsDocumentNumber\(f\.outcome\) && \(\s*<div className="space-y-2">\s*<Label htmlFor="doc-number"/);
+  assert.equal(needsDocumentNumber("birthdate_change", "live"), false);
+  assert.match(f, /needsDocumentNumber\(f\.outcome, method\) && \(\s*<div className="space-y-2">\s*<Label htmlFor="doc-number"/);
   assert.match(f, /set\(\{ documentNumber: "", legalName: "" \}\)/);
 });
 
