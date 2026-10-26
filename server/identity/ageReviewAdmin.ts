@@ -102,7 +102,10 @@ export async function planDecision(a: {
 
   const checklistFull = () => requiredChecklist(req.method).every((k) => body.checklist?.[k] === true);
   let overrideReason: string | null = null;
-  const fingerprintFor = async (): Promise<{ fp: string; type: string }> => {
+  // A live check shows the ID on camera and the user uploaded no document, so there is no type or number to record and no
+  // duplicate check (upload reviews keep both).
+  const fingerprintFor = async (): Promise<{ fp: string | null; type: string | null }> => {
+    if (req.method === "live") return { fp: null, type: null };
     const type = req.document_type ?? body.documentType ?? null;
     if (!type || !body.documentNumber?.trim()) throw new AgeReviewError(400, "BAD_REQUEST", "The document type and number are required.");
     const fp = documentFingerprint(type, body.documentNumber);

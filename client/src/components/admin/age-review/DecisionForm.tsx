@@ -9,7 +9,7 @@ import { Loader2Icon } from "@/components/ui/icons";
 import { ReviewApiError, decide, errText } from "@/lib/adminAgeReviewApi";
 import {
   CHECKLIST_LABEL, CONFIRM_TEXT, DECLINE_LABEL, DECLINE_REASONS, DOC_TYPES, DOC_TYPE_LABEL, OUTCOME_HELP, OUTCOME_LABEL, canOverrideDuplicate,
-  decisionBody, decisionReady, emptyChecklist, legalNameProblem, needsDocumentNumber, outcomesFor, requiredChecks, type DecisionForm as Form, type Outcome,
+  decisionBody, decisionReady, emptyChecklist, isIdOutcome, legalNameProblem, needsDocumentNumber, outcomesFor, requiredChecks, type DecisionForm as Form, type Outcome,
 } from "@/lib/adminAgeReviewUi";
 
 const FIELD = "min-h-[44px] border-slate-600 bg-slate-700/50 text-white";
@@ -29,7 +29,7 @@ export default function DecisionForm({ requestId, role, registeredDob, method, d
   const send = async () => {
     setBusy(true); setError(null); setConfirm(false);
     try {
-      await decide(requestId, decisionBody(f, { overrideAllowed: needsOverride && overrideAllowed, wantsPayouts }) as Parameters<typeof decide>[1]);
+      await decide(requestId, decisionBody(f, { overrideAllowed: needsOverride && overrideAllowed, wantsPayouts, method }) as Parameters<typeof decide>[1]);
       onDone();
     } catch (e) {
       if (e instanceof ReviewApiError && e.code === "DUPLICATE_DOCUMENT") setNeedsOverride(true);
@@ -86,7 +86,7 @@ export default function DecisionForm({ requestId, role, registeredDob, method, d
         </div>
       )}
 
-      {documentType === null && needsDocumentNumber(f.outcome) && (
+      {documentType === null && needsDocumentNumber(f.outcome, method) && (
         <div className="space-y-2">
           <Label htmlFor="doc-type" className="text-slate-300">Document type (required)</Label>
           <select id="doc-type" required value={f.documentType} onChange={(e) => set({ documentType: e.target.value })} className={`${FIELD} w-full rounded-md px-3 text-sm`} data-testid="select-document-type">
@@ -96,7 +96,7 @@ export default function DecisionForm({ requestId, role, registeredDob, method, d
         </div>
       )}
 
-      {needsDocumentNumber(f.outcome) && (
+      {needsDocumentNumber(f.outcome, method) && (
         <div className="space-y-2">
           <Label htmlFor="doc-number" className="text-slate-300">Document number</Label>
           <Input
@@ -108,7 +108,7 @@ export default function DecisionForm({ requestId, role, registeredDob, method, d
         </div>
       )}
 
-      {wantsPayouts && needsDocumentNumber(f.outcome) && (
+      {wantsPayouts && isIdOutcome(f.outcome) && (
         <div className="space-y-2">
           <Label htmlFor="legal-name" className="text-slate-300">Full name on the document</Label>
           <Input

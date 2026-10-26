@@ -1105,6 +1105,7 @@ export const userLocations = pgTable("user_locations", {
 export const mapSharingPrefs = pgTable("map_sharing_prefs", {
   userId: varchar("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
   audience: text("audience").notNull().default("friends"), // 'friends' | 'selected'
+  shareWithBuddies: boolean("share_with_buddies").notNull().default(false), // confirmed safety buddies (either direction) may see me
 });
 export const mapAllowedViewers = pgTable("map_allowed_viewers", {
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),

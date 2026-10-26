@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ChevronDownIcon, HeartIcon, ReplyIcon, SparklesIcon } from "@/components/ui/icons";
 import { useIdleScrollbar } from "@/hooks/useIdleScrollbar";
+import { liveLines } from "@/lib/chatFade";
 import { canQuote, quoteView, replyProgress, swipeDecision } from "@/lib/chatReply";
 import type { ChatItem } from "@/lib/roomReducer";
 import { AMBER } from "@/lib/roomTickets";
@@ -12,7 +13,9 @@ import { SPRAY_COPY, systemChatText } from "@/lib/sprayUi";
  * - `nameOf`: display name for a userId; return "" for someone who left and the quote shows "Someone".
  * - `selfId`: the viewer's userId, or null. Own lines get no Wave action.
  * - `hidden`: userIds the viewer muted locally; their lines are not rendered.
- * - `immersive`: the log sits over the picture. Rows get a dark translucent panel (the scrim that keeps the text readable).
+ * - `immersive`: the log sits over the picture. Rows get a light translucent panel (text shadow keeps the text readable, the picture stays visible).
+ *   Lines also expire like a live-stream chat: each fades out after a few seconds, only the newest few stay, and a line with its action row open stays.
+ *   `serverOffsetMs` (server clock minus client clock) keeps that lifetime right on a wrong device clock.
  *   It stays a polite live region: the room page renders one chat log in every view, so it is the one that announces.
  * - `onReply` / `onHeart`: the viewer chose that line (swipe right 56 px or more, or the action row).
  * - `onWave` / `onPickAuthor`: addressed by userId, never by name.
@@ -24,6 +27,7 @@ export interface ChatLogProps {
   selfId: string | null;
   hidden?: Set<string>;
   immersive?: boolean;
+  serverOffsetMs?: number;
   onReply(item: ChatItem): void;
   onHeart(item: ChatItem): void;
   onWave(userId: string): void;
@@ -40,6 +44,8 @@ interface RowProps {
   mine: boolean;
   open: boolean;
   immersive: boolean;
+  /** Immersive only: the last second of the line's life, so it fades out. */
+  fading: boolean;
   /** Still in the server's quote window (the newest 50 lines): older lines offer no Reply and ignore the swipe. */
   canReply: boolean;
   onToggle(id: string): void;
@@ -49,7 +55,7 @@ interface RowProps {
   onPickAuthor(userId: string): void;
 }
 
-const ChatRow = memo(function ChatRow({ item, name, quoteName, quoteText, mine, open, immersive, canReply, onToggle, onReply, onHeart, onWave, onPickAuthor }: RowProps) {
+const ChatRow = memo(function ChatRow({ item, name, quoteName, quoteText, mine, open, immersive, fading, canReply, onToggle, onReply, onHeart, onWave, onPickAuthor }: RowProps) {
   const rowRef = useRef<HTMLDivElement>(null);
   const hintRef = useRef<HTMLSpanElement>(null);
   const drag = useRef<{ x: number; y: number; active: boolean; dx: number; id: number } | null>(null);
@@ -109,7 +115,7 @@ const ChatRow = memo(function ChatRow({ item, name, quoteName, quoteText, mine, 
   const initial = (name.trim()[0] ?? "?").toUpperCase();
   const who = mine ? "You" : name;
   return (
-    <div className="relative" data-testid="chat-row">
+    <div className={`relative ${immersive ? `transition-opacity duration-700 ease-out motion-reduce:transition-none motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 ${fading ? "opacity-0" : ""}` : ""}`} data-testid="chat-row" data-fading={fading ? "1" : undefined}>
       <span ref={hintRef} aria-hidden="true" className="pointer-events-none absolute left-1 top-1/2 -translate-y-1/2 text-primary opacity-0">
         <ReplyIcon size={18} />
       </span>
@@ -125,7 +131,7 @@ const ChatRow = memo(function ChatRow({ item, name, quoteName, quoteText, mine, 
         onClick={toggle}
         style={{ touchAction: "pan-y" }}
         className={`flex min-w-0 items-start gap-2 rounded-xl px-2 py-1.5 transition-transform duration-150 motion-reduce:transition-none ${
-          immersive ? "bg-black/35 text-white [text-shadow:0_1px_2px_rgb(0_0_0/0.6)]" : open ? "bg-muted/60" : ""
+          immersive ? "bg-black/15 text-white [text-shadow:0_1px_3px_rgb(0_0_0/0.85)]" : open ? "bg-muted/60" : ""
         }`}
       >
         <button
@@ -170,11 +176,11 @@ const ChatRow = memo(function ChatRow({ item, name, quoteName, quoteText, mine, 
  * A server-made line (room:chat with `system`): a spray receipt, or the payer-only refund line. Never drawn like a typed
  * message (no author button, no swipe, no reply, heart or wave), so typed text can never pass for a receipt.
  */
-const SystemRow = memo(function SystemRow({ item, who, immersive }: { item: ChatItem; who: string; immersive: boolean }) {
+const SystemRow = memo(function SystemRow({ item, who, immersive, fading }: { item: ChatItem; who: string; immersive: boolean; fading: boolean }) {
   const priv = item.system === "spray_reversed";
   return (
-    <div className="relative" data-testid="chat-system-row" data-system={item.system}>
-      <div className={`flex min-w-0 items-start gap-2 rounded-xl px-2 py-1.5 ${immersive ? "bg-black/45 text-white [text-shadow:0_1px_2px_rgb(0_0_0/0.6)]" : priv ? "border border-border bg-muted" : AMBER.tint}`}>
+    <div className={`relative ${immersive ? `transition-opacity duration-700 ease-out motion-reduce:transition-none motion-safe:animate-in motion-safe:fade-in ${fading ? "opacity-0" : ""}` : ""}`} data-testid="chat-system-row" data-system={item.system}>
+      <div className={`flex min-w-0 items-start gap-2 rounded-xl px-2 py-1.5 ${immersive ? "bg-black/25 text-white [text-shadow:0_1px_3px_rgb(0_0_0/0.85)]" : priv ? "border border-border bg-muted" : AMBER.tint}`}>
         <span aria-hidden="true" className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${priv ? "bg-background text-foreground" : "bg-secondary text-secondary-foreground"}`}>
           <SparklesIcon size={14} />
         </span>
@@ -200,7 +206,7 @@ function ActionButton({ onClick, children }: { onClick: (e: React.MouseEvent) =>
   );
 }
 
-export function ChatLog({ chat, nameOf, selfId, hidden, immersive = false, onReply, onHeart, onWave, onPickAuthor }: ChatLogProps) {
+export function ChatLog({ chat, nameOf, selfId, hidden, immersive = false, serverOffsetMs = 0, onReply, onHeart, onWave, onPickAuthor }: ChatLogProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const lastSeen = useRef<string | null>(null);
@@ -208,7 +214,19 @@ export function ChatLog({ chat, nameOf, selfId, hidden, immersive = false, onRep
   const [openId, setOpenId] = useState<string | null>(null);
   useIdleScrollbar(listRef);
 
-  const lines = hidden && hidden.size ? chat.filter((c) => !hidden.has(c.userId)) : chat;
+  // Immersive: a clock tick re-judges each line's age (once a second is enough for an 8 s life with a 1 s fade).
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!immersive) return;
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [immersive]);
+
+  const visible = hidden && hidden.size ? chat.filter((c) => !hidden.has(c.userId)) : chat;
+  const shown = immersive ? liveLines(visible, now + serverOffsetMs, openId) : null;
+  const lines = shown ? shown.map((s) => s.item) : visible;
+  const fadingIds = new Set(shown ? shown.filter((s) => s.fading).map((s) => s.item.id) : []);
   const lastId = lines.length ? lines[lines.length - 1].id : null;
   const position = new Map(chat.map((c, i) => [c.id, i]));
 
@@ -258,9 +276,9 @@ export function ChatLog({ chat, nameOf, selfId, hidden, immersive = false, onRep
         className="scroll-fade h-full min-w-0 space-y-1 overflow-y-auto overflow-x-hidden overscroll-contain px-1 py-1 text-sm"
         data-testid="chat-log"
       >
-        {lines.length === 0 && <p className={immersive ? "px-2 text-white/80" : "px-2 text-muted-foreground"}>Say hi.</p>}
+        {lines.length === 0 && !immersive && <p className="px-2 text-muted-foreground">Say hi.</p>}
         {lines.map((c) => c.system ? (
-          <SystemRow key={c.id} item={c} who={c.userId === selfId ? "You" : nameOf(c.userId) || "Someone"} immersive={immersive} />
+          <SystemRow key={c.id} item={c} who={c.userId === selfId ? "You" : nameOf(c.userId) || "Someone"} immersive={immersive} fading={fadingIds.has(c.id)} />
         ) : (
           <ChatRow
             key={c.id}
@@ -272,6 +290,7 @@ export function ChatLog({ chat, nameOf, selfId, hidden, immersive = false, onRep
             open={openId === c.id}
             canReply={canQuote(position.get(c.id) ?? -1, chat.length)}
             immersive={immersive}
+            fading={fadingIds.has(c.id)}
             onToggle={toggle}
             onReply={onReply}
             onHeart={onHeart}
@@ -280,7 +299,7 @@ export function ChatLog({ chat, nameOf, selfId, hidden, immersive = false, onRep
           />
         ))}
       </div>
-      {!atBottom && unseen > 0 && (
+      {!immersive && !atBottom && unseen > 0 && (
         <button
           type="button"
           onClick={jump}
