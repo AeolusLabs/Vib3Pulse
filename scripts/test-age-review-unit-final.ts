@@ -96,9 +96,10 @@ await test("override: age_reviewer cannot mark verified; nobody can change their
   assert.ok(a.includes('verified && req.admin!.role === "age_reviewer"'));
 });
 
-await test("two-factor also covers super_admin when AGE_REVIEW is on; setup stays reachable", () => {
+await test("two-factor covers admin and age_reviewer when AGE_REVIEW is on, never super_admin by that flag; setup stays reachable", () => {
   const on = { AGE_REVIEW: "1" } as NodeJS.ProcessEnv, off = {} as NodeJS.ProcessEnv;
-  for (const r of ["super_admin", "admin", "age_reviewer"]) { assert.equal(mfaRequiredFor(r, on), true, r); assert.equal(mfaRequiredFor(r, off), false, r); }
+  for (const r of ["admin", "age_reviewer"]) { assert.equal(mfaRequiredFor(r, on), true, r); assert.equal(mfaRequiredFor(r, off), false, r); }
+  assert.equal(mfaRequiredFor("super_admin", on), false); assert.equal(mfaRequiredFor("super_admin", off), false);
   assert.equal(mfaRequiredFor("super_admin", { ADMIN_MFA_REQUIRED: "true" } as NodeJS.ProcessEnv), true);
   assert.equal(mfaRequiredFor("content_moderator", on), false);
   const sec = src("server/services/adminSecurity.ts");

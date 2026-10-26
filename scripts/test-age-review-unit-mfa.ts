@@ -8,7 +8,7 @@ import { join } from "node:path";
 delete process.env.AGE_REVIEW;
 delete process.env.ADMIN_MFA_REQUIRED;
 const { storage } = await import("../server/storage");
-const { adminGate, mfaTestHooks } = await import("../server/services/adminSecurity");
+const { adminGate, mfaTestHooks, mfaRequiredFor } = await import("../server/services/adminSecurity");
 const { scrubSentryEvent } = await import("../server/sentryScrub");
 
 let passed = 0, failed = 0;
@@ -34,7 +34,7 @@ async function run(session: Record<string, unknown>, opts: Parameters<typeof adm
 await test("a session minted before the flag was on is forced through MFA once the flag is on", async () => {
   // Minted while MFA was not required: login set mfaVerified = true and never mfaPassed.
   const stale = { mfaVerified: true };
-  for (const r of ["super_admin", "admin", "age_reviewer"]) {
+  for (const r of ["admin", "age_reviewer"]) {
     role = r;
     delete process.env.AGE_REVIEW;
     assert.equal((await run(stale)).status, 200, `${r}: fine while the flag is off`);
@@ -78,6 +78,37 @@ await test("no MFA required: nothing changes", async () => {
     role = "admin";
     assert.equal((await run({ mfaVerified: false })).status, 200, "ADMIN_MFA_REQUIRED alone is still super_admin only");
   } finally { delete process.env.ADMIN_MFA_REQUIRED; }
+});
+
+await test("super_admin does not need MFA when AGE_REVIEW is on and ADMIN_MFA_REQUIRED is unset", async () => {
+  role = "super_admin";
+  delete process.env.ADMIN_MFA_REQUIRED;
+  process.env.AGE_REVIEW = "1";
+  try {
+    assert.equal(mfaRequiredFor("super_admin", { AGE_REVIEW: "1" } as NodeJS.ProcessEnv), false);
+    assert.equal((await run({ mfaVerified: true })).status, 200, "a plain password session keeps working");
+    assert.equal((await run({})).status, 200);
+  } finally { delete process.env.AGE_REVIEW; }
+});
+
+await test("super_admin needs MFA when ADMIN_MFA_REQUIRED=true", async () => {
+  role = "super_admin";
+  process.env.ADMIN_MFA_REQUIRED = "true";
+  try {
+    assert.equal(mfaRequiredFor("super_admin", { ADMIN_MFA_REQUIRED: "true" } as NodeJS.ProcessEnv), true);
+    assert.equal((await run({ mfaVerified: true })).body.code, "MFA_REQUIRED", "a session without a real second factor is stopped");
+    assert.equal((await run({ mfaVerified: true, mfaPassed: true })).status, 200);
+  } finally { delete process.env.ADMIN_MFA_REQUIRED; }
+});
+
+await test("admin and age_reviewer need MFA when AGE_REVIEW is on", async () => {
+  for (const r of ["admin", "age_reviewer"]) {
+    role = r;
+    assert.equal(mfaRequiredFor(r, { AGE_REVIEW: "1" } as NodeJS.ProcessEnv), true, r);
+    assert.equal(mfaRequiredFor(r, {} as NodeJS.ProcessEnv), false, r);
+    process.env.AGE_REVIEW = "1";
+    try { assert.equal((await run({ mfaVerified: true })).body.code, "MFA_REQUIRED", r); assert.equal((await run({ mfaPassed: true })).status, 200, r); } finally { delete process.env.AGE_REVIEW; }
+  }
 });
 
 await test("Sentry events never carry bodies, cookies or auth headers", () => {

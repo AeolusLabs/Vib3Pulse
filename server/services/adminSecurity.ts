@@ -64,15 +64,15 @@ export async function withAudit<T>(e: AuditEntry, fn: () => Promise<T>): Promise
 // effect immediately (the old gate trusted a role cached in the session for up to 8 hours).
 // Roles for which mfaRequiredFor() is true additionally need a session that passed a real second factor, enforced here in code.
 // ---------------------------------------------------------------------------------------------
-// Two-factor authentication is BUILT. It is required for super-admins when ADMIN_MFA_REQUIRED=true, and for super_admin, admin
-// and age_reviewer whenever AGE_REVIEW is on. Read on every call (not at import), so flipping a variable and restarting is the
-// whole change, and an already-open session is forced through MFA too (see mfaPassed). While it is not required for a role,
-// nothing below treats that role differently, and the MFA endpoints refuse to start enrolment.
-/** Super-admins follow ADMIN_MFA_REQUIRED; every role that can open ID evidence (super_admin, admin, age_reviewer) needs it whenever AGE_REVIEW is on. */
+// Two-factor authentication is BUILT. super_admin needs it only when ADMIN_MFA_REQUIRED=true (the age review feature never forces it
+// on a super_admin); admin and age_reviewer, who can open ID evidence, need it whenever AGE_REVIEW is on. Read on every call (not at
+// import), so flipping a variable and restarting is the whole change, and an already-open session is forced through MFA too (see
+// mfaPassed). While it is not required for a role, nothing below treats that role differently, and the MFA endpoints refuse to
+// start enrolment.
+/** super_admin follows ONLY ADMIN_MFA_REQUIRED; admin and age_reviewer also need it whenever AGE_REVIEW is on. */
 export function mfaRequiredFor(role: string, env: NodeJS.ProcessEnv = process.env): boolean {
-  const ageReviewOn = parseFlag(env.AGE_REVIEW, false);
-  if (role === "super_admin") return env.ADMIN_MFA_REQUIRED === "true" || ageReviewOn;
-  return (role === "admin" || role === "age_reviewer") && ageReviewOn;
+  if (role === "super_admin") return env.ADMIN_MFA_REQUIRED === "true";
+  return (role === "admin" || role === "age_reviewer") && parseFlag(env.AGE_REVIEW, false);
 }
 
 /** Test hook: lets the gate be exercised without a database. */
