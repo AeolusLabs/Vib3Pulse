@@ -196,10 +196,12 @@ function PayoutBody({ status, moneyOn, changing, onChange, onCancel, onSaved, ch
     <div className="space-y-5" data-stage={stage} data-testid="payout-stage">
       <ul className="divide-y divide-border rounded-2xl bg-muted/60" aria-label="Payout checks">
         {a && (
-          <CheckRow ok={a.nameMatches} label={PAYOUT_COPY.bankRow} line={PAYOUT_COPY.bankLine(a.bankName, a.last4, a.nameMatches)}
-            word={a.nameMatches ? PAYOUT_COPY.verified : PAYOUT_COPY.notVerified} testId="payout-row-bank" />
+          panel === "needs_name"
+            ? <CheckRow ok={false} label={PAYOUT_COPY.bankRow} line={PAYOUT_COPY.notCheckedLine(a.bankName, a.last4)} word={PAYOUT_COPY.notChecked} testId="payout-row-bank" />
+            : <CheckRow ok={a.nameMatches} label={PAYOUT_COPY.bankRow} line={PAYOUT_COPY.bankLine(a.bankName, a.last4, a.nameMatches)}
+              word={a.nameMatches ? PAYOUT_COPY.verified : PAYOUT_COPY.notVerified} testId="payout-row-bank" />
         )}
-        {stage === "setup" && (
+        {stage === "setup" && panel !== "needs_name" && (
           <CheckRow ok label={PAYOUT_COPY.bankRow} line={PAYOUT_COPY.setupLine} word={PAYOUT_COPY.verified} testId="payout-row-bank" />
         )}
         <CheckRow ok={status.verifiedAdult} label={PAYOUT_COPY.idRow} line={status.verifiedAdult ? PAYOUT_COPY.idVerified : PAYOUT_COPY.idMissing}
@@ -222,7 +224,7 @@ function PayoutBody({ status, moneyOn, changing, onChange, onCancel, onSaved, ch
         </div>
       )}
 
-      {stage === "mismatch" && !changing && (
+      {stage === "mismatch" && !changing && panel !== "needs_name" && (
         <div role="alert" className="space-y-2 rounded-2xl border border-destructive/60 p-4" data-testid="payout-mismatch">
           <h2 className="font-semibold">{PAYOUT_COPY.mismatchTitle}</h2>
           <p className="text-sm">{PAYOUT_COPY.mismatchBody}</p>
@@ -230,16 +232,16 @@ function PayoutBody({ status, moneyOn, changing, onChange, onCancel, onSaved, ch
         </div>
       )}
 
-      {stage === "pending" && (
+      {stage === "pending" && panel !== "needs_name" && (
         <div role="status" className="space-y-2 rounded-2xl border border-border p-4" data-testid="payout-pending">
           <h2 className="flex items-center gap-2 font-semibold"><ClockIcon className="h-5 w-5 text-primary" aria-hidden />{PAYOUT_COPY.pendingTitle}</h2>
           <p className="text-sm text-muted-foreground">{PAYOUT_COPY.pendingBody}</p>
         </div>
       )}
 
-      {stage === "ready" && !changing && <p className="text-sm text-muted-foreground" data-testid="payout-ready">{PAYOUT_COPY.readyBody}</p>}
+      {stage === "ready" && !changing && panel !== "needs_name" && <p className="text-sm text-muted-foreground" data-testid="payout-ready">{PAYOUT_COPY.readyBody}</p>}
 
-      {stage === "setup" && (
+      {stage === "setup" && panel !== "needs_name" && (
         <div className="space-y-2" data-testid="payout-setup">
           <p className="text-sm text-muted-foreground">{PAYOUT_COPY.setupBody}</p>
           <p className="text-sm text-muted-foreground">{PAYOUT_COPY.readyBody}</p>

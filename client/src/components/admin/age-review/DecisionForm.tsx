@@ -140,7 +140,8 @@ export default function DecisionForm({ requestId, role, registeredDob, method, d
       {f.outcome && (
         <div className="space-y-2">
           <Label htmlFor="decision-note" className="text-slate-300">Note (optional, for the audit log)</Label>
-          <Textarea id="decision-note" rows={2} maxLength={500} value={f.note} onChange={(e) => set({ note: e.target.value })} className="border-slate-600 bg-slate-700/50 text-white" />
+          <Textarea id="decision-note" rows={2} maxLength={500} value={f.note} onChange={(e) => set({ note: e.target.value })} aria-describedby="decision-note-help" className="border-slate-600 bg-slate-700/50 text-white" />
+          <p id="decision-note-help" className="text-xs text-slate-400">Do not write names or document numbers here.</p>
         </div>
       )}
 

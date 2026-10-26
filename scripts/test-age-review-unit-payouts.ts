@@ -81,8 +81,8 @@ test("payout page state per status (not verified, no name, has name)", () => {
   assert.equal(payoutPanel(status({ canLinkAccount: false, hasVerifiedName: true })), "soon");
   assert.equal(payoutPanel(status({ hasVerifiedName: false }), false), "soon", "money flags off: linking is not open, no name step");
   const acct = { bankName: "GTBank", last4: "4821", nameMatches: false };
-  assert.equal(payoutPanel(status({ account: acct, hasVerifiedName: false })), "mismatch");
-  assert.equal(payoutPanel(status({ account: { ...acct, nameMatches: true }, subaccountReady: true, hasVerifiedName: false })), "ready");
+  assert.equal(payoutPanel(status({ account: acct, hasVerifiedName: true })), "mismatch");
+  assert.equal(payoutPanel(status({ account: { ...acct, nameMatches: true }, subaccountReady: true, hasVerifiedName: true })), "ready");
   assert.equal(payoutStage(status({ hasVerifiedName: false })), "none", "payoutStage itself is unchanged");
   assert.equal(VERIFY_AGE_HREF, "/account/settings#verify-age");
   assert.equal(VERIFY_NAME_HREF, "/account/settings?payouts=1#verify-age");
@@ -93,6 +93,24 @@ test("payout page state per status (not verified, no name, has name)", () => {
   assert.match(view, /PAYOUT_COPY\.needNameTitle/);
   assert.equal(PAYOUT_COPY.needAgeTitle, "Verify your age first");
   assert.equal(PAYOUT_COPY.needNameTitle, "Verify your name for payouts");
+});
+
+test("existing account without a name shows the name step", () => {
+  const acct = { bankName: "GTBank", last4: "4821", nameMatches: false };
+  assert.equal(payoutPanel(status({ account: acct, canLinkAccount: false, hasVerifiedName: false })), "needs_name");
+  assert.equal(payoutPanel(status({ account: { ...acct, nameMatches: true }, subaccountReady: true, hasVerifiedName: false })), "needs_name");
+  assert.equal(payoutPanel(status({ account: null, subaccountReady: true, hasVerifiedName: false })), "needs_name", "setup without details too");
+  assert.equal(payoutPanel(status({ account: { ...acct, nameMatches: true }, subaccountReady: true, hasVerifiedName: true })), "ready", "with a name: the old stages");
+  assert.equal(payoutPanel(status({ account: acct, hasVerifiedName: false }), false), "mismatch", "payouts off: no name step");
+  assert.equal(payoutPanel(status({ verifiedAdult: false, account: acct, hasVerifiedName: false })), "needs_age");
+  const view = read("client/src/components/rooms/earnings/PayoutAccountView.tsx");
+  assert.match(view, /panel === "needs_name"\s*\?\s*<CheckRow ok=\{false\}[^>]*notCheckedLine/);
+  for (const stageName of ["mismatch", "pending", "ready", "setup"]) assert.match(view, new RegExp(`stage === "${stageName}"[^\\n]*panel !== "needs_name"`), stageName);
+  assert.match(view, /const canLink = canLinkHere\(status, moneyOn\) && panel !== "needs_name"/);
+  assert.equal(PAYOUT_COPY.notChecked, "Not checked yet");
+  assert.ok(!BAD.test(PAYOUT_COPY.notCheckedLine("GTBank", "4821")));
+  const fx = read("client/src/components/rooms/earnings/earningsFixtures.ts");
+  assert.match(fx, /case "oldaccount"[^\n]*hasVerifiedName: false/);
 });
 
 test("NO_VERIFIED_NAME maps to the verify-name CTA", () => {
@@ -177,6 +195,21 @@ test("reviewer legalName required only when wantsPayouts and cleared after submi
   assert.ok(!/console\.|localStorage|sessionStorage|setQueryData|searchParams|history\.|location\./.test(form));
   assert.match(read("client/src/components/admin/age-review/DetailDrawer.tsx"), /wantsPayouts=\{r\.wantsPayouts === true\}/);
   assert.match(read("client/src/pages/admin/AdminAgeReviews.tsx"), /data-testid="chip-payouts"/);
+});
+
+test("legal name check has no unicode flag and mirrors the server length rule", () => {
+  const src = read("client/src/lib/adminAgeReviewUi.ts");
+  assert.ok(!/\\p\{/.test(src) && !/\/[a-z]*u[a-z]*[,;)\s]/.test(src.split("\n").filter((l) => l.includes("NAME_RE")).join("\n")));
+  for (const ok of ["Ada", "Chioma Okafor", "Jos\u00E9 Mu\u00F1oz", "Zo\u00EB O\u2019Brien", "Anne-Marie St. John", "Nguy\u1EC5n V\u0103n An"]) assert.equal(legalNameValid(ok), true, ok);
+  for (const bad of ["Al", "A\u00D7B", "Ada1", "Ada_Obi", "-Ada", "Ada\nObi\u0000", "x".repeat(121)]) assert.equal(legalNameValid(bad), false, JSON.stringify(bad));
+  assert.equal(legalNameValid("x".repeat(120)), true);
+  assert.equal(legalNameValid("   Ada  Obi   "), true);
+});
+
+test("reviewer note helper warns against names and document numbers", () => {
+  const form = read("client/src/components/admin/age-review/DecisionForm.tsx");
+  assert.match(form, /Do not write names or document numbers here\./);
+  assert.match(form, /aria-describedby="decision-note-help"/);
 });
 
 test("errors: NAME_REQUIRED, NAME_NOT_REQUESTED and ALREADY_VERIFIED have plain messages", () => {

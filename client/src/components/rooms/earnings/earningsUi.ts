@@ -80,14 +80,15 @@ export function payoutStage(s: PayoutStatus, moneyOn = true): PayoutStage {
 /**
  * What the page leads with, on top of the stage above (which stays as it was):
  * - "needs_age": not an ID-verified adult: verify your age first
- * - "needs_name": a verified adult with no account and no name on file, while linking could be offered: verify your name for payouts
+ * - "needs_name": a verified adult with no name on file (with or without a linked account), while payouts are on: verify your name for payouts.
+ *   An account linked before names existed is shown as "not checked yet" under it, and no bank form is offered until a name exists.
  * - otherwise the stage.
  */
 export type PayoutPanel = "needs_age" | "needs_name" | PayoutStage;
 export function payoutPanel(s: PayoutStatus, moneyOn = true): PayoutPanel {
   const stage = payoutStage(s, moneyOn);
   if (stage === "unverified") return "needs_age";
-  if ((stage === "none" || stage === "soon") && moneyOn && !s.hasVerifiedName) return "needs_name";
+  if (moneyOn && !s.hasVerifiedName) return "needs_name";
   return stage;
 }
 export const VERIFY_AGE_HREF = "/account/settings#verify-age";
@@ -198,6 +199,8 @@ export const PAYOUT_COPY = {
   needNameBody: "To pay you, we check that your bank account is in your name. A reviewer notes the name on your ID once, and we keep it encrypted. This is only for people who want to receive money.",
   needNameCta: "Verify your name for payouts",
   recheckCta: "Ask for a name recheck",
+  notChecked: "Not checked yet",
+  notCheckedLine: (bank: string, last4: string) => `${bank} account ending ${last4}. We will check its name once your name is verified.`,
   noneTitle: "Add a bank account",
   noneBody: "Add the account you want sprays and ticket money paid into. It must be in your own name.",
   mismatchTitle: "The name does not match your ID",

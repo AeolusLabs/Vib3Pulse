@@ -81,10 +81,15 @@ export interface DecisionForm {
 }
 
 /** Whether the submit button is enabled. Verify stays off until all six checks are ticked. */
-/** 3 to 120 characters: letters, spaces, hyphen, apostrophe and dot (the server's rule). */
+/**
+ * 3 to 120 characters after trimming: Latin letters (with accents), spaces, hyphen, apostrophe (straight and typographic) and dot.
+ * Written with explicit ranges, not Unicode property escapes, so it compiles for older targets.
+ */
+const NAME_LETTER = "A-Za-zÀ-ÖØ-öø-ɏḀ-ỿ";
+const NAME_RE = new RegExp(`^[${NAME_LETTER}][${NAME_LETTER} .'’ʼ-]*$`);
 export const legalNameValid = (raw: string): boolean => {
   const n = raw.trim().replace(/\s+/g, " ");
-  return n.length >= 3 && n.length <= 120 && /^[\p{L}][\p{L} .'’-]*$/u.test(n);
+  return n.length >= 3 && n.length <= 120 && NAME_RE.test(n);
 };
 export function decisionReady(f: DecisionForm, method: ReviewMethod = "upload", wantsPayouts = false): boolean {
   if (wantsPayouts && needsDocumentNumber(f.outcome) && !legalNameValid(f.legalName)) return false;
