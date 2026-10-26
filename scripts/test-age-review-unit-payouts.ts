@@ -188,7 +188,7 @@ test("reviewer legalName required only when wantsPayouts and cleared after submi
   assert.ok(!("legalName" in decisionBody(f({ outcome: "decline", declineReason: "other", legalName: "Ada Obi" }), { overrideAllowed: false, wantsPayouts: true })));
   const form = read("client/src/components/admin/age-review/DecisionForm.tsx");
   assert.match(form, /finally \{[^}]*set\(\{ documentNumber: "", legalName: "" \}\)/s);
-  assert.match(form, /wantsPayouts && needsDocumentNumber\(f\.outcome\)/);
+  assert.match(form, /wantsPayouts && isIdOutcome\(f\.outcome\)/);
   assert.match(form, /Full name on the document/);
   assert.match(form, /Used only to check the bank account holder's name\. Stored encrypted\. Not shown anywhere\./);
   assert.match(form, /id="legal-name"[\s\S]{0,200}autoComplete="off"/);

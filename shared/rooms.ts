@@ -156,6 +156,34 @@ export function resolveRoomPrivacy(stored: unknown): RoomPrivacy {
 
 export type Validated<T> = { ok: true; value: T } | { ok: false; field: string };
 
+/** What a host wants switched on in every new room (Settings, Hosting defaults). The create form starts from these. */
+export interface RoomDefaults { voice: boolean; liveVideo: boolean; slowModeSec: SlowMode; sprayEnabled: boolean }
+export const DEFAULT_ROOM_DEFAULTS: RoomDefaults = { voice: true, liveVideo: false, slowModeSec: 0, sprayEnabled: false };
+
+/** Reads a stored value tolerantly: each bad or missing field falls back to its default. Live video needs voice. */
+export function resolveRoomDefaults(stored: unknown): RoomDefaults {
+  const d = DEFAULT_ROOM_DEFAULTS;
+  const s = isObj(stored) ? stored : {};
+  const voice = typeof s.voice === "boolean" ? s.voice : d.voice;
+  return {
+    voice,
+    liveVideo: voice && typeof s.liveVideo === "boolean" ? s.liveVideo : false,
+    slowModeSec: (SLOW_MODES as readonly unknown[]).includes(s.slowModeSec) ? (s.slowModeSec as SlowMode) : d.slowModeSec,
+    sprayEnabled: typeof s.sprayEnabled === "boolean" ? s.sprayEnabled : d.sprayEnabled,
+  };
+}
+
+/** Strict: for writes. Unknown keys and wrong types are refused, naming the field. */
+export function validateRoomDefaults(input: unknown): Validated<RoomDefaults> {
+  if (!isObj(input)) return { ok: false, field: "body" };
+  for (const k of Object.keys(input)) if (!["voice", "liveVideo", "slowModeSec", "sprayEnabled"].includes(k)) return { ok: false, field: k };
+  if (typeof input.voice !== "boolean") return { ok: false, field: "voice" };
+  if (typeof input.liveVideo !== "boolean" || (input.liveVideo && !input.voice)) return { ok: false, field: "liveVideo" };
+  if (!(SLOW_MODES as readonly unknown[]).includes(input.slowModeSec)) return { ok: false, field: "slowModeSec" };
+  if (typeof input.sprayEnabled !== "boolean") return { ok: false, field: "sprayEnabled" };
+  return { ok: true, value: { voice: input.voice, liveVideo: input.liveVideo, slowModeSec: input.slowModeSec as SlowMode, sprayEnabled: input.sprayEnabled } };
+}
+
 /**
  * Strict: for writes. Unknown keys and wrong types are rejected, naming the field. notifyFriendsLive is optional (older
  * clients do not send it): when absent it keeps `prev`'s value (the stored setting), else the default (true).

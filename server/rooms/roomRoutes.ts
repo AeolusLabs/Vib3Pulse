@@ -15,7 +15,7 @@ import { getConfig } from "../services/moderationConfig";
 import { events, follows, users, venues, type Room, type User } from "@shared/schema";
 import { ageFromDob, minAgeForLimit } from "@shared/age";
 import { resolveScreen } from "@shared/screen";
-import { ROOM_LIMITS, SPRAY_ENABLE_MESSAGES, resolveRoomPrivacy, validateRoomInput, validateRoomPrivacy } from "@shared/rooms";
+import { ROOM_LIMITS, SPRAY_ENABLE_MESSAGES, resolveRoomDefaults, resolveRoomPrivacy, validateRoomDefaults, validateRoomInput, validateRoomPrivacy } from "@shared/rooms";
 import { canEnableSpray, canHostRoom, canJoinRoom, canSellTickets, isMinorsRoomHost, isTicketedRoom, roomCapacity, ticketEligible, type TicketSaleCode } from "@shared/roomRules";
 import { isIdVerifiedAdult } from "@shared/ageVerification";
 import * as rs from "./roomStorage";
@@ -1185,6 +1185,30 @@ export function registerRoomRoutes(app: Express): void {
     } catch (e) {
       console.error("[rooms] room-privacy read failed:", e);
       res.status(500).json({ message: "Failed to load room privacy" });
+    }
+  });
+
+  // ------------------------------------------------------------ hosting defaults (per user): what the create form starts with
+  app.get("/api/users/me/room-defaults", requireAuth, async (req, res) => {
+    try {
+      const u = await storage.getUser(req.user!.id);
+      if (!u) return res.status(404).json({ message: "User not found" });
+      res.json({ roomDefaults: resolveRoomDefaults(u.roomDefaults) });
+    } catch (e) {
+      console.error("[rooms] room-defaults read failed:", e);
+      res.status(500).json({ message: "Failed to load hosting defaults" });
+    }
+  });
+
+  app.put("/api/users/me/room-defaults", requireAuth, roomLimiter, async (req, res) => {
+    try {
+      const v = validateRoomDefaults(req.body);
+      if (!v.ok) return res.status(400).json({ message: "Invalid hosting defaults", field: v.field });
+      await storage.updateUser(req.user!.id, { roomDefaults: v.value } as any);
+      res.json({ roomDefaults: v.value });
+    } catch (e) {
+      console.error("[rooms] room-defaults save failed:", e);
+      res.status(500).json({ message: "Failed to save hosting defaults" });
     }
   });
 

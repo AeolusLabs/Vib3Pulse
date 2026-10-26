@@ -168,7 +168,8 @@ export default function MapPage() {
   const [located, setLocated] = useState(true);
   const [filter, setFilter] = useState<Filter>("all");
   const [selected, setSelected] = useState<Selected>(null);
-  const [panel, setPanel] = useState(false);
+  // /map?sharing=1 (Settings, Map sharing) opens the sharing panel straight away.
+  const [panel, setPanel] = useState(() => new URLSearchParams(window.location.search).get("sharing") === "1");
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
   useEffect(() => { const id = setTimeout(() => setDebouncedQ(q.trim()), 300); return () => clearTimeout(id); }, [q]);

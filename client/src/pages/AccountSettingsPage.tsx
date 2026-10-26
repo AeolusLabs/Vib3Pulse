@@ -33,6 +33,8 @@ import RoomPrivacyCard from "@/components/RoomPrivacyCard";
 import type { User as UserType } from "@shared/schema";
 import { LockIcon, UserIcon, AlertCircleIcon, Loader2Icon, CheckCircleIcon, BellIcon, BellOffIcon, CheckCheckIcon, Trash2Icon } from "@/components/ui/icons";
 
+const TITLES: Record<string, string> = { account: "Account and sign in", notifications: "Notifications", privacy: "Privacy and blocked people", verify: "Age verification and payouts" };
+
 export default function AccountSettingsPage() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
@@ -197,6 +199,10 @@ export default function AccountSettingsPage() {
     return null;
   }
 
+  // /settings opens one topic at a time with ?section=; no section shows everything, as before.
+  const section = new URLSearchParams(window.location.search).get("section");
+  const show = (key: string) => !section || section === key;
+
   const usernameChangesRemaining = userProfile?.usernameChangesRemaining ?? 2;
 
   return (
@@ -204,11 +210,15 @@ export default function AccountSettingsPage() {
       <Navigation />
       
       <main className="container mx-auto px-4 py-6 max-w-2xl">
-        <h1 className="text-2xl font-bold mb-6">Account Settings</h1>
+        {section && <Link href="/settings" className="mb-1 inline-flex min-h-[44px] items-center text-sm text-muted-foreground" data-testid="link-back-settings">Back to Settings</Link>}
+        <h1 className="mb-6 text-2xl font-bold">{(section && TITLES[section]) || "Account Settings"}</h1>
 
         <div className="space-y-6">
+          {show("verify") && (<>
           <VerifyAgeCard />
           <PayoutAccountLink />
+          </>)}
+          {show("account") && (<>
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -332,7 +342,9 @@ export default function AccountSettingsPage() {
               )}
             </CardContent>
           </Card>
+          </>)}
 
+          {show("notifications") && (<>
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -393,7 +405,9 @@ export default function AccountSettingsPage() {
               )}
             </CardContent>
           </Card>
+          </>)}
 
+          {show("privacy") && (<>
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -440,7 +454,9 @@ export default function AccountSettingsPage() {
           <RoomPrivacyCard />
 
           <BlockedUsersCard />
+          </>)}
 
+          {show("account") && (<>
           <Card className="border-destructive/30">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-destructive">
@@ -529,6 +545,7 @@ export default function AccountSettingsPage() {
               </AlertDialog>
             </CardContent>
           </Card>
+          </>)}
         </div>
         <p className="mt-8 text-center text-sm text-muted-foreground">
           <Link href="/privacy" className="inline-flex min-h-[44px] items-center underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary" data-testid="link-privacy-policy">Privacy policy</Link>

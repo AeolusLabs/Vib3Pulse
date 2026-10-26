@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Sheet, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import RoomSheetContent from "@/components/rooms/shell/RoomSheetContent";
-import { CheckIcon, EyeIcon, FlagIcon, LogOutIcon, SettingsIcon, Share2Icon, ShieldIcon, XIcon } from "@/components/ui/icons";
+import { CheckIcon, EyeIcon, FlagIcon, LogOutIcon, MicIcon, SettingsIcon, Share2Icon, ShieldIcon, XIcon } from "@/components/ui/icons";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { reportErrorToast, roomSafetyRules, type SafetyTone } from "@/lib/roomShell";
@@ -20,6 +20,8 @@ export interface RoomMoreSheetProps {
   onLeave(): void;
   /** Host and co-host: opens the Controls sheet. Omit for everyone else. */
   onControls?: () => void;
+  /** A guest who may ask for the mic and has not yet: the first row. */
+  onAsk?: () => void;
   /** Line under the title, e.g. "13+ room". */
   subtitle?: string;
 }
@@ -40,7 +42,7 @@ function Row({ icon, label, sub, onClick, warn, testid }: { icon: ReactNode; lab
 }
 
 /** The room's options. Each row closes this sheet first, then the page does the thing (some open another sheet). */
-export default function RoomMoreSheet({ open, onOpenChange, roomId, isHost, canShare, onShare, onSafety, onReport, onLeave, onControls, subtitle }: RoomMoreSheetProps) {
+export default function RoomMoreSheet({ open, onOpenChange, roomId, isHost, canShare, onShare, onSafety, onReport, onLeave, onControls, onAsk, subtitle }: RoomMoreSheetProps) {
   const then = (fn: () => void) => () => { onOpenChange(false); fn(); };
   const ic = "h-5 w-5";
   return (
@@ -51,6 +53,7 @@ export default function RoomMoreSheet({ open, onOpenChange, roomId, isHost, canS
           <SheetDescription>{subtitle ?? "What you can do here"}</SheetDescription>
         </SheetHeader>
         <div className="mt-3 grid gap-1.5">
+          {onAsk && <Row icon={<MicIcon className={ic} />} label="Ask to go on stage" sub="The host will see your request" onClick={then(onAsk)} testid="more-ask" />}
           {onControls && <Row icon={<SettingsIcon className={ic} />} label="Controls" sub={isHost ? "Requests, stage, people, settings, end the room" : "Requests, stage, people and the pinned message"} onClick={then(onControls)} testid="more-controls" />}
           {canShare && <Row icon={<Share2Icon className={ic} />} label="Share room" sub="Copy the link to bring your crew" onClick={then(onShare)} testid="more-share" />}
           <Row icon={<ShieldIcon className={ic} />} label="Room safety" sub="Age rules and how to report" onClick={then(onSafety)} testid="more-safety" />
