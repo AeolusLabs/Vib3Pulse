@@ -27,7 +27,7 @@ async function withApp<T>(role: string, fn: (call: (m: string, p: string, body?:
   (storage as any).getAdminUser = async (id: string) => ({ id, role, email: "r@x.test", isActive: true });
   const app = express();
   app.use(express.json());
-  app.use((req: any, _res, next) => { req.session = { adminId: "a1", mfaVerified: true, destroy: () => {} }; next(); });
+  app.use((req: any, _res, next) => { req.session = { adminId: "a1", mfaVerified: true, mfaPassed: true, destroy: () => {} }; next(); });
   registerAgeReviewAdminRoutes(app);
   const server = app.listen(0);
   const base = `http://127.0.0.1:${(server.address() as any).port}/api/admin/age-reviews`;

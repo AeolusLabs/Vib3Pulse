@@ -65,7 +65,7 @@ const asAdmin = (role: string, email: string, userEmail: string) => {
   (storage as any).getUser = async (id: string) => ({ id, email: userEmail, dateOfBirth: "1990-01-01" });
 };
 const adminApp = (app: express.Express) => {
-  app.use((req: any, _res, next) => { req.session = { adminId: "a1", mfaVerified: true, destroy: () => {} }; next(); });
+  app.use((req: any, _res, next) => { req.session = { adminId: "a1", mfaVerified: true, mfaPassed: true, destroy: () => {} }; next(); });
   registerAgeVerificationAdminRoute(app);
 };
 

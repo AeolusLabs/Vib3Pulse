@@ -40,7 +40,7 @@ export function registerAdminSocialRoutes(app: Express) {
   // ------------------------------------------------------------------ MFA
   app.get("/api/admin/mfa/status", requireAdminPending, h(async (req, res) => {
     const required = mfaRequiredFor(req.admin!.role);
-    res.json({ required, enrolled: required ? await isMfaEnrolled(req.admin!.id) : false, verified: !!req.session.mfaVerified });
+    res.json({ required, enrolled: required ? await isMfaEnrolled(req.admin!.id) : false, verified: required ? req.session.mfaPassed === true : !!req.session.mfaVerified });
   }));
 
   app.post("/api/admin/mfa/setup", requireAdminPending, h(async (req, res) => {
@@ -65,6 +65,7 @@ export function registerAdminSocialRoutes(app: Express) {
     await clearLoginAttempts(key, ip);
     await audit({ adminId: req.admin!.id, action: "mfa_enrolled", targetType: "admin", targetId: req.admin!.id, reason: "Two-factor authentication enabled", ip });
     req.session.mfaVerified = true;
+    req.session.mfaPassed = true;
     req.session.save(() => res.json({ enrolled: true, recoveryCodes: r.recoveryCodes }));
   }));
 
@@ -84,6 +85,7 @@ export function registerAdminSocialRoutes(app: Express) {
     await clearLoginAttempts(key, ip);
     if (r.usedRecovery) await audit({ adminId: req.admin!.id, action: "mfa_recovery_code_used", targetType: "admin", targetId: req.admin!.id, reason: "Signed in with a recovery code", ip });
     req.session.mfaVerified = true;
+    req.session.mfaPassed = true;
     req.session.save(() => res.json({ verified: true }));
   }));
 

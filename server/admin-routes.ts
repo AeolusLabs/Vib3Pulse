@@ -481,9 +481,11 @@ export function setupAdminRoutes(app: Express) {
       // Set session
       req.session.adminId = admin.id;
       req.session.adminRole = admin.role as AdminRole;
-      // Super-admins must pass MFA (or enrol) before any admin route works; enforced in the gate.
-      const needsMfa = mfaRequiredFor(admin.role); // off by default (super_admin: ADMIN_MFA_REQUIRED; admin and age_reviewer: AGE_REVIEW)
+      // Roles that need MFA (see mfaRequiredFor) must pass it, or enrol, before any admin route works; enforced in the gate.
+      // mfaPassed is never set here: only the TOTP/recovery verify and enrolment confirm endpoints prove a second factor.
+      const needsMfa = mfaRequiredFor(admin.role);
       req.session.mfaVerified = !needsMfa;
+      req.session.mfaPassed = false;
       const mfaState = needsMfa ? ((await isMfaEnrolled(admin.id)) ? "verify" : "enroll") : null;
 
       // Update last login
@@ -529,7 +531,7 @@ export function setupAdminRoutes(app: Express) {
       }
       const adminWithoutPassword = toPublicAdminUser(admin);
       const required = mfaRequiredFor(admin.role);
-      res.json({ ...adminWithoutPassword, mfa: { required, enrolled: required ? await isMfaEnrolled(admin.id) : false, verified: !!req.session.mfaVerified } });
+      res.json({ ...adminWithoutPassword, mfa: { required, enrolled: required ? await isMfaEnrolled(admin.id) : false, verified: required ? req.session.mfaPassed === true : !!req.session.mfaVerified } });
     } catch (error) {
       res.status(500).json({ message: "Failed to get admin" });
     }

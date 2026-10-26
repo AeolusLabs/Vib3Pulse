@@ -64,7 +64,7 @@ await test("GET without a token never returns the image", async () => {
   process.env.AGE_REVIEW = "1";
   (storage as any).getAdminUser = async (id: string) => ({ id, role: "age_reviewer", email: "r@x.test", isActive: true });
   const app = express();
-  app.use((req: any, _res, next) => { req.session = { adminId: "a1", mfaVerified: true, destroy: () => {} }; next(); });
+  app.use((req: any, _res, next) => { req.session = { adminId: "a1", mfaVerified: true, mfaPassed: true, destroy: () => {} }; next(); });
   registerAgeReviewAdminRoutes(app);
   const server = app.listen(0);
   const id = "11111111-1111-1111-1111-111111111111", ev = "22222222-2222-2222-2222-222222222222";

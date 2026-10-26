@@ -4,9 +4,12 @@ import * as Sentry from "@sentry/node";
 Sentry.init({
   dsn: process.env.SENTRY_DSN,
   environment: process.env.NODE_ENV || "development",
+  sendDefaultPii: false,
+  beforeSend: (event) => scrubSentryEvent(event),
   // If SENTRY_DSN is undefined, Sentry is disabled — no crash
 });
 
+import { scrubSentryEvent } from "./sentryScrub";
 import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
 import passport from "passport";

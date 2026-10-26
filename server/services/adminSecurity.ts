@@ -10,6 +10,8 @@ import { adminActivityLogs, adminMfa, adminRoles, type AdminRole, type AdminUser
 declare module "express-session" {
   interface SessionData {
     mfaVerified?: boolean;
+    /** Set ONLY by a real TOTP/recovery verify or enrolment confirm, never at login: proof of an actual second factor. */
+    mfaPassed?: boolean;
   }
 }
 declare global {
@@ -60,18 +62,21 @@ export async function withAudit<T>(e: AuditEntry, fn: () => Promise<T>): Promise
 // ---------------------------------------------------------------------------------------------
 // Auth gate. Every admin request re-reads the admin row, so deactivation and role changes take
 // effect immediately (the old gate trusted a role cached in the session for up to 8 hours).
-// Super-admins additionally need a session that has passed MFA, enforced here in code.
+// Roles for which mfaRequiredFor() is true additionally need a session that passed a real second factor, enforced here in code.
 // ---------------------------------------------------------------------------------------------
-// Two-factor authentication for super-admins is BUILT but switched OFF. Super-admins sign in with
-// username + password only until ADMIN_MFA_REQUIRED=true is set. Read on every call (not at import),
-// so flipping the variable and restarting is the whole change. While off, nothing below treats a
-// super-admin differently from any other admin, and the MFA endpoints refuse to start enrolment.
+// Two-factor authentication is BUILT. It is required for super-admins when ADMIN_MFA_REQUIRED=true, and for super_admin, admin
+// and age_reviewer whenever AGE_REVIEW is on. Read on every call (not at import), so flipping a variable and restarting is the
+// whole change, and an already-open session is forced through MFA too (see mfaPassed). While it is not required for a role,
+// nothing below treats that role differently, and the MFA endpoints refuse to start enrolment.
 /** Super-admins follow ADMIN_MFA_REQUIRED; every role that can open ID evidence (super_admin, admin, age_reviewer) needs it whenever AGE_REVIEW is on. */
 export function mfaRequiredFor(role: string, env: NodeJS.ProcessEnv = process.env): boolean {
   const ageReviewOn = parseFlag(env.AGE_REVIEW, false);
   if (role === "super_admin") return env.ADMIN_MFA_REQUIRED === "true" || ageReviewOn;
   return (role === "admin" || role === "age_reviewer") && ageReviewOn;
 }
+
+/** Test hook: lets the gate be exercised without a database. */
+export const mfaTestHooks: { isEnrolled: ((adminId: string) => Promise<boolean>) | null } = { isEnrolled: null };
 
 export type GateOpts = { roles?: readonly AdminRole[]; allowPendingMfa?: boolean };
 
@@ -86,8 +91,9 @@ export function adminGate(opts: GateOpts = {}) {
         return res.status(401).json({ message: "Admin authentication required" });
       }
       req.session.adminRole = admin.role as AdminRole;
-      if (mfaRequiredFor(admin.role) && !opts.allowPendingMfa && !req.session.mfaVerified) {
-        const enrolled = await isMfaEnrolled(admin.id);
+      // mfaPassed, not mfaVerified: a session minted while MFA was not required carries mfaVerified=true and must not outlive a switch-on.
+      if (mfaRequiredFor(admin.role) && !opts.allowPendingMfa && req.session.mfaPassed !== true) {
+        const enrolled = await (mfaTestHooks.isEnrolled ?? isMfaEnrolled)(admin.id);
         return res.status(403).json({ message: "Two-factor authentication required", code: "MFA_REQUIRED", mfa: enrolled ? "verify" : "enroll" });
       }
       if (opts.roles && !opts.roles.includes(admin.role as AdminRole)) {

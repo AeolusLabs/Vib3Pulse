@@ -34,7 +34,7 @@ app.use(express.json());
 app.use(cookieParser());
 app.use((req: any, _res, next) => {
   const a = req.header("x-test-admin");
-  req.session = a ? { adminId: a, mfaVerified: true, destroy: (cb: any) => cb?.() } : { destroy: (cb: any) => cb?.() };
+  req.session = a ? { adminId: a, mfaVerified: true, mfaPassed: true, destroy: (cb: any) => cb?.() } : { destroy: (cb: any) => cb?.() };
   next();
 });
 app.use(redactSensitiveFields);

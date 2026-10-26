@@ -25,7 +25,7 @@ const src = (p: string) => readFileSync(join(root, p), "utf8");
 let role = "age_reviewer";
 (storage as any).getAdminUser = async (id: string) => ({ id, role, isActive: true });
 async function run(gate: any) {
-  const req: any = { session: { adminId: "a1", mfaVerified: true, destroy: () => {} } };
+  const req: any = { session: { adminId: "a1", mfaVerified: true, mfaPassed: true, destroy: () => {} } };
   let status = 200, nexted = false;
   const res: any = { status(c: number) { status = c; return res; }, json() { return res; } };
   await gate(req, res, () => { nexted = true; });
