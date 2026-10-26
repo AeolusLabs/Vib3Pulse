@@ -10,7 +10,7 @@ export interface PolicySection {
   afterBullets?: string[];
 }
 export interface PrivacyPolicy {
-  version: "2026-10-v2";
+  version: "2026-10-v3";
   status: "draft" | "final";
   lastUpdated: "2026-10-26";
   contactEmail: "info@aeoluslabsltd.com";
@@ -37,7 +37,7 @@ export function visibleSections(policy: PrivacyPolicy, ageReviewEnabled: boolean
 }
 
 export const PRIVACY_POLICY: PrivacyPolicy = {
-  version: "2026-10-v2",
+  version: "2026-10-v3",
   status: "draft",
   lastUpdated: "2026-10-26",
   contactEmail: "info@aeoluslabsltd.com",
@@ -105,7 +105,7 @@ export const PRIVACY_POLICY: PrivacyPolicy = {
         "Anyone who has the link to a photo or video you uploaded can open it, because those links do not require a login. Do not upload anything you would not want a link holder to see.",
         "Vib3Pulse staff can see account and safety information they need to do their job. Admin actions are logged with a reason.",
       ],
-      whenAgeReview: { paragraphs: ["ID photos are seen only by Vib3Pulse staff who review ages (administrators and age reviewers), as described in the age verification section."] },
+      whenAgeReview: { paragraphs: ["ID photos are seen only by Vib3Pulse staff who review ages (administrators, super administrators and age reviewers), as described in the age verification section."] },
     },
     {
       id: "who-we-share-with",
@@ -145,9 +145,9 @@ export const PRIVACY_POLICY: PrivacyPolicy = {
       ageReviewOnly: true,
       paragraphs: [
         "If you choose to verify your age, you can upload a photo of an identity document and a selfie holding a one time code, or take a private live video check with a reviewer. This is optional. Saying no only means the adult only features stay off.",
-        "Who sees it: Only Vib3Pulse staff who review ages (administrators and age reviewers). Your images are encrypted in our database and are opened one at a time, with every viewing logged. For a live check, a reviewer sees you on a private call. Nothing is recorded or saved.",
-        "How long: for an upload, we delete your photos after the final decision, or after 7 days if nobody looks. If a second approval is needed, they are kept until that is decided. If you cancel before a decision, your photos are deleted.",
-        "What we keep: We keep a record of the decision: who made it, when, the type of document, whether the birthdate matched, and the reason if it was declined. We also keep the birthdate you registered with at the time, and a one-way code made from your document number. The code cannot be turned back into the number without our secret key, and it only stops the same document being used on several accounts. We do not keep your photos or the document number itself. Notifications and emails about the result do not contain your documents.",
+        "Who sees it: Only Vib3Pulse staff who review ages (administrators, super administrators and age reviewers). Your images are encrypted in our database and are opened one at a time, with every viewing logged. For a live check, a reviewer sees you on a private call. Nothing is recorded or saved.",
+        "How long: for an upload, we delete your photos after the final decision, or after 7 days from when you started, whichever comes first. If a second approval is needed, they are kept until that is decided, within the 7 days. If you cancel before a decision, your photos are deleted.",
+        "What we keep: We keep a record of the decision: who made it, when, the type of document, whether the birthdate matched, and the reason if it was declined. A reviewer may also write a short note about the decision (up to 300 characters), which is kept in our staff audit log. We also keep the birthdate you registered with at the time, and a one-way code made from your document number. The code cannot be turned back into the number without our secret key, and it only stops the same document being used on several accounts. We do not keep your photos or the document number itself. Notifications and emails about the result do not contain your documents.",
         "Your birthdate: a reviewer compares the document with the birthdate you gave when you signed up. If it shows you are under 18, we move your account to the right age group. If it shows a different adult birthdate, a second senior reviewer must approve before we change it.",
         "Your choices: Cover everything except your photo, name and date of birth. Cancel any time before a decision and your photos are deleted. Choose the live check instead of uploading. Saying no only means the adult only features stay off.",
         "Your safety: If your document shows you are under 18, we will move your account to the right age group.",

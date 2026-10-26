@@ -21,7 +21,7 @@ test("policy has every required section id", () => {
   }
   assert.equal(new Set(ids).size, ids.length);
   for (const s of PRIVACY_POLICY.sections) assert.ok(s.title && s.paragraphs.length > 0, s.id);
-  assert.equal(PRIVACY_POLICY.version, "2026-10-v2");
+  assert.equal(PRIVACY_POLICY.version, "2026-10-v3");
 });
 
 test("contact email is info@aeoluslabsltd.com everywhere", () => {
@@ -62,8 +62,10 @@ test("age review section matches the pop-up wording", () => {
   assert.ok(t.includes(PRIVACY.choices.p) && t.includes(PRIVACY.safety.p));
   assert.ok(t.includes("one-way code") && t.includes("record of the decision"));
   assert.ok(!/never/i.test(t));
-  assert.ok(whatHappens("upload").includes("after the final decision, or after 7 days if nobody looks"));
-  assert.ok(t.includes("after the final decision, or after 7 days if nobody looks"));
+  assert.ok(t.includes("super administrators and age reviewers") && t.includes("staff audit log"));
+  assert.equal(PRIVACY_POLICY.lastUpdated, "2026-10-26");
+  assert.ok(whatHappens("upload").includes("after the final decision, or after 7 days from when you started, whichever comes first"));
+  assert.ok(t.includes("after the final decision, or after 7 days from when you started, whichever comes first"));
 });
 
 test("the age review section and its sentences appear only when age review is on", () => {
