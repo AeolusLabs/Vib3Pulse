@@ -467,6 +467,9 @@ export const EARNINGS_UI_COPY: readonly string[] = [
   readFailureMessage(0, ""), readFailureMessage(401, ""), readFailureMessage(429, ""),
 ];
 
+/** Paid rooms or spray switched on. Unknown (config not loaded) counts as off. */
+export const moneyFlagsOn = (f: { paidRooms?: boolean; spray?: boolean } | null | undefined): boolean => f?.paidRooms === true || f?.spray === true;
+
 /** Account settings shows the "Payout account" row only when the status read worked (HTTP 200 and a body we can use). */
 export const payoutLinkVisible = (res: { ok: boolean } | null | undefined): boolean => res?.ok === true;
 export const PAYOUT_LINK_COPY = { title: "Payout account", help: "Where tips and ticket money are paid" } as const;

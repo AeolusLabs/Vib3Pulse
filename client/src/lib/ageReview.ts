@@ -70,6 +70,13 @@ export const COPY = {
   verifyNameAction: "Verify your name for payouts",
   verifyNameHelp: "Only needed if you want to receive money. A reviewer notes the name on your ID.",
   recheckLink: "Redo my payouts check",
+  payoutsDraftTitle: "Continue your payouts check",
+  payoutsDraftBody: "Finish this so a reviewer can note the name on your ID. It is only for receiving money.",
+  payoutsContinueButton: "Continue your payouts check",
+  payoutsPaused: "Verification is paused for now. Please come back later to verify your name for payouts.",
+  agePaused: "Verification is paused for now. Please come back later to verify your age.",
+  payoutsInReview: "Your payouts check is being reviewed",
+  payoutsInReviewBody: "We will tell you when it is done. You do not need to start another one.",
   choiceUploadHint: "Your photos are deleted after the final decision.",
   cancel: "Cancel my request",
   howHandled: "How your ID is handled",
@@ -176,6 +183,10 @@ export function cardView(me: AgeReviewMe, now: Date = new Date()): CardView {
         tone: "neutral",
       };
     default:
+      // A verified person part way through a payouts check is not asked to "verify their age" again.
+      if (openRequest(me)?.wantsPayouts === true) {
+        return { title: COPY.payoutsDraftTitle, body: COPY.payoutsDraftBody, action: null, tone: "neutral" };
+      }
       return {
         title: COPY.cardTitle,
         body: `Tipping, buying tickets and hosting paid rooms are for adults only. We check once.${pausedNote}`,
@@ -305,6 +316,15 @@ export function payoutsAction(me: AgeReviewMe): PayoutsAction {
 
 /** `/account/settings?payouts=1#verify-age` preselects the payouts choice. */
 export const payoutsPreselected = (search: string): boolean => new URLSearchParams(search).get("payouts") === "1";
+/** What the payout page offers for the verify steps: the link, a paused notice, or "being reviewed" (no new check while one is in review). */
+export type PayoutCta = "link" | "paused" | "in_review";
+export function payoutCta(me: AgeReviewMe | null | undefined): PayoutCta {
+  if (!me) return "link";
+  const r = openRequest(me);
+  if (r?.wantsPayouts === true && ["submitted", "in_review", "pending_second_approval"].includes(r.status)) return "in_review";
+  if (me.paused) return "paused";
+  return "link";
+}
 export const PAYOUTS_HREF = "/account/settings?payouts=1#verify-age";
 
 export const VERIFY_HREF = "/account/settings#verify-age";

@@ -11,6 +11,8 @@ import { Label } from "@/components/ui/label";
 import { AlertTriangleIcon, CheckCircleIcon, ChevronRightIcon, ClockIcon, Loader2Icon, ShieldCheckIcon } from "@/components/ui/icons";
 import { banksKey, fetchBanks, fetchPayoutStatus, payoutStatusKey, savePayoutAccount } from "@/lib/earningsApi";
 import { useRoomsConfig } from "@/lib/roomsApi";
+import { useAgeReview } from "@/hooks/useAgeReview";
+import { COPY as AGE_COPY, payoutCta } from "@/lib/ageReview";
 import {
   PAYOUT_COPY, VERIFY_AGE_HREF, VERIFY_NAME_HREF, accountFailureCta, accountNeedsRefetch, accountNumberValid, canLinkHere, payoutErrorMessage, payoutPanel,
   payoutStage, readFailureMessage, savedAccountOf, type PayoutStatus,
@@ -189,6 +191,8 @@ function PayoutBody({ status, moneyOn, changing, onChange, onCancel, onSaved, ch
 }) {
   const stage = payoutStage(status, moneyOn);
   const panel = payoutPanel(status, moneyOn);
+  const { me: ageMe } = useAgeReview();
+  const cta = payoutCta(ageMe);
   // The name step comes first: no bank form until a name is on file.
   const canLink = canLinkHere(status, moneyOn) && panel !== "needs_name";
   const a = status.account;
@@ -212,7 +216,8 @@ function PayoutBody({ status, moneyOn, changing, onChange, onCancel, onSaved, ch
         <div className="space-y-2 rounded-2xl border border-border p-4" data-testid="payout-unverified">
           <h2 className="flex items-center gap-2 font-semibold"><ShieldCheckIcon className="h-5 w-5 text-primary" aria-hidden />{PAYOUT_COPY.needAgeTitle}</h2>
           <p className="text-sm text-muted-foreground">{PAYOUT_COPY.needAgeBody}</p>
-          <Button asChild className="min-h-[44px] rounded-full" data-testid="payout-verify-age-cta"><Link href={VERIFY_AGE_HREF}>{PAYOUT_COPY.needAgeCta}</Link></Button>
+          {cta === "link" && <Button asChild className="min-h-[44px] rounded-full" data-testid="payout-verify-age-cta"><Link href={VERIFY_AGE_HREF}>{PAYOUT_COPY.needAgeCta}</Link></Button>}
+          {cta === "paused" && <p role="status" className="text-sm font-medium" data-testid="payout-cta-paused">{AGE_COPY.agePaused}</p>}
         </div>
       )}
 
@@ -220,7 +225,14 @@ function PayoutBody({ status, moneyOn, changing, onChange, onCancel, onSaved, ch
         <div className="space-y-2 rounded-2xl border border-border p-4" data-testid="payout-needs-name">
           <h2 className="flex items-center gap-2 font-semibold"><ShieldCheckIcon className="h-5 w-5 text-primary" aria-hidden />{PAYOUT_COPY.needNameTitle}</h2>
           <p className="text-sm text-muted-foreground">{PAYOUT_COPY.needNameBody}</p>
-          <Button asChild className="min-h-[44px] rounded-full" data-testid="payout-verify-name-cta"><Link href={VERIFY_NAME_HREF}>{PAYOUT_COPY.needNameCta}</Link></Button>
+          {cta === "link" && <Button asChild className="min-h-[44px] rounded-full" data-testid="payout-verify-name-cta"><Link href={VERIFY_NAME_HREF}>{PAYOUT_COPY.needNameCta}</Link></Button>}
+          {cta === "paused" && <p role="status" className="text-sm font-medium" data-testid="payout-cta-paused">{AGE_COPY.payoutsPaused}</p>}
+          {cta === "in_review" && (
+            <div role="status" className="space-y-1" data-testid="payout-cta-in-review">
+              <p className="text-sm font-medium">{AGE_COPY.payoutsInReview}</p>
+              <p className="text-sm text-muted-foreground">{AGE_COPY.payoutsInReviewBody}</p>
+            </div>
+          )}
         </div>
       )}
 

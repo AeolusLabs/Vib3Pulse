@@ -29,6 +29,8 @@ export default function VerifyAgeCard() {
   // "Receive money" is a choice the person makes: the box starts off, unless the link they came from asked for payouts.
   const [wants, setWants] = useState(() => (typeof window !== "undefined" ? payoutsPreselected(window.location.search) : false));
   const [payoutChoices, setPayoutChoices] = useState(false);
+  // The live region renders empty first and is filled a moment later, so a change is announced (text present on first paint is not).
+  const [announce, setAnnounce] = useState("");
   const anchor = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
 
@@ -40,6 +42,14 @@ export default function VerifyAgeCard() {
   // /account/settings?payouts=1 opens the payouts action for a verified user who has no name on file yet.
   const asksPayouts = present && typeof window !== "undefined" && payoutsPreselected(window.location.search);
   useEffect(() => { if (asksPayouts) setPayoutChoices(true); }, [asksPayouts]);
+
+  const summary = me ? (() => { const v = cardView(me); return `${v.title}. ${v.body}`; })() : "";
+  useEffect(() => {
+    if (!summary) return;
+    setAnnounce("");
+    const t = window.setTimeout(() => setAnnounce(summary), 60);
+    return () => window.clearTimeout(t);
+  }, [summary]);
 
   if (!me) return null;
   const view = cardView(me);
@@ -86,7 +96,8 @@ export default function VerifyAgeCard() {
       <Card className={TONE_BORDER[view.tone]}>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><Icon className="h-5 w-5" aria-hidden />{view.title}</CardTitle>
-          <CardDescription aria-live="polite">{view.body}</CardDescription>
+          <CardDescription>{view.body}</CardDescription>
+          <p role="status" className="sr-only" data-testid="age-live-status">{announce}</p>
         </CardHeader>
         <CardContent className="space-y-4">
           {flow === "upload" && (
@@ -148,7 +159,7 @@ export default function VerifyAgeCard() {
 
           {flow === null && mode === "resume_upload" && (
             <Button className="min-h-[44px] rounded-full" onClick={() => { setError(null); setFlow("upload"); }} data-testid="age-continue">
-              {me.state === "needs_more" ? "Add a photo" : "Continue your upload"}
+              {me.state === "needs_more" ? "Add a photo" : req?.wantsPayouts === true ? COPY.payoutsContinueButton : "Continue your upload"}
             </Button>
           )}
 

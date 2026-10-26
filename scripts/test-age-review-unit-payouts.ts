@@ -3,15 +3,15 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  COPY, ERROR_CODES, PAYOUTS_HREF, PRIVACY, createBody, errorMessage, keepFor, payoutsAction, payoutsPreselected, startLiveRequest, type AgeReviewMe,
+  COPY, ERROR_CODES, PAYOUTS_HREF, PRIVACY, cardView, createBody, errorMessage, keepFor, payoutCta, payoutsAction, payoutsPreselected, startLiveRequest, type AgeReviewMe,
 } from "../client/src/lib/ageReview";
 import { PAYOUTS_NAME_NOTE, PRIVACY_POLICY, visibleSections } from "../shared/privacyPolicy";
 import {
-  PAYOUT_COPY, PAYOUT_ERROR, VERIFY_AGE_HREF, VERIFY_NAME_HREF, accountFailureCta, parsePayoutStatus, payoutErrorMessage, payoutLinkVisible, payoutPanel, payoutStage,
+  PAYOUT_COPY, PAYOUT_ERROR, VERIFY_AGE_HREF, VERIFY_NAME_HREF, accountFailureCta, parsePayoutStatus, payoutErrorMessage, payoutLinkVisible, payoutPanel, payoutStage, moneyFlagsOn,
   PAYOUT_LINK_COPY,
 } from "../client/src/components/rooms/earnings/earningsUi";
 import {
-  ADMIN_ERROR_CODES, adminErrorMessage, decisionBody, decisionReady, emptyChecklist, legalNameValid, type DecisionForm,
+  ADMIN_ERROR_CODES, adminErrorMessage, decisionBody, decisionReady, emptyChecklist, legalNameValid, legalNameProblem, normaliseLegalName, LEGAL_NAME_HINT, type DecisionForm,
 } from "../client/src/lib/adminAgeReviewUi";
 
 let passed = 0, failed = 0;
@@ -142,7 +142,7 @@ test("account settings payout link hidden unless status answers 200", () => {
   assert.equal(payoutLinkVisible(undefined), false);
   assert.equal(payoutLinkVisible(null), false);
   const link = read("client/src/components/rooms/earnings/PayoutAccountLink.tsx");
-  assert.match(link, /if \(!payoutLinkVisible\(q\.data\)\) return null;/);
+  assert.match(link, /payoutLinkVisible\(q\.data\)\) return null;/);
   assert.match(link, /from "wouter"/);
   assert.match(link, /href="\/rooms\/payouts"/);
   assert.match(link, /min-h-\[56px\]/);
@@ -197,13 +197,98 @@ test("reviewer legalName required only when wantsPayouts and cleared after submi
   assert.match(read("client/src/pages/admin/AdminAgeReviews.tsx"), /data-testid="chip-payouts"/);
 });
 
-test("legal name check has no unicode flag and mirrors the server length rule", () => {
-  const src = read("client/src/lib/adminAgeReviewUi.ts");
-  assert.ok(!/\\p\{/.test(src) && !/\/[a-z]*u[a-z]*[,;)\s]/.test(src.split("\n").filter((l) => l.includes("NAME_RE")).join("\n")));
-  for (const ok of ["Ada", "Chioma Okafor", "Jos\u00E9 Mu\u00F1oz", "Zo\u00EB O\u2019Brien", "Anne-Marie St. John", "Nguy\u1EC5n V\u0103n An"]) assert.equal(legalNameValid(ok), true, ok);
-  for (const bad of ["Al", "A\u00D7B", "Ada1", "Ada_Obi", "-Ada", "Ada\nObi\u0000", "x".repeat(121)]) assert.equal(legalNameValid(bad), false, JSON.stringify(bad));
-  assert.equal(legalNameValid("x".repeat(120)), true);
-  assert.equal(legalNameValid("   Ada  Obi   "), true);
+// The same cases the server tests (scripts/test-age-review-unit-payoutname.ts) plus scripts and edge characters, so the form and the server cannot drift.
+const NAME_OK: [string, string][] = [
+  ["  Adébáyọ̀   Okafor ", "Adébáyọ̀ Okafor"],
+  ["Mary O'Neil-Smith Jr.", "Mary O'Neil-Smith Jr."],
+  ["a".repeat(120), "a".repeat(120)],
+  ["José Muñoz", "José Muñoz"],                       // decomposed accents become composed (NFC)
+  ["Zoë O’Brien", "Zoë O’Brien"],                           // typographic apostrophe
+  ["Αλέξανδρος Παπαδόπουλος", "Αλέξανδρος Παπαδόπουλος"], // Greek
+  ["Иван Петров", "Иван Петров"],       // Cyrillic
+  ["محمد علي", "محمد علي"],                                   // Arabic
+  ["田中 太郎", "田中 太郎"],                                                                    // CJK
+  ["Anne-Marie St. John", "Anne-Marie St. John"],
+  ["Nguyễn Văn An", "Nguyễn Văn An"],
+];
+const NAME_BAD: unknown[] = [
+  "ab", "A1 Smith", "x@y.com z", "Robert'); DROP", "<b>Bob</b> Lee", "", "   ", null, 42, "a".repeat(121), "-Smith John", "John \u{1F600} Smith",
+  "Ada Obiʼ", "Ada×Obi", "Ada÷Obi", "Ada_Obi", "Ada 123", "Ada\u0000Obi",
+];
+
+test("legal name rule mirrors the server (NFC, char-code ranges, no unicode flag)", () => {
+  for (const [input, want] of NAME_OK) assert.equal(normaliseLegalName(input), want, JSON.stringify(input));
+  for (const bad of NAME_BAD) assert.equal(normaliseLegalName(bad), null, String(bad));
+  assert.equal(legalNameValid("  Ada   Obi "), true);
+  assert.equal(legalNameValid("Ada"), true);
+  assert.equal(legalNameValid("Al"), false);
+  // Same function body as the server's: the ranges are copied, so compare the source of both.
+  const client = read("client/src/lib/adminAgeReviewUi.ts");
+  const server = read("server/identity/verifiedName.ts");
+  for (const part of ["c >= 0xc0 && c <= 0x2af && c !== 0xd7 && c !== 0xf7", "c >= 0x300 && c <= 0x36f", "c >= 0x370 && c <= 0x1fff", "c >= 0x3040 && c <= 0x9fff", 'raw.normalize("NFC").replace(/\\s+/g, " ").trim()', "n.length < 3 || n.length > 120"]) {
+    assert.ok(client.includes(part) && server.includes(part), part);
+  }
+  const rule = client.slice(client.indexOf("export function normaliseLegalName"), client.indexOf("export const legalNameValid"));
+  assert.ok(!/\/[a-z]*u[a-z]*[.,;)\s]/.test(rule.replace(/\/\[A-Za-z\]\//, "")), "no regex with the u flag");
+});
+
+test("inline reason when the name is not usable", () => {
+  assert.equal(legalNameProblem(""), null);
+  assert.equal(legalNameProblem("Ada Obi"), null);
+  assert.equal(legalNameProblem("Ada 1"), LEGAL_NAME_HINT);
+  assert.equal(LEGAL_NAME_HINT, "Letters, spaces, hyphens, apostrophes and dots, 3 to 120 characters");
+  const form = read("client/src/components/admin/age-review/DecisionForm.tsx");
+  assert.match(form, /aria-describedby="legal-name-help legal-name-problem"/);
+  assert.match(form, /id="legal-name-problem" role="status"/);
+  const body = decisionBody({ outcome: "verify", checklist: emptyChecklist(), idBirthdate: "2000-05-01", documentNumber: "A1234567", documentType: "passport", legalName: "José  Muñoz", declineReason: "", note: "", overrideReason: "" }, { overrideAllowed: false, wantsPayouts: true });
+  assert.equal(body.legalName, "José Muñoz", "the server's normal form is sent");
+});
+
+test("payout account link needs the money flags on, and asks nothing when they are off", () => {
+  assert.equal(moneyFlagsOn({ paidRooms: true, spray: false }), true);
+  assert.equal(moneyFlagsOn({ spray: true }), true);
+  assert.equal(moneyFlagsOn({ paidRooms: false, spray: false }), false);
+  assert.equal(moneyFlagsOn(undefined), false);
+  const link = read("client/src/components/rooms/earnings/PayoutAccountLink.tsx");
+  assert.match(link, /useRoomsConfig\(\)/);
+  assert.match(link, /enabled: moneyOn/);
+  assert.match(link, /if \(!moneyOn \|\| !payoutLinkVisible\(q\.data\)\) return null;/);
+  assert.ok(read("client/src/components/rooms/earnings/PayoutAccountView.tsx").includes("config.data?.features.paidRooms === true || config.data?.features.spray === true"), "same check as the payout page");
+});
+
+test("mid-draft payouts check is not the generic age card", () => {
+  const req = { id: "r", method: "upload" as const, status: "draft", documentType: null, canCancel: true, needsMore: false, hasDocument: false, hasSelfie: false, code: null, codeExpiresAt: null, liveInviteExpiresAt: null, submittedAt: null, declineReason: null, consentedAt: null, wantsPayouts: true };
+  const v = cardView(me({ state: "none", request: req }));
+  assert.equal(v.title, "Continue your payouts check");
+  assert.ok(!/adults only/i.test(v.body) && !/Verify your age/.test(v.title));
+  assert.equal(cardView(me({ state: "none", request: { ...req, wantsPayouts: false } })).title, "Verify your age");
+  assert.equal(cardView(me({ state: "none" })).title, "Verify your age");
+  assert.match(read("client/src/components/age-review/VerifyAgeCard.tsx"), /COPY\.payoutsContinueButton/);
+});
+
+test("payout page CTA: paused notice, and no second check while one is in review", () => {
+  const r = (status: string, wantsPayouts = true) => ({ id: "r", method: "upload" as const, status, documentType: null, canCancel: true, needsMore: false, hasDocument: false, hasSelfie: false, code: null, codeExpiresAt: null, liveInviteExpiresAt: null, submittedAt: null, declineReason: null, consentedAt: null, wantsPayouts });
+  assert.equal(payoutCta(null), "link");
+  assert.equal(payoutCta(me({ state: "verified", verified })), "link");
+  assert.equal(payoutCta(me({ state: "verified", verified, paused: true })), "paused");
+  assert.equal(payoutCta(me({ state: "in_review", request: r("in_review") })), "in_review");
+  assert.equal(payoutCta(me({ state: "in_review", request: r("submitted") })), "in_review");
+  assert.equal(payoutCta(me({ state: "in_review", request: r("pending_second_approval") })), "in_review");
+  assert.equal(payoutCta(me({ state: "in_review", request: r("in_review"), paused: true })), "in_review");
+  assert.equal(payoutCta(me({ state: "none", request: r("draft") })), "link", "a draft can be continued");
+  assert.equal(payoutCta(me({ state: "in_review", request: r("in_review", false) })), "link", "an age check is not a payouts check");
+  assert.equal(COPY.payoutsInReview, "Your payouts check is being reviewed");
+  const view = read("client/src/components/rooms/earnings/PayoutAccountView.tsx");
+  assert.match(view, /cta === "paused"/);
+  assert.match(view, /cta === "in_review"/);
+  assert.match(view, /cta === "link" && <Button asChild/);
+});
+
+test("card status paragraph renders empty first, then fills", () => {
+  const card = read("client/src/components/age-review/VerifyAgeCard.tsx");
+  assert.match(card, /setAnnounce\(""\);\s*const t = window\.setTimeout\(\(\) => setAnnounce\(summary\)/);
+  assert.match(card, /role="status" className="sr-only" data-testid="age-live-status">\{announce\}/);
+  assert.ok(!/<CardDescription aria-live/.test(card));
 });
 
 test("reviewer note helper warns against names and document numbers", () => {
@@ -227,7 +312,7 @@ test("copy has no dashes, 'never' or 'cash' in the new strings and components", 
   const strings = [
     PRIVACY.keepPayouts, keepFor(true), PAYOUTS_NAME_NOTE, COPY.wantsPayoutsLabel, COPY.wantsPayoutsHelp, COPY.verifyNameAction, COPY.verifyNameHelp, COPY.recheckLink,
     PAYOUT_COPY.needAgeTitle, PAYOUT_COPY.needAgeBody, PAYOUT_COPY.needAgeCta, PAYOUT_COPY.needNameTitle, PAYOUT_COPY.needNameBody, PAYOUT_COPY.needNameCta, PAYOUT_COPY.recheckCta,
-    PAYOUT_ERROR.noVerifiedName, PAYOUT_LINK_COPY.title, PAYOUT_LINK_COPY.help,
+    PAYOUT_ERROR.noVerifiedName, COPY.payoutsDraftTitle, COPY.payoutsDraftBody, COPY.payoutsContinueButton, COPY.payoutsPaused, COPY.agePaused, COPY.payoutsInReview, COPY.payoutsInReviewBody, LEGAL_NAME_HINT, PAYOUT_LINK_COPY.title, PAYOUT_LINK_COPY.help,
     ...["NAME_REQUIRED", "NAME_NOT_REQUESTED", "ALREADY_VERIFIED"].map((c) => adminErrorMessage(c)), errorMessage("ALREADY_VERIFIED"),
   ];
   for (const s of strings) assert.ok(!BAD.test(s.replace("choose 'Verify", "choose 'Verify")), s.slice(0, 60));

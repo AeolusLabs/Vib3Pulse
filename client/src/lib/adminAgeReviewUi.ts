@@ -82,15 +82,28 @@ export interface DecisionForm {
 
 /** Whether the submit button is enabled. Verify stays off until all six checks are ticked. */
 /**
- * 3 to 120 characters after trimming: Latin letters (with accents), spaces, hyphen, apostrophe (straight and typographic) and dot.
- * Written with explicit ranges, not Unicode property escapes, so it compiles for older targets.
+ * Mirrors the server's normaliseLegalName (server/identity/verifiedName.ts) so a name the form accepts is one the server accepts:
+ * NFC, whitespace collapsed and trimmed, 3 to 120 characters, letters of the scripts our users write (by char code, no regex
+ * flags), combining marks, and space . ' U+2019 and hyphen between words. U+02BC is refused, like the server. Returns the
+ * name the server will store, or null.
  */
-const NAME_LETTER = "A-Za-zÀ-ÖØ-öø-ɏḀ-ỿ";
-const NAME_RE = new RegExp(`^[${NAME_LETTER}][${NAME_LETTER} .'’ʼ-]*$`);
-export const legalNameValid = (raw: string): boolean => {
-  const n = raw.trim().replace(/\s+/g, " ");
-  return n.length >= 3 && n.length <= 120 && NAME_RE.test(n);
-};
+export function normaliseLegalName(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const n = raw.normalize("NFC").replace(/\s+/g, " ").trim();
+  if (n.length < 3 || n.length > 120) return null;
+  const letter = (ch: string) => {
+    if (/[A-Za-z]/.test(ch)) return true;
+    const c = ch.charCodeAt(0);
+    return (c >= 0xc0 && c <= 0x2af && c !== 0xd7 && c !== 0xf7) || (c >= 0x300 && c <= 0x36f) || (c >= 0x370 && c <= 0x1fff) || (c >= 0x3040 && c <= 0x9fff);
+  };
+  const punct = (ch: string) => ch === " " || ch === "." || ch === "'" || ch === "’" || ch === "-";
+  for (let i = 0; i < n.length; i++) if (!letter(n[i]) && !punct(n[i])) return null;
+  return letter(n[0]) ? n : null;
+}
+export const legalNameValid = (raw: string): boolean => normaliseLegalName(raw) !== null;
+export const LEGAL_NAME_HINT = "Letters, spaces, hyphens, apostrophes and dots, 3 to 120 characters";
+/** Shown under the field once something is typed and it is not usable yet. */
+export const legalNameProblem = (raw: string): string | null => (raw.trim() === "" || legalNameValid(raw) ? null : LEGAL_NAME_HINT);
 export function decisionReady(f: DecisionForm, method: ReviewMethod = "upload", wantsPayouts = false): boolean {
   if (wantsPayouts && needsDocumentNumber(f.outcome) && !legalNameValid(f.legalName)) return false;
   if (f.outcome && ID_OUTCOMES.includes(f.outcome) && !(DOC_TYPES as readonly string[]).includes(f.documentType)) return false;
@@ -112,7 +125,7 @@ export function decisionBody(f: DecisionForm, opts: { overrideAllowed: boolean; 
   if (f.outcome && ID_OUTCOMES.includes(f.outcome)) { body.idBirthdate = f.idBirthdate; body.documentType = f.documentType; }
   if (needsDocumentNumber(f.outcome)) body.documentNumber = f.documentNumber.trim();
   // Only for a request that asked for payouts; otherwise the server answers NAME_NOT_REQUESTED.
-  if (opts.wantsPayouts === true && needsDocumentNumber(f.outcome)) body.legalName = f.legalName.trim().replace(/\s+/g, " ");
+  if (opts.wantsPayouts === true && needsDocumentNumber(f.outcome)) body.legalName = normaliseLegalName(f.legalName) ?? f.legalName.trim();
   if (f.outcome === "decline") body.declineReason = f.declineReason;
   if (f.note.trim()) body.note = f.note.trim();
   if (needsDocumentNumber(f.outcome) && opts.overrideAllowed && f.overrideReason.trim().length >= 3) body.overrideDuplicate = { reason: f.overrideReason.trim() };

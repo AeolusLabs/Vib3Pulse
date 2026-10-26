@@ -9,7 +9,7 @@ import { Loader2Icon } from "@/components/ui/icons";
 import { ReviewApiError, decide, errText } from "@/lib/adminAgeReviewApi";
 import {
   CHECKLIST_LABEL, CONFIRM_TEXT, DECLINE_LABEL, DECLINE_REASONS, DOC_TYPES, DOC_TYPE_LABEL, OUTCOME_HELP, OUTCOME_LABEL, canOverrideDuplicate,
-  decisionBody, decisionReady, emptyChecklist, needsDocumentNumber, outcomesFor, requiredChecks, type DecisionForm as Form, type Outcome,
+  decisionBody, decisionReady, emptyChecklist, legalNameProblem, needsDocumentNumber, outcomesFor, requiredChecks, type DecisionForm as Form, type Outcome,
 } from "@/lib/adminAgeReviewUi";
 
 const FIELD = "min-h-[44px] border-slate-600 bg-slate-700/50 text-white";
@@ -114,9 +114,11 @@ export default function DecisionForm({ requestId, role, registeredDob, method, d
           <Input
             id="legal-name" value={f.legalName} onChange={(e) => set({ legalName: e.target.value })}
             autoComplete="off" autoCorrect="off" spellCheck={false} data-lpignore="true" required aria-required="true"
+            aria-invalid={legalNameProblem(f.legalName) ? true : undefined} aria-describedby="legal-name-help legal-name-problem"
             className={FIELD} data-testid="input-legal-name"
           />
-          <p className="text-xs text-slate-400">Used only to check the bank account holder's name. Stored encrypted. Not shown anywhere.</p>
+          <p id="legal-name-help" className="text-xs text-slate-400">Used only to check the bank account holder's name. Stored encrypted. Not shown anywhere.</p>
+          <p id="legal-name-problem" role="status" className={legalNameProblem(f.legalName) ? "text-xs text-amber-300" : "sr-only"}>{legalNameProblem(f.legalName) ?? ""}</p>
         </div>
       )}
 

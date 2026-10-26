@@ -2,12 +2,15 @@ import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRightIcon } from "@/components/ui/icons";
 import { fetchPayoutStatus, payoutStatusKey } from "@/lib/earningsApi";
-import { PAYOUT_LINK_COPY, payoutLinkVisible } from "./earningsUi";
+import { useRoomsConfig } from "@/lib/roomsApi";
+import { PAYOUT_LINK_COPY, moneyFlagsOn, payoutLinkVisible } from "./earningsUi";
 
-/** Account settings row to /rooms/payouts. Silent (renders nothing) unless the payout status answers 200. */
+/** Account settings row to /rooms/payouts. Silent (renders nothing, and asks nothing) unless paid rooms or spray is on and the payout status answers 200. */
 export default function PayoutAccountLink() {
-  const q = useQuery({ queryKey: payoutStatusKey, queryFn: fetchPayoutStatus, retry: false, staleTime: 60_000 });
-  if (!payoutLinkVisible(q.data)) return null;
+  const config = useRoomsConfig();
+  const moneyOn = moneyFlagsOn(config.data?.features);
+  const q = useQuery({ queryKey: payoutStatusKey, queryFn: fetchPayoutStatus, retry: false, staleTime: 60_000, enabled: moneyOn });
+  if (!moneyOn || !payoutLinkVisible(q.data)) return null;
   return (
     <Link
       href="/rooms/payouts"
