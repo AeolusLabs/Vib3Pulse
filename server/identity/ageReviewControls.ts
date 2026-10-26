@@ -70,6 +70,7 @@ export async function emergencyPurge(admin: { id: string; role: string }, reason
     if (ids.length) {
       await client.query(
         `update age_review_requests set proposed_dob = case when status = 'pending_second_approval' then null else proposed_dob end,
+                proposed_legal_name_enc = case when status = 'pending_second_approval' then null else proposed_legal_name_enc end,
                 status = case when status in ('submitted', 'in_review', 'pending_second_approval') then 'needs_more' else status end
           where id = any($1::uuid[])`, [ids]);
     }

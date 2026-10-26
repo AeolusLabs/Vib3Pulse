@@ -2629,6 +2629,8 @@ export const ageReviewRequests = pgTable("age_review_requests", {
   reviewerId: varchar("reviewer_id"),
   secondApproverId: varchar("second_approver_id"),
   proposedDob: text("proposed_dob"),
+  wantsPayouts: boolean("wants_payouts").notNull().default(false),
+  proposedLegalNameEnc: bytea("proposed_legal_name_enc"),
   outcome: text("outcome"),
   declineReason: text("decline_reason"),
   dobMatch: boolean("dob_match"),
@@ -2668,3 +2670,12 @@ export const ageReviewRevealNonces = pgTable("age_review_reveal_nonces", {
   nonce: text("nonce").primaryKey(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 }, (t) => ({ expiresIdx: index("age_review_reveal_nonces_expires_idx").on(t.expiresAt) }));
+
+// The legal name read off the ID of someone who chose to receive money (migrations/add_payout_names.sql). Encrypted; never in a users query.
+export const userVerifiedNames = pgTable("user_verified_names", {
+  userId: varchar("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  nameEnc: bytea("name_enc").notNull(),
+  requestId: uuid("request_id"),
+  setBy: varchar("set_by"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});

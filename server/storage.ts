@@ -501,6 +501,8 @@ CREATE TABLE IF NOT EXISTS room_members (
     await pool.query(AGE_REVIEW_V2_SCHEMA_SQL);
     const { AGE_REVIEW_V3_SCHEMA_SQL } = await import("./identity/ageReviewMigrationV3");
     await pool.query(AGE_REVIEW_V3_SCHEMA_SQL);
+    const { PAYOUT_NAMES_SCHEMA_SQL } = await import("./identity/payoutNamesMigration");
+    await pool.query(PAYOUT_NAMES_SCHEMA_SQL);
   }
   // Ledger v2: spray_payments (created_at, id) index, spray_events.seq and clock_timestamp() default. migrations/add_spray_ledger_v2.sql.
   {

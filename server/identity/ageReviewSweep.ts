@@ -21,7 +21,7 @@ export async function sweepExpiredAgeReviews(): Promise<{ expired: number; userI
         where r.status in ('approved', 'declined', 'expired', 'cancelled', 'closed_minor') or r.expires_at < now() - interval '2 hours'`)).rows[0].n);
     const exp = (await client.query(
       // Rows are locked in id order (as the emergency purge does) so the two can never deadlock; a row someone else holds waits for the next sweep.
-      `update age_review_requests set status = 'expired', proposed_dob = null, code = null, code_expires_at = null, decided_at = now()
+      `update age_review_requests set status = 'expired', proposed_dob = null, proposed_legal_name_enc = null, code = null, code_expires_at = null, decided_at = now()
        where id in (select id from age_review_requests where expires_at < now() and status in ('draft', 'submitted', 'in_review', 'needs_more', 'pending_second_approval') order by id for update skip locked)
        returning id, user_id`,
     )).rows as { id: string; user_id: string }[];

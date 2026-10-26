@@ -1,7 +1,7 @@
 // Manual age review: constants and pure rules shared by server and client. No database.
 import { ageFromDob } from "./age";
 
-export const CONSENT_VERSION = "2026-10-v1";
+export const CONSENT_VERSION = "2026-10-v2";
 export const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 export const CODE_LENGTH = 6;
 export const CODE_TTL_MS = 30 * 60 * 1000;

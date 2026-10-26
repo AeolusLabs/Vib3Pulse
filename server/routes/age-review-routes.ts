@@ -50,7 +50,7 @@ export function registerAgeReviewRoutes(app: Express): void {
 
   app.post(`${base}/requests`, requireAuth, createLimiter, async (req, res) => {
     try {
-      const b = z.object({ method: z.enum(["upload", "live"]), documentType: z.string().max(40).nullish(), consentVersion: z.string().max(40) }).parse(req.body);
+      const b = z.object({ method: z.enum(["upload", "live"]), documentType: z.string().max(40).nullish(), consentVersion: z.string().max(40), wantsPayouts: z.boolean().optional() }).parse(req.body);
       res.status(201).json({ request: await createRequest(uid(req), b) });
     } catch (e) { fail(res, e); }
   });

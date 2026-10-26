@@ -57,7 +57,7 @@ await test("evidence is never returned to the user", () => {
     id: "i", user_id: "u", method: "upload", status: "submitted", document_type: "passport", code: "ABC234", code_expires_at: new Date(),
     decline_reason: null, live_invite_expires_at: null, consented_at: new Date(), submitted_at: new Date(), decided_at: null, created_at: new Date(), expires_at: new Date(),
   }, ["document", "selfie"]);
-  assert.deepEqual(Object.keys(dto).sort(), ["canCancel", "code", "codeExpiresAt", "consentedAt", "declineReason", "documentType", "hasDocument", "hasSelfie", "id", "liveInviteExpiresAt", "method", "needsMore", "status", "submittedAt"]);
+  assert.deepEqual(Object.keys(dto).sort(), ["canCancel", "code", "codeExpiresAt", "consentedAt", "declineReason", "documentType", "hasDocument", "hasSelfie", "id", "liveInviteExpiresAt", "method", "needsMore", "status", "submittedAt", "wantsPayouts"]);
   assert.equal(dto.hasDocument && dto.hasSelfie, true);
   // The user service never selects the encrypted bytes at all.
   assert.ok(!/COLS[^`]*bytes_enc|select\s+(\w+,\s*)*bytes_enc/i.test(src("server/identity/ageReviewService.ts")), "bytes_enc only appears in the insert");

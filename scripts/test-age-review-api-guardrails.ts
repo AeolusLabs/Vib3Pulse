@@ -121,7 +121,7 @@ check("sweep sees the stale evidence, then removes it", (sw.staleFound ?? 0) >= 
 
 // pause
 const pu = await mkUser("argu5");
-const consent = { consentVersion: "2026-10-v1" };
+const consent = { consentVersion: "2026-10-v2" };
 check("pause: admin can pause", (await http("POST", "/api/admin/age-reviews/pause", { admin: adm }, { on: true, reason: "incident" })).json?.changed === true);
 check("pause: repeat is changed false", (await http("POST", "/api/admin/age-reviews/pause", { admin: adm }, { on: true, reason: "incident" })).json?.changed === false);
 check("paused: create refused", (await http("POST", "/api/age-review/requests", { user: pu }, { method: "live", ...consent })).json?.code === "AGE_REVIEW_PAUSED");

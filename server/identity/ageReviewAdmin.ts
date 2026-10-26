@@ -8,6 +8,7 @@ import {
 } from "../../shared/ageReview";
 import { AgeReviewError } from "./ageReviewService";
 import { documentFingerprint } from "./evidenceCrypto";
+import { deleteVerifiedName, normaliseLegalName, openProposedName, sealProposedName, setVerifiedName } from "./verifiedName";
 
 export type AdminRef = { id: string; email: string; role: string };
 export type DecideBody = {
@@ -19,10 +20,12 @@ export type DecideBody = {
   declineReason?: DeclineReason;
   note?: string;
   overrideDuplicate?: { reason: string };
+  /** The full name on the document; only for a request that asked for payouts. Never logged, audited or returned. */
+  legalName?: string;
 };
 export type RequestCtx = {
   id: string; user_id: string; method: "upload" | "live"; status: string; document_type: string | null;
-  registered_dob_snapshot: string | null; more_requests: number; reviewer_id: string | null; proposed_dob: string | null;
+  registered_dob_snapshot: string | null; more_requests: number; reviewer_id: string | null; proposed_dob: string | null; wants_payouts?: boolean;
 };
 export type UserCtx = { email: string | null; dateOfBirth: string | null };
 
@@ -40,6 +43,11 @@ export type Plan = {
   notify: "approved" | "declined" | "needs_more" | "teen_moved" | null;
   /** Set when a super_admin knowingly verified a document that already verified another account. */
   overrideReason: string | null;
+  /** The normalised legal name to store with the verification (verify only). */
+  storeName: string | null;
+  /** The name to hold, sealed, until the second approval (birthdate_change only). */
+  holdName: string | null;
+  deleteName: boolean;
 };
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -75,7 +83,20 @@ export async function planDecision(a: {
   if (!DECISION_OUTCOMES.includes(body.outcome)) throw new AgeReviewError(400, "BAD_REQUEST", "Unknown outcome.");
   const base: Plan = {
     outcome: body.outcome, finalStatus: "declined", account: null, declineReason: null, dobMatch: false, proposedDob: null,
-    fingerprint: null, documentType: null, bumpMore: false, deleteEvidence: true, notify: null, overrideReason: null,
+    fingerprint: null, documentType: null, bumpMore: false, deleteEvidence: true, notify: null, overrideReason: null, storeName: null, holdName: null, deleteName: false,
+  };
+
+  // A name is asked for exactly when the user asked for payouts.
+  const nameFor = (): string | null => {
+    const sent = typeof body.legalName === "string" && body.legalName.trim().length > 0;
+    if (!req.wants_payouts) {
+      if (sent) throw new AgeReviewError(400, "NAME_NOT_REQUESTED", "This person did not ask to receive money, so no name is recorded.");
+      return null;
+    }
+    if (!sent) throw new AgeReviewError(400, "NAME_REQUIRED", "Enter the full name on the document.");
+    const n = normaliseLegalName(body.legalName);
+    if (!n) throw new AgeReviewError(400, "BAD_REQUEST", "That is not a usable name.");
+    return n;
   };
 
   const checklistFull = () => requiredChecklist(req.method).every((k) => body.checklist?.[k] === true);
@@ -103,14 +124,15 @@ export async function planDecision(a: {
       if (idDob !== req.registered_dob_snapshot.slice(0, 10) || age === null || age < 18) {
         throw new AgeReviewError(400, "BIRTHDATE_MISMATCH", "The ID birthdate does not match the registered one or is under 18. Use teen correction or birthdate change.");
       }
+      const storeName = nameFor();
       const { fp, type } = await fingerprintFor();
-      return { ...base, finalStatus: "approved", outcome: "verified", account: { kind: "verify", method: req.method === "live" ? "admin_live" : "admin_upload" }, dobMatch: true, fingerprint: fp, documentType: type, notify: "approved", overrideReason };
+      return { ...base, storeName, finalStatus: "approved", outcome: "verified", account: { kind: "verify", method: req.method === "live" ? "admin_live" : "admin_upload" }, dobMatch: true, fingerprint: fp, documentType: type, notify: "approved", overrideReason };
     }
     case "teen_correction": {
       const idDob = needBirthdate(body);
       const age = ageFromDob(idDob, now);
       if (age === null || age >= 18) throw new AgeReviewError(400, "BIRTHDATE_MISMATCH", "The ID birthdate does not make this person under 18.");
-      return { ...base, finalStatus: "declined", outcome: "teen_correction", account: { kind: "correct_dob", dob: idDob, reason: "age review: ID shows under 18" }, dobMatch: false, notify: "teen_moved" };
+      return { ...base, finalStatus: "declined", outcome: "teen_correction", account: { kind: "correct_dob", dob: idDob, reason: "age review: ID shows under 18" }, dobMatch: false, notify: "teen_moved", deleteName: true };
     }
     case "birthdate_change": {
       // Checked as fully as verify, so the second approver is approving a complete case.
@@ -119,9 +141,10 @@ export async function planDecision(a: {
       const age = ageFromDob(idDob, now);
       if (age === null || age < 18) throw new AgeReviewError(400, "BIRTHDATE_MISMATCH", "The ID birthdate must be an adult birthdate. Use teen correction.");
       if (idDob === req.registered_dob_snapshot?.slice(0, 10)) throw new AgeReviewError(400, "BIRTHDATE_MISMATCH", "The ID birthdate matches the registered one. Use verify.");
+      const holdName = nameFor();
       const { fp, type } = await fingerprintFor();
-      // Evidence stays until the second approver has decided.
-      return { ...base, finalStatus: "pending_second_approval", outcome: "birthdate_change", proposedDob: idDob, fingerprint: fp, documentType: type, deleteEvidence: false, overrideReason };
+      // Evidence and the proposed name stay until the second approver has decided.
+      return { ...base, holdName, finalStatus: "pending_second_approval", outcome: "birthdate_change", proposedDob: idDob, fingerprint: fp, documentType: type, deleteEvidence: false, overrideReason };
     }
     case "needs_more":
       if (req.method !== "upload") throw new AgeReviewError(409, "WRONG_STATE", "A live check cannot ask for more photos.");
@@ -151,12 +174,13 @@ export const isUuid = (s: string) => UUID.test(s);
 
 type ItemRow = {
   id: string; created_at: Date; submitted_at: Date | null; method: string; status: string; user_id: string; display_name: string | null; username: string;
-  document_type: string | null; registered_dob_snapshot: string | null; more_requests: number; ck?: string;
+  document_type: string | null; registered_dob_snapshot: string | null; more_requests: number; wants_payouts?: boolean; ck?: string;
 };
 const itemOf = (r: ItemRow, now = new Date()) => ({
   id: r.id, createdAt: iso(r.created_at)!, submittedAt: iso(r.submitted_at), method: r.method, status: r.status, userId: r.user_id,
   displayName: r.display_name || r.username, documentType: r.document_type,
   registeredAge: ageFromDob(r.registered_dob_snapshot, now), needsMore: r.status === "needs_more", awaitingSecondApproval: r.status === "pending_second_approval",
+  wantsPayouts: r.wants_payouts === true,
 });
 
 function encodeCursor(ck: string, id: string) { return Buffer.from(JSON.stringify({ k: ck, id }), "utf8").toString("base64url"); }
@@ -177,7 +201,7 @@ export async function listQueue(q: { status?: string; cursor?: string; limit?: n
   if (q.cursor && !cur) throw new AgeReviewError(400, "BAD_REQUEST", "Bad cursor.");
   const statuses = q.status ? [q.status] : [...QUEUE_DEFAULT_STATUSES];
   const rows = (await pool.query(
-    `select r.id, r.created_at, r.submitted_at, r.method, r.status, r.user_id, u.display_name, u.username, r.document_type, r.registered_dob_snapshot, r.more_requests, ${TS} as ck
+    `select r.id, r.created_at, r.submitted_at, r.method, r.status, r.user_id, u.display_name, u.username, r.document_type, r.registered_dob_snapshot, r.more_requests, r.wants_payouts, ${TS} as ck
        from age_review_requests r join users u on u.id = r.user_id
       where r.status = any($1::text[]) and ($2::text is null or (${TS}, r.id::text) > ($2::text, $3::text))
       order by r.created_at asc, r.id asc limit $4`,
@@ -242,19 +266,21 @@ async function withLock<T>(id: string, fn: (c: { query: (q: string, p?: any[]) =
 
 async function loadLocked(c: { query: (q: string, p?: any[]) => Promise<any> }, id: string, forUpdate = false) {
   const r = (await c.query(
-    `select r.id, r.user_id, r.method, r.status, r.document_type, r.registered_dob_snapshot, r.more_requests, r.reviewer_id, r.proposed_dob, r.second_approver_id, r.document_fingerprint,
+    `select r.id, r.user_id, r.method, r.status, r.document_type, r.registered_dob_snapshot, r.more_requests, r.reviewer_id, r.proposed_dob, r.second_approver_id, r.document_fingerprint, r.wants_payouts, r.proposed_legal_name_enc,
             u.email as user_email, u.date_of_birth as user_dob
-       from age_review_requests r join users u on u.id = r.user_id where r.id = $1 ${forUpdate ? "for update of r" : ""}`, [id])).rows[0] as (RequestCtx & { user_email: string | null; user_dob: string | null; document_fingerprint: string | null }) | undefined;
+       from age_review_requests r join users u on u.id = r.user_id where r.id = $1 ${forUpdate ? "for update of r" : ""}`, [id])).rows[0] as (RequestCtx & { user_email: string | null; user_dob: string | null; document_fingerprint: string | null; proposed_legal_name_enc: Buffer | null }) | undefined;
   if (!r) throw new AgeReviewError(404, "NOT_FOUND", "Not found");
   return r;
 }
 
 /** The account-level change comes first and is idempotent; if it succeeded but the request update fails, the request stays open and a retry converges. */
-async function applyAccount(adminId: string, userId: string, account: NonNullable<Plan["account"]>, ip?: string) {
+async function applyAccount(adminId: string, userId: string, account: NonNullable<Plan["account"]>, ip?: string): Promise<boolean> {
   const { storage } = await import("../storage");
   if (account.kind === "verify") {
+    // A payouts-only review of someone already verified keeps the original verification (date and method); only the name is new.
+    if ((await storage.getUser(userId))?.ageVerifiedAt) return false;
     await storage.setAgeVerification(userId, { verified: true, method: account.method });
-    return;
+    return true;
   }
   const user = await storage.getUser(userId);
   if (user?.dateOfBirth?.slice(0, 10) !== account.dob) {
@@ -266,6 +292,7 @@ async function applyAccount(adminId: string, userId: string, account: NonNullabl
     // Retry after a partial failure: the birthdate is already corrected, but verification must still be cleared.
     await storage.setAgeVerification(userId, { verified: false });
   }
+  return true;
 }
 
 async function audit(adminId: string, action: string, id: string, details: string, ip?: string) {
@@ -288,27 +315,31 @@ export async function decide(admin: AdminRef, id: string, body: DecideBody, ip?:
         admin, req, user: { email: req.user_email, dateOfBirth: req.user_dob }, body,
         isDuplicate: async (fp) => ((await c.query(`select 1 from age_review_requests where document_fingerprint = $1 and status = 'approved' and user_id <> $2 limit 1`, [fp, req.user_id])).rowCount ?? 0) > 0,
       });
-      if (plan.account) { await applyAccount(admin.id, req.user_id, plan.account, ip); applied = plan.account; }
+      if (plan.account && (await applyAccount(admin.id, req.user_id, plan.account, ip))) applied = plan.account;
+      // The name goes in on the same connection and transaction as the verification: both commit together or neither does.
+      if (plan.storeName) await setVerifiedName(c, req.user_id, plan.storeName, id, admin.id);
+      if (plan.deleteName) await deleteVerifiedName(req.user_id, c);
       if (plan.deleteEvidence) await c.query(`delete from age_review_evidence where request_id = $1`, [id]);
       await c.query(
         `update age_review_requests set status = $2, outcome = $3, decline_reason = $4, dob_match = $5,
                 proposed_dob = case when $2 in ('approved', 'declined', 'closed_minor') then null else coalesce($6, proposed_dob) end,
+                proposed_legal_name_enc = case when $2 in ('approved', 'declined', 'closed_minor') then null else coalesce($11, proposed_legal_name_enc) end,
                 code = case when $2 in ('approved', 'declined', 'closed_minor') then null else code end,
                 code_expires_at = case when $2 in ('approved', 'declined', 'closed_minor') then null else code_expires_at end,
                 document_fingerprint = coalesce($7, document_fingerprint), document_type = coalesce(document_type, $8), reviewer_id = $9,
                 more_requests = more_requests + $10, decided_at = case when $2 in ('needs_more', 'pending_second_approval') then decided_at else now() end
           where id = $1`,
-        [id, plan.finalStatus, plan.outcome, plan.declineReason, plan.dobMatch, plan.proposedDob, plan.fingerprint, plan.documentType, admin.id, plan.bumpMore ? 1 : 0],
+        [id, plan.finalStatus, plan.outcome, plan.declineReason, plan.dobMatch, plan.proposedDob, plan.fingerprint, plan.documentType, admin.id, plan.bumpMore ? 1 : 0, plan.holdName ? sealProposedName(plan.holdName, id) : null],
       );
       await c.query("commit");
-      return { plan, userId: req.user_id, method: req.method };
+      return { plan, userId: req.user_id, method: req.method, payouts: req.wants_payouts === true };
     } catch (e) {
       await c.query("rollback").catch(() => {});
       if (applied && r) await compensateAccountChange(id, r.user_id, applied);
       throw e;
     }
   });
-  await audit(admin.id, "age_review.decide", id, `outcome=${result.plan.outcome} request=${id}${body.note?.trim() ? ` note=${body.note.trim().slice(0, 300)}` : ""}`, ip);
+  await audit(admin.id, "age_review.decide", id, `outcome=${result.plan.outcome} request=${id}${result.payouts ? " payouts=true" : ""}${body.note?.trim() ? ` note=${body.note.trim().slice(0, 300)}` : ""}`, ip);
   if (result.plan.overrideReason) await audit(admin.id, "age_review.duplicate_override", id, `request=${id} reason=${result.plan.overrideReason}`, ip);
   if (result.method === "live") await closeRoomQuietly(id);
   if (result.plan.notify) await notifyQuietly(result.userId, result.plan.notify);
@@ -360,10 +391,12 @@ export async function secondApprove(admin: AdminRef, id: string, body: { approve
         applied = true;
         const { storage } = await import("../storage");
         await storage.setAgeVerification(r.user_id, { verified: true, method: r.method === "live" ? "admin_live" : "admin_upload" });
+        // The name held at queue time is stored now, in the same transaction as the decision.
+        if (r.wants_payouts && r.proposed_legal_name_enc) await setVerifiedName(c, r.user_id, openProposedName(r.proposed_legal_name_enc, id), id, admin.id);
       }
       await c.query(`delete from age_review_evidence where request_id = $1`, [id]);
       await c.query(
-        `update age_review_requests set status = $2, outcome = $3, second_approver_id = $4, proposed_dob = null, code = null, code_expires_at = null, decided_at = now() where id = $1`,
+        `update age_review_requests set status = $2, outcome = $3, second_approver_id = $4, proposed_dob = null, proposed_legal_name_enc = null, code = null, code_expires_at = null, decided_at = now() where id = $1`,
         [id, body.approve ? "approved" : "declined", body.approve ? "birthdate_changed" : "birthdate_rejected", admin.id],
       );
       await c.query("commit");

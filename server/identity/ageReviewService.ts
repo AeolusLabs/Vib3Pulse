@@ -7,6 +7,7 @@ import {
 } from "../../shared/ageReview";
 import { encryptEvidence } from "./evidenceCrypto";
 import { ageReviewPaused } from "./ageReviewFeatures";
+import { hasVerifiedName } from "./verifiedName";
 
 export class AgeReviewError extends Error {
   constructor(public status: number, public code: string, message: string, public extra: Record<string, unknown> = {}) { super(message); }
@@ -17,10 +18,10 @@ async function getPool() { return (await import("../storage")).pool; }
 type Row = {
   id: string; user_id: string; method: "upload" | "live"; status: string; document_type: string | null; code: string | null;
   code_expires_at: Date | null; decline_reason: string | null; live_invite_expires_at: Date | null; consented_at: Date | null;
-  submitted_at: Date | null; decided_at: Date | null; created_at: Date; expires_at: Date;
+  submitted_at: Date | null; decided_at: Date | null; created_at: Date; expires_at: Date; wants_payouts?: boolean;
 };
 type Queryable = { query: (q: string, p?: any[]) => Promise<any> };
-const COLS = `id, user_id, method, status, document_type, code, code_expires_at, decline_reason, live_invite_expires_at, consented_at, submitted_at, decided_at, created_at, expires_at`;
+const COLS = `id, user_id, method, status, document_type, code, code_expires_at, decline_reason, live_invite_expires_at, consented_at, submitted_at, decided_at, created_at, expires_at, wants_payouts`;
 const iso = (d: Date | null) => (d ? new Date(d).toISOString() : null);
 
 export function toRequestDto(r: Row, kinds: string[], now: Date = new Date()) {
@@ -41,6 +42,7 @@ export function toRequestDto(r: Row, kinds: string[], now: Date = new Date()) {
     submittedAt: iso(r.submitted_at),
     declineReason: r.status === "declined" ? r.decline_reason : null,
     consentedAt: iso(r.consented_at),
+    wantsPayouts: r.wants_payouts === true,
   };
 }
 
@@ -79,22 +81,23 @@ export async function getMe(userId: string, now: Date = new Date()) {
   const paused = await ageReviewPaused();
   const rows = (await pool.query(`select ${COLS} from age_review_requests where user_id = $1 order by created_at desc limit 20`, [userId])).rows as Row[];
   const { attemptsLeft, retryAfter } = attemptState(rows.map((r) => ({ status: r.status, decidedAt: r.decided_at })), now);
-  const base = { enabled: true as const, paused, consentVersion: CONSENT_VERSION, attemptsLeft };
+  const hasPayoutName = await hasVerifiedName(userId, pool);
+  const base = { enabled: true as const, paused, consentVersion: CONSENT_VERSION, attemptsLeft, hasPayoutName };
   const eligibility = registeredEligibility(user.date_of_birth, now);
+  const verifiedAdult = !!user.age_verified_at && eligibility === "ok";
+  const m = user.age_verified_method;
+  const verifiedInfo = verifiedAdult ? { method: (m === "admin_upload" || m === "admin_live" ? m : "admin") as "admin" | "admin_upload" | "admin_live", at: new Date(user.age_verified_at!).toISOString() } : null;
 
-  if (user.age_verified_at && eligibility === "ok") {
-    const m = user.age_verified_method;
-    const method = m === "admin_upload" || m === "admin_live" ? m : "admin";
-    return { ...base, state: "verified" as const, verified: { method, at: new Date(user.age_verified_at).toISOString() }, request: null, retryAfter: null };
+  // An open request decides the state even for someone already verified (a payouts-only review).
+  const open = eligibility === "ok" ? rows.find((r) => isOpenStatus(r.status)) : undefined;
+  if (open) {
+    const state = open.status === "draft" ? "none" : open.status === "needs_more" ? "needs_more" : "in_review"; // a draft is the user still mid-flow
+    return { ...base, state: state as "none" | "needs_more" | "in_review", verified: verifiedInfo, request: toRequestDto(open, await kindsOf(open.id), now), retryAfter: null };
   }
+  if (verifiedInfo) return { ...base, state: "verified" as const, verified: verifiedInfo, request: null, retryAfter: null };
   const none = { verified: null, request: null, retryAfter: null };
   if (eligibility !== "ok") return { ...base, state: "not_offered" as const, ...none };
 
-  const open = rows.find((r) => isOpenStatus(r.status));
-  if (open) {
-    const state = open.status === "draft" ? "none" : open.status === "needs_more" ? "needs_more" : "in_review"; // a draft is the user still mid-flow
-    return { ...base, state: state as "none" | "needs_more" | "in_review", verified: null, request: toRequestDto(open, await kindsOf(open.id), now), retryAfter: null };
-  }
   const last = rows[0];
   if (last && last.status === "declined") {
     const cooling = retryAfter !== null && retryAfter > now;
@@ -104,7 +107,7 @@ export async function getMe(userId: string, now: Date = new Date()) {
   return { ...base, state: "none" as const, ...none };
 }
 
-export async function createRequest(userId: string, input: { method: "upload" | "live"; documentType?: string | null; consentVersion: string }, now: Date = new Date()) {
+export async function createRequest(userId: string, input: { method: "upload" | "live"; documentType?: string | null; consentVersion: string; wantsPayouts?: boolean }, now: Date = new Date()) {
   if (input.consentVersion !== CONSENT_VERSION) throw new AgeReviewError(400, "CONSENT_REQUIRED", "Please read and accept the privacy notice first.");
   if (await ageReviewPaused()) throw new AgeReviewError(503, "AGE_REVIEW_PAUSED", "Age checks are paused right now. Please try again later.");
   const pool = await getPool();
@@ -112,7 +115,8 @@ export async function createRequest(userId: string, input: { method: "upload" | 
     { date_of_birth: string | null; age_verified_at: Date | null } | undefined;
   if (!user) throw new AgeReviewError(404, "NOT_FOUND", "Not found");
   if (registeredEligibility(user.date_of_birth, now) !== "ok") throw new AgeReviewError(403, "NOT_OFFERED", "Age verification is not available for this account.");
-  if (user.age_verified_at) throw new AgeReviewError(409, "WRONG_STATE", "Your age is already verified.");
+  // A verified adult may only start a payouts review (to add the name on their ID, or to recheck it).
+  if (user.age_verified_at && input.wantsPayouts !== true) throw new AgeReviewError(409, "ALREADY_VERIFIED", "Your age is already verified.");
   const upload = input.method === "upload";
   if (upload && !(DOCUMENT_TYPES as readonly string[]).includes(input.documentType ?? "")) throw new AgeReviewError(400, "BAD_REQUEST", "Choose a document type.");
   const history = (await pool.query(`select status, decided_at from age_review_requests where user_id = $1 order by created_at desc limit 50`, [userId])).rows as { status: string; decided_at: Date | null }[];
@@ -121,10 +125,10 @@ export async function createRequest(userId: string, input: { method: "upload" | 
   if (retryAfter) throw new AgeReviewError(429, "RATE_LIMITED", "Please wait before trying again.", { retryAfter: retryAfter.toISOString(), attemptsLeft });
   try {
     const r = (await pool.query(
-      `insert into age_review_requests (user_id, method, status, document_type, code, code_expires_at, registered_dob_snapshot, consent_version, consented_at, expires_at)
-       values ($1, $2, 'draft', $3, $4, $5, $6, $7, $8, $9) returning ${COLS}`,
+      `insert into age_review_requests (user_id, method, status, document_type, code, code_expires_at, registered_dob_snapshot, consent_version, consented_at, expires_at, wants_payouts)
+       values ($1, $2, 'draft', $3, $4, $5, $6, $7, $8, $9, $10) returning ${COLS}`,
       [userId, input.method, input.documentType ?? null, upload ? generateCode() : null,
-        upload ? new Date(now.getTime() + CODE_TTL_MS) : null, user.date_of_birth, CONSENT_VERSION, now, new Date(now.getTime() + REQUEST_EXPIRY_MS)],
+        upload ? new Date(now.getTime() + CODE_TTL_MS) : null, user.date_of_birth, CONSENT_VERSION, now, new Date(now.getTime() + REQUEST_EXPIRY_MS), input.wantsPayouts === true],
     )).rows[0] as Row;
     return toRequestDto(r, [], now);
   } catch (e: any) {
@@ -183,7 +187,7 @@ export async function cancelRequest(userId: string, id: string) {
     const req = await loadOwned(userId, id, c, true);
     if (!(CANCELLABLE_STATUSES as readonly string[]).includes(req.status)) throw new AgeReviewError(409, "WRONG_STATE", "This request cannot be cancelled now.");
     await c.query(`delete from age_review_evidence where request_id = $1`, [req.id]);
-    const row = (await c.query(`update age_review_requests set status = 'cancelled', proposed_dob = null, code = null, code_expires_at = null, decided_at = now() where id = $1 returning ${COLS}`, [req.id])).rows[0] as Row;
+    const row = (await c.query(`update age_review_requests set status = 'cancelled', proposed_dob = null, proposed_legal_name_enc = null, code = null, code_expires_at = null, decided_at = now() where id = $1 returning ${COLS}`, [req.id])).rows[0] as Row;
     return toRequestDto(row, []);
   });
 }
