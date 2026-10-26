@@ -625,7 +625,7 @@ test("the payout code never returns or logs the account name or the full number"
   // An empty bank list is never cached (review r1 m3).
   assert.match(p, /if \(banks\.length > 0\) bankCache =/);
   // canLinkAccount is in the status (fix round contract).
-  assert.match(p, /canLinkAccount: canLinkAccountFor\(user\)/);
+  assert.match(p, /canLinkAccount: await canLinkAccountFor\(user\)/);
 });
 
 test("receipt route sends the exact safety headers", () => {

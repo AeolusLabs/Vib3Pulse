@@ -37,6 +37,7 @@ export const decideSchema = z.object({
   documentType: z.enum(["passport", "drivers_licence", "national_id", "nin_slip"]).optional(),
   declineReason: z.enum(DECLINE_REASONS).optional(),
   note: z.string().max(300).optional(),
+  legalName: z.string().max(200).optional(),
   overrideDuplicate: z.object({ reason: z.string().trim().min(3).max(300) }).optional(),
 });
 

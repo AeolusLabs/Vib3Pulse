@@ -295,6 +295,9 @@ async function applyAccount(adminId: string, userId: string, account: NonNullabl
   return true;
 }
 
+/** Test hook (no database needed). */
+export const applyAccountForTests = applyAccount;
+
 async function audit(adminId: string, action: string, id: string, details: string, ip?: string) {
   const { storage } = await import("../storage");
   await storage.logAdminActivity({ adminId, action, targetType: "age_review_request", targetId: id, details, reason: details, ipAddress: ip })

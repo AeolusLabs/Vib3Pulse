@@ -148,8 +148,8 @@ await test("code is cleared on every final status (structure)", () => {
   const a = src("server/identity/ageReviewAdmin.ts");
   assert.ok(a.includes("code = case when $2 in ('approved', 'declined', 'closed_minor') then null else code end") && a.includes("code_expires_at = case when $2 in ('approved', 'declined', 'closed_minor') then null else code_expires_at end"));
   assert.ok(a.includes("proposed_dob = null, proposed_legal_name_enc = null, code = null, code_expires_at = null, decided_at = now() where id = $1"), "second approval");
-  assert.ok(src("server/identity/ageReviewSweep.ts").includes("status = 'expired', proposed_dob = null, code = null, code_expires_at = null"));
-  assert.ok(src("server/identity/ageReviewService.ts").includes("status = 'cancelled', proposed_dob = null, code = null, code_expires_at = null"));
+  assert.ok(src("server/identity/ageReviewSweep.ts").includes("status = 'expired', proposed_dob = null, proposed_legal_name_enc = null, code = null, code_expires_at = null"));
+  assert.ok(src("server/identity/ageReviewService.ts").includes("status = 'cancelled', proposed_dob = null, proposed_legal_name_enc = null, code = null, code_expires_at = null"));
   assert.ok(!/status = 'needs_more'/.test(src("server/identity/ageReviewControls.ts").replace(/'needs_more'/g, "")) || true);
 });
 

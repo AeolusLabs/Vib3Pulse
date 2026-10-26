@@ -13,9 +13,9 @@
 //     hour (counted in the database and shared with the organiser resolve / onboard routes, so it holds across server
 //     instances and both doors), plus a per-IP limit on the route. The bank's account name is NEVER returned or logged
 //     here: the answer is only whether it matches. "Not found" and "not your name" are ONE answer (NAME_MISMATCH).
-//  3. Name match is strict (shared/roomEarnings.ts namesMatch). No verified legal name is stored anywhere in the repo yet
-//     (the ID provider is gate G2): verifiedLegalNameOf returns null, canLinkAccount is false, and linking refuses with
-//     NO_VERIFIED_NAME before any lookup. Owner item.
+//  3. Name match is strict (shared/roomEarnings.ts namesMatch). The verified legal name is the one an age reviewer recorded,
+//     encrypted, when the person asked to receive money (server/identity/verifiedName.ts). Without one, linking refuses with
+//     NO_VERIFIED_NAME before any lookup.
 //  4. In-flight transfers are never redirected, and no transaction is held open across a Paystack call (fix round I3):
 //      - the change runs under a SESSION advisory lock (LOCK_ACCOUNT_CHANGE, user id) with no transaction open;
 //      - settlement takes the SHARED transaction lock on the same key before it moves a payout held -> queued or an admin
@@ -42,6 +42,7 @@ import {
   type PaystackBank,
 } from "../payments/paystack";
 import { BUSY, LOCK_PAYOUT, withAdvisoryLock } from "./refunds";
+import { getVerifiedLegalName, hasVerifiedName } from "../identity/verifiedName";
 
 export const ROOMS_ACCOUNT_ATTEMPTS_PER_HOUR = 5;
 const HOUR_MS = 60 * 60_000;
@@ -100,13 +101,17 @@ const provider = (): PayoutProvider => ({ ...realProvider, ...(testProvider ?? {
 export const payoutTestHooks: { verifiedName?: (userId: string) => string | null } = {};
 
 /**
- * The person's verified legal name, from ID verification. The repo stores none today (users has only ageVerifiedAt /
- * ageVerifiedMethod; the ID provider is gate G2), so this is null for everyone and linking refuses NO_VERIFIED_NAME.
- * When the provider lands, read its stored legal name here (and only here).
+ * The person's verified legal name: the encrypted name an age reviewer recorded when they asked to receive money
+ * (server/identity/verifiedName.ts). null when none is stored. Tests may stand in for it with payoutTestHooks.verifiedName.
  */
-export function verifiedLegalNameOf(user: User): string | null {
-  if (testing() && payoutTestHooks.verifiedName) return payoutTestHooks.verifiedName(user.id);
-  return null;
+export async function verifiedLegalNameOf(userId: string): Promise<string | null> {
+  if (testing() && payoutTestHooks.verifiedName) return payoutTestHooks.verifiedName(userId);
+  return getVerifiedLegalName(userId);
+}
+
+async function hasVerifiedNameFor(userId: string): Promise<boolean> {
+  if (testing() && payoutTestHooks.verifiedName) return payoutTestHooks.verifiedName(userId) !== null;
+  return hasVerifiedName(userId);
 }
 
 /** "Paystack unavailable: ..." (or any error that is not a Paystack refusal) is an outage. */
@@ -124,8 +129,8 @@ export async function payoutBanks(): Promise<PaystackBank[]> {
 // ---------------------------------------------------------------- GET /api/rooms/payouts/status
 
 /** Can this person link a bank account through rooms in this deployment (a verified adult with a verified legal name)? */
-export function canLinkAccountFor(user: User | undefined | null): boolean {
-  return !!user && !user.deletedAt && isIdVerifiedAdult(user) && !!verifiedLegalNameOf(user);
+export async function canLinkAccountFor(user: User | undefined | null): Promise<boolean> {
+  return !!user && !user.deletedAt && isIdVerifiedAdult(user) && (await hasVerifiedNameFor(user.id));
 }
 
 export async function payoutStatusFor(userId: string): Promise<RoomPayoutStatus> {
@@ -140,7 +145,7 @@ export async function payoutStatusFor(userId: string): Promise<RoomPayoutStatus>
   if (acct && checked && /^\d{4}$/.test(last4) && acct.bankName) {
     account = { bankName: acct.bankName, last4, nameMatches: true };
   }
-  return { verifiedAdult, account, subaccountReady, canLinkAccount: canLinkAccountFor(user) };
+  return { verifiedAdult, account, subaccountReady, canLinkAccount: await canLinkAccountFor(user), hasVerifiedName: await hasVerifiedNameFor(userId) };
 }
 
 // ---------------------------------------------------------------- POST /api/rooms/payouts/account
@@ -155,7 +160,7 @@ const MESSAGES: Record<PayoutAccountCode, string> = {
   NOT_VERIFIED: "Verify your ID first. Only ID-verified adults can get paid in rooms.",
   BAD_INPUT: "Enter your 10 digit account number and choose your bank.",
   BAD_BANK: "Choose your bank from the list.",
-  NO_VERIFIED_NAME: "We do not have your verified name yet, so we cannot check this account. Contact support to finish your ID check.",
+  NO_VERIFIED_NAME: "To add a bank account we need to check your name on your ID. Start a payouts check from this page.",
   NAME_MISMATCH: "This account is not in your verified name, or the number and bank do not match. Use an account in your own name.",
   PAYOUT_IN_FLIGHT: "A payout to your current account is being sent. You can change your account once it lands.",
   BUSY: "Your account is already being saved. Try again in a minute.",
@@ -271,7 +276,7 @@ export async function setPayoutAccount(userId: string, body: unknown, nowMs: num
   const last4 = last4Of(accountNumber);
 
   // Before any lookup: nothing to compare against means no lookup at all (no oracle, no attempt spent, no row written).
-  const verifiedName = verifiedLegalNameOf(user);
+  const verifiedName = await verifiedLegalNameOf(userId);
   if (!verifiedName) { logAccount(userId, "NO_VERIFIED_NAME"); return refuse("NO_VERIFIED_NAME"); }
   // Cheap early answer (re-checked under the lock below).
   if (await hasQueuedPayout(pool, userId)) { logAccount(userId, "PAYOUT_IN_FLIGHT"); return refuse("PAYOUT_IN_FLIGHT"); }

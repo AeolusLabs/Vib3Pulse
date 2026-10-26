@@ -42,6 +42,8 @@ export interface RoomPayoutStatus {
    * page should then say that adding an account needs support instead of showing a form that will always refuse.
    */
   canLinkAccount: boolean;
+  /** A verified legal name (read off the ID by an age reviewer) is on file. Never the name itself. */
+  hasVerifiedName: boolean;
 }
 
 /** Codes POST /api/rooms/payouts/account answers with (besides 200). */
@@ -49,7 +51,7 @@ export type PayoutAccountCode =
   | "NOT_VERIFIED"        // 403: not an ID-verified adult
   | "BAD_INPUT"           // 400: bankCode / accountNumber malformed
   | "BAD_BANK"            // 400: the bank code is not on Paystack's list
-  | "NO_VERIFIED_NAME"    // 422: no verified legal name is stored for this person (owner item: the ID provider, gate G2)
+  | "NO_VERIFIED_NAME"    // 422: no verified legal name is stored for this person (they start a payouts check from the payout page)
   | "NAME_MISMATCH"       // 422: the account is not in the verified name, or the number and bank do not match (one answer)
   | "PAYOUT_IN_FLIGHT"    // 409: a payout to the current account is being sent; try again once it lands
   | "BUSY"                // 409: a save for this account is already running (double submit); try again in a minute
