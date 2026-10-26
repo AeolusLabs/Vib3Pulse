@@ -183,7 +183,7 @@ export async function cancelRequest(userId: string, id: string) {
     const req = await loadOwned(userId, id, c, true);
     if (!(CANCELLABLE_STATUSES as readonly string[]).includes(req.status)) throw new AgeReviewError(409, "WRONG_STATE", "This request cannot be cancelled now.");
     await c.query(`delete from age_review_evidence where request_id = $1`, [req.id]);
-    const row = (await c.query(`update age_review_requests set status = 'cancelled', decided_at = now() where id = $1 returning ${COLS}`, [req.id])).rows[0] as Row;
+    const row = (await c.query(`update age_review_requests set status = 'cancelled', proposed_dob = null, code = null, code_expires_at = null, decided_at = now() where id = $1 returning ${COLS}`, [req.id])).rows[0] as Row;
     return toRequestDto(row, []);
   });
 }

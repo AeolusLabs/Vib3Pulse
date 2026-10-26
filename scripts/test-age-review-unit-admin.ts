@@ -111,7 +111,7 @@ await test("age_reviewer and admin need MFA when the flag is on", () => {
   for (const r of ["content_moderator", "user_support", "finance_manager"]) assert.equal(mfaRequiredFor(r, on), false, r);
   assert.equal(mfaRequiredFor("super_admin", off), false);
   assert.equal(mfaRequiredFor("super_admin", { ADMIN_MFA_REQUIRED: "true" } as NodeJS.ProcessEnv), true);
-  assert.equal(mfaRequiredFor("super_admin", on), false, "super_admin rule unchanged");
+  assert.equal(mfaRequiredFor("super_admin", on), true, "super_admin needs it too while age review is on");
   assert.ok(/mfaRequiredFor\(admin\.role\) && !opts\.allowPendingMfa/.test(src("server/services/adminSecurity.ts")));
 });
 

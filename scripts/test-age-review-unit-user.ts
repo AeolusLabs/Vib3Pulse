@@ -70,7 +70,7 @@ await test("expiry sweep expires and deletes in one transaction (structure)", ()
   const order = ["client.query(\"begin\")", "update age_review_requests set status = 'expired'", "delete from age_review_evidence", "client.query(\"commit\")"].map((x) => fn.indexOf(x));
   assert.ok(order.every((i) => i >= 0) && [...order].sort((a, b) => a - b).join() === order.join(), "begin, update, delete, commit in order on one client");
   assert.ok(/rollback/.test(fn));
-  assert.ok(/if \(!ageReviewEnabled\(\) \|\| timer\) return;/.test(s), "sweep starts only when the flag is on");
+  assert.ok(/if \(timer\) return;/.test(s), "the clean-up sweep runs whether or not the flag is on (notices are the flagged part)");
 });
 
 await test("account deletion purges evidence (structure)", () => {
@@ -100,6 +100,7 @@ await test("sweep: a failing room close never skips the expiry notices, and runs
   const { runSweepWith } = await import("../server/identity/ageReviewSweep");
   const log: string[] = [];
   const origErr = console.error; console.error = () => {};
+  process.env.AGE_REVIEW = "1"; // notices and room closing only happen while the feature is on
   try {
     await runSweepWith({
       sweep: async () => ({ expired: 2, userIds: ["u1", "u2"], evidenceDeleted: 3 }),
@@ -110,7 +111,7 @@ await test("sweep: a failing room close never skips the expiry notices, and runs
     log.length = 0;
     await runSweepWith({ sweep: async () => { throw new Error("db"); }, notify: async () => { log.push("n"); }, closeRooms: async () => { log.push("close"); } });
     assert.deepEqual(log, ["close"], "housekeeping still runs when the sweep itself failed");
-  } finally { console.error = origErr; }
+  } finally { console.error = origErr; delete process.env.AGE_REVIEW; }
 });
 
 await test("notices: neutral push, escaped email, no relative link, purge before soft delete (structure)", () => {

@@ -4,6 +4,7 @@ import type { Express, NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import { requireRole } from "../services/adminSecurity";
 import { ageReviewEnabled } from "../identity/ageReviewFeatures";
+import { noStore } from "./age-review-routes";
 import { AgeReviewError } from "../identity/ageReviewService";
 import { decide, getDetail, isSelfReview, isUuid, listQueue, secondApprove, type AdminRef } from "../identity/ageReviewAdmin";
 import { inviteLiveCheck, reviewerLiveJoin } from "../identity/ageReviewLive";
@@ -41,6 +42,7 @@ export const decideSchema = z.object({
 
 export function registerAgeReviewAdminRoutes(app: Express): void {
   const base = "/api/admin/age-reviews";
+  app.use(base, noStore);
   app.use(base, flagGate);
   // Routes that are not a request id (health, pause, purge) fall through to their own handlers.
   const withId = (h: (req: Request, res: Response) => Promise<unknown>) => async (req: Request, res: Response, next: NextFunction) => {
@@ -103,9 +105,11 @@ export function registerAgeReviewAdminRoutes(app: Express): void {
     if (!isUuid(evidenceId)) throw new AgeReviewError(404, "NOT_FOUND", "Not found");
     const { pool } = await import("../storage");
     const row = (await pool.query(
-      `select e.kind, u.email as user_email from age_review_evidence e join age_review_requests r on r.id = e.request_id join users u on u.id = r.user_id where e.id = $1 and e.request_id = $2`,
-      [evidenceId, requestId])).rows[0] as { kind: string; user_email: string | null } | undefined;
+      `select e.kind, r.status, u.email as user_email from age_review_evidence e join age_review_requests r on r.id = e.request_id join users u on u.id = r.user_id where e.id = $1 and e.request_id = $2`,
+      [evidenceId, requestId])).rows[0] as { kind: string; status: string; user_email: string | null } | undefined;
     if (!row) throw new AgeReviewError(404, "WRONG_STATE", "That photo is no longer available.");
+    // Only a request that is actually with the reviewers: not a draft, not one waiting for the user's next photo.
+    if (!["submitted", "in_review", "pending_second_approval"].includes(row.status)) throw new AgeReviewError(409, "WRONG_STATE", "This request is not open for review.");
     if (isSelfReview(me(req), { email: row.user_email, dateOfBirth: null })) throw new AgeReviewError(403, "SELF_REVIEW", "You cannot review your own age check.");
     // Count and record in one transaction under a per-reviewer lock: parallel requests cannot all pass the check. No audit row, no token.
     if (!(await claimReveal(pool, { adminId: req.admin!.id, requestId, kind: row.kind, ip: req.ip }))) {

@@ -66,12 +66,11 @@ export async function withAudit<T>(e: AuditEntry, fn: () => Promise<T>): Promise
 // username + password only until ADMIN_MFA_REQUIRED=true is set. Read on every call (not at import),
 // so flipping the variable and restarting is the whole change. While off, nothing below treats a
 // super-admin differently from any other admin, and the MFA endpoints refuse to start enrolment.
-export const mfaRequired = (): boolean => process.env.ADMIN_MFA_REQUIRED === "true";
-
-/** Super-admins follow ADMIN_MFA_REQUIRED; the roles that can open ID evidence (admin, age_reviewer) need it whenever AGE_REVIEW is on. */
+/** Super-admins follow ADMIN_MFA_REQUIRED; every role that can open ID evidence (super_admin, admin, age_reviewer) needs it whenever AGE_REVIEW is on. */
 export function mfaRequiredFor(role: string, env: NodeJS.ProcessEnv = process.env): boolean {
-  if (role === "super_admin") return env.ADMIN_MFA_REQUIRED === "true";
-  return (role === "admin" || role === "age_reviewer") && parseFlag(env.AGE_REVIEW, false);
+  const ageReviewOn = parseFlag(env.AGE_REVIEW, false);
+  if (role === "super_admin") return env.ADMIN_MFA_REQUIRED === "true" || ageReviewOn;
+  return (role === "admin" || role === "age_reviewer") && ageReviewOn;
 }
 
 export type GateOpts = { roles?: readonly AdminRole[]; allowPendingMfa?: boolean };

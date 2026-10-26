@@ -22,8 +22,8 @@ export type DocumentType = typeof DOCUMENT_TYPES[number];
 
 export type AgeReviewStatus = "draft" | "submitted" | "in_review" | "needs_more" | "pending_second_approval" | "approved" | "declined" | "expired" | "cancelled" | "closed_minor";
 export const OPEN_STATUSES: readonly AgeReviewStatus[] = ["draft", "submitted", "in_review", "needs_more", "pending_second_approval"];
-/** The user may cancel up to the point a second approver is involved. */
-export const CANCELLABLE_STATUSES: readonly AgeReviewStatus[] = ["draft", "submitted", "in_review", "needs_more"];
+/** The user may withdraw at any point before a decision, including while a second approval is pending. */
+export const CANCELLABLE_STATUSES: readonly AgeReviewStatus[] = ["draft", "submitted", "in_review", "needs_more", "pending_second_approval"];
 
 export function isOpenStatus(s: string): boolean {
   return (OPEN_STATUSES as readonly string[]).includes(s);
@@ -35,7 +35,7 @@ const TRANSITIONS: Record<AgeReviewStatus, readonly AgeReviewStatus[]> = {
   submitted: ["in_review", "needs_more", "pending_second_approval", "approved", "declined", "closed_minor", "cancelled", "expired"],
   in_review: ["submitted", "needs_more", "pending_second_approval", "approved", "declined", "closed_minor", "cancelled", "expired"],
   needs_more: ["submitted", "declined", "cancelled", "expired"],
-  pending_second_approval: ["approved", "declined", "expired"],
+  pending_second_approval: ["approved", "declined", "expired", "cancelled"],
   approved: FINAL, declined: FINAL, expired: FINAL, cancelled: FINAL, closed_minor: FINAL,
 };
 

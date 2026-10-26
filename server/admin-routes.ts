@@ -12,6 +12,7 @@ import { z } from "zod";
 import { getSocialPlanAdminStats } from "./services/socialAdminStats";
 import { registerAgeReviewAdminRoutes } from "./routes/age-review-admin-routes";
 import { ageReviewEnabled } from "./identity/ageReviewFeatures";
+import { isSelfReview } from "./identity/ageReviewAdmin";
 import { requireAdmin, requireStaffNotReviewer, requireAdminPending, requireRole, requireSuperAdmin, isMfaEnrolled, mfaRequiredFor } from "./services/adminSecurity";
 import { registerSprayClawbackAdminRoutes } from "./rooms/clawbacks";
 import { registerRoomsAdminRoutes } from "./rooms/adminRoutes";
@@ -63,9 +64,12 @@ export function registerAgeVerificationAdminRoute(app: Express) {
       const reasonCheck = z.string().trim().min(3).max(300).safeParse(req.body?.reason);
       if (!reasonCheck.success) return res.status(400).json({ message: "A reason (3 to 300 characters) is required", code: "REASON_REQUIRED" });
       const { verified, reason } = z.object({ verified: z.boolean(), reason: z.string().trim().min(3).max(300) }).parse(req.body);
+      // Marking someone verified with just a reason skips the checklist, the duplicate check and the second approver, so it stays with admin and super_admin.
+      if (verified && req.admin!.role === "age_reviewer") return res.status(403).json({ message: "Reviewers verify through the review queue.", code: "NOT_ALLOWED" });
       const { ageVerifier } = await import("./identity/ageVerification");
       const user = await storage.getUser(req.params.id);
       if (!user) return res.status(404).json({ message: "User not found" });
+      if (isSelfReview({ id: req.admin!.id, email: req.admin!.email, role: req.admin!.role }, { email: user.email, dateOfBirth: null })) return res.status(403).json({ message: "You cannot change your own age verification.", code: "SELF_REVIEW" });
       if (verified && !user.dateOfBirth) return res.status(409).json({ message: "This user has no date of birth on file. Verification must vouch for a stored birthdate." });
       const prev = await ageVerifier.status(user.id);
       await storage.setAgeVerification(user.id, { verified, method: "admin" });
@@ -96,6 +100,7 @@ export function registerAgeVerificationAdminRoute(app: Express) {
       const { ageVerifier } = await import("./identity/ageVerification");
       const user = await storage.getUser(req.params.id);
       if (!user) return res.status(404).json({ message: "User not found" });
+      if (isSelfReview({ id: req.admin!.id, email: req.admin!.email, role: req.admin!.role }, { email: user.email, dateOfBirth: null })) return res.status(403).json({ message: "You cannot change your own age verification.", code: "SELF_REVIEW" });
       await storage.logAdminActivity({
         adminId: req.session.adminId!, action: "age_review.revoke", targetType: "user", targetId: user.id,
         details: `Cleared ID verification (revoke). Reason: ${reason.data}`, reason: reason.data, ipAddress: req.ip,

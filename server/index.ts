@@ -380,7 +380,8 @@ setupAdminRoutes(app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
+    // A JSON parse error quotes a snippet of the body; on the age review paths that body can be a photo or a birthdate.
+    const message = /^\/api\/(age-review|admin\/age-reviews)(\/|$)/.test(_req.path) ? "Invalid request" : (err.message || "Internal Server Error");
 
     res.status(status).json({ message });
     throw err;

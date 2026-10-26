@@ -132,7 +132,12 @@ try {
   const adminClear = await http("POST", `/api/admin/users/${user}/age-verification`, { admin: regularAdmin }, { verified: false, reason: "test reason" });
   check("admin can clear it", adminClear.status === 200 && adminClear.json?.verified === false, JSON.stringify(adminClear));
   const reviewerSet = await http("POST", `/api/admin/users/${user}/age-verification`, { admin: reviewer }, { verified: true, reason: "test reason" });
-  check("age_reviewer can set it again", reviewerSet.status === 200 && (await http("GET", "/api/users/me/age-verification", { user })).json?.verified === true, JSON.stringify(reviewerSet));
+  check("age_reviewer cannot mark someone verified (403), nothing changes", reviewerSet.status === 403 && (await http("GET", "/api/users/me/age-verification", { user })).json?.verified === false, JSON.stringify(reviewerSet));
+  const adminSet = await http("POST", `/api/admin/users/${user}/age-verification`, { admin: regularAdmin }, { verified: true, reason: "test reason" });
+  check("admin can set it again", adminSet.status === 200 && (await http("GET", "/api/users/me/age-verification", { user })).json?.verified === true, JSON.stringify(adminSet));
+  const reviewerClear = await http("POST", `/api/admin/users/${user}/age-verification`, { admin: reviewer }, { verified: false, reason: "test reason" });
+  check("age_reviewer can still clear it", reviewerClear.status === 200 && reviewerClear.json?.verified === false, JSON.stringify(reviewerClear));
+  await http("POST", `/api/admin/users/${user}/age-verification`, { admin: regularAdmin }, { verified: true, reason: "test reason" });
 
   // DOB correction clears it (the service behind PUT /api/admin/users/:id/date-of-birth)
   const fix = await correctDateOfBirth({ adminId: admin, userId: user, dateOfBirth: yearsAgo(31), reason: "typo" });

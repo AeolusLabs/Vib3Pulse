@@ -47,8 +47,16 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 /** A live check has no code selfie, so codeMatches is not required there. */
 export const requiredChecklist = (method: string): readonly string[] => (method === "live" ? CHECKLIST_KEYS.filter((k) => k !== "codeMatches") : CHECKLIST_KEYS);
 
+/** Lower case, no +tag, and no dots for Gmail: the usual ways one mailbox is written as several addresses. */
+export function normalizeEmail(e: string): string {
+  const [local0, domain0 = ""] = e.trim().toLowerCase().split("@");
+  let local = local0.split("+")[0], domain = domain0;
+  if (domain === "gmail.com" || domain === "googlemail.com") { local = local.replace(/\./g, ""); domain = "gmail.com"; }
+  return `${local}@${domain}`;
+}
+
 export function isSelfReview(admin: AdminRef, user: UserCtx): boolean {
-  return !!user.email && !!admin.email && admin.email.trim().toLowerCase() === user.email.trim().toLowerCase();
+  return !!user.email && !!admin.email && normalizeEmail(admin.email) === normalizeEmail(user.email);
 }
 
 function needBirthdate(b: DecideBody): string {
@@ -136,7 +144,7 @@ export async function planDecision(a: {
 async function getPool() { return (await import("../storage")).pool; }
 const iso = (d: Date | null) => (d ? new Date(d).toISOString() : null);
 export const QUEUE_DEFAULT_STATUSES = ["submitted", "in_review", "needs_more", "pending_second_approval"] as const;
-const ALL_STATUSES = ["draft", ...QUEUE_DEFAULT_STATUSES, "approved", "declined", "expired", "cancelled", "closed_minor"];
+const ALL_STATUSES = [...QUEUE_DEFAULT_STATUSES, "approved", "declined", "expired", "cancelled", "closed_minor"];
 const TS = `to_char(r.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.US')`;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isUuid = (s: string) => UUID.test(s);
@@ -162,6 +170,8 @@ function decodeCursor(c: string): { k: string; id: string } | null {
 export async function listQueue(q: { status?: string; cursor?: string; limit?: number }) {
   const pool = await getPool();
   const limit = Math.min(Math.max(Math.trunc(q.limit || 25), 1), 100);
+  // A draft is the user still choosing what to upload: reviewers never see it, so ?status=draft is ignored.
+  if (q.status === "draft") q = { ...q, status: undefined };
   if (q.status && !ALL_STATUSES.includes(q.status)) throw new AgeReviewError(400, "BAD_REQUEST", "Unknown status.");
   const cur = q.cursor ? decodeCursor(q.cursor) : null;
   if (q.cursor && !cur) throw new AgeReviewError(400, "BAD_REQUEST", "Bad cursor.");
@@ -188,7 +198,7 @@ export async function getDetail(admin: AdminRef, id: string) {
   const row = (await pool.query(
     `select r.*, u.display_name, u.username, u.email as user_email from age_review_requests r join users u on u.id = r.user_id where r.id = $1`, [id],
   )).rows[0] as (ItemRow & Record<string, any>) | undefined;
-  if (!row) throw new AgeReviewError(404, "NOT_FOUND", "Not found");
+  if (!row || row.status === "draft") throw new AgeReviewError(404, "NOT_FOUND", "Not found");
   const self = isSelfReview(admin, { email: row.user_email, dateOfBirth: null });
   if (row.status === "submitted" && !self) {
     const u = await pool.query(`update age_review_requests set status = 'in_review', reviewer_id = $2 where id = $1 and status = 'submitted' returning reviewer_id`, [id, admin.id]);
@@ -283,6 +293,8 @@ export async function decide(admin: AdminRef, id: string, body: DecideBody, ip?:
       await c.query(
         `update age_review_requests set status = $2, outcome = $3, decline_reason = $4, dob_match = $5,
                 proposed_dob = case when $2 in ('approved', 'declined', 'closed_minor') then null else coalesce($6, proposed_dob) end,
+                code = case when $2 in ('approved', 'declined', 'closed_minor') then null else code end,
+                code_expires_at = case when $2 in ('approved', 'declined', 'closed_minor') then null else code_expires_at end,
                 document_fingerprint = coalesce($7, document_fingerprint), document_type = coalesce(document_type, $8), reviewer_id = $9,
                 more_requests = more_requests + $10, decided_at = case when $2 in ('needs_more', 'pending_second_approval') then decided_at else now() end
           where id = $1`,
@@ -351,7 +363,7 @@ export async function secondApprove(admin: AdminRef, id: string, body: { approve
       }
       await c.query(`delete from age_review_evidence where request_id = $1`, [id]);
       await c.query(
-        `update age_review_requests set status = $2, outcome = $3, second_approver_id = $4, proposed_dob = null, decided_at = now() where id = $1`,
+        `update age_review_requests set status = $2, outcome = $3, second_approver_id = $4, proposed_dob = null, code = null, code_expires_at = null, decided_at = now() where id = $1`,
         [id, body.approve ? "approved" : "declined", body.approve ? "birthdate_changed" : "birthdate_rejected", admin.id],
       );
       await c.query("commit");

@@ -31,8 +31,17 @@ function fail(res: Response, e: unknown) {
 const uid = (req: Request) => (req.user as { id: string }).id;
 const idParam = (req: Request) => String(req.params.id);
 
+export function noStore(_req: Request, res: Response, next: NextFunction) {
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Pragma", "no-cache");
+  next();
+}
+
 export function registerAgeReviewRoutes(app: Express): void {
   const base = "/api/age-review";
+  app.use(base, noStore);
+  // Public and outside the flag gate: the privacy page asks whether age review is offered. It reveals the flag state and nothing else.
+  app.get(`${base}/enabled`, (_req, res) => { res.json({ enabled: ageReviewEnabled() }); });
   app.use(base, flagGate);
 
   app.get(`${base}/me`, requireAuth, async (req, res) => {

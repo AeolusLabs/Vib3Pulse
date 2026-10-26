@@ -21,7 +21,7 @@ export async function sweepExpiredAgeReviews(): Promise<{ expired: number; userI
         where r.status in ('approved', 'declined', 'expired', 'cancelled', 'closed_minor') or r.expires_at < now() - interval '2 hours'`)).rows[0].n);
     const exp = (await client.query(
       // Rows are locked in id order (as the emergency purge does) so the two can never deadlock; a row someone else holds waits for the next sweep.
-      `update age_review_requests set status = 'expired', proposed_dob = null, decided_at = now()
+      `update age_review_requests set status = 'expired', proposed_dob = null, code = null, code_expires_at = null, decided_at = now()
        where id in (select id from age_review_requests where expires_at < now() and status in ('draft', 'submitted', 'in_review', 'needs_more', 'pending_second_approval') order by id for update skip locked)
        returning id, user_id`,
     )).rows as { id: string; user_id: string }[];
@@ -56,19 +56,20 @@ export async function runSweepWith(d: SweepDeps = realDeps): Promise<void> {
     const r = await d.sweep();
     if (r.expired || r.evidenceDeleted) console.log(`[AGE-REVIEW] sweep: expired ${r.expired}, evidence rows deleted ${r.evidenceDeleted}`);
     if (r.staleFound) console.error(`[AGE-REVIEW] ALERT age review evidence outlived its request: ${r.staleFound}`);
-    for (const id of r.userIds) await d.notify(id, "expired");
+    // The clean-up above always runs (the "7 days" promise does not depend on the flag); notices only go out while the feature is on.
+    if (ageReviewEnabled()) for (const id of r.userIds) await d.notify(id, "expired");
   } catch {
     console.error("[AGE-REVIEW] ALERT sweep failed");
   }
-  try { await d.closeRooms(); } catch { console.error("[AGE-REVIEW] closing stale live rooms failed"); }
+  if (ageReviewEnabled()) try { await d.closeRooms(); } catch { console.error("[AGE-REVIEW] closing stale live rooms failed"); }
 }
 const runSweep = () => runSweepWith();
 
 /** One sweep now, then hourly. Only when the flag is on. */
-// With the flag off nothing here runs on purpose: no reveal token can be issued, so age_review_reveal_nonces stays empty. If the
-// flag is switched off after use, the few leftover rows (tens of bytes each) wait for the next time it is on.
+// Runs whether or not AGE_REVIEW is on: evidence of open requests must not outlive the 7 day promise if the flag is switched off.
+// With the flag off the sweep only expires, deletes and cleans nonces (it logs counts); it sends no notices and closes no rooms.
 export function startAgeReviewSweep(): void {
-  if (!ageReviewEnabled() || timer) return;
+  if (timer) return;
   void runSweep();
   timer = setInterval(() => void runSweep(), 60 * 60 * 1000);
   timer.unref?.();
