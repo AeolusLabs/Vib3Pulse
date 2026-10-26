@@ -76,6 +76,7 @@ export default function DetailDrawer({ id, role, reviewer, onClose, onChanged }:
               <dl>
                 <Row k="Status"><StatusChip status={r.status} /></Row>
                 <Row k="Method">{methodLabel(r.method)}</Row>
+                {r.wantsPayouts && <Row k="Payouts"><span className="rounded-full border border-purple-400/60 px-2.5 py-1 text-xs font-medium text-purple-200">Wants payouts</span></Row>}
                 <Row k="Registered birthdate">{r.registeredDob || "Not on file"}{registeredAge(r.registeredDob) !== null && <span className="text-slate-400"> (age {registeredAge(r.registeredDob)})</span>}</Row>
                 {r.proposedDob && <Row k="Proposed birthdate (from the ID)"><span className="text-amber-200">{r.proposedDob}</span></Row>}
                 <Row k="Document type">{documentTypeLabel(r.documentType)}</Row>
@@ -117,7 +118,7 @@ export default function DetailDrawer({ id, role, reviewer, onClose, onChanged }:
 
               <p role="status" className={msg ? "text-sm text-slate-300" : "sr-only"}>{msg ?? ""}</p>
 
-              {d.canDecide && <DecisionForm key={r.id} requestId={r.id} role={role} registeredDob={r.registeredDob} method={r.method} documentType={r.documentType} onDone={done} />}
+              {d.canDecide && <DecisionForm key={r.id} requestId={r.id} role={role} registeredDob={r.registeredDob} method={r.method} documentType={r.documentType} wantsPayouts={r.wantsPayouts === true} onDone={done} />}
               {!d.canDecide && r.status !== "pending_second_approval" && <p className="text-sm text-slate-400">This request cannot be decided by you right now.</p>}
 
               {r.status === "pending_second_approval" && (

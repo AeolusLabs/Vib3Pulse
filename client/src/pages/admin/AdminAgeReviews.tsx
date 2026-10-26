@@ -59,7 +59,7 @@ function QueueTable({ status, openId, onOpen }: { status: string; openId: string
                     {fmt(r.submittedAt ?? r.createdAt)}<span className="sr-only">, open {r.displayName}</span>
                   </button>
                 </td>
-                <td className="px-3 py-1"><span className="rounded-full border border-slate-600 px-2.5 py-1 text-xs text-slate-200">{methodLabel(r.method)}</span></td>
+                <td className="px-3 py-1"><span className="rounded-full border border-slate-600 px-2.5 py-1 text-xs text-slate-200">{methodLabel(r.method)}</span>{r.wantsPayouts && <span className="ml-1.5 rounded-full border border-purple-400/60 px-2.5 py-1 text-xs text-purple-200" data-testid="chip-payouts">Payouts</span>}</td>
                 <td className="px-3 py-1">
                   <div className="flex flex-col items-start gap-1">
                     <StatusChip status={r.status} />

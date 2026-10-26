@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ensureCsrfToken } from "@/lib/queryClient";
-import { errorMessage, shouldPoll, type AgeReviewMe, type AgeReviewMethod, type AgeReviewRequest } from "@/lib/ageReview";
+import { createBody, errorMessage, shouldPoll, type AgeReviewMe, type AgeReviewMethod, type AgeReviewRequest } from "@/lib/ageReview";
 
 export const AGE_REVIEW_KEY = ["/api/age-review/me"] as const;
 const POLL_MS = 20_000;
@@ -47,7 +47,7 @@ export function useAgeReview() {
     isLoading: me.isLoading,
     refresh,
     create: useMutation({
-      mutationFn: (v: { method: AgeReviewMethod; documentType?: string; consentVersion: string }) => call<{ request: AgeReviewRequest }>("POST", "/api/age-review/requests", v),
+      mutationFn: (v: { method: AgeReviewMethod; documentType?: string; consentVersion: string; wantsPayouts?: boolean }) => call<{ request: AgeReviewRequest }>("POST", "/api/age-review/requests", createBody(v)),
       ...withRefresh,
     }),
     // A plain function, not a mutation: TanStack would keep the base64 image in its mutation cache.

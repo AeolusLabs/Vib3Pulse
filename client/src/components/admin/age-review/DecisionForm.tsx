@@ -14,22 +14,22 @@ import {
 
 const FIELD = "min-h-[44px] border-slate-600 bg-slate-700/50 text-white";
 
-interface Props { requestId: string; role: string; registeredDob: string; method: "upload" | "live"; documentType: string | null; onDone: () => void }
+interface Props { requestId: string; role: string; registeredDob: string; method: "upload" | "live"; documentType: string | null; wantsPayouts?: boolean; onDone: () => void }
 
-export default function DecisionForm({ requestId, role, registeredDob, method, documentType, onDone }: Props) {
-  const [f, setF] = useState<Form>({ outcome: null, checklist: emptyChecklist(), idBirthdate: "", documentNumber: "", documentType: documentType ?? "", declineReason: "", note: "", overrideReason: "" });
+export default function DecisionForm({ requestId, role, registeredDob, method, documentType, wantsPayouts = false, onDone }: Props) {
+  const [f, setF] = useState<Form>({ outcome: null, checklist: emptyChecklist(), idBirthdate: "", documentNumber: "", documentType: documentType ?? "", legalName: "", declineReason: "", note: "", overrideReason: "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needsOverride, setNeedsOverride] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const set = (p: Partial<Form>) => setF((x) => ({ ...x, ...p }));
   const overrideAllowed = canOverrideDuplicate(role);
-  const ready = decisionReady(f, method) && (!needsOverride || !overrideAllowed || f.overrideReason.trim().length >= 3);
+  const ready = decisionReady(f, method, wantsPayouts) && (!needsOverride || !overrideAllowed || f.overrideReason.trim().length >= 3);
 
   const send = async () => {
     setBusy(true); setError(null); setConfirm(false);
     try {
-      await decide(requestId, decisionBody(f, { overrideAllowed: needsOverride && overrideAllowed }) as Parameters<typeof decide>[1]);
+      await decide(requestId, decisionBody(f, { overrideAllowed: needsOverride && overrideAllowed, wantsPayouts }) as Parameters<typeof decide>[1]);
       onDone();
     } catch (e) {
       if (e instanceof ReviewApiError && e.code === "DUPLICATE_DOCUMENT") setNeedsOverride(true);
@@ -38,7 +38,7 @@ export default function DecisionForm({ requestId, role, registeredDob, method, d
         : errText(e));
       if (e instanceof ReviewApiError && e.code === "WRONG_STATE") onDone();
     } finally {
-      set({ documentNumber: "" }); // never kept after a submit, success or not
+      set({ documentNumber: "", legalName: "" }); // never kept after a submit, success or not
       setBusy(false);
     }
   };
@@ -105,6 +105,18 @@ export default function DecisionForm({ requestId, role, registeredDob, method, d
             className={FIELD} data-testid="input-document-number"
           />
           <p className="text-xs text-slate-400">Used to stop one ID being used on many accounts. It is turned into a one-way code and never stored.</p>
+        </div>
+      )}
+
+      {wantsPayouts && needsDocumentNumber(f.outcome) && (
+        <div className="space-y-2">
+          <Label htmlFor="legal-name" className="text-slate-300">Full name on the document</Label>
+          <Input
+            id="legal-name" value={f.legalName} onChange={(e) => set({ legalName: e.target.value })}
+            autoComplete="off" autoCorrect="off" spellCheck={false} data-lpignore="true" required aria-required="true"
+            className={FIELD} data-testid="input-legal-name"
+          />
+          <p className="text-xs text-slate-400">Used only to check the bank account holder's name. Stored encrypted. Not shown anywhere.</p>
         </div>
       )}
 

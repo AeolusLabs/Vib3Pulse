@@ -73,13 +73,21 @@ export interface DecisionForm {
   idBirthdate: string;
   documentNumber: string;
   documentType: string;
+  /** Full name on the document: asked only when the user chose to receive money. Never logged or kept after a submit. */
+  legalName: string;
   declineReason: string;
   note: string;
   overrideReason: string;
 }
 
 /** Whether the submit button is enabled. Verify stays off until all six checks are ticked. */
-export function decisionReady(f: DecisionForm, method: ReviewMethod = "upload"): boolean {
+/** 3 to 120 characters: letters, spaces, hyphen, apostrophe and dot (the server's rule). */
+export const legalNameValid = (raw: string): boolean => {
+  const n = raw.trim().replace(/\s+/g, " ");
+  return n.length >= 3 && n.length <= 120 && /^[\p{L}][\p{L} .'’-]*$/u.test(n);
+};
+export function decisionReady(f: DecisionForm, method: ReviewMethod = "upload", wantsPayouts = false): boolean {
+  if (wantsPayouts && needsDocumentNumber(f.outcome) && !legalNameValid(f.legalName)) return false;
   if (f.outcome && ID_OUTCOMES.includes(f.outcome) && !(DOC_TYPES as readonly string[]).includes(f.documentType)) return false;
   if (f.outcome === "needs_more" && method === "live") return false;
   switch (f.outcome) {
@@ -93,11 +101,13 @@ export function decisionReady(f: DecisionForm, method: ReviewMethod = "upload"):
   }
 }
 
-export function decisionBody(f: DecisionForm, opts: { overrideAllowed: boolean }): Record<string, unknown> {
+export function decisionBody(f: DecisionForm, opts: { overrideAllowed: boolean; wantsPayouts?: boolean }): Record<string, unknown> {
   const body: Record<string, unknown> = { outcome: f.outcome, checklist: f.checklist };
   if (f.outcome === "teen_correction") body.idBirthdate = f.idBirthdate;
   if (f.outcome && ID_OUTCOMES.includes(f.outcome)) { body.idBirthdate = f.idBirthdate; body.documentType = f.documentType; }
   if (needsDocumentNumber(f.outcome)) body.documentNumber = f.documentNumber.trim();
+  // Only for a request that asked for payouts; otherwise the server answers NAME_NOT_REQUESTED.
+  if (opts.wantsPayouts === true && needsDocumentNumber(f.outcome)) body.legalName = f.legalName.trim().replace(/\s+/g, " ");
   if (f.outcome === "decline") body.declineReason = f.declineReason;
   if (f.note.trim()) body.note = f.note.trim();
   if (needsDocumentNumber(f.outcome) && opts.overrideAllowed && f.overrideReason.trim().length >= 3) body.overrideDuplicate = { reason: f.overrideReason.trim() };
@@ -197,6 +207,7 @@ export const ADMIN_ERROR_CODES = [
   "EVIDENCE_INCOMPLETE", "WRONG_STATE", "CODE_EXPIRED", "NOT_ALLOWED", "SECOND_APPROVER_MUST_DIFFER", "SELF_REVIEW",
   "CHECKLIST_INCOMPLETE", "DUPLICATE_DOCUMENT", "REVEAL_LIMIT", "TOKEN_INVALID", "REASON_REQUIRED",
   "BIRTHDATE_MISMATCH", "EVIDENCE_UNAVAILABLE", "NOT_FOUND", "BAD_REQUEST", "VOICE_UNAVAILABLE", "AGE_REVIEW_OFF",
+  "NAME_REQUIRED", "NAME_NOT_REQUESTED", "ALREADY_VERIFIED",
 ] as const;
 const ADMIN_ERROR: Record<(typeof ADMIN_ERROR_CODES)[number], string> = {
   CONSENT_REQUIRED: "The user has not accepted the privacy notice yet.",
@@ -223,6 +234,9 @@ const ADMIN_ERROR: Record<(typeof ADMIN_ERROR_CODES)[number], string> = {
   BAD_REQUEST: "Something in the form is not valid. Check the fields and try again.",
   VOICE_UNAVAILABLE: "Live video is not available right now.",
   AGE_REVIEW_OFF: "Age review is not switched on.",
+  NAME_REQUIRED: "This user asked to receive money, so type the full name on the document before you verify.",
+  NAME_NOT_REQUESTED: "This user did not ask to receive money, so no name is needed. Clear the name field and try again.",
+  ALREADY_VERIFIED: "This user is already verified.",
 };
 export function adminErrorMessage(code: string | undefined | null, extra?: { retryAfter?: string | null }): string {
   if (code === "RATE_LIMITED" && extra?.retryAfter) return "Too many attempts. Please wait a bit and try again.";

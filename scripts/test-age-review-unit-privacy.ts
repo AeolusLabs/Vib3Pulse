@@ -21,7 +21,7 @@ test("policy has every required section id", () => {
   }
   assert.equal(new Set(ids).size, ids.length);
   for (const s of PRIVACY_POLICY.sections) assert.ok(s.title && s.paragraphs.length > 0, s.id);
-  assert.equal(PRIVACY_POLICY.version, "2026-10-v3");
+  assert.equal(PRIVACY_POLICY.version, "2026-10-v4");
 });
 
 test("contact email is info@aeoluslabsltd.com everywhere", () => {

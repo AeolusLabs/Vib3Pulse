@@ -27,6 +27,7 @@ import { useToast } from "@/hooks/use-toast";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { Switch } from "@/components/ui/switch";
 import VerifyAgeCard from "@/components/age-review/VerifyAgeCard";
+import PayoutAccountLink from "@/components/rooms/earnings/PayoutAccountLink";
 import BlockedUsersCard from "@/components/BlockedUsersCard";
 import RoomPrivacyCard from "@/components/RoomPrivacyCard";
 import type { User as UserType } from "@shared/schema";
@@ -207,6 +208,7 @@ export default function AccountSettingsPage() {
 
         <div className="space-y-6">
           <VerifyAgeCard />
+          <PayoutAccountLink />
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">

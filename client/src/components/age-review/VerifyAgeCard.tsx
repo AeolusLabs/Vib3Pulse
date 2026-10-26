@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { CameraIcon, CheckCircleIcon, ClockIcon, Loader2Icon, ShieldCheckIcon, UploadIcon } from "@/components/ui/icons";
 import { useToast } from "@/hooks/use-toast";
 import { AgeReviewError, useAgeReview } from "@/hooks/useAgeReview";
-import { COPY, cancelOffered, cardMode, cardView, errorMessage, startLiveRequest, type AgeReviewMethod, type CardTone } from "@/lib/ageReview";
+import { COPY, cancelOffered, cardMode, cardView, errorMessage, payoutsAction, payoutsPreselected, startLiveRequest, type AgeReviewMethod, type CardTone } from "@/lib/ageReview";
 import PrivacyNotice from "./PrivacyNotice";
 import UploadFlow from "./UploadFlow";
 import LiveCheckFlow from "./LiveCheckFlow";
@@ -26,6 +26,9 @@ export default function VerifyAgeCard() {
   const [notice, setNotice] = useState<{ mode: "consent" | "readonly"; method: AgeReviewMethod } | null>(null);
   const [accepted, setAccepted] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // "Receive money" is a choice the person makes: the box starts off, unless the link they came from asked for payouts.
+  const [wants, setWants] = useState(() => (typeof window !== "undefined" ? payoutsPreselected(window.location.search) : false));
+  const [payoutChoices, setPayoutChoices] = useState(false);
   const anchor = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
 
@@ -34,11 +37,18 @@ export default function VerifyAgeCard() {
   useEffect(() => {
     if (present && window.location.hash === "#verify-age") anchor.current?.scrollIntoView({ block: "start" });
   }, [present]);
+  // /account/settings?payouts=1 opens the payouts action for a verified user who has no name on file yet.
+  const asksPayouts = present && typeof window !== "undefined" && payoutsPreselected(window.location.search);
+  useEffect(() => { if (asksPayouts) setPayoutChoices(true); }, [asksPayouts]);
 
   if (!me) return null;
   const view = cardView(me);
   const req = me.request;
   const mode = cardMode(me);
+  const pAction = payoutsAction(me);
+  const showChoices = mode === "choose" || (mode === "none" && payoutChoices && pAction !== null);
+  // In the payouts-only flow the intent is fixed; otherwise it is the checkbox.
+  const wantsPayouts = mode === "none" ? true : wants;
   const busy = starting || create.isPending || submit.isPending || cancel.isPending;
 
   const fail = (e: unknown) => setError(e instanceof AgeReviewError ? errorMessage(e.code, { retryAfter: e.retryAfter }) : errorMessage(undefined));
@@ -58,7 +68,7 @@ export default function VerifyAgeCard() {
     if (notice.method === "upload") { setAccepted(me.consentVersion); setFlow("upload"); setNotice(null); return; }
     setStarting(true);
     try {
-      await startLiveRequest({ create: (v) => create.mutateAsync(v), submit: (id) => submit.mutateAsync(id) }, me.consentVersion);
+      await startLiveRequest({ create: (v) => create.mutateAsync(v), submit: (id) => submit.mutateAsync(id) }, me.consentVersion, wantsPayouts);
       setNotice(null);
       window.setTimeout(() => anchor.current?.focus(), 0); // the choice buttons are gone; keep focus inside the card
     } catch (e) { setNotice(null); fail(e); } finally { setStarting(false); }
@@ -81,7 +91,7 @@ export default function VerifyAgeCard() {
         <CardContent className="space-y-4">
           {flow === "upload" && (
             <UploadFlow
-              me={me} consentVersion={accepted}
+              me={me} consentVersion={accepted} wantsPayouts={wantsPayouts}
               onClose={() => { setFlow(null); setAccepted(null); }}
               onHowHandled={() => setNotice({ mode: "readonly", method: "upload" })}
             />
@@ -91,8 +101,21 @@ export default function VerifyAgeCard() {
             <LiveCheckFlow request={req} onHowHandled={() => setNotice({ mode: "readonly", method: "live" })} />
           )}
 
-          {flow === null && mode === "choose" && (
+          {flow === null && showChoices && (
             <div className="grid gap-2">
+              {mode === "choose" && (
+                <div className="rounded-2xl border border-border p-3">
+                  <label className="flex min-h-[44px] cursor-pointer items-center gap-3 text-sm font-medium">
+                    <input
+                      type="checkbox" checked={wants} onChange={(e) => setWants(e.target.checked)} aria-describedby="wants-payouts-help"
+                      className={`h-5 w-5 shrink-0 rounded accent-primary ${FOCUS}`} data-testid="age-wants-payouts"
+                    />
+                    {COPY.wantsPayoutsLabel}
+                  </label>
+                  <p id="wants-payouts-help" className="pl-8 text-xs text-muted-foreground">{COPY.wantsPayoutsHelp}</p>
+                </div>
+              )}
+              {mode === "none" && <p className="text-sm font-medium" aria-live="polite">{COPY.verifyNameAction}</p>}
               <button
                 type="button" disabled={busy} onClick={(e) => choose("upload", e.currentTarget)}
                 className={`flex min-h-[56px] items-center gap-3 rounded-2xl border border-border bg-muted/40 px-4 text-left transition-colors hover:border-primary/40 disabled:opacity-50 ${FOCUS}`}
@@ -110,6 +133,17 @@ export default function VerifyAgeCard() {
                 <span className="min-w-0"><span className="block text-sm font-medium">{COPY.choiceLive}</span><span className="block text-xs text-muted-foreground">{COPY.choiceLiveHint}</span></span>
               </button>
             </div>
+          )}
+
+          {flow === null && mode === "none" && pAction === "verify_name" && !payoutChoices && (
+            <div className="space-y-1">
+              <Button variant="outline" className="min-h-[44px] rounded-full" onClick={() => setPayoutChoices(true)} data-testid="age-verify-name">{COPY.verifyNameAction}</Button>
+              <p className="text-xs text-muted-foreground">{COPY.verifyNameHelp}</p>
+            </div>
+          )}
+
+          {flow === null && mode === "none" && pAction === "recheck" && !payoutChoices && (
+            <button type="button" onClick={() => setPayoutChoices(true)} className={`min-h-[44px] self-start text-xs text-muted-foreground underline underline-offset-2 ${FOCUS}`} data-testid="age-recheck-payouts">{COPY.recheckLink}</button>
           )}
 
           {flow === null && mode === "resume_upload" && (
@@ -136,6 +170,7 @@ export default function VerifyAgeCard() {
 
       <PrivacyNotice
         open={notice !== null} mode={notice?.mode ?? "readonly"} method={notice?.method ?? "upload"}
+        wantsPayouts={notice?.mode === "consent" ? wantsPayouts : req?.wantsPayouts === true}
         busy={create.isPending} onContinue={() => void onContinue()} onClose={closeNotice}
       />
     </div>

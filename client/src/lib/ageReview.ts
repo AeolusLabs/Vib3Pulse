@@ -19,6 +19,8 @@ export interface AgeReviewRequest {
   submittedAt: string | null;
   declineReason: string | null;
   consentedAt: string | null;
+  /** The user asked to receive money, so the reviewer also records the name on the document. */
+  wantsPayouts?: boolean;
 }
 
 export interface AgeReviewMe {
@@ -30,6 +32,8 @@ export interface AgeReviewMe {
   request: AgeReviewRequest | null;
   retryAfter: string | null;
   attemptsLeft: number;
+  /** A name for payouts is on file (never the name itself). Absent on an older server. */
+  hasPayoutName?: boolean;
 }
 
 export type CardTone = "neutral" | "pending" | "success" | "warning";
@@ -61,6 +65,11 @@ export const COPY = {
   choiceUpload: "Upload an ID photo and a selfie",
   choiceLive: "Private live check with a reviewer",
   choiceLiveHint: "Nothing is recorded or saved.",
+  wantsPayoutsLabel: "I also want to receive money (tips and ticket sales)",
+  wantsPayoutsHelp: "We will also note the name on your ID to check your bank account later.",
+  verifyNameAction: "Verify your name for payouts",
+  verifyNameHelp: "Only needed if you want to receive money. A reviewer notes the name on your ID.",
+  recheckLink: "Redo my payouts check",
   choiceUploadHint: "Your photos are deleted after the final decision.",
   cancel: "Cancel my request",
   howHandled: "How your ID is handled",
@@ -83,6 +92,7 @@ export const PRIVACY = {
   keep: { h: "What we keep", p: "We keep a record of the decision: who made it, when, the type of document, whether the birthdate matched, and the reason if it was declined. A reviewer may also write a short note about the decision (up to 300 characters), which is kept in our staff audit log. We also keep the birthdate you registered with at the time, and a one-way code made from your document number. The code cannot be turned back into the number without our secret key, and it only stops the same document being used on several accounts. We do not keep your photos or the document number itself. Notifications and emails about the result do not contain your documents." },
   choices: { h: "Your choices", p: "Cover everything except your photo, name and date of birth. Cancel any time before a decision and your photos are deleted. Choose the live check instead of uploading. Saying no only means the adult only features stay off." },
   safety: { h: "Your safety", p: "If your document shows you are under 18, we will move your account to the right age group." },
+  keepPayouts: "Because you chose to receive money, we also keep the full name on your document, encrypted. It is used only to check that your bank account is in your name. We delete it if you delete your account or an administrator removes your verification.",
   tick: "I understand how my information is used",
   cont: "Continue",
   notNow: "Not now",
@@ -93,6 +103,8 @@ export const PRIVACY = {
   askHref: "mailto:info@aeoluslabsltd.com",
 } as const;
 
+/** "What we keep": the payouts variant adds the name sentence, the plain one does not. */
+export const keepFor = (wantsPayouts: boolean): string => (wantsPayouts ? `${PRIVACY.keep.p} ${PRIVACY.keepPayouts}` : PRIVACY.keep.p);
 export const whoSees = (m: AgeReviewMethod): string => (m === "live" ? PRIVACY.whoLive : PRIVACY.who.p);
 export const whatHappens = (m: AgeReviewMethod): string => (m === "live" ? PRIVACY.whatLive : PRIVACY.whatUpload);
 
@@ -176,7 +188,7 @@ export function cardView(me: AgeReviewMe, now: Date = new Date()): CardView {
 export const ERROR_CODES = [
   "CONSENT_REQUIRED", "AGE_REVIEW_PAUSED", "OPEN_REQUEST_EXISTS", "RATE_LIMITED", "NOT_OFFERED", "BAD_FILE", "TOO_LARGE",
   "EVIDENCE_INCOMPLETE", "WRONG_STATE", "CODE_EXPIRED", "NOT_ALLOWED", "SECOND_APPROVER_MUST_DIFFER", "SELF_REVIEW",
-  "CHECKLIST_INCOMPLETE", "DUPLICATE_DOCUMENT", "REVEAL_LIMIT", "TOKEN_INVALID", "REASON_REQUIRED",
+  "CHECKLIST_INCOMPLETE", "DUPLICATE_DOCUMENT", "REVEAL_LIMIT", "TOKEN_INVALID", "REASON_REQUIRED", "ALREADY_VERIFIED",
 ] as const;
 
 const GENERIC_STAFF = "Something went wrong with this request. Please try again later.";
@@ -199,6 +211,7 @@ const ERROR_TEXT: Record<(typeof ERROR_CODES)[number], string> = {
   REVEAL_LIMIT: GENERIC_STAFF,
   TOKEN_INVALID: "That link has expired. Please start again.",
   REASON_REQUIRED: GENERIC_STAFF,
+  ALREADY_VERIFIED: "You are already verified. To receive money, choose 'Verify your name for payouts'.",
 };
 
 export function errorMessage(code: string | undefined | null, extra?: { retryAfter?: string | null; now?: Date }): string {
@@ -268,13 +281,30 @@ export const cancelOffered = (me: Pick<AgeReviewMe, "request">): boolean => !!op
 /** A live check has nothing to upload, so it is submitted right after it is created. */
 export async function startLiveRequest(
   deps: {
-    create(v: { method: "live"; consentVersion: string }): Promise<{ request: { id: string } }>;
+    create(v: { method: "live"; consentVersion: string; wantsPayouts?: boolean }): Promise<{ request: { id: string } }>;
     submit(id: string): Promise<unknown>;
   },
   consentVersion: string,
+  wantsPayouts = false,
 ): Promise<void> {
-  const { request } = await deps.create({ method: "live", consentVersion });
+  const { request } = await deps.create({ method: "live", consentVersion, ...(wantsPayouts ? { wantsPayouts: true } : {}) });
   await deps.submit(request.id);
 }
+
+/** The body of POST /api/age-review/requests. `wantsPayouts` is sent only when the box was ticked (or the payouts action was used). */
+export function createBody(v: { method: AgeReviewMethod; documentType?: string; consentVersion: string; wantsPayouts?: boolean }): Record<string, unknown> {
+  return { method: v.method, ...(v.documentType ? { documentType: v.documentType } : {}), consentVersion: v.consentVersion, ...(v.wantsPayouts === true ? { wantsPayouts: true } : {}) };
+}
+
+export type PayoutsAction = "verify_name" | "recheck" | null;
+/** A verified user without a name on file is offered "Verify your name for payouts"; one with a name only gets a small recheck link. Nobody else is asked. */
+export function payoutsAction(me: AgeReviewMe): PayoutsAction {
+  if (me.state !== "verified" || me.paused || openRequest(me) || typeof me.hasPayoutName !== "boolean") return null;
+  return me.hasPayoutName ? "recheck" : "verify_name";
+}
+
+/** `/account/settings?payouts=1#verify-age` preselects the payouts choice. */
+export const payoutsPreselected = (search: string): boolean => new URLSearchParams(search).get("payouts") === "1";
+export const PAYOUTS_HREF = "/account/settings?payouts=1#verify-age";
 
 export const VERIFY_HREF = "/account/settings#verify-age";

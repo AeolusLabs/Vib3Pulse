@@ -28,6 +28,8 @@ export interface PayoutStatus {
   verifiedAdult: boolean; account: PayoutAccountView | null; subaccountReady: boolean;
   /** The server would accept an account from this page now (fix round: false until verified legal names exist). Default false. */
   canLinkAccount: boolean;
+  /** A name from the ID is on file for payouts (never the name). An older server never sends it: default false. */
+  hasVerifiedName: boolean;
 }
 
 /**
@@ -51,7 +53,7 @@ export function parsePayoutStatus(body: unknown): PayoutStatus | null {
   const account = parsePayoutAccount(b.account === undefined ? null : b.account);
   if (account === undefined) return null;
   // Read defensively: anything but a real true means the form stays hidden (an older server never sends it).
-  return { verifiedAdult: b.verifiedAdult, account, subaccountReady: b.subaccountReady, canLinkAccount: b.canLinkAccount === true };
+  return { verifiedAdult: b.verifiedAdult, account, subaccountReady: b.subaccountReady, canLinkAccount: b.canLinkAccount === true, hasVerifiedName: b.hasVerifiedName === true };
 }
 
 /**
@@ -75,6 +77,25 @@ export function payoutStage(s: PayoutStatus, moneyOn = true): PayoutStage {
   if (!s.account.nameMatches) return "mismatch";
   return s.subaccountReady ? "ready" : "pending";
 }
+/**
+ * What the page leads with, on top of the stage above (which stays as it was):
+ * - "needs_age": not an ID-verified adult: verify your age first
+ * - "needs_name": a verified adult with no account and no name on file, while linking could be offered: verify your name for payouts
+ * - otherwise the stage.
+ */
+export type PayoutPanel = "needs_age" | "needs_name" | PayoutStage;
+export function payoutPanel(s: PayoutStatus, moneyOn = true): PayoutPanel {
+  const stage = payoutStage(s, moneyOn);
+  if (stage === "unverified") return "needs_age";
+  if ((stage === "none" || stage === "soon") && moneyOn && !s.hasVerifiedName) return "needs_name";
+  return stage;
+}
+export const VERIFY_AGE_HREF = "/account/settings#verify-age";
+export const VERIFY_NAME_HREF = "/account/settings?payouts=1#verify-age";
+/** The failures that should offer the payouts check next to the message. */
+export const accountFailureCta = (f: AccountFailure): "verify_name" | "recheck" | null =>
+  f.code === "NO_VERIFIED_NAME" ? "verify_name" : f.code === "NAME_MISMATCH" || (f.status === 422 && !f.code) ? "recheck" : null;
+
 /** Can receive money now, exactly as the server's subaccountReady says (for a verified adult). */
 export const payoutReady = (s: PayoutStatus | null | undefined) => !!s && ["ready", "setup"].includes(payoutStage(s));
 
@@ -107,7 +128,7 @@ export const PAYOUT_ERROR = {
   signIn: "Sign in again to set up payouts.",
   unverified: "Payouts are for ID-verified adults. Verify your ID first, then come back here.",
   nameMismatch: "The name on this bank account does not match the name on your ID. Use an account in your own name.",
-  noVerifiedName: "We do not have the name from your ID yet, so we cannot check this account. Contact support and we will sort it out.",
+  noVerifiedName: "To add a bank account we need to check your name on your ID. Start a payouts check from this page.",
   notFound: "We could not find that account. Check the bank and the 10 digit account number.",
   badBank: "Choose your bank from the list.",
   reload: "That did not go through. Reload the page and try again.",
@@ -170,6 +191,13 @@ export const PAYOUT_COPY = {
   notVerified: "Not verified",
   unverifiedTitle: "Verify your ID to get paid",
   unverifiedBody: "Payouts are for ID-verified adults. Your history stays here, but nothing new can be paid to you until your ID is verified.",
+  needAgeTitle: "Verify your age first",
+  needAgeBody: "Payouts are for verified adults. Once your age is verified you can add a bank account here.",
+  needAgeCta: "Verify your age",
+  needNameTitle: "Verify your name for payouts",
+  needNameBody: "To pay you, we check that your bank account is in your name. A reviewer notes the name on your ID once, and we keep it encrypted. This is only for people who want to receive money.",
+  needNameCta: "Verify your name for payouts",
+  recheckCta: "Ask for a name recheck",
   noneTitle: "Add a bank account",
   noneBody: "Add the account you want sprays and ticket money paid into. It must be in your own name.",
   mismatchTitle: "The name does not match your ID",
@@ -435,3 +463,7 @@ export const EARNINGS_UI_COPY: readonly string[] = [
   ...["paid", "pending", "processing", "reversing", "disputed", "chargeback", "refunded", "partially_refunded", "reversed", "failed", "processed"].flatMap((s) => [paymentStatusWord("ticket", s), paymentStatusWord("refund", s)]),
   readFailureMessage(0, ""), readFailureMessage(401, ""), readFailureMessage(429, ""),
 ];
+
+/** Account settings shows the "Payout account" row only when the status read worked (HTTP 200 and a body we can use). */
+export const payoutLinkVisible = (res: { ok: boolean } | null | undefined): boolean => res?.ok === true;
+export const PAYOUT_LINK_COPY = { title: "Payout account", help: "Where tips and ticket money are paid" } as const;

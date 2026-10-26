@@ -26,10 +26,10 @@ const READY = { verifiedAdult: true, account: { bankName: "GTBank", last4: "4821
 // ---------------------------------------------------------------- payout status
 test("status: the plan's shape parses; extra fields (a name, a full number) are never kept", () => {
   const s = parsePayoutStatus({ ...READY, account: { ...READY.account, accountName: "ADA OBI", accountNumber: "0123454821" } });
-  assert.deepEqual(s, READY);
+  assert.deepEqual(s, { ...READY, hasVerifiedName: false }, "an older server sends no hasVerifiedName: it defaults to false");
   assert.equal(JSON.stringify(s).includes("ADA"), false);
   assert.equal(JSON.stringify(s).includes("0123454821"), false);
-  assert.deepEqual(parsePayoutStatus({ verifiedAdult: false, account: null, subaccountReady: false }), { verifiedAdult: false, account: null, subaccountReady: false, canLinkAccount: false });
+  assert.deepEqual(parsePayoutStatus({ verifiedAdult: false, account: null, subaccountReady: false }), { verifiedAdult: false, account: null, subaccountReady: false, canLinkAccount: false, hasVerifiedName: false });
   assert.deepEqual(parsePayoutStatus({ verifiedAdult: true, subaccountReady: false })?.account, null, "a missing account is no account");
 });
 test("status: last4 that is not exactly four digits fails the whole status (a full number is never drawn)", () => {

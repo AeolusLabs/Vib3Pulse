@@ -12,8 +12,8 @@ import { AlertTriangleIcon, CheckCircleIcon, ChevronRightIcon, ClockIcon, Loader
 import { banksKey, fetchBanks, fetchPayoutStatus, payoutStatusKey, savePayoutAccount } from "@/lib/earningsApi";
 import { useRoomsConfig } from "@/lib/roomsApi";
 import {
-  PAYOUT_COPY, accountNeedsRefetch, accountNumberValid, canLinkHere, payoutErrorMessage, payoutStage, readFailureMessage, savedAccountOf,
-  type PayoutStatus,
+  PAYOUT_COPY, VERIFY_AGE_HREF, VERIFY_NAME_HREF, accountFailureCta, accountNeedsRefetch, accountNumberValid, canLinkHere, payoutErrorMessage, payoutPanel,
+  payoutStage, readFailureMessage, savedAccountOf, type PayoutStatus,
 } from "./earningsUi";
 
 function Spinner({ label }: { label: string }) {
@@ -58,6 +58,7 @@ export function AccountForm({ onSaved, onCancel, autoFocus = false }: FormProps)
   const [tried, setTried] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cta, setCta] = useState<"verify_name" | "recheck" | null>(null);
   const bankRef = useRef<HTMLSelectElement>(null);
   useEffect(() => { if (autoFocus) bankRef.current?.focus(); }, [autoFocus]);
 
@@ -78,6 +79,7 @@ export function AccountForm({ onSaved, onCancel, autoFocus = false }: FormProps)
       return;
     }
     setError(payoutErrorMessage(r));
+    setCta(accountFailureCta(r));
     if (accountNeedsRefetch(r) || r.code === "NAME_MISMATCH" || r.status === 422 || r.status === 403) void qc.invalidateQueries({ queryKey: payoutStatusKey });
   };
 
@@ -117,7 +119,16 @@ export function AccountForm({ onSaved, onCancel, autoFocus = false }: FormProps)
         <p id="payout-number-help" className="text-sm text-muted-foreground">{PAYOUT_COPY.numberHelp}</p>
         {showNumberError && <p id="payout-number-error" role="alert" className="text-sm text-destructive">{PAYOUT_COPY.numberInvalid}</p>}
       </div>
-      {error && <p role="alert" className="rounded-xl border border-destructive/60 p-3 text-sm" data-testid="payout-account-error">{error}</p>}
+      {error && (
+        <div role="alert" className="space-y-1 rounded-xl border border-destructive/60 p-3 text-sm" data-testid="payout-account-error">
+          <p>{error}</p>
+          {cta && (
+            <Link href={VERIFY_NAME_HREF} className="inline-flex min-h-[44px] items-center font-medium text-primary underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary" data-testid="payout-name-cta">
+              {cta === "recheck" ? PAYOUT_COPY.recheckCta : PAYOUT_COPY.needNameCta}
+            </Link>
+          )}
+        </div>
+      )}
       <div className="flex flex-col gap-2 sm:flex-row">
         <Button type="submit" className="min-h-[48px] flex-1 rounded-full" disabled={busy || (tried && (!bankCode || !numberOk))} aria-busy={busy || undefined} data-testid="button-save-payout-account">
           {busy && <Loader2Icon className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />}
@@ -177,7 +188,9 @@ function PayoutBody({ status, moneyOn, changing, onChange, onCancel, onSaved, ch
   changeBtn: RefObject<HTMLButtonElement>;
 }) {
   const stage = payoutStage(status, moneyOn);
-  const canLink = canLinkHere(status, moneyOn);
+  const panel = payoutPanel(status, moneyOn);
+  // The name step comes first: no bank form until a name is on file.
+  const canLink = canLinkHere(status, moneyOn) && panel !== "needs_name";
   const a = status.account;
   return (
     <div className="space-y-5" data-stage={stage} data-testid="payout-stage">
@@ -195,8 +208,17 @@ function PayoutBody({ status, moneyOn, changing, onChange, onCancel, onSaved, ch
 
       {stage === "unverified" && (
         <div className="space-y-2 rounded-2xl border border-border p-4" data-testid="payout-unverified">
-          <h2 className="flex items-center gap-2 font-semibold"><ShieldCheckIcon className="h-5 w-5 text-primary" aria-hidden />{PAYOUT_COPY.unverifiedTitle}</h2>
-          <p className="text-sm text-muted-foreground">{PAYOUT_COPY.unverifiedBody}</p>
+          <h2 className="flex items-center gap-2 font-semibold"><ShieldCheckIcon className="h-5 w-5 text-primary" aria-hidden />{PAYOUT_COPY.needAgeTitle}</h2>
+          <p className="text-sm text-muted-foreground">{PAYOUT_COPY.needAgeBody}</p>
+          <Button asChild className="min-h-[44px] rounded-full" data-testid="payout-verify-age-cta"><Link href={VERIFY_AGE_HREF}>{PAYOUT_COPY.needAgeCta}</Link></Button>
+        </div>
+      )}
+
+      {panel === "needs_name" && (
+        <div className="space-y-2 rounded-2xl border border-border p-4" data-testid="payout-needs-name">
+          <h2 className="flex items-center gap-2 font-semibold"><ShieldCheckIcon className="h-5 w-5 text-primary" aria-hidden />{PAYOUT_COPY.needNameTitle}</h2>
+          <p className="text-sm text-muted-foreground">{PAYOUT_COPY.needNameBody}</p>
+          <Button asChild className="min-h-[44px] rounded-full" data-testid="payout-verify-name-cta"><Link href={VERIFY_NAME_HREF}>{PAYOUT_COPY.needNameCta}</Link></Button>
         </div>
       )}
 
@@ -204,6 +226,7 @@ function PayoutBody({ status, moneyOn, changing, onChange, onCancel, onSaved, ch
         <div role="alert" className="space-y-2 rounded-2xl border border-destructive/60 p-4" data-testid="payout-mismatch">
           <h2 className="font-semibold">{PAYOUT_COPY.mismatchTitle}</h2>
           <p className="text-sm">{PAYOUT_COPY.mismatchBody}</p>
+          <Link href={VERIFY_NAME_HREF} className="inline-flex min-h-[44px] items-center font-medium text-primary underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary" data-testid="payout-recheck-cta">{PAYOUT_COPY.recheckCta}</Link>
         </div>
       )}
 
@@ -223,7 +246,7 @@ function PayoutBody({ status, moneyOn, changing, onChange, onCancel, onSaved, ch
         </div>
       )}
 
-      {(stage === "soon" || (stage === "mismatch" && !canLink)) && (
+      {panel !== "needs_name" && (stage === "soon" || (stage === "mismatch" && !canLink)) && (
         <div role="status" className="space-y-2 rounded-2xl border border-border p-4" data-testid="payout-soon">
           <h2 className="flex items-center gap-2 font-semibold"><ClockIcon className="h-5 w-5 text-primary" aria-hidden />{PAYOUT_COPY.soonTitle}</h2>
           <p className="text-sm text-muted-foreground">{PAYOUT_COPY.soonBody}</p>

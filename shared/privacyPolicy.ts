@@ -10,12 +10,15 @@ export interface PolicySection {
   afterBullets?: string[];
 }
 export interface PrivacyPolicy {
-  version: "2026-10-v3";
+  version: "2026-10-v4";
   status: "draft" | "final";
   lastUpdated: "2026-10-26";
   contactEmail: "info@aeoluslabsltd.com";
   sections: PolicySection[];
 }
+
+/** Shown only to people who chose to receive money. The pop-up uses the same words (client/src/lib/ageReview.ts). */
+export const PAYOUTS_NAME_NOTE = "Because you chose to receive money, we also keep the full name on your document, encrypted. It is used only to check that your bank account is in your name. We delete it if you delete your account or an administrator removes your verification.";
 
 export const DRAFT_BADGE = "Draft, under legal review";
 /** The badge text while the policy is a draft; null once it is final. */
@@ -37,7 +40,7 @@ export function visibleSections(policy: PrivacyPolicy, ageReviewEnabled: boolean
 }
 
 export const PRIVACY_POLICY: PrivacyPolicy = {
-  version: "2026-10-v3",
+  version: "2026-10-v4",
   status: "draft",
   lastUpdated: "2026-10-26",
   contactEmail: "info@aeoluslabsltd.com",
@@ -82,7 +85,7 @@ export const PRIVACY_POLICY: PrivacyPolicy = {
         "Device and network data: your IP address and a device cookie, used for login security and to enforce bans. Our servers also log requests and sign in events, including IP addresses.",
         "Cookies: a session cookie that keeps you signed in (30 days), a security token cookie (24 hours), a device cookie (up to 2 years), and a small display preference for the side menu. We do not use advertising or analytics cookies, and the app has no analytics or advertising trackers.",
       ],
-      whenAgeReview: { bullets: ["Age review: if you ask us to verify your age, see the section on age verification below."] },
+      whenAgeReview: { bullets: ["Age review: if you ask us to verify your age, see the section on age verification below.", `Name on your document (only if you choose to receive money): ${PAYOUTS_NAME_NOTE}`] },
     },
     {
       id: "why-we-use-it",
@@ -148,6 +151,7 @@ export const PRIVACY_POLICY: PrivacyPolicy = {
         "Who sees it: Only Vib3Pulse staff who review ages (administrators, super administrators and age reviewers). Your images are encrypted in our database and are opened one at a time, with every viewing logged. For a live check, a reviewer sees you on a private call. Nothing is recorded or saved.",
         "How long: for an upload, we delete your photos after the final decision, or after 7 days from when you started, whichever comes first. If a second approval is needed, they are kept until that is decided, within the 7 days. If you cancel before a decision, your photos are deleted.",
         "What we keep: We keep a record of the decision: who made it, when, the type of document, whether the birthdate matched, and the reason if it was declined. A reviewer may also write a short note about the decision (up to 300 characters), which is kept in our staff audit log. We also keep the birthdate you registered with at the time, and a one-way code made from your document number. The code cannot be turned back into the number without our secret key, and it only stops the same document being used on several accounts. We do not keep your photos or the document number itself. Notifications and emails about the result do not contain your documents.",
+        `Receiving money: ${PAYOUTS_NAME_NOTE}`,
         "Your birthdate: a reviewer compares the document with the birthdate you gave when you signed up. If it shows you are under 18, we move your account to the right age group. If it shows a different adult birthdate, a second senior reviewer must approve before we change it.",
         "Your choices: Cover everything except your photo, name and date of birth. Cancel any time before a decision and your photos are deleted. Choose the live check instead of uploading. Saying no only means the adult only features stay off.",
         "Your safety: If your document shows you are under 18, we will move your account to the right age group.",

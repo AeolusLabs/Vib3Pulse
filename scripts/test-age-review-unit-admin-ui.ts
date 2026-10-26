@@ -18,7 +18,7 @@ const read = (p: string) => readFileSync(join(root, p), "utf8");
 const dir = "client/src/components/admin/age-review";
 const files = [...readdirSync(join(root, dir)).map((f) => `${dir}/${f}`), "client/src/pages/admin/AdminAgeReviews.tsx", "client/src/lib/adminAgeReviewApi.ts", "client/src/lib/adminAgeReviewUi.ts"];
 
-const form = (o: Partial<DecisionForm> = {}): DecisionForm => ({ outcome: "verify", checklist: emptyChecklist(), idBirthdate: "2000-05-01", documentNumber: "A1234567", documentType: "passport", declineReason: "", note: "", overrideReason: "", ...o });
+const form = (o: Partial<DecisionForm> = {}): DecisionForm => ({ outcome: "verify", checklist: emptyChecklist(), idBirthdate: "2000-05-01", documentNumber: "A1234567", documentType: "passport", legalName: "", declineReason: "", note: "", overrideReason: "", ...o });
 const allTicked = () => Object.fromEntries(CHECKLIST_KEYS.map((k) => [k, true])) as DecisionForm["checklist"];
 
 test("status labels have a non-colour cue", () => {
@@ -136,7 +136,7 @@ test("stale evidence shows the red warning text", () => {
 
 test("document number is cleared after submit (source check)", () => {
   const f = read(`${dir}/DecisionForm.tsx`);
-  assert.match(f, /finally \{[^}]*set\(\{ documentNumber: "" \}\)/s);
+  assert.match(f, /finally \{[^}]*set\(\{ documentNumber: "", legalName: "" \}\)/s);
   assert.match(f, /autoComplete="off"/);
   for (const file of files) {
     const src = read(file);
@@ -253,7 +253,7 @@ test("birthdate_change needs the same checks as verify", () => {
   assert.equal(needsDocumentNumber("birthdate_change"), true);
   const f = read(`${dir}/DecisionForm.tsx`);
   assert.match(f, /needsDocumentNumber\(f\.outcome\) && \(\s*<div className="space-y-2">\s*<Label htmlFor="doc-number"/);
-  assert.match(f, /set\(\{ documentNumber: "" \}\)/);
+  assert.match(f, /set\(\{ documentNumber: "", legalName: "" \}\)/);
 });
 
 test("teen_correction needs only the ID birthdate", () => {

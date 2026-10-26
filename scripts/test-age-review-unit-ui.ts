@@ -43,7 +43,8 @@ test("errorMessage covers every contract error code", () => {
     assert.ok(m.length > 10, c);
     if (["CONSENT_REQUIRED", "BAD_FILE", "TOO_LARGE", "CODE_EXPIRED", "AGE_REVIEW_PAUSED", "OPEN_REQUEST_EXISTS"].includes(c)) assert.notEqual(m, generic, c);
   }
-  assert.equal(ERROR_CODES.length, 18);
+  assert.equal(ERROR_CODES.length, 19);
+  assert.match(errorMessage("ALREADY_VERIFIED"), /^You are already verified\. To receive money, choose 'Verify your name for payouts'\.$/);
   assert.match(errorMessage("RATE_LIMITED", { retryAfter: "2026-10-25T14:00:00Z", now: NOW }), /about 2 hours/);
   assert.equal(errorMessage(undefined), generic);
 });

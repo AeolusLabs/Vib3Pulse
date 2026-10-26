@@ -28,6 +28,7 @@ export const errText = (e: unknown): string => (e instanceof ReviewApiError ? e.
 export interface QueueItem {
   id: string; createdAt: string; submittedAt: string | null; method: "upload" | "live"; status: string; userId: string;
   displayName: string; documentType: string | null; registeredAge: number | null; needsMore: boolean; awaitingSecondApproval: boolean;
+  wantsPayouts?: boolean;
 }
 export interface Detail {
   request: QueueItem & { registeredDob: string; proposedDob?: string | null; code: string | null; codeExpiresAt: string | null; moreRequests: number; consentRecorded: boolean; liveInviteExpiresAt: string | null };
