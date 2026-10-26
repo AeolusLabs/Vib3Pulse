@@ -27,7 +27,8 @@ const { registerAgeReviewRoutes } = await import("../server/routes/age-review-ro
 const { registerAgeReviewAdminRoutes } = await import("../server/routes/age-review-admin-routes");
 const { registerAgeVerificationAdminRoute } = await import("../server/admin-routes");
 const { registerRoomPayoutRoutes } = await import("../server/rooms/payoutRoutes");
-const { setPayoutProviderForTests, payoutTestHooks } = await import("../server/rooms/payouts");
+const { setPayoutProviderForTests, payoutTestHooks, payableSubaccountOf } = await import("../server/rooms/payouts");
+const { setVerifiedName } = await import("../server/identity/verifiedName");
 const { getVerifiedLegalName, hasVerifiedName } = await import("../server/identity/verifiedName");
 const { sweepExpiredAgeReviews } = await import("../server/identity/ageReviewSweep");
 const { correctDateOfBirth } = await import("../server/services/dobCorrection");
@@ -197,7 +198,6 @@ check("(setup) second user has a name", await hasName(v2));
 check("revoke deletes the name", (await http("POST", `/api/admin/users/${v2}/age-verification/revoke`, { admin: adm }, { reason: "chargeback review" })).status === 200 && !(await hasName(v2)));
 
 const v3 = await mkUser("v3", { verified: true });
-const { setVerifiedName } = await import("../server/identity/verifiedName");
 await setVerifiedName(pool as any, v3, NAME, null, rev);
 const rV3 = await submitted(v3, true);
 const teenRes = await http("POST", `/api/admin/age-reviews/${rV3}/decide`, { admin: rev }, { outcome: "teen_correction", idBirthdate: yearsAgo(15) });
@@ -212,6 +212,85 @@ const v5 = await mkUser("v5", { verified: true });
 await setVerifiedName(pool as any, v5, NAME, null, rev);
 await storage.softDeleteUser(v5);
 check("account deletion deletes the name", !(await hasName(v5)));
+
+// ---- changing or removing the name also stops an account that was checked against it
+const payable = (id: string) => payableSubaccountOf(id);
+const acctRow = async (id: string) => (await q(`select paystack_subaccount_code, room_verified_subaccount_code, name_matched_at from organizer_payment_accounts where user_id = $1 and provider = 'paystack'`, [id]))[0];
+const mkPayable = (id: string) => q(
+  `insert into organizer_payment_accounts (user_id, provider, paystack_subaccount_code, details_submitted, payouts_enabled, room_verified_subaccount_code, name_matched_at) values ($1,'paystack',$2,true,true,$2,now())`,
+  [id, `ACCT_pn_${id.slice(0, 8)}_${stamp}`]);
+check("(setup) the linked account of the verified user is payable", (await payable(verified)) !== null);
+async function reReview(userId: string, name: string, tag: string) {
+  const id = await submitted(userId, true);
+  return http("POST", `/api/admin/age-reviews/${id}/decide`, { admin: rev }, { ...base1, documentNumber: tag + stamp, legalName: name });
+}
+check("a payouts re-review storing the SAME name keeps the match", (await reReview(verified, "ZURIEL  quenby adewale".replace("quenby", "Quenby"), "SN")).status === 200 && (await payable(verified)) !== null);
+check("a different new name clears the match, the account stays linked but unpayable", (await reReview(verified, "Zuriel Quenby Olawale", "DN")).status === 200
+  && (await payable(verified)) === null && (await acctRow(verified))?.paystack_subaccount_code != null && (await acctRow(verified)).room_verified_subaccount_code === null && (await acctRow(verified)).name_matched_at === null);
+
+const rv = await mkUser("rv", { verified: true });
+await setVerifiedName(pool as any, rv, NAME, null, rev); await mkPayable(rv);
+check("(setup) payable before revoke", (await payable(rv)) !== null);
+check("revoke clears the match and the account becomes unpayable", (await http("POST", `/api/admin/users/${rv}/age-verification/revoke`, { admin: adm }, { reason: "chargeback review" })).status === 200
+  && (await payable(rv)) === null && !(await hasName(rv)) && (await acctRow(rv))?.paystack_subaccount_code != null);
+
+const dc = await mkUser("dc", { verified: true });
+await setVerifiedName(pool as any, dc, NAME, null, rev); await mkPayable(dc);
+await correctDateOfBirth({ adminId: adm, userId: dc, dateOfBirth: yearsAgo(31), reason: "typo" });
+check("dob correction clears name and match", !(await hasName(dc)) && (await payable(dc)) === null);
+
+const cl = await mkUser("cl", { verified: true });
+await setVerifiedName(pool as any, cl, NAME, null, rev); await mkPayable(cl);
+check("the direct clear (verified:false) clears name and match", (await http("POST", `/api/admin/users/${cl}/age-verification`, { admin: adm }, { verified: false, reason: "found a problem" })).status === 200 && !(await hasName(cl)) && (await payable(cl)) === null);
+
+const tc = await mkUser("tc", { verified: true });
+await setVerifiedName(pool as any, tc, NAME, null, rev); await mkPayable(tc);
+const rTc = await submitted(tc, true);
+await http("POST", `/api/admin/age-reviews/${rTc}/decide`, { admin: rev }, { outcome: "teen_correction", idBirthdate: yearsAgo(15) });
+check("teen correction clears name and match", !(await hasName(tc)) && (await payable(tc)) === null);
+
+const gone = await mkUser("gone", { verified: true });
+await setVerifiedName(pool as any, gone, NAME, null, rev); await mkPayable(gone);
+await storage.softDeleteUser(gone);
+check("account deletion clears name and match", !(await hasName(gone)) && (await payable(gone)) === null);
+
+check("spray gate refuses after the match is cleared (it asks only payableSubaccountOf)", (await payable(rv)) === null && /payableSubaccountOf\(userId\)/.test((await import("node:fs")).readFileSync("server/rooms/spray.ts", "utf8")));
+
+// ---- an undecryptable stored name counts as no name
+const tam = await mkUser("tam", { verified: true });
+await setVerifiedName(pool as any, tam, NAME, null, rev);
+await q(`update user_verified_names set name_enc = $2 where user_id = $1`, [tam, Buffer.from("v1:garbage-not-a-real-ciphertext-at-all-0123456789")]);
+const quiet = console.error; console.error = () => {};
+const tamMe = await http("GET", "/api/age-review/me", { user: tam });
+const tamSt = await http("GET", "/api/rooms/payouts/status", { user: tam });
+console.error = quiet;
+check("an undecryptable row counts as no name everywhere (hasPayoutName, hasVerifiedName, canLinkAccount)", tamMe.json.hasPayoutName === false && tamSt.json.hasVerifiedName === false && tamSt.json.canLinkAccount === false);
+
+// ---- me precedence: only an open PAYOUTS review changes the state of a verified user
+const vp = await mkUser("vp", { verified: true });
+await q(`insert into age_review_requests (user_id, method, status, document_type, registered_dob_snapshot, consent_version, consented_at, wants_payouts) values ($1,'live','submitted','passport',$2,$3,now(),false)`, [vp, dob, CONSENT_VERSION]);
+check("an open request that did not ask for payouts leaves a verified user 'verified' (old order)", (await http("GET", "/api/age-review/me", { user: vp })).json.state === "verified");
+await q(`update age_review_requests set wants_payouts = true where user_id = $1`, [vp]);
+check("...an open payouts request makes it 'in_review'", (await http("GET", "/api/age-review/me", { user: vp })).json.state === "in_review");
+
+// ---- the link race: the name or the verification vanishes during the Paystack round trip
+const lr = await mkUser("lr", { verified: true });
+await setVerifiedName(pool as any, lr, NAME, null, rev);
+OWNER.set("0222222222", NAME.toUpperCase());
+let revokeMidFlight: (() => Promise<void>) | null = async () => { await q(`delete from user_verified_names where user_id = $1`, [lr]); };
+setPayoutProviderForTests({
+  listBanks: async () => [{ name: "Test Bank Plc", code: "058" }],
+  resolve: async (n) => { if (revokeMidFlight) { const f = revokeMidFlight; revokeMidFlight = null; await f(); } const name = OWNER.get(n); if (!name) throw new Error("Paystack error: Could not resolve account name"); return { accountNumber: n, accountName: name }; },
+  createSubaccount: async (p) => { subaccounts.push(p); return { subaccountCode: `ACCT_pn_${subaccounts.length}_${Date.now()}` }; },
+  updateSubaccount: async () => {},
+});
+const before = subaccounts.length;
+const raced = await http("POST", "/api/rooms/payouts/account", { user: lr }, { bankCode: "058", accountNumber: "0222222222" });
+check("the name vanishing mid-flight stops the link (NO_VERIFIED_NAME, nothing created)", raced.status === 422 && raced.json.code === "NO_VERIFIED_NAME" && subaccounts.length === before && (await payable(lr)) === null, raced.text);
+await setVerifiedName(pool as any, lr, NAME, null, rev);
+revokeMidFlight = async () => { await q(`update users set age_verified_at = null where id = $1`, [lr]); };
+const raced2 = await http("POST", "/api/rooms/payouts/account", { user: lr }, { bankCode: "058", accountNumber: "0222222222" });
+check("the verification vanishing mid-flight stops the link (NOT_VERIFIED, nothing created)", raced2.status === 403 && raced2.json.code === "NOT_VERIFIED" && subaccounts.length === before, raced2.text);
 
 // ---- the name is nowhere it should not be
 const leaks = [...responses, ...logged].filter((s) => /Quenby/i.test(s));

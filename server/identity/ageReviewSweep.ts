@@ -78,7 +78,7 @@ export function startAgeReviewSweep(): void {
 /** Account deletion: removes the user's requests, (through the foreign key) all their evidence, and their stored verified name. */
 export async function purgeUserAgeReview(userId: string): Promise<number> {
   const { pool } = await import("../storage");
-  await (await import("./verifiedName")).deleteVerifiedName(userId);
+  await (await import("./payoutNameGuard")).clearNameAndMatch(userId);
   const r = await pool.query(`delete from age_review_requests where user_id = $1`, [userId]);
   return r.rowCount ?? 0;
 }

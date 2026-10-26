@@ -349,6 +349,27 @@ try {
   await settlement.runSettlementPass(new Date());
   check("missed hook: the next pass creates the held payout", (await payout(R11))?.status === "held");
 
+  // ---- the host's verified name was removed (revoke, dob correction...): the account stays linked but its name match is cleared.
+  // Held AND already-queued payouts must wait (NO_PAYOUT_ACCOUNT, nothing sent), and are paid once the account is matched again.
+  const HC = await mk("hostcleared"); await payoutAccount(HC);
+  const RC1 = await mkRoom(HC);
+  await mkTicket(RC1, U[0]);
+  await endRoom(RC1);
+  const { clearNameAndMatch } = await import("../server/identity/payoutNameGuard");
+  await clearNameAndMatch(HC);
+  const dueC = new Date((await endedMs(RC1)) + 49 * HOUR);
+  await settlement.runSettlementPass(dueC);
+  check("after the match is cleared: the held payout waits, nothing is sent", (await payout(RC1)).status === "held" && callsFor(ref(RC1)).length === 0, JSON.stringify(await payout(RC1)));
+  const RC2 = await mkRoom(HC, { status: "ended", started: true });
+  await mkTicket(RC2, U[1]);
+  await q(`insert into room_payouts (room_id, host_id, amount_kobo, status, release_at, transfer_ref) values ($1,$2,$3,'queued',$4::timestamp,$5)`, [RC2, HC, B.host, new Date(Date.now() - HOUR).toISOString(), ref(RC2)]);
+  await settlement.runSettlementPass(new Date());
+  check("queued payout waits after the match is cleared: not paid to the cleared account", (await payout(RC2)).status !== "paid" && callsFor(ref(RC2)).length === 0, JSON.stringify(await payout(RC2)));
+  await q(`update organizer_payment_accounts set room_verified_subaccount_code = paystack_subaccount_code, name_matched_at = now() where user_id = $1`, [HC]);
+  await settlement.runSettlementPass(new Date());
+  await settlement.runSettlementPass(dueC);
+  check("...matched again: the held one is paid once, the queued one is no longer waiting", (await payout(RC1)).status === "paid" && callsFor(ref(RC1)).length === 1 && (await payout(RC2)).last_error !== "NO_PAYOUT_ACCOUNT" && (await payout(RC2)).status !== "failed", JSON.stringify(await payout(RC2)));
+
   // ---- host sales summary (host only, counts and sums only)
   const R12 = await mkRoom(H, { visibility: "friends" });
   await mkTicket(R12, U[0]); await mkTicket(R12, U[1]); await mkTicket(R12, U[2], { status: "refunded" });

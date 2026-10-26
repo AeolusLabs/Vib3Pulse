@@ -43,8 +43,9 @@ export async function getVerifiedLegalName(userId: string, db?: Db): Promise<str
   catch { console.error("[AGE-REVIEW] ALERT a stored verified name could not be decrypted"); return null; }
 }
 
+/** True only if a stored name can actually be decrypted: an unreadable row counts as no name (and logs the ALERT), so the UI offers the verify-name step. */
 export async function hasVerifiedName(userId: string, db?: Db): Promise<boolean> {
-  return (((await (db ?? (await getPool())).query(`select 1 from user_verified_names where user_id = $1`, [userId])).rows.length) > 0);
+  return (await getVerifiedLegalName(userId, db)) !== null;
 }
 
 export async function deleteVerifiedName(userId: string, db?: Db): Promise<boolean> {

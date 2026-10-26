@@ -88,15 +88,17 @@ export async function getMe(userId: string, now: Date = new Date()) {
   const m = user.age_verified_method;
   const verifiedInfo = verifiedAdult ? { method: (m === "admin_upload" || m === "admin_live" ? m : "admin") as "admin" | "admin_upload" | "admin_live", at: new Date(user.age_verified_at!).toISOString() } : null;
 
-  // An open request decides the state even for someone already verified (a payouts-only review).
-  const open = eligibility === "ok" ? rows.find((r) => isOpenStatus(r.status)) : undefined;
-  if (open) {
+  // Only an open PAYOUTS review decides the state for someone already verified; for everyone else the older order stands.
+  const openAny = rows.find((r) => isOpenStatus(r.status));
+  const openState = async (open: Row) => {
     const state = open.status === "draft" ? "none" : open.status === "needs_more" ? "needs_more" : "in_review"; // a draft is the user still mid-flow
     return { ...base, state: state as "none" | "needs_more" | "in_review", verified: verifiedInfo, request: toRequestDto(open, await kindsOf(open.id), now), retryAfter: null };
-  }
+  };
+  if (eligibility === "ok" && openAny?.wants_payouts === true) return openState(openAny);
   if (verifiedInfo) return { ...base, state: "verified" as const, verified: verifiedInfo, request: null, retryAfter: null };
   const none = { verified: null, request: null, retryAfter: null };
   if (eligibility !== "ok") return { ...base, state: "not_offered" as const, ...none };
+  if (openAny) return openState(openAny);
 
   const last = rows[0];
   if (last && last.status === "declined") {

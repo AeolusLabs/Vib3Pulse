@@ -17,10 +17,10 @@ export async function correctDateOfBirth(a: {
   }
   const user = await storage.getUser(a.userId);
   if (!user) return { ok: false, status: 404, message: "User not found" };
+  // The name read off the old document goes first (and the account's name match with it): if that fails nothing else has changed.
+  await (await import("../identity/payoutNameGuard")).clearNameAndMatch(a.userId);
   // Same UPDATE clears ID verification: it vouched for the old birthdate, not the corrected one.
   const updated = await storage.updateUser(a.userId, { dateOfBirth: a.dateOfBirth.slice(0, 10), ageVerifiedAt: null, ageVerifiedMethod: null } as any);
-  // The verification is cleared above; a name read off the old document must not outlive it.
-  await (await import("../identity/verifiedName")).deleteVerifiedName(a.userId);
   await storage.logAdminActivity({
     adminId: a.adminId, action: "user.dob_corrected", targetType: "user", targetId: a.userId,
     details: `DOB ${user.dateOfBirth ?? "none"} -> ${a.dateOfBirth.slice(0, 10)}: ${reason}`, reason, ipAddress: a.ip,

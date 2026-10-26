@@ -8,7 +8,8 @@ import {
 } from "../../shared/ageReview";
 import { AgeReviewError } from "./ageReviewService";
 import { documentFingerprint } from "./evidenceCrypto";
-import { deleteVerifiedName, normaliseLegalName, openProposedName, sealProposedName, setVerifiedName } from "./verifiedName";
+import { normaliseLegalName, openProposedName, sealProposedName } from "./verifiedName";
+import { clearNameAndMatchTx, storeNameTx } from "./payoutNameGuard";
 
 export type AdminRef = { id: string; email: string; role: string };
 export type DecideBody = {
@@ -320,8 +321,9 @@ export async function decide(admin: AdminRef, id: string, body: DecideBody, ip?:
       });
       if (plan.account && (await applyAccount(admin.id, req.user_id, plan.account, ip))) applied = plan.account;
       // The name goes in on the same connection and transaction as the verification: both commit together or neither does.
-      if (plan.storeName) await setVerifiedName(c, req.user_id, plan.storeName, id, admin.id);
-      if (plan.deleteName) await deleteVerifiedName(req.user_id, c);
+      // A different new name also clears the account's match (storeNameTx); removing a name clears it too. Both under the account lock.
+      if (plan.storeName) await storeNameTx(c, req.user_id, plan.storeName, id, admin.id);
+      if (plan.deleteName) await clearNameAndMatchTx(c, req.user_id);
       if (plan.deleteEvidence) await c.query(`delete from age_review_evidence where request_id = $1`, [id]);
       await c.query(
         `update age_review_requests set status = $2, outcome = $3, decline_reason = $4, dob_match = $5,
@@ -395,7 +397,7 @@ export async function secondApprove(admin: AdminRef, id: string, body: { approve
         const { storage } = await import("../storage");
         await storage.setAgeVerification(r.user_id, { verified: true, method: r.method === "live" ? "admin_live" : "admin_upload" });
         // The name held at queue time is stored now, in the same transaction as the decision.
-        if (r.wants_payouts && r.proposed_legal_name_enc) await setVerifiedName(c, r.user_id, openProposedName(r.proposed_legal_name_enc, id), id, admin.id);
+        if (r.wants_payouts && r.proposed_legal_name_enc) await storeNameTx(c, r.user_id, openProposedName(r.proposed_legal_name_enc, id), id, admin.id);
       }
       await c.query(`delete from age_review_evidence where request_id = $1`, [id]);
       await c.query(

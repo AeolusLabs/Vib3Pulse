@@ -128,11 +128,11 @@ await test("completing a payouts review keeps the original age_verified_at (appl
 await test("name is stored in the decision transaction and cleared on every final status (structure)", () => {
   const a = src("server/identity/ageReviewAdmin.ts");
   const fn = a.slice(a.indexOf("export async function decide"), a.indexOf("export async function compensateAccountChange"));
-  assert.ok(fn.indexOf('c.query("begin")') < fn.indexOf("setVerifiedName(c,") && fn.indexOf("setVerifiedName(c,") < fn.indexOf('c.query("commit")'));
-  assert.ok(fn.includes("deleteVerifiedName(req.user_id, c)"));
+  assert.ok(fn.indexOf('c.query("begin")') < fn.indexOf("storeNameTx(c,") && fn.indexOf("storeNameTx(c,") < fn.indexOf('c.query("commit")'));
+  assert.ok(fn.includes("clearNameAndMatchTx(c, req.user_id)"));
   assert.ok(fn.includes("proposed_legal_name_enc = case when $2 in ('approved', 'declined', 'closed_minor') then null"));
   const sa = a.slice(a.indexOf("export async function secondApprove"), a.indexOf("async function getDetailRequestOnly"));
-  assert.ok(sa.includes("openProposedName(r.proposed_legal_name_enc, id)") && sa.includes("proposed_legal_name_enc = null") && sa.indexOf("setVerifiedName(c,") < sa.indexOf('c.query("commit")'));
+  assert.ok(sa.includes("openProposedName(r.proposed_legal_name_enc, id)") && sa.includes("proposed_legal_name_enc = null") && sa.indexOf("storeNameTx(c,") < sa.indexOf('c.query("commit")'));
   assert.ok(src("server/identity/ageReviewSweep.ts").includes("proposed_legal_name_enc = null"));
   assert.ok(src("server/identity/ageReviewService.ts").includes("proposed_legal_name_enc = null"));
   assert.ok(src("server/identity/ageReviewControls.ts").includes("proposed_legal_name_enc = case when status = 'pending_second_approval' then null"));
@@ -140,11 +140,13 @@ await test("name is stored in the decision transaction and cleared on every fina
 
 await test("revoke, old clear, teen correction, birthdate correction and account deletion delete the name (structure)", () => {
   const r = src("server/admin-routes.ts");
-  assert.ok(r.includes("await deleteVerifiedName(user.id); // the stored legal name goes with the verification"));
-  assert.ok(r.includes("if (!verified) await deleteVerifiedName(user.id)"));
-  assert.ok(src("server/services/dobCorrection.ts").includes("deleteVerifiedName(a.userId)"));
+  const rev = r.slice(r.indexOf("age_review.revoke") - 600, r.indexOf("age_review.revoke") + 900);
+  assert.ok(rev.includes("await clearNameAndMatch(user.id)") && rev.indexOf("clearNameAndMatch(user.id)") < rev.indexOf("setAgeVerification(user.id, { verified: false })"), "name and match go BEFORE the verification");
+  assert.ok(r.includes("if (!verified) await clearNameAndMatch(user.id)") && r.indexOf("if (!verified) await clearNameAndMatch") < r.indexOf('setAgeVerification(user.id, { verified, method: "admin" })'));
+  const dc = src("server/services/dobCorrection.ts");
+  assert.ok(dc.includes("clearNameAndMatch(a.userId)") && dc.indexOf("clearNameAndMatch(a.userId)") < dc.indexOf("storage.updateUser(a.userId"));
   const sw = src("server/identity/ageReviewSweep.ts");
-  assert.ok(sw.slice(sw.indexOf("export async function purgeUserAgeReview")).includes("deleteVerifiedName(userId)"));
+  assert.ok(sw.slice(sw.indexOf("export async function purgeUserAgeReview")).includes("clearNameAndMatch(userId)"));
   assert.ok(src("server/storage.ts").slice(src("server/storage.ts").indexOf("async softDeleteUser")).includes("purgeUserAgeReview(userId)"));
   assert.ok(PAYOUT_NAMES_SCHEMA_SQL.includes("user_id varchar PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE"), "hard delete cascades");
 });
@@ -170,6 +172,71 @@ await test("payout status reports hasVerifiedName (and canLinkAccount follows it
   const p = src("server/rooms/payouts.ts");
   assert.ok(p.includes("To add a bank account we need to check your name on your ID. Start a payouts check from this page."));
   assert.ok(p.includes("const verifiedName = await verifiedLegalNameOf(userId);"));
+});
+
+await test("changing or removing the name clears the account match under the account lock (guard)", async () => {
+  const guard = await import("../server/identity/payoutNameGuard");
+  const mem = new Map<string, Buffer>();
+  const log: string[] = [];
+  const tx = {
+    query: async (q: string, p: unknown[] = []) => {
+      const s = q.trim().replace(/\s+/g, " ");
+      log.push(s.split(" ").slice(0, 4).join(" "));
+      if (s.startsWith("insert into user_verified_names")) { mem.set(p[0] as string, p[1] as Buffer); return { rows: [] }; }
+      if (s.startsWith("select name_enc")) return { rows: mem.has(p[0] as string) ? [{ name_enc: mem.get(p[0] as string) }] : [] };
+      if (s.startsWith("delete from user_verified_names")) { mem.delete(p[0] as string); return { rows: [], rowCount: 1 }; }
+      return { rows: [], rowCount: 0 };
+    },
+  };
+  assert.equal(guard.LOCK_ACCOUNT_CHANGE, 41004);
+  // first name: no earlier name, so the match is cleared (nothing could have been checked against it)
+  await guard.storeNameTx(tx, "u1", NAME, "r1", "a1");
+  assert.ok(log[0].startsWith("set local lock_timeout") && log[1].startsWith("select pg_advisory_xact_lock") && log[2].startsWith("set local lock_timeout"), "waits for the lock first");
+  assert.ok(log.some((l) => l.startsWith("update organizer_payment_accounts")), "first name clears");
+  log.length = 0;
+  await guard.storeNameTx(tx, "u1", "  zuriel quenby   ADEWALE ", "r2", "a1");
+  assert.ok(!log.some((l) => l.startsWith("update organizer_payment_accounts")), "the same name (case and spacing aside) keeps the match");
+  log.length = 0;
+  await guard.storeNameTx(tx, "u1", "Zuriel Quenby Olawale", "r3", "a1");
+  assert.ok(log.some((l) => l.startsWith("update organizer_payment_accounts")), "a different name clears it");
+  log.length = 0;
+  await guard.clearNameAndMatchTx(tx, "u1");
+  assert.ok(log.some((l) => l.startsWith("delete from user_verified_names")) && log.some((l) => l.startsWith("update organizer_payment_accounts")) && mem.size === 0);
+  // BUSY when the lock cannot be had in time
+  const busy = { query: async (q: string) => { if (q.includes("pg_advisory_xact_lock")) { const e: any = new Error("lock timeout"); e.code = "55P03"; throw e; } return { rows: [] }; } };
+  const got = await code(guard.lockAccountChange(busy, "u1"));
+  assert.equal(got, "BUSY");
+  const g = src("server/identity/payoutNameGuard.ts");
+  assert.ok(g.includes("update organizer_payment_accounts set room_verified_subaccount_code = null, name_matched_at = null"));
+  assert.ok(src("server/rooms/payouts.ts").includes("export { LOCK_ACCOUNT_CHANGE };"), "the link takes the very same lock");
+});
+
+await test("an undecryptable stored name counts as no name (tampered row)", async () => {
+  const good = await (async () => { let b: Buffer | undefined; await vn.setVerifiedName({ query: async (_q: string, p?: unknown[]) => { b = p![1] as Buffer; return { rows: [] }; } }, "u1", NAME, null, null); return b!; })();
+  const tampered = Buffer.from(good); tampered[tampered.length - 2] ^= 1;
+  const db = (row: Buffer | null) => ({ query: async () => ({ rows: row ? [{ name_enc: row }] : [] }) });
+  const errs: string[] = []; const orig = console.error; console.error = (...a: unknown[]) => { errs.push(a.join(" ")); };
+  try {
+    assert.equal(await vn.hasVerifiedName("u1", db(good)), true);
+    assert.equal(await vn.hasVerifiedName("u1", db(tampered)), false);
+    assert.equal(await vn.hasVerifiedName("u1", db(Buffer.from("v1:short"))), false);
+    assert.equal(await vn.hasVerifiedName("u1", db(null)), false);
+  } finally { console.error = orig; }
+  assert.equal(errs.length, 2); assert.ok(errs.every((e) => e.includes("ALERT") && !e.includes("Quenby")));
+});
+
+await test("link race: the name and the verification are re-read under the account lock (structure)", () => {
+  const p = src("server/rooms/payouts.ts");
+  const fn = p.slice(p.indexOf("async function changeLocked"));
+  const reread = fn.indexOf("const nowUser = await storage.getUser(userId)");
+  assert.ok(reread > 0 && reread < fn.indexOf("hasQueuedPayout(c, userId)"), "before anything is changed");
+  assert.ok(fn.includes('refuse("NOT_VERIFIED")') && fn.includes('refuse("NO_VERIFIED_NAME")') && fn.includes("nameNow !== i.verifiedName"));
+});
+
+await test("me: only an open payouts review changes the state of a verified user (structure)", () => {
+  const s = src("server/identity/ageReviewService.ts");
+  assert.ok(s.includes('eligibility === "ok" && openAny?.wants_payouts === true) return openState(openAny)'));
+  assert.ok(s.indexOf("openAny?.wants_payouts === true") < s.indexOf("if (verifiedInfo) return") && s.indexOf("if (verifiedInfo) return") < s.indexOf("if (openAny) return openState(openAny)"));
 });
 
 await test("migration SQL equals the .sql file, is additive and has the required shape", () => {

@@ -13,7 +13,8 @@ import { getSocialPlanAdminStats } from "./services/socialAdminStats";
 import { registerAgeReviewAdminRoutes } from "./routes/age-review-admin-routes";
 import { ageReviewEnabled } from "./identity/ageReviewFeatures";
 import { isSelfReview } from "./identity/ageReviewAdmin";
-import { deleteVerifiedName } from "./identity/verifiedName";
+import { clearNameAndMatch } from "./identity/payoutNameGuard";
+import { AgeReviewError } from "./identity/ageReviewService";
 import { requireAdmin, requireStaffNotReviewer, requireAdminPending, requireRole, requireSuperAdmin, isMfaEnrolled, mfaRequiredFor } from "./services/adminSecurity";
 import { registerSprayClawbackAdminRoutes } from "./rooms/clawbacks";
 import { registerRoomsAdminRoutes } from "./rooms/adminRoutes";
@@ -73,8 +74,8 @@ export function registerAgeVerificationAdminRoute(app: Express) {
       if (isSelfReview({ id: req.admin!.id, email: req.admin!.email, role: req.admin!.role }, { email: user.email, dateOfBirth: null })) return res.status(403).json({ message: "You cannot change your own age verification.", code: "SELF_REVIEW" });
       if (verified && !user.dateOfBirth) return res.status(409).json({ message: "This user has no date of birth on file. Verification must vouch for a stored birthdate." });
       const prev = await ageVerifier.status(user.id);
+      if (!verified) await clearNameAndMatch(user.id); // removing a verification removes the stored legal name and the name match first
       await storage.setAgeVerification(user.id, { verified, method: "admin" });
-      if (!verified) await deleteVerifiedName(user.id); // removing a verification removes the stored legal name too
       const prevText = prev.verified ? `verified (${prev.method ?? "unknown"})` : "not verified";
       const newText = verified ? "verified (admin)" : "not verified";
       await storage.logAdminActivity({
@@ -88,6 +89,7 @@ export function registerAgeVerificationAdminRoute(app: Express) {
       }).catch((error) => console.error("Failed to log admin activity:", error));
       res.json(await ageVerifier.status(user.id));
     } catch (error) {
+      if (error instanceof AgeReviewError) return res.status(error.status).json({ message: error.message, code: error.code });
       if (error instanceof z.ZodError) return res.status(400).json({ message: "verified (true or false) and a reason (3 to 300 characters) are required" });
       res.status(500).json({ message: "Failed to update age verification" });
     }
@@ -107,10 +109,11 @@ export function registerAgeVerificationAdminRoute(app: Express) {
         adminId: req.session.adminId!, action: "age_review.revoke", targetType: "user", targetId: user.id,
         details: `Cleared ID verification (revoke). Reason: ${reason.data}`, reason: reason.data, ipAddress: req.ip,
       }).catch((error) => console.error("Failed to log admin activity:", error));
+      await clearNameAndMatch(user.id); // the stored legal name (and the account's name match) goes first: a failure leaves the verification in place
       await storage.setAgeVerification(user.id, { verified: false });
-      await deleteVerifiedName(user.id); // the stored legal name goes with the verification
       res.json(await ageVerifier.status(user.id));
-    } catch {
+    } catch (error) {
+      if (error instanceof AgeReviewError) return res.status(error.status).json({ message: error.message, code: error.code });
       res.status(500).json({ message: "Failed to revoke age verification" });
     }
   });

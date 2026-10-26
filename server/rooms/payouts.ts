@@ -43,14 +43,15 @@ import {
 } from "../payments/paystack";
 import { BUSY, LOCK_PAYOUT, withAdvisoryLock } from "./refunds";
 import { getVerifiedLegalName, hasVerifiedName } from "../identity/verifiedName";
+import { LOCK_ACCOUNT_CHANGE } from "../identity/payoutNameGuard";
 
 export const ROOMS_ACCOUNT_ATTEMPTS_PER_HOUR = 5;
 const HOUR_MS = 60 * 60_000;
 const lockKey = (userId: string) => `room-payout-acct:${userId}`;
 const testing = () => process.env.NODE_ENV !== "production";
 
-/** Advisory lock namespace for a payout account change (refunds.ts 41001 / 41002, spray.ts 41003). Key: the user id. */
-export const LOCK_ACCOUNT_CHANGE = 41004;
+/** Advisory lock namespace for a payout account change (refunds.ts 41001 / 41002, spray.ts 41003). Key: the user id. Shared with the verified-name changes. */
+export { LOCK_ACCOUNT_CHANGE };
 
 // ---------------------------------------------------------------- the single "can be paid" helper
 
@@ -325,6 +326,13 @@ interface ChangeInput {
 /** Under the session lock (rule 4), with NO transaction open around the provider call. */
 async function changeLocked(c: Q, i: ChangeInput): Promise<PayoutAccountOutcome> {
   const { userId, bankCode, last4 } = i;
+  // The name and the verification were read before the Paystack round trip. Under the lock nothing can change them any more
+  // (they are changed under this same lock), so read them again: whatever vanished meanwhile stops the link here.
+  const nowUser = await storage.getUser(userId);
+  if (!nowUser || nowUser.deletedAt || !isIdVerifiedAdult(nowUser)) { logAccount(userId, "NOT_VERIFIED"); return refuse("NOT_VERIFIED"); }
+  const nameNow = await verifiedLegalNameOf(userId);
+  if (!nameNow) { logAccount(userId, "NO_VERIFIED_NAME"); return refuse("NO_VERIFIED_NAME"); }
+  if (nameNow !== i.verifiedName) { logAccount(userId, "BUSY:name_changed"); return refuse("BUSY"); }
   // No payout can become queued while we hold the lock (settlement takes the shared lock to queue), so this answer holds.
   if (await hasQueuedPayout(c, userId)) {
     logAccount(userId, "PAYOUT_IN_FLIGHT");
