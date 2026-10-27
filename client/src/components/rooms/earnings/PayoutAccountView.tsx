@@ -185,6 +185,21 @@ export default function PayoutAccountView() {
   );
 }
 
+/** The whole path in one line: ID, then the name for payouts, then a bank account that matches it. The first step not done is the current one. */
+function PayoutSteps({ steps }: { steps: { label: string; done: boolean }[] }) {
+  const current = steps.findIndex((s) => !s.done);
+  return (
+    <ol className="flex gap-2" aria-label="Steps to get paid" data-testid="payout-steps">
+      {steps.map((s, i) => (
+        <li key={s.label} className="flex-1" aria-current={i === current ? "step" : undefined}>
+          <span className={`block h-1.5 rounded-full ${s.done ? "bg-primary" : i === current ? "bg-primary/40" : "bg-muted"}`} aria-hidden />
+          <span className={`mt-1.5 block text-xs ${i === current ? "font-semibold" : "text-muted-foreground"}`}>{i + 1}. {s.label}<span className="sr-only">{s.done ? ", done" : i === current ? ", next" : ""}</span></span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 function PayoutBody({ status, moneyOn, changing, onChange, onCancel, onSaved, changeBtn }: {
   status: PayoutStatus; moneyOn: boolean; changing: boolean; onChange(): void; onCancel(): void; onSaved(last4: string | null): void;
   changeBtn: RefObject<HTMLButtonElement>;
@@ -198,6 +213,11 @@ function PayoutBody({ status, moneyOn, changing, onChange, onCancel, onSaved, ch
   const a = status.account;
   return (
     <div className="space-y-5" data-stage={stage} data-testid="payout-stage">
+      <PayoutSteps steps={[
+        { label: "Verify your ID", done: status.verifiedAdult },
+        { label: "Name for payouts", done: status.hasVerifiedName },
+        { label: "Bank account", done: status.subaccountReady },
+      ]} />
       <ul className="divide-y divide-border rounded-2xl bg-muted/60" aria-label="Payout checks">
         {a && (
           panel === "needs_name"

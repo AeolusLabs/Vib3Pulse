@@ -36,6 +36,7 @@ const refundCalls: string[] = [];                  // provider refs, one entry p
 const refundAttempts: string[] = [];               // every refund call, accepted or not
 const lookups: string[] = [];                      // every refund lookup
 const notes = new Map<string, string | undefined>(); // provider ref -> the merchant note of the last refund
+const amounts = new Map<string, number | undefined>(); // provider ref -> the partial amount (kobo) asked for, undefined = full
 const providerHas = new Map<string, RS>();         // provider ref -> refund state the provider reports
 const afterRefund = new Map<string, RS>();         // provider ref -> state right after a refund is accepted
 const refuse = new Set<string>();                  // refs whose refund the provider refuses (e.g. charged back)
@@ -52,6 +53,7 @@ setPaymentProviderForTests({
     if (refuse.has(ref)) throw new Error("Paystack error: Transaction has a chargeback and cannot be refunded");
     refundCalls.push(ref);
     notes.set(ref, opts?.note);
+    amounts.set(ref, opts?.amountKobo);
     providerHas.set(ref, afterRefund.get(ref) ?? "done");
     if (loseResponse.has(ref)) throw new TypeError("fetch failed");
   },
@@ -121,6 +123,8 @@ const mk = async (name: string) => {
 
 const PRICE = 500000; // 5,000 naira
 const B = ticketBreakdown(PRICE);
+// What a buyer who asks gets back: the price less the card service charge and our platform fee (the policy). Everyone else gets the full price.
+const BACK = B.price - B.fee - B.platform;
 /** A ticketed room, written straight to the table. scheduled_for is an ISO string (UTC, the drizzle convention). */
 async function mkRoom(host: string, o: { minutesAhead?: number | null; status?: string; visibility?: string; refundBeforeStart?: boolean; started?: boolean } = {}) {
   const at = o.minutesAhead === null ? null : new Date(Date.now() + (o.minutesAhead ?? 180) * 60_000).toISOString();
@@ -190,10 +194,11 @@ try {
   const row1 = await ticket(t1.id);
   check("ticket is refunded (reason buyer) and confirmed (refunded_at set)", row1.status === "refunded" && row1.refund_reason === "buyer" && row1.refunded_at !== null, JSON.stringify(row1));
   check("the provider received exactly one refund for the payment", callsFor(t1.ref) === 1);
+  check("...for the price less the service charge and platform fee, not the full price", amounts.get(t1.ref) === BACK && BACK < B.price, String(amounts.get(t1.ref)));
   const led1 = await ledgerRows(t1.id);
-  check("one ledger row room_ticket_refund with the stored amounts", led1.length === 1 && led1[0].gross_amount === B.price && led1[0].net_to_organizer_amount === B.host && led1[0].status === "refunded", JSON.stringify(led1));
+  check("one ledger row room_ticket_refund: what went back, the platform keeps its fee, the host's share returns", led1.length === 1 && led1[0].gross_amount === BACK && led1[0].platform_fee_amount === 0 && led1[0].net_to_organizer_amount === B.host && led1[0].status === "refunded", JSON.stringify(led1));
   const n1 = await refundNotes(U1, R1);
-  check("the buyer is told once, in naira, with a link to the room", n1.length === 1 && n1[0].message.includes("₦5,000") && n1[0].link === `/rooms/${R1}`, JSON.stringify(n1));
+  check("the buyer is told once, in naira, with a link to the room", n1.length === 1 && n1[0].message.includes((BACK / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })) && n1[0].message.includes("service charge and platform fee") && n1[0].link === `/rooms/${R1}`, JSON.stringify(n1));
 
   // ---- twice
   const r1b = await http("POST", `/api/rooms/${R1}/tickets/refund`, U1);
@@ -246,6 +251,7 @@ try {
   const cancelled = await Promise.all([c1, c2, c3].map((t) => ticket(t.id)));
   check("every ticket refunded with reason host_cancelled", cancelled.every((t) => t.status === "refunded" && t.refund_reason === "host_cancelled" && t.refunded_at !== null), JSON.stringify(cancelled));
   check("one provider refund per ticket", [c1, c2, c3].every((t) => callsFor(t.ref) === 1));
+  check("host cancelled: every refund is the full price (no partial amount asked for)", [c1, c2, c3].every((t) => amounts.get(t.ref) === undefined));
   check("the payout row is removed on cancel", (await q(`select 1 from room_payouts where room_id = $1`, [RC])).length === 0);
   const again = await http("POST", `/api/rooms/${RC}/cancel`, H2);
   check("cancelling again: 409 BAD_STATE and nothing moves", again.status === 409 && again.json?.code === "BAD_STATE" && [c1, c2, c3].every((t) => callsFor(t.ref) === 1), JSON.stringify(again));

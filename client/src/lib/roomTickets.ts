@@ -4,7 +4,7 @@
 // refuse, and never show a price it did not send.
 import { DEFAULT_RATES, ticketBreakdown } from "@shared/money";
 import { ROOM_LIMITS } from "@shared/rooms";
-import { BUYER_REFUND_CUTOFF_MS, buyerRefundCheck, type BuyerRefundCode } from "@shared/roomRefunds";
+import { BUYER_REFUND_CUTOFF_MS, REFUND_FEES_NOTE, buyerRefundCheck, type BuyerRefundCode } from "@shared/roomRefunds";
 import type { RoomPayoutView, RoomTicketBlock, RoomTicketSummary, RoomTicketView } from "./roomsApi";
 
 // ---------------------------------------------------------------- limits
@@ -66,6 +66,7 @@ export function parseTicketBlock(x: unknown): RoomTicketBlock | null {
   if (typeof t.left === "number" && Number.isInteger(t.left) && t.left >= 0) block.left = t.left;
   if (typeof t.capacity === "number" && Number.isInteger(t.capacity) && t.capacity > 0) block.capacity = t.capacity;
   if (typeof t.refundBeforeStart === "boolean") block.refundBeforeStart = t.refundBeforeStart;
+  if (typeof t.refundKobo === "number" && Number.isInteger(t.refundKobo) && t.refundKobo >= 0) block.refundKobo = t.refundKobo;
   return block;
 }
 
@@ -335,7 +336,7 @@ export { BUYER_REFUND_CUTOFF_MS };
 export const REFUND_COPY = {
   button: "Refund my ticket",
   confirmTitle: "Refund your ticket?",
-  confirmBody: (price: string) => `You get ${price} back on your card and lose your place in the room. It can take a few days to show.`,
+  confirmBody: (price: string, back?: string) => `${back ? `You get ${back} back of the ${price} you paid and lose your place in the room.` : "You lose your place in the room."} ${REFUND_FEES_NOTE} It can take a few days to show on your card.`,
   confirmYes: "Refund ticket",
   confirmNo: "Keep my ticket",
   working: "Refunding",
@@ -391,8 +392,8 @@ export function refundOutcome(body: unknown): { kind: "refunded" | "already" | "
 
 /** The refund promise on the ticket page. The "1 hour" line only when the server said the host offers it. */
 export function refundPromise(room: { scheduledFor: string | null; refundBeforeStart?: boolean }): string {
-  const auto = "If the room does not start, you are refunded automatically.";
-  if (room.refundBeforeStart === true && room.scheduledFor) return `Full refund up to 1 hour before. ${auto}`;
+  const auto = "If the room does not start, you are refunded in full.";
+  if (room.refundBeforeStart === true && room.scheduledFor) return `Refund up to 1 hour before, less the service charge and platform fee. ${auto}`;
   return auto;
 }
 
@@ -469,7 +470,7 @@ export const PRICE_COPY = {
   about: (v: string) => `about ${v}`,
   feesNote: (platformPct: number) => `After VAT (7.5%), card fees and a fraud reserve, we take ${platformPct}%. Price includes VAT.`,
   refundLabel: "Refund up to 1 hour before",
-  refundHelp: "If the room never starts, everyone is refunded automatically.",
+  refundHelp: "If the room never starts, everyone is refunded in full. A buyer who asks for a refund gets back the price less the service charge and our platform fee.",
   payoutTitle: "Payouts",
   payoutBody: "Ticket money is held until 48 hours after the room ends, then paid to your payout account.",
   videoOver: `Live video works in rooms of up to ${ROOM_LIMITS.liveVideoMax} people, so with more tickets than that this room has voice only.`,

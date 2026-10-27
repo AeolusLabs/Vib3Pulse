@@ -37,6 +37,21 @@ export async function clearNameAndMatchTx(c: Tx, userId: string): Promise<void> 
   await clearMatch(c, userId);
 }
 
+/** Support: its own transaction. The account stays linked but cannot be paid until the host relinks it and is name-checked again. */
+export async function resetPayoutMatch(userId: string): Promise<void> {
+  const { pool } = await import("../storage");
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    await lockAccountChange(client, userId);
+    await clearMatch(client, userId);
+    await client.query("commit");
+  } catch (e) {
+    await client.query("rollback").catch(() => {});
+    throw e;
+  } finally { client.release(); }
+}
+
 /** Its own transaction. */
 export async function clearNameAndMatch(userId: string): Promise<void> {
   const { pool } = await import("../storage");

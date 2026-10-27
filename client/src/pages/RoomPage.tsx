@@ -355,7 +355,7 @@ function RoomPageInner({ id }: { id: string }) {
   } else if (room.status === "scheduled" && gate === "held" && ticketBlock) {
     bare = true;
     // The refund promise comes from the ticket block (a guest's room object does not carry refundBeforeStart).
-    content = <WaitingRoom room={{ ...room, id, refundBeforeStart: ticketBlock.refundBeforeStart ?? room.refundBeforeStart }} hostName={hostName(detail.host)} token={token} priceKobo={ticketBlock.priceKobo} onRecheck={() => { void refetch(); }} onRefunded={onRefunded} />;
+    content = <WaitingRoom room={{ ...room, id, refundBeforeStart: ticketBlock.refundBeforeStart ?? room.refundBeforeStart }} hostName={hostName(detail.host)} token={token} priceKobo={ticketBlock.priceKobo} refundKobo={ticketBlock.refundKobo} onRecheck={() => { void refetch(); }} onRefunded={onRefunded} />;
   } else if (room.status === "scheduled") {
     content = (
       <div className="space-y-4">

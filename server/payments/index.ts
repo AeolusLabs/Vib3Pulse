@@ -100,10 +100,10 @@ export async function verifyPaymentIntent(
   return verifyStripePaymentIntent(paymentIntentId);
 }
 
-export async function refundPayment(providerPaymentId: string, provider: PaymentProvider, opts: { note?: string } = {}): Promise<void> {
+export async function refundPayment(providerPaymentId: string, provider: PaymentProvider, opts: { note?: string; amountKobo?: number } = {}): Promise<void> {
   if (testProvider?.refund) return testProvider.refund(providerPaymentId, provider, opts);
   if (testProvider?.refundPayment) return testProvider.refundPayment(providerPaymentId, provider);
-  if (provider === "paystack") return refundPaystackPayment(providerPaymentId, { merchantNote: opts.note });
+  if (provider === "paystack") return refundPaystackPayment(providerPaymentId, { merchantNote: opts.note, amountKobo: opts.amountKobo });
   if (provider === "stripe") return refundStripePayment(providerPaymentId);
   // "free" provider (promotion credits, free RSVPs) never charged anything to refund.
 }

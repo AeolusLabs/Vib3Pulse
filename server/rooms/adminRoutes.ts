@@ -13,6 +13,7 @@ import { adminHoldAllPayoutsForHost } from "./settlement";
 import { adminEndRoom } from "./roomAdmin";
 import { getRates, listRateChanges, setRate } from "./roomRates";
 import { registerSprayLedgerRoutes } from "./adminSprayLedger";
+import { registerSprayHostRoutes } from "./adminSprayHosts";
 import { DEFAULT_RATES, RATE_LIMITS, isRateKey, validateRate } from "@shared/money";
 
 const MODERATION = ["super_admin", "content_moderator"] as const;
@@ -30,6 +31,7 @@ async function audit(req: Request, action: string, targetType: string, targetId:
 
 export function registerRoomsAdminRoutes(app: Express): void {
   registerSprayLedgerRoutes(app);
+  registerSprayHostRoutes(app);
   app.get("/api/admin/rooms/live", requireRole(...MODERATION, ...FINANCE), async (_req: Request, res: Response) => {
     try {
       res.json({ rooms: await listLiveRooms() });
@@ -210,6 +212,7 @@ export function registerRoomsAdminRoutes(app: Express): void {
       if (r.changed) await audit(req, "room_rate.set", "room_rate", key, reason.data, { key, before: r.before, after: r.after });
       res.json({ key, value: r.after, changed: r.changed });
     } catch (e) {
+      if (e instanceof RangeError) return res.status(400).json({ message: e.message, code: "BAD_VALUE" });
       console.error("[ADMIN] room rate change failed:", (e as Error)?.message);
       res.status(500).json({ message: "That did not work. Check the rate before trying again." });
     }

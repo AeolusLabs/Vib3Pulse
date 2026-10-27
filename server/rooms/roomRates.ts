@@ -2,7 +2,7 @@
 // defaults in shared/money.ts. Cached 5 s per process (cleared on a write here), like the pause switches. setRate() validates, then
 // changes the value and appends the log row in one transaction, under a per-key lock so two admins saving at once chain cleanly.
 import { pool } from "../storage";
-import { DEFAULT_RATES, RATE_KEYS, isRateKey, validateRate, type RateKey, type Rates } from "@shared/money";
+import { DEFAULT_RATES, RATE_KEYS, isRateKey, rateSetProblem, validateRate, type RateKey, type Rates } from "@shared/money";
 
 const CACHE_MS = 5000;
 let cache: { rates: Rates; at: number } | null = null;
@@ -27,6 +27,14 @@ export async function setRate(p: { key: RateKey; value: number; adminId: string;
     const row = (await c.query(`select value::float8 as value from room_rates where key = $1`, [p.key])).rows[0] as { value: number } | undefined;
     const before = row?.value ?? DEFAULT_RATES[p.key];
     if (before === v.value) { await c.query("ROLLBACK"); return { changed: false, before, after: v.value }; }
+    // Never save a set that leaves a spray with a zero share (it could not be sent to the provider). A change that repairs an already bad set is allowed.
+    await c.query(`select pg_advisory_xact_lock(hashtext('room_rate:set'))`);
+    const current: Rates = { ...DEFAULT_RATES };
+    for (const r of (await c.query(`select key, value::float8 as value from room_rates`)).rows as { key: string; value: number }[]) if (isRateKey(r.key)) current[r.key] = r.value;
+    if (rateSetProblem(current) === null) {
+      const problem = rateSetProblem({ ...current, [p.key]: v.value });
+      if (problem) throw new RangeError(problem);
+    }
     // clock_timestamp(), not now(): the lock orders the writers, and now() is the transaction START, which can run backwards.
     await c.query(
       `insert into room_rates (key, value, updated_by, updated_at) values ($1, $2, $3, clock_timestamp())

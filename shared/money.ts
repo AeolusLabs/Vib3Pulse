@@ -130,6 +130,21 @@ export function sprayBreakdown(tier: SprayTier, stageGuest?: boolean, rates: Rat
   });
 }
 
+/**
+ * A rate set must leave the host a share of a host spray, and the host AND the stage person a share of a stage spray, on every tier.
+ * A zero share cannot be sent to the payment provider, so such a set would make every spray of that kind fail. null = fine.
+ */
+export function rateSetProblem(rates: Rates): string | null {
+  for (const t of SPRAY_TIERS) {
+    const toHost = sprayBreakdown(t, false, rates);
+    const toStage = sprayBreakdown(t, true, rates);
+    if (toHost.host <= 0 || toStage.host <= 0 || (toStage.guest ?? 0) <= 0) {
+      return "These rates would leave the host or the person on stage with nothing from a spray, so those sprays would be refused. Lower the platform cut or change the host's share of a stage spray.";
+    }
+  }
+  return null;
+}
+
 export function ticketBreakdown(priceKobo: number, rates: Rates = DEFAULT_RATES): Breakdown {
   return breakdown({ price: priceKobo, platformPct: rates.ticket_platform, reservePct: rates.ticket_reserve / 100 });
 }
