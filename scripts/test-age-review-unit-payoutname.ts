@@ -160,7 +160,7 @@ await test("payout status reports hasVerifiedName (and canLinkAccount follows it
   (storage as any).getOrganizerPaymentAccount = async () => undefined;
   try {
     let s = await payoutStatusFor("u1");
-    assert.equal(s.hasVerifiedName, false); assert.equal(s.canLinkAccount, false); assert.equal(s.verifiedAdult, true);
+    assert.equal(s.hasVerifiedName, false); assert.equal(s.canLinkAccount, true); assert.equal(s.verifiedAdult, true);
     names.set("u1", NAME);
     s = await payoutStatusFor("u1");
     assert.equal(s.hasVerifiedName, true); assert.equal(s.canLinkAccount, true);
@@ -230,7 +230,7 @@ await test("link race: the name and the verification are re-read under the accou
   const fn = p.slice(p.indexOf("async function changeLocked"));
   const reread = fn.indexOf("const nowUser = await storage.getUser(userId)");
   assert.ok(reread > 0 && reread < fn.indexOf("hasQueuedPayout(c, userId)"), "before anything is changed");
-  assert.ok(fn.includes('refuse("NOT_VERIFIED")') && fn.includes('refuse("NO_VERIFIED_NAME")') && fn.includes("nameNow !== i.verifiedName"));
+  assert.ok(fn.includes('refuse("NOT_VERIFIED")') && fn.includes("nameNow !== i.verifiedName"));
 });
 
 await test("me: only an open payouts review changes the state of a verified user (structure)", () => {

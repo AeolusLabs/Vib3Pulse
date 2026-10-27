@@ -30,6 +30,8 @@ export interface PayoutStatus {
   canLinkAccount: boolean;
   /** A name from the ID is on file for payouts (never the name). An older server never sends it: default false. */
   hasVerifiedName: boolean;
+  /** A bank account is saved and waits for the name check (the name on the ID is recorded by a reviewer). */
+  awaitingName?: boolean;
 }
 
 /**
@@ -53,7 +55,7 @@ export function parsePayoutStatus(body: unknown): PayoutStatus | null {
   const account = parsePayoutAccount(b.account === undefined ? null : b.account);
   if (account === undefined) return null;
   // Read defensively: anything but a real true means the form stays hidden (an older server never sends it).
-  return { verifiedAdult: b.verifiedAdult, account, subaccountReady: b.subaccountReady, canLinkAccount: b.canLinkAccount === true, hasVerifiedName: b.hasVerifiedName === true };
+  return { verifiedAdult: b.verifiedAdult, account, subaccountReady: b.subaccountReady, canLinkAccount: b.canLinkAccount === true, hasVerifiedName: b.hasVerifiedName === true, awaitingName: b.awaitingName === true };
 }
 
 /**
@@ -196,7 +198,10 @@ export const PAYOUT_COPY = {
   needAgeBody: "Payouts are for verified adults. Once your age is verified you can add a bank account here.",
   needAgeCta: "Verify your age",
   needNameTitle: "Verify your name for payouts",
-  needNameBody: "To pay you, we check that your bank account is in your name. A reviewer notes the name on your ID once, and we keep it encrypted. This is only for people who want to receive money.",
+  needNameBody: "Add your bank account below. Before we pay into it, we check it is in your name: a reviewer notes the name on your ID once, and we keep it encrypted. This is only for people who want to receive money.",
+  waitingTitle: "Bank account saved. Waiting for your name check",
+  waitingBody: "Nothing is paid to this account until a reviewer has recorded the name on your ID and it matches the account. Start the name check below.",
+  savedWaiting: (last4: string) => `Saved. The account ending ${last4} will be paid once your name is verified.`,
   needNameCta: "Verify your name for payouts",
   recheckCta: "Ask for a name recheck",
   notChecked: "Not checked yet",

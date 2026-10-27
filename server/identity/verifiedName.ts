@@ -53,6 +53,11 @@ export async function deleteVerifiedName(userId: string, db?: Db): Promise<boole
   return (r.rowCount ?? 0) > 0;
 }
 
+const holderAad = (userId: string) => `holder:${userId}`;
+/** The bank's account-holder name of an account saved before the ID name existed (compared once, then cleared). */
+export const sealHolderName = (name: string, userId: string): Buffer => encryptEvidence(Buffer.from(name, "utf8"), holderAad(userId));
+export const openHolderName = (enc: Buffer, userId: string): string => decryptEvidence(enc, holderAad(userId)).toString("utf8");
+
 /** A name held on a birthdate-change request until the second approval; bound to the request, not the user. */
 export function sealProposedName(name: string, requestId: string): Buffer {
   const clean = normaliseLegalName(name);

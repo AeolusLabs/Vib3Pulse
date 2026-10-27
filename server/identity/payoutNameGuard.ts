@@ -2,7 +2,8 @@
 // change takes the same per-user lock the bank-account link takes (LOCK_ACCOUNT_CHANGE), so it cannot interleave with a link,
 // and clears the account's match in the same transaction. The account stays linked but is unpayable until relinked and re-checked.
 import { AgeReviewError } from "./ageReviewService";
-import { deleteVerifiedName, getVerifiedLegalName, normaliseLegalName, setVerifiedName } from "./verifiedName";
+import { namesMatch } from "../../shared/roomEarnings";
+import { deleteVerifiedName, getVerifiedLegalName, normaliseLegalName, openHolderName, setVerifiedName } from "./verifiedName";
 
 /** Advisory lock namespace for a payout account change (refunds.ts 41001 / 41002, spray.ts 41003). Key: the user id. */
 export const LOCK_ACCOUNT_CHANGE = 41004;
@@ -78,4 +79,26 @@ export async function storeNameTx(c: Tx, userId: string, name: string, requestId
   await setVerifiedName(c, userId, clean, requestId, adminId);
   // Case and spacing do not make a different person: the bank-name check (namesMatch) ignores them too.
   if (existing === null || existing.toLowerCase() !== clean.toLowerCase()) await clearMatch(c, userId);
+  await matchWaitingAccount(c, userId, clean);
+}
+
+/**
+ * An account saved before the name existed keeps the bank's holder name (encrypted). Now that the ID name is here, compare once:
+ * a match makes the account payable; a mismatch leaves it unpayable.
+ */
+async function matchWaitingAccount(c: Tx, userId: string, name: string): Promise<void> {
+  const row = (await c.query(
+    `select paystack_subaccount_code as code, holder_name_enc as enc from organizer_payment_accounts
+      where user_id = $1 and provider = 'paystack' and holder_name_enc is not null and paystack_subaccount_code is not null`,
+    [userId],
+  )).rows[0] as { code: string; enc: Buffer } | undefined;
+  if (!row) return;
+  let holder = "";
+  try { holder = openHolderName(row.enc, userId); } catch { console.error("[AGE-REVIEW] ALERT a stored account holder name could not be decrypted"); }
+  // A mismatch leaves the holder name in place so the page can say the account does not match; relinking replaces it.
+  if (!namesMatch(name, holder)) return;
+  await c.query(
+    `update organizer_payment_accounts set room_verified_subaccount_code = paystack_subaccount_code, name_matched_at = now(), holder_name_enc = null where user_id = $1 and provider = 'paystack'`,
+    [userId],
+  );
 }

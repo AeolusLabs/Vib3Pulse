@@ -166,14 +166,14 @@ try {
   check("status unverified: verifiedAdult false, no account, cannot link", r.status === 200 && r.json.verifiedAdult === false && r.json.account === null
     && r.json.subaccountReady === false && r.json.canLinkAccount === false, r.text);
   r = await rest("GET", "/api/rooms/payouts/status", H1);
-  check("verified adult WITHOUT a verified legal name: canLinkAccount false (the page says to contact support)", r.json?.verifiedAdult === true && r.json?.canLinkAccount === false, r.text);
+  check("verified adult WITHOUT a verified legal name: canLinkAccount true (the account waits for its name check)", r.json?.verifiedAdult === true && r.json?.canLinkAccount === true, r.text);
   r = await rest("POST", "/api/rooms/payouts/account", U0, { bankCode: "058", accountNumber: "0123456789" });
   check("unverified user: 403 NOT_VERIFIED, no lookup", r.status === 403 && r.json?.code === "NOT_VERIFIED" && mock.calls.resolve.length === 0, r.text);
 
   r = await rest("POST", "/api/rooms/payouts/account", H1, { bankCode: "058", accountNumber: "0123456789" });
-  check("no verified legal name: 422 NO_VERIFIED_NAME before any lookup", r.status === 422 && r.json?.code === "NO_VERIFIED_NAME" && mock.calls.resolve.length === 0, r.text);
+  check("no verified legal name and the bank cannot resolve the account: refused, nothing saved", r.status === 422 && r.json?.code === "NAME_MISMATCH", r.text);
   const attemptsAfterNoName = Number((await q(`select count(*)::int as n from room_payout_account_events where user_id = $1 and action = 'attempt'`, [H1]))[0].n);
-  check("NO_VERIFIED_NAME spends no attempt", attemptsAfterNoName === 0);
+  check("...the lookup spent one attempt", attemptsAfterNoName === 1);
 
   VERIFIED_NAME.set(H1, "Adébáyọ̀ Okafor");
   VERIFIED_NAME.set(H2, "Grace Bello");
@@ -216,9 +216,9 @@ try {
     && rows1[0].account_last4 === "2222" && rows1[0].bank_code === "044" && rows1[0].bank_name === "Other Bank", JSON.stringify(rows1));
   const audit1 = await q(`select action, outcome from room_payout_account_events where user_id = $1 order by created_at, id`, [H1]);
   check("an audit row for every lookup outcome; refusals before any lookup write nothing (review r1 m6)",
-    audit1.filter((a) => a.action === "account_set").length === 2 && audit1.filter((a) => a.action === "account_refused").length === 2
+    audit1.filter((a) => a.action === "account_set").length === 2 && audit1.filter((a) => a.action === "account_refused").length === 3
     && !audit1.some((a) => a.outcome === "NO_VERIFIED_NAME" || a.outcome === "BAD_BANK"), JSON.stringify(audit1));
-  check("an unknown bank spends no attempt (review r1 m3)", audit1.filter((a) => a.action === "attempt").length === 4, JSON.stringify(audit1));
+  check("an unknown bank spends no attempt (review r1 m3)", audit1.filter((a) => a.action === "attempt").length === 5, JSON.stringify(audit1));
 
   // ---- C1: an organiser re-onboarding replaces the code with an UNCHECKED one: no longer payable in rooms.
   const goodCode = rows1[0].paystack_subaccount_code;

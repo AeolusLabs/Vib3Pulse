@@ -44,6 +44,8 @@ export interface RoomPayoutStatus {
   canLinkAccount: boolean;
   /** A verified legal name (read off the ID by an age reviewer) is on file. Never the name itself. */
   hasVerifiedName: boolean;
+  /** A bank account is saved and waits for the name check: it becomes payable when the reviewer records the name on the ID. */
+  awaitingName?: boolean;
 }
 
 /** Codes POST /api/rooms/payouts/account answers with (besides 200). */
@@ -61,8 +63,10 @@ export type PayoutAccountCode =
 
 /** POST /api/rooms/payouts/account 200 body. */
 export interface RoomPayoutAccountResult {
-  account: { bankName: string; last4: string; nameMatches: true };
+  account: { bankName: string; last4: string; nameMatches: boolean };
   subaccountReady: boolean;
+  /** true when the account was saved before the ID name exists: not payable until the name check passes. */
+  awaitingName?: boolean;
   /** true when an existing subaccount was updated (second call), false when one was created. */
   updated: boolean;
 }

@@ -42,7 +42,7 @@ import {
   type PaystackBank,
 } from "../payments/paystack";
 import { BUSY, LOCK_PAYOUT, withAdvisoryLock } from "./refunds";
-import { getVerifiedLegalName, hasVerifiedName } from "../identity/verifiedName";
+import { getVerifiedLegalName, hasVerifiedName, sealHolderName } from "../identity/verifiedName";
 import { LOCK_ACCOUNT_CHANGE } from "../identity/payoutNameGuard";
 
 export const ROOMS_ACCOUNT_ATTEMPTS_PER_HOUR = 5;
@@ -129,9 +129,9 @@ export async function payoutBanks(): Promise<PaystackBank[]> {
 
 // ---------------------------------------------------------------- GET /api/rooms/payouts/status
 
-/** Can this person link a bank account through rooms in this deployment (a verified adult with a verified legal name)? */
+/** Can this person link a bank account through rooms? Any verified adult: without a name on file the account waits for its name check. */
 export async function canLinkAccountFor(user: User | undefined | null): Promise<boolean> {
-  return !!user && !user.deletedAt && isIdVerifiedAdult(user) && (await hasVerifiedNameFor(user.id));
+  return !!user && !user.deletedAt && isIdVerifiedAdult(user);
 }
 
 export async function payoutStatusFor(userId: string): Promise<RoomPayoutStatus> {
@@ -143,10 +143,14 @@ export async function payoutStatusFor(userId: string): Promise<RoomPayoutStatus>
   // Shown only when it is the name-checked account rooms saved AND still the row's subaccount. Otherwise null.
   let account: RoomPayoutStatus["account"] = null;
   const last4 = acct?.accountLast4 ?? "";
-  if (acct && checked && /^\d{4}$/.test(last4) && acct.bankName) {
-    account = { bankName: acct.bankName, last4, nameMatches: true };
+  // An account saved before the ID name existed carries the bank's holder name until it is compared: shown as not matched yet.
+  const waiting = !!acct && !checked && !!acct.paystackSubaccountCode
+    && (((await pool.query(`select 1 from organizer_payment_accounts where user_id = $1 and provider = 'paystack' and holder_name_enc is not null`, [userId])).rowCount ?? 0) > 0);
+  if (acct && (checked || waiting) && /^\d{4}$/.test(last4) && acct.bankName) {
+    account = { bankName: acct.bankName, last4, nameMatches: checked };
   }
-  return { verifiedAdult, account, subaccountReady, canLinkAccount: await canLinkAccountFor(user), hasVerifiedName: await hasVerifiedNameFor(userId) };
+  const hasName = await hasVerifiedNameFor(userId);
+  return { verifiedAdult, account, subaccountReady, canLinkAccount: await canLinkAccountFor(user), hasVerifiedName: hasName, awaitingName: waiting && !hasName };
 }
 
 // ---------------------------------------------------------------- POST /api/rooms/payouts/account
@@ -277,8 +281,8 @@ export async function setPayoutAccount(userId: string, body: unknown, nowMs: num
   const last4 = last4Of(accountNumber);
 
   // Before any lookup: nothing to compare against means no lookup at all (no oracle, no attempt spent, no row written).
+  // No name yet is allowed: the account is saved as "waiting for its name check" and becomes payable when the reviewer records the name.
   const verifiedName = await verifiedLegalNameOf(userId);
-  if (!verifiedName) { logAccount(userId, "NO_VERIFIED_NAME"); return refuse("NO_VERIFIED_NAME"); }
   // Cheap early answer (re-checked under the lock below).
   if (await hasQueuedPayout(pool, userId)) { logAccount(userId, "PAYOUT_IN_FLIGHT"); return refuse("PAYOUT_IN_FLIGHT"); }
 
@@ -300,7 +304,8 @@ export async function setPayoutAccount(userId: string, body: unknown, nowMs: num
     if (isOutage(e)) { logAccount(userId, "PROVIDER_UNAVAILABLE:resolve"); return refuse("PROVIDER_UNAVAILABLE"); }
     resolvedName = ""; // Paystack could not resolve it: the same answer as a name that does not match
   }
-  const matches = namesMatch(verifiedName, resolvedName);
+  const holderName = resolvedName;
+  const matches = verifiedName ? namesMatch(verifiedName, resolvedName) : holderName.trim().length > 0; // no name yet: the bank must at least know the account
   resolvedName = ""; // not kept a moment longer than needed
   if (!matches) {
     logAccount(userId, "NAME_MISMATCH");
@@ -311,7 +316,7 @@ export async function setPayoutAccount(userId: string, body: unknown, nowMs: num
   const commissionBps = await storage.getPlatformCommissionBps();
   const bankName = bank.name.slice(0, 200);
   const out = await withAdvisoryLock(LOCK_ACCOUNT_CHANGE, userId, (c) => changeLocked(c, {
-    userId, verifiedName, bankCode, accountNumber, last4, bankName, commissionBps, nowMs,
+    userId, verifiedName, holderName: verifiedName ? "" : holderName, bankCode, accountNumber, last4, bankName, commissionBps, nowMs,
   }), 8000);
   // Review r3 m3: lock contention (a double submit, or a save already talking to Paystack) is "busy", never "a payout is
   // being sent".
@@ -320,7 +325,7 @@ export async function setPayoutAccount(userId: string, body: unknown, nowMs: num
 }
 
 interface ChangeInput {
-  userId: string; verifiedName: string; bankCode: string; accountNumber: string; last4: string; bankName: string; commissionBps: number; nowMs: number;
+  userId: string; verifiedName: string | null; /** the bank's holder name, kept (encrypted) only when verifiedName is null */ holderName: string; bankCode: string; accountNumber: string; last4: string; bankName: string; commissionBps: number; nowMs: number;
 }
 
 /** Under the session lock (rule 4), with NO transaction open around the provider call. */
@@ -331,7 +336,6 @@ async function changeLocked(c: Q, i: ChangeInput): Promise<PayoutAccountOutcome>
   const nowUser = await storage.getUser(userId);
   if (!nowUser || nowUser.deletedAt || !isIdVerifiedAdult(nowUser)) { logAccount(userId, "NOT_VERIFIED"); return refuse("NOT_VERIFIED"); }
   const nameNow = await verifiedLegalNameOf(userId);
-  if (!nameNow) { logAccount(userId, "NO_VERIFIED_NAME"); return refuse("NO_VERIFIED_NAME"); }
   if (nameNow !== i.verifiedName) { logAccount(userId, "BUSY:name_changed"); return refuse("BUSY"); }
   // No payout can become queued while we hold the lock (settlement takes the shared lock to queue), so this answer holds.
   if (await hasQueuedPayout(c, userId)) {
@@ -374,7 +378,7 @@ async function changeWithPayoutsHeld(c: Q, i: ChangeInput): Promise<PayoutAccoun
   }
   try {
     if (updating) await provider().updateSubaccount(code, { bankCode, accountNumber: i.accountNumber });
-    else code = (await provider().createSubaccount({ businessName: i.verifiedName, bankCode, accountNumber: i.accountNumber, percentageCharge: i.commissionBps / 100 })).subaccountCode;
+    else code = (await provider().createSubaccount({ businessName: i.verifiedName ?? i.holderName, bankCode, accountNumber: i.accountNumber, percentageCharge: i.commissionBps / 100 })).subaccountCode;
   } catch (e) {
     const outage = isOutage(e);
     if (updating && !outage && existing?.room_verified_subaccount_code && existing.matched_ms !== null) {
@@ -392,18 +396,19 @@ async function changeWithPayoutsHeld(c: Q, i: ChangeInput): Promise<PayoutAccoun
 
   // One short autocommit statement straight after Paystack answered (review r1 m4): the code is never lost silently.
   const at = new Date(i.nowMs).toISOString();
+  const waiting = i.verifiedName === null;
   try {
     await c.query(
       `insert into organizer_payment_accounts
          (user_id, provider, paystack_subaccount_code, details_submitted, payouts_enabled, bank_code, bank_name, account_last4,
-          room_verified_subaccount_code, name_matched_at, updated_at)
-       values ($1, 'paystack', $2, true, true, $3, $4, $5, $2, $6::timestamp, $6::timestamp)
+          room_verified_subaccount_code, name_matched_at, holder_name_enc, updated_at)
+       values ($1, 'paystack', $2, true, true, $3, $4, $5, case when $7::boolean then null else $2::varchar end, case when $7::boolean then null else $6::timestamp end, $8, $6::timestamp)
        on conflict (user_id, provider) do update set
          paystack_subaccount_code = excluded.paystack_subaccount_code, details_submitted = true, payouts_enabled = true,
          bank_code = excluded.bank_code, bank_name = excluded.bank_name, account_last4 = excluded.account_last4,
          room_verified_subaccount_code = excluded.room_verified_subaccount_code, name_matched_at = excluded.name_matched_at,
-         updated_at = excluded.updated_at`,
-      [userId, code, bankCode, i.bankName, last4, at],
+         holder_name_enc = excluded.holder_name_enc, updated_at = excluded.updated_at`,
+      [userId, code, bankCode, i.bankName, last4, at, waiting, waiting ? sealHolderName(i.holderName, userId) : null],
     );
   } catch (e) {
     // Paystack has the new account but our row does not. The account stays unpayable (fail closed); the code is in this
@@ -415,6 +420,8 @@ async function changeWithPayoutsHeld(c: Q, i: ChangeInput): Promise<PayoutAccoun
   logAccount(userId, updating ? "updated" : "created");
   return {
     status: 200,
-    body: { account: { bankName: i.bankName, last4, nameMatches: true }, subaccountReady: true, updated: updating },
+    body: waiting
+      ? { account: { bankName: i.bankName, last4, nameMatches: false }, subaccountReady: false, updated: updating, awaitingName: true }
+      : { account: { bankName: i.bankName, last4, nameMatches: true }, subaccountReady: true, updated: updating },
   };
 }

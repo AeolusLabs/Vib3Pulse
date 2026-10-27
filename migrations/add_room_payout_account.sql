@@ -9,6 +9,7 @@ ALTER TABLE organizer_payment_accounts ADD COLUMN IF NOT EXISTS bank_name text;
 ALTER TABLE organizer_payment_accounts ADD COLUMN IF NOT EXISTS account_last4 text;
 ALTER TABLE organizer_payment_accounts ADD COLUMN IF NOT EXISTS room_verified_subaccount_code varchar(255);
 ALTER TABLE organizer_payment_accounts ADD COLUMN IF NOT EXISTS name_matched_at timestamp;
+ALTER TABLE organizer_payment_accounts ADD COLUMN IF NOT EXISTS holder_name_enc bytea;
 CREATE TABLE IF NOT EXISTS room_payout_account_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,

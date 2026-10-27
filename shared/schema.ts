@@ -2240,6 +2240,7 @@ export type PlatformSettings = typeof platformSettings.$inferSelect;
 // checkout is allowed to create a paid charge for that organizer's events/venues
 // (see the payout guardrail in payment-routes.ts) — money is never accepted for
 // an organizer the platform has no way to pay out.
+const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 export const organizerPaymentAccounts = pgTable("organizer_payment_accounts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
@@ -2257,6 +2258,7 @@ export const organizerPaymentAccounts = pgTable("organizer_payment_accounts", {
   accountLast4: text("account_last4"),
   roomVerifiedSubaccountCode: varchar("room_verified_subaccount_code", { length: 255 }),
   nameMatchedAt: timestamp("name_matched_at"),
+  holderNameEnc: bytea("holder_name_enc"),
 }, (table) => ({
   uniqueUserProvider: unique().on(table.userId, table.provider),
 }));
@@ -2617,7 +2619,6 @@ export const sprayEvents = pgTable("spray_events", {
 export type SprayEvent = typeof sprayEvents.$inferSelect;
 
 // Manual age review (migrations/add_age_review.sql). Evidence is encrypted (server/identity/evidenceCrypto.ts) and never leaves the server as JSON.
-const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 export const ageReviewRequests = pgTable("age_review_requests", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),

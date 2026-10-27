@@ -9,7 +9,7 @@
 //   settled + onItsWay + needsAttention + held = totals.spray + totals.ticket - clawbackApplied (0 here)
 //   sprayReturned is its own figure, outside totals and outside sprayDirect.
 
-export const EARN_SCENES = ["empty", "week", "clawback", "noaccount", "mismatch", "soon", "attention", "noname", "oldaccount"] as const;
+export const EARN_SCENES = ["empty", "week", "clawback", "noaccount", "mismatch", "soon", "attention", "noname", "oldaccount", "waiting"] as const;
 export type EarnScene = (typeof EARN_SCENES)[number];
 export const EARN_PAGES = ["earnings", "payouts", "payments"] as const;
 export type EarnPage = (typeof EARN_PAGES)[number];
@@ -20,7 +20,7 @@ export function parseEarnFixture(search: string): { scene: EarnScene; page: Earn
   if (!v || !(EARN_SCENES as readonly string[]).includes(v)) return null;
   const scene = v as EarnScene;
   const p = q.get("page");
-  const page: EarnPage = p && (EARN_PAGES as readonly string[]).includes(p) ? (p as EarnPage) : scene === "mismatch" || scene === "soon" || scene === "noname" || scene === "oldaccount" ? "payouts" : "earnings";
+  const page: EarnPage = p && (EARN_PAGES as readonly string[]).includes(p) ? (p as EarnPage) : scene === "mismatch" || scene === "soon" || scene === "noname" || scene === "oldaccount" || scene === "waiting" ? "payouts" : "earnings";
   return { scene, page };
 }
 
@@ -32,7 +32,8 @@ export function fixturePayoutStatus(scene: EarnScene) {
     // A verified adult who has not done the payouts name check yet: the page leads with "Verify your name for payouts".
     // An account linked before names existed: verified adult, account on file, no verified name yet.
     case "oldaccount": return { verifiedAdult: true, account: { bankName: "GTBank", last4: "4821", nameMatches: false }, subaccountReady: false, canLinkAccount: false, hasVerifiedName: false };
-    case "noname": return { verifiedAdult: true, account: null, subaccountReady: false, canLinkAccount: false, hasVerifiedName: false };
+    case "noname": return { verifiedAdult: true, account: null, subaccountReady: false, canLinkAccount: true, hasVerifiedName: false };
+    case "waiting": return { verifiedAdult: true, account: { bankName: "GTBank", last4: "4821", nameMatches: false }, subaccountReady: false, canLinkAccount: true, hasVerifiedName: false, awaitingName: true };
     default: return { verifiedAdult: true, account: { bankName: "GTBank", last4: "4821", nameMatches: true }, subaccountReady: true, canLinkAccount: true, hasVerifiedName: true };
   }
 }

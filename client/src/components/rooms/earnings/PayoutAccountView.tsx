@@ -44,7 +44,7 @@ function CheckRow({ ok, label, line, word, testId }: { ok: boolean; label: strin
 
 interface FormProps {
   /** Called after a save the server accepted, with the last four digits if the answer carried them. */
-  onSaved(last4: string | null): void;
+  onSaved(last4: string | null, waitingForName?: boolean): void;
   /** Shown only when there is an account to keep. */
   onCancel?: () => void;
   /** Move focus to the first field (when the person opened the form with a button, not on page load). */
@@ -77,7 +77,8 @@ export function AccountForm({ onSaved, onCancel, autoFocus = false }: FormProps)
     setTried(false);
     if (r.ok) {
       void qc.invalidateQueries({ queryKey: payoutStatusKey });
-      onSaved(savedAccountOf(r.body)?.last4 ?? null);
+      const acct = savedAccountOf(r.body);
+      onSaved(acct?.last4 ?? null, !!acct && !acct.nameMatches);
       return;
     }
     setError(payoutErrorMessage(r));
@@ -173,7 +174,7 @@ export default function PayoutAccountView() {
           status={res.data} moneyOn={moneyOn} changing={changing}
           onChange={() => { setSaved(null); setChanging(true); }}
           onCancel={() => { setChanging(false); requestAnimationFrame(() => changeBtn.current?.focus()); }}
-          onSaved={(last4) => { setChanging(false); setSaved(last4 ? PAYOUT_COPY.saved(last4) : PAYOUT_COPY.savedPlain); }}
+          onSaved={(last4, waiting) => { setChanging(false); setSaved(last4 ? (waiting ? PAYOUT_COPY.savedWaiting(last4) : PAYOUT_COPY.saved(last4)) : PAYOUT_COPY.savedPlain); }}
           changeBtn={changeBtn}
         />
       )}
@@ -201,22 +202,22 @@ function PayoutSteps({ steps }: { steps: { label: string; done: boolean }[] }) {
 }
 
 function PayoutBody({ status, moneyOn, changing, onChange, onCancel, onSaved, changeBtn }: {
-  status: PayoutStatus; moneyOn: boolean; changing: boolean; onChange(): void; onCancel(): void; onSaved(last4: string | null): void;
+  status: PayoutStatus; moneyOn: boolean; changing: boolean; onChange(): void; onCancel(): void; onSaved(last4: string | null, waitingForName?: boolean): void;
   changeBtn: RefObject<HTMLButtonElement>;
 }) {
   const stage = payoutStage(status, moneyOn);
   const panel = payoutPanel(status, moneyOn);
   const { me: ageMe } = useAgeReview();
   const cta = payoutCta(ageMe);
-  // The name step comes first: no bank form until a name is on file.
-  const canLink = canLinkHere(status, moneyOn) && panel !== "needs_name";
+  // The bank form is open before the name is on file; once an account is saved it waits for the name check, so no second form.
+  const canLink = canLinkHere(status, moneyOn) && !(panel === "needs_name" && status.awaitingName);
   const a = status.account;
   return (
     <div className="space-y-5" data-stage={stage} data-testid="payout-stage">
       <PayoutSteps steps={[
         { label: "Verify your ID", done: status.verifiedAdult },
-        { label: "Name for payouts", done: status.hasVerifiedName },
-        { label: "Bank account", done: status.subaccountReady },
+        { label: "Bank account", done: !!status.account || status.subaccountReady },
+        { label: "Name check", done: status.subaccountReady },
       ]} />
       <ul className="divide-y divide-border rounded-2xl bg-muted/60" aria-label="Payout checks">
         {a && (
@@ -244,8 +245,8 @@ function PayoutBody({ status, moneyOn, changing, onChange, onCancel, onSaved, ch
 
       {panel === "needs_name" && (
         <div className="space-y-2 rounded-2xl border border-border p-4" data-testid="payout-needs-name">
-          <h2 className="flex items-center gap-2 font-semibold"><ShieldCheckIcon className="h-5 w-5 text-primary" aria-hidden />{PAYOUT_COPY.needNameTitle}</h2>
-          <p className="text-sm text-muted-foreground">{PAYOUT_COPY.needNameBody}</p>
+          <h2 className="flex items-center gap-2 font-semibold"><ShieldCheckIcon className="h-5 w-5 text-primary" aria-hidden />{status.awaitingName ? PAYOUT_COPY.waitingTitle : PAYOUT_COPY.needNameTitle}</h2>
+          <p className="text-sm text-muted-foreground">{status.awaitingName ? PAYOUT_COPY.waitingBody : PAYOUT_COPY.needNameBody}</p>
           {cta === "link" && <Button asChild className="min-h-[44px] rounded-full" data-testid="payout-verify-name-cta"><Link href={VERIFY_NAME_HREF}>{PAYOUT_COPY.needNameCta}</Link></Button>}
           {cta === "paused" && <p role="status" className="text-sm font-medium" data-testid="payout-cta-paused">{AGE_COPY.payoutsPaused}</p>}
           {cta === "cooldown" && <p role="status" className="text-sm font-medium" data-testid="payout-cta-cooldown">Your last check was declined. You can start a new one {waitLabel(ageMe?.retryAfter ?? null)}.</p>}
@@ -290,7 +291,7 @@ function PayoutBody({ status, moneyOn, changing, onChange, onCancel, onSaved, ch
       )}
 
       {/* The form only when the server takes an account from this page now; never in "setup" (no details to replace). */}
-      {canLink && (stage === "none" || stage === "mismatch" || stage === "pending" || stage === "ready") && (
+      {canLink && (stage === "none" || stage === "mismatch" || stage === "pending" || stage === "ready") && (panel !== "needs_name" || stage === "none") && (
         stage === "none" || stage === "mismatch" ? (
           <div className="space-y-3">
             {stage === "none" && (

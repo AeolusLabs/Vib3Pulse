@@ -10,6 +10,8 @@
 //                                        is still the row's paystack_subaccount_code (an organiser re-onboarding makes a new
 //                                        code, so an unchecked account can never inherit "name matches")
 //   name_matched_at                      when that check passed
+//   holder_name_enc                      the bank's account-holder name (encrypted) of an account saved BEFORE the person's ID name was
+//                                        recorded; compared once the name exists, then cleared. Never returned by a route.
 // room_payout_account_events: one row per attempt and per outcome. The audit log of every account change, and the durable
 // per-user rate limit for the bank lookup (counted across server instances). Not a money record: goes with its user.
 // room_payouts (host_id, status): the "payout in flight" check made before an account change.
@@ -20,6 +22,7 @@ ALTER TABLE organizer_payment_accounts ADD COLUMN IF NOT EXISTS bank_name text;
 ALTER TABLE organizer_payment_accounts ADD COLUMN IF NOT EXISTS account_last4 text;
 ALTER TABLE organizer_payment_accounts ADD COLUMN IF NOT EXISTS room_verified_subaccount_code varchar(255);
 ALTER TABLE organizer_payment_accounts ADD COLUMN IF NOT EXISTS name_matched_at timestamp;
+ALTER TABLE organizer_payment_accounts ADD COLUMN IF NOT EXISTS holder_name_enc bytea;
 CREATE TABLE IF NOT EXISTS room_payout_account_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,

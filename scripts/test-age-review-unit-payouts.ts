@@ -106,7 +106,7 @@ test("existing account without a name shows the name step", () => {
   const view = read("client/src/components/rooms/earnings/PayoutAccountView.tsx");
   assert.match(view, /panel === "needs_name"\s*\?\s*<CheckRow ok=\{false\}[^>]*notCheckedLine/);
   for (const stageName of ["mismatch", "pending", "ready", "setup"]) assert.match(view, new RegExp(`stage === "${stageName}"[^\\n]*panel !== "needs_name"`), stageName);
-  assert.match(view, /const canLink = canLinkHere\(status, moneyOn\) && panel !== "needs_name"/);
+  assert.match(view, /const canLink = canLinkHere\(status, moneyOn\) && !\(panel === "needs_name" && status.awaitingName\)/);
   assert.equal(PAYOUT_COPY.notChecked, "Not checked yet");
   assert.ok(!BAD.test(PAYOUT_COPY.notCheckedLine("GTBank", "4821")));
   const fx = read("client/src/components/rooms/earnings/earningsFixtures.ts");

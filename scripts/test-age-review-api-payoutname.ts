@@ -126,10 +126,12 @@ check("me reports verified and hasPayoutName false before any name", me0.json.st
 
 // ---- payouts-only review of a verified user, end to end
 const status0 = await http("GET", "/api/rooms/payouts/status", { user: verified });
-check("payout status reports hasVerifiedName false, canLinkAccount false", status0.status === 200 && status0.json.hasVerifiedName === false && status0.json.canLinkAccount === false, status0.text);
+check("payout status reports hasVerifiedName false but canLinkAccount true (the bank form is open before the name)", status0.status === 200 && status0.json.hasVerifiedName === false && status0.json.canLinkAccount === true, status0.text);
 OWNER.set("0123456789", NAME.toUpperCase());
 const noName = await http("POST", "/api/rooms/payouts/account", { user: verified }, { bankCode: "058", accountNumber: "0123456789" });
-check("linking without a name: NO_VERIFIED_NAME with the new message", noName.status === 422 && noName.json.code === "NO_VERIFIED_NAME" && /check your name on your ID/.test(noName.json.message), noName.text);
+check("linking without a name saves the account as waiting for its name check (200, awaitingName, not payable)", noName.status === 200 && noName.json.awaitingName === true && noName.json.subaccountReady === false && noName.json.account.nameMatches === false && subaccounts.length === 1 && (await q(`select room_verified_subaccount_code, name_matched_at from organizer_payment_accounts where user_id = $1`, [verified]))[0].room_verified_subaccount_code === null, noName.text);
+const waitSt = (await http("GET", "/api/rooms/payouts/status", { user: verified })).json;
+check("...the status shows it as not matched, awaitingName true, and never the holder name", waitSt.awaitingName === true && waitSt.account?.last4 === "6789" && waitSt.account?.nameMatches === false && !JSON.stringify(waitSt).includes(NAME.split(" ")[0].toUpperCase()), JSON.stringify(waitSt));
 
 const rid = await submitted(verified, true);
 const meOpen = await http("GET", "/api/age-review/me", { user: verified });
@@ -153,7 +155,8 @@ await q(`delete from user_verified_names where user_id = $1`, [other]);
 check("me reports hasPayoutName true; payout status hasVerifiedName and canLinkAccount true", (await http("GET", "/api/age-review/me", { user: verified })).json.hasPayoutName === true && await (async () => { const s = (await http("GET", "/api/rooms/payouts/status", { user: verified })).json; return s.hasVerifiedName === true && s.canLinkAccount === true; })());
 OWNER.set("0000000001", "SOMEONE ELSE ENTIRELY");
 const mismatch2 = await http("POST", "/api/rooms/payouts/account", { user: verified }, { bankCode: "058", accountNumber: "0000000001" });
-check("a mismatching account name is refused NAME_MISMATCH", mismatch2.status === 422 && mismatch2.json.code === "NAME_MISMATCH" && subaccounts.length === 0, mismatch2.text);
+check("a mismatching account name is refused NAME_MISMATCH", mismatch2.status === 422 && mismatch2.json.code === "NAME_MISMATCH" && subaccounts.length === 1, mismatch2.text);
+check("the waiting account became payable when the reviewer recorded the matching name, holder name cleared", (await q(`select holder_name_enc, name_matched_at, room_verified_subaccount_code from organizer_payment_accounts where user_id = $1`, [verified]))[0] .holder_name_enc === null && (await q(`select name_matched_at from organizer_payment_accounts where user_id = $1`, [verified]))[0].name_matched_at !== null);
 const link = await http("POST", "/api/rooms/payouts/account", { user: verified }, { bankCode: "058", accountNumber: "0123456789" });
 check("linking a bank account works end to end with a stored name: name match creates the subaccount", link.status === 200 && subaccounts.length === 1, link.text);
 
@@ -264,7 +267,7 @@ const quiet = console.error; console.error = () => {};
 const tamMe = await http("GET", "/api/age-review/me", { user: tam });
 const tamSt = await http("GET", "/api/rooms/payouts/status", { user: tam });
 console.error = quiet;
-check("an undecryptable row counts as no name everywhere (hasPayoutName, hasVerifiedName, canLinkAccount)", tamMe.json.hasPayoutName === false && tamSt.json.hasVerifiedName === false && tamSt.json.canLinkAccount === false);
+check("an undecryptable row counts as no name everywhere (hasPayoutName, hasVerifiedName, canLinkAccount)", tamMe.json.hasPayoutName === false && tamSt.json.hasVerifiedName === false);
 
 // ---- me precedence: only an open PAYOUTS review changes the state of a verified user
 const vp = await mkUser("vp", { verified: true });
@@ -303,7 +306,7 @@ setPayoutProviderForTests({
 });
 const before = subaccounts.length;
 const raced = await http("POST", "/api/rooms/payouts/account", { user: lr }, { bankCode: "058", accountNumber: "0222222222" });
-check("the name vanishing mid-flight stops the link (NO_VERIFIED_NAME, nothing created)", raced.status === 422 && raced.json.code === "NO_VERIFIED_NAME" && subaccounts.length === before && (await payable(lr)) === null, raced.text);
+check("the name vanishing mid-flight stops the link (BUSY, nothing created)", raced.status === 409 && raced.json.code === "BUSY" && subaccounts.length === before && (await payable(lr)) === null, raced.text);
 await setVerifiedName(pool as any, lr, NAME, null, rev);
 revokeMidFlight = async () => { await q(`update users set age_verified_at = null where id = $1`, [lr]); };
 const raced2 = await http("POST", "/api/rooms/payouts/account", { user: lr }, { bankCode: "058", accountNumber: "0222222222" });
