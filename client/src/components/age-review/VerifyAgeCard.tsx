@@ -112,6 +112,8 @@ export default function VerifyAgeCard() {
             <LiveCheckFlow request={req} onHowHandled={() => setNotice({ mode: "readonly", method: "live" })} />
           )}
 
+          <p role="alert" className={error ? "rounded-xl border border-destructive/60 p-3 text-sm text-destructive" : "sr-only"} data-testid="age-error">{error ?? ""}</p>
+
           {flow === null && showChoices && (
             <div className="grid gap-2">
               {mode === "choose" && (
@@ -166,8 +168,6 @@ export default function VerifyAgeCard() {
           {flow === null && req && cancelOffered(me) && (
             <Button variant="ghost" className="min-h-[44px] rounded-full" disabled={busy} onClick={() => void doCancel()} data-testid="age-cancel">{COPY.cancel}</Button>
           )}
-
-          <p role="alert" className={error ? "text-sm text-destructive" : "sr-only"}>{error ?? ""}</p>
 
           <div className="flex flex-col gap-0.5 border-t border-border pt-3">
             <p className="text-xs text-muted-foreground">{COPY.scopeNote}</p>

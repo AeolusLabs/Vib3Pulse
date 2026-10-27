@@ -337,6 +337,19 @@ test("a passed payouts check tells the person what is next and opens the page wh
   assert.ok(admin.includes('{ detail: "Next, add your bank account to get paid.", link: "/rooms/payouts" }'));
 });
 
+test("a verified person in a decline cooldown is told up front and offered no buttons that cannot work", () => {
+  const now = new Date("2026-10-28T12:00:00Z");
+  const base: any = { enabled: true, paused: false, consentVersion: "v", state: "verified", verified: { method: "admin", at: "2026-10-01T00:00:00Z" }, request: null, attemptsLeft: 2, hasPayoutName: false };
+  const waiting = { ...base, retryAfter: "2026-10-29T12:00:00Z" };
+  assert.equal(payoutsAction(base, now), "verify_name");
+  assert.equal(payoutsAction(waiting, now), null);
+  assert.ok(/declined, so you can start a new one/.test(cardView(waiting, now).body));
+  assert.ok(!/declined/.test(cardView(base, now).body));
+  assert.equal(payoutsAction({ ...base, retryAfter: "2026-10-27T12:00:00Z" }, now), "verify_name", "a wait that has ended offers the action again");
+  const src = readFileSync("server/identity/ageReviewService.ts", "utf8");
+  assert.ok(src.includes('retryAfter: retryAfter && retryAfter > now ? retryAfter.toISOString() : null };'));
+});
+
 await Promise.all(pending);
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -76,6 +76,9 @@ export function registerAgeVerificationAdminRoute(app: Express) {
       const prev = await ageVerifier.status(user.id);
       if (!verified) await clearNameAndMatch(user.id); // removing a verification removes the stored legal name and the name match first
       await storage.setAgeVerification(user.id, { verified, method: "admin" });
+      // The override answers any open age check of theirs that did not ask for payouts: close it (and tell them) instead of leaving it open.
+      const closed = verified ? await (await import("./identity/ageReviewService")).closeAnsweredRequests(user.id) : [];
+      if (closed.length) (await import("./identity/ageReviewNotify")).notifyAgeReview(user.id, "approved").catch(() => {});
       const prevText = prev.verified ? `verified (${prev.method ?? "unknown"})` : "not verified";
       const newText = verified ? "verified (admin)" : "not verified";
       await storage.logAdminActivity({
@@ -83,7 +86,7 @@ export function registerAgeVerificationAdminRoute(app: Express) {
         action: verified ? "user.age_verified" : "user.age_verification_cleared",
         targetType: "user",
         targetId: user.id,
-        details: `${verified ? "Marked ID-verified by admin" : "Cleared ID verification"}: ${prevText} -> ${newText}. Reason: ${reason}`,
+        details: `${verified ? "Marked ID-verified by admin" : "Cleared ID verification"}: ${prevText} -> ${newText}.${closed.length ? ` Closed ${closed.length} open age request(s).` : ""} Reason: ${reason}`,
         reason,
         ipAddress: req.ip,
       }).catch((error) => console.error("Failed to log admin activity:", error));
