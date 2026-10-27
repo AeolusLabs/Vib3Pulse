@@ -33,7 +33,7 @@ import RoomPrivacyCard from "@/components/RoomPrivacyCard";
 import type { User as UserType } from "@shared/schema";
 import { LockIcon, UserIcon, AlertCircleIcon, Loader2Icon, CheckCircleIcon, BellIcon, BellOffIcon, CheckCheckIcon, Trash2Icon } from "@/components/ui/icons";
 
-const TITLES: Record<string, string> = { account: "Account and sign in", notifications: "Notifications", privacy: "Privacy and blocked people", verify: "Age verification and payouts" };
+const TITLES: Record<string, string> = { account: "Account and sign in", notifications: "Notifications", privacy: "Privacy and blocked people", verify: "Name and Age review and payouts" };
 
 export default function AccountSettingsPage() {
   const [, navigate] = useLocation();

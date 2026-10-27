@@ -45,7 +45,7 @@ function QueueTable({ status, openId, onOpen }: { status: string; openId: string
     <div>
       <div className="overflow-x-auto rounded-lg border border-slate-700">
         <table className="w-full min-w-[40rem] text-sm">
-          <caption className="sr-only">Age review requests, oldest first</caption>
+          <caption className="sr-only">Name and Age review requests, oldest first</caption>
           <thead className="text-left text-xs text-slate-400">
             <tr>
               {["Requested", "Method", "Status", "Name", "Age", "Document"].map((h) => <th key={h} scope="col" className="px-3 py-2.5 font-medium">{h}</th>)}
@@ -100,7 +100,7 @@ export default function AdminAgeReviews() {
     <AdminLayout>
       <div className="space-y-5">
         <div>
-          <h1 className="text-2xl font-bold text-white">Age reviews</h1>
+          <h1 className="text-2xl font-bold text-white">Name and Age reviews</h1>
           <p className="mt-1 max-w-[65ch] text-sm text-slate-400">Compare each document with the birthdate the user registered. Images stay hidden until you press Reveal, and hide again after 30 seconds.</p>
         </div>
 

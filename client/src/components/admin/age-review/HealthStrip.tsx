@@ -31,7 +31,7 @@ export default function HealthStrip({ role }: { role: string }) {
 
   const pause = useMutation({
     mutationFn: (v: { on: boolean; reason: string }) => setPause(v.on, v.reason),
-    onSuccess: (r) => { setPauseTo(null); void q.refetch(); toast({ title: r.paused ? "Age checks paused" : "Age checks resumed" }); },
+    onSuccess: (r) => { setPauseTo(null); void q.refetch(); toast({ title: r.paused ? "Name and Age review paused" : "Name and Age review resumed" }); },
     onError: (e) => setPauseErr(errText(e)),
   });
   const purge = useMutation({
@@ -53,7 +53,7 @@ export default function HealthStrip({ role }: { role: string }) {
     <section aria-label="Age review health" className="space-y-4" data-testid="age-review-health">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-700 p-3">
         <div className="min-w-0">
-          <p className="text-sm font-medium text-white">{h.paused ? "Age checks are paused" : "Age checks are on"}</p>
+          <p className="text-sm font-medium text-white">{h.paused ? "Name and Age review is paused" : "Name and Age review is on"}</p>
           <p className="text-xs text-slate-400">{h.paused ? "New uploads and invites are refused. Decisions and cancels still work." : "Pausing stops new uploads and invites straight away."}</p>
           {blocked && h.paused && <p className="mt-1 text-xs text-amber-300">{blocked}</p>}
         </div>
@@ -95,7 +95,7 @@ export default function HealthStrip({ role }: { role: string }) {
       )}
 
       <ReasonDialog
-        open={pauseTo !== null} title={pauseTo ? "Pause age checks" : "Resume age checks"}
+        open={pauseTo !== null} title={pauseTo ? "Pause Name and Age review" : "Resume Name and Age review"}
         description={pauseTo ? "New uploads and live invites stop at once. Users see a notice." : "New uploads and invites start again."}
         confirmLabel={pauseTo ? "Pause" : "Resume"} destructive={pauseTo === true} minLength={3} maxLength={300}
         busy={pause.isPending} error={pauseErr} onClose={() => setPauseTo(null)}

@@ -38,7 +38,7 @@ test("role visibility: age_reviewer sees only the age reviews page", () => {
   const layout = read("client/src/pages/admin/AdminLayout.tsx");
   const withRole = layout.split("\n").filter((l) => /roles:\s*\[/.test(l) && l.includes("age_reviewer"));
   assert.equal(withRole.length, 1);
-  assert.ok(/label: "Age reviews"[\s\S]{0,200}roles: \["super_admin", "admin", "age_reviewer"\]/.test(layout));
+  assert.ok(/label: "Name and Age reviews"[\s\S]{0,200}roles: \["super_admin", "admin", "age_reviewer"\]/.test(layout));
   assert.ok(/age_reviewer: "Age reviewer"/.test(layout));
   const staff = read("client/src/pages/admin/AdminStaff.tsx");
   assert.ok(/value="age_reviewer"/.test(staff) && /age_reviewer: "Age reviewer"/.test(staff));

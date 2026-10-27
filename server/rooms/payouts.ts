@@ -165,7 +165,7 @@ const MESSAGES: Record<PayoutAccountCode, string> = {
   NOT_VERIFIED: "Verify your ID first. Only ID-verified adults can get paid in rooms.",
   BAD_INPUT: "Enter your 10 digit account number and choose your bank.",
   BAD_BANK: "Choose your bank from the list.",
-  NO_VERIFIED_NAME: "To add a bank account we need to check your name on your ID. Start a payouts check from this page.",
+  NO_VERIFIED_NAME: "To add a bank account we need to check your name on your ID. Start your Name and Age review from this page.",
   NAME_MISMATCH: "This account is not in your verified name, or the number and bank do not match. Use an account in your own name.",
   PAYOUT_IN_FLIGHT: "A payout to your current account is being sent. You can change your account once it lands.",
   BUSY: "Your account is already being saved. Try again in a minute.",

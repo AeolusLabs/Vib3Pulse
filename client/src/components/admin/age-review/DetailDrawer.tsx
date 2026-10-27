@@ -64,7 +64,7 @@ export default function DetailDrawer({ id, role, reviewer, onClose, onChanged }:
       <Sheet open={!!id && !call} onOpenChange={(o) => !o && onClose()}>
         <SheetContent side="right" className="w-full overflow-y-auto border-slate-700 bg-slate-900 text-white sm:max-w-xl" data-testid="age-review-drawer">
           <SheetHeader className="text-left">
-            <SheetTitle className="text-white">{r ? r.displayName : "Age review"}</SheetTitle>
+            <SheetTitle className="text-white">{r ? r.displayName : "Name and Age review"}</SheetTitle>
             <SheetDescription className="text-slate-400">{r ? `Request ${r.id.slice(0, 8)}` : "Loading the request"}</SheetDescription>
           </SheetHeader>
 

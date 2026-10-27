@@ -131,7 +131,7 @@ const navItems: NavItem[] = [
     roles: ["super_admin", "finance_manager", "analytics_viewer"],
   },
   {
-    label: "Age reviews",
+    label: "Name and Age reviews",
     path: "/admin/age-reviews",
     icon: <ShieldIcon className="w-5 h-5" />,
     roles: ["super_admin", "admin", "age_reviewer"],

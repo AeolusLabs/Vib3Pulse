@@ -54,7 +54,7 @@ export function moneyView(v: { flags: MoneyFlags | null | undefined; readiness: 
   const off = [!flags.paidRooms && "Paid rooms", !flags.spray && "Spray"].filter(Boolean) as string[];
   const items: MoneyItem[] = [
     { id: "adult", label: "You are 18 or over", met: r.adult, why: r.adult ? null : "Add a date of birth that shows you are an adult.", fix: r.adult ? null : { href: SETTINGS, label: "Open account settings" } },
-    { id: "idVerified", label: "Your ID is verified", met: r.idVerified, why: r.idVerified ? null : "Only ID-verified adults can take money.", fix: r.idVerified ? null : v.ageReview ? { href: "/account/settings#verify-age", label: "Verify your age" } : { href: SETTINGS, label: "Verify your ID in account settings" } },
+    { id: "idVerified", label: "Your Name and Age review is done", met: r.idVerified, why: r.idVerified ? null : "Only adults who have passed the Name and Age review can take money.", fix: r.idVerified ? null : v.ageReview ? { href: "/account/settings#verify-age", label: "Start your Name and Age review" } : { href: SETTINGS, label: "Start your Name and Age review" } },
     { id: "payoutAccount", label: "A payout account is added", met: r.payoutAccount, why: r.payoutAccount ? null : "Add a bank account in your own name so we can pay you.", fix: r.payoutAccount ? null : { href: PAYOUTS, label: "Add a payout account" } },
     { id: "adultRoom", label: "The room is 18+ or 21+", met: adultRoom, why: adultRoom ? null : MONEY_COPY.lockedAge, fix: null },
     { id: "platform", label: "Switched on by Vib3Pulse", met: off.length === 0, why: off.length === 0 ? null : `${off.join(" and ")} ${off.length > 1 ? "are" : "is"} not switched on yet.`, fix: null },

@@ -44,7 +44,7 @@ test("errorMessage covers every contract error code", () => {
     if (["CONSENT_REQUIRED", "BAD_FILE", "TOO_LARGE", "CODE_EXPIRED", "AGE_REVIEW_PAUSED", "OPEN_REQUEST_EXISTS"].includes(c)) assert.notEqual(m, generic, c);
   }
   assert.equal(ERROR_CODES.length, 19);
-  assert.match(errorMessage("ALREADY_VERIFIED"), /^You are already verified\. To receive money, choose 'Verify your name for payouts'\.$/);
+  assert.match(errorMessage("ALREADY_VERIFIED"), /^You are already verified\. To receive money, choose 'Start your Name and Age review'.$/);
   assert.match(errorMessage("RATE_LIMITED", { retryAfter: "2026-10-25T14:00:00Z", now: NOW }), /about 2 hours/);
   assert.equal(errorMessage(undefined), generic);
 });
@@ -88,7 +88,7 @@ test("copy has no dashes or the word cash", () => {
 });
 
 test("privacy copy matches the spec wording", () => {
-  assert.equal(PRIVACY.title, "Before you verify your age");
+  assert.equal(PRIVACY.title, "Before your Name and Age review");
   assert.equal(PRIVACY.tick, "I understand how my information is used");
   assert.match(whatHappens("upload"), /7 days/);
   assert.match(whatHappens("live"), /Nothing is recorded or saved/);

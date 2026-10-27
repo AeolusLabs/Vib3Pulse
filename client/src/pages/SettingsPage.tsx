@@ -16,7 +16,7 @@ const GROUPS = [
     { href: "/map?sharing=1", icon: MapPinIcon, title: "Map sharing", sub: "Who sees you on the map, including safety buddies" },
     { href: `${A}privacy`, icon: ShieldIcon, title: "Privacy and blocked people", sub: "Who sees your events and rooms" },
     { href: "/buddy/settings", icon: ShieldCheckIcon, title: "Safety buddies", sub: "Buddies, timers and alerts" },
-    { href: `${A}verify`, icon: ShieldCheckIcon, title: "Age verification and payouts", sub: "Verify your age, link a payout account" },
+    { href: `${A}verify`, icon: ShieldCheckIcon, title: "Name and Age review and payouts", sub: "Name and Age review, link a payout account" },
   ] },
   { label: "Rooms and money", rows: [
     { href: "/settings/hosting", icon: MicIcon, title: "Hosting defaults", sub: "What every new room starts with" },

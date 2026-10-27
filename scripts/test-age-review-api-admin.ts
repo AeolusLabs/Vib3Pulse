@@ -105,6 +105,9 @@ check("a decided request cannot be decided again", (await http("POST", `/api/adm
 const u2 = await mkUser("arvu2", dob);
 const r2 = await mkReq(u2, dob);
 check("a second account verifies the same way (no document number to collide on)", (await http("POST", `/api/admin/age-reviews/${r2}/decide`, rev, { outcome: "verify" })).status === 200);
+const uSA = await mkUser("arvusa", dob);
+const rSA = await mkReq(uSA, dob);
+check("a super admin can verify a user (one click)", (await http("POST", `/api/admin/age-reviews/${rSA}/decide`, sup1, { outcome: "verify" })).status === 200 && (await q(`select age_verified_method from users where id = $1`, [uSA]))[0].age_verified_method === "admin_upload");
 
 const u3 = await mkUser("arvu3", dob);
 const r3 = await mkReq(u3, dob);

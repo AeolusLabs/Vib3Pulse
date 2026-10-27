@@ -170,7 +170,7 @@ await test("payout status reports hasVerifiedName (and canLinkAccount follows it
     assert.equal(s.hasVerifiedName, true); assert.equal(s.canLinkAccount, false, "no verified adult, no linking");
   } finally { delete payoutTestHooks.verifiedName; (storage as any).getUser = keep.u; (storage as any).getOrganizerPaymentAccount = keep.a; }
   const p = src("server/rooms/payouts.ts");
-  assert.ok(p.includes("To add a bank account we need to check your name on your ID. Start a payouts check from this page."));
+  assert.ok(p.includes("To add a bank account we need to check your name on your ID. Start your Name and Age review from this page."));
   assert.ok(p.includes("const verifiedName = await verifiedLegalNameOf(userId);"));
 });
 

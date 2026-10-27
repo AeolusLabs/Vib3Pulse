@@ -100,15 +100,23 @@ export function personNameTokens(name: unknown): string[] {
 }
 
 /**
- * Does the bank's account name belong to the verified person? Strict on purpose (fail closed): both names have at least
- * two words and the same words, in any order, any case, with or without accents. A missing middle name is a mismatch
- * (owner question in the lane report).
+ * Does the bank's account name belong to the verified person? The verified name is one a reviewer confirmed against the ID, so
+ * a middle name may be missing on either side: every word of the shorter name must appear in the longer one (any order, any case,
+ * with or without accents), both have at least two words, and the longer has at most two extra words. Unrelated names never match.
  */
 export function namesMatch(verifiedName: unknown, bankAccountName: unknown): boolean {
   const a = personNameTokens(verifiedName);
   const b = personNameTokens(bankAccountName);
-  if (a.length < 2 || b.length < 2 || a.length !== b.length) return false;
-  return a.every((t, i) => t === b[i]);
+  if (a.length < 2 || b.length < 2) return false;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  if (long.length - short.length > 2) return false;
+  const pool = [...long];
+  for (const t of short) {
+    const i = pool.indexOf(t);
+    if (i < 0) return false;
+    pool.splice(i, 1);
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------- 6.2 earnings (GET /api/users/me/room-earnings)

@@ -463,11 +463,15 @@ test("property generator covers the hard cases (refunds, reversals, chargebacks,
 });
 
 // ---------------------------------------------------------------- name match (6.1)
-test("namesMatch: case, spacing, order and accents do not matter; anything else does (strict)", () => {
+test("namesMatch: case, spacing, order and accents do not matter; a missing middle name is allowed; anything else is not", () => {
   assert.ok(namesMatch("Adébáyọ̀ Okafor", "OKAFOR  ADEBAYO"));
   assert.ok(namesMatch("Mary O'Neil", "ONEIL MARY"));
   assert.ok(namesMatch("Chinedu Ade-Bayo", "adebayo, chinedu"));
-  assert.ok(!namesMatch("John Smith", "John Smith Okafor"), "a missing middle name is a mismatch");
+  assert.ok(namesMatch("John Smith", "John Paul Smith"), "a middle name missing on the ID side is allowed");
+  assert.ok(namesMatch("John Paul Smith", "Smith John"), "and on the bank side");
+  assert.ok(!namesMatch("John Smith", "John Paul Peter James Smith"), "not more than two extra words");
+  assert.ok(!namesMatch("John Smith", "Paul Smith Okafor"), "the first name must be there");
+  assert.ok(!namesMatch("John Smith", "John Okafor"), "a different surname is a mismatch");
   assert.ok(!namesMatch("John Smith", "Jon Smith"));
   assert.ok(!namesMatch("Smith", "Smith"), "one word is never enough");
   assert.ok(!namesMatch("John Smith", ""));

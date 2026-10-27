@@ -215,9 +215,8 @@ function PayoutBody({ status, moneyOn, changing, onChange, onCancel, onSaved, ch
   return (
     <div className="space-y-5" data-stage={stage} data-testid="payout-stage">
       <PayoutSteps steps={[
-        { label: "Verify your ID", done: status.verifiedAdult },
-        { label: "Bank account", done: !!status.account || status.subaccountReady },
-        { label: "Name check", done: status.subaccountReady },
+        { label: "Name and Age review", done: status.verifiedAdult && status.hasVerifiedName },
+        { label: "Bank account", done: status.subaccountReady },
       ]} />
       <ul className="divide-y divide-border rounded-2xl bg-muted/60" aria-label="Payout checks">
         {a && (

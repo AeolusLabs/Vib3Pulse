@@ -60,28 +60,28 @@ const DECLINE_LABEL: Record<string, string> = {
 const VERIFY_LABEL: Record<string, string> = { admin: "a reviewer check", admin_upload: "a photo check", admin_live: "a live check" };
 
 export const COPY = {
-  cardTitle: "Verify your age",
+  cardTitle: "Name and Age review",
   scopeNote: "Verification is only needed for tipping, buying tickets and hosting paid rooms. You can use the rest of Vib3Pulse without it.",
   choiceUpload: "Upload an ID photo and a selfie",
   choiceLive: "Private live check with a reviewer",
   choiceLiveHint: "Nothing is recorded or saved.",
   wantsPayoutsLabel: "I also want to receive money (tips and ticket sales)",
-  wantsPayoutsHelp: "You will type your name, which must match your ID. One check covers your age and your name for payouts.",
-  verifyNameAction: "Verify your name for payouts",
-  verifyNameHelp: "Only needed if you want to receive money. A reviewer notes the name on your ID.",
-  recheckLink: "Redo my payouts check",
-  payoutsDraftTitle: "Continue your payouts check",
-  payoutsDraftBody: "Finish this so a reviewer can note the name on your ID. It is only for receiving money.",
-  payoutsContinueButton: "Continue your payouts check",
-  payoutsPaused: "Verification is paused for now. Please come back later to verify your name for payouts.",
-  agePaused: "Verification is paused for now. Please come back later to verify your age.",
-  payoutsInReview: "Your payouts check is being reviewed",
+  wantsPayoutsHelp: "You will type your name, which must match your ID. One Name and Age review covers both.",
+  verifyNameAction: "Start your Name and Age review",
+  verifyNameHelp: "Needed to receive money. A reviewer checks the name you type against your ID.",
+  recheckLink: "Redo my Name and Age review",
+  payoutsDraftTitle: "Continue your Name and Age review",
+  payoutsDraftBody: "Finish this so a reviewer can check your name and age against your ID.",
+  payoutsContinueButton: "Continue your Name and Age review",
+  payoutsPaused: "Name and Age review is paused for now. Please come back later.",
+  agePaused: "Name and Age review is paused for now. Please come back later.",
+  payoutsInReview: "Your Name and Age review is with a reviewer",
   payoutsInReviewBody: "We will tell you when it is done. You do not need to start another one.",
   choiceUploadHint: "Your photos are deleted after the final decision.",
   cancel: "Cancel my request",
   howHandled: "How your ID is handled",
-  paused: "Age checks are paused for a short while. Please try again later.",
-  verifyLink: "Verify your age",
+  paused: "Name and Age review is paused for a short while. Please try again later.",
+  verifyLink: "Name and Age review",
   notRecorded: "Not recorded",
   guidance: "You can cover everything except your photo, name and date of birth.",
   waiting: "Waiting for a reviewer. We will tell you here and in your notifications when it is time to join.",
@@ -89,7 +89,7 @@ export const COPY = {
 } as const;
 
 export const PRIVACY = {
-  title: "Before you verify your age",
+  title: "Before your Name and Age review",
   why: { h: "Why we ask", p: "Tipping, buying tickets and hosting paid rooms are for adults only. We check once. You can use the rest of Vib3Pulse without it." },
   who: { h: "Who sees it", p: "Only Vib3Pulse staff who review ages (administrators, super administrators and age reviewers). Your images are encrypted in our database and are opened one at a time, with every viewing logged." },
   whoLive: "A reviewer sees you on a private call. Nothing is recorded or saved.",
@@ -205,7 +205,7 @@ export const ERROR_CODES = [
 const GENERIC_STAFF = "Something went wrong with this request. Please try again later.";
 const ERROR_TEXT: Record<(typeof ERROR_CODES)[number], string> = {
   CONSENT_REQUIRED: "Please read and accept how your information is used, then try again.",
-  AGE_REVIEW_PAUSED: "Age checks are paused for a short while. Please try again later.",
+  AGE_REVIEW_PAUSED: "Name and Age review is paused for a short while. Please try again later.",
   OPEN_REQUEST_EXISTS: "You already have a request open. Finish or cancel it first.",
   RATE_LIMITED: "You have tried too many times. Please wait a bit.",
   NOT_OFFERED: "Adult verification is not offered on accounts registered as under 18.",
@@ -222,7 +222,7 @@ const ERROR_TEXT: Record<(typeof ERROR_CODES)[number], string> = {
   REVEAL_LIMIT: GENERIC_STAFF,
   TOKEN_INVALID: "That link has expired. Please start again.",
   REASON_REQUIRED: GENERIC_STAFF,
-  ALREADY_VERIFIED: "You are already verified. To receive money, choose 'Verify your name for payouts'.",
+  ALREADY_VERIFIED: "You are already verified. To receive money, choose 'Start your Name and Age review'.",
 };
 
 export function errorMessage(code: string | undefined | null, extra?: { retryAfter?: string | null; now?: Date }): string {

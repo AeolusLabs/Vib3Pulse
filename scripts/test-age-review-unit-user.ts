@@ -116,7 +116,7 @@ await test("sweep: a failing room close never skips the expiry notices, and runs
 
 await test("notices: neutral push, escaped email, no relative link, purge before soft delete (structure)", () => {
   const n = src("server/identity/ageReviewNotify.ts");
-  assert.ok(n.includes('push: { title: "Vib3Pulse", body: "Your age review has an update" }'));
+  assert.ok(n.includes('push: { title: "Vib3Pulse", body: "Your Name and Age review has an update" }'));
   assert.ok(n.includes("link: base ? base + link : undefined"));
   const e = src("server/emailService.ts");
   const em = e.slice(e.indexOf("export async function sendAgeReviewEmail"), e.indexOf("export async function sendSocialPlansNoticeEmail"));

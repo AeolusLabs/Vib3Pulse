@@ -45,7 +45,7 @@ test("wantsPayouts sent only when ticked", async () => {
   assert.match(card, /wantsPayouts=\{wantsPayouts\}/);
   assert.match(read("client/src/components/age-review/UploadFlow.tsx"), /consentVersion, wantsPayouts, legalName \}/);
   assert.equal(COPY.wantsPayoutsLabel, "I also want to receive money (tips and ticket sales)");
-  assert.equal(COPY.wantsPayoutsHelp, "You will type your name, which must match your ID. One check covers your age and your name for payouts.");
+  assert.equal(COPY.wantsPayoutsHelp, "You will type your name, which must match your ID. One Name and Age review covers both.");
 });
 
 test("payouts variant copy contains the name sentence and the plain variant does not", () => {
@@ -91,8 +91,8 @@ test("payout page state per status (not verified, no name, has name)", () => {
   assert.match(view, /href=\{VERIFY_AGE_HREF\}/);
   assert.match(view, /panel === "needs_name"/);
   assert.match(view, /PAYOUT_COPY\.needNameTitle/);
-  assert.equal(PAYOUT_COPY.needAgeTitle, "Verify your age first");
-  assert.equal(PAYOUT_COPY.needNameTitle, "Verify your name for payouts");
+  assert.equal(PAYOUT_COPY.needAgeTitle, "Complete your Name and Age review first");
+  assert.equal(PAYOUT_COPY.needNameTitle, "Finish your Name and Age review");
 });
 
 test("existing account without a name shows the name step", () => {
@@ -117,13 +117,13 @@ test("NO_VERIFIED_NAME maps to the verify-name CTA", () => {
   assert.equal(accountFailureCta({ status: 422, code: "NO_VERIFIED_NAME" }), "verify_name");
   assert.equal(accountFailureCta({ status: 409, code: "NO_VERIFIED_NAME" }), "verify_name");
   assert.equal(payoutErrorMessage({ status: 422, code: "NO_VERIFIED_NAME" }), PAYOUT_ERROR.noVerifiedName);
-  assert.equal(PAYOUT_ERROR.noVerifiedName, "To add a bank account we need to check your name on your ID. Start a payouts check from this page.");
+  assert.equal(PAYOUT_ERROR.noVerifiedName, "To add a bank account we need to check your name on your ID. Start your Name and Age review from this page.");
   assert.equal(accountFailureCta({ status: 422, code: "NAME_MISMATCH" }), "recheck");
   assert.equal(accountFailureCta({ status: 422 }), "recheck");
   assert.equal(payoutErrorMessage({ status: 422, code: "NAME_MISMATCH" }), PAYOUT_ERROR.nameMismatch);
   assert.equal(accountFailureCta({ status: 500 }), null);
   assert.equal(accountFailureCta({ status: 429, code: "RATE_LIMITED" }), null);
-  assert.equal(PAYOUT_COPY.recheckCta, "Ask for a name recheck");
+  assert.equal(PAYOUT_COPY.recheckCta, "Redo my Name and Age review");
   const view = read("client/src/components/rooms/earnings/PayoutAccountView.tsx");
   assert.match(view, /accountFailureCta\(r\)/);
   assert.match(view, /data-testid="payout-recheck-cta"/);
@@ -160,8 +160,8 @@ test("payouts action: only for verified users, never for people who did not ask"
   assert.equal(payoutsPreselected("?payouts=1"), true);
   assert.equal(payoutsPreselected("?payouts=0"), false);
   assert.equal(payoutsPreselected(""), false);
-  assert.equal(COPY.verifyNameAction, "Verify your name for payouts");
-  assert.equal(COPY.recheckLink, "Redo my payouts check");
+  assert.equal(COPY.verifyNameAction, "Start your Name and Age review");
+  assert.equal(COPY.recheckLink, "Redo my Name and Age review");
   const card = read("client/src/components/age-review/VerifyAgeCard.tsx");
   assert.match(card, /pAction === "recheck" && !payoutChoices/);
   assert.match(card, /text-xs text-muted-foreground underline/);
@@ -259,10 +259,10 @@ test("payout account link needs the money flags on, and asks nothing when they a
 test("mid-draft payouts check is not the generic age card", () => {
   const req = { id: "r", method: "upload" as const, status: "draft", documentType: null, canCancel: true, needsMore: false, hasDocument: false, hasSelfie: false, code: null, codeExpiresAt: null, liveInviteExpiresAt: null, submittedAt: null, declineReason: null, consentedAt: null, wantsPayouts: true };
   const v = cardView(me({ state: "none", request: req }));
-  assert.equal(v.title, "Continue your payouts check");
+  assert.equal(v.title, "Continue your Name and Age review");
   assert.ok(!/adults only/i.test(v.body) && !/Verify your age/.test(v.title));
-  assert.equal(cardView(me({ state: "none", request: { ...req, wantsPayouts: false } })).title, "Verify your age");
-  assert.equal(cardView(me({ state: "none" })).title, "Verify your age");
+  assert.equal(cardView(me({ state: "none", request: { ...req, wantsPayouts: false } })).title, "Name and Age review");
+  assert.equal(cardView(me({ state: "none" })).title, "Name and Age review");
   assert.match(read("client/src/components/age-review/VerifyAgeCard.tsx"), /COPY\.payoutsContinueButton/);
 });
 
@@ -277,7 +277,7 @@ test("payout page CTA: paused notice, and no second check while one is in review
   assert.equal(payoutCta(me({ state: "in_review", request: r("in_review"), paused: true })), "in_review");
   assert.equal(payoutCta(me({ state: "none", request: r("draft") })), "link", "a draft can be continued");
   assert.equal(payoutCta(me({ state: "in_review", request: r("in_review", false) })), "link", "an age check is not a payouts check");
-  assert.equal(COPY.payoutsInReview, "Your payouts check is being reviewed");
+  assert.equal(COPY.payoutsInReview, "Your Name and Age review is with a reviewer");
   const view = read("client/src/components/rooms/earnings/PayoutAccountView.tsx");
   assert.match(view, /cta === "paused"/);
   assert.match(view, /cta === "in_review"/);
@@ -305,7 +305,7 @@ test("errors: NAME_REQUIRED, NAME_NOT_REQUESTED and ALREADY_VERIFIED have plain 
   }
   assert.ok(!/ada|obi/i.test(adminErrorMessage("NAME_REQUIRED")), "error text never carries a name");
   assert.ok((ERROR_CODES as readonly string[]).includes("ALREADY_VERIFIED"));
-  assert.equal(errorMessage("ALREADY_VERIFIED"), "You are already verified. To receive money, choose 'Verify your name for payouts'.");
+  assert.equal(errorMessage("ALREADY_VERIFIED"), "You are already verified. To receive money, choose 'Start your Name and Age review'.");
 });
 
 test("copy has no dashes, 'never' or 'cash' in the new strings and components", () => {

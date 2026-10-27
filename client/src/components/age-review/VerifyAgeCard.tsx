@@ -138,7 +138,7 @@ export default function VerifyAgeCard() {
                 <div className="space-y-1">
                   <Label htmlFor="age-legal-name">Your full name (must match your ID)</Label>
                   <Input id="age-legal-name" value={legalName} onChange={(e) => setLegalName(e.target.value)} autoComplete="name" className="h-11" aria-describedby="age-legal-name-help" data-testid="age-legal-name" />
-                  <p id="age-legal-name-help" className={`text-xs ${legalNameProblem(legalName) ? "text-destructive" : "text-muted-foreground"}`}>{legalNameProblem(legalName) ?? "Type it exactly as it is written on your ID. It must match your ID or we cannot verify you. One check covers your age and your name for payouts."}</p>
+                  <p id="age-legal-name-help" className={`text-xs ${legalNameProblem(legalName) ? "text-destructive" : "text-muted-foreground"}`}>{legalNameProblem(legalName) ?? "Type it exactly as it is written on your ID. It must match your ID or we cannot verify you. One Name and Age review covers both."}</p>
                 </div>
               )}
               <button
