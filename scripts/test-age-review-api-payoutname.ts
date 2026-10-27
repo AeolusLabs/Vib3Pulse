@@ -273,6 +273,23 @@ check("an open request that did not ask for payouts leaves a verified user 'veri
 await q(`update age_review_requests set wants_payouts = true where user_id = $1`, [vp]);
 check("...an open payouts request makes it 'in_review'", (await http("GET", "/api/age-review/me", { user: vp })).json.state === "in_review");
 
+// ---- an answered request is closed: an old open request of a verified person must not block the payouts check
+const { closeAnsweredRequests } = await import("../server/identity/ageReviewService");
+const openRow = (uid: string, payouts: boolean, status = "submitted") => q(`insert into age_review_requests (user_id, method, status, document_type, registered_dob_snapshot, consent_version, consented_at, wants_payouts) values ($1,'upload',$4,'passport',$2,$3,now(),$5)`, [uid, dob, CONSENT_VERSION, status, payouts]);
+const vq = await mkUser("vq", { verified: true });
+await openRow(vq, false);
+const vqNew = await http("POST", "/api/age-review/requests", { user: vq }, { method: "upload", documentType: "passport", ...consent, wantsPayouts: true });
+check("a verified person with an old open request can start a payouts check (201), no OPEN_REQUEST_EXISTS", vqNew.status === 201, JSON.stringify(vqNew));
+check("...and the old request is closed as approved, its photos gone", (await q(`select status from age_review_requests where user_id = $1 and wants_payouts = false`, [vq]))[0]?.status === "approved");
+const vr = await mkUser("vr", { verified: true });
+await openRow(vr, true, "draft");
+check("closeAnsweredRequests leaves an open payouts request alone (its name is still to be recorded)", (await closeAnsweredRequests(vr)).length === 0 && (await q(`select status from age_review_requests where user_id = $1`, [vr]))[0].status === "draft");
+const vs = await mkUser("vs", { verified: true });
+await openRow(vs, false, "needs_more");
+const closedIds = await closeAnsweredRequests(vs);
+check("closeAnsweredRequests closes the open one that did not ask for payouts, and says which", closedIds.length === 1 && (await q(`select status, code from age_review_requests where user_id = $1`, [vs]))[0].status === "approved");
+check("...so the person has no open request left", (await http("GET", "/api/age-review/me", { user: vs })).json.request === null);
+
 // ---- the link race: the name or the verification vanishes during the Paystack round trip
 const lr = await mkUser("lr", { verified: true });
 await setVerifiedName(pool as any, lr, NAME, null, rev);

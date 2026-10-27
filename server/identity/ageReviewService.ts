@@ -95,7 +95,8 @@ export async function getMe(userId: string, now: Date = new Date()) {
     return { ...base, state: state as "none" | "needs_more" | "in_review", verified: verifiedInfo, request: toRequestDto(open, await kindsOf(open.id), now), retryAfter: null };
   };
   if (eligibility === "ok" && openAny?.wants_payouts === true) return openState(openAny);
-  if (verifiedInfo) return { ...base, state: "verified" as const, verified: verifiedInfo, request: null, retryAfter: null };
+  // A verified person whose last check was declined still has to wait before the next one (a payouts check): say so up front.
+  if (verifiedInfo) return { ...base, state: "verified" as const, verified: verifiedInfo, request: null, retryAfter: retryAfter && retryAfter > now ? retryAfter.toISOString() : null };
   const none = { verified: null, request: null, retryAfter: null };
   if (eligibility !== "ok") return { ...base, state: "not_offered" as const, ...none };
   if (openAny) return openState(openAny);
@@ -109,6 +110,28 @@ export async function getMe(userId: string, now: Date = new Date()) {
   return { ...base, state: "none" as const, ...none };
 }
 
+/**
+ * A request that was answered must be closed. When an admin verifies someone another way (the Mark verified override), a request that
+ * did not ask for payouts has nothing left to decide: it is closed as approved and its photos are deleted. One that asked for payouts
+ * stays open, because the name on the ID is still to be recorded. Returns the closed requests (the live ones also need their room closed).
+ */
+export async function closeAnsweredRequests(userId: string): Promise<{ id: string; method: string }[]> {
+  const pool = await getPool();
+  const rows = (await pool.query(
+    `with gone as (
+       select id from age_review_requests
+        where user_id = $1 and wants_payouts = false and status in ('draft', 'submitted', 'in_review', 'needs_more', 'pending_second_approval')
+          for update
+     ), wipe as (delete from age_review_evidence where request_id in (select id from gone))
+     update age_review_requests set status = 'approved', outcome = 'verified', proposed_dob = null, proposed_legal_name_enc = null,
+            code = null, code_expires_at = null, decided_at = now()
+      where id in (select id from gone) returning id, method`,
+    [userId],
+  )).rows as { id: string; method: string }[];
+  for (const r of rows) if (r.method === "live") { try { await (await import("./ageReviewLive")).closeAgeCheckRoom(r.id); } catch { /* the timer and the sweep close it too */ } }
+  return rows;
+}
+
 export async function createRequest(userId: string, input: { method: "upload" | "live"; documentType?: string | null; consentVersion: string; wantsPayouts?: boolean }, now: Date = new Date()) {
   if (input.consentVersion !== CONSENT_VERSION) throw new AgeReviewError(400, "CONSENT_REQUIRED", "Please read and accept the privacy notice first.");
   if (await ageReviewPaused()) throw new AgeReviewError(503, "AGE_REVIEW_PAUSED", "Age checks are paused right now. Please try again later.");
@@ -119,6 +142,8 @@ export async function createRequest(userId: string, input: { method: "upload" | 
   if (registeredEligibility(user.date_of_birth, now) !== "ok") throw new AgeReviewError(403, "NOT_OFFERED", "Age verification is not available for this account.");
   // A verified adult may only start a payouts review (to add the name on their ID, or to recheck it).
   if (user.age_verified_at && input.wantsPayouts !== true) throw new AgeReviewError(409, "ALREADY_VERIFIED", "Your age is already verified.");
+  // Someone verified another way can still have an old request open that nothing will ever answer: close it, it must not block the payouts check.
+  if (user.age_verified_at) await closeAnsweredRequests(userId);
   const upload = input.method === "upload";
   if (upload && !(DOCUMENT_TYPES as readonly string[]).includes(input.documentType ?? "")) throw new AgeReviewError(400, "BAD_REQUEST", "Choose a document type.");
   const history = (await pool.query(`select status, decided_at from age_review_requests where user_id = $1 order by created_at desc limit 50`, [userId])).rows as { status: string; decided_at: Date | null }[];

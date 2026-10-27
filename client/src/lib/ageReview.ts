@@ -139,7 +139,7 @@ export function cardView(me: AgeReviewMe, now: Date = new Date()): CardView {
     case "verified":
       return {
         title: "Age verified",
-        body: `You were verified${me.verified ? ` on ${dateLabel(me.verified.at)} by ${VERIFY_LABEL[me.verified.method] ?? "a reviewer check"}` : ""}. Tipping, tickets and paid rooms are open to you.`,
+        body: `You were verified${me.verified ? ` on ${dateLabel(me.verified.at)} by ${VERIFY_LABEL[me.verified.method] ?? "a reviewer check"}` : ""}. Tipping, tickets and paid rooms are open to you.${inCooldown(me, now) ? ` Your last check was declined, so you can start a new one ${waitLabel(me.retryAfter, now)}.` : ""}`,
         action: null,
         tone: "success",
       };
@@ -307,22 +307,26 @@ export function createBody(v: { method: AgeReviewMethod; documentType?: string; 
   return { method: v.method, ...(v.documentType ? { documentType: v.documentType } : {}), consentVersion: v.consentVersion, ...(v.wantsPayouts === true ? { wantsPayouts: true } : {}) };
 }
 
+/** A decline cooldown that has not ended yet. */
+export const inCooldown = (me: Pick<AgeReviewMe, "retryAfter">, now: Date = new Date()): boolean => !!me.retryAfter && new Date(me.retryAfter) > now;
+
 export type PayoutsAction = "verify_name" | "recheck" | null;
 /** A verified user without a name on file is offered "Verify your name for payouts"; one with a name only gets a small recheck link. Nobody else is asked. */
-export function payoutsAction(me: AgeReviewMe): PayoutsAction {
-  if (me.state !== "verified" || me.paused || openRequest(me) || typeof me.hasPayoutName !== "boolean") return null;
+export function payoutsAction(me: AgeReviewMe, now: Date = new Date()): PayoutsAction {
+  if (me.state !== "verified" || me.paused || openRequest(me) || typeof me.hasPayoutName !== "boolean" || inCooldown(me, now)) return null;
   return me.hasPayoutName ? "recheck" : "verify_name";
 }
 
 /** `?payouts=1` on the verify screen preselects the payouts choice. */
 export const payoutsPreselected = (search: string): boolean => new URLSearchParams(search).get("payouts") === "1";
 /** What the payout page offers for the verify steps: the link, a paused notice, or "being reviewed" (no new check while one is in review). */
-export type PayoutCta = "link" | "paused" | "in_review";
+export type PayoutCta = "link" | "paused" | "in_review" | "cooldown";
 export function payoutCta(me: AgeReviewMe | null | undefined): PayoutCta {
   if (!me) return "link";
   const r = openRequest(me);
   if (r?.wantsPayouts === true && ["submitted", "in_review", "pending_second_approval"].includes(r.status)) return "in_review";
   if (me.paused) return "paused";
+  if (inCooldown(me)) return "cooldown";
   return "link";
 }
 export const PAYOUTS_HREF = "/account/settings?section=verify&payouts=1#verify-age";

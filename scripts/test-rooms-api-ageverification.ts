@@ -107,6 +107,12 @@ try {
   const missing = await http("POST", `/api/admin/users/00000000-0000-0000-0000-000000000000/age-verification`, { admin }, { verified: true, reason: "test reason" });
   check("unknown user is 404", missing.status === 404, JSON.stringify(missing));
 
+  // The override answers an open age check of theirs: the request is closed (approved, photos gone) so it cannot block a later payouts check.
+  const waiting = await mk("av_waiting", yearsAgo(30));
+  await q(`insert into age_review_requests (user_id, method, status, document_type, registered_dob_snapshot, consent_version, consented_at, wants_payouts) values ($1,'upload','in_review','passport',$2,'2026-10-v2',now(),false)`, [waiting, yearsAgo(30)]);
+  const mark = await http("POST", `/api/admin/users/${waiting}/age-verification`, { admin }, { verified: true, reason: "seen proof at the door" });
+  check("override: 200 and the user's open age request is closed as approved", mark.status === 200 && (await q(`select status from age_review_requests where user_id=$1`, [waiting]))[0].status === "approved", JSON.stringify(mark));
+  check("...and the audit entry says it closed one request", /Closed 1 open age request/.test((await q(`select details from admin_activity_logs where admin_id=$1 and action='user.age_verified' and target_id=$2`, [admin, waiting]))[0]?.details ?? ""));
   const set = await http("POST", `/api/admin/users/${user}/age-verification`, { admin }, { verified: true, reason: "test reason" });
   check("admin sets it: 200 with the AgeVerification shape", set.status === 200 && set.json?.verified === true && set.json.band === "adult" && set.json.method === "admin" && typeof set.json.at === "string", JSON.stringify(set));
   const after = await http("GET", "/api/users/me/age-verification", { user });

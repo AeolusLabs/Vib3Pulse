@@ -12,7 +12,7 @@ import { AlertTriangleIcon, CheckCircleIcon, ChevronRightIcon, ClockIcon, Loader
 import { banksKey, fetchBanks, fetchPayoutStatus, payoutStatusKey, savePayoutAccount } from "@/lib/earningsApi";
 import { useRoomsConfig } from "@/lib/roomsApi";
 import { useAgeReview } from "@/hooks/useAgeReview";
-import { COPY as AGE_COPY, payoutCta } from "@/lib/ageReview";
+import { COPY as AGE_COPY, payoutCta, waitLabel } from "@/lib/ageReview";
 import {
   PAYOUT_COPY, VERIFY_AGE_HREF, VERIFY_NAME_HREF, accountFailureCta, accountNeedsRefetch, accountNumberValid, canLinkHere, payoutErrorMessage, payoutPanel,
   payoutStage, readFailureMessage, savedAccountOf, type PayoutStatus,
@@ -238,6 +238,7 @@ function PayoutBody({ status, moneyOn, changing, onChange, onCancel, onSaved, ch
           <p className="text-sm text-muted-foreground">{PAYOUT_COPY.needAgeBody}</p>
           {cta === "link" && <Button asChild className="min-h-[44px] rounded-full" data-testid="payout-verify-age-cta"><Link href={VERIFY_AGE_HREF}>{PAYOUT_COPY.needAgeCta}</Link></Button>}
           {cta === "paused" && <p role="status" className="text-sm font-medium" data-testid="payout-cta-paused">{AGE_COPY.agePaused}</p>}
+          {cta === "cooldown" && <p role="status" className="text-sm font-medium" data-testid="payout-cta-cooldown-age">Your last check was declined. You can start a new one {waitLabel(ageMe?.retryAfter ?? null)}.</p>}
         </div>
       )}
 
@@ -247,6 +248,7 @@ function PayoutBody({ status, moneyOn, changing, onChange, onCancel, onSaved, ch
           <p className="text-sm text-muted-foreground">{PAYOUT_COPY.needNameBody}</p>
           {cta === "link" && <Button asChild className="min-h-[44px] rounded-full" data-testid="payout-verify-name-cta"><Link href={VERIFY_NAME_HREF}>{PAYOUT_COPY.needNameCta}</Link></Button>}
           {cta === "paused" && <p role="status" className="text-sm font-medium" data-testid="payout-cta-paused">{AGE_COPY.payoutsPaused}</p>}
+          {cta === "cooldown" && <p role="status" className="text-sm font-medium" data-testid="payout-cta-cooldown">Your last check was declined. You can start a new one {waitLabel(ageMe?.retryAfter ?? null)}.</p>}
           {cta === "in_review" && (
             <div role="status" className="space-y-1" data-testid="payout-cta-in-review">
               <p className="text-sm font-medium">{AGE_COPY.payoutsInReview}</p>
