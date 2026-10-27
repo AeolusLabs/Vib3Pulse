@@ -37,7 +37,7 @@ import type { PoolClient } from "pg";
 import { pool } from "../storage";
 import { refundPayment, refundState, type PaymentProvider, type ProviderRefundState } from "../payments";
 import { deliverNotification } from "../notifications";
-import {
+import { buyerRefundKobo,
   buyerRefundCheck, isAutoRefundReason, reasonNeedsBuyerWindow, refundAllowedByPayout, refundNotice, refundNoticeKey,
   returnedPaymentNotice, sanitizeMoneyError, ticketRefundReference,
   AUTO_REFUND_JOB_DELAY_MS, MONEY_JOB_EVERY_MS, NEVER_STARTED_GRACE_MS, NO_START_TIME_GRACE_MS, REFUND_OVERDUE_MS,
@@ -131,14 +131,20 @@ function enforceAfterRefund(roomId: string, userId: string): void {
 }
 
 // ------------------------------------------------------------ refundTicket
+/** What goes back to the buyer for this ticket: less the service charge and platform fee only when the buyer asked; otherwise the full price. */
+function refundKoboOf(t: TicketRow): number {
+  const full = Number(t.amount_kobo);
+  return t.refund_reason === "buyer" ? buyerRefundKobo({ amountKobo: full, feeKobo: Number(t.fee_kobo), platformKobo: Number(t.platform_kobo) }) : full;
+}
+
 interface TicketRow {
-  id: string; room_id: string; user_id: string; amount_kobo: number; platform_kobo: number; host_kobo: number;
+  id: string; room_id: string; user_id: string; amount_kobo: number; fee_kobo: number; platform_kobo: number; host_kobo: number;
   provider: string; provider_ref: string; status: string; confirmed: boolean; refund_reason: string | null;
   room_status: string; refund_before_start: boolean | null; room_title: string; host_id: string; scheduled_ms: number | null;
 }
 
 const TICKET_SELECT = `
-  select t.id, t.room_id, t.user_id, t.amount_kobo, t.platform_kobo, t.host_kobo, t.provider, t.provider_ref, t.status,
+  select t.id, t.room_id, t.user_id, t.amount_kobo, t.fee_kobo, t.platform_kobo, t.host_kobo, t.provider, t.provider_ref, t.status,
          (t.refunded_at is not null) as confirmed, t.refund_reason,
          r.status as room_status, r.refund_before_start, r.title as room_title, r.host_id,
          round(extract(epoch from r.scheduled_for) * 1000)::float8 as scheduled_ms
@@ -248,7 +254,8 @@ async function finishProviderRefund(c: PoolClient, t: TicketRow, now: Date): Pro
   }
   if (state === "failed") await issue("REFUND_FAILED_AT_PROVIDER: an earlier refund failed at the provider; trying again");
   try {
-    await refundPayment(t.provider_ref, provider, { note });
+    const back = refundKoboOf(t);
+    await refundPayment(t.provider_ref, provider, { note, ...(back < Number(t.amount_kobo) ? { amountKobo: back } : {}) });
   } catch (e) {
     const msg = sanitizeMoneyError(e);
     if (isRefusalAnswer(e)) {
@@ -292,7 +299,7 @@ async function confirmRefund(c: PoolClient, t: TicketRow, now: Date): Promise<Pr
                                            gross_amount, platform_fee_amount, net_to_organizer_amount, status, created_at)
          select 'room_ticket_refund', $1::text, $2::text, 'NGN', $3::varchar, $4::varchar, $5::varchar, $6::int, $7::int, $8::int, 'refunded', $9::timestamp
           where not exists (select 1 from payment_transactions where type = 'room_ticket_refund' and ticket_id = $5::varchar)`,
-        [t.provider, t.provider_ref, t.user_id, t.host_id, t.id, Number(t.amount_kobo), Number(t.platform_kobo), Number(t.host_kobo), iso(now)],
+        [t.provider, t.provider_ref, t.user_id, t.host_id, t.id, refundKoboOf(t), t.refund_reason === "buyer" ? 0 : Number(t.platform_kobo), Number(t.host_kobo), iso(now)],
       );
     }
     await c.query("COMMIT");
@@ -315,7 +322,7 @@ async function notifyRefund(c: PoolClient, t: TicketRow, stage: "pending" | "pro
     const key = refundNoticeKey(t.id, stage);
     const seen = await c.query(`select 1 from notifications where user_id = $1 and type = 'room_refund' and related_entity_id = $2 limit 1`, [t.user_id, key]);
     if (seen.rowCount) return;
-    const amount = Number(t.amount_kobo);
+    const amount = refundKoboOf(t);
     const auto = isAutoRefundReason(t.refund_reason);
     const reason = (REFUND_REASONS as readonly string[]).includes(t.refund_reason ?? "") ? (t.refund_reason as RefundReason) : "host_cancelled";
     const n = auto ? returnedPaymentNotice(amount, stage) : refundNotice(amount, t.room_title, reason, stage);

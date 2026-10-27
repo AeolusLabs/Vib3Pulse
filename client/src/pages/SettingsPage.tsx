@@ -21,7 +21,7 @@ const GROUPS = [
   { label: "Rooms and money", rows: [
     { href: "/settings/hosting", icon: MicIcon, title: "Hosting defaults", sub: "What every new room starts with" },
     { href: "/settings/spray", icon: SparklesIcon, title: "Spray limits and effects", sub: "Daily limit, saved card, quiet effects" },
-    { href: "/rooms/payouts", icon: CreditCardIcon, title: "Room payouts", sub: "Earnings and payout details" },
+    { href: "/rooms/payouts", icon: CreditCardIcon, title: "Get paid", sub: "ID, bank account and payouts for spray and tickets" },
   ] },
   { label: "Help", rows: [
     { href: "/privacy", icon: ShieldIcon, title: "Privacy policy", sub: "How we handle your data" },

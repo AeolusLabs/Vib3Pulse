@@ -15,6 +15,8 @@ interface Props {
   /** refundBeforeStart comes from the ticket block (the viewer's room object does not carry it); undefined leaves it to the server. */
   room: Pick<RoomView, "id" | "status" | "scheduledFor" | "refundBeforeStart">;
   priceKobo: number;
+  /** What they get back if they ask (from the server, exact). Absent: the dialog says the fees are kept without a figure. */
+  refundKobo?: number;
   /** The invite token (invite-only rooms): the refund route is gated on it like the room page. */
   token?: string;
   /** Clock seam for the fixture; defaults to Date.now(). */
@@ -23,7 +25,7 @@ interface Props {
   onRefunded(message: string): void;
 }
 
-export default function RefundButton({ room, priceKobo, token, now, onRefunded }: Props) {
+export default function RefundButton({ room, priceKobo, refundKobo, token, now, onRefunded }: Props) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
@@ -59,7 +61,7 @@ export default function RefundButton({ room, priceKobo, token, now, onRefunded }
         <AlertDialogContent onCloseAutoFocus={(e) => { e.preventDefault(); triggerRef.current?.focus(); }}>
           <AlertDialogHeader>
             <AlertDialogTitle>{REFUND_COPY.confirmTitle}</AlertDialogTitle>
-            <AlertDialogDescription>{REFUND_COPY.confirmBody(formatNaira(priceKobo))}</AlertDialogDescription>
+            <AlertDialogDescription>{REFUND_COPY.confirmBody(formatNaira(priceKobo), refundKobo === undefined ? undefined : formatNaira(refundKobo))}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel className="min-h-[44px]" disabled={busy}>{REFUND_COPY.confirmNo}</AlertDialogCancel>

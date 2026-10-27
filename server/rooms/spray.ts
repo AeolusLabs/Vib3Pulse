@@ -122,7 +122,7 @@ export const shownReason = (r: string | null | undefined): string | undefined =>
 /** Plain words for the payer-only chat line after a reversal (no em dashes, no "cash"). */
 // Delivery problems no longer reverse a spray (the charge goes through); only the integrity guards do, with the default words.
 export const REVERSAL_TEXT: Record<string, string> = {};
-export const REVERSAL_DEFAULT = "Your spray could not be delivered, so you were refunded in full.";
+export const REVERSAL_DEFAULT = "This payment didn't pass our checks, so it was returned to you in full.";
 
 // ---------------------------------------------------------------- the gate (rule B1)
 export interface SprayFacts {

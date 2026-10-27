@@ -11,6 +11,8 @@ import {
   REFUND_OVERDUE_MS, REFUND_RETRY_FOR_MS,
 } from "../shared/roomRefunds";
 import { ticketBreakdown } from "../shared/money";
+import { readFileSync } from "node:fs";
+import { REFUND_FEES_NOTE, buyerRefundKobo } from "../shared/roomRefunds";
 // Pure helpers of the Paystack layer (nothing here calls fetch).
 import { isPaystackOutage, isTransferNotFoundAnswer, matchSettlementBank, normaliseBankName, refundStateFrom } from "../server/payments/paystack";
 
@@ -170,11 +172,26 @@ test("timing constants: overdue alert 24 h, rejection retry cap 24 h, refused ch
 test("refund notice: 'on its way' while pending, 'refunded' only when processed", () => {
   const pending = refundNotice(500000, "Friday vibes", "buyer", "pending");
   assert.equal(pending.title, "Refund on its way");
-  assert.match(pending.message, /^Your refund of ₦5,000 for "Friday vibes" is on its way\. You asked for this refund\./);
+  assert.match(pending.message, /^Your refund of ₦5,000 for "Friday vibes" is on its way\. You asked for this refund, so the service charge and platform fee were not returned\./);
   assert.ok(!/refunded/i.test(pending.message), pending.message);
   const done = refundNotice(500000, "Friday vibes", "buyer", "processed");
   assert.equal(done.title, "Ticket refunded");
   assert.deepEqual(refundNotice(500000, "Friday vibes", "buyer"), done); // default stays "processed" (older callers)
+});
+
+test("a refund the buyer asks for returns the price less the service charge and platform fee; every other reason is the full price", () => {
+  // A 5,000 naira ticket at the default rates: VAT 348.84, card fee 75, reserve 50, platform 15% of what is left.
+  const t = { amountKobo: 500000, feeKobo: 7500, platformKobo: 62600 };
+  assert.equal(buyerRefundKobo(t), 500000 - 7500 - 62600);
+  assert.equal(buyerRefundKobo({ amountKobo: 10000, feeKobo: 9000, platformKobo: 5000 }), 0, "never below zero");
+  const src = (f: string) => readFileSync(f, "utf8");
+  const refunds = src("server/rooms/refunds.ts");
+  assert.match(refunds, /refund_reason === "buyer" \? buyerRefundKobo\(/);
+  assert.match(refunds, /back < Number\(t\.amount_kobo\) \? \{ amountKobo: back \}/);
+  assert.match(refunds, /refundKoboOf\(t\), t\.refund_reason === "buyer" \? 0 : Number\(t\.platform_kobo\)/);
+  assert.match(src("server/payments/paystack.ts"), /\.\.\.\(opts\.amountKobo \? \{ amount: opts\.amountKobo \} : \{\}\)/);
+  assert.match(src("server/rooms/ticketMoneyRoutes.ts"), /NOTHING_LEFT/);
+  assert.ok(REFUND_FEES_NOTE.includes("Paystack does not refund its service charge and neither do we"));
 });
 
 test("returned payment (refused charge): never mentions the host or a cancellation", () => {

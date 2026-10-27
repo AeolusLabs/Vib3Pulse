@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import HostAvatar from "@/components/rooms/HostAvatar";
 import { requestQueue, type RequestItem } from "@/lib/hostControls";
@@ -109,5 +111,19 @@ export function ViewerAskCard({ hasHand, spot, onStage, onCancel }: ViewerProps)
       </p>
       <Button variant="outline" className="min-h-[48px] rounded-full px-5" onClick={() => { cancelled.current = true; onCancel(); }} data-testid="stage-cancel">Cancel</Button>
     </div>
+  );
+}
+
+/**
+ * For someone on stage (or a co-host) in a room with spray on: sprays only reach people with a bank account that passed the name check, and a
+ * person who has not set one up is simply not offered to the room. Nothing else tells them, so say it once, with the way to fix it.
+ */
+export function StagePayoutHint() {
+  const { data } = useQuery<{ verifiedAdult: boolean; subaccountReady: boolean }>({ queryKey: ["/api/rooms/payouts/status"], staleTime: 60_000 });
+  if (!data || data.subaccountReady) return null;
+  return (
+    <p role="status" className="rounded-xl border bg-muted px-3 py-2 text-sm" data-testid="stage-payout-hint">
+      People can't spray you yet. <Link href="/rooms/payouts" className="font-medium text-primary underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Finish Get paid</Link> so your share reaches your bank.
+    </p>
   );
 }

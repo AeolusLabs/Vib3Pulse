@@ -14,6 +14,7 @@ interface Props {
   /** The invite token (invite-only rooms), passed on to the refund call. */
   token?: string;
   priceKobo: number;
+  refundKobo?: number;
   /** Ask the page to load the room again (start time reached). */
   onRecheck(): void;
   onRefunded(message: string): void;
@@ -21,7 +22,7 @@ interface Props {
   nowFn?: () => number;
 }
 
-export default function WaitingRoom({ room, hostName, token, priceKobo, onRecheck, onRefunded, nowFn = Date.now }: Props) {
+export default function WaitingRoom({ room, hostName, token, priceKobo, refundKobo, onRecheck, onRefunded, nowFn = Date.now }: Props) {
   const [now, setNow] = useState(nowFn);
   const start = room.scheduledFor ? Date.parse(room.scheduledFor) : NaN;
   const left = Number.isNaN(start) ? null : start - now;
@@ -48,7 +49,7 @@ export default function WaitingRoom({ room, hostName, token, priceKobo, onRechec
         <p className="font-serif text-6xl font-bold tabular-nums" data-testid="ticket-countdown" aria-live="off">{waitingClock(left)}</p>
       )}
       <p className="text-sm text-muted-foreground" data-testid="ticket-waiting-line">{line}</p>
-      <div className="flex justify-center"><RefundButton room={room} priceKobo={priceKobo} token={token} now={now} onRefunded={onRefunded} /></div>
+      <div className="flex justify-center"><RefundButton room={room} priceKobo={priceKobo} refundKobo={refundKobo} token={token} now={now} onRefunded={onRefunded} /></div>
     </section>
   );
 }

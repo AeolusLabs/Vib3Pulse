@@ -4,7 +4,8 @@ import type { Express, Request, Response } from "express";
 import crypto from "crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
-import { storage, db } from "../storage";
+import { storage, db, pool } from "../storage";
+import { buyerRefundKobo } from "@shared/roomRefunds";
 import { requireAuth } from "../middleware";
 import { roomLimiter } from "../security";
 import { toPublicUser, userToSessionUser } from "../auth";
@@ -129,7 +130,7 @@ async function sprayCheck(host: User, room: { ageLimit: string; minorsRoom: bool
 /** The ticket block of GET /api/rooms/:id (eligible viewers only). Counts and the refund promise only for a ticketed room. */
 type TicketBlock = {
   required: boolean; priceKobo: number; held: boolean; soldOut: boolean;
-  refundBeforeStart?: boolean; capacity?: number; left?: number;
+  refundBeforeStart?: boolean; capacity?: number; left?: number; refundKobo?: number;
 };
 
 /** For the host of a ticketed room only: are sales paused, and why. Never sent to anyone else. */
@@ -398,10 +399,13 @@ export function registerRoomRoutes(app: Express): void {
         const exempt = self || (!!member && member.role === "cohost");
         if (ticketed) {
           const [held, sold] = await Promise.all([hasPaidTicket(room.id, req.user!.id), countPaidTickets(room.id)]);
+          // What they would get back if they ask for a refund (exact, from their ticket): the price less the service charge and platform fee.
+          const mine = held ? (await pool.query(`select amount_kobo, fee_kobo, platform_kobo from room_tickets where room_id = $1 and user_id = $2 and status = 'paid' limit 1`, [room.id, req.user!.id])).rows[0] as { amount_kobo: number; fee_kobo: number; platform_kobo: number } | undefined : undefined;
           const capacity = roomCapacity(room);
           ticket = {
             required: !exempt, priceKobo: room.ticketPriceKobo ?? 0, held, soldOut: sold >= capacity,
             refundBeforeStart: room.refundBeforeStart !== false, capacity, left: Math.max(0, capacity - sold),
+            ...(mine ? { refundKobo: buyerRefundKobo({ amountKobo: Number(mine.amount_kobo), feeKobo: Number(mine.fee_kobo), platformKobo: Number(mine.platform_kobo) }) } : {}),
           };
         } else {
           ticket = { required: false, priceKobo: 0, held: false, soldOut: false };

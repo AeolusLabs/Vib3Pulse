@@ -19,13 +19,14 @@ import { StatTile, pctChange } from "@/components/admin/charts/StatTile";
 import { COLOR_MONEY, COLOR_USAGE, SERIES, compactCount, compactNaira, daysBetween, naira } from "@/components/admin/charts/tokens";
 import RoomRatesTab from "./RoomRatesTab";
 import SprayTransactionsTab from "./SprayTransactionsTab";
+import SprayHostsTab from "./SprayHostsTab";
 import { BLOCK_CONFIRM, RESUME_DISABLED_REASON, appliedText, canBlock, canEndRoom, canResume, canSeeLive, canSeeTransactions } from "@/lib/adminSprayUi";
 
 // Rooms admin (rooms admin plan, task 6). One screen for what an admin needs when something looks wrong: who is live right now,
 // where the money went, and the switches that stop new money. A pause or freeze stops NEW money only; money already settled to a
 // bank cannot be recalled from here. Every action asks for a reason and is audit-logged by the server.
 
-type Tab = "live" | "reported" | "money" | "transactions" | "rates" | "controls";
+type Tab = "live" | "reported" | "money" | "transactions" | "hosts" | "rates" | "controls";
 type Me = { role: string };
 type LiveRoom = { id: string; title: string; hostId: string; hostUsername: string; ageLimit: string; members: number; startedAt: string | null; ticketed: boolean; hostFrozen: boolean };
 type ReportedRoom = { roomId: string; title: string; status: string; ageLimit: string; hostId: string; host: { username?: string; displayName?: string } | null; reports: { id: string; reason: string; description?: string | null }[] };
@@ -689,6 +690,7 @@ export default function AdminRooms() {
     canMod && { id: "reported" as const, label: "Reported" },
     canMoney && { id: "money" as const, label: "Money" },
     canSeeTransactions(role) && { id: "transactions" as const, label: "Transactions" },
+    canMoney && { id: "hosts" as const, label: "Spray hosts" },
     canMoney && { id: "rates" as const, label: "Rates" },
     canMoney && { id: "controls" as const, label: "Controls" },
   ].filter(Boolean)) as { id: Tab; label: string }[];
@@ -732,6 +734,7 @@ export default function AdminRooms() {
               {tab === "reported" && <ReportedTab />}
               {tab === "money" && <MoneyTab />}
               {tab === "transactions" && <SprayTransactionsTab />}
+              {tab === "hosts" && <SprayHostsTab />}
               {tab === "rates" && <RoomRatesTab isSuper={role === "super_admin"} />}
               {tab === "controls" && <ControlsTab isSuper={role === "super_admin"} />}
             </div>

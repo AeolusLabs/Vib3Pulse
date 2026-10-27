@@ -12,7 +12,7 @@ import * as rs from "./roomStorage";
 import { canViewRoom, viewerRoom } from "./roomAccess";
 import { TokenBucket } from "./rateLimit";
 import { MoneyLockBusy, moneyClock, refundAllForRoom, refundTicketDetailed } from "./refunds";
-import { isAdminHold } from "@shared/roomRefunds";
+import { buyerRefundKobo, isAdminHold } from "@shared/roomRefunds";
 
 const REFUSAL_MESSAGES: Record<string, string> = {
   ROOM_NOT_SCHEDULED: "This room has already started, so the ticket can't be refunded.",
@@ -54,14 +54,17 @@ export function registerRoomMoneyRoutes(app: Express): void {
       // A refused charge (lane S2 row, refund_reason auto_*) is NOT a ticket: it answers NO_TICKET, unless its money is still
       // owed (refunded_at NULL), in which case this call only finishes the provider step (refundTicketDetailed -> "already").
       const t = (await pool.query(
-        `select t.id from room_tickets t
+        `select t.id, t.amount_kobo, t.fee_kobo, t.platform_kobo from room_tickets t
           where t.room_id = $1 and t.user_id = $2
             and (coalesce(left(t.refund_reason, 5), '') <> 'auto_' or t.refunded_at is null)
           order by (t.status = 'paid') desc, (coalesce(left(t.refund_reason, 5), '') = 'auto_') asc, t.created_at desc
           limit 1`,
         [room.id, req.user!.id],
-      )).rows[0] as { id: string } | undefined;
+      )).rows[0] as { id: string; amount_kobo: number; fee_kobo: number; platform_kobo: number } | undefined;
       if (!t) return res.status(404).json({ result: "not_allowed", code: "NO_TICKET", message: REFUSAL_MESSAGES.NOT_FOUND });
+      if (buyerRefundKobo({ amountKobo: Number(t.amount_kobo), feeKobo: Number(t.fee_kobo), platformKobo: Number(t.platform_kobo) }) <= 0) {
+        return res.status(409).json({ result: "not_allowed", code: "NOTHING_LEFT", message: "Nothing would be left to refund after the service charge and platform fee." });
+      }
       const o = await refundTicketDetailed(t.id, "buyer");
       if (o.result === "not_allowed") {
         const code = o.code ?? "BAD_STATE";

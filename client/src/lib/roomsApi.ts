@@ -71,6 +71,8 @@ export interface RoomTicketBlock {
   left?: number; capacity?: number;
   /** Optional: the host's refund promise. The viewer's room object does not carry it, so the block does. */
   refundBeforeStart?: boolean;
+  /** Only when they hold a paid ticket: what they get back if they ask for a refund (the price less the service charge and platform fee). */
+  refundKobo?: number;
 }
 
 /** A buyer's ticket as the verify route returns it (lane S2). `code` is a short code derived from the ticket id. */

@@ -21,7 +21,7 @@ import RoomFrame from "@/components/rooms/shell/RoomFrame";
 import RoomTopBar from "@/components/rooms/shell/RoomTopBar";
 import RoomDock from "@/components/rooms/shell/RoomDock";
 import PeopleSheet from "@/components/rooms/shell/PeopleSheet";
-import { HostRequestCard, ViewerAskCard } from "@/components/rooms/shell/StageRequests";
+import { HostRequestCard, StagePayoutHint, ViewerAskCard } from "@/components/rooms/shell/StageRequests";
 import { readSettings } from "@/lib/hostControls";
 import QuickControlsSheet from "@/components/rooms/shell/QuickControlsSheet";
 import RoomMoreSheet, { RoomReportSheet, RoomSafetySheet } from "@/components/rooms/shell/RoomMoreSheet";
@@ -397,6 +397,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
           <p role="status" className="rounded-xl border bg-muted px-3 py-2 text-sm text-muted-foreground" data-testid="banner-details-error">Couldn't refresh the room details. You're still in the room.</p>
         )}
         {/* The dock owns the mic otherwise; this only shows while audio needs a tap, is connecting, failed, or the mic errored. */}
+        {role !== "host" && onStageNow && !listenOnly && sprayFlags(state.room).sprayOn === true && <StagePayoutHint />}
         {voiceNeedsAttention && <VoiceBar voice={voice} hasHand={!!meId && state.hands.includes(meId)} canAskToSpeak={role === "guest" && !listenOnly} onRaise={() => sock.stageAction("raise")} onLower={() => sock.stageAction("lower")} />}
       </div>
       {LINK_SCREENS && (

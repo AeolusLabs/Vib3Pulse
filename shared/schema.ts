@@ -1843,7 +1843,7 @@ export const notificationTypes = [
   "room_live",
   "room_starting",
   "room_refund", // paid room ticket refunded (phase 4, server/rooms/refunds.ts)
-  "spray_reversed", // a paid spray could not be delivered and was refunded in full (phase 5, server/rooms/spray.ts)
+  "spray_reversed", // a paid spray failed one of our checks and was returned in full (phase 5, server/rooms/spray.ts)
   // Phase 6 (server/rooms/notify.ts, copy in shared/roomNotifications.ts):
   "room_ticket", // a paid room ticket was issued to the buyer
   "spray_received", // sprays delivered to a host or stage guest, ONE per (recipient, room) batch; never names the payer

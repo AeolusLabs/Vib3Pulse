@@ -372,10 +372,10 @@ test("refund window follows shared buyerRefundCheck: open until 1 hour before, o
   assert.ok(lib.includes('from "@shared/roomRefunds"') && lib.includes("buyerRefundCheck("), "the shared rule, not a copy");
 });
 test("refund promise: the 1 hour line only when the host offered it on a scheduled room; the automatic refund always", () => {
-  assert.equal(refundPromise({ scheduledFor: "2026-10-20T20:00:00Z", refundBeforeStart: true }), "Full refund up to 1 hour before. If the room does not start, you are refunded automatically.");
-  assert.equal(refundPromise({ scheduledFor: "2026-10-20T20:00:00Z", refundBeforeStart: false }), "If the room does not start, you are refunded automatically.");
-  assert.equal(refundPromise({ scheduledFor: "2026-10-20T20:00:00Z" }), "If the room does not start, you are refunded automatically.");
-  assert.equal(refundPromise({ scheduledFor: null, refundBeforeStart: true }), "If the room does not start, you are refunded automatically.");
+  assert.equal(refundPromise({ scheduledFor: "2026-10-20T20:00:00Z", refundBeforeStart: true }), "Refund up to 1 hour before, less the service charge and platform fee. If the room does not start, you are refunded in full.");
+  assert.equal(refundPromise({ scheduledFor: "2026-10-20T20:00:00Z", refundBeforeStart: false }), "If the room does not start, you are refunded in full.");
+  assert.equal(refundPromise({ scheduledFor: "2026-10-20T20:00:00Z" }), "If the room does not start, you are refunded in full.");
+  assert.equal(refundPromise({ scheduledFor: null, refundBeforeStart: true }), "If the room does not start, you are refunded in full.");
   const page = src("../client/src/components/rooms/tickets/TicketPage.tsx");
   assert.ok(page.includes("ticket.refundBeforeStart ?? room.refundBeforeStart"), "I3: from the ticket block");
 });

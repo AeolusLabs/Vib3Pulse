@@ -253,15 +253,15 @@ export async function cancelPaystackSocialSubscriptions(customerCode: string): P
   return cancelled;
 }
 
-export async function refundPaystackPayment(reference: string, opts: { merchantNote?: string } = {}): Promise<void> {
-  // Omitting `amount` triggers a full refund of the original transaction amount.
+export async function refundPaystackPayment(reference: string, opts: { merchantNote?: string; amountKobo?: number } = {}): Promise<void> {
+  // Omitting `amount` triggers a full refund of the original transaction amount; `amountKobo` refunds only that part (the buyer-asked rule).
   // merchant_note carries our own deterministic refund reference (Paystack's refund API has no idempotency key), so a
   // later lookup can tell whether this exact refund was already created.
   // paystackCall: an HTTP 5xx (even with a JSON body) or no answer throws "Paystack unavailable" (an outage: the room
   // refund code retries after a lookup); a 4xx / status:false answer throws "Paystack error: ..." as before.
   await paystackCall<unknown>("/refund", {
     method: "POST",
-    body: JSON.stringify({ transaction: reference, ...(opts.merchantNote ? { merchant_note: opts.merchantNote } : {}) }),
+    body: JSON.stringify({ transaction: reference, ...(opts.amountKobo ? { amount: opts.amountKobo } : {}), ...(opts.merchantNote ? { merchant_note: opts.merchantNote } : {}) }),
   });
 }
 

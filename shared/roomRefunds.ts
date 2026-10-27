@@ -157,8 +157,20 @@ export function nairaText(kobo: number): string {
   return `₦${whole.toLocaleString("en-NG")}${rest ? `.${String(rest).padStart(2, "0")}` : ""}`;
 }
 
+/**
+ * What a buyer gets back when THEY ask for a refund: the price minus the card service charge (the provider never returns it) and our
+ * platform fee (we do not return it either). VAT and the chargeback reserve go back. Refunds that are not the buyer's choice (the host
+ * cancelled, the room never started, it was oversold) are always the full price. Never below zero.
+ */
+export function buyerRefundKobo(t: { amountKobo: number; feeKobo: number; platformKobo: number }): number {
+  return Math.max(0, t.amountKobo - t.feeKobo - t.platformKobo);
+}
+
+/** The sentence every place a buyer can ask for a refund uses. */
+export const REFUND_FEES_NOTE = "Paystack does not refund its service charge and neither do we, so you get back what is left after the service charge and our platform fee.";
+
 const REASON_LINE: Record<RefundReason, string> = {
-  buyer: "You asked for this refund.",
+  buyer: "You asked for this refund, so the service charge and platform fee were not returned.",
   host_cancelled: "The host cancelled the room.",
   never_started: "The room did not start.",
   oversold: "The room was already full.",
@@ -178,7 +190,7 @@ export function refundNotice(amountKobo: number, roomTitle: string, reason: Refu
   }
   return {
     title: "Ticket refunded",
-    message: `Your ${nairaText(amountKobo)} ticket for "${roomTitle}" was refunded. ${REASON_LINE[reason]} It can take a few working days to reach your account.`,
+    message: `${reason === "buyer" ? `Your refund of ${nairaText(amountKobo)} for "${roomTitle}" was sent.` : `Your ${nairaText(amountKobo)} ticket for "${roomTitle}" was refunded.`} ${REASON_LINE[reason]} It can take a few working days to reach your account.`,
   };
 }
 
