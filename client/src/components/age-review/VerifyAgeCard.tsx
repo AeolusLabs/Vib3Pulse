@@ -136,9 +136,9 @@ export default function VerifyAgeCard() {
               {mode === "none" && <p className="text-sm font-medium" aria-live="polite">{COPY.verifyNameAction}</p>}
               {wantsPayouts && (
                 <div className="space-y-1">
-                  <Label htmlFor="age-legal-name">Your full name, exactly as on your ID</Label>
+                  <Label htmlFor="age-legal-name">Your full name (must match your ID)</Label>
                   <Input id="age-legal-name" value={legalName} onChange={(e) => setLegalName(e.target.value)} autoComplete="name" className="h-11" aria-describedby="age-legal-name-help" data-testid="age-legal-name" />
-                  <p id="age-legal-name-help" className={`text-xs ${legalNameProblem(legalName) ? "text-destructive" : "text-muted-foreground"}`}>{legalNameProblem(legalName) ?? "A reviewer checks it against your ID. It is used only to check your bank account holder's name."}</p>
+                  <p id="age-legal-name-help" className={`text-xs ${legalNameProblem(legalName) ? "text-destructive" : "text-muted-foreground"}`}>{legalNameProblem(legalName) ?? "Type it exactly as it is written on your ID. It must match your ID or we cannot verify you. One check covers your age and your name for payouts."}</p>
                 </div>
               )}
               <button

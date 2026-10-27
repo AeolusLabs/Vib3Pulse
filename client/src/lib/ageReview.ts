@@ -66,7 +66,7 @@ export const COPY = {
   choiceLive: "Private live check with a reviewer",
   choiceLiveHint: "Nothing is recorded or saved.",
   wantsPayoutsLabel: "I also want to receive money (tips and ticket sales)",
-  wantsPayoutsHelp: "We will also note the name on your ID to check your bank account later.",
+  wantsPayoutsHelp: "You will type your name, which must match your ID. One check covers your age and your name for payouts.",
   verifyNameAction: "Verify your name for payouts",
   verifyNameHelp: "Only needed if you want to receive money. A reviewer notes the name on your ID.",
   recheckLink: "Redo my payouts check",

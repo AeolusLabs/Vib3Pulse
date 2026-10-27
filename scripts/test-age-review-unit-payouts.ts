@@ -45,7 +45,7 @@ test("wantsPayouts sent only when ticked", async () => {
   assert.match(card, /wantsPayouts=\{wantsPayouts\}/);
   assert.match(read("client/src/components/age-review/UploadFlow.tsx"), /consentVersion, wantsPayouts, legalName \}/);
   assert.equal(COPY.wantsPayoutsLabel, "I also want to receive money (tips and ticket sales)");
-  assert.equal(COPY.wantsPayoutsHelp, "We will also note the name on your ID to check your bank account later.");
+  assert.equal(COPY.wantsPayoutsHelp, "You will type your name, which must match your ID. One check covers your age and your name for payouts.");
 });
 
 test("payouts variant copy contains the name sentence and the plain variant does not", () => {
