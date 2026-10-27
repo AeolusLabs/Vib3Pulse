@@ -31,7 +31,7 @@ export interface QueueItem {
   wantsPayouts?: boolean;
 }
 export interface Detail {
-  request: QueueItem & { registeredDob: string; proposedDob?: string | null; code: string | null; codeExpiresAt: string | null; moreRequests: number; consentRecorded: boolean; liveInviteExpiresAt: string | null };
+  request: QueueItem & { registeredDob: string; proposedDob?: string | null; claimedName?: string | null; code: string | null; codeExpiresAt: string | null; moreRequests: number; consentRecorded: boolean; liveInviteExpiresAt: string | null };
   evidence: { id: string; kind: "document" | "selfie"; mime: string; bytes: number }[];
   checklist: string[];
   canDecide: boolean;

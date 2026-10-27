@@ -14,9 +14,9 @@ import {
 
 const FIELD = "min-h-[44px] border-slate-600 bg-slate-700/50 text-white";
 
-interface Props { requestId: string; role: string; registeredDob: string; method: "upload" | "live"; documentType: string | null; wantsPayouts?: boolean; onDone: () => void }
+interface Props { requestId: string; role: string; registeredDob: string; method: "upload" | "live"; documentType: string | null; wantsPayouts?: boolean; claimedName?: string | null; onDone: () => void }
 
-export default function DecisionForm({ requestId, role, registeredDob, method, documentType, wantsPayouts = false, onDone }: Props) {
+export default function DecisionForm({ requestId, role, registeredDob, method, documentType, wantsPayouts = false, claimedName = null, onDone }: Props) {
   const [f, setF] = useState<Form>({ outcome: null, checklist: emptyChecklist(), idBirthdate: "", documentNumber: "", documentType: documentType ?? "", legalName: "", declineReason: "", note: "", overrideReason: "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,12 +24,12 @@ export default function DecisionForm({ requestId, role, registeredDob, method, d
   const [confirm, setConfirm] = useState(false);
   const set = (p: Partial<Form>) => setF((x) => ({ ...x, ...p }));
   const overrideAllowed = canOverrideDuplicate(role);
-  const ready = decisionReady(f, method, wantsPayouts) && (!needsOverride || !overrideAllowed || f.overrideReason.trim().length >= 3);
+  const ready = decisionReady(f, method, wantsPayouts, claimedName) && (!needsOverride || !overrideAllowed || f.overrideReason.trim().length >= 3);
 
   const send = async () => {
     setBusy(true); setError(null); setConfirm(false);
     try {
-      await decide(requestId, decisionBody(f, { overrideAllowed: needsOverride && overrideAllowed, wantsPayouts, method }) as Parameters<typeof decide>[1]);
+      await decide(requestId, decisionBody(f, { overrideAllowed: needsOverride && overrideAllowed, wantsPayouts, method, claimedName }) as Parameters<typeof decide>[1]);
       onDone();
     } catch (e) {
       if (e instanceof ReviewApiError && e.code === "DUPLICATE_DOCUMENT") setNeedsOverride(true);
@@ -54,7 +54,7 @@ export default function DecisionForm({ requestId, role, registeredDob, method, d
     <form onSubmit={submit} className="space-y-5" aria-labelledby="decision-title" data-testid="decision-form">
       <h3 id="decision-title" className="text-base font-semibold text-white">Decision</h3>
 
-      <fieldset className="space-y-2">
+      {f.outcome === "birthdate_change" && <fieldset className="space-y-2">
         <legend className="mb-1 text-sm font-medium text-slate-300">Checks</legend>
         {requiredChecks(method).map((k) => (
           <label key={k} className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-lg border border-slate-700 px-3 text-sm text-slate-200">
@@ -62,7 +62,7 @@ export default function DecisionForm({ requestId, role, registeredDob, method, d
             {CHECKLIST_LABEL[k]}
           </label>
         ))}
-      </fieldset>
+      </fieldset>}
 
       <fieldset className="space-y-2">
         <legend className="mb-1 text-sm font-medium text-slate-300">Outcome</legend>
@@ -78,7 +78,15 @@ export default function DecisionForm({ requestId, role, registeredDob, method, d
         {f.outcome && <p className="text-sm text-slate-400" aria-live="polite">{OUTCOME_HELP[f.outcome]}</p>}
       </fieldset>
 
-      {(f.outcome === "verify" || f.outcome === "teen_correction" || f.outcome === "birthdate_change") && (
+      {f.outcome === "verify" && (
+        <dl className="grid gap-1 rounded-lg border border-slate-700 p-3 text-sm" data-testid="verify-compare">
+          <div className="flex justify-between gap-3"><dt className="text-slate-400">Registered birthdate</dt><dd className="tabular-nums text-white">{registeredDob || "not on file"}</dd></div>
+          {wantsPayouts && claimedName && <div className="flex justify-between gap-3"><dt className="text-slate-400">Name they gave</dt><dd className="text-white" data-testid="claimed-name">{claimedName}</dd></div>}
+          <p className="text-xs text-slate-400">Verify if the ID shows this birthdate{wantsPayouts && claimedName ? " and this name" : ""} and the face matches. Otherwise decline.</p>
+        </dl>
+      )}
+
+      {(f.outcome === "teen_correction" || f.outcome === "birthdate_change") && (
         <div className="space-y-2">
           <Label htmlFor="id-birthdate" className="text-slate-300">ID birthdate</Label>
           <Input id="id-birthdate" type="date" value={f.idBirthdate} onChange={(e) => set({ idBirthdate: e.target.value })} className={`${FIELD} max-w-[12rem] tabular-nums`} data-testid="input-id-birthdate" />
@@ -108,7 +116,7 @@ export default function DecisionForm({ requestId, role, registeredDob, method, d
         </div>
       )}
 
-      {wantsPayouts && isIdOutcome(f.outcome) && (
+      {wantsPayouts && isIdOutcome(f.outcome) && !(f.outcome === "verify" && claimedName) && (
         <div className="space-y-2">
           <Label htmlFor="legal-name" className="text-slate-300">Full name on the document</Label>
           <Input

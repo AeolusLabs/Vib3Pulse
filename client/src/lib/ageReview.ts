@@ -292,19 +292,20 @@ export const cancelOffered = (me: Pick<AgeReviewMe, "request">): boolean => !!op
 /** A live check has nothing to upload, so it is submitted right after it is created. */
 export async function startLiveRequest(
   deps: {
-    create(v: { method: "live"; consentVersion: string; wantsPayouts?: boolean }): Promise<{ request: { id: string } }>;
+    create(v: { method: "live"; consentVersion: string; wantsPayouts?: boolean; legalName?: string }): Promise<{ request: { id: string } }>;
     submit(id: string): Promise<unknown>;
   },
   consentVersion: string,
   wantsPayouts = false,
+  legalName = "",
 ): Promise<void> {
-  const { request } = await deps.create({ method: "live", consentVersion, ...(wantsPayouts ? { wantsPayouts: true } : {}) });
+  const { request } = await deps.create({ method: "live", consentVersion, ...(wantsPayouts ? { wantsPayouts: true, legalName } : {}) });
   await deps.submit(request.id);
 }
 
 /** The body of POST /api/age-review/requests. `wantsPayouts` is sent only when the box was ticked (or the payouts action was used). */
-export function createBody(v: { method: AgeReviewMethod; documentType?: string; consentVersion: string; wantsPayouts?: boolean }): Record<string, unknown> {
-  return { method: v.method, ...(v.documentType ? { documentType: v.documentType } : {}), consentVersion: v.consentVersion, ...(v.wantsPayouts === true ? { wantsPayouts: true } : {}) };
+export function createBody(v: { method: AgeReviewMethod; documentType?: string; consentVersion: string; wantsPayouts?: boolean; legalName?: string }): Record<string, unknown> {
+  return { method: v.method, ...(v.documentType ? { documentType: v.documentType } : {}), consentVersion: v.consentVersion, ...(v.wantsPayouts === true ? { wantsPayouts: true, ...(v.legalName ? { legalName: v.legalName } : {}) } : {}) };
 }
 
 /** A decline cooldown that has not ended yet. */

@@ -47,7 +47,7 @@ export function useAgeReview() {
     isLoading: me.isLoading,
     refresh,
     create: useMutation({
-      mutationFn: (v: { method: AgeReviewMethod; documentType?: string; consentVersion: string; wantsPayouts?: boolean }) => call<{ request: AgeReviewRequest }>("POST", "/api/age-review/requests", createBody(v)),
+      mutationFn: (v: { method: AgeReviewMethod; documentType?: string; consentVersion: string; wantsPayouts?: boolean; legalName?: string }) => call<{ request: AgeReviewRequest }>("POST", "/api/age-review/requests", createBody(v)),
       ...withRefresh,
     }),
     // A plain function, not a mutation: TanStack would keep the base64 image in its mutation cache.

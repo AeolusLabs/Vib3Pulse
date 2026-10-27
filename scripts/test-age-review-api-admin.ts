@@ -93,21 +93,18 @@ check("queue oldest first, keyset cursor, no registered birthdate", q1.json.item
 const det = await http("GET", `/api/admin/age-reviews/${r1}`, rev);
 check("detail: opening moves submitted to in_review, lists evidence without bytes", det.json.request.status === "in_review" && det.json.evidence.length === 2 && !JSON.stringify(det.json).match(/bytes_enc|bytesEnc|cG5n/) && det.json.request.registeredDob === dob && det.json.canDecide === true);
 
-check("verify needs a full checklist", (await http("POST", `/api/admin/age-reviews/${r1}/decide`, rev, { outcome: "verify", checklist: { ...full, noEditing: false }, idBirthdate: dob, documentNumber: "P1234567" })).json?.code === "CHECKLIST_INCOMPLETE");
-check("verify refuses a birthdate mismatch", (await http("POST", `/api/admin/age-reviews/${r1}/decide`, rev, { outcome: "verify", checklist: full, idBirthdate: yearsAgo(31), documentNumber: "P1234567" })).json?.code === "BIRTHDATE_MISMATCH");
-const ok = await http("POST", `/api/admin/age-reviews/${r1}/decide`, rev, { outcome: "verify", checklist: full, idBirthdate: dob, documentNumber: "P1234567" });
+check("a different-birthdate case still needs a full checklist", (await http("POST", `/api/admin/age-reviews/${r1}/decide`, rev, { outcome: "birthdate_change", checklist: { ...full, noEditing: false }, idBirthdate: yearsAgo(33), documentNumber: "P1234567" })).json?.code === "CHECKLIST_INCOMPLETE");
+check("verify refuses a birthdate mismatch", (await http("POST", `/api/admin/age-reviews/${r1}/decide`, rev, { outcome: "verify", idBirthdate: yearsAgo(31) })).json?.code === "BIRTHDATE_MISMATCH");
+const ok = await http("POST", `/api/admin/age-reviews/${r1}/decide`, rev, { outcome: "verify" });
 const row1 = (await q(`select status, outcome, dob_match, document_fingerprint from age_review_requests where id = $1`, [r1]))[0];
 const user1 = (await q(`select age_verified_at, age_verified_method from users where id = $1`, [u1]))[0];
-check("verify approves, sets admin_upload, deletes evidence, stores only a fingerprint", ok.status === 200 && row1.status === "approved" && row1.dob_match === true && /^[0-9a-f]{64}$/.test(row1.document_fingerprint) && user1.age_verified_method === "admin_upload" && (await evCount(r1)) === 0);
+check("verify is one click: approves, sets admin_upload, deletes evidence, stores no document code", ok.status === 200 && row1.status === "approved" && row1.dob_match === true && row1.document_fingerprint === null && user1.age_verified_method === "admin_upload" && (await evCount(r1)) === 0);
 check("decisions audited without birthdates or numbers", (await q(`select details from admin_activity_logs where target_id = $1 and action = 'age_review.decide'`, [r1])).every((r: any) => !/P1234567|\d{4}-\d{2}-\d{2}/.test(r.details)));
 check("a decided request cannot be decided again", (await http("POST", `/api/admin/age-reviews/${r1}/decide`, rev, { outcome: "decline", declineReason: "other" })).json?.code === "WRONG_STATE");
 
 const u2 = await mkUser("arvu2", dob);
 const r2 = await mkReq(u2, dob);
-const dup = await http("POST", `/api/admin/age-reviews/${r2}/decide`, rev, { outcome: "verify", checklist: full, idBirthdate: dob, documentNumber: "p-1234 567" });
-check("same document on a second account is refused", dup.json?.code === "DUPLICATE_DOCUMENT");
-check("override needs super_admin", (await http("POST", `/api/admin/age-reviews/${r2}/decide`, rev, { outcome: "verify", checklist: full, idBirthdate: dob, documentNumber: "P1234567", overrideDuplicate: { reason: "same person, new account" } })).json?.code === "NOT_ALLOWED");
-check("super_admin override with a reason verifies", (await http("POST", `/api/admin/age-reviews/${r2}/decide`, sup1, { outcome: "verify", checklist: full, idBirthdate: dob, documentNumber: "P1234567", overrideDuplicate: { reason: "same person, new account" } })).status === 200);
+check("a second account verifies the same way (no document number to collide on)", (await http("POST", `/api/admin/age-reviews/${r2}/decide`, rev, { outcome: "verify" })).status === 200);
 
 const u3 = await mkUser("arvu3", dob);
 const r3 = await mkReq(u3, dob);

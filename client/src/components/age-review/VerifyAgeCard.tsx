@@ -4,6 +4,9 @@ import { Button } from "@/components/ui/button";
 import { CameraIcon, CheckCircleIcon, ClockIcon, Loader2Icon, ShieldCheckIcon, UploadIcon } from "@/components/ui/icons";
 import { useToast } from "@/hooks/use-toast";
 import { AgeReviewError, useAgeReview } from "@/hooks/useAgeReview";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { legalNameProblem, legalNameValid } from "@/lib/adminAgeReviewUi";
 import { COPY, cancelOffered, cardMode, cardView, errorMessage, payoutsAction, payoutsPreselected, startLiveRequest, type AgeReviewMethod, type CardTone } from "@/lib/ageReview";
 import PrivacyNotice from "./PrivacyNotice";
 import UploadFlow from "./UploadFlow";
@@ -29,6 +32,8 @@ export default function VerifyAgeCard() {
   // "Receive money" is a choice the person makes: the box starts off, unless the link they came from asked for payouts.
   const [wants, setWants] = useState(() => (typeof window !== "undefined" ? payoutsPreselected(window.location.search) : false));
   const [payoutChoices, setPayoutChoices] = useState(false);
+  // Someone who wants to be paid types their own name as it is on the ID; the reviewer only checks it against the ID.
+  const [legalName, setLegalName] = useState("");
   // The live region renders empty first and is filled a moment later, so a change is announced (text present on first paint is not).
   const [announce, setAnnounce] = useState("");
   const anchor = useRef<HTMLDivElement>(null);
@@ -78,7 +83,7 @@ export default function VerifyAgeCard() {
     if (notice.method === "upload") { setAccepted(me.consentVersion); setFlow("upload"); setNotice(null); return; }
     setStarting(true);
     try {
-      await startLiveRequest({ create: (v) => create.mutateAsync(v), submit: (id) => submit.mutateAsync(id) }, me.consentVersion, wantsPayouts);
+      await startLiveRequest({ create: (v) => create.mutateAsync(v), submit: (id) => submit.mutateAsync(id) }, me.consentVersion, wantsPayouts, legalName);
       setNotice(null);
       window.setTimeout(() => anchor.current?.focus(), 0); // the choice buttons are gone; keep focus inside the card
     } catch (e) { setNotice(null); fail(e); } finally { setStarting(false); }
@@ -102,7 +107,7 @@ export default function VerifyAgeCard() {
         <CardContent className="space-y-4">
           {flow === "upload" && (
             <UploadFlow
-              me={me} consentVersion={accepted} wantsPayouts={wantsPayouts}
+              me={me} consentVersion={accepted} wantsPayouts={wantsPayouts} legalName={legalName}
               onClose={() => { setFlow(null); setAccepted(null); }}
               onHowHandled={() => setNotice({ mode: "readonly", method: "upload" })}
             />
@@ -129,8 +134,15 @@ export default function VerifyAgeCard() {
                 </div>
               )}
               {mode === "none" && <p className="text-sm font-medium" aria-live="polite">{COPY.verifyNameAction}</p>}
+              {wantsPayouts && (
+                <div className="space-y-1">
+                  <Label htmlFor="age-legal-name">Your full name, exactly as on your ID</Label>
+                  <Input id="age-legal-name" value={legalName} onChange={(e) => setLegalName(e.target.value)} autoComplete="name" className="h-11" aria-describedby="age-legal-name-help" data-testid="age-legal-name" />
+                  <p id="age-legal-name-help" className={`text-xs ${legalNameProblem(legalName) ? "text-destructive" : "text-muted-foreground"}`}>{legalNameProblem(legalName) ?? "A reviewer checks it against your ID. It is used only to check your bank account holder's name."}</p>
+                </div>
+              )}
               <button
-                type="button" disabled={busy} onClick={(e) => choose("upload", e.currentTarget)}
+                type="button" disabled={busy || (wantsPayouts && !legalNameValid(legalName))} onClick={(e) => choose("upload", e.currentTarget)}
                 className={`flex min-h-[56px] items-center gap-3 rounded-2xl border border-border bg-muted/40 px-4 text-left transition-colors hover:border-primary/40 disabled:opacity-50 ${FOCUS}`}
                 data-testid="age-choose-upload"
               >
@@ -138,7 +150,7 @@ export default function VerifyAgeCard() {
                 <span className="min-w-0"><span className="block text-sm font-medium">{COPY.choiceUpload}</span><span className="block text-xs text-muted-foreground">{COPY.choiceUploadHint}</span></span>
               </button>
               <button
-                type="button" disabled={busy} onClick={(e) => choose("live", e.currentTarget)}
+                type="button" disabled={busy || (wantsPayouts && !legalNameValid(legalName))} onClick={(e) => choose("live", e.currentTarget)}
                 className={`flex min-h-[56px] items-center gap-3 rounded-2xl border border-border bg-muted/40 px-4 text-left transition-colors hover:border-primary/40 disabled:opacity-50 ${FOCUS}`}
                 data-testid="age-choose-live"
               >

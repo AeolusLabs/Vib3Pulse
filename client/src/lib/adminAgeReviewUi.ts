@@ -60,7 +60,9 @@ const ID_OUTCOMES: Outcome[] = ["verify", "birthdate_change"];
 /** verify and birthdate_change both fingerprint the document number, so they share the full checklist and the duplicate check. */
 export const isIdOutcome = (o: Outcome | null): boolean => o === "verify" || o === "birthdate_change";
 /** A live check has no uploaded document, so it asks for no document type or number (the reviewer sees the ID on camera). */
-export const needsDocumentNumber = (o: Outcome | null, method: ReviewMethod = "upload"): boolean => method !== "live" && isIdOutcome(o);
+/** Only a different-birthdate case is checked this fully; a plain verify is the ID birthdate and one click. */
+export const isFullReview = (o: Outcome | null): boolean => o === "birthdate_change";
+export const needsDocumentNumber = (o: Outcome | null, method: ReviewMethod = "upload"): boolean => method !== "live" && isFullReview(o);
 
 export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 export const isIsoDate = (s: string): boolean => {
@@ -106,12 +108,14 @@ export const legalNameValid = (raw: string): boolean => normaliseLegalName(raw) 
 export const LEGAL_NAME_HINT = "Letters, spaces, hyphens, apostrophes and dots, 3 to 120 characters";
 /** Shown under the field once something is typed and it is not usable yet. */
 export const legalNameProblem = (raw: string): string | null => (raw.trim() === "" || legalNameValid(raw) ? null : LEGAL_NAME_HINT);
-export function decisionReady(f: DecisionForm, method: ReviewMethod = "upload", wantsPayouts = false): boolean {
-  if (wantsPayouts && isIdOutcome(f.outcome) && !legalNameValid(f.legalName)) return false;
+/** A plain verify of someone who typed their own name: the reviewer only confirms it, so nothing is typed here. */
+export const nameGiven = (o: Outcome | null, claimedName?: string | null): boolean => o === "verify" && !!claimedName;
+export function decisionReady(f: DecisionForm, method: ReviewMethod = "upload", wantsPayouts = false, claimedName?: string | null): boolean {
+  if (wantsPayouts && isIdOutcome(f.outcome) && !nameGiven(f.outcome, claimedName) && !legalNameValid(f.legalName)) return false;
   if (needsDocumentNumber(f.outcome, method) && !(DOC_TYPES as readonly string[]).includes(f.documentType)) return false;
   if (f.outcome === "needs_more" && method === "live") return false;
   switch (f.outcome) {
-    case "verify":
+    case "verify": return true; // the registered birthdate and the typed name sit next to the ID; the reviewer just verifies
     case "birthdate_change": return checklistComplete(f.checklist, method) && isIsoDate(f.idBirthdate) && (method === "live" || f.documentNumber.trim().length >= 3);
     case "teen_correction": return isIsoDate(f.idBirthdate);
     case "decline": return (DECLINE_REASONS as readonly string[]).includes(f.declineReason);
@@ -121,14 +125,15 @@ export function decisionReady(f: DecisionForm, method: ReviewMethod = "upload", 
   }
 }
 
-export function decisionBody(f: DecisionForm, opts: { overrideAllowed: boolean; wantsPayouts?: boolean; method?: ReviewMethod }): Record<string, unknown> {
+export function decisionBody(f: DecisionForm, opts: { overrideAllowed: boolean; wantsPayouts?: boolean; method?: ReviewMethod; claimedName?: string | null }): Record<string, unknown> {
   const method = opts.method ?? "upload";
-  const body: Record<string, unknown> = { outcome: f.outcome, checklist: f.checklist };
+  const body: Record<string, unknown> = { outcome: f.outcome };
+  if (isFullReview(f.outcome)) body.checklist = f.checklist;
   if (f.outcome === "teen_correction") body.idBirthdate = f.idBirthdate;
-  if (f.outcome && ID_OUTCOMES.includes(f.outcome)) { body.idBirthdate = f.idBirthdate; if (method !== "live") body.documentType = f.documentType; }
+  if (f.outcome && ID_OUTCOMES.includes(f.outcome)) { if (f.outcome !== "verify") body.idBirthdate = f.idBirthdate; if (method !== "live" && isFullReview(f.outcome)) body.documentType = f.documentType; }
   if (needsDocumentNumber(f.outcome, method)) body.documentNumber = f.documentNumber.trim();
   // Only for a request that asked for payouts; otherwise the server answers NAME_NOT_REQUESTED.
-  if (opts.wantsPayouts === true && isIdOutcome(f.outcome)) body.legalName = normaliseLegalName(f.legalName) ?? f.legalName.trim();
+  if (opts.wantsPayouts === true && isIdOutcome(f.outcome) && !nameGiven(f.outcome, opts.claimedName)) body.legalName = normaliseLegalName(f.legalName) ?? f.legalName.trim();
   if (f.outcome === "decline") body.declineReason = f.declineReason;
   if (f.note.trim()) body.note = f.note.trim();
   if (needsDocumentNumber(f.outcome, method) && opts.overrideAllowed && f.overrideReason.trim().length >= 3) body.overrideDuplicate = { reason: f.overrideReason.trim() };

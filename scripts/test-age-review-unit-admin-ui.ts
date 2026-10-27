@@ -44,35 +44,37 @@ test("role visibility: age_reviewer sees only the age reviews page", () => {
   assert.ok(/value="age_reviewer"/.test(staff) && /age_reviewer: "Age reviewer"/.test(staff));
 });
 
-test("live verify needs no document type or number and sends none", () => {
-  const { codeMatches, ...five } = allTicked() as Record<string, boolean>;
-  const f = form({ checklist: five as any, documentNumber: "", documentType: "" });
+test("verify is one click: no checks, birthdate, document or name to type, and none sent", () => {
+  const f = form({ checklist: emptyChecklist(), documentNumber: "", documentType: "", idBirthdate: "" });
   assert.equal(decisionReady(f, "live"), true);
-  assert.equal(decisionReady(f, "upload"), false);
-  const body = decisionBody(f, { overrideAllowed: false, method: "live" });
-  assert.equal("documentNumber" in body, false);
-  assert.equal("documentType" in body, false);
-  assert.equal(body.idBirthdate, f.idBirthdate);
+  assert.equal(decisionReady(f, "upload"), true);
+  const body = decisionBody(f, { overrideAllowed: false, method: "upload" });
+  for (const k of ["checklist", "documentNumber", "documentType", "idBirthdate", "legalName"]) assert.equal(k in body, false, k);
+  assert.equal(decisionReady(f, "upload", true), false, "payouts and no typed name from the user: the reviewer must type it (older requests)");
+  assert.equal(decisionReady(f, "upload", true, "Ada Obi"), true, "the user's own name is only confirmed");
+  assert.equal("legalName" in decisionBody(f, { overrideAllowed: false, wantsPayouts: true, claimedName: "Ada Obi" }), false);
 });
 
-test("verify disabled until all six checks are ticked", () => {
-  assert.equal(decisionReady(form()), false);
+test("a different-birthdate case still needs all six checks, the document and the ID birthdate", () => {
+  const bc = (o: Partial<DecisionForm> = {}) => form({ outcome: "birthdate_change", ...o });
+  assert.equal(decisionReady(bc()), false);
   for (const k of CHECKLIST_KEYS) {
     const c = allTicked(); c[k] = false;
-    assert.equal(decisionReady(form({ checklist: c })), false, k);
+    assert.equal(decisionReady(bc({ checklist: c })), false, k);
   }
-  assert.equal(decisionReady(form({ checklist: allTicked() })), true);
-  assert.equal(decisionReady(form({ checklist: allTicked(), documentNumber: "" })), false);
-  assert.equal(decisionReady(form({ checklist: allTicked(), idBirthdate: "2000-13-40" })), false);
+  assert.equal(decisionReady(bc({ checklist: allTicked() })), true);
+  assert.equal(decisionReady(bc({ checklist: allTicked(), documentNumber: "" })), false);
+  assert.equal(decisionReady(bc({ checklist: allTicked(), idBirthdate: "2000-13-40" })), false);
   assert.equal(decisionReady(form({ outcome: "decline" })), false);
   assert.equal(decisionReady(form({ outcome: "decline", declineReason: "unreadable" })), true);
   assert.equal(decisionReady(form({ outcome: "teen_correction", idBirthdate: "" })), false);
   assert.equal(decisionReady(form({ outcome: null })), false);
-  const body = decisionBody(form({ checklist: allTicked() }), { overrideAllowed: false });
+
+  const body = decisionBody(bc({ checklist: allTicked() }), { overrideAllowed: false });
   assert.equal(body.documentNumber, "A1234567");
   assert.ok(!("overrideDuplicate" in body));
-  assert.deepEqual(decisionBody(form({ checklist: allTicked(), overrideReason: "same person, two accounts" }), { overrideAllowed: true }).overrideDuplicate, { reason: "same person, two accounts" });
-  assert.ok(!("overrideDuplicate" in decisionBody(form({ checklist: allTicked(), overrideReason: "same person" }), { overrideAllowed: false })));
+  assert.deepEqual(decisionBody(bc({ checklist: allTicked(), overrideReason: "same person, two accounts" }), { overrideAllowed: true }).overrideDuplicate, { reason: "same person, two accounts" });
+  assert.ok(!("overrideDuplicate" in decisionBody(bc({ checklist: allTicked(), overrideReason: "same person" }), { overrideAllowed: false })));
   assert.equal(canOverrideDuplicate("admin"), false);
   assert.equal(canOverrideDuplicate("super_admin"), true);
   for (const o of ["teen_correction", "birthdate_change"] as const) assert.ok(CONFIRM_TEXT[o]);
@@ -170,16 +172,15 @@ test("no image data in query cache (source check)", () => {
 });
 
 test("live verify is not gated on a document; upload still is", () => {
-  const live = (o: Partial<DecisionForm> = {}) => form({ checklist: { ...allTicked(), codeMatches: false }, documentType: "", documentNumber: "", ...o });
+  const live = (o: Partial<DecisionForm> = {}) => form({ outcome: "birthdate_change", checklist: { ...allTicked(), codeMatches: false }, documentType: "", documentNumber: "", ...o });
   assert.equal(decisionReady(live(), "live"), true);
-  assert.equal(decisionReady(live({ outcome: "birthdate_change" }), "live"), true);
   assert.equal(decisionReady(live({ idBirthdate: "" }), "live"), false, "the ID birthdate is still required");
   const body = decisionBody(live(), { overrideAllowed: false, method: "live" });
   assert.equal("documentType" in body, false);
   assert.equal("documentNumber" in body, false);
-  const up = form({ documentType: "", documentNumber: "A1234567" });
+  const up = form({ outcome: "birthdate_change", checklist: allTicked(), documentType: "", documentNumber: "A1234567" });
   assert.equal(decisionReady(up, "upload"), false, "an upload review still needs the document type");
-  assert.equal(decisionBody(form({ documentType: "nin_slip" }), { overrideAllowed: false }).documentType, "nin_slip");
+  assert.equal(decisionBody(form({ outcome: "birthdate_change", documentType: "nin_slip" }), { overrideAllowed: false }).documentType, "nin_slip");
   const f = read(`${dir}/DecisionForm.tsx`);
   assert.match(f, /documentType === null &&/);
   assert.match(f, /select-document-type/);
@@ -190,9 +191,10 @@ test("live checklist needs five checks", () => {
   assert.deepEqual([...requiredChecks("live")], ["faceMatches", "documentTypeMatches", "notExpired", "birthdateReadable", "noEditing"]);
   assert.equal(requiredChecks("upload").length, 6);
   const five = { ...allTicked(), codeMatches: false };
-  assert.equal(decisionReady(form({ checklist: five }), "live"), true);
-  assert.equal(decisionReady(form({ checklist: five }), "upload"), false);
-  for (const k of requiredChecks("live")) { const c = { ...five, [k]: false }; assert.equal(decisionReady(form({ checklist: c }), "live"), false, k); }
+  const bc = (c: typeof five) => form({ outcome: "birthdate_change", checklist: c, documentNumber: "", documentType: "" });
+  assert.equal(decisionReady(bc(five), "live"), true);
+  assert.equal(decisionReady(form({ outcome: "birthdate_change", checklist: five }), "upload"), false);
+  for (const k of requiredChecks("live")) { const c = { ...five, [k]: false }; assert.equal(decisionReady(bc(c), "live"), false, k); }
   const src = read(`${dir}/DecisionForm.tsx`);
   assert.ok(!/no code is needed/i.test(src));
   assert.match(src, /requiredChecks\(method\)\.map/);

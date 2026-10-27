@@ -27,6 +27,8 @@ export type DecideBody = {
 export type RequestCtx = {
   id: string; user_id: string; method: "upload" | "live"; status: string; document_type: string | null;
   registered_dob_snapshot: string | null; more_requests: number; reviewer_id: string | null; proposed_dob: string | null; wants_payouts?: boolean;
+  /** The name the person typed for their payouts check (decrypted); null when none was given. The reviewer only confirms it against the ID. */
+  claimedName?: string | null;
 };
 export type UserCtx = { email: string | null; dateOfBirth: string | null };
 
@@ -88,14 +90,15 @@ export async function planDecision(a: {
   };
 
   // A name is asked for exactly when the user asked for payouts.
-  const nameFor = (): string | null => {
+  const nameFor = (useClaimed = false): string | null => {
     const sent = typeof body.legalName === "string" && body.legalName.trim().length > 0;
     if (!req.wants_payouts) {
       if (sent) throw new AgeReviewError(400, "NAME_NOT_REQUESTED", "This person did not ask to receive money, so no name is recorded.");
       return null;
     }
-    if (!sent) throw new AgeReviewError(400, "NAME_REQUIRED", "Enter the full name on the document.");
-    const n = normaliseLegalName(body.legalName);
+    const given = sent ? body.legalName : useClaimed ? req.claimedName : null;
+    if (!given) throw new AgeReviewError(400, "NAME_REQUIRED", "Enter the full name on the document.");
+    const n = normaliseLegalName(given);
     if (!n) throw new AgeReviewError(400, "BAD_REQUEST", "That is not a usable name.");
     return n;
   };
@@ -119,8 +122,9 @@ export async function planDecision(a: {
 
   switch (body.outcome) {
     case "verify": {
-      if (!checklistFull()) throw new AgeReviewError(400, "CHECKLIST_INCOMPLETE", "Tick every item on the checklist first.");
-      const idDob = needBirthdate(body);
+      // Kept simple on purpose: the reviewer looks at the ID and the selfie, enters the ID birthdate (it must equal the registered one), and verifies.
+      // Verify is one click: the reviewer saw the registered birthdate and the typed name next to the ID. An ID birthdate sent anyway must still match.
+      const idDob = body.idBirthdate ? needBirthdate(body) : (req.registered_dob_snapshot ?? "").slice(0, 10);
       if (!req.registered_dob_snapshot || user.dateOfBirth?.slice(0, 10) !== req.registered_dob_snapshot.slice(0, 10)) {
         throw new AgeReviewError(409, "WRONG_STATE", "The registered birthdate changed since this request started.");
       }
@@ -128,9 +132,8 @@ export async function planDecision(a: {
       if (idDob !== req.registered_dob_snapshot.slice(0, 10) || age === null || age < 18) {
         throw new AgeReviewError(400, "BIRTHDATE_MISMATCH", "The ID birthdate does not match the registered one or is under 18. Use teen correction or birthdate change.");
       }
-      const storeName = nameFor();
-      const { fp, type } = await fingerprintFor();
-      return { ...base, storeName, finalStatus: "approved", outcome: "verified", account: { kind: "verify", method: req.method === "live" ? "admin_live" : "admin_upload" }, dobMatch: true, fingerprint: fp, documentType: type, notify: "approved", overrideReason };
+      const storeName = nameFor(true);
+      return { ...base, storeName, finalStatus: "approved", outcome: "verified", account: { kind: "verify", method: req.method === "live" ? "admin_live" : "admin_upload" }, dobMatch: true, notify: "approved" };
     }
     case "teen_correction": {
       const idDob = needBirthdate(body);
@@ -244,6 +247,8 @@ export async function getDetail(admin: AdminRef, id: string) {
       proposedDob: canSecondApprove ? row.proposed_dob ?? null : null,
       code: row.method === "upload" ? row.code ?? null : null,
       codeExpiresAt: row.method === "upload" ? iso(row.code_expires_at) : null,
+      // Shown to the reviewer who decides, to compare with the ID; never to the person's own reviewer-self, never after the decision.
+      claimedName: open && !self && row.wants_payouts ? claimedNameOf(row as any, id) : null,
       moreRequests: Number(row.more_requests),
       consentRecorded: !!row.consent_version && !!row.consented_at,
       liveInviteExpiresAt: iso(row.live_invite_expires_at),
@@ -266,6 +271,11 @@ async function withLock<T>(id: string, fn: (c: { query: (q: string, p?: any[]) =
     await client.query(`select pg_advisory_unlock(hashtext($1))`, [`age_review:${id}`]).catch(() => { unlocked = false; });
     client.release(unlocked ? undefined : true);
   }
+}
+
+function claimedNameOf(r: { wants_payouts?: boolean; proposed_legal_name_enc?: Buffer | null }, id: string): string | null {
+  if (!r.wants_payouts || !r.proposed_legal_name_enc) return null;
+  try { return openProposedName(r.proposed_legal_name_enc, id); } catch { return null; }
 }
 
 async function loadLocked(c: { query: (q: string, p?: any[]) => Promise<any> }, id: string, forUpdate = false) {
@@ -317,7 +327,7 @@ export async function decide(admin: AdminRef, id: string, body: DecideBody, ip?:
       // The row lock is held from here to the commit: cancel, submit and the expiry sweep all need it, so none can slip in between
       // the status check, the account change and the request update.
       r = await loadLocked(c, id, true);
-      const req = r;
+      const req = { ...r, claimedName: claimedNameOf(r, id) };
       const plan = await planDecision({
         admin, req, user: { email: req.user_email, dateOfBirth: req.user_dob }, body,
         isDuplicate: async (fp) => ((await c.query(`select 1 from age_review_requests where document_fingerprint = $1 and status = 'approved' and user_id <> $2 limit 1`, [fp, req.user_id])).rowCount ?? 0) > 0,

@@ -118,7 +118,7 @@ export default function DetailDrawer({ id, role, reviewer, onClose, onChanged }:
 
               <p role="status" className={msg ? "text-sm text-slate-300" : "sr-only"}>{msg ?? ""}</p>
 
-              {d.canDecide && <DecisionForm key={r.id} requestId={r.id} role={role} registeredDob={r.registeredDob} method={r.method} documentType={r.documentType} wantsPayouts={r.wantsPayouts === true} onDone={done} />}
+              {d.canDecide && <DecisionForm key={r.id} requestId={r.id} role={role} registeredDob={r.registeredDob} method={r.method} documentType={r.documentType} wantsPayouts={r.wantsPayouts === true} claimedName={r.claimedName ?? null} onDone={done} />}
               {!d.canDecide && r.status !== "pending_second_approval" && <p className="text-sm text-slate-400">This request cannot be decided by you right now.</p>}
 
               {r.status === "pending_second_approval" && (

@@ -15,6 +15,8 @@ interface Props {
   consentVersion: string | null;
   /** Ticked "receive money" (or the payouts action): sent with the new request. */
   wantsPayouts?: boolean;
+  /** The name they typed for the payouts check. */
+  legalName?: string;
   onClose: () => void;
   onHowHandled: () => void;
 }
@@ -22,7 +24,7 @@ interface Props {
 const BTN = "min-h-[44px] rounded-full";
 const FOCUS = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
 
-export default function UploadFlow({ me, consentVersion, wantsPayouts = false, onClose, onHowHandled }: Props) {
+export default function UploadFlow({ me, consentVersion, wantsPayouts = false, legalName = "", onClose, onHowHandled }: Props) {
   const api = useAgeReview();
   // Fixed at mount: once create succeeds `me` gains a request, which must not turn a fresh flow into a resumed one.
   const [resumed] = useState(() => (me.request && me.request.method === "upload" ? me.request : null));
@@ -57,7 +59,7 @@ export default function UploadFlow({ me, consentVersion, wantsPayouts = false, o
     if (!docType || !consentVersion) return;
     setError(null); setBusy("create");
     try {
-      const r = await api.create.mutateAsync({ method: "upload", documentType: docType, consentVersion, wantsPayouts });
+      const r = await api.create.mutateAsync({ method: "upload", documentType: docType, consentVersion, wantsPayouts, legalName });
       setRequest(r.request); setStep("document");
     } catch (e) { fail(e); } finally { setBusy(null); }
   };

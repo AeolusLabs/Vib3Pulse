@@ -106,7 +106,7 @@ const rev = await mkAdmin("rev", "age_reviewer"), sup1 = await mkAdmin("sup1", "
 
 // a request submitted by the user, ready for the reviewer
 async function submitted(userId: string, payouts: boolean) {
-  const r = await http("POST", "/api/age-review/requests", { user: userId }, { method: "upload", documentType: "passport", ...consent, ...(payouts ? { wantsPayouts: true } : {}) });
+  const r = await http("POST", "/api/age-review/requests", { user: userId }, { method: "upload", documentType: "passport", ...consent, ...(payouts ? { wantsPayouts: true, legalName: "  Zuriel   Quenby  Adewale " } : {}) });
   if (r.status !== 201) throw new Error(`create failed ${r.status} ${r.text}`);
   const id: string = r.json.request.id;
   for (const kind of ["document", "selfie"]) await http("POST", `/api/age-review/requests/${id}/evidence`, { user: userId }, { kind, mime: "image/png", data: PNG });
@@ -139,8 +139,11 @@ check("wantsPayouts creates a request and a verified user may start a payouts-on
 const detail = await http("GET", `/api/admin/age-reviews/${rid}`, { admin: rev });
 check("queue/detail expose wantsPayouts", detail.json.request.wantsPayouts === true && (await http("GET", "/api/admin/age-reviews", { admin: rev })).json.items.some((i: any) => i.id === rid && i.wantsPayouts === true));
 const base1 = { outcome: "verify", checklist: full, idBirthdate: dob, documentNumber: "PN" + stamp };
-check("legalName required when wantsPayouts (NAME_REQUIRED)", (await http("POST", `/api/admin/age-reviews/${rid}/decide`, { admin: rev }, base1)).json?.code === "NAME_REQUIRED");
-const done = await http("POST", `/api/admin/age-reviews/${rid}/decide`, { admin: rev }, { ...base1, legalName: "  Zuriel   Quenby  Adewale " });
+const claimed = await http("GET", `/api/admin/age-reviews/${rid}`, { admin: rev });
+check("the reviewer sees the name the person typed, to compare with the ID (and the person never gets it back)", claimed.json.request.claimedName === NAME && !JSON.stringify((await http("GET", "/api/age-review/me", { user: verified })).json).includes("Quenby"));
+const noNameCreate = await http("POST", "/api/age-review/requests", { user: await mkUser("nn", { verified: true }) }, { method: "upload", documentType: "passport", ...consent, wantsPayouts: true });
+check("asking for payouts without typing a name is refused (NAME_REQUIRED)", noNameCreate.status === 400 && noNameCreate.json.code === "NAME_REQUIRED", noNameCreate.text);
+const done = await http("POST", `/api/admin/age-reviews/${rid}/decide`, { admin: rev }, { outcome: "verify" });
 const keep = (await q(`select age_verified_at, age_verified_method from users where id = $1`, [verified]))[0];
 check("a verified user who completes a payouts review keeps the original age_verified_at", done.status === 200 && new Date(keep.age_verified_at).toISOString() === "2026-01-15T10:00:00.000Z" && keep.age_verified_method === "admin_upload", done.text + JSON.stringify(keep));
 const enc = (await q(`select name_enc, set_by, request_id from user_verified_names where user_id = $1`, [verified]))[0];
@@ -281,7 +284,7 @@ const { closeAnsweredRequests } = await import("../server/identity/ageReviewServ
 const openRow = (uid: string, payouts: boolean, status = "submitted") => q(`insert into age_review_requests (user_id, method, status, document_type, registered_dob_snapshot, consent_version, consented_at, wants_payouts) values ($1,'upload',$4,'passport',$2,$3,now(),$5)`, [uid, dob, CONSENT_VERSION, status, payouts]);
 const vq = await mkUser("vq", { verified: true });
 await openRow(vq, false);
-const vqNew = await http("POST", "/api/age-review/requests", { user: vq }, { method: "upload", documentType: "passport", ...consent, wantsPayouts: true });
+const vqNew = await http("POST", "/api/age-review/requests", { user: vq }, { method: "upload", documentType: "passport", ...consent, wantsPayouts: true, legalName: NAME });
 check("a verified person with an old open request can start a payouts check (201), no OPEN_REQUEST_EXISTS", vqNew.status === 201, JSON.stringify(vqNew));
 check("...and the old request is closed as approved, its photos gone", (await q(`select status from age_review_requests where user_id = $1 and wants_payouts = false`, [vq]))[0]?.status === "approved");
 const vr = await mkUser("vr", { verified: true });
@@ -313,7 +316,7 @@ const raced2 = await http("POST", "/api/rooms/payouts/account", { user: lr }, { 
 check("the verification vanishing mid-flight stops the link (NOT_VERIFIED, nothing created)", raced2.status === 403 && raced2.json.code === "NOT_VERIFIED" && subaccounts.length === before, raced2.text);
 
 // ---- the name is nowhere it should not be
-const leaks = [...responses, ...logged].filter((s) => /Quenby/i.test(s));
+const leaks = [...responses.filter((s) => !s.includes('"claimedName"')), ...logged].filter((s) => /Quenby/i.test(s));
 check("name never in any response or log line", leaks.length === 0, leaks.slice(0, 2).join(" | ").slice(0, 200));
 const audits = await q(`select details, reason from admin_activity_logs where details ilike '%Quenby%' or reason ilike '%Quenby%'`);
 check("name never in any audit row", audits.length === 0);

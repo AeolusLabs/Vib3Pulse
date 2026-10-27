@@ -29,23 +29,24 @@ const plan = (body: any, o: { admin?: any; req?: any; user?: any; dup?: boolean 
   planDecision({ admin: o.admin ?? admin, req: req(o.req), user: o.user ?? user, body, isDuplicate: async () => o.dup === true, now });
 const code = async (p: Promise<unknown>) => { try { await p; return "none"; } catch (e: any) { return e.code as string; } };
 
-await test("verify needs a full checklist", async () => {
-  assert.equal(await code(plan({ outcome: "verify", checklist: { ...full, faceMatches: false }, idBirthdate: REG, documentNumber: "A1" })), "CHECKLIST_INCOMPLETE");
-  assert.equal(await code(plan({ outcome: "verify", idBirthdate: REG, documentNumber: "A1" })), "CHECKLIST_INCOMPLETE");
-  const p = await plan({ outcome: "verify", checklist: full, idBirthdate: REG, documentNumber: "A1" });
+await test("verify is one click; a different-birthdate case still needs the full checklist", async () => {
+  assert.equal(await code(plan({ outcome: "birthdate_change", checklist: { ...full, faceMatches: false }, idBirthdate: "1985-03-03", documentNumber: "A1" })), "CHECKLIST_INCOMPLETE");
+  assert.equal(await code(plan({ outcome: "birthdate_change", idBirthdate: "1985-03-03", documentNumber: "A1" })), "CHECKLIST_INCOMPLETE");
+  const p = await plan({ outcome: "verify" });
   assert.equal(p.finalStatus, "approved");
   assert.deepEqual(p.account, { kind: "verify", method: "admin_upload" });
-  assert.equal((await plan({ outcome: "verify", checklist: full, idBirthdate: REG, documentNumber: "A1" }, { req: { method: "live" } })).account?.kind, "verify");
+  assert.equal((await plan({ outcome: "verify" }, { req: { method: "live" } })).account?.kind, "verify");
 });
 
 await test("verify refuses a birthdate mismatch", async () => {
   assert.equal(await code(plan({ outcome: "verify", checklist: full, idBirthdate: "1991-05-05", documentNumber: "A1" })), "BIRTHDATE_MISMATCH");
   assert.equal(await code(plan({ outcome: "verify", checklist: full, idBirthdate: REG, documentNumber: "A1" }, { user: { ...user, dateOfBirth: "1980-01-01" } })), "WRONG_STATE");
-  assert.equal(await code(plan({ outcome: "verify", checklist: full, idBirthdate: REG })), "BAD_REQUEST");
+  assert.equal(await code(plan({ outcome: "verify", idBirthdate: REG })), "none", "no document number is asked for any more");
 });
 
-await test("verify stores a fingerprint and never the number", async () => {
-  const p = await plan({ outcome: "verify", checklist: full, idBirthdate: REG, documentNumber: " ab-12 3 " });
+await test("a different-birthdate case stores a fingerprint and never the number; verify stores none", async () => {
+  assert.equal((await plan({ outcome: "verify" })).fingerprint, null);
+  const p = await plan({ outcome: "birthdate_change", checklist: full, idBirthdate: "1985-03-03", documentNumber: " ab-12 3 " });
   assert.equal(p.fingerprint, documentFingerprint("passport", "AB123"));
   assert.ok(!JSON.stringify(p).includes("AB123") && !JSON.stringify(p).toLowerCase().includes("ab-12"));
   const ad = src("server/identity/ageReviewAdmin.ts");
@@ -53,7 +54,7 @@ await test("verify stores a fingerprint and never the number", async () => {
 });
 
 await test("same document on a second account is refused, override needs super_admin and a reason", async () => {
-  const b = { outcome: "verify", checklist: full, idBirthdate: REG, documentNumber: "A1" };
+  const b = { outcome: "birthdate_change", checklist: full, idBirthdate: "1985-03-03", documentNumber: "A1" };
   assert.equal(await code(plan(b, { dup: true })), "DUPLICATE_DOCUMENT");
   assert.equal(await code(plan({ ...b, overrideDuplicate: { reason: "same person, new account" } }, { dup: true })), "NOT_ALLOWED");
   assert.equal(await code(plan({ ...b, overrideDuplicate: { reason: "same person, new account" } }, { dup: true, admin: superA })), "none");
@@ -188,20 +189,21 @@ await test("birthdate change needs the full checklist and a document number, and
 await test("live checks need five checklist items (no codeMatches); needs_more stays refused for live", async () => {
   const { codeMatches, ...five } = full as Record<string, boolean>;
   const live = { req: { method: "live" } };
-  assert.equal((await plan({ outcome: "verify", checklist: five, idBirthdate: REG, documentNumber: "A1" }, live)).finalStatus, "approved");
-  assert.equal(await code(plan({ outcome: "verify", checklist: five, idBirthdate: REG, documentNumber: "A1" })), "CHECKLIST_INCOMPLETE", "upload still needs all six");
-  assert.equal(await code(plan({ outcome: "verify", checklist: { ...five, faceMatches: false }, idBirthdate: REG, documentNumber: "A1" }, live)), "CHECKLIST_INCOMPLETE");
+  const bc = { outcome: "birthdate_change", idBirthdate: "1985-03-03" };
+  assert.equal((await plan({ ...bc, checklist: five }, live)).finalStatus, "pending_second_approval");
+  assert.equal(await code(plan({ ...bc, checklist: five, documentNumber: "A1" })), "CHECKLIST_INCOMPLETE", "upload still needs all six");
+  assert.equal(await code(plan({ ...bc, checklist: { ...five, faceMatches: false } }, live)), "CHECKLIST_INCOMPLETE");
   assert.equal(await code(plan({ outcome: "needs_more" }, live)), "WRONG_STATE");
 });
 
 await test("a live check verifies with no document type or number, and records none (no duplicate check)", async () => {
   const { codeMatches, ...five } = full as Record<string, boolean>;
   const live = { req: { method: "live", document_type: null }, dup: true };
-  const p = await plan({ outcome: "verify", checklist: five, idBirthdate: REG }, live);
-  assert.equal(p.finalStatus, "approved");
+  const p = await plan({ outcome: "birthdate_change", checklist: five, idBirthdate: "1985-03-03" }, live);
+  assert.equal(p.finalStatus, "pending_second_approval");
   assert.equal(p.fingerprint, null);
   assert.equal(p.documentType, null);
-  assert.equal(await code(plan({ outcome: "verify", checklist: full, idBirthdate: REG }, { req: { method: "upload", document_type: null } })), "BAD_REQUEST", "upload still needs the document");
+  assert.equal(await code(plan({ outcome: "birthdate_change", checklist: full, idBirthdate: "1985-03-03" }, { req: { method: "upload", document_type: null } })), "BAD_REQUEST", "upload still needs the document");
 });
 
 await test("not_eligible_minor needs an ID that matches the registered birthdate and is under 18", async () => {

@@ -7,7 +7,7 @@ import {
 } from "../../shared/ageReview";
 import { encryptEvidence } from "./evidenceCrypto";
 import { ageReviewPaused } from "./ageReviewFeatures";
-import { hasVerifiedName } from "./verifiedName";
+import { hasVerifiedName, normaliseLegalName, sealProposedName } from "./verifiedName";
 
 export class AgeReviewError extends Error {
   constructor(public status: number, public code: string, message: string, public extra: Record<string, unknown> = {}) { super(message); }
@@ -132,7 +132,7 @@ export async function closeAnsweredRequests(userId: string): Promise<{ id: strin
   return rows;
 }
 
-export async function createRequest(userId: string, input: { method: "upload" | "live"; documentType?: string | null; consentVersion: string; wantsPayouts?: boolean }, now: Date = new Date()) {
+export async function createRequest(userId: string, input: { method: "upload" | "live"; documentType?: string | null; consentVersion: string; wantsPayouts?: boolean; legalName?: string | null }, now: Date = new Date()) {
   if (input.consentVersion !== CONSENT_VERSION) throw new AgeReviewError(400, "CONSENT_REQUIRED", "Please read and accept the privacy notice first.");
   if (await ageReviewPaused()) throw new AgeReviewError(503, "AGE_REVIEW_PAUSED", "Age checks are paused right now. Please try again later.");
   const pool = await getPool();
@@ -144,6 +144,9 @@ export async function createRequest(userId: string, input: { method: "upload" | 
   if (user.age_verified_at && input.wantsPayouts !== true) throw new AgeReviewError(409, "ALREADY_VERIFIED", "Your age is already verified.");
   // Someone verified another way can still have an old request open that nothing will ever answer: close it, it must not block the payouts check.
   if (user.age_verified_at) await closeAnsweredRequests(userId);
+  // Someone who wants to be paid types their own name as it is on the ID; the reviewer only checks it against the ID.
+  const claimed = input.wantsPayouts === true ? normaliseLegalName(input.legalName) : null;
+  if (input.wantsPayouts === true && !claimed) throw new AgeReviewError(400, "NAME_REQUIRED", "Enter your full name as it appears on your ID.");
   const upload = input.method === "upload";
   if (upload && !(DOCUMENT_TYPES as readonly string[]).includes(input.documentType ?? "")) throw new AgeReviewError(400, "BAD_REQUEST", "Choose a document type.");
   const history = (await pool.query(`select status, decided_at from age_review_requests where user_id = $1 order by created_at desc limit 50`, [userId])).rows as { status: string; decided_at: Date | null }[];
@@ -157,6 +160,7 @@ export async function createRequest(userId: string, input: { method: "upload" | 
       [userId, input.method, input.documentType ?? null, upload ? generateCode() : null,
         upload ? new Date(now.getTime() + CODE_TTL_MS) : null, user.date_of_birth, CONSENT_VERSION, now, new Date(now.getTime() + REQUEST_EXPIRY_MS), input.wantsPayouts === true],
     )).rows[0] as Row;
+    if (claimed) await pool.query(`update age_review_requests set proposed_legal_name_enc = $2 where id = $1`, [r.id, sealProposedName(claimed, r.id)]);
     return toRequestDto(r, [], now);
   } catch (e: any) {
     if (e?.code === "23505") throw new AgeReviewError(409, "OPEN_REQUEST_EXISTS", "You already have a request open.");

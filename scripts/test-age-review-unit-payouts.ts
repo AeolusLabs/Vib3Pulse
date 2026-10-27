@@ -43,7 +43,7 @@ test("wantsPayouts sent only when ticked", async () => {
   const card = read("client/src/components/age-review/VerifyAgeCard.tsx");
   assert.match(card, /useState\(\(\) => \(typeof window !== "undefined" \? payoutsPreselected\(window\.location\.search\) : false\)\)/);
   assert.match(card, /wantsPayouts=\{wantsPayouts\}/);
-  assert.match(read("client/src/components/age-review/UploadFlow.tsx"), /consentVersion, wantsPayouts \}/);
+  assert.match(read("client/src/components/age-review/UploadFlow.tsx"), /consentVersion, wantsPayouts, legalName \}/);
   assert.equal(COPY.wantsPayoutsLabel, "I also want to receive money (tips and ticket sales)");
   assert.equal(COPY.wantsPayoutsHelp, "We will also note the name on your ID to check your bank account later.");
 });
