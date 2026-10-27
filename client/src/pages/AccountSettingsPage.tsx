@@ -202,6 +202,8 @@ export default function AccountSettingsPage() {
   // /settings opens one topic at a time with ?section=; no section shows everything, as before.
   const section = new URLSearchParams(window.location.search).get("section");
   const show = (key: string) => !section || section === key;
+  // The payout page sends people here to verify their name: back goes to that page, where the next step (the bank account) is.
+  const backToPay = section === "verify" && new URLSearchParams(window.location.search).get("payouts") === "1";
 
   const usernameChangesRemaining = userProfile?.usernameChangesRemaining ?? 2;
 
@@ -210,7 +212,7 @@ export default function AccountSettingsPage() {
       <Navigation />
       
       <main className="container mx-auto px-4 py-6 max-w-2xl">
-        {section && <Link href="/settings" className="mb-1 inline-flex min-h-[44px] items-center text-sm text-muted-foreground" data-testid="link-back-settings">Back to Settings</Link>}
+        {section && <Link href={backToPay ? "/rooms/payouts" : "/settings"} className="mb-1 inline-flex min-h-[44px] items-center text-sm text-muted-foreground" data-testid="link-back-settings">{backToPay ? "Back to Get paid" : "Back to Settings"}</Link>}
         <h1 className="mb-6 text-2xl font-bold">{(section && TITLES[section]) || "Account Settings"}</h1>
 
         <div className="space-y-6">

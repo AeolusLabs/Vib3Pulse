@@ -11,9 +11,10 @@ export const AGE_REVIEW_NOTICE_COPY: Record<AgeReviewNoticeKind, { title: string
   expired: { title: "Your age check expired", message: "Nobody reviewed it in time and your photos were deleted. You can start again any time." },
 };
 
-export async function notifyAgeReview(userId: string, kind: AgeReviewNoticeKind, detail?: string): Promise<void> {
+export const VERIFY_LINK = "/account/settings?section=verify#verify-age";
+
+export async function notifyAgeReview(userId: string, kind: AgeReviewNoticeKind, detail?: string, link: string = VERIFY_LINK): Promise<void> {
   const c = AGE_REVIEW_NOTICE_COPY[kind];
-  const link = "/account/settings#verify-age";
   const message = detail ? `${c.message} ${detail}` : c.message;
   try {
     const { deliverNotification } = await import("../notifications");

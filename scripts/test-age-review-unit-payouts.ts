@@ -84,8 +84,8 @@ test("payout page state per status (not verified, no name, has name)", () => {
   assert.equal(payoutPanel(status({ account: acct, hasVerifiedName: true })), "mismatch");
   assert.equal(payoutPanel(status({ account: { ...acct, nameMatches: true }, subaccountReady: true, hasVerifiedName: true })), "ready");
   assert.equal(payoutStage(status({ hasVerifiedName: false })), "none", "payoutStage itself is unchanged");
-  assert.equal(VERIFY_AGE_HREF, "/account/settings#verify-age");
-  assert.equal(VERIFY_NAME_HREF, "/account/settings?payouts=1#verify-age");
+  assert.equal(VERIFY_AGE_HREF, "/account/settings?section=verify#verify-age");
+  assert.equal(VERIFY_NAME_HREF, "/account/settings?section=verify&payouts=1#verify-age");
   assert.equal(PAYOUTS_HREF, VERIFY_NAME_HREF);
   const view = read("client/src/components/rooms/earnings/PayoutAccountView.tsx");
   assert.match(view, /href=\{VERIFY_AGE_HREF\}/);
@@ -323,6 +323,18 @@ test("copy has no dashes, 'never' or 'cash' in the new strings and components", 
   }
   const section = PRIVACY_POLICY.sections.find((s) => s.id === "age-review")!.paragraphs.join(" ");
   assert.ok(!/[—–]/.test(section));
+});
+
+test("every verify link opens the focused verify screen, not the whole Account Settings page; Back returns to Get paid", () => {
+  for (const href of [VERIFY_AGE_HREF, VERIFY_NAME_HREF]) assert.ok(href.includes("section=verify"), href);
+  const page = readFileSync("client/src/pages/AccountSettingsPage.tsx", "utf8");
+  assert.ok(page.includes('backToPay ? "/rooms/payouts" : "/settings"'));
+  assert.ok(page.includes('{show("verify") && (<>'));
+});
+test("a passed payouts check tells the person what is next and opens the page where the bank account is added", () => {
+  const admin = readFileSync("server/identity/ageReviewAdmin.ts", "utf8");
+  assert.ok(admin.includes('const payoutsDone = result.payouts && result.plan.notify === "approved"'));
+  assert.ok(admin.includes('{ detail: "Next, add your bank account to get paid.", link: "/rooms/payouts" }'));
 });
 
 await Promise.all(pending);

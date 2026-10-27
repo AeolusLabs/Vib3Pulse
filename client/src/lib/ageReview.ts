@@ -314,7 +314,7 @@ export function payoutsAction(me: AgeReviewMe): PayoutsAction {
   return me.hasPayoutName ? "recheck" : "verify_name";
 }
 
-/** `/account/settings?payouts=1#verify-age` preselects the payouts choice. */
+/** `?payouts=1` on the verify screen preselects the payouts choice. */
 export const payoutsPreselected = (search: string): boolean => new URLSearchParams(search).get("payouts") === "1";
 /** What the payout page offers for the verify steps: the link, a paused notice, or "being reviewed" (no new check while one is in review). */
 export type PayoutCta = "link" | "paused" | "in_review";
@@ -325,6 +325,6 @@ export function payoutCta(me: AgeReviewMe | null | undefined): PayoutCta {
   if (me.paused) return "paused";
   return "link";
 }
-export const PAYOUTS_HREF = "/account/settings?payouts=1#verify-age";
+export const PAYOUTS_HREF = "/account/settings?section=verify&payouts=1#verify-age";
 
-export const VERIFY_HREF = "/account/settings#verify-age";
+export const VERIFY_HREF = "/account/settings?section=verify#verify-age";
