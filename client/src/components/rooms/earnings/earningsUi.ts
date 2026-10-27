@@ -91,8 +91,8 @@ export function payoutPanel(s: PayoutStatus, moneyOn = true): PayoutPanel {
   if (moneyOn && !s.hasVerifiedName) return "needs_name";
   return stage;
 }
-export const VERIFY_AGE_HREF = "/account/settings#verify-age";
-export const VERIFY_NAME_HREF = "/account/settings?payouts=1#verify-age";
+export const VERIFY_AGE_HREF = "/account/settings?section=verify#verify-age";
+export const VERIFY_NAME_HREF = "/account/settings?section=verify&payouts=1#verify-age";
 /** The failures that should offer the payouts check next to the message. */
 export const accountFailureCta = (f: AccountFailure): "verify_name" | "recheck" | null =>
   f.code === "NO_VERIFIED_NAME" ? "verify_name" : f.code === "NAME_MISMATCH" || (f.status === 422 && !f.code) ? "recheck" : null;

@@ -350,7 +350,9 @@ export async function decide(admin: AdminRef, id: string, body: DecideBody, ip?:
   await audit(admin.id, "age_review.decide", id, `outcome=${result.plan.outcome} request=${id}${result.payouts ? " payouts=true" : ""}${body.note?.trim() ? ` note=${body.note.trim().slice(0, 300)}` : ""}`, ip);
   if (result.plan.overrideReason) await audit(admin.id, "age_review.duplicate_override", id, `request=${id} reason=${result.plan.overrideReason}`, ip);
   if (result.method === "live") await closeRoomQuietly(id);
-  if (result.plan.notify) await notifyQuietly(result.userId, result.plan.notify);
+  // A payouts check that passed: say what is next and open the page where the bank account is added.
+  const payoutsDone = result.payouts && result.plan.notify === "approved";
+  if (result.plan.notify) await notifyQuietly(result.userId, result.plan.notify, payoutsDone ? { detail: "Next, add your bank account to get paid.", link: "/rooms/payouts" } : undefined);
   return getDetailRequestOnly(id);
 }
 
@@ -367,8 +369,8 @@ export async function compensateAccountChange(id: string, userId: string, accoun
 }
 
 /** The decision is committed: a notice that fails must never turn it into an error. */
-async function notifyQuietly(userId: string, kind: "approved" | "declined" | "needs_more" | "teen_moved") {
-  try { const { notifyAgeReview } = await import("./ageReviewNotify"); await notifyAgeReview(userId, kind); }
+async function notifyQuietly(userId: string, kind: "approved" | "declined" | "needs_more" | "teen_moved", extra?: { detail: string; link: string }) {
+  try { const { notifyAgeReview } = await import("./ageReviewNotify"); await notifyAgeReview(userId, kind, extra?.detail, extra?.link); }
   catch { console.error("[AGE-REVIEW] ALERT a decision notice could not be sent"); }
 }
 
