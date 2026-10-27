@@ -4,6 +4,7 @@ import { CameraIcon, CheckCircleIcon, Loader2Icon, RefreshCwIcon } from "@/compo
 import { AgeReviewError, useAgeReview } from "@/hooks/useAgeReview";
 import { COPY, DOCUMENT_TYPES, documentTypeLabel, errorMessage, formatCode, minutesLeft, type AgeReviewMe, type AgeReviewRequest } from "@/lib/ageReview";
 import { ImagePrepError, prepareImage } from "@/lib/ageReviewImage";
+import SelfieCamera from "./SelfieCamera";
 
 type Step = "type" | "document" | "selfie" | "review";
 type Kind = "document" | "selfie";
@@ -32,6 +33,7 @@ export default function UploadFlow({ me, consentVersion, wantsPayouts = false, o
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
+  const [cameraOpen, setCameraOpen] = useState(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const thumbsRef = useRef(thumbs);
   thumbsRef.current = thumbs;
@@ -164,7 +166,14 @@ export default function UploadFlow({ me, consentVersion, wantsPayouts = false, o
               Get a new code
             </Button>
           )}
-          {left > 0 && picker("selfie", "user")}
+          {left > 0 && (cameraOpen
+            ? <SelfieCamera onClose={() => setCameraOpen(false)} onFile={(f) => { setCameraOpen(false); void put("selfie", f); }} />
+            : (
+              <Button variant="outline" className={BTN} disabled={busy !== null} onClick={() => setCameraOpen(true)} data-testid="age-open-camera">
+                {busy === "selfie" ? <Loader2Icon className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden /> : <CameraIcon className="mr-2 h-4 w-4" aria-hidden />}
+                {hasSelfie ? "Take it again" : "Take your selfie"}
+              </Button>
+            ))}
           {(thumbs.selfie || hasSelfie) && <div className="max-w-[12rem]">{thumb("selfie", "Selfie", hasSelfie)}</div>}
         </div>
       )}
