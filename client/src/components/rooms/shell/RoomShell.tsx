@@ -52,12 +52,14 @@ import { LIVE_HOLD_MS } from "@shared/liveScreen";
 import type { ChatItem, RoomMemberView, RoomState } from "@/lib/roomReducer";
 import SprayFlow, { type Sub as SpraySub } from "@/components/rooms/spray/SprayFlow";
 import SprayEffects, { useSprayQuiet } from "@/components/rooms/spray/SprayEffects";
+import { SprayBoardTray, SprayReceivedChip } from "@/components/rooms/spray/SprayBoardTray";
 import { snd } from "@/components/rooms/spray/sound";
 import { sprayFlags } from "@/lib/sprayLive";
 import { useSpraySlot } from "@/hooks/useSprayLive";
 import { sprayTargets, type SprayBlock, type SprayFlow as SprayFlowState } from "@/lib/sprayUi";
 import { moneyEligibleRoom } from "@shared/roomRules";
 import type { SprayTier } from "@shared/money";
+import { ANON_SPRAYER_ID } from "@shared/spray";
 
 /** The socket actions the shell uses. RoomPage passes useRoomSocket(); the dev fixture passes fakes. */
 export type RoomShellSocket = Pick<ReturnType<typeof useRoomSocket>,
@@ -170,7 +172,7 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
   // Chat lines outlive the people who wrote them, so remember every name seen while they were in the room.
   const names = useRef(new Map<string, string>());
   state.members.forEach((m) => names.current.set(m.userId, m.displayName || m.organizationName || m.username || "Guest"));
-  const nameOf = useCallback((uid: string) => names.current.get(uid) ?? (uid === host?.id ? hostName(host) : "Someone"), [host, state.members]); // eslint-disable-line react-hooks/exhaustive-deps
+  const nameOf = useCallback((uid: string) => uid === ANON_SPRAYER_ID ? "Anonymous" : names.current.get(uid) ?? (uid === host?.id ? hostName(host) : "Someone"), [host, state.members]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A short spoken/visible line for the most recent private thing aimed at me, and for the last rejected action.
   const incoming = state.interactions.filter((i) => i.targetId === meId && !hidden.has(i.fromId)).slice(-1)[0];
@@ -499,6 +501,8 @@ export default function RoomShell({ id, token, room, host, fallbackCount, isHost
     <>
       <SprayEffects sprays={state.sprays} nameOf={nameOf} quiet={quiet} serverOffsetMs={state.serverOffsetMs} videoActive={videoActive}
         selfId={meId} onThank={!muted && !listenOnly ? (text) => { sock.chat(text); } : undefined} maxNotes={gameOn ? GAME_MAX_NOTES : undefined} />
+      <SprayBoardTray top={state.sprayBoard} tick={state.sprayBoardTick} selfId={meId} />
+      <SprayReceivedChip received={state.sprayReceived} />
       <HypeBurst burst={hype.burst} layout={layout} />
       {isCoHostOrHost && state.phase === "live" && (
         <HostRequestCard

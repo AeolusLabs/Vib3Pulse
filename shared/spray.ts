@@ -72,6 +72,8 @@ export function sprayEligibility(i: SprayEligibilityInput): Check<SprayCode> {
 // ---------------------------------------------------------------- limits (all kobo)
 export const ROOM_LIMIT_OPTIONS_KOBO: readonly number[] = Object.freeze([50000, 100000, 200000, 500000, 1000000, 10000000]);
 export const ROOM_LIMIT_DEFAULT_KOBO = 200000;
+/** What an anonymous sprayer is called on the wire: in room:spray as fromId, in the receipt line as userId, on the board as id. */
+export const ANON_SPRAYER_ID = "anonymous";
 export const DAILY_DEFAULT_KOBO = 2000000;
 export const DAILY_VERIFIED_MAX_KOBO = 10000000;
 /** Raising a room or daily limit above this needs an ID-verified adult. */

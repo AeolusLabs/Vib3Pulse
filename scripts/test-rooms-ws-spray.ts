@@ -182,6 +182,38 @@ try {
   // Fix round (R1 M5 / ruling 7): the receipt is a system line, kept OUT of the chat ring report excerpts are cut from.
   check("the receipt is a system line and is not in the server's chat ring", receipts[0].system === "spray" && !roomHub.recentChat(R).some((l) => l.userId === P && l.text === receipts[0].text));
 
+  // ---- the spray board (top three) and the recipient's own total
+  const boards = await Promise.all(all.map((c) => c.waitFor((m) => m.type === "room:spray_board")));
+  check("room:spray_board reaches everyone with the top sprayers by V3C", boards.every(Boolean) && boards[2].top?.length === 1 && boards[2].top[0].id === P && boards[2].top[0].v3c === SPRAY_CATALOGUE.bundle.v3c, JSON.stringify(boards[2]));
+  const rec = await g.c.waitFor((m) => m.type === "room:spray_received");
+  check("the recipient gets what they were sprayed (their own share in kobo, and the V3C)", !!rec && rec.v3c === SPRAY_CATALOGUE.bundle.v3c && rec.kobo > 0 && rec.kobo < SPRAY_CATALOGUE.bundle.kobo && rec.roomId === R, JSON.stringify(rec));
+  await sleep(300);
+  check("nobody else gets a room:spray_received", [h, by, p].every((x) => x.c.all((m) => m.type === "room:spray_received").length === 0));
+  const gb1 = await rest("GET", `/api/rooms/${R}/spray/board`, BY);
+  check("GET board for a member: the top three and their own total (nothing for someone not sprayed)", gb1.status === 200 && gb1.json?.top?.length === 1 && gb1.json?.mine?.kobo === 0 && gb1.json?.mine?.v3c === 0, JSON.stringify(gb1.json));
+  const gb2 = await rest("GET", `/api/rooms/${R}/spray/board`, G);
+  check("GET board for the recipient: their total matches what the socket sent", gb2.json?.mine?.kobo === rec?.kobo && gb2.json?.mine?.v3c === rec?.v3c, JSON.stringify(gb2.json));
+  const OUT = await mk("outsider");
+  check("GET board for someone not in the room: 404", (await rest("GET", `/api/rooms/${R}/spray/board`, OUT)).status === 404);
+
+  // ---- anonymous spray: the room never sees who; the row (admins) still does
+  const PA = await mk("payer_anon", { card: true });
+  await join(PA, R);
+  reset();
+  const ra = await spray(PA, R, { tier: "note", targetId: H, idempotencyKey: key(), anonymous: true });
+  check("anonymous spray delivered", ra.json?.status === "delivered", JSON.stringify(ra.json));
+  const aev = await by.c.waitFor((m) => m.type === "room:spray" && m.id === ra.json.sprayId);
+  check("room:spray fromId is the anonymous sentinel, never the payer's id", aev?.fromId === "anonymous" && !JSON.stringify(aev).includes(PA), JSON.stringify(aev));
+  const arc = await by.c.waitFor((m) => m.type === "room:chat" && m.system === "spray");
+  check("the receipt line comes from the anonymous sentinel", arc?.userId === "anonymous");
+  const abd = await by.c.waitFor((m) => m.type === "room:spray_board");
+  check("the board names them Anonymous, with no id of theirs", abd?.top?.some((r: any) => r.id === "anonymous" && r.name === "Anonymous") && !JSON.stringify(abd).includes(PA), JSON.stringify(abd));
+  await sleep(300);
+  check("nothing the room received names the anonymous payer", !JSON.stringify(by.c.msgs).includes(PA));
+  const rowA = (await sprayRows(PA))[0];
+  check("the row still records who paid, and that they chose anonymous", rowA?.payer_id === PA && rowA?.anonymous === true);
+  check("a non-boolean anonymous is a plain 400", (await spray(PA, R, { tier: "note", targetId: H, idempotencyKey: key(), anonymous: "yes" })).status === 400);
+
   // ---- double tap: one room:spray
   reset();
   const kd = key();
@@ -220,8 +252,6 @@ try {
   // ---- rain: bank approval, then finalize; V3C 10,000,000
   const PR = await mk("payer_rain", { card: true });
   const pr = await join(PR, R);
-  await rest("PUT", "/api/users/me/spray/daily-limit", PR, { kobo: 10000000 });
-  await rest("PUT", `/api/rooms/${R}/spray/limit`, PR, { kobo: 10000000 });
   reset();
   const rr = await spray(PR, R, { tier: "rain", targetId: H, idempotencyKey: key() });
   check("rain: action_required (never a silent saved-card charge)", rr.json?.status === "action_required", JSON.stringify(rr.json));
@@ -248,9 +278,9 @@ try {
   try { out = await finalizeSpray(lrow.provider_ref); } finally { sprayClock.now = realNow; }
   check("finalize delivers once past the deadline (never refunds a taken payment)", out === "delivered" && !mock.refunds.has(lrow.provider_ref), out);
   await sleep(300);
-  check("no refund line to the payer, nobody else sees one, and no room:spray went out (nobody to see it)",
+  check("no refund line to the payer, nobody else sees one, and the room is still told once (the delivery check decides the money, not the show)",
     [h.c, by.c, pr.c, pl.c].every((c) => !c.all((m) => m.system === "spray_reversed").length)
-    && !by.c.all((m) => m.type === "room:spray" && m.id === lrow.id).length);
+    && by.c.all((m) => m.type === "room:spray" && m.id === lrow.id).length === 1);
 } catch (e: any) {
   failed++; console.log(`FAIL uncaught: ${e.stack || e}`);
 } finally {

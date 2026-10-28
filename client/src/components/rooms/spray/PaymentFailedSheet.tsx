@@ -13,8 +13,6 @@ interface Props {
   retryAfterSec?: number;
   onRetry(): void;
   onAnotherCard(): void;
-  onLimit(): void;
-  onLimits(): void;
   onClose(): void;
 }
 
@@ -31,7 +29,7 @@ function useCountdown(until: number | null): number {
   return sec;
 }
 
-export default function PaymentFailedSheet({ reason, retryAfterSec, onRetry, onAnotherCard, onLimit, onLimits, onClose }: Props) {
+export default function PaymentFailedSheet({ reason, retryAfterSec, onRetry, onAnotherCard, onClose }: Props) {
   const c = SPRAY_FAIL_COPY[reason];
   const first = useRef<HTMLButtonElement>(null);
   useEffect(() => { requestAnimationFrame(() => first.current?.focus()); }, [reason]);
@@ -47,8 +45,6 @@ export default function PaymentFailedSheet({ reason, retryAfterSec, onRetry, onA
         </Button>
       );
       case "check": return <Button ref={first} className="min-h-[48px] rounded-full" onClick={onRetry} data-testid="spray-failed-check">{SPRAY_COPY.checkAgain}</Button>;
-      case "limit": return <Button ref={first} className="min-h-[48px] rounded-full" onClick={onLimit} data-testid="spray-failed-limit">{SPRAY_COPY.changeLimit}</Button>;
-      case "limits": return <Button ref={first} className="min-h-[48px] rounded-full" onClick={onLimits} data-testid="spray-failed-limits">{SPRAY_COPY.openLimits}</Button>;
       case "signin": return <Button asChild className="min-h-[48px] rounded-full" data-testid="spray-failed-signin"><Link href={`/login?redirect=${encodeURIComponent(back)}`}>{SPRAY_COPY.signIn}</Link></Button>;
       default: return null;
     }

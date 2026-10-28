@@ -36,6 +36,7 @@ import { laneForAge } from "@/lib/gameScreen";
 import { SprayReturn } from "@/components/rooms/spray/BankApproval";
 import { sprayVisible } from "@/lib/sprayLive";
 import { useSprayLive } from "@/hooks/useSprayLive";
+import { useSprayBoardSeed } from "@/hooks/useSprayBoard";
 import { parseSprayBlock, searchWithoutSpray, sprayReturnId, sprayTeamReturnId } from "@/lib/sprayUi";
 import { MINORS_LANE_WARNING } from "@shared/rooms";
 import { moneyEligibleRoom } from "@shared/roomRules";
@@ -259,6 +260,7 @@ function RoomPageInner({ id }: { id: string }) {
   useEffect(() => {
     if (state.phase === "live" && sprayRoom) void refetch();
   }, [state.phase, sprayRoom]); // eslint-disable-line react-hooks/exhaustive-deps
+  useSprayBoardSeed({ roomId: id, token, enabled: state.phase === "live" && sprayRoom, inject: sock?.inject });
 
   if (inRoom && detail && room && !sprayBack && sock && voice) {
     return (

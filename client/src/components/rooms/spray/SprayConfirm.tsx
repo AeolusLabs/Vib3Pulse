@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { ChevronRightIcon, ExternalLinkIcon, Loader2Icon } from "@/components/ui/icons";
 import { AMBER } from "@/lib/roomTickets";
 import { sprayPrice } from "@shared/spray";
@@ -33,6 +34,9 @@ interface Props {
   payOther?: boolean;
   /** Switch between the card path and "pay another way" (only before paying). */
   onPayOther?(on: boolean): void;
+  /** Show as "Anonymous" in the room (only before paying). */
+  anonymous?: boolean;
+  onAnonymous?(on: boolean): void;
   onPay(): void;
   onCancel(): void;
   /** While paying: hide the sheet; the flow keeps going and says when it lands. */
@@ -147,7 +151,7 @@ function TwoTapPay({ tier, onComplete, disabled }: { tier: SprayTier; onComplete
   );
 }
 
-export default function SprayConfirm({ tier, name, method, paying, sending, unknown = false, bankUrl = null, payOther = false, onPayOther, onPay, onCancel, onHide }: Props) {
+export default function SprayConfirm({ tier, name, method, paying, sending, unknown = false, bankUrl = null, payOther = false, onPayOther, anonymous = false, onAnonymous, onPay, onCancel, onHide }: Props) {
   const price = sprayPrice(tier);
   const tapped = useRef(false);
   useEffect(() => { if (!paying) tapped.current = false; }, [paying]);
@@ -162,6 +166,16 @@ export default function SprayConfirm({ tier, name, method, paying, sending, unkn
         <SheetDescription>{priceLine(tier)}. {TIER_LINE[tier].charAt(0).toUpperCase() + TIER_LINE[tier].slice(1)}.</SheetDescription>
       </SheetHeader>
       <NonRefundableNotice />
+
+      {!paying && onAnonymous && (
+        <div className="flex min-h-[44px] items-center justify-between gap-3 rounded-2xl border border-border px-3 py-1.5">
+          <label htmlFor="spray-anon" className="flex min-h-[44px] min-w-0 flex-1 cursor-pointer flex-col justify-center">
+            <span className="block text-sm font-medium">{SPRAY_COPY.anonymousLabel}</span>
+            <span className="block text-xs text-muted-foreground">{SPRAY_COPY.anonymousNote}</span>
+          </label>
+          <Switch id="spray-anon" checked={anonymous} onCheckedChange={onAnonymous} data-testid="spray-anonymous" />
+        </div>
+      )}
 
       {paying ? (
         <div className="grid gap-2">

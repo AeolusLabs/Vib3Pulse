@@ -8,8 +8,7 @@
 import { SPRAY_TIERS, formatV3c, isSprayTier, type SprayTier } from "@shared/money";
 import type { Side } from "@shared/gameScreen";
 import {
-  DAILY_DEFAULT_KOBO, DAILY_VERIFIED_MAX_KOBO, DELIVERY_DEADLINE_MS, ID_REQUIRED_ABOVE_KOBO, ROOM_LIMIT_OPTIONS_KOBO, SPRAY_REASONS,
-  exceedsRoomLimit, idempotencyKeyShape, requiresThreeDs, sprayPrice, type SprayReason,
+  DELIVERY_DEADLINE_MS, SPRAY_REASONS, idempotencyKeyShape, requiresThreeDs, sprayPrice, type SprayReason,
 } from "@shared/spray";
 import { moneyEligibleRoom } from "@shared/roomRules";
 import { formatNaira } from "./roomTickets";
@@ -17,7 +16,7 @@ import { formatNaira } from "./roomTickets";
 // ---------------------------------------------------------------- the room's spray block (GET /api/rooms/:id)
 
 /** Sent ONLY to a viewer who passes payer eligibility in a live, money-eligible room. Absent means no Spray anywhere. */
-export interface SprayBlock { enabled: true; roomLimitKobo: number; roomSpentKobo: number; targets: string[] }
+export interface SprayBlock { enabled: true; targets: string[] }
 
 const koboOk = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
 const MAX_TARGETS = 50;
@@ -31,9 +30,9 @@ export function parseSprayBlock(raw: unknown, room: { ageLimit: string; minorsRo
   if (!room || opts.listenOnly || room.status !== "live" || !moneyEligibleRoom(room)) return null;
   if (!raw || typeof raw !== "object") return null;
   const b = raw as Record<string, unknown>;
-  if (b.enabled !== true || !koboOk(b.roomLimitKobo) || !koboOk(b.roomSpentKobo) || !Array.isArray(b.targets)) return null;
+  if (b.enabled !== true || !Array.isArray(b.targets)) return null;
   const targets = b.targets.filter((t): t is string => typeof t === "string" && t.length > 0 && t.length <= 128).slice(0, MAX_TARGETS);
-  return { enabled: true, roomLimitKobo: b.roomLimitKobo, roomSpentKobo: b.roomSpentKobo, targets: Array.from(new Set(targets)) };
+  return { enabled: true, targets: Array.from(new Set(targets)) };
 }
 
 /**
@@ -54,12 +53,12 @@ export function defaultTarget(targets: readonly string[], hostId: string): strin
 
 /** A saved card as shown: the last four digits when the server knows them (null when it does not), and the brand. */
 export interface SprayCard { last4: string | null; brand: string }
-export interface SprayMe { method: SprayCard | null; dailyLimitKobo: number; dailySpentKobo: number; verified: boolean }
+export interface SprayMe { method: SprayCard | null; verified: boolean }
 
 export function parseSprayMe(raw: unknown): SprayMe | null {
   if (!raw || typeof raw !== "object") return null;
   const b = raw as Record<string, unknown>;
-  if (!koboOk(b.dailyLimitKobo) || !koboOk(b.dailySpentKobo) || typeof b.verified !== "boolean") return null;
+  if (typeof b.verified !== "boolean") return null;
   let method: SprayMe["method"] = null;
   if (b.method && typeof b.method === "object") {
     const m = b.method as Record<string, unknown>;
@@ -70,7 +69,7 @@ export function parseSprayMe(raw: unknown): SprayMe | null {
     if (typeof m.last4 === "string" && /^\d{4}$/.test(m.last4)) method = { last4: m.last4, brand };
     else if (m.last4 === null || m.last4 === undefined || m.last4 === "") method = { last4: null, brand };
   }
-  return { method, dailyLimitKobo: b.dailyLimitKobo, dailySpentKobo: b.dailySpentKobo, verified: b.verified };
+  return { method, verified: b.verified };
 }
 
 const BRANDS: Record<string, string> = { visa: "Visa", mastercard: "Mastercard", verve: "Verve", amex: "Amex", "american express": "Amex" };
@@ -84,13 +83,6 @@ export function cardLabel(method: SprayCard | null): string | null {
 
 /** The card label inside a sentence: "Charged to your saved Visa", "Charged to Visa ending 4242". */
 export const cardInSentence = (label: string) => (label.startsWith("Your ") ? `y${label.slice(1)}` : label);
-
-/** PUT .../spray/limit answers `{ limitKobo, spentKobo }`. */
-export function parseLimitBody(raw: unknown): { limitKobo: number; spentKobo: number } | null {
-  if (!raw || typeof raw !== "object") return null;
-  const b = raw as Record<string, unknown>;
-  return koboOk(b.limitKobo) && koboOk(b.spentKobo) ? { limitKobo: b.limitKobo, spentKobo: b.spentKobo } : null;
-}
 
 // ---------------------------------------------------------------- the tray
 
@@ -120,39 +112,13 @@ export function priceLine(tier: SprayTier): string {
 /** The note pays with a tap; bundle, bag and rain need a deliberate slide. */
 export const needsSlide = (tier: SprayTier) => tier !== "note";
 
-export type TileAction = { kind: "pay" } | { kind: "limit" } | { kind: "blocked"; reason: string };
+export type TileAction = { kind: "pay" } | { kind: "blocked"; reason: string };
 
-/**
- * What tapping a tier does. Over the room limit asks to raise it first (board 7, Room limit); over the daily limit, offline,
- * or while the payer's settings are still loading, the tile is disabled with the reason in words.
- */
-export function tileAction(tier: SprayTier, block: SprayBlock, me: SprayMe | null, online: boolean): TileAction {
+/** What tapping a tier does. There is no spending limit; offline, or while the payer's settings are still loading, the tile is disabled with the reason in words. */
+export function tileAction(_tier: SprayTier, _block: SprayBlock, me: SprayMe | null, online: boolean): TileAction {
   if (!online) return { kind: "blocked", reason: "You're offline." };
   if (!me) return { kind: "blocked", reason: "Checking your card." };
-  const price = sprayPrice(tier).kobo;
-  if (me.dailySpentKobo + price > me.dailyLimitKobo) return { kind: "blocked", reason: `Over your daily limit of ${formatNaira(me.dailyLimitKobo)}.` };
-  if (exceedsRoomLimit(block.roomSpentKobo, block.roomLimitKobo, price)) {
-    // No room limit option is high enough: there is nothing to raise it to.
-    return limitChoices(block, price, me.verified).some((c) => c.ok) ? { kind: "limit" } : { kind: "blocked", reason: "Above the highest room limit." };
-  }
   return { kind: "pay" };
-}
-
-export interface LimitChoice { kobo: number; ok: boolean; why?: string }
-
-/** Room limit options for this spray: one below what you have spent plus this price cannot be picked; above ₦20,000 needs ID. */
-export function limitChoices(block: SprayBlock, priceKobo: number, verified: boolean): LimitChoice[] {
-  return ROOM_LIMIT_OPTIONS_KOBO.map((kobo) => {
-    if (kobo < block.roomSpentKobo + priceKobo) return { kobo, ok: false, why: "Too low for this spray" };
-    if (kobo > ID_REQUIRED_ABOVE_KOBO && !verified) return { kobo, ok: false, why: "Needs a verified account" };
-    return { kobo, ok: true };
-  });
-}
-
-/** The daily limit choices (Spending limits). Above the default needs a verified account; never above the verified maximum. */
-export const DAILY_LIMIT_OPTIONS_KOBO: readonly number[] = [500_000, 2_000_000, 5_000_000, 10_000_000].filter((k) => k <= DAILY_VERIFIED_MAX_KOBO);
-export function dailyChoices(verified: boolean): LimitChoice[] {
-  return DAILY_LIMIT_OPTIONS_KOBO.map((kobo) => (kobo > DAILY_DEFAULT_KOBO && !verified ? { kobo, ok: false, why: "Needs a verified account" } : { kobo, ok: true }));
 }
 
 // ---------------------------------------------------------------- the pay flow (state machine)
@@ -165,13 +131,15 @@ export interface SprayIntent {
   tier: SprayTier; targetId: string; key: string; saveCard: boolean; bankUrl?: string;
   /** The payer chose "pay another way" (bank, transfer, USSD...): one time, the saved card is not used and nothing is saved. */
   payOther?: boolean;
+  /** Show as "Anonymous" in the room (the board, the receipt line, the animation). The server still keeps who paid; admins see it. */
+  anonymous?: boolean;
   /** A team spray (one charge split between the team's players). `targetId` is then only an anchor player; the sheet says the team. */
   side?: Side;
 }
 
 export type SprayFailReason =
   | SprayReason
-  | "REVERSED" | "FAILED" | "UNAVAILABLE" | "ROOM_LIMIT" | "DAILY_LIMIT" | "RATE_LIMITED" | "SIGNED_OUT"
+  | "REVERSED" | "FAILED" | "UNAVAILABLE" | "RATE_LIMITED" | "SIGNED_OUT"
   /** Offline when Pay was tapped: nothing was sent. */
   | "NOT_SENT"
   /** The server could not start the payment (our side, 402 NETWORK or a failed row with NETWORK): not charged. */
@@ -213,6 +181,7 @@ export type SprayFlowEvent =
   | { type: "start"; tier: SprayTier; targetId: string; key: string; side?: Side }
   | { type: "saveCard"; on: boolean }
   | { type: "payOther"; on: boolean }
+  | { type: "anonymous"; on: boolean }
   | { type: "pay"; now: number }
   | { type: "outcome"; outcome: SprayOutcome; now: number }
   /** A room:spray event with this id reached the room: it was delivered. */
@@ -240,6 +209,8 @@ export function sprayFlow(s: SprayFlow, e: SprayFlowEvent): SprayFlow {
       return { kind: "confirming", intent: { tier: e.tier, targetId: e.targetId, key: e.key, saveCard: false, ...(e.side === "A" || e.side === "B" ? { side: e.side } : {}) } };
     case "saveCard":
       return s.kind === "confirming" ? { ...s, intent: { ...s.intent, saveCard: e.on === true } } : s;
+    case "anonymous":
+      return s.kind === "confirming" ? { ...s, intent: { ...s.intent, anonymous: e.on === true } } : s;
     case "payOther": {
       if (s.kind !== "confirming") return s;
       const { payOther: _drop, ...rest } = s.intent;
@@ -277,7 +248,7 @@ export function sprayFlow(s: SprayFlow, e: SprayFlowEvent): SprayFlow {
     case "retry":
       if (s.kind !== "failed") return s;
       if (s.sameKey) return { kind: "confirming", intent: s.intent };
-      return idempotencyKeyShape(e.key) ? { kind: "confirming", intent: { tier: s.intent.tier, targetId: s.intent.targetId, key: e.key, saveCard: s.intent.saveCard, ...(s.intent.payOther ? { payOther: true } : {}), ...(s.intent.side ? { side: s.intent.side } : {}) } } : s;
+      return idempotencyKeyShape(e.key) ? { kind: "confirming", intent: { tier: s.intent.tier, targetId: s.intent.targetId, key: e.key, saveCard: s.intent.saveCard, ...(s.intent.payOther ? { payOther: true } : {}), ...(s.intent.anonymous ? { anonymous: true } : {}), ...(s.intent.side ? { side: s.intent.side } : {}) } } : s;
     case "close":
       // While the request is out or the bank page is open the flow is never dropped: the sheet is hidden, and the hook
       // keeps watching (closing the bank sheet must not stop tracking, review M8).
@@ -389,7 +360,7 @@ export function reasonOfRefusal(status: number, code?: string, reason?: unknown)
   if (status === 401) return "SIGNED_OUT";
   if (status === 402) return isServerReason(reason) ? failedReason(reason) : "DECLINED";
   if (status === 400) return "BAD_REQUEST";
-  if (status === 409) return code === "ROOM_LIMIT" ? "ROOM_LIMIT" : code === "DAILY_LIMIT" ? "DAILY_LIMIT" : code === "IDEMPOTENCY_MISMATCH" ? "MISMATCH" : "UNAVAILABLE";
+  if (status === 409) return code === "IDEMPOTENCY_MISMATCH" ? "MISMATCH" : "UNAVAILABLE";
   if (status === 429) return "RATE_LIMITED";
   return "UNAVAILABLE"; // 403 SPRAY_UNAVAILABLE, 404, anything else: the one plain line
 }
@@ -476,7 +447,7 @@ export const bankWillAsk = (tier: SprayTier, hasCard: boolean) => requiresThreeD
  * "wait" is an outcome we don't know yet (a calm status line, never an alert), "info" is a plain refusal.
  */
 export interface FailCopy {
-  title: string; body: string; primary: "retry" | "check" | "limit" | "limits" | "signin" | null; anotherCard: boolean; refunded: boolean;
+  title: string; body: string; primary: "retry" | "check" | "signin" | null; anotherCard: boolean; refunded: boolean;
   tone: "fail" | "refund" | "wait" | "info";
 }
 
@@ -499,8 +470,6 @@ export const SPRAY_FAIL_COPY: Record<SprayFailReason, FailCopy> = {
   FAILED: { title: "The payment didn't go through", body: "Nothing was sent. If your bank shows a charge, it is returned in full.", primary: "retry", anotherCard: false, refunded: false, tone: "fail" },
   NOT_FOUND: { title: "We can't find this payment", body: "This payment isn't on your account, or it doesn't exist.", primary: null, anotherCard: false, refunded: false, tone: "info" },
   UNAVAILABLE: { title: "Spraying isn't available", body: "Spraying is not available here.", primary: null, anotherCard: false, refunded: false, tone: "info" },
-  ROOM_LIMIT: { title: "Over your room limit", body: "This spray is above your limit for this room. Raise it to continue.", primary: "limit", anotherCard: false, refunded: false, tone: "info" },
-  DAILY_LIMIT: { title: "Over your daily limit", body: "This spray would go over your daily limit. You can change it in Spending limits.", primary: "limits", anotherCard: false, refunded: false, tone: "info" },
   RATE_LIMITED: { title: "Slow down a little", body: "You've sprayed a lot in a short time. Wait a moment, then try again.", primary: "retry", anotherCard: false, refunded: false, tone: "info" },
   SIGNED_OUT: { title: "Sign in to spray", body: "You were signed out. Sign in again, then come back to the room.", primary: "signin", anotherCard: false, refunded: false, tone: "info" },
   NOT_SENT: { title: "You're offline", body: "Nothing was sent and you were not charged. Try again when you're back online.", primary: "retry", anotherCard: false, refunded: false, tone: "info" },
@@ -517,6 +486,8 @@ export const SPRAY_COPY = {
   addCardTitle: "Add a card",
   addCardBody: "Your bank asks you to approve once. Cards are handled by Paystack: we never see your card number.",
   saveCard: "Save this card so the next note or bundle is one tap",
+  anonymousLabel: "Spray anonymously",
+  anonymousNote: "You'll show as Anonymous in the room and on the leaderboard.",
   addCardGo: "Continue",
   payOther: "Pay another way",
   payOtherLine: "Bank, bank transfer, USSD or QR. Paid one time: nothing is saved.",
@@ -538,11 +509,7 @@ export const SPRAY_COPY = {
   thankYou: "Say thank you",
   privateLine: "Only you can see this",
   sent: "Sprayed",
-  limitTitle: "Room limit",
-  limitNote: `Limits above ${formatNaira(ID_REQUIRED_ABOVE_KOBO)} need a verified account.`,
-  limitsTitle: "Spending limits",
-  dailyLabel: "Most I can spend in a day",
-  dailyNote: `Verified adults can go up to ${formatNaira(DAILY_VERIFIED_MAX_KOBO)} a day.`,
+  limitsTitle: "Saved card",
   removeCard: "Remove saved card",
   removedCard: "Card removed. Your next spray goes through your bank.",
   quietLabel: "Quiet effects",
@@ -550,8 +517,7 @@ export const SPRAY_COPY = {
   anotherCard: "Use another card",
   tryAgain: "Try again",
   checkAgain: "Check again",
-  changeLimit: "Change room limit",
-  openLimits: "Spending limits",
+  openLimits: "Saved card",
   signIn: "Sign in",
   cancel: "Cancel",
   done: "Done",
@@ -568,23 +534,6 @@ export function chargeLine(tier: SprayTier, method: SprayCard | null, payOther =
   const card = label ? cardInSentence(label) : null;
   if (!card) return "Your bank will ask you to add and approve a card.";
   return requiresThreeDs(tier) ? `Charged to ${card}. Your bank will ask you to approve it.` : `Charged to ${card}.`;
-}
-
-/**
- * Why a limit change was refused, in words. `ID_REQUIRED` (403) is the payer's own fact: a limit above the ID line needs
- * a verified ID (review M17). `status` undefined means the answer came back but could not be read.
- */
-export function limitErrorText(status: number | undefined, code: string | undefined, fallback: string): string {
-  if (status === 0) return "You're offline. Try again when you're back online.";
-  if (code === "ID_REQUIRED") return `Verify your ID to set a limit above ${formatNaira(ID_REQUIRED_ABOVE_KOBO)}.`;
-  return fallback;
-}
-
-/** "Room limit ₦2,000 · spent ₦0". */
-export const limitChipText = (b: SprayBlock) => `Room limit ${formatNaira(b.roomLimitKobo)} · spent ${formatNaira(b.roomSpentKobo)}`;
-
-export function limitAsk(tier: SprayTier, b: SprayBlock): string {
-  return `This spray is ${sprayPrice(tier).display}, above your limit of ${formatNaira(b.roomLimitKobo)} (${formatNaira(b.roomSpentKobo)} spent). Raise it to continue.`;
 }
 
 /** The bank approval line: "Your bank is asking you to approve a payment of ₦10,000 to Vib3Pulse." */

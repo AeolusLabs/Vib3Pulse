@@ -462,7 +462,6 @@ try {
   check("after deleting the card: action_required", afterDel.json?.status === "action_required", JSON.stringify(afterDel.json));
   // 3D Secure: bag never charges the saved card silently.
   const P3 = await payer("p_bag");
-  check("setup: room limit raised to 1,000,000 (verified)", (await rest("PUT", `/api/rooms/${R}/spray/limit`, P3.id, { kobo: 1000000 })).json?.limitKobo === 1000000);
   const bag = await spray(P3.id, R, body(H, "bag"));
   const bagRow = (await sprayRows(P3.id))[0];
   check("bag with a saved card: action_required (bank approval), chargeSaved never called", bag.json?.status === "action_required" && !mock.calls.charge.some((c) => c.reference === bagRow.provider_ref) && mock.calls.start.some((s) => s.reference === bagRow.provider_ref), JSON.stringify(bag.json));
@@ -578,12 +577,13 @@ try {
   try { await due(lrow.id); await sweepPendingSprays(sprayClock.now()); } finally { clockBack(); }
   const lnow = await rowById(lrow.id);
   // Owner rule 2026-10-22: a charge that went through is never undone for a delivery problem. The recipient left, so nobody
-  // is there to see it: delivered all the same (ledger rows, notifications), no animation, no refund, no clawback.
+  // is there to see it: delivered all the same (ledger rows, notifications), no refund, no clawback. The room still gets the
+  // announcement (2026-10-28: the delivery check decides the money path, not the show).
   check("recipient left: delivered (the charge went through), no reversal reason", lnow.status === "delivered" && !lnow.reason, JSON.stringify(lnow));
   check("recipient left: no refund call, spend kept, spray ledger once, no refund ledger",
     mock.calls.refund.filter((r) => r === lrow.provider_ref).length === 0 && (await spentIn(R, PL.id)) > 0
     && (await ledger(lrow.provider_ref, "spray")).length === 1 && (await ledger(lrow.provider_ref, "spray_refund")).length === 0);
-  check("recipient left: no room:spray animation (nobody there to see it)", !h.c.all((m) => m.type === "room:spray" && m.id === lrow.id).length);
+  check("recipient left: the room is still told (one room:spray)", h.c.all((m) => m.type === "room:spray" && m.id === lrow.id).length === 1);
   check("recipient left: the payer is not told of any refund", !h.c.all((m) => m.system === "spray_reversed").length
     && (await q(`select 1 from notifications where user_id = $1 and type = 'spray_reversed'`, [PL.id])).length === 0);
   check("recipient left: status poll says delivered", (await rest("GET", `/api/rooms/${R}/spray/${lrow.id}`, PL.id)).json?.status === "delivered");
@@ -829,47 +829,13 @@ try {
   // =============================================================== limits (task 5.5)
   const PLIM = await payer("p_limits");
   const g0 = await rest("GET", "/api/users/me/spray", PLIM.id);
-  check("GET me/spray: defaults", g0.status === 200 && g0.json.dailyLimitKobo === 2000000 && g0.json.dailySpentKobo === 0 && g0.json.verified === true, JSON.stringify(g0.json));
+  check("GET me/spray: defaults", g0.status === 200 && g0.json.verified === true && g0.json.dailyLimitKobo === undefined && g0.json.dailySpentKobo === undefined, JSON.stringify(g0.json));
   check("GET me/spray for a teen: generic 403 (teens never see money controls)", isGeneric403(await rest("GET", "/api/users/me/spray", TEEN)));
-  check("unverified adult cannot raise the daily limit above the default: 403 ID_REQUIRED", (await rest("PUT", "/api/users/me/spray/daily-limit", UNV, { kobo: 2000001 })).json?.code === "ID_REQUIRED");
-  check("unverified adult may set it at the default", (await rest("PUT", "/api/users/me/spray/daily-limit", UNV, { kobo: 2000000 })).status === 200);
-  check("verified: up to 10,000,000", (await rest("PUT", "/api/users/me/spray/daily-limit", PLIM.id, { kobo: 10000000 })).json?.dailyLimitKobo === 10000000);
-  check("never above 10,000,000: 400", (await rest("PUT", "/api/users/me/spray/daily-limit", PLIM.id, { kobo: 10000001 })).status === 400);
-  check("room limit not an option: 400", (await rest("PUT", `/api/rooms/${R}/spray/limit`, PLIM.id, { kobo: 123456 })).status === 400);
-  check("room limit 100,000 naira unverified: 403 ID_REQUIRED", (await rest("PUT", `/api/rooms/${R}/spray/limit`, UNV, { kobo: 10000000 })).json?.code === "ID_REQUIRED");
-  check("room limit for a teen: generic 403", isGeneric403(await rest("PUT", `/api/rooms/${R}/spray/limit`, TEEN, { kobo: 50000 })));
-  const rl = await rest("PUT", `/api/rooms/${R}/spray/limit`, PLIM.id, { kobo: 100000 });
-  check("room limit set: { limitKobo, spentKobo }", rl.json?.limitKobo === 100000 && rl.json?.spentKobo === 0, JSON.stringify(rl.json));
-  check("room limit boundary: equal to the limit is allowed", (await spray(PLIM.id, R, body(H, "bundle"))).json?.status === "delivered");
-  const over = await spray(PLIM.id, R, body(G));
-  check("room limit boundary: one more note is 409 ROOM_LIMIT, no charge", over.status === 409 && over.json?.code === "ROOM_LIMIT" && (await sprayRows(PLIM.id)).length === 1);
-  // Fix round (R1 M1 / ruling 5): the payer's own limits are answered BEFORE anything about the target, so the answer is
-  // the same whoever they name: a plain guest, someone without a payout account, an unknown id. No oracle.
-  for (const [n, t] of [["a plain guest", PLAIN], ["a stage person without a payout account", NOPAY], ["an unknown id", "00000000-0000-4000-8000-000000000000"]] as const) {
-    const r = await spray(PLIM.id, R, body(t));
-    check(`M1: at their own room limit, spraying ${n} is the same 409 ROOM_LIMIT`, r.status === 409 && r.json?.code === "ROOM_LIMIT", `${r.status} ${JSON.stringify(r.json)}`);
-  }
-  // Daily total across rooms.
-  const PDAY = await payer("p_daily");
-  await rest("PUT", "/api/users/me/spray/daily-limit", PDAY.id, { kobo: 100000 });
-  check("daily: first bundle fits", (await spray(PDAY.id, R, body(H, "bundle"))).json?.status === "delivered");
-  const H5 = await mk("host_daily", { payout: true });
-  const R5 = await mkRoom(H5);
-  await joinRoom(H5, R5);
-  await joinRoom(PDAY.id, R5); // leaves R, joins R5
-  const dd = await spray(PDAY.id, R5, body(H5));
-  check("daily total across rooms: 409 DAILY_LIMIT", dd.status === 409 && dd.json?.code === "DAILY_LIMIT", JSON.stringify(dd.json));
-  // Two tabs and two devices racing the room limit: never over.
-  const PRL = await payer("p_racelimit");
-  await rest("PUT", `/api/rooms/${R}/spray/limit`, PRL.id, { kobo: 100000 });
-  const racers = await Promise.all([H, G, CO, H, G, CO].map((t) => spray(PRL.id, R, body(t, "bundle"))));
-  const delivered = (await sprayRows(PRL.id)).filter((r: any) => r.status === "delivered").length;
-  check("limit race: at most one bundle delivered against a 100,000 limit, spent never over", delivered === 1 && (await spentIn(R, PRL.id)) <= 100000, `${delivered} ${JSON.stringify(racers.map((r) => r.status))}`);
-  // Daily race across two rooms.
-  const PDR = await payer("p_racedaily");
-  await rest("PUT", "/api/users/me/spray/daily-limit", PDR.id, { kobo: 100000 });
-  await Promise.all([spray(PDR.id, R, body(H, "bundle")), spray(PDR.id, R, body(G, "bundle")), spray(PDR.id, R, body(CO, "bundle"))]);
-  check("daily race: the rolling 24 h total never passes the limit", Number((await q(`select coalesce(sum(amount_kobo),0) as n from spray_payments where payer_id = $1 and status in ('created','pending','paid','delivered','reversing','disputed')`, [PDR.id]))[0].n) <= 100000);
+  // Owner decision 2026-10-28: there are no spending limits. The routes are gone and nothing is refused for how much was sprayed.
+  check("the daily-limit route is gone", (await rest("PUT", "/api/users/me/spray/daily-limit", PLIM.id, { kobo: 100000 })).status === 404);
+  check("the room-limit route is gone", (await rest("PUT", `/api/rooms/${R}/spray/limit`, PLIM.id, { kobo: 100000 })).status === 404);
+  const big = await spray(PLIM.id, R, body(H, "rain"));
+  check("a rain (100,000 naira, above the old default room and daily limits) is not refused for its size", big.status === 200 && ["action_required", "pending", "delivered"].includes(big.json?.status), JSON.stringify(big.json));
   // Velocity: 10 a minute per payer, 3 a minute per recipient, Retry-After.
   const PV = await payer("p_velocity");
   const vrow = await sprayRows(P.id);
@@ -910,7 +876,7 @@ try {
   // =============================================================== the room's spray block (GET /api/rooms/:id)
   const PB = await payer("p_block");
   const gb = await rest("GET", `/api/rooms/${R}`, PB.id);
-  check("spray block for an eligible payer in the room", gb.json?.spray?.enabled === true && typeof gb.json.spray.roomLimitKobo === "number", JSON.stringify(gb.json?.spray));
+  check("spray block for an eligible payer in the room", gb.json?.spray?.enabled === true && gb.json.spray.roomLimitKobo === undefined, JSON.stringify(gb.json?.spray));
   check("spray block targets: host, payable stage guest and co-host; never the unverified, unpayable or plain guest",
     [H, G, CO].every((t) => gb.json?.spray?.targets.includes(t)) && ![UNVSTAGE, NOPAY, PLAIN, PB.id].some((t) => gb.json?.spray?.targets.includes(t)), JSON.stringify(gb.json?.spray?.targets));
   check("spray block absent for an unverified adult (never enabled: false)", !("spray" in ((await rest("GET", `/api/rooms/${R}`, UNV)).json ?? {})));

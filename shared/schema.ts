@@ -1392,6 +1392,8 @@ export const sprayPayments = pgTable("spray_payments", {
   // Team spray: the batch (the one charge) this share belongs to, and the subaccount fixed for it when the spray started.
   batchId: uuid("batch_id").references(() => sprayBatches.id, { onDelete: "restrict" }),
   recipientSubaccount: text("recipient_subaccount"),
+  // The payer chose to show as "Anonymous" in the room (leaderboard, receipt line, spray animation). Admins always see the payer.
+  anonymous: boolean("anonymous").notNull().default(false),
 }, (t) => ({
   // Per payer, never global: one user can never squat or probe another's key.
   payerKeyUnique: unique("spray_payments_payer_key_key").on(t.payerId, t.idempotencyKey),

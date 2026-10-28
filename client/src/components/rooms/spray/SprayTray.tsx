@@ -9,7 +9,7 @@ import { SPRAY_TIERS, formatV3c, type SprayTier } from "@shared/money";
 import { sprayPrice } from "@shared/spray";
 import { AMBER } from "@/lib/roomTickets";
 import NonRefundableNotice from "./NonRefundableNotice";
-import { SPRAY_COPY, TIER_LINE, cardInSentence, cardLabel, limitChipText, tileAction, type SprayBlock, type SprayMe } from "@/lib/sprayUi";
+import { SPRAY_COPY, TIER_LINE, cardInSentence, cardLabel, tileAction, type SprayBlock, type SprayMe } from "@/lib/sprayUi";
 
 /** A small drawing of each tier for the tray and the confirm step. Decorative. */
 export function TierMark({ tier, className = "h-10 w-14" }: { tier: SprayTier; className?: string }) {
@@ -61,14 +61,13 @@ interface Props {
   onTarget(id: string): void;
   online: boolean;
   onPick(tier: SprayTier): void;
-  onLimit(): void;
   onLimits(): void;
   quiet: boolean;
   onQuiet(on: boolean): void;
   onDone(): void;
 }
 
-export default function SprayTray({ block, me, meError, onRetryMe, targets, targetId, onTarget, online, onPick, onLimit, onLimits, quiet, onQuiet, onDone }: Props) {
+export default function SprayTray({ block, me, meError, onRetryMe, targets, targetId, onTarget, online, onPick, onLimits, quiet, onQuiet, onDone }: Props) {
   const target = targets.find((t) => t.id === targetId);
   const card = cardLabel(me?.method ?? null);
   return (
@@ -114,7 +113,6 @@ export default function SprayTray({ block, me, meError, onRetryMe, targets, targ
                   <span className="block font-semibold">{p.label} · {p.display}</span>
                   <span className="block text-xs text-muted-foreground">{formatV3c(p.v3c)} · {TIER_LINE[tier]}</span>
                   {blocked && <span id={`spray-why-${tier}`} className="block text-xs text-destructive">{a.reason}</span>}
-                  {a.kind === "limit" && <span className="block text-xs text-muted-foreground">Above your room limit. Tap to raise it.</span>}
                 </span>
               </button>
             </li>
@@ -123,7 +121,6 @@ export default function SprayTray({ block, me, meError, onRetryMe, targets, targ
       </ul>
 
       <div className="flex items-center justify-between gap-2">
-        <button type="button" onClick={onLimit} className={`${AMBER.chip} min-h-[44px] px-4 text-sm`} data-testid="spray-limit-chip">{limitChipText(block)}</button>
         <Button className="min-h-[44px] rounded-full px-6" onClick={onDone} data-testid="spray-done">{SPRAY_COPY.done}</Button>
       </div>
 

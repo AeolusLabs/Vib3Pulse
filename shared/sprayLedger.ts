@@ -12,6 +12,8 @@ export interface LedgerRow {
   hostUsername: string;
   payerId: string;
   payerUsername: string;
+  /** The payer chose to show as "Anonymous" in the room. Admins still see who they are. */
+  anonymous: boolean;
   recipientId: string;
   recipientUsername: string;
   tier: string;

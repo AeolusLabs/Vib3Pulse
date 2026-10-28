@@ -169,8 +169,6 @@ try {
   const joined = new Map<string, Awaited<ReturnType<typeof join>>>();
   for (const id of everyone) joined.set(id, await join(id, R));
   check("setup: everyone in", everyone.every((id) => joined.get(id)?.s?.type === "room:state"));
-  // Payer-owned limits are checked FIRST (no oracle), so the payers that spray a 10,000 naira bag need a higher room limit than the 2,000 naira default.
-  for (const id of [P3, P4]) await ss.setRoomLimit(R, id, 5_000_000);
   roomHub.setVoiceOn(R, true);
   roomHub.setLiveVideoOn(R, true);
   roomHub.setGameOn(R, true, { dropMs: 120_000, ageLane: null });
@@ -336,7 +334,7 @@ try {
   check("room ended before delivery: delivered, ledger written, NOT refunded", out5 === "delivered" && !mock.refunds.has(b5.provider_ref)
     && (await ledger(b5.provider_ref, "spray")).length === 1 && (await batchesOf(P6))[0].status === "delivered");
   await sleep(300);
-  check("room ended: no animation broadcast (nobody to see it)", !watcher.all((m) => m.type === "room:spray").length);
+  check("room ended: the room is still told (the delivery check decides the money, not the show)", watcher.all((m) => m.type === "room:spray").length === 1);
   await sweepPendingSprays(Date.now()); // the sweep drives batches without error and leaves delivered ones alone
   check("the sweep runs over batches and changes nothing that is delivered", (await batchesOf(P))[0].status === "delivered");
 } catch (e: any) {

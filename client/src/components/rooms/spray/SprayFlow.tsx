@@ -21,7 +21,6 @@ import CardSheet from "./CardSheet";
 import SprayConfirm from "./SprayConfirm";
 import BankApproval from "./BankApproval";
 import PaymentFailedSheet from "./PaymentFailedSheet";
-import RoomLimitSheet from "./RoomLimitSheet";
 import SpendingLimits from "./SpendingLimits";
 
 export const SPRAY_ME_KEY = ["/api/users/me/spray"] as const;
@@ -37,7 +36,7 @@ function useOnline() {
   return on;
 }
 
-export type Sub = { kind: "limit"; tier: SprayTier | null } | { kind: "limits" } | { kind: "card-replace" };
+export type Sub = { kind: "limits" } | { kind: "card-replace" };
 
 export interface SprayFlowProps {
   roomId: string;
@@ -82,10 +81,6 @@ export default function SprayFlow({ roomId, token, block, targets, hostId, nameO
   const skipCard = useRef(false);
   const autoPay = useRef(false);
 
-  // The room's limit as the server last answered it here, until the refetched block catches up.
-  const [localLimit, setLocalLimit] = useState<{ limitKobo: number; spentKobo: number } | null>(null);
-  useEffect(() => { setLocalLimit(null); }, [block.roomLimitKobo, block.roomSpentKobo]);
-  const eff: SprayBlock = localLimit ? { ...block, roomLimitKobo: localLimit.limitKobo, roomSpentKobo: localLimit.spentKobo } : block;
 
   const [targetId, setTargetId] = useState<string | null>(() => presetTarget ?? defaultTarget(targets, hostId));
   useEffect(() => { if (presetTarget) setTargetId(presetTarget); }, [presetTarget]);
@@ -138,20 +133,18 @@ export default function SprayFlow({ roomId, token, block, targets, hostId, nameO
   const pick = (tier: SprayTier) => {
     snd.unlock(); // the tap is the gesture the browser needs before any sound
     if (!targetId) return;
-    const a = tileAction(tier, eff, me, online);
-    if (a.kind === "limit") { setSub({ kind: "limit", tier }); return; }
+    const a = tileAction(tier, block, me, online);
     if (a.kind !== "pay") return;
     if (!flow.start(tier, targetId)) toast({ title: "A spray is still on its way. Wait for it to land." });
   };
 
-  // The team sheet's pick: the same checks as a single spray (room limit, daily limit), then a team intent with its own key.
+  // The team sheet's pick: the same checks as a single spray (the card and the connection), then a team intent with its own key.
   const lastTeamSeq = useRef(0);
   useEffect(() => {
     if (!teamRequest || teamRequest.seq === lastTeamSeq.current) return;
     lastTeamSeq.current = teamRequest.seq;
     snd.unlock();
-    const a = tileAction(teamRequest.tier, eff, me, online);
-    if (a.kind === "limit") { setSub({ kind: "limit", tier: teamRequest.tier }); return; }
+    const a = tileAction(teamRequest.tier, block, me, online);
     if (a.kind !== "pay") return;
     if (!flow.start(teamRequest.tier, teamRequest.anchorId, teamRequest.side)) toast({ title: "A spray is still on its way. Wait for it to land." });
   }, [teamRequest?.seq]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -182,7 +175,7 @@ export default function SprayFlow({ roomId, token, block, targets, hostId, nameO
   // ---------------------------------------------------------------- which step shows
   // Only once we know there is no saved card (while the settings load, no card step flashes; the server decides anyway).
   const needsCard = s.kind === "confirming" && !!me && !me.method && cardOkFor !== s.intent.key;
-  type View = "tray" | "card" | "confirm" | "bank" | "failed" | "limit" | "limits" | "card-replace" | null;
+  type View = "tray" | "card" | "confirm" | "bank" | "failed" | "limits" | "card-replace" | null;
   const view: View = sub ? sub.kind
     : s.kind === "confirming" ? (needsCard ? "card" : "confirm")
     : s.kind === "paying" ? (hidden ? null : "confirm")
@@ -209,9 +202,9 @@ export default function SprayFlow({ roomId, token, block, targets, hostId, nameO
         <Button className="min-h-[44px] rounded-full" onClick={() => onTrayOpenChange(false)}>{SPRAY_COPY.done}</Button>
       </div>
     ) : (
-      <SprayTray block={eff} me={me} meError={meQ.isError && !me} onRetryMe={() => void meQ.refetch()}
+      <SprayTray block={block} me={me} meError={meQ.isError && !me} onRetryMe={() => void meQ.refetch()}
         targets={targets.map((id) => ({ id, name: name(id) }))} targetId={targetId} onTarget={setTargetId}
-        online={online} onPick={pick} onLimit={() => setSub({ kind: "limit", tier: null })} onLimits={() => setSub({ kind: "limits" })}
+        online={online} onPick={pick} onLimits={() => setSub({ kind: "limits" })}
         quiet={quiet} onQuiet={onQuiet} onDone={() => onTrayOpenChange(false)} />
     );
   } else if (view === "card" && s.kind === "confirming") {
@@ -225,6 +218,7 @@ export default function SprayFlow({ roomId, token, block, targets, hostId, nameO
       paying={s.kind === "paying"} sending={s.kind === "paying" && !!s.sprayId} unknown={s.kind === "paying" && s.unknown === true}
       bankUrl={s.kind === "paying" ? s.intent.bankUrl ?? null : null}
       payOther={s.intent.payOther === true} onPayOther={s.kind === "confirming" ? flow.setPayOther : undefined}
+      anonymous={s.intent.anonymous === true} onAnonymous={s.kind === "confirming" ? flow.setAnonymous : undefined}
       onPay={() => { snd.unlock(); flow.pay(); }} onCancel={flow.close} onHide={hide} />;
   } else if (view === "bank" && s.kind === "action_required") {
     body = <BankApproval tier={s.intent.tier} url={s.url} onClose={hide} />;
@@ -232,19 +226,7 @@ export default function SprayFlow({ roomId, token, block, targets, hostId, nameO
     const tier = s.intent.tier;
     body = <PaymentFailedSheet key={`${s.intent.key}:${s.reason}`} reason={s.reason} retryAfterSec={s.retryAfterSec} onRetry={retry}
       onAnotherCard={() => { setCardError(null); setReplaceSave(false); setSub({ kind: "card-replace" }); }}
-      onLimit={() => { flow.close(); setSub({ kind: "limit", tier }); }}
-      onLimits={() => { flow.close(); setSub({ kind: "limits" }); }}
       onClose={flow.close} />;
-  } else if (view === "limit" && sub?.kind === "limit") {
-    const tier = sub.tier;
-    body = <RoomLimitSheet roomId={roomId} token={token} block={eff} tier={tier} verified={me?.verified === true}
-      onSaved={(l) => {
-        setLocalLimit(l);
-        onSettled();
-        setSub(null);
-        if (tier && targetId && !flow.start(tier, targetId)) toast({ title: "A spray is still on its way. Wait for it to land." });
-      }}
-      onClose={() => setSub(null)} />;
   } else if (view === "limits") {
     body = <SpendingLimits me={me} onChanged={() => void queryClient.invalidateQueries({ queryKey: SPRAY_ME_KEY })} onClose={() => setSub(null)} />;
   }

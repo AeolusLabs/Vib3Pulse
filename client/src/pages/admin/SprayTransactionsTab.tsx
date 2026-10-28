@@ -226,7 +226,7 @@ function DetailBody({ id, onFilter }: { id: string; onFilter: (patch: Partial<Tx
         <dl className={`${panel} divide-y divide-slate-700/60`}>
           <Party label="Room" name={tx.roomTitle} />
           <Party label="Host" name={tx.hostUsername} />
-          <Party label="Payer" name={tx.payerUsername} />
+          <Party label="Payer" name={tx.anonymous ? `${tx.payerUsername} (anonymous in the room)` : tx.payerUsername} />
           <Party label="Recipient" name={tx.recipientUsername} />
           {tx.hostSubaccountLast4 && <KV k="Host payout account" v={`ending ${tx.hostSubaccountLast4}`} />}
           {tx.recipientSubaccountLast4 && <KV k="Recipient payout account" v={`ending ${tx.recipientSubaccountLast4}`} />}
@@ -443,7 +443,7 @@ export default function SprayTransactionsTab() {
                   <td className={td}><StatusChip status={r.status} /></td>
                   <td className={`${td} max-w-[12rem] truncate`} title={r.roomTitle}>{r.roomTitle}</td>
                   <td className={td}>{r.hostUsername}</td>
-                  <td className={`${td} whitespace-nowrap`}>{r.payerUsername} to {r.recipientUsername}{r.kind === "team_share" && <span className="ml-1 text-xs text-slate-400">(team)</span>}</td>
+                  <td className={`${td} whitespace-nowrap`}>{r.payerUsername}{r.anonymous && <span className="ml-1 text-xs text-slate-400">(anon)</span>} to {r.recipientUsername}{r.kind === "team_share" && <span className="ml-1 text-xs text-slate-400">(team)</span>}</td>
                   <td className={td}>{TIER_LABEL[r.tier] ?? r.tier}</td>
                   <td className={`${td} text-right tabular-nums`}>{naira(r.amountKobo)}</td>
                   <td className={`${td} min-w-[10rem]`}>{r.endedAs}</td>

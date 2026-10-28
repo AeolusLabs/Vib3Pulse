@@ -22,7 +22,7 @@ import { sql } from "drizzle-orm";
 import { db, storage } from "../storage";
 import type { SprayBatch, SprayPayment } from "@shared/schema";
 import { SPRAY_CATALOGUE, isSprayTier, teamSprayBreakdown, teamSprayTiers, type SprayTier } from "@shared/money";
-import { DELIVERY_DEADLINE_MS, idempotencyKeyShape, requiresThreeDs, type SprayStatus } from "@shared/spray";
+import { ANON_SPRAYER_ID, DELIVERY_DEADLINE_MS, idempotencyKeyShape, requiresThreeDs, type SprayStatus } from "@shared/spray";
 import { type Side } from "@shared/gameScreen";
 import { sanitizeMoneyError } from "@shared/roomRefunds";
 import { getSplitProvider, type ChargeResult, type SplitSpec, type SplitVerifyResult } from "../payments/splitProvider";
@@ -34,6 +34,7 @@ import * as ss from "./sprayStorage";
 import * as bs from "./sprayBatchStorage";
 import { recordBatchTransition } from "./sprayEvents";
 import { roomHub } from "./RoomHub";
+import { announceBoard } from "./sprayBoard";
 import { roomFeatures } from "./features";
 import { sprayAllowed } from "./roomControls";
 import { getRates } from "./roomRates";
@@ -41,8 +42,8 @@ import { ticketCheckoutBaseUrl } from "./checkoutUrl";
 import { QueueFullError } from "./keyedQueue";
 import { openPaymentIssue } from "./refunds";
 import {
-  CAP_STATUSES_AT_DELIVERY, CAP_STATUSES_AT_START, capLockKey, checkVelocity, clawbackBlockThresholdKobo, dailyWindowStart,
-  effectiveDailyLimit, hasSprayInFlight, isNewHost, newHostReceiveCapKobo, payerPrecheck, roomLimitFor, windowStart,
+  CAP_STATUSES_AT_DELIVERY, CAP_STATUSES_AT_START, capLockKey, checkVelocity, clawbackBlockThresholdKobo,
+  hasSprayInFlight, isNewHost, newHostReceiveCapKobo, payerPrecheck, windowStart,
 } from "./sprayLimits";
 import { isGamePlayer } from "./stage";
 import { registerBatchFinalizer } from "./sprayBatchHook";
@@ -68,8 +69,6 @@ export interface TeamOutcome { status: number; body: Record<string, unknown>; re
 const unavailable = (): TeamOutcome => ({ status: 403, body: { ...SPRAY_UNAVAILABLE } });
 const badRequest = (): TeamOutcome => ({ status: 400, body: { code: "BAD_REQUEST", message: "That spray request is not valid." } });
 const rateLimited = (sec: number): TeamOutcome => ({ status: 429, retryAfterSec: sec, body: { code: "RATE_LIMITED", message: "You're spraying too fast. Please wait a moment." } });
-const dailyLimit = (): TeamOutcome => ({ status: 409, body: { code: "DAILY_LIMIT", message: "This would go over your daily spray limit." } });
-const roomLimit = (): TeamOutcome => ({ status: 409, body: { code: "ROOM_LIMIT", message: "This would go over your limit for this room." } });
 const declined = (batchId: string, reason: string): TeamOutcome => ({ status: 402, body: { code: "PAYMENT_DECLINED", batchId, reason, message: "Your card was not charged." } });
 
 /** What the payer is shown about their team spray: never a reference, a subaccount or anyone's cut, only gross shares. */
@@ -106,7 +105,7 @@ type Reservation =
   | { kind: "created"; batch: SprayBatch }
   | { kind: "replay"; batch: SprayBatch }
   | { kind: "velocity"; retryAfterSec: number }
-  | { kind: "in_flight" } | { kind: "daily" } | { kind: "room" } | { kind: "cap" } | { kind: "ban" };
+  | { kind: "in_flight" } | { kind: "cap" } | { kind: "ban" };
 
 export async function startTeamSpray(input: TeamStartInput): Promise<TeamOutcome> {
   const now = sprayClock.now();
@@ -115,9 +114,10 @@ export async function startTeamSpray(input: TeamStartInput): Promise<TeamOutcome
   const { tier, side, idempotencyKey } = b;
   const payOther = b.payOther === true; // "pay another way": any Paystack method, one time, never a saved card
   const saveCard = b.saveCard === true && !payOther;
+  const anonymous = b.anonymous === true; // show as "Anonymous" in the room; admins always see the payer
   if (!isSprayTier(tier) || (side !== "A" && side !== "B") || !idempotencyKeyShape(idempotencyKey)
     || (b.saveCard !== undefined && typeof b.saveCard !== "boolean")
-    || (b.payOther !== undefined && typeof b.payOther !== "boolean")
+    || (b.payOther !== undefined && typeof b.payOther !== "boolean") || (b.anonymous !== undefined && typeof b.anonymous !== "boolean")
     || typeof input.roomId !== "string" || input.roomId.length < 1 || input.roomId.length > 64) {
     return badRequest();
   }
@@ -136,7 +136,7 @@ export async function startTeamSpray(input: TeamStartInput): Promise<TeamOutcome
   if (!pre.ok) {
     if (pre.kind === "velocity") return rateLimited(pre.retryAfterSec);
     if (pre.kind === "in_flight") return rateLimited(10);
-    return pre.kind === "daily" ? dailyLimit() : roomLimit();
+    return rateLimited(10);
   }
 
   // ---- the team gate: every current player must pass the single spray's gate; any failure is the one generic answer
@@ -200,10 +200,6 @@ export async function startTeamSpray(input: TeamStartInput): Promise<TeamOutcome
         if (!vel.ok) return { kind: "velocity", retryAfterSec: vel.retryAfterSec };
       }
       for (const id of present) if (await hasSprayInFlight(payerId, id, now, tx)) return { kind: "in_flight" };
-      const spent = await ss.sumPayerKoboSince(tx, payerId, dailyWindowStart(now));
-      if (spent + price > effectiveDailyLimit(first.payer)) return { kind: "daily" };
-      const limit = await roomLimitFor(roomId, payerId, tx);
-      if (limit.spentKobo + price > limit.limitKobo) return { kind: "room" };
       for (const u of people) await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${capLockKey(u.id)}))`);
       const cap = newHostReceiveCapKobo();
       for (const u of people) {
@@ -211,7 +207,7 @@ export async function startTeamSpray(input: TeamStartInput): Promise<TeamOutcome
         if ((await ss.sumReceivedSince(u.id, windowStart(u), CAP_STATUSES_AT_START, null, tx)) + adds(u.id) > cap) return { kind: "cap" };
       }
       if (await ss.receiveBlocked(people.map((u) => u.id), clawbackBlockThresholdKobo(), tx)) return { kind: "ban" };
-      if (!(await ss.addSpend(roomId, payerId, price, limit.limitKobo, tx))) return { kind: "room" };
+      if (!(await ss.addSpend(roomId, payerId, price, tx))) throw new Error("room spend not recorded");
       const batch = await bs.insertBatchIfNew({
         idempotencyKey, requestHash, roomId, hostId, payerId, featuredId: featuredId ?? present[0],
         side, tier, amountKobo: price, vatKobo: bd.whole.vat, feeKobo: bd.whole.paystackFee, reserveKobo: bd.whole.reserve,
@@ -229,7 +225,7 @@ export async function startTeamSpray(input: TeamStartInput): Promise<TeamOutcome
           // the host who plays keeps their equal share as host money (host_kobo, guest null), as a host spray row does
           hostKobo: p.isHost ? p.host + p.recipient : p.host, guestKobo: p.isHost ? null : p.recipient,
           provider: PROVIDER_NAME, providerRef: `${reference}.${i}`, status: "created",
-          batchId: batch.id, recipientSubaccount: p.isHost ? first.hostSubaccount : f.recipientSubaccount,
+          batchId: batch.id, recipientSubaccount: p.isHost ? first.hostSubaccount : f.recipientSubaccount, anonymous,
         }, tx);
         if (!ins.created) throw new Error("team spray share conflicted under the payer lock");
       }
@@ -244,8 +240,6 @@ export async function startTeamSpray(input: TeamStartInput): Promise<TeamOutcome
     case "replay": return replay(reserved.batch, requestHash);
     case "velocity": return rateLimited(reserved.retryAfterSec);
     case "in_flight": return rateLimited(10);
-    case "daily": return dailyLimit();
-    case "room": return roomLimit();
     case "cap": return refuse("NEW_HOST_CAP");
     case "ban": return refuse("RECEIVE_BAN");
     case "created": break;
@@ -393,13 +387,14 @@ async function deliverBatch(c: PoolClient, b: SprayBatch): Promise<FinalizeOutco
   // The gate needs a recipient: the host (a host spray's checks: room, payer, host, blocks with the host). When the payer is
   // the host, the first player stands in.
   const probe = b.payerId !== b.hostId ? b.hostId : shares.find((s) => s.recipientId !== b.payerId)?.recipientId;
-  let show = false;
+  let why = "no_probe";
   if (probe) {
     const gate = await sprayGate(b.roomId, b.payerId, probe, "deliver");
     if (!gate.ok && gate.absentOnly && !pastDeadline) { logBatch(b.providerRef, "waiting:recipient_not_seen"); return "pending"; }
-    show = gate.ok && gate.facts.room.hostId === b.hostId;
+    why = !gate.ok ? gate.code : gate.facts.room.hostId === b.hostId ? "ok" : "host_mismatch";
   }
-  if (!show) logBatch(b.providerRef, "delivered_unseen"); // delivered all the same, no animation
+  // Delivered all the same, and the room still sees it: the check only decides the money path, not the show.
+  if (why !== "ok") logBatch(b.providerRef, `delivery_check_failed:${why}`);
 
   const ids = Array.from(new Set([b.hostId, ...shares.map((s) => s.recipientId)])).sort();
   const users = await Promise.all(ids.map((id) => storage.getUser(id)));
@@ -445,7 +440,7 @@ async function deliverBatch(c: PoolClient, b: SprayBatch): Promise<FinalizeOutco
   }
   if (refused) return reverseBatch(c, b, refused);
   logBatch(b.providerRef, "delivered", `shares=${shares.length}`);
-  if (show) announceBatch(b, shares);
+  announceBatch(b, shares);
   // Phase 6 notifications: the host's total and each player's own cut, batched per (person, room), never naming the payer.
   const hostTotal = shares.reduce((a, s) => a + s.hostKobo, 0);
   if (hostTotal > 0) void notifySprayReceived(b.hostId, b.roomId, hostTotal, b.id);
@@ -459,9 +454,11 @@ function announceBatch(b: SprayBatch, shares: SprayPayment[]): void {
     if (testing() && (globalThis as { __failTeamBroadcast?: boolean }).__failTeamBroadcast) throw new Error("injected broadcast failure (test)");
     const tier = b.tier as SprayTier;
     const at = sprayClock.now();
-    for (const s of shares) roomHub.broadcast(b.roomId, { type: "room:spray", id: s.id, tier, v3c: s.amountKobo, fromId: b.payerId, toId: s.recipientId, at });
+    const fromId = shares.some((s) => s.anonymous) ? ANON_SPRAYER_ID : b.payerId; // an anonymous payer never goes out by id
+    for (const s of shares) roomHub.broadcast(b.roomId, { type: "room:spray", id: s.id, tier, v3c: s.amountKobo, fromId, toId: s.recipientId, at });
     const text = tier === "rain" ? `made it rain on team ${b.side}` : `sprayed team ${b.side} a ${SPRAY_CATALOGUE[tier].label.toLowerCase()}`;
-    roomHub.broadcast(b.roomId, { type: "room:chat", userId: b.payerId, text, at, system: "spray" }); // not recorded in the chat ring
+    roomHub.broadcast(b.roomId, { type: "room:chat", userId: fromId, text, at, system: "spray" }); // not recorded in the chat ring
+    void announceBoard(b.roomId, shares.map((s) => s.recipientId));
   } catch (e) {
     console.error(`[rooms:spray] team ref=${sprayReferenceForLog(b.providerRef)} delivered, but the announcement failed:`, sanitizeMoneyError(e));
   }

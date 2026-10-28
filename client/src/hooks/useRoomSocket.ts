@@ -67,6 +67,8 @@ export function useRoomSocket(roomId: string, opts: { inviteToken?: string } = {
 
   return {
     state, status, join, leave,
+    /** Feed one server-shaped event to the reducer (used to seed what a late joiner missed, such as the spray board). */
+    inject: dispatch as (e: Parameters<typeof roomReducer>[1]) => void,
     chat: (text: string, replyTo?: ChatReply) => ws?.send({ type: "room:chat", text, ...(replyTo ? { replyTo } : {}) }) ?? false,
     react: (emoji: string) => ws?.send({ type: "room:react", emoji }) ?? false,
     interact: (targetId: string, kind: "wave" | "reaction", emoji?: string) => ws?.send({ type: "room:interact", targetId, kind, ...(emoji ? { emoji } : {}) }) ?? false,

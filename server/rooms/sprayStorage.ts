@@ -9,7 +9,7 @@ import {
   hostClawbacks, roomSpend, sprayPayments, userPaymentMethods, users,
   type HostClawback, type InsertSprayPayment, type SprayPayment, type UserPaymentMethod,
 } from "@shared/schema";
-import { SPRAY_SPEND_STATUSES, isSprayStatus, type SprayStatus } from "@shared/spray";
+import { ROOM_LIMIT_DEFAULT_KOBO, SPRAY_SPEND_STATUSES, isSprayStatus, type SprayStatus } from "@shared/spray";
 import { recordSprayEvent } from "./sprayEvents";
 
 export type SprayTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -168,19 +168,17 @@ export async function sumReceivedSince(
   return Number(row?.n ?? 0);
 }
 
-// ---------------------------------------------------------------- room_spend (the payer's own room limit)
-/**
- * Reserves `kobo` of the payer's room limit, atomically. Returns false (and changes nothing) when it would go over.
- * `limitKobo` only seeds a row that does not exist yet (the caller reads it from the database, never from the client);
- * an existing row keeps its stored limit. The UPDATE is the gate: concurrent calls serialise on the row lock and each
- * re-checks `spent + kobo <= limit` against the latest row, so parallel calls can never pass the limit together.
- */
-export async function addSpend(roomId: string, userId: string, kobo: number, limitKobo: number, tx?: SprayExec): Promise<boolean> {
-  if (!isPosInt(kobo) || !isPosInt(limitKobo)) return false; // fail closed
+// ---------------------------------------------------------------- room_spend (running total per payer per room, no limit)
+/** Adds `kobo` to the payer's running total for this room. There is no spending limit any more; this only keeps the total. */
+export async function addSpend(roomId: string, userId: string, kobo: number, tx?: SprayExec): Promise<boolean> {
+  if (!isPosInt(kobo)) return false; // fail closed
   const ex = x(tx);
-  await ex.insert(roomSpend).values({ roomId, userId, limitKobo, spentKobo: 0 }).onConflictDoNothing();
-  const rows = await ex.update(roomSpend).set({ spentKobo: sql`${roomSpend.spentKobo} + ${kobo}` })
-    .where(and(eq(roomSpend.roomId, roomId), eq(roomSpend.userId, userId), sql`${roomSpend.spentKobo} + ${kobo} <= ${roomSpend.limitKobo}`))
+  // No spending limit (owner decision 2026-10-28): the row only keeps the running total for the room. limit_kobo is a legacy
+  // column the table still checks (spent_kobo <= limit_kobo), so it rides up with the total instead of ever refusing.
+  await ex.insert(roomSpend).values({ roomId, userId, limitKobo: ROOM_LIMIT_DEFAULT_KOBO, spentKobo: 0 }).onConflictDoNothing();
+  const rows = await ex.update(roomSpend)
+    .set({ spentKobo: sql`${roomSpend.spentKobo} + ${kobo}`, limitKobo: sql`greatest(${roomSpend.limitKobo}, ${roomSpend.spentKobo} + ${kobo})` })
+    .where(and(eq(roomSpend.roomId, roomId), eq(roomSpend.userId, userId)))
     .returning({ spentKobo: roomSpend.spentKobo });
   return rows.length > 0;
 }
@@ -199,18 +197,6 @@ export async function getRoomSpend(roomId: string, userId: string, tx?: SprayExe
   const [row] = await x(tx).select({ limitKobo: roomSpend.limitKobo, spentKobo: roomSpend.spentKobo }).from(roomSpend)
     .where(and(eq(roomSpend.roomId, roomId), eq(roomSpend.userId, userId))).limit(1);
   return row ?? null;
-}
-
-/**
- * Sets the payer's limit for this room (the caller validates it is one of ROOM_LIMIT_OPTIONS_KOBO and the ID rule). A
- * limit below what is already spent is stored as the spent amount (so nothing more can be sprayed there), never an error.
- */
-export async function setRoomLimit(roomId: string, userId: string, limitKobo: number, tx?: SprayExec): Promise<{ limitKobo: number; spentKobo: number }> {
-  if (!isPosInt(limitKobo)) throw new RangeError("room limit must be a positive integer of kobo");
-  const [row] = await x(tx).insert(roomSpend).values({ roomId, userId, limitKobo, spentKobo: 0 })
-    .onConflictDoUpdate({ target: [roomSpend.roomId, roomSpend.userId], set: { limitKobo: sql`greatest(${limitKobo}, ${roomSpend.spentKobo})` } })
-    .returning({ limitKobo: roomSpend.limitKobo, spentKobo: roomSpend.spentKobo });
-  return row;
 }
 
 // ---------------------------------------------------------------- host_clawbacks

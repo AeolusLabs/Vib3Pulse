@@ -1,63 +1,15 @@
-// Spraying (phase 5, task 5.5): the payer's limits, velocity, the one-in-flight rule and the new host receive cap.
-// Every limit is read from the database each time, never from the client. The SQL that stores limits and spend lives in
-// sprayStorage.ts (lane A); this file only decides. The reservation itself (advisory lock, daily sum, room spend, insert)
+// Spraying (phase 5, task 5.5): velocity, the one-in-flight rule and the new host receive cap.
+// There are no spending limits (owner decision 2026-10-28). Every check here is read from the database each time, never from the
+// client. The SQL lives in sprayStorage.ts (lane A); this file only decides. The reservation itself (advisory lock, room spend, insert)
 // runs in spray.ts, inside one per-payer critical section, so these counts cannot race each other for one payer.
 import { db } from "../storage";
 import type { User } from "@shared/schema";
-import { isIdVerifiedAdult } from "@shared/ageVerification";
 import {
-  DAILY_DEFAULT_KOBO, DAILY_VERIFIED_MAX_KOBO, ID_REQUIRED_ABOVE_KOBO, NEW_HOST_RECEIVE_CAP_KOBO_DEFAULT, NEW_HOST_WINDOW_DAYS,
-  ROOM_LIMIT_DEFAULT_KOBO, VELOCITY, isRoomLimitOption, type SprayStatus,
+  NEW_HOST_RECEIVE_CAP_KOBO_DEFAULT, NEW_HOST_WINDOW_DAYS, VELOCITY, type SprayStatus,
 } from "@shared/spray";
-import { MIN_CHARGE_KOBO } from "@shared/money";
 import * as ss from "./sprayStorage";
 
 const DAY_MS = 86_400_000;
-
-/**
- * The payer's effective daily limit: their stored choice, else the default. Never above DAILY_VERIFIED_MAX_KOBO, and never
- * above the default for someone who is not an ID-verified adult (a stored higher value from before an un-verification
- * stops counting at once).
- */
-export function effectiveDailyLimit(user: Pick<User, "ageVerifiedAt" | "dateOfBirth"> & { sprayDailyLimitKobo?: number | null }): number {
-  const stored = user.sprayDailyLimitKobo;
-  const chosen = typeof stored === "number" && Number.isSafeInteger(stored) && stored > 0 ? stored : DAILY_DEFAULT_KOBO;
-  const cap = isIdVerifiedAdult(user) ? DAILY_VERIFIED_MAX_KOBO : DAILY_DEFAULT_KOBO;
-  return Math.min(chosen, cap);
-}
-
-export type DailyLimitCheck = { ok: true } | { ok: false; status: 400 | 403; code: "BAD_REQUEST" | "ID_REQUIRED"; message: string };
-
-/** May this person set their daily limit to `kobo`? Lowering is always allowed; raising above the default needs ID. */
-export function checkDailyLimitChange(user: Pick<User, "ageVerifiedAt" | "dateOfBirth">, kobo: unknown): DailyLimitCheck {
-  if (typeof kobo !== "number" || !Number.isSafeInteger(kobo) || kobo < MIN_CHARGE_KOBO || kobo > DAILY_VERIFIED_MAX_KOBO) {
-    return { ok: false, status: 400, code: "BAD_REQUEST", message: "Choose a daily limit between 500 and 100,000 naira." };
-  }
-  if ((kobo > DAILY_DEFAULT_KOBO || kobo > ID_REQUIRED_ABOVE_KOBO) && !isIdVerifiedAdult(user)) {
-    return { ok: false, status: 403, code: "ID_REQUIRED", message: "Verify your ID to raise your daily limit above 20,000 naira." };
-  }
-  return { ok: true };
-}
-
-export type RoomLimitCheck = DailyLimitCheck;
-
-/** May this person set their room limit to `kobo`? Must be one of the options; above ID_REQUIRED_ABOVE_KOBO needs ID. */
-export function checkRoomLimitChange(user: Pick<User, "ageVerifiedAt" | "dateOfBirth">, kobo: unknown): RoomLimitCheck {
-  if (!isRoomLimitOption(kobo)) return { ok: false, status: 400, code: "BAD_REQUEST", message: "Choose one of the room limits." };
-  if (kobo > ID_REQUIRED_ABOVE_KOBO && !isIdVerifiedAdult(user)) {
-    return { ok: false, status: 403, code: "ID_REQUIRED", message: "Verify your ID to set a room limit above 20,000 naira." };
-  }
-  return { ok: true };
-}
-
-/** The payer's room limit for this room, from the database (the default when they never chose one). Pass the reservation's tx. */
-export async function roomLimitFor(roomId: string, userId: string, tx?: ss.SprayExec): Promise<{ limitKobo: number; spentKobo: number }> {
-  const row = await ss.getRoomSpend(roomId, userId, tx);
-  return row ? { limitKobo: Number(row.limitKobo), spentKobo: Number(row.spentKobo) } : { limitKobo: ROOM_LIMIT_DEFAULT_KOBO, spentKobo: 0 };
-}
-
-/** Rolling 24 hours, never a calendar day. */
-export const dailyWindowStart = (now: number) => new Date(now - DAY_MS);
 
 export type VelocityVerdict = { ok: true } | { ok: false; retryAfterSec: number };
 
@@ -95,7 +47,7 @@ export async function hasSprayInFlight(payerId: string, recipientId: string, now
 export type PayerPrecheck =
   | { ok: true }
   | { ok: false; kind: "velocity"; retryAfterSec: number }
-  | { ok: false; kind: "in_flight" | "daily" | "room" };
+  | { ok: false; kind: "in_flight" };
 export async function payerPrecheck(
   payer: Pick<User, "id" | "ageVerifiedAt" | "dateOfBirth"> & { sprayDailyLimitKobo?: number | null },
   roomId: string, targetId: string, priceKobo: number, now: number,
@@ -103,10 +55,6 @@ export async function payerPrecheck(
   const vel = await checkVelocity(payer.id, targetId, now);
   if (!vel.ok) return { ok: false, kind: "velocity", retryAfterSec: vel.retryAfterSec };
   if (await hasSprayInFlight(payer.id, targetId, now)) return { ok: false, kind: "in_flight" };
-  const spent = await ss.sumPayerKoboSince(db, payer.id, dailyWindowStart(now));
-  if (spent + priceKobo > effectiveDailyLimit(payer)) return { ok: false, kind: "daily" };
-  const room = await roomLimitFor(roomId, payer.id);
-  if (room.spentKobo + priceKobo > room.limitKobo) return { ok: false, kind: "room" };
   return { ok: true };
 }
 

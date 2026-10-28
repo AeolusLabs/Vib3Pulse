@@ -31,7 +31,7 @@ const MIN_MS = 60_000;
 const iso = (col: string) => `to_char(${col}, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`;
 const SELECT_ROW = `
   s.id, s.batch_id, s.room_id, coalesce(r.title, '[deleted room]') as room_title, s.host_id, coalesce(hu.username, '[deleted]') as host_username, s.payer_id, coalesce(pu.username, '[deleted]') as payer_username,
-  s.recipient_id, coalesce(ru.username, '[deleted]') as recipient_username, s.tier, s.amount_kobo, s.status, s.reason,
+  s.recipient_id, coalesce(ru.username, '[deleted]') as recipient_username, s.tier, s.amount_kobo, s.status, s.reason, s.anonymous,
   coalesce(b.provider_ref, s.provider_ref) as provider_ref,
   ${iso("s.created_at")} as created_at, ${iso("s.delivered_at")} as delivered_at, ${iso("s.reversed_at")} as reversed_at,
   to_char(s.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.US') as ck`;
@@ -45,14 +45,14 @@ const FROM_ROW = `
 
 interface RawRow {
   id: string; batch_id: string | null; room_id: string; room_title: string; host_id: string; host_username: string; payer_id: string; payer_username: string;
-  recipient_id: string; recipient_username: string; tier: string; amount_kobo: number; status: string; reason: string | null; provider_ref: string;
+  anonymous: boolean; recipient_id: string; recipient_username: string; tier: string; amount_kobo: number; status: string; reason: string | null; provider_ref: string;
   created_at: string; delivered_at: string | null; reversed_at: string | null; ck: string;
 }
 
 export function toLedgerRow(r: RawRow): LedgerRow {
   return {
     id: r.id, kind: r.batch_id ? "team_share" : "single", batchId: r.batch_id, roomId: r.room_id, roomTitle: r.room_title,
-    hostId: r.host_id, hostUsername: r.host_username, payerId: r.payer_id, payerUsername: r.payer_username,
+    hostId: r.host_id, hostUsername: r.host_username, payerId: r.payer_id, payerUsername: r.payer_username, anonymous: r.anonymous === true,
     recipientId: r.recipient_id, recipientUsername: r.recipient_username, tier: r.tier, amountKobo: Number(r.amount_kobo),
     status: r.status as LedgerRow["status"], endedAs: endedAs({ status: r.status, reason: r.reason, recipientUsername: r.recipient_username }),
     providerRef: r.provider_ref, createdAt: r.created_at, deliveredAt: r.delivered_at, reversedAt: r.reversed_at,

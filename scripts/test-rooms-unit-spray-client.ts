@@ -8,8 +8,8 @@ import { idempotencyKeyShape, sprayPrice } from "../shared/spray";
 import { SPRAY_CAP, initialRoomState, roomReducer, type RoomState } from "../client/src/lib/roomReducer";
 import {
   IDLE, MOCK_CHECKOUT_HOST, RAIN_FX, SAME_KEY_REASONS, SPRAY_COPY, SPRAY_FAIL_COPY, SPRAY_SCREEN_FX, SPRAY_TRACK_KEY, allSprayCopy, animateSprays,
-  cardLabel, chargeLine, counterAt, dailyChoices, decodeSprayTrack, defaultTarget, encodeSprayTrack, holdsSprayBlock, inFlight, isDevBuild,
-  limitChoices, limitErrorText, needsSlide, newIdempotencyKey, newSprays, outcomeOfPost, outcomeOfStatus, parseLimitBody, parseRetryAfter,
+  cardLabel, chargeLine, counterAt, decodeSprayTrack, defaultTarget, encodeSprayTrack, holdsSprayBlock, inFlight, isDevBuild,
+  needsSlide, newIdempotencyKey, newSprays, outcomeOfPost, outcomeOfStatus, parseRetryAfter,
   parseSprayBlock, parseSprayMe, rainBannerText, reasonOfRefusal, safeAuthorizationUrl, searchWithoutSpray, sprayFlow, sprayReturnId,
   sprayTargets, sprayTeamReturnId, systemChatText, thankYouText, tileAction, waitDeadlineMs, type SprayBlock, type SprayFlow, type SprayMe,
 } from "../client/src/lib/sprayUi";
@@ -29,8 +29,8 @@ const ORIGIN = "https://vib3pulse.example";
 const K1 = "11111111-1111-4111-8111-111111111111";
 const K2 = "22222222-2222-4222-9222-222222222222";
 const ROOM18 = { ageLimit: "18+", minorsRoom: false, status: "live" };
-const BLOCK: SprayBlock = { enabled: true, roomLimitKobo: 200_000, roomSpentKobo: 0, targets: ["host", "stage1"] };
-const ME: SprayMe = { method: { last4: "4242", brand: "visa" }, dailyLimitKobo: 2_000_000, dailySpentKobo: 0, verified: true };
+const BLOCK: SprayBlock = { enabled: true, targets: ["host", "stage1"] };
+const ME: SprayMe = { method: { last4: "4242", brand: "visa" }, verified: true };
 
 function liveState(roomId = "r1"): RoomState {
   let s = roomReducer(initialRoomState("me"), { type: "client:connecting" });
@@ -94,8 +94,6 @@ test("reducer: same room keeps sprays across room:state, another room clears the
 test("parseSprayBlock: absent, not enabled, or malformed is null", () => {
   assert.equal(parseSprayBlock(undefined, ROOM18), null);
   assert.equal(parseSprayBlock({ ...BLOCK, enabled: false }, ROOM18), null);
-  assert.equal(parseSprayBlock({ ...BLOCK, roomLimitKobo: 1.5 }, ROOM18), null);
-  assert.equal(parseSprayBlock({ ...BLOCK, roomSpentKobo: -1 }, ROOM18), null);
   assert.equal(parseSprayBlock({ ...BLOCK, targets: "host" }, ROOM18), null);
 });
 test("parseSprayBlock: never in a 13+/16+ room, a minors' room, a room not live, or for a listen-only viewer", () => {
@@ -123,15 +121,13 @@ test("sprayTargets: never yourself, only people still here and still host or on 
 
 // ---------------------------------------------------------------- the payer's settings
 test("parseSprayMe: only last4 and brand of the card are ever kept", () => {
-  const me = parseSprayMe({ method: { last4: "4242", brand: "visa", authorizationCode: "AUTH_secret", signature: "SIG" }, dailyLimitKobo: 2_000_000, dailySpentKobo: 0, verified: true })!;
+  const me = parseSprayMe({ method: { last4: "4242", brand: "visa", authorizationCode: "AUTH_secret", signature: "SIG" }, verified: true })!;
   assert.deepEqual(Object.keys(me.method!).sort(), ["brand", "last4"]);
   assert.equal(JSON.stringify(me).includes("AUTH_secret"), false);
-  assert.equal(parseSprayMe({ method: { last4: "42a2", brand: "visa" }, dailyLimitKobo: 1, dailySpentKobo: 0, verified: false })!.method, null);
-  assert.equal(parseSprayMe({ method: null, dailyLimitKobo: "x", dailySpentKobo: 0, verified: true }), null);
+  assert.equal(parseSprayMe({ method: { last4: "42a2", brand: "visa" }, verified: false })!.method, null);
+  assert.equal(parseSprayMe({ method: null, verified: "yes" }), null);
   assert.equal(cardLabel({ last4: "4242", brand: "visa" }), "Visa ending 4242");
   assert.equal(cardLabel({ last4: "0001", brand: "weird" }), "Card ending 0001");
-  assert.equal(parseLimitBody({ limitKobo: 500000, spentKobo: 0 })!.limitKobo, 500000);
-  assert.equal(parseLimitBody({ limitKobo: "500000" }), null);
 });
 
 // ---------------------------------------------------------------- tray rules
@@ -139,25 +135,8 @@ test("tileAction: offline and loading are disabled with a reason", () => {
   assert.equal(tileAction("note", BLOCK, ME, false).kind, "blocked");
   assert.equal(tileAction("note", BLOCK, null, true).kind, "blocked");
 });
-test("tileAction: equal to the room limit pays, one kobo over asks to raise it", () => {
-  assert.equal(tileAction("bundle", { ...BLOCK, roomLimitKobo: 200_000, roomSpentKobo: 100_000 }, ME, true).kind, "pay");
-  assert.equal(tileAction("bundle", { ...BLOCK, roomLimitKobo: 200_000, roomSpentKobo: 100_001 }, ME, true).kind, "limit");
-  assert.equal(tileAction("bag", BLOCK, ME, true).kind, "limit");
-});
-test("tileAction: over the daily limit is disabled", () => {
-  const a = tileAction("note", BLOCK, { ...ME, dailySpentKobo: 1_960_000 }, true);
-  assert.equal(a.kind, "blocked");
-});
-test("tileAction: rain over the highest room option has nothing to raise to", () => {
-  assert.equal(tileAction("rain", { ...BLOCK, roomLimitKobo: 10_000_000, roomSpentKobo: 50_000 }, { ...ME, dailyLimitKobo: 100_000_000 }, true).kind, "blocked");
-});
-test("limitChoices: too low and unverified-above-ID options are not offered", () => {
-  const c = limitChoices({ ...BLOCK, roomSpentKobo: 50_000 }, sprayPrice("bag").kobo, false);
-  assert.equal(c.find((x) => x.kobo === 1_000_000)!.ok, false); // 50,000 + 1,000,000 > 1,000,000
-  assert.equal(c.find((x) => x.kobo === 10_000_000)!.ok, false); // above the ID line, unverified
-  assert.equal(limitChoices(BLOCK, sprayPrice("bag").kobo, true).find((x) => x.kobo === 10_000_000)!.ok, true);
-  assert.equal(dailyChoices(false).find((x) => x.kobo === 5_000_000)!.ok, false);
-  assert.equal(dailyChoices(true).every((x) => x.ok), true);
+test("tileAction: there is no spending limit, any tier pays however much was sprayed", () => {
+  for (const t of ["note", "bundle", "bag", "rain"] as const) assert.equal(tileAction(t, BLOCK, ME, true).kind, "pay");
 });
 test("needsSlide: note taps, bundle/bag/rain slide; bag and rain say the bank will ask", () => {
   assert.equal(needsSlide("note"), false);
@@ -239,8 +218,6 @@ test("outcomeOfPost: refusals map to plain reasons, no oracle beyond the payer's
   assert.equal(reasonOfRefusal(402, "PAYMENT_DECLINED"), "DECLINED");
   assert.equal(reasonOfRefusal(403, "SPRAY_UNAVAILABLE"), "UNAVAILABLE");
   assert.equal(reasonOfRefusal(404), "UNAVAILABLE");
-  assert.equal(reasonOfRefusal(409, "ROOM_LIMIT"), "ROOM_LIMIT");
-  assert.equal(reasonOfRefusal(409, "DAILY_LIMIT"), "DAILY_LIMIT");
   assert.equal(reasonOfRefusal(409, "IDEMPOTENCY_MISMATCH"), "MISMATCH");
   assert.equal(reasonOfRefusal(429), "RATE_LIMITED");
   const o = outcomeOfPost({ ok: false, status: 429, code: "RATE_LIMITED", retryAfterSec: 30 }, ORIGIN);
@@ -456,7 +433,7 @@ test("M8: closing the bank sheet keeps tracking; idle and outcomes still close",
 });
 test("M4: a saved card without last four is still a saved card", () => {
   for (const last4 of ["", null, undefined]) {
-    const me = parseSprayMe({ method: { last4, brand: "visa" }, dailyLimitKobo: 2_000_000, dailySpentKobo: 0, verified: true })!;
+    const me = parseSprayMe({ method: { last4, brand: "visa" }, verified: true })!;
     assert.deepEqual(me.method, { last4: null, brand: "visa" }, String(last4));
     assert.equal(cardLabel(me.method), "Your saved Visa");
     assert.match(chargeLine("note", me.method), /^Charged to your saved Visa\./);
@@ -505,11 +482,6 @@ test("M9: tracking survives a reload in this tab only, and holds no secret", () 
   const hook = src("../client/src/components/rooms/spray/useSpray.ts");
   assert.match(hook, /window\.sessionStorage/);
   assert.ok(!hook.includes("localStorage"));
-});
-test("M17: a room or daily limit above the ID line says to verify ID", () => {
-  assert.match(limitErrorText(403, "ID_REQUIRED", "x"), /^Verify your ID to set a limit above ₦20,000\.$/);
-  assert.match(limitErrorText(0, undefined, "x"), /offline/);
-  assert.equal(limitErrorText(500, "SERVER_ERROR", "fallback"), "fallback");
 });
 test("M19: the fixture's chat line matches the server's text, and the scene parser lives in the fixture module", () => {
   assert.equal(fixtureSprayChatText("note", "Mara"), "sprayed Mara a note");
@@ -697,7 +669,7 @@ test("fixture scenes parse and start in valid states", () => {
   assert.equal(parseSprayFixture("?spray=bank"), "bank");
   assert.equal(parseSprayFixture("?spray=nope"), null);
   assert.ok(idempotencyKeyShape(FIXTURE_SPRAY_KEY));
-  for (const scene of ["tray", "confirm", "bank", "declined", "limit", "quiet"] as const) {
+  for (const scene of ["tray", "confirm", "bank", "declined", "quiet"] as const) {
     const f = fixtureSprayStart(scene, 1000, ORIGIN);
     if (f.flow.kind === "action_required") assert.ok(safeAuthorizationUrl(f.flow.url, ORIGIN, { dev: true }));
   }
@@ -743,6 +715,34 @@ test("source: effects never make a chat line, and the tray draws no naira sign i
   assert.ok(!/\bsend\(|socket|\bws\./.test(fx), "effects never touch the socket (the thank-you is the viewer's own tap through a prop)");
   const tray = src("../client/src/components/rooms/spray/SprayTray.tsx");
   assert.ok(!tray.includes("₦"));
+});
+
+test("spray board: a live board bumps the tick, the first load does not; bad rows are dropped; at most three", () => {
+  let st = liveState("R1");
+  st = roomReducer(st, { type: "room:spray_board", top: [{ id: "a", name: "A", v3c: 5 }, { id: "", name: "x", v3c: 1 }, { id: "b", name: "B", v3c: -1 }, { id: "c", name: "C", v3c: 3 }, { id: "d", name: "D", v3c: 2 }, { id: "e", name: "E", v3c: 1 }], initial: true });
+  assert.deepEqual(st.sprayBoard.map((r) => r.id), ["a", "c", "d"]);
+  assert.equal(st.sprayBoardTick, 0);
+  st = roomReducer(st, { type: "room:spray_board", top: [{ id: "anonymous", name: "Anonymous", v3c: 9 }] });
+  assert.equal(st.sprayBoardTick, 1);
+  assert.equal(st.sprayBoard[0].name, "Anonymous");
+  assert.deepEqual(roomReducer(st, { type: "room:spray_board", top: "nope" }).sprayBoard, []);
+});
+test("spray received: only for this room, only sane numbers, and it resets in another room", () => {
+  let st = liveState("R1");
+  assert.equal(roomReducer(st, { type: "room:spray_received", roomId: "OTHER", kobo: 10, v3c: 10 }).sprayReceived, null);
+  assert.equal(roomReducer(st, { type: "room:spray_received", kobo: -1, v3c: 10 }).sprayReceived, null);
+  st = roomReducer(st, { type: "room:spray_received", roomId: "R1", kobo: 86_000, v3c: 1_150_000 });
+  assert.deepEqual(st.sprayReceived, { kobo: 86_000, v3c: 1_150_000 });
+  st = roomReducer(st, { type: "room:state", room: { id: "R2" }, members: [], memberCount: 0, screen: null, you: { role: "guest", muted: false } });
+  assert.equal(st.sprayReceived, null);
+});
+test("anonymous: a toggle on the confirm step, off by default", () => {
+  let f = sprayFlow({ kind: "idle" } as SprayFlow, { type: "start", tier: "note", targetId: "t1", key: newIdempotencyKey() });
+  assert.equal((f as any).intent.anonymous, undefined);
+  f = sprayFlow(f, { type: "anonymous", on: true });
+  assert.equal((f as any).intent.anonymous, true);
+  f = sprayFlow(f, { type: "anonymous", on: false });
+  assert.equal((f as any).intent.anonymous, false);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

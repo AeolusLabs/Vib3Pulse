@@ -57,6 +57,7 @@ export function useSpray(roomId: string, opts: UseSprayOptions) {
   }, []);
 
   const setSaveCard = useCallback((on: boolean) => dispatch({ type: "saveCard", on }), []);
+  const setAnonymous = useCallback((on: boolean) => dispatch({ type: "anonymous", on }), []);
   const setPayOther = useCallback((on: boolean) => dispatch({ type: "payOther", on }), []);
 
   /** One POST of this intent with its own key. Never overlaps another (busy), never a new key. */
@@ -66,8 +67,8 @@ export function useSpray(roomId: string, opts: UseSprayOptions) {
     try {
       // A team intent goes to the team route with its side; the key, the replay rule and the answer handling are the single spray's.
       const r = intent.side
-        ? await postSprayTeam(roomId, { tier: intent.tier, side: intent.side, idempotencyKey: intent.key, saveCard: intent.saveCard, payOther: intent.payOther }, tokenRef.current)
-        : await postSpray(roomId, { tier: intent.tier, targetId: intent.targetId, idempotencyKey: intent.key, saveCard: intent.saveCard, payOther: intent.payOther }, tokenRef.current);
+        ? await postSprayTeam(roomId, { tier: intent.tier, side: intent.side, idempotencyKey: intent.key, saveCard: intent.saveCard, payOther: intent.payOther, anonymous: intent.anonymous }, tokenRef.current)
+        : await postSpray(roomId, { tier: intent.tier, targetId: intent.targetId, idempotencyKey: intent.key, saveCard: intent.saveCard, payOther: intent.payOther, anonymous: intent.anonymous }, tokenRef.current);
       if (!alive.current) return;
       const cur = stateRef.current;
       // Only an answer for the intent that is still in flight counts (the machine also ignores other spray ids).
@@ -211,7 +212,7 @@ export function useSpray(roomId: string, opts: UseSprayOptions) {
   const settledKey = state.kind === "delivered" ? `d:${state.sprayId}` : state.kind === "failed" && state.sprayId ? `f:${state.sprayId}:${state.reason}` : null;
   useEffect(() => { if (settledKey) settledRef.current?.(); }, [settledKey]);
 
-  return { state, start, setSaveCard, setPayOther, pay, retry, close };
+  return { state, start, setSaveCard, setPayOther, setAnonymous, pay, retry, close };
 }
 
 export type SprayController = ReturnType<typeof useSpray>;

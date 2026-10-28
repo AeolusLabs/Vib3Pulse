@@ -6,6 +6,8 @@ import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { db, storage } from "../storage";
 import { requireAuth } from "../middleware";
 import { roomLimiter } from "../security";
+import { roomHub } from "./RoomHub";
+import { sprayBoardFor, sprayReceivedFor } from "./sprayBoard";
 import { ageFromDob } from "@shared/age";
 import { isIdVerifiedAdult } from "@shared/ageVerification";
 import { moneyEligibleRoom } from "@shared/roomRules";
@@ -19,7 +21,6 @@ import { withSpraySource } from "./sprayEvents";
 import { SPRAY_UNAVAILABLE, finalizeSpray, getOwnSpray, sprayStatusView, startSpray } from "./spray";
 import { batchStatusView, getOwnBatch, startTeamSpray } from "./teamSpray";
 import * as bs from "./sprayBatchStorage";
-import { checkDailyLimitChange, checkRoomLimitChange, dailyWindowStart, effectiveDailyLimit } from "./sprayLimits";
 
 /** A normal per-IP limiter on the spray routes, on top of the per-user database-backed velocity (rule B5). */
 export const sprayIpLimiter = rateLimit({
@@ -70,6 +71,22 @@ export function registerSprayRoutes(app: Express): void {
     } catch (e) {
       console.error("[rooms:spray] spray failed:", sanitizeMoneyError(e));
       res.status(500).json({ code: "SERVER_ERROR", message: "Spraying isn't working right now. Try again." });
+    }
+  });
+
+  // ------------------------------------------------------------ the room's spray board (top three) and my own total
+  // For someone who is in the room right now; anyone else gets the same 404 as a room that does not exist. The total is only ever
+  // the caller's own (what they were sprayed here), never anyone else's.
+  app.get("/api/rooms/:id/spray/board", requireAuth, async (req: Request, res: Response) => {
+    try {
+      if (!roomFeatures.spray) return unavailable(res);
+      const roomId = String(req.params.id ?? "");
+      if (!roomHub.get(roomId, req.user!.id)) return res.status(404).json({ message: "Not found" });
+      const [top, mine] = await Promise.all([sprayBoardFor(roomId), sprayReceivedFor(roomId, req.user!.id)]);
+      res.json({ top, mine });
+    } catch (e) {
+      console.error("[rooms:spray] board failed:", sanitizeMoneyError(e));
+      res.status(500).json({ message: "Failed to load the board" });
     }
   });
 
@@ -132,65 +149,23 @@ export function registerSprayRoutes(app: Express): void {
     }
   });
 
-  // ------------------------------------------------------------ room limit (the payer's own, per room)
-  app.put("/api/rooms/:id/spray/limit", requireAuth, roomLimiter, async (req: Request, res: Response) => {
-    try {
-      if (!roomFeatures.spray) return unavailable(res);
-      const [user, room] = await Promise.all([storage.getUser(req.user!.id), rs.getRoom(String(req.params.id ?? ""))]);
-      // Not a money room for this person, or not visible: the generic answer (no detail).
-      if (!user || user.deletedAt || !isAdult(user) || !room || !moneyEligibleRoom(room) || room.minorsRoom
-        || !(await canViewRoom(room, user.id, typeof req.query.token === "string" ? req.query.token : undefined))) {
-        return unavailable(res);
-      }
-      const kobo = (req.body ?? {}).kobo;
-      const chk = checkRoomLimitChange(user, kobo);
-      if (!chk.ok) return res.status(chk.status).json({ code: chk.code, message: chk.message });
-      const saved = await ss.setRoomLimit(room.id, user.id, kobo as number);
-      res.json({ limitKobo: Number(saved.limitKobo), spentKobo: Number(saved.spentKobo) });
-    } catch (e) {
-      console.error("[rooms:spray] room limit failed:", sanitizeMoneyError(e));
-      res.status(500).json({ message: "Failed to save the room limit" });
-    }
-  });
-
   // ------------------------------------------------------------ the payer's spray settings
   // Teens and unknown age never get money controls: the generic 403. An adult who is not ID-verified sees verified: false
-  // (they can lower limits and remove a card, but cannot spray).
+  // (they can remove a card, but cannot spray).
   app.get("/api/users/me/spray", requireAuth, async (req: Request, res: Response) => {
     try {
       if (!roomFeatures.spray) return unavailable(res);
       const user = await storage.getUser(req.user!.id);
       if (!user || user.deletedAt || !isAdult(user)) return unavailable(res);
-      const [method, spent] = await Promise.all([
-        ss.getSavedMethod(user.id),
-        ss.sumPayerKoboSince(db, user.id, dailyWindowStart(Date.now())),
-      ]);
+      const method = await ss.getSavedMethod(user.id);
       res.json({
         // last4 and brand only: never auth_enc, the signature or the bank.
         method: method ? { last4: method.last4 ?? "", brand: method.brand ?? "" } : null,
-        dailyLimitKobo: effectiveDailyLimit(user),
-        dailySpentKobo: spent,
         verified: isIdVerifiedAdult(user),
       });
     } catch (e) {
       console.error("[rooms:spray] spray settings failed:", sanitizeMoneyError(e));
       res.status(500).json({ message: "Failed to load your spray settings" });
-    }
-  });
-
-  app.put("/api/users/me/spray/daily-limit", requireAuth, roomLimiter, async (req: Request, res: Response) => {
-    try {
-      if (!roomFeatures.spray) return unavailable(res);
-      const user = await storage.getUser(req.user!.id);
-      if (!user || user.deletedAt || !isAdult(user)) return unavailable(res);
-      const kobo = (req.body ?? {}).kobo;
-      const chk = checkDailyLimitChange(user, kobo);
-      if (!chk.ok) return res.status(chk.status).json({ code: chk.code, message: chk.message });
-      await ss.setDailyLimit(user.id, kobo as number);
-      res.json({ dailyLimitKobo: effectiveDailyLimit({ ...user, sprayDailyLimitKobo: kobo as number }) });
-    } catch (e) {
-      console.error("[rooms:spray] daily limit failed:", sanitizeMoneyError(e));
-      res.status(500).json({ message: "Failed to save your daily limit" });
     }
   });
 

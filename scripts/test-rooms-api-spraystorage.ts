@@ -72,24 +72,17 @@ try {
   const H = await mk("host"), P = await mk("payer"), P2 = await mk("payer2"), G = await mk("guest");
   const R = await mkRoom(H);
 
-  // ---- addSpend: atomic, never over the limit
-  check("addSpend within the limit", await S.addSpend(R, P, 50000, 200000));
-  check("addSpend up to exactly the limit", await S.addSpend(R, P, 150000, 200000));
-  check("addSpend one kobo over: false", !(await S.addSpend(R, P, 1, 200000)));
-  check("spent unchanged after a refusal", (await S.getRoomSpend(R, P))?.spentKobo === 200000);
-  await S.releaseSpend(R, P, 50000);
-  check("releaseSpend gives it back", (await S.getRoomSpend(R, P))?.spentKobo === 150000);
-  await S.releaseSpend(R, P, 999999);
+  // ---- addSpend: a running total per payer per room, no limit
+  check("addSpend adds", await S.addSpend(R, P, 50000));
+  check("addSpend has no ceiling", await S.addSpend(R, P, 150000) && await S.addSpend(R, P, 10_000_000));
+  check("spent is the sum", (await S.getRoomSpend(R, P))?.spentKobo === 10_200_000);
+  await S.releaseSpend(R, P, 10_000_000);
+  check("releaseSpend gives it back", (await S.getRoomSpend(R, P))?.spentKobo === 200000);
+  await S.releaseSpend(R, P, 999999999);
   check("releaseSpend never goes below zero", (await S.getRoomSpend(R, P))?.spentKobo === 0);
-  check("addSpend refuses bad input (fail closed)", !(await S.addSpend(R, P, 0, 200000)) && !(await S.addSpend(R, P, 1.5, 200000)) && !(await S.addSpend(R, P, 50000, -1)));
-  const par = await Promise.all(Array.from({ length: 5 }, () => S.addSpend(R, P2, 50000, 100000)));
-  check("5 parallel addSpend of 50,000 against 100,000: exactly 2 pass", par.filter(Boolean).length === 2, JSON.stringify(par));
-  check("and spent is exactly the limit", (await S.getRoomSpend(R, P2))?.spentKobo === 100000);
-  check("an existing row keeps its stored limit (the passed limit only seeds)", !(await S.addSpend(R, P2, 50000, 10000000)));
-  const lowered = await S.setRoomLimit(R, P2, 50000);
-  check("setRoomLimit below spent stores the spent amount", lowered.limitKobo === 100000 && lowered.spentKobo === 100000, JSON.stringify(lowered));
-  const raised = await S.setRoomLimit(R, P2, 500000);
-  check("setRoomLimit raise", raised.limitKobo === 500000);
+  check("addSpend refuses bad input (fail closed)", !(await S.addSpend(R, P, 0)) && !(await S.addSpend(R, P, 1.5)) && !(await S.addSpend(R, P, -5)));
+  const par = await Promise.all(Array.from({ length: 5 }, () => S.addSpend(R, P2, 50000)));
+  check("5 parallel addSpend of 50,000 all pass and add up", par.every(Boolean) && (await S.getRoomSpend(R, P2))?.spentKobo === 250000, JSON.stringify(par));
 
   // ---- insertSprayIfNew: one row per (payer, key), parallel safe, per payer only
   const key = randomUUID();

@@ -65,8 +65,12 @@ const cases: Array<[string, SprayEligibilityInput, SprayCode | null]> = [
 for (const [name, input, code] of cases) {
   test(`sprayEligibility: ${name} -> ${code ?? "ok"}`, () => assert.deepEqual(sprayEligibility(input), code === null ? { ok: true } : { ok: false, code }));
 }
-test("sprayEligibility: no anonymous field anywhere", () => {
-  assert.doesNotMatch(src("shared/spray.ts"), /anonymous/i);
+test("sprayEligibility: anonymity never takes part in who may spray (no anonymous field in its input or its rule)", () => {
+  const f = src("shared/spray.ts");
+  const a = f.indexOf("export interface SprayEligibilityInput");
+  const rule = f.slice(a, f.indexOf("\n}\n", f.indexOf("export function sprayEligibility")) + 3);
+  assert.ok(rule.length > 200 && rule.includes("sprayEligibility"));
+  assert.doesNotMatch(rule, /anonymous/i);
 });
 
 // ---------------------------------------------------------------- limits
@@ -372,11 +376,11 @@ test("statuses: the eight, terminal ones, spend statuses", () => {
     const b = fnBody("insertSprayIfNew");
     assert.ok(b.indexOf("onConflictDoNothing") > 0 && b.indexOf("onConflictDoNothing") < b.indexOf(".select()"));
   });
-  test("addSpend's gate is a conditional UPDATE (spent + kobo <= limit) and fails closed on bad input", () => {
+  test("addSpend only adds to the running total (no spending limit) and fails closed on bad input", () => {
     const b = fnBody("addSpend");
     assert.match(b, /\.update\(roomSpend\)/);
-    assert.match(b, /spentKobo\} \+ \$\{kobo\} <= \$\{roomSpend\.limitKobo\}/);
-    assert.match(b, /if \(!isPosInt\(kobo\) \|\| !isPosInt\(limitKobo\)\) return false/);
+    assert.doesNotMatch(b, /<= \$\{roomSpend\.limitKobo\}/);
+    assert.match(b, /if \(!isPosInt\(kobo\)\) return false/);
   });
   test("markSprayStatus is conditional on the current status", () => {
     assert.match(fnBody("markSprayStatus"), /inArray\(sprayPayments\.status, \[\.\.\.from\]\)/);
@@ -426,7 +430,6 @@ test("statuses: the eight, terminal ones, spend statuses", () => {
     const i = spray.indexOf("db.transaction(async (tx): Promise<Reservation>");
     const body = spray.slice(i, spray.indexOf("}));", i));
     assert.match(body, /hasSprayInFlight\(payerId, targetId, now, tx\)/);
-    assert.match(body, /roomLimitFor\(roomId, payerId, tx\)/);
     assert.match(body, /overNewHostCapAtStart\(people, price, now, tx\)/);
     assert.doesNotMatch(body, /\bpool\./);
   });

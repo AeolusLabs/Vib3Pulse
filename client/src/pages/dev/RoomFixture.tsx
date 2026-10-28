@@ -411,18 +411,7 @@ function ShellFixture({ opts, spray = null, edge = null, game = null }: { opts: 
       const base = "/api/rooms/fixture-room/spray";
       if (path === "/api/csrf-token") return json({ csrfToken: "fixture" }, 200, 0);
       if (path === "/api/users/me/spray" && method === "GET") return json(sprayMe.current);
-      if (path === "/api/users/me/spray/daily-limit" && method === "PUT") {
-        const k = Number(JSON.parse(String(init?.body ?? "{}")).kobo);
-        sprayMe.current = { ...sprayMe.current, dailyLimitKobo: k };
-        return json({ dailyLimitKobo: k });
-      }
       if (path === "/api/users/me/spray/method" && method === "DELETE") { sprayMe.current = { ...sprayMe.current, method: null }; return json({ ok: true }); }
-      if (path === `${base}/limit` && method === "PUT") {
-        const k = Number(JSON.parse(String(init?.body ?? "{}")).kobo);
-        const next = { ...FIXTURE_SPRAY_BLOCK, roomLimitKobo: k };
-        setTimeout(() => setSprayBlock(next), 0);
-        return json({ limitKobo: k, spentKobo: 0 });
-      }
       if (path === base && method === "POST") {
         const b = JSON.parse(String(init?.body ?? "{}")) as { tier?: unknown };
         const tier: SprayTier = isSprayTier(b.tier) ? b.tier : "note";
@@ -448,7 +437,13 @@ function ShellFixture({ opts, spray = null, edge = null, game = null }: { opts: 
     }) as typeof window.fetch;
     // Quiet effects: one spray from someone else arrives, shown as a chip instead of the animation.
     const t = spray === "quiet" ? setTimeout(() => dispatch({ type: "room:spray", id: "fx-quiet-1", tier: "bundle", v3c: SPRAY_CATALOGUE.bundle.v3c, fromId: "fx-g1", toId: FIXTURE_IDS.host, at: Date.now() }), 900) : undefined;
-    return () => { window.fetch = real; clearTimeout(t); };
+    // Board scene: someone anonymous sprays the host a bundle, then the board and the host's own total arrive, as the server sends them.
+    const tb = spray === "board" ? setTimeout(() => {
+      dispatch({ type: "room:spray", id: "fx-board-1", tier: "bundle", v3c: SPRAY_CATALOGUE.bundle.v3c, fromId: "anonymous", toId: FIXTURE_IDS.host, at: Date.now() });
+      dispatch({ type: "room:spray_board", top: [{ id: "anonymous", name: "Anonymous", v3c: 1_300_000 }, { id: "fx-g1", name: "Theo Baptiste", v3c: 1_000_000 }, { id: FIXTURE_IDS.self, name: "Rosa", v3c: 50_000 }] });
+      dispatch({ type: "room:spray_received", kobo: 86_000, v3c: 1_150_000 });
+    }, 900) : undefined;
+    return () => { window.fetch = real; clearTimeout(t); clearTimeout(tb); };
   }, [spray]);
 
   const [audioOnly, setAudioOnly] = useState(opts.sound);

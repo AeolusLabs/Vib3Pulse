@@ -37,6 +37,15 @@ export interface InteractionItem { id: string; fromId: string; targetId: string;
  * No amount beyond what the tier implies, no card, no reference.
  */
 export interface SprayEvent { id: string; tier: SprayTier; v3c: number; fromId: string; toId: string; at: number }
+/** One line of the room's top-three sprayers (server-made; an anonymous payer arrives as id "anonymous", name "Anonymous"). */
+export interface SprayBoardRow { id: string; name: string; v3c: number }
+/** What the viewer has been sprayed in this room: their own share in kobo, and the V3C. Only ever sent to them. */
+export interface SprayReceived { kobo: number; v3c: number }
+const boardRows = (raw: unknown): SprayBoardRow[] => (Array.isArray(raw) ? raw : []).flatMap((r) => {
+  const x = r as Partial<SprayBoardRow> | null;
+  return x && typeof x.id === "string" && x.id && typeof x.name === "string" && Number.isFinite(x.v3c) && (x.v3c as number) >= 0
+    ? [{ id: x.id.slice(0, 64), name: x.name.slice(0, 64), v3c: x.v3c as number }] : [];
+}).slice(0, 3);
 
 export interface RoomState {
   selfId: string | null;
@@ -51,6 +60,11 @@ export interface RoomState {
   interactions: InteractionItem[];
   /** Phase 5: the last SPRAY_CAP delivered sprays, newest last (ring). */
   sprays: SprayEvent[];
+  /** The room's top three sprayers, and how many times it changed live (the tray slides out on each change, not on the first load). */
+  sprayBoard: SprayBoardRow[];
+  sprayBoardTick: number;
+  /** What the viewer was sprayed here (null until they were). */
+  sprayReceived: SprayReceived | null;
   /** Terminal failure code (AGE_LIMIT, BANNED, KICKED, ROOM_FULL ...). */
   error: string | null;
   /** The server's own warning text that came with a socket refusal (a minors' room or lane), shown instead of the bare constant. */
@@ -84,7 +98,7 @@ export const SPRAY_CAP = 20;
 
 export const initialRoomState = (selfId: string | null = null): RoomState => ({
   selfId, phase: "idle", room: null, members: [], memberCount: 0, screen: null, you: null,
-  chat: [], reactions: [], interactions: [], sprays: [], error: null, errorWarning: null, notice: null, seq: 0,
+  chat: [], reactions: [], interactions: [], sprays: [], sprayBoard: [], sprayBoardTick: 0, sprayReceived: null, error: null, errorWarning: null, notice: null, seq: 0,
   voiceEnabled: false, stage: [], hands: [], invitedYou: false, liveVideo: false, holder: null, asks: [], holderAwayUntil: null, nowPlaying: null, serverOffsetMs: 0, game: null,
 });
 
@@ -96,6 +110,8 @@ export type RoomServerMessage =
   | { type: "room:react"; userId: string; emoji: string; at?: number }
   | { type: "room:interact"; fromId: string; targetId: string; kind: "wave" | "reaction"; emoji?: string }
   | { type: "room:spray"; id: string; tier: SprayTier; v3c: number; fromId: string; toId: string; at: number }
+  | { type: "room:spray_board"; top: unknown; initial?: boolean }
+  | { type: "room:spray_received"; roomId?: string; kobo: number; v3c: number }
   | { type: "room:screen"; screen: Screen | null; screenVersion?: number }
   | { type: "room:stage"; stage: string[]; hands: string[]; invitedYou?: boolean }
   | { type: "room:voice"; enabled: boolean }
@@ -167,6 +183,7 @@ export function roomReducer(state: RoomState, event: RoomEvent, now: () => numbe
         // A late joiner has the host's clock from this message, not only from the next heartbeat.
         serverOffsetMs: event.serverNowMs !== undefined ? event.serverNowMs - now() : state.serverOffsetMs,
         chat: sameRoom ? state.chat : [], reactions: sameRoom ? state.reactions : [], interactions: sameRoom ? state.interactions : [], sprays: sameRoom ? state.sprays : [],
+        sprayBoard: sameRoom ? state.sprayBoard : [], sprayReceived: sameRoom ? state.sprayReceived : null,
       };
     }
     case "room:joined": {
@@ -195,6 +212,12 @@ export function roomReducer(state: RoomState, event: RoomEvent, now: () => numbe
       const item: InteractionItem = { id: `i${state.seq}`, fromId: event.fromId, targetId: event.targetId, kind: event.kind, emoji: event.emoji, at: now() };
       return { ...state, seq: state.seq + 1, interactions: cap([...state.interactions, item], INTERACTION_CAP) };
     }
+    case "room:spray_board":
+      // `initial` is the load on joining: shown quietly. A live one bumps the tick so the tray slides out.
+      return { ...state, sprayBoard: boardRows(event.top), sprayBoardTick: event.initial === true ? state.sprayBoardTick : state.sprayBoardTick + 1 };
+    case "room:spray_received":
+      if ((event.roomId !== undefined && event.roomId !== state.room?.id) || !Number.isFinite(event.kobo) || !Number.isFinite(event.v3c) || event.kobo < 0 || event.v3c < 0) return state;
+      return { ...state, sprayReceived: { kobo: event.kobo, v3c: event.v3c } };
     case "room:spray": {
       // Server-made, but still checked: a malformed event is dropped, never animated. The same id twice (a resend after a
       // reconnect) is kept once, so a spray never plays twice.

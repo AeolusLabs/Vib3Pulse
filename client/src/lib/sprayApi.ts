@@ -65,11 +65,16 @@ export async function sprayCall<T>(method: string, url: string, data?: unknown, 
 }
 
 /** POST /api/rooms/:id/spray. `saveCard` is only sent when the save box was ticked (default off). */
-export const postSpray = (roomId: string, p: { tier: SprayTier; targetId: string; idempotencyKey: string; saveCard: boolean; payOther?: boolean }, token?: string) =>
+export const postSpray = (roomId: string, p: { tier: SprayTier; targetId: string; idempotencyKey: string; saveCard: boolean; payOther?: boolean; anonymous?: boolean }, token?: string) =>
   sprayCall<unknown>("POST", `${roomBase(roomId)}/spray${withToken(token)}`, {
     tier: p.tier, targetId: p.targetId, idempotencyKey: p.idempotencyKey, ...(p.saveCard ? { saveCard: true } : {}),
     ...(p.payOther ? { payOther: true } : {}), // "pay another way": any Paystack method, one time
+    ...(p.anonymous ? { anonymous: true } : {}),
   });
+
+/** GET /api/rooms/:id/spray/board: the top three sprayers and the caller's own total, for someone in the room. */
+export const getSprayBoard = (roomId: string, token?: string) =>
+  sprayCall<unknown>("GET", `${roomBase(roomId)}/spray/board${withToken(token)}`);
 
 /** GET /api/rooms/:id/spray/:sprayId (the payer's own spray only; anyone else gets 404). */
 export const getSprayStatus = (roomId: string, sprayId: string, token?: string) =>
@@ -80,10 +85,11 @@ export const getSprayStatus = (roomId: string, sprayId: string, token?: string) 
  * `batchId`; the batch id is used as the spray id from here on, so the same pay machine, replay rule and poll serve both.
  * The client sends no amount and no share: only the tier, the side and the idempotency key.
  */
-export const postSprayTeam = async (roomId: string, p: { tier: SprayTier; side: "A" | "B"; idempotencyKey: string; saveCard: boolean; payOther?: boolean }, token?: string): Promise<SprayCall<unknown>> => {
+export const postSprayTeam = async (roomId: string, p: { tier: SprayTier; side: "A" | "B"; idempotencyKey: string; saveCard: boolean; payOther?: boolean; anonymous?: boolean }, token?: string): Promise<SprayCall<unknown>> => {
   const r = await sprayCall<unknown>("POST", `${roomBase(roomId)}/spray/team${withToken(token)}`, {
     tier: p.tier, side: p.side, idempotencyKey: p.idempotencyKey, ...(p.saveCard ? { saveCard: true } : {}),
     ...(p.payOther ? { payOther: true } : {}),
+    ...(p.anonymous ? { anonymous: true } : {}),
   });
   return r.ok ? { ...r, body: withSprayId(r.body) } : r;
 };
@@ -101,15 +107,8 @@ function withSprayId(body: unknown): unknown {
   return typeof b.batchId === "string" && b.sprayId === undefined ? { ...b, sprayId: b.batchId } : b;
 }
 
-/** GET /api/users/me/spray: the saved card (last4 and brand only), the daily limit and today's rolling spend. */
+/** GET /api/users/me/spray: the saved card (last4 and brand only) and whether the payer is verified. */
 export const getSprayMe = () => sprayCall<unknown>("GET", "/api/users/me/spray");
-
-/** PUT /api/rooms/:id/spray/limit `{ kobo }`, one of ROOM_LIMIT_OPTIONS_KOBO. The server checks it again. */
-export const putRoomLimit = (roomId: string, kobo: number, token?: string) =>
-  sprayCall<unknown>("PUT", `${roomBase(roomId)}/spray/limit${withToken(token)}`, { kobo });
-
-/** PUT /api/users/me/spray/daily-limit `{ kobo }`. The server checks it again (verified and maximum rules). */
-export const putDailyLimit = (kobo: number) => sprayCall<unknown>("PUT", "/api/users/me/spray/daily-limit", { kobo });
 
 /** DELETE /api/users/me/spray/method: forget the saved card. The next spray goes through the bank again. */
 export const deleteMethod = () => sprayCall<unknown>("DELETE", "/api/users/me/spray/method");

@@ -42,7 +42,7 @@ import { db, storage } from "../storage";
 import { sprayPayments, type Room, type SprayPayment, type User } from "@shared/schema";
 import { SPRAY_CATALOGUE, isSprayTier, type SprayTier } from "@shared/money";
 import {
-  DELIVERY_DEADLINE_MS, SPRAY_REASONS, idempotencyKeyShape, requiresThreeDs, sprayEligibility, spraySplit,
+  ANON_SPRAYER_ID, DELIVERY_DEADLINE_MS, SPRAY_REASONS, idempotencyKeyShape, requiresThreeDs, sprayEligibility, spraySplit,
   type SprayCode, type SprayEligibilityInput, type SprayStatus,
 } from "@shared/spray";
 import { moneyEligibleRoom } from "@shared/roomRules";
@@ -61,6 +61,7 @@ import * as ss from "./sprayStorage";
 import { recordSprayEvent, withSpraySource } from "./sprayEvents";
 import { laneParentBlocked } from "./sprayState";
 import { roomHub } from "./RoomHub";
+import { announceBoard } from "./sprayBoard";
 import { isKicked } from "./roomSocket";
 import { isGamePlayer } from "./stage";
 import { batchFinalizer } from "./sprayBatchHook";
@@ -72,8 +73,8 @@ import { ticketCheckoutBaseUrl } from "./checkoutUrl";
 import { createKeyedQueue, QueueFullError } from "./keyedQueue";
 import { BUSY, openPaymentIssue, withAdvisoryLock } from "./refunds";
 import {
-  capLockKey, capUsers, checkVelocity, clawbackBlockThresholdKobo, dailyWindowStart, effectiveDailyLimit, hasSprayInFlight, overNewHostCapAtDelivery,
-  overNewHostCapAtStart, payerPrecheck, roomLimitFor,
+  capLockKey, capUsers, checkVelocity, clawbackBlockThresholdKobo, hasSprayInFlight, overNewHostCapAtDelivery,
+  overNewHostCapAtStart, payerPrecheck,
 } from "./sprayLimits";
 
 export { QueueFullError };
@@ -248,8 +249,6 @@ const rateLimited = (sec: number): StartOutcome => ({
 const declined = (sprayId: string, reason: string): StartOutcome => ({
   status: 402, body: { code: "PAYMENT_DECLINED", sprayId, reason, message: "Your card was not charged." },
 });
-const dailyLimit = (): StartOutcome => ({ status: 409, body: { code: "DAILY_LIMIT", message: "This would go over your daily spray limit." } });
-const roomLimit = (): StartOutcome => ({ status: 409, body: { code: "ROOM_LIMIT", message: "This would go over your limit for this room." } });
 
 async function rowByPayerKey(payerId: string, key: string, ex: ss.SprayExec = db): Promise<SprayPayment | null> {
   const [row] = await (ex as typeof db).select().from(sprayPayments)
@@ -295,8 +294,6 @@ type Reservation =
   | { kind: "replay"; row: SprayPayment }
   | { kind: "velocity"; retryAfterSec: number }
   | { kind: "in_flight" }
-  | { kind: "daily" }
-  | { kind: "room" }
   | { kind: "cap" }
   | { kind: "ban" };
 
@@ -321,9 +318,10 @@ export async function startSpray(input: StartInput): Promise<StartOutcome> {
   const { tier, targetId, idempotencyKey } = b;
   const payOther = b.payOther === true; // "pay another way": any Paystack method, one time, never a saved card
   const saveCard = b.saveCard === true && !payOther; // only a card can be saved
+  const anonymous = b.anonymous === true; // show as "Anonymous" in the room; admins always see the payer
   if (!isSprayTier(tier) || typeof targetId !== "string" || targetId.length < 1 || targetId.length > 64
     || !idempotencyKeyShape(idempotencyKey) || (b.saveCard !== undefined && typeof b.saveCard !== "boolean")
-    || (b.payOther !== undefined && typeof b.payOther !== "boolean")
+    || (b.payOther !== undefined && typeof b.payOther !== "boolean") || (b.anonymous !== undefined && typeof b.anonymous !== "boolean")
     || typeof input.roomId !== "string" || input.roomId.length < 1 || input.roomId.length > 64) {
     return badRequest();
   }
@@ -342,7 +340,7 @@ export async function startSpray(input: StartInput): Promise<StartOutcome> {
   if (!pre.ok) {
     if (pre.kind === "velocity") return rateLimited(pre.retryAfterSec);
     if (pre.kind === "in_flight") return rateLimited(10);
-    return pre.kind === "daily" ? dailyLimit() : roomLimit();
+    return rateLimited(10);
   }
 
   const gate = await sprayGate(roomId, payerId, targetId, "start");
@@ -380,24 +378,18 @@ export async function startSpray(input: StartInput): Promise<StartOutcome> {
       const vel = await checkVelocity(payerId, targetId, now, tx);
       if (!vel.ok) return { kind: "velocity", retryAfterSec: vel.retryAfterSec };
       if (await hasSprayInFlight(payerId, targetId, now, tx)) return { kind: "in_flight" };
-      // The daily limit and the stored limits are read here, from the database, under the lock.
-      // (f.payer was read from the database by the gate for this request; never a client value.)
-      const spent = await ss.sumPayerKoboSince(tx, payerId, dailyWindowStart(now));
-      if (spent + price > effectiveDailyLimit(f.payer)) return { kind: "daily" };
-      const limit = await roomLimitFor(roomId, payerId, tx);
-      if (limit.spentKobo + price > limit.limitKobo) return { kind: "room" };
       // Then the recipient side: the receive cap of everyone the money reaches, under their locks (id order; delivery
       // takes the same locks in the same order, so the two can never deadlock).
       for (const u of people) await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${capLockKey(u.id)}))`);
       if (await overNewHostCapAtStart(people, price, now, tx)) return { kind: "cap" };
       // The receive ban again, now serialised with toReversing / disputes (they write clawbacks under the same locks).
       if (await ss.receiveBlocked(people.map((u) => u.id), clawbackBlockThresholdKobo(), tx)) return { kind: "ban" };
-      if (!(await ss.addSpend(roomId, payerId, price, limit.limitKobo, tx))) return { kind: "room" };
+      if (!(await ss.addSpend(roomId, payerId, price, tx))) throw new Error("room spend not recorded");
       const ins = await ss.insertSprayIfNew({
         idempotencyKey, requestHash, roomId, hostId: f.room.hostId, payerId, recipientId: targetId, tier,
         v3c: SPRAY_CATALOGUE[tier].v3c, amountKobo: bd.price, vatKobo: bd.vat, feeKobo: bd.fee, reserveKobo: bd.reserve,
         platformKobo: bd.platform, hostKobo: split.hostKobo, guestKobo: split.guestKobo,
-        provider: PROVIDER_NAME, providerRef: reference, status: "created",
+        provider: PROVIDER_NAME, providerRef: reference, status: "created", anonymous,
       }, tx);
       if (!ins.created) throw new Error("spray row conflicted under the payer lock"); // roll back the spend; the retry replays
       return { kind: "created", row: ins.row };
@@ -411,8 +403,6 @@ export async function startSpray(input: StartInput): Promise<StartOutcome> {
     case "replay": return replayOutcome(reserved.row, requestHash);
     case "velocity": return rateLimited(reserved.retryAfterSec);
     case "in_flight": return rateLimited(10);
-    case "daily": return dailyLimit();
-    case "room": return roomLimit();
     // Same generic 403 for both (no oracle); distinct labels in the server log only (review r5 m6).
     case "cap":
       console.log(`[rooms:spray] start refused room=${roomId} payer=${payerId} code=NEW_HOST_CAP`);
@@ -668,7 +658,8 @@ async function deliverOrReverse(c: PoolClient, row: SprayPayment): Promise<Final
   if (!gate.ok && gate.absentOnly && !pastDeadline) { logSpray(row.providerRef, "waiting:recipient_not_seen"); return "pending"; }
   // Shown only when the gate still passes and the split is the one this room's host and recipient kind were priced for.
   const f = gate.ok && gate.facts.room.hostId === row.hostId && (gate.facts.kind === "host") === (row.guestKobo === null) ? gate.facts : null;
-  if (!f) logSpray(row.providerRef, "delivered_unseen"); // delivered all the same, no animation
+  // Delivered all the same. The room still sees it (announceDelivery below): the check only decides the money path, not the show.
+  if (!f) logSpray(row.providerRef, `delivery_check_failed:${gate.ok ? "split_mismatch" : gate.code}`);
   const [hostUser, recipientUser] = f ? [f.host, f.recipient] : await Promise.all([storage.getUser(row.hostId), storage.getUser(row.recipientId)]);
 
   let refused: StoredReason | null = null;
@@ -707,7 +698,7 @@ async function deliverOrReverse(c: PoolClient, row: SprayPayment): Promise<Final
   }
   if (refused) return reverse(c, row, refused);
   logSpray(row.providerRef, "delivered");
-  if (f) announceDelivery(row, f);
+  announceDelivery(row, recipientUser);
   // Phase 6: the people the money reached (the host's share; a stage guest's share). Batched per (person, room), never names
   // the payer, fire-and-forget (notify never rejects, so a notification failure never touches the delivered spray).
   void notifySprayReceived(row.hostId, row.roomId, row.hostKobo, row.id);
@@ -716,19 +707,23 @@ async function deliverOrReverse(c: PoolClient, row: SprayPayment): Promise<Final
 }
 
 /** After the commit, never the source of truth: a failure here never undoes the delivery. */
-function announceDelivery(row: SprayPayment, f: SprayFacts): void {
+function announceDelivery(row: SprayPayment, recipient: Pick<User, "displayName" | "username"> | undefined | null): void {
   try {
     if (testing() && sprayTestHooks.failBroadcast?.(row.id)) throw new Error("injected broadcast failure (test)");
     const tier = row.tier as SprayTier;
     const at = sprayClock.now();
     // Rule B13: ids exactly as members appear in room:state (user ids), the tier and its V3C label value. Nothing else.
-    roomHub.broadcast(row.roomId, { type: "room:spray", id: row.id, tier, v3c: SPRAY_CATALOGUE[tier].v3c, fromId: row.payerId, toId: row.recipientId, at });
-    const name = f.recipient.displayName || f.recipient.username || "them";
+    // An anonymous payer goes out as the shared sentinel, never their id (admins read the row, not the room).
+    const fromId = row.anonymous ? ANON_SPRAYER_ID : row.payerId;
+    roomHub.broadcast(row.roomId, { type: "room:spray", id: row.id, tier, v3c: SPRAY_CATALOGUE[tier].v3c, fromId, toId: row.recipientId, at });
+    const name = recipient?.displayName || recipient?.username || "them";
     const text = tier === "rain" ? `made it rain on ${name}` : `sprayed ${name} a ${SPRAY_CATALOGUE[tier].label.toLowerCase()}`;
     // A server-made SYSTEM chat line (the client never invents one). Owner ruling 7: it is NOT recorded in the room's chat
     // ring, which report excerpts are cut from: it is not something the payer typed, and a payer spraying fast must not be
     // able to push other people's lines out of the evidence window.
-    roomHub.broadcast(row.roomId, { type: "room:chat", userId: row.payerId, text, at, system: "spray" });
+    roomHub.broadcast(row.roomId, { type: "room:chat", userId: fromId, text, at, system: "spray" });
+    void announceBoard(row.roomId, [row.recipientId]);
+    logSpray(row.providerRef, "announced");
   } catch (e) {
     console.error(`[rooms:spray] ref=${sprayReferenceForLog(row.providerRef)} delivered, but the announcement failed:`, sanitizeMoneyError(e));
   }
@@ -899,7 +894,7 @@ export async function getOwnSpray(roomId: string, sprayId: string, payerId: stri
  * eligibility for a live, money-eligible room (rule: never `enabled: false`). targets: user ids that are spray-eligible now.
  * (Accepted and documented: targets leave out people the viewer blocked or was blocked by, and people who owe a clawback.)
  */
-export async function sprayBlockFor(room: Room, viewerId: string): Promise<{ enabled: true; roomLimitKobo: number; roomSpentKobo: number; targets: string[] } | null> {
+export async function sprayBlockFor(room: Room, viewerId: string): Promise<{ enabled: true; targets: string[] } | null> {
   if (room.sprayEnabled !== true || room.sprayAdminBlocked === true || await laneParentBlocked(room) || !(await sprayAllowed()) || room.status !== "live" || !moneyEligibleRoom(room) || roomHub.isMinorsRoom(room.id)) return null;
   if (!roomHub.get(room.id, viewerId)) return null;
   const candidates = new Set<string>();
@@ -922,6 +917,5 @@ export async function sprayBlockFor(room: Room, viewerId: string): Promise<{ ena
     const g = id === probe ? p : await sprayGate(room.id, viewerId, id, "start");
     if (g.ok) targets.push(id);
   }
-  const lim = await roomLimitFor(room.id, viewerId);
-  return { enabled: true, roomLimitKobo: lim.limitKobo, roomSpentKobo: lim.spentKobo, targets };
+  return { enabled: true, targets };
 }

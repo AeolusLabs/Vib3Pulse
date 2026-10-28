@@ -483,6 +483,11 @@ CREATE TABLE IF NOT EXISTS room_members (
     const { ROOM_SPRAY_ENABLED_SCHEMA_SQL } = await import("./rooms/roomSprayEnabledMigration");
     await pool.query(ROOM_SPRAY_ENABLED_SCHEMA_SQL);
   }
+  // Anonymous spray: spray_payments.anonymous. Same SQL as migrations/add_spray_anonymous.sql.
+  {
+    const { SPRAY_ANONYMOUS_SCHEMA_SQL } = await import("./rooms/sprayAnonymousMigration");
+    await pool.query(SPRAY_ANONYMOUS_SCHEMA_SQL);
+  }
   // Admin spray block: rooms.spray_admin_blocked and its audit columns. Same SQL as migrations/add_rooms_spray_admin_block.sql.
   {
     const { ROOM_SPRAY_BLOCK_SCHEMA_SQL } = await import("./rooms/roomSprayBlockMigration");
