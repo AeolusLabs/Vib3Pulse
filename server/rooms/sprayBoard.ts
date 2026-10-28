@@ -24,15 +24,18 @@ export async function sprayBoardFor(roomId: string): Promise<BoardRow[]> {
       : { id: x.payer_id, name: x.display_name || x.username || "Someone", v3c: Number(x.v3c), anonymous: false }));
 }
 
-/** What this person was sprayed in this room: their own share in naira (kobo) and the V3C. Only ever sent to them. */
+/**
+ * What this person actually receives in this room, after the platform cut, VAT and fees: their own share in kobo, and the same
+ * amount in V3C (1 V3C is 1 kobo). Never the sprayed amount. Only ever sent to them.
+ */
 export async function sprayReceivedFor(roomId: string, userId: string): Promise<Received> {
   const r = await pool.query(
-    `select coalesce(sum(case when recipient_id = host_id then host_kobo else coalesce(guest_kobo, 0) end), 0)::bigint as kobo,
-            coalesce(sum(v3c), 0)::bigint as v3c
+    `select coalesce(sum(case when recipient_id = host_id then host_kobo else coalesce(guest_kobo, 0) end), 0)::bigint as kobo
        from spray_payments where room_id = $1 and recipient_id = $2 and status = 'delivered'`,
     [roomId, userId],
   );
-  return { kobo: Number(r.rows[0]?.kobo ?? 0), v3c: Number(r.rows[0]?.v3c ?? 0) };
+  const kobo = Number(r.rows[0]?.kobo ?? 0);
+  return { kobo, v3c: kobo };
 }
 
 /** After a delivery: everyone gets the board, each recipient their own total. Never throws: it is only a display. */

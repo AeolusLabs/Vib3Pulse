@@ -48,9 +48,9 @@ export function SprayReceivedChip({ received }: { received: SprayReceived | null
       key={received.v3c} role="status" aria-live="polite" data-testid="spray-received"
       className="pointer-events-none absolute left-3 top-[88px] z-[13] rounded-2xl bg-secondary px-3 py-1.5 text-secondary-foreground shadow-lg motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-200"
     >
-      <span className="block text-[11px] font-medium opacity-80">You've been sprayed</span>
+      <span className="block text-[11px] font-medium opacity-80">You've received</span>
       <span className="block text-base font-bold leading-tight tabular-nums">{formatNaira(received.kobo)}</span>
-      <span className="block text-xs tabular-nums opacity-80">{formatV3c(received.v3c)}</span>
+      <span className="block text-xs tabular-nums opacity-80">{formatV3c(received.v3c)} · after fees</span>
     </div>
   );
 }

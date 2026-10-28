@@ -186,7 +186,7 @@ try {
   const boards = await Promise.all(all.map((c) => c.waitFor((m) => m.type === "room:spray_board")));
   check("room:spray_board reaches everyone with the top sprayers by V3C", boards.every(Boolean) && boards[2].top?.length === 1 && boards[2].top[0].id === P && boards[2].top[0].v3c === SPRAY_CATALOGUE.bundle.v3c, JSON.stringify(boards[2]));
   const rec = await g.c.waitFor((m) => m.type === "room:spray_received");
-  check("the recipient gets what they were sprayed (their own share in kobo, and the V3C)", !!rec && rec.v3c === SPRAY_CATALOGUE.bundle.v3c && rec.kobo > 0 && rec.kobo < SPRAY_CATALOGUE.bundle.kobo && rec.roomId === R, JSON.stringify(rec));
+  check("the recipient gets what they receive after fees (their own share in kobo, and the same amount in V3C), never the sprayed amount", !!rec && rec.kobo > 0 && rec.kobo < SPRAY_CATALOGUE.bundle.kobo && rec.v3c === rec.kobo && rec.roomId === R, JSON.stringify(rec));
   await sleep(300);
   check("nobody else gets a room:spray_received", [h, by, p].every((x) => x.c.all((m) => m.type === "room:spray_received").length === 0));
   const gb1 = await rest("GET", `/api/rooms/${R}/spray/board`, BY);

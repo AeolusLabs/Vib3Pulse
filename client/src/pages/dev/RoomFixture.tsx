@@ -441,7 +441,7 @@ function ShellFixture({ opts, spray = null, edge = null, game = null }: { opts: 
     const tb = spray === "board" ? setTimeout(() => {
       dispatch({ type: "room:spray", id: "fx-board-1", tier: "bundle", v3c: SPRAY_CATALOGUE.bundle.v3c, fromId: "anonymous", toId: FIXTURE_IDS.host, at: Date.now() });
       dispatch({ type: "room:spray_board", top: [{ id: "anonymous", name: "Anonymous", v3c: 1_300_000 }, { id: "fx-g1", name: "Theo Baptiste", v3c: 1_000_000 }, { id: FIXTURE_IDS.self, name: "Rosa", v3c: 50_000 }] });
-      dispatch({ type: "room:spray_received", kobo: 86_000, v3c: 1_150_000 });
+      dispatch({ type: "room:spray_received", kobo: 86_000, v3c: 86_000 });
     }, 900) : undefined;
     return () => { window.fetch = real; clearTimeout(t); clearTimeout(tb); };
   }, [spray]);
