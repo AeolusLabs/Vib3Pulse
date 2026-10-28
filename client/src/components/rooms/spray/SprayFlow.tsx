@@ -215,7 +215,8 @@ export default function SprayFlow({ roomId, token, block, targets, hostId, nameO
         quiet={quiet} onQuiet={onQuiet} onDone={() => onTrayOpenChange(false)} />
     );
   } else if (view === "card" && s.kind === "confirming") {
-    body = <CardSheet mode="add" method={null} saveCard={s.intent.saveCard} onSaveCard={flow.setSaveCard} onContinue={() => setCardOkFor(s.intent.key)} onCancel={flow.close} />;
+    body = <CardSheet mode="add" method={null} saveCard={s.intent.saveCard} onSaveCard={flow.setSaveCard} onContinue={() => setCardOkFor(s.intent.key)}
+      onPayOther={() => { flow.setPayOther(true); setCardOkFor(s.intent.key); }} onCancel={flow.close} />;
   } else if (view === "card-replace" && s.kind === "failed") {
     body = <CardSheet mode="replace" method={me?.method ?? null} saveCard={replaceSave} onSaveCard={setReplaceSave}
       onContinue={() => void replaceCard()} onCancel={() => setSub(null)} busy={cardBusy} error={cardError} />;
@@ -223,6 +224,7 @@ export default function SprayFlow({ roomId, token, block, targets, hostId, nameO
     body = <SprayConfirm tier={s.intent.tier} name={s.intent.side ? SIDE_NAME[s.intent.side] : name(s.intent.targetId)} method={me?.method ?? null}
       paying={s.kind === "paying"} sending={s.kind === "paying" && !!s.sprayId} unknown={s.kind === "paying" && s.unknown === true}
       bankUrl={s.kind === "paying" ? s.intent.bankUrl ?? null : null}
+      payOther={s.intent.payOther === true} onPayOther={s.kind === "confirming" ? flow.setPayOther : undefined}
       onPay={() => { snd.unlock(); flow.pay(); }} onCancel={flow.close} onHide={hide} />;
   } else if (view === "bank" && s.kind === "action_required") {
     body = <BankApproval tier={s.intent.tier} url={s.url} onClose={hide} />;

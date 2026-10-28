@@ -113,9 +113,11 @@ export async function startTeamSpray(input: TeamStartInput): Promise<TeamOutcome
   if (!(await sprayAllowed())) return unavailable();
   const b = (input.body && typeof input.body === "object" && !Array.isArray(input.body) ? input.body : {}) as Record<string, unknown>;
   const { tier, side, idempotencyKey } = b;
-  const saveCard = b.saveCard === true;
+  const payOther = b.payOther === true; // "pay another way": any Paystack method, one time, never a saved card
+  const saveCard = b.saveCard === true && !payOther;
   if (!isSprayTier(tier) || (side !== "A" && side !== "B") || !idempotencyKeyShape(idempotencyKey)
     || (b.saveCard !== undefined && typeof b.saveCard !== "boolean")
+    || (b.payOther !== undefined && typeof b.payOther !== "boolean")
     || typeof input.roomId !== "string" || input.roomId.length < 1 || input.roomId.length > 64) {
     return badRequest();
   }
@@ -250,7 +252,7 @@ export async function startTeamSpray(input: TeamStartInput): Promise<TeamOutcome
   }
   const batch = reserved.batch;
   logBatch(reference, "created", `room=${roomId} payer=${payerId} tier=${tier} players=${present.length}`);
-  return chargeBatch(batch, first.payer.email, tier, saveCard, split, input.devOrigin);
+  return chargeBatch(batch, first.payer.email, tier, saveCard, split, input.devOrigin, payOther);
 }
 
 async function failUnpaidBatch(b: SprayBatch, from: SprayStatus[], reason: StoredReason): Promise<boolean> {
@@ -259,7 +261,7 @@ async function failUnpaidBatch(b: SprayBatch, from: SprayStatus[], reason: Store
   return !!won;
 }
 
-async function chargeBatch(b: SprayBatch, email: string, tier: SprayTier, saveCard: boolean, split: SplitSpec, devOrigin: string): Promise<TeamOutcome> {
+async function chargeBatch(b: SprayBatch, email: string, tier: SprayTier, saveCard: boolean, split: SplitSpec, devOrigin: string, payOther = false): Promise<TeamOutcome> {
   const reference = b.providerRef;
   const metadata: Record<string, string> = { type: "spray", batchId: b.id, roomId: b.roomId, payerId: b.payerId, tier, side: b.side, saveCard: saveCard ? "1" : "0" };
   const base = ticketCheckoutBaseUrl(process.env, devOrigin);
@@ -279,7 +281,7 @@ async function chargeBatch(b: SprayBatch, email: string, tier: SprayTier, saveCa
 
   let method: Awaited<ReturnType<typeof ss.getSavedMethod>> = null;
   let authorizationCode: string | null = null;
-  if (!requiresThreeDs(tier)) {
+  if (!requiresThreeDs(tier) && !payOther) {
     method = await ss.getSavedMethod(b.payerId);
     if (method) {
       try { authorizationCode = decryptToken(method.authEnc); }
@@ -289,7 +291,7 @@ async function chargeBatch(b: SprayBatch, email: string, tier: SprayTier, saveCa
 
   if (!authorizationCode) {
     try {
-      const { url } = await provider.startFirstPayment({ reference, email, amountKobo: b.amountKobo, split, metadata, callbackUrl });
+      const { url } = await provider.startFirstPayment({ reference, email, amountKobo: b.amountKobo, split, metadata, callbackUrl, ...(payOther ? { anyMethod: true } : {}) });
       const now = await bs.markBatchStatus(b.id, ["created"], "pending", { authorizationUrl: url });
       logBatch(reference, "action_required");
       return ok(now ?? b, "action_required", { authorizationUrl: url });

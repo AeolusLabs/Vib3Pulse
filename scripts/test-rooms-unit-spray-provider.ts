@@ -186,6 +186,15 @@ test("body: initialize is card only with a callback and no authorization code", 
   assert.throws(() => buildChargeBody(body({ callbackUrl: "https://x.test/" })), /callbackUrl/);
 });
 
+test("body: anyMethod initialize sends NO channels (every Paystack method), keeps the split; never for charge_authorization", () => {
+  const cb = "https://vib3pulse.test/rooms/r?spray=s1";
+  const any = buildChargeBody(body({ kind: "initialize", authorizationCode: undefined, callbackUrl: cb, anyMethod: true }));
+  assert.equal("channels" in any, false);
+  assert.ok(any.subaccount && any.transaction_charge && any.bearer === "account"); // the split is untouched
+  assert.deepEqual(buildChargeBody(body({ kind: "initialize", authorizationCode: undefined, callbackUrl: cb, anyMethod: false })).channels, ["card"]);
+  assert.throws(() => buildChargeBody(body({ anyMethod: true })), /anyMethod/); // body() defaults to charge_authorization
+});
+
 test("body: refuses non-NGN, sub-minimum, fractional, bad shares, bad reference, bad metadata", () => {
   for (const c of ["GBP", "USD", "ngn", ""]) assert.throws(() => buildChargeBody(body({ currency: c })), RangeError, c);
   assert.throws(() => buildChargeBody(body({ amountKobo: MIN_CHARGE_KOBO - 1, split: { shares: [{ subaccountCode: HOST_ACCT, amountKobo: 100 }] } })), RangeError);

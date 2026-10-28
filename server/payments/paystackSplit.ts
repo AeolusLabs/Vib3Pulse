@@ -8,7 +8,9 @@
 //    kobo, bearer_type "account") created once per (subaccounts, shares) and reused by name; then `split_code`. The
 //    remainder of a flat split stays with the main account (docs imply it; on the G3 checklist).
 //  - first payment: POST /transaction/initialize with channels ["card"] (a card is the only thing that can be saved and the
-//    only channel whose authorization can be reused), the server-made reference and callback.
+//    only channel whose authorization can be reused), the server-made reference and callback. `anyMethod` (the payer chose
+//    "pay another way") sends NO channels, so Paystack shows every method the account has on (bank, transfer, USSD, QR...);
+//    nothing is saved for those (mapVerifyData reports a reusable authorization for a card only).
 //  - saved card: POST /transaction/charge_authorization. At or above 10,000 naira (or force3ds) we never charge silently:
 //    a card-only checkout is started instead and the answer is action_required (rule B9).
 //  - verify: GET /transaction/verify/:reference. paid on status success for the same reference; the currency and amount
@@ -97,6 +99,8 @@ export interface ChargeBodyInput {
   metadata: Record<string, string>;
   /** initialize only. */
   callbackUrl?: string;
+  /** initialize only: true = let the payer pick any method Paystack offers (no `channels`); default card only. */
+  anyMethod?: boolean;
   /** charge_authorization only. */
   authorizationCode?: string;
 }
@@ -139,9 +143,10 @@ export function buildChargeBody(p: ChargeBodyInput): Record<string, unknown> {
     if (p.authorizationCode !== undefined) throw new RangeError("authorizationCode: not for initialize");
     if (typeof p.callbackUrl !== "string" || !callbackUrlAllowed(p.callbackUrl)) throw new RangeError("callbackUrl: required (https)");
     body.callback_url = p.callbackUrl;
-    body.channels = ["card"];
+    if (p.anyMethod !== true) body.channels = ["card"];
   } else if (p.kind === "charge_authorization") {
     if (p.callbackUrl !== undefined) throw new RangeError("callbackUrl: not for charge_authorization");
+    if (p.anyMethod !== undefined) throw new RangeError("anyMethod: not for charge_authorization");
     if (typeof p.authorizationCode !== "string" || !/^AUTH_[A-Za-z0-9]{4,64}$/.test(p.authorizationCode)) throw new RangeError("authorizationCode: invalid");
     body.authorization_code = p.authorizationCode;
   } else {
@@ -371,7 +376,7 @@ export function createPaystackSplitProvider(): SplitPaymentProvider {
     return code;
   }
 
-  async function initialize(p: { reference: string; email: string; amountKobo: number; split: SplitSpec; metadata: Record<string, string>; callbackUrl: string }): Promise<{ url: string }> {
+  async function initialize(p: { reference: string; email: string; amountKobo: number; split: SplitSpec; metadata: Record<string, string>; callbackUrl: string; anyMethod?: boolean }): Promise<{ url: string }> {
     // Validate before any network call (also before a split is created).
     buildChargeBody({ kind: "initialize", ...p, currency: "NGN", splitCode: p.split.shares.length >= 2 ? "SPL_placeholder0" : undefined });
     const splitCode = p.split.shares.length >= 2 ? await ensureSplitCode(p.split.shares) : undefined;

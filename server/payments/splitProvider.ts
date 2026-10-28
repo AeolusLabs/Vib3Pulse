@@ -77,7 +77,7 @@ export interface ChargeDetails {
 
 export interface SplitPaymentProvider {
   /** Hosted checkout (card only). The reference must be a spray reference (sprayReference.ts). */
-  startFirstPayment(p: { reference: string; email: string; amountKobo: number; split: SplitSpec; metadata: Record<string, string>; callbackUrl: string }): Promise<{ url: string }>;
+  startFirstPayment(p: { reference: string; email: string; amountKobo: number; split: SplitSpec; metadata: Record<string, string>; callbackUrl: string; anyMethod?: boolean }): Promise<{ url: string }>;
   /**
    * Charges a saved card. Never called for requiresThreeDs tiers; as a second guard, when force3ds is true or the amount is
    * at or above 10,000 naira the provider does NOT charge silently: it starts a card checkout and answers action_required.

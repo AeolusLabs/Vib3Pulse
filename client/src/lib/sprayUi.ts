@@ -163,6 +163,8 @@ export function dailyChoices(verified: boolean): LimitChoice[] {
  */
 export interface SprayIntent {
   tier: SprayTier; targetId: string; key: string; saveCard: boolean; bankUrl?: string;
+  /** The payer chose "pay another way" (bank, transfer, USSD...): one time, the saved card is not used and nothing is saved. */
+  payOther?: boolean;
   /** A team spray (one charge split between the team's players). `targetId` is then only an anchor player; the sheet says the team. */
   side?: Side;
 }
@@ -210,6 +212,7 @@ export type SprayOutcome =
 export type SprayFlowEvent =
   | { type: "start"; tier: SprayTier; targetId: string; key: string; side?: Side }
   | { type: "saveCard"; on: boolean }
+  | { type: "payOther"; on: boolean }
   | { type: "pay"; now: number }
   | { type: "outcome"; outcome: SprayOutcome; now: number }
   /** A room:spray event with this id reached the room: it was delivered. */
@@ -237,6 +240,11 @@ export function sprayFlow(s: SprayFlow, e: SprayFlowEvent): SprayFlow {
       return { kind: "confirming", intent: { tier: e.tier, targetId: e.targetId, key: e.key, saveCard: false, ...(e.side === "A" || e.side === "B" ? { side: e.side } : {}) } };
     case "saveCard":
       return s.kind === "confirming" ? { ...s, intent: { ...s.intent, saveCard: e.on === true } } : s;
+    case "payOther": {
+      if (s.kind !== "confirming") return s;
+      const { payOther: _drop, ...rest } = s.intent;
+      return { ...s, intent: e.on === true ? { ...rest, saveCard: false, payOther: true } : rest }; // only a card can be saved
+    }
     case "pay":
       return s.kind === "confirming" ? { kind: "paying", intent: s.intent, sprayId: null, since: e.now } : s;
     case "resume":
@@ -269,7 +277,7 @@ export function sprayFlow(s: SprayFlow, e: SprayFlowEvent): SprayFlow {
     case "retry":
       if (s.kind !== "failed") return s;
       if (s.sameKey) return { kind: "confirming", intent: s.intent };
-      return idempotencyKeyShape(e.key) ? { kind: "confirming", intent: { tier: s.intent.tier, targetId: s.intent.targetId, key: e.key, saveCard: s.intent.saveCard, ...(s.intent.side ? { side: s.intent.side } : {}) } } : s;
+      return idempotencyKeyShape(e.key) ? { kind: "confirming", intent: { tier: s.intent.tier, targetId: s.intent.targetId, key: e.key, saveCard: s.intent.saveCard, ...(s.intent.payOther ? { payOther: true } : {}), ...(s.intent.side ? { side: s.intent.side } : {}) } } : s;
     case "close":
       // While the request is out or the bank page is open the flow is never dropped: the sheet is hidden, and the hook
       // keeps watching (closing the bank sheet must not stop tracking, review M8).
@@ -510,6 +518,10 @@ export const SPRAY_COPY = {
   addCardBody: "Your bank asks you to approve once. Cards are handled by Paystack: we never see your card number.",
   saveCard: "Save this card so the next note or bundle is one tap",
   addCardGo: "Continue",
+  payOther: "Pay another way",
+  payOtherLine: "Bank, bank transfer, USSD or QR. Paid one time: nothing is saved.",
+  payOtherOn: "Paying one time with the method you pick on Paystack's page. Nothing is saved.",
+  useCardInstead: "Pay with a card instead",
   notNow: "Not now",
   bankTitle: "Approve with your bank",
   bankOpen: "Open my bank",
@@ -550,7 +562,8 @@ export const SPRAY_COPY = {
 } as const;
 
 /** "Charged to Visa ending 4242. Your bank will ask you to approve it." */
-export function chargeLine(tier: SprayTier, method: SprayCard | null): string {
+export function chargeLine(tier: SprayTier, method: SprayCard | null, payOther = false): string {
+  if (payOther) return SPRAY_COPY.payOtherOn;
   const label = cardLabel(method);
   const card = label ? cardInSentence(label) : null;
   if (!card) return "Your bank will ask you to add and approve a card.";

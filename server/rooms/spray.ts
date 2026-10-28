@@ -319,9 +319,11 @@ export async function startSpray(input: StartInput): Promise<StartOutcome> {
   if (!(await sprayAllowed())) return unavailable();
   const b = (input.body && typeof input.body === "object" && !Array.isArray(input.body) ? input.body : {}) as Record<string, unknown>;
   const { tier, targetId, idempotencyKey } = b;
-  const saveCard = b.saveCard === true;
+  const payOther = b.payOther === true; // "pay another way": any Paystack method, one time, never a saved card
+  const saveCard = b.saveCard === true && !payOther; // only a card can be saved
   if (!isSprayTier(tier) || typeof targetId !== "string" || targetId.length < 1 || targetId.length > 64
     || !idempotencyKeyShape(idempotencyKey) || (b.saveCard !== undefined && typeof b.saveCard !== "boolean")
+    || (b.payOther !== undefined && typeof b.payOther !== "boolean")
     || typeof input.roomId !== "string" || input.roomId.length < 1 || input.roomId.length > 64) {
     return badRequest();
   }
@@ -422,7 +424,7 @@ export async function startSpray(input: StartInput): Promise<StartOutcome> {
   }
   const row = reserved.row;
   logSpray(reference, "created", `room=${roomId} payer=${payerId} tier=${tier}`);
-  return chargeNewSpray(row, f, tier, saveCard, shares, input.devOrigin);
+  return chargeNewSpray(row, f, tier, saveCard, shares, input.devOrigin, payOther);
 }
 
 /** created -> failed with a reason, and the reservation back (only the call that wins the transition gives it back). */
@@ -433,7 +435,7 @@ async function failUnpaid(row: SprayPayment, from: SprayStatus[], reason: Stored
 }
 
 async function chargeNewSpray(
-  row: SprayPayment, f: SprayFacts, tier: SprayTier, saveCard: boolean, shares: SplitSpec["shares"], devOrigin: string,
+  row: SprayPayment, f: SprayFacts, tier: SprayTier, saveCard: boolean, shares: SplitSpec["shares"], devOrigin: string, payOther = false,
 ): Promise<StartOutcome> {
   const reference = row.providerRef;
   const metadata: Record<string, string> = {
@@ -459,7 +461,7 @@ async function chargeNewSpray(
   // A saved, reusable card, decrypted only here. Never for bag / rain (rule B9: no silent charge at 10,000 naira and above).
   let method: Awaited<ReturnType<typeof ss.getSavedMethod>> = null;
   let authorizationCode: string | null = null;
-  if (!requiresThreeDs(tier)) {
+  if (!requiresThreeDs(tier) && !payOther) { // the payer picked another way: the saved card is left alone
     method = await ss.getSavedMethod(row.payerId);
     if (method) {
       try { authorizationCode = decryptToken(method.authEnc); }
@@ -472,6 +474,7 @@ async function chargeNewSpray(
     try {
       const { url } = await provider.startFirstPayment({
         reference, email: f.payer.email, amountKobo: row.amountKobo, split: { shares }, metadata, callbackUrl,
+        ...(payOther ? { anyMethod: true } : {}),
       });
       await ss.markSprayStatus(row.id, ["created"], "pending", { authorizationUrl: url });
       logSpray(reference, "action_required");

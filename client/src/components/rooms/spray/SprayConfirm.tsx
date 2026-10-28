@@ -29,6 +29,10 @@ interface Props {
   unknown?: boolean;
   /** The bank's approval page for this spray, when we had one (so it can be opened again while we keep checking). */
   bankUrl?: string | null;
+  /** The payer chose to pay another way (bank, transfer, USSD...): one time, no saved card. */
+  payOther?: boolean;
+  /** Switch between the card path and "pay another way" (only before paying). */
+  onPayOther?(on: boolean): void;
   onPay(): void;
   onCancel(): void;
   /** While paying: hide the sheet; the flow keeps going and says when it lands. */
@@ -143,7 +147,7 @@ function TwoTapPay({ tier, onComplete, disabled }: { tier: SprayTier; onComplete
   );
 }
 
-export default function SprayConfirm({ tier, name, method, paying, sending, unknown = false, bankUrl = null, onPay, onCancel, onHide }: Props) {
+export default function SprayConfirm({ tier, name, method, paying, sending, unknown = false, bankUrl = null, payOther = false, onPayOther, onPay, onCancel, onHide }: Props) {
   const price = sprayPrice(tier);
   const tapped = useRef(false);
   useEffect(() => { if (!paying) tapped.current = false; }, [paying]);
@@ -187,7 +191,12 @@ export default function SprayConfirm({ tier, name, method, paying, sending, unkn
         </Button>
       )}
 
-      <p className="text-center text-xs text-muted-foreground" data-testid="spray-charge-line">{chargeLine(tier, method)}</p>
+      <p className="text-center text-xs text-muted-foreground" data-testid="spray-charge-line">{chargeLine(tier, method, payOther)}</p>
+      {!paying && onPayOther && (
+        <Button variant="outline" className="min-h-[44px] rounded-full" onClick={() => onPayOther(!payOther)} data-testid="spray-pay-other-toggle">
+          {payOther ? SPRAY_COPY.useCardInstead : SPRAY_COPY.payOther}
+        </Button>
+      )}
       {paying
         ? <Button variant="ghost" className="min-h-[44px]" onClick={onHide} data-testid="spray-hide">{SPRAY_COPY.bankDismiss}</Button>
         : <Button variant="ghost" className="min-h-[44px]" onClick={onCancel} data-testid="spray-not-now">{SPRAY_COPY.notNow}</Button>}

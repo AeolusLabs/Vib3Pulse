@@ -16,13 +16,15 @@ interface Props {
   saveCard: boolean;
   onSaveCard(on: boolean): void;
   onContinue(): void;
+  /** "add" mode only: skip the card and pay one time another way (bank, transfer, USSD...). */
+  onPayOther?(): void;
   onCancel(): void;
   busy?: boolean;
   /** The last attempt to forget the card failed. */
   error?: string | null;
 }
 
-export default function CardSheet({ mode, method, saveCard, onSaveCard, onContinue, onCancel, busy = false, error = null }: Props) {
+export default function CardSheet({ mode, method, saveCard, onSaveCard, onContinue, onPayOther, onCancel, busy = false, error = null }: Props) {
   const label = cardLabel(method);
   const card = label ? cardInSentence(label) : null; // mid-sentence: "we forget your saved Visa"
   const replacing = mode === "replace" && !!card;
@@ -52,6 +54,12 @@ export default function CardSheet({ mode, method, saveCard, onSaveCard, onContin
         {busy && <Loader2Icon className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />}
         {replacing ? "Forget this card and continue" : SPRAY_COPY.addCardGo}
       </Button>
+      {mode === "add" && onPayOther && (
+        <div className="grid gap-1 text-center">
+          <Button variant="outline" className="min-h-[48px] rounded-full" onClick={onPayOther} disabled={busy} data-testid="spray-pay-other">{SPRAY_COPY.payOther}</Button>
+          <p className="text-xs text-muted-foreground">{SPRAY_COPY.payOtherLine}</p>
+        </div>
+      )}
       <Button variant="ghost" className="min-h-[44px]" onClick={onCancel} data-testid="spray-card-cancel">{SPRAY_COPY.notNow}</Button>
     </div>
   );

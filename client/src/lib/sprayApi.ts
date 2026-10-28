@@ -65,9 +65,10 @@ export async function sprayCall<T>(method: string, url: string, data?: unknown, 
 }
 
 /** POST /api/rooms/:id/spray. `saveCard` is only sent when the save box was ticked (default off). */
-export const postSpray = (roomId: string, p: { tier: SprayTier; targetId: string; idempotencyKey: string; saveCard: boolean }, token?: string) =>
+export const postSpray = (roomId: string, p: { tier: SprayTier; targetId: string; idempotencyKey: string; saveCard: boolean; payOther?: boolean }, token?: string) =>
   sprayCall<unknown>("POST", `${roomBase(roomId)}/spray${withToken(token)}`, {
     tier: p.tier, targetId: p.targetId, idempotencyKey: p.idempotencyKey, ...(p.saveCard ? { saveCard: true } : {}),
+    ...(p.payOther ? { payOther: true } : {}), // "pay another way": any Paystack method, one time
   });
 
 /** GET /api/rooms/:id/spray/:sprayId (the payer's own spray only; anyone else gets 404). */
@@ -79,9 +80,10 @@ export const getSprayStatus = (roomId: string, sprayId: string, token?: string) 
  * `batchId`; the batch id is used as the spray id from here on, so the same pay machine, replay rule and poll serve both.
  * The client sends no amount and no share: only the tier, the side and the idempotency key.
  */
-export const postSprayTeam = async (roomId: string, p: { tier: SprayTier; side: "A" | "B"; idempotencyKey: string; saveCard: boolean }, token?: string): Promise<SprayCall<unknown>> => {
+export const postSprayTeam = async (roomId: string, p: { tier: SprayTier; side: "A" | "B"; idempotencyKey: string; saveCard: boolean; payOther?: boolean }, token?: string): Promise<SprayCall<unknown>> => {
   const r = await sprayCall<unknown>("POST", `${roomBase(roomId)}/spray/team${withToken(token)}`, {
     tier: p.tier, side: p.side, idempotencyKey: p.idempotencyKey, ...(p.saveCard ? { saveCard: true } : {}),
+    ...(p.payOther ? { payOther: true } : {}),
   });
   return r.ok ? { ...r, body: withSprayId(r.body) } : r;
 };

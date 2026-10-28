@@ -66,7 +66,7 @@ export class MockSplitProvider implements SplitPaymentProvider {
     return body;
   }
 
-  async startFirstPayment(p: { reference: string; email: string; amountKobo: number; split: SplitSpec; metadata: Record<string, string>; callbackUrl: string }): Promise<{ url: string }> {
+  async startFirstPayment(p: { reference: string; email: string; amountKobo: number; split: SplitSpec; metadata: Record<string, string>; callbackUrl: string; anyMethod?: boolean }): Promise<{ url: string }> {
     this.validate("initialize", p);
     this.calls.push({ method: "startFirstPayment", reference: p.reference, amountKobo: p.amountKobo, shares: p.split.shares });
     this.record(p, "checkout", "pending", false);
