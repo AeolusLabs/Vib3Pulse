@@ -72,6 +72,10 @@ export const postSpray = (roomId: string, p: { tier: SprayTier; targetId: string
     ...(p.anonymous ? { anonymous: true } : {}),
   });
 
+/** GET /api/rooms/:id/spray/quote: who gets what for this spray (a person, or a team with `side`). For someone in the room. */
+export const getSprayQuote = (roomId: string, tier: SprayTier, who: { targetId: string } | { side: "A" | "B" }, token?: string) =>
+  sprayCall<unknown>("GET", `${roomBase(roomId)}/spray/quote?tier=${encodeURIComponent(tier)}&${"side" in who ? `side=${who.side}` : `target=${encodeURIComponent(who.targetId)}`}${token ? `&token=${encodeURIComponent(token)}` : ""}`);
+
 /** GET /api/rooms/:id/spray/board: the top three sprayers and the caller's own total, for someone in the room. */
 export const getSprayBoard = (roomId: string, token?: string) =>
   sprayCall<unknown>("GET", `${roomBase(roomId)}/spray/board${withToken(token)}`);

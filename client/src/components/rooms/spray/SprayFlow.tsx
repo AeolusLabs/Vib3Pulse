@@ -12,8 +12,8 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
 import type { SprayTier } from "@shared/money";
 import type { SprayEvent } from "@/lib/roomReducer";
-import { deleteMethod, getSprayMe } from "@/lib/sprayApi";
-import { SPRAY_COPY, defaultTarget, holdsSprayBlock, inFlight, parseSprayMe, tileAction, type SprayBlock, type SprayFlow as Flow, type SprayMe } from "@/lib/sprayUi";
+import { deleteMethod, getSprayMe, getSprayQuote } from "@/lib/sprayApi";
+import { SPRAY_COPY, defaultTarget, holdsSprayBlock, inFlight, parseQuote, parseSprayMe, tileAction, type ParsedQuote, type SprayBlock, type SprayFlow as Flow, type SprayMe } from "@/lib/sprayUi";
 import { snd } from "./sound";
 import { useSpray } from "./useSpray";
 import SprayTray from "./SprayTray";
@@ -100,6 +100,19 @@ export default function SprayFlow({ roomId, token, block, targets, hostId, nameO
     retry: 1,
   });
   const me = meQ.data ?? null;
+  // Who gets what for the spray on the confirm sheet (exact: the server uses the same split as the charge).
+  const quoteIntent = s.kind === "confirming" ? s.intent : null;
+  const quoteQ = useQuery<ParsedQuote | null>({
+    queryKey: ["spray-quote", roomId, quoteIntent?.tier, quoteIntent?.side ?? quoteIntent?.targetId],
+    queryFn: async () => {
+      if (!quoteIntent) return null;
+      const r = await getSprayQuote(roomId, quoteIntent.tier, quoteIntent.side ? { side: quoteIntent.side } : { targetId: quoteIntent.targetId }, token);
+      return r.ok ? parseQuote(r.body) : null;
+    },
+    enabled: quoteIntent !== null,
+    staleTime: 30_000,
+    retry: 0,
+  });
 
   // A new step (the bank, an outcome): show the sheet again if it was hidden while waiting. Opening Spray again shows it too.
   useEffect(() => { setHidden(false); }, [s.kind]);
@@ -218,7 +231,7 @@ export default function SprayFlow({ roomId, token, block, targets, hostId, nameO
       paying={s.kind === "paying"} sending={s.kind === "paying" && !!s.sprayId} unknown={s.kind === "paying" && s.unknown === true}
       bankUrl={s.kind === "paying" ? s.intent.bankUrl ?? null : null}
       payOther={s.intent.payOther === true} onPayOther={s.kind === "confirming" ? flow.setPayOther : undefined}
-      anonymous={s.intent.anonymous === true} onAnonymous={s.kind === "confirming" ? flow.setAnonymous : undefined}
+      quote={quoteQ.data ?? null} anonymous={s.intent.anonymous === true} onAnonymous={s.kind === "confirming" ? flow.setAnonymous : undefined}
       onPay={() => { snd.unlock(); flow.pay(); }} onCancel={flow.close} onHide={hide} />;
   } else if (view === "bank" && s.kind === "action_required") {
     body = <BankApproval tier={s.intent.tier} url={s.url} onClose={hide} />;

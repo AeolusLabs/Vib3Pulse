@@ -84,6 +84,51 @@ export function cardLabel(method: SprayCard | null): string | null {
 /** The card label inside a sentence: "Charged to your saved Visa", "Charged to Visa ending 4242". */
 export const cardInSentence = (label: string) => (label.startsWith("Your ") ? `y${label.slice(1)}` : label);
 
+// ---------------------------------------------------------------- the breakdown (who gets what, shown before paying)
+
+export interface QuoteLine { label: string; amount: string; strong?: boolean }
+export interface ParsedQuote { priceKobo: number; serviceKobo: number; parts: { kind: "recipient" | "host"; name: string; kobo: number }[]; team: { players: number; poolKobo: number } | null }
+
+/** The server's quote, or null when anything is off (the sheet then simply shows no breakdown; it never blocks paying). */
+export function parseQuote(raw: unknown): ParsedQuote | null {
+  if (!raw || typeof raw !== "object") return null;
+  const b = raw as Record<string, unknown>;
+  if (!koboOk(b.priceKobo) || !koboOk(b.serviceKobo) || !Array.isArray(b.parts) || b.parts.length === 0 || b.parts.length > 12) return null;
+  const parts: ParsedQuote["parts"] = [];
+  for (const p of b.parts) {
+    const x = p as Record<string, unknown>;
+    if ((x?.kind !== "recipient" && x?.kind !== "host") || !koboOk(x.kobo)) return null;
+    parts.push({ kind: x.kind, name: typeof x.name === "string" && x.name ? x.name.slice(0, 40) : "Someone", kobo: x.kobo });
+  }
+  const t = b.team as Record<string, unknown> | undefined;
+  const team = t && typeof t === "object" && Number.isSafeInteger(t.players) && (t.players as number) > 0 && koboOk(t.poolKobo) ? { players: t.players as number, poolKobo: t.poolKobo as number } : null;
+  return { priceKobo: b.priceKobo, serviceKobo: b.serviceKobo, parts, team };
+}
+
+/**
+ * The breakdown in words: what the person sprayed gets, the host's share when a stage guest is sprayed or a team plays with a
+ * guest, and one service charge (payment fees, VAT and Vib3Pulse). Only these two kinds of line, plus a short explanation of a split.
+ */
+export function quoteLines(q: ParsedQuote): { lines: QuoteLine[]; why: string | null } {
+  const lines: QuoteLine[] = [];
+  const hostPart = q.parts.find((p) => p.kind === "host");
+  const people = q.parts.filter((p) => p.kind === "recipient");
+  let why: string | null = null;
+  if (q.team) {
+    const n = q.team.players;
+    lines.push({ label: n === 1 ? "The player gets" : `${n} players share, about ${formatNaira(Math.floor(q.team.poolKobo / n))} each`, amount: formatNaira(q.team.poolKobo), strong: true });
+    if (hostPart) { lines.push({ label: `Host ${hostPart.name} gets`, amount: formatNaira(hostPart.kobo) }); why = "A team spray is split equally between the players. The host also keeps a share when someone other than the host plays."; }
+  } else {
+    for (const p of people) lines.push({ label: `${p.name} gets`, amount: formatNaira(p.kobo), strong: true });
+    if (hostPart) { lines.push({ label: `Host ${hostPart.name} gets`, amount: formatNaira(hostPart.kobo) }); why = "A spray at someone on stage is shared between them and the host."; }
+  }
+  lines.push({ label: "Service charge", amount: formatNaira(q.serviceKobo) });
+  return { lines, why };
+}
+
+/** What the service charge covers. */
+export const SERVICE_CHARGE_NOTE = "The service charge covers payment fees, VAT and Vib3Pulse.";
+
 // ---------------------------------------------------------------- the tray
 
 /** Plain words for what each tier does. Prices come from sprayPrice (payer text only); no naira sign is ever in artwork. */

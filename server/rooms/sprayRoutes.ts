@@ -8,6 +8,7 @@ import { requireAuth } from "../middleware";
 import { roomLimiter } from "../security";
 import { roomHub } from "./RoomHub";
 import { sprayBoardFor, sprayReceivedFor } from "./sprayBoard";
+import { registerSprayQuoteRoute } from "./sprayQuote";
 import { ageFromDob } from "@shared/age";
 import { isIdVerifiedAdult } from "@shared/ageVerification";
 import { moneyEligibleRoom } from "@shared/roomRules";
@@ -57,6 +58,7 @@ const unavailable = (res: Response) => res.status(403).json({ ...SPRAY_UNAVAILAB
 const isAdult = (u: { dateOfBirth: string | null }) => { const a = ageFromDob(u.dateOfBirth); return a !== null && a >= 18; };
 
 export function registerSprayRoutes(app: Express): void {
+  registerSprayQuoteRoute(app); // before /spray/:sprayId so "quote" is not read as a spray id
   // ------------------------------------------------------------ spray (pay at the moment you throw)
   app.post("/api/rooms/:id/spray", requireAuth, sprayIpLimiter, roomLimiter, async (req: Request, res: Response) => {
     try {

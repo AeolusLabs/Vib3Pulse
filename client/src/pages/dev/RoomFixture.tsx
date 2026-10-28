@@ -40,6 +40,8 @@ import HostSales, { HostSalesBody } from "@/components/rooms/tickets/HostSales";
 import StepPrice from "@/components/rooms/create/StepPrice";
 import { PRICE_COPY, defaultTicketDraft, parseSummary, type TicketDraft } from "@/lib/roomTickets";
 import type { RoomTicketView } from "@/lib/roomsApi";
+import { DEFAULT_RATES } from "@shared/money";
+import { singleQuote, teamQuote } from "@shared/sprayQuote";
 import { FIXTURE_SPRAY_BLOCK, fixtureSprayChatText, fixtureSprayMe, fixtureSprayStart, parseSprayFixture, type SprayScene } from "@/lib/sprayFixtures";
 import { mediaLineFor } from "@/lib/mediaIssues";
 import { SPRAY_CATALOGUE, isSprayTier, type SprayTier } from "@shared/money";
@@ -412,6 +414,13 @@ function ShellFixture({ opts, spray = null, edge = null, game = null }: { opts: 
       if (path === "/api/csrf-token") return json({ csrfToken: "fixture" }, 200, 0);
       if (path === "/api/users/me/spray" && method === "GET") return json(sprayMe.current);
       if (path === "/api/users/me/spray/method" && method === "DELETE") { sprayMe.current = { ...sprayMe.current, method: null }; return json({ ok: true }); }
+      if (path.startsWith(`${base}/quote?`) && method === "GET") {
+        const q = new URL(path, window.location.origin).searchParams;
+        const tier = q.get("tier");
+        if (!isSprayTier(tier)) return json({}, 404, 0);
+        const quote = q.get("side") ? teamQuote(tier, FIXTURE_IDS.host, [{ userId: FIXTURE_IDS.host, isHost: true }, { userId: FIXTURE_IDS.stage, isHost: false }], null, DEFAULT_RATES) : singleQuote(tier, FIXTURE_IDS.host, q.get("target") ?? FIXTURE_IDS.host, DEFAULT_RATES);
+        return json({ ...quote, parts: quote.parts.map((p) => ({ ...p, name: FIXTURE_NAMES[p.userId] ?? "Someone" })) }, 200, 150);
+      }
       if (path === base && method === "POST") {
         const b = JSON.parse(String(init?.body ?? "{}")) as { tier?: unknown };
         const tier: SprayTier = isSprayTier(b.tier) ? b.tier : "note";

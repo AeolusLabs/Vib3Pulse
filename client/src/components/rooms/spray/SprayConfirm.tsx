@@ -14,7 +14,7 @@ import { ChevronRightIcon, ExternalLinkIcon, Loader2Icon } from "@/components/ui
 import { AMBER } from "@/lib/roomTickets";
 import { sprayPrice } from "@shared/spray";
 import type { SprayTier } from "@shared/money";
-import { SPRAY_COPY, TIER_LINE, chargeLine, confirmAgainText, confirmTitle, needsSlide, priceLine, slidePayLabel, type SprayCard } from "@/lib/sprayUi";
+import { SERVICE_CHARGE_NOTE, SPRAY_COPY, TIER_LINE, chargeLine, confirmAgainText, confirmTitle, needsSlide, priceLine, quoteLines, slidePayLabel, type ParsedQuote, type SprayCard } from "@/lib/sprayUi";
 import { TierMark } from "./SprayTray";
 import NonRefundableNotice from "./NonRefundableNotice";
 
@@ -34,6 +34,8 @@ interface Props {
   payOther?: boolean;
   /** Switch between the card path and "pay another way" (only before paying). */
   onPayOther?(on: boolean): void;
+  /** Who gets what, from the server (null while loading or when it could not be loaded: the sheet then shows none and never blocks paying). */
+  quote?: ParsedQuote | null;
   /** Show as "Anonymous" in the room (only before paying). */
   anonymous?: boolean;
   onAnonymous?(on: boolean): void;
@@ -151,7 +153,7 @@ function TwoTapPay({ tier, onComplete, disabled }: { tier: SprayTier; onComplete
   );
 }
 
-export default function SprayConfirm({ tier, name, method, paying, sending, unknown = false, bankUrl = null, payOther = false, onPayOther, anonymous = false, onAnonymous, onPay, onCancel, onHide }: Props) {
+export default function SprayConfirm({ tier, name, method, paying, sending, unknown = false, bankUrl = null, payOther = false, onPayOther, quote = null, anonymous = false, onAnonymous, onPay, onCancel, onHide }: Props) {
   const price = sprayPrice(tier);
   const tapped = useRef(false);
   useEffect(() => { if (!paying) tapped.current = false; }, [paying]);
@@ -166,6 +168,20 @@ export default function SprayConfirm({ tier, name, method, paying, sending, unkn
         <SheetDescription>{priceLine(tier)}. {TIER_LINE[tier].charAt(0).toUpperCase() + TIER_LINE[tier].slice(1)}.</SheetDescription>
       </SheetHeader>
       <NonRefundableNotice />
+
+      {!paying && quote && (() => {
+        const { lines, why } = quoteLines(quote);
+        return (
+          <div className="grid gap-1 rounded-2xl border border-border px-3 py-2.5 text-sm" data-testid="spray-breakdown">
+            {lines.map((l) => (
+              <p key={l.label} className={`flex items-baseline justify-between gap-3 ${l.strong ? "font-semibold" : "text-muted-foreground"}`}>
+                <span className="min-w-0">{l.label}</span><span className="shrink-0 tabular-nums">{l.amount}</span>
+              </p>
+            ))}
+            <p className="pt-1 text-xs text-muted-foreground">{why ? `${why} ` : ""}{SERVICE_CHARGE_NOTE}</p>
+          </div>
+        );
+      })()}
 
       {!paying && onAnonymous && (
         <div className="flex min-h-[44px] items-center justify-between gap-3 rounded-2xl border border-border px-3 py-1.5">

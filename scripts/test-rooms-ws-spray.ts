@@ -182,6 +182,20 @@ try {
   // Fix round (R1 M5 / ruling 7): the receipt is a system line, kept OUT of the chat ring report excerpts are cut from.
   check("the receipt is a system line and is not in the server's chat ring", receipts[0].system === "spray" && !roomHub.recentChat(R).some((l) => l.userId === P && l.text === receipts[0].text));
 
+  // ---- the breakdown shown before paying: exactly what the real spray stored (same split, same saved rates)
+  const rowQ = (await sprayRows(P))[0];
+  const qs = await rest("GET", `/api/rooms/${R}/spray/quote?tier=bundle&target=${G}`, P);
+  const qGuest = qs.json?.parts?.find((x: any) => x.kind === "recipient"), qHost = qs.json?.parts?.find((x: any) => x.kind === "host");
+  check("quote for a stage guest: their share and the host's share are what the spray stored", qs.status === 200 && qGuest?.kobo === Number(rowQ.guest_kobo) && qHost?.kobo === Number(rowQ.host_kobo) && qGuest?.userId === G && qHost?.userId === H, JSON.stringify(qs.json));
+  check("quote: the parts and the service charge add up to the price, and names come with it", qs.json?.priceKobo === SPRAY_CATALOGUE.bundle.kobo && qs.json.parts.reduce((a: number, x: any) => a + x.kobo, 0) + qs.json.serviceKobo === qs.json.priceKobo && qs.json.parts.every((x: any) => typeof x.name === "string" && x.name.length > 0));
+  const qh = await rest("GET", `/api/rooms/${R}/spray/quote?tier=note&target=${H}`, BY);
+  check("quote for the host: only the host's share, plus the service charge", qh.status === 200 && qh.json?.parts?.length === 1 && qh.json.parts[0].userId === H && qh.json.parts[0].kobo + qh.json.serviceKobo === SPRAY_CATALOGUE.note.kobo, JSON.stringify(qh.json));
+  check("quote leaks no rate or account detail", !/rate|percent|subaccount|account|vat|fee|reserve|platform/i.test(JSON.stringify(qs.json)), JSON.stringify(qs.json));
+  check("quote: not in the room, a bad tier or someone not in the room is a plain 404",
+    (await rest("GET", `/api/rooms/${R}/spray/quote?tier=bundle&target=${G}`, (await mk("quoteout")))).status === 404
+    && (await rest("GET", `/api/rooms/${R}/spray/quote?tier=zzz&target=${G}`, P)).status === 404
+    && (await rest("GET", `/api/rooms/${R}/spray/quote?tier=bundle&target=${(await mk("quoteabsent"))}`, P)).status === 404);
+
   // ---- the spray board (top three) and the recipient's own total
   const boards = await Promise.all(all.map((c) => c.waitFor((m) => m.type === "room:spray_board")));
   check("room:spray_board reaches everyone with the top sprayers by V3C", boards.every(Boolean) && boards[2].top?.length === 1 && boards[2].top[0].id === P && boards[2].top[0].v3c === SPRAY_CATALOGUE.bundle.v3c, JSON.stringify(boards[2]));

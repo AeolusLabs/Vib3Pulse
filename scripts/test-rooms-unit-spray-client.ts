@@ -5,12 +5,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { SPRAY_TIERS } from "../shared/money";
 import { idempotencyKeyShape, sprayPrice } from "../shared/spray";
+import { DEFAULT_RATES } from "../shared/money";
+import { singleQuote, teamQuote } from "../shared/sprayQuote";
 import { SPRAY_CAP, initialRoomState, roomReducer, type RoomState } from "../client/src/lib/roomReducer";
 import {
   IDLE, MOCK_CHECKOUT_HOST, RAIN_FX, SAME_KEY_REASONS, SPRAY_COPY, SPRAY_FAIL_COPY, SPRAY_SCREEN_FX, SPRAY_TRACK_KEY, allSprayCopy, animateSprays,
   cardLabel, chargeLine, counterAt, decodeSprayTrack, defaultTarget, encodeSprayTrack, holdsSprayBlock, inFlight, isDevBuild,
   needsSlide, newIdempotencyKey, newSprays, outcomeOfPost, outcomeOfStatus, parseRetryAfter,
-  parseSprayBlock, parseSprayMe, rainBannerText, reasonOfRefusal, safeAuthorizationUrl, searchWithoutSpray, sprayFlow, sprayReturnId,
+  parseQuote, parseSprayBlock, parseSprayMe, quoteLines, rainBannerText, reasonOfRefusal, safeAuthorizationUrl, searchWithoutSpray, sprayFlow, sprayReturnId,
   sprayTargets, sprayTeamReturnId, systemChatText, thankYouText, tileAction, waitDeadlineMs, type SprayBlock, type SprayFlow, type SprayMe,
 } from "../client/src/lib/sprayUi";
 import { splitLine, teamSprayTiers } from "../client/src/lib/gameScreen";
@@ -743,6 +745,34 @@ test("anonymous: a toggle on the confirm step, off by default", () => {
   assert.equal((f as any).intent.anonymous, true);
   f = sprayFlow(f, { type: "anonymous", on: false });
   assert.equal((f as any).intent.anonymous, false);
+});
+
+test("quote: a host spray shows the host's share and one service charge, adding up to the price", () => {
+  const q = singleQuote("bundle", "H", "H", DEFAULT_RATES);
+  assert.equal(q.parts.length, 1);
+  assert.equal(q.parts[0].kobo + q.serviceKobo, q.priceKobo);
+  const { lines, why } = quoteLines(parseQuote({ ...q, parts: q.parts.map((p) => ({ ...p, name: "Maya" })) })!);
+  assert.deepEqual(lines.map((l) => l.label), ["Maya gets", "Service charge"]);
+  assert.equal(why, null);
+});
+test("quote: a stage spray names the person and the host, with the split explained", () => {
+  const q = singleQuote("bag", "H", "G", DEFAULT_RATES);
+  assert.deepEqual(q.parts.map((p) => p.kind), ["recipient", "host"]);
+  assert.equal(q.parts[0].kobo + q.parts[1].kobo + q.serviceKobo, q.priceKobo);
+  const { lines, why } = quoteLines(parseQuote({ ...q, parts: q.parts.map((p, i) => ({ ...p, name: i ? "Maya" : "Ayo" })) })!);
+  assert.deepEqual(lines.map((l) => l.label), ["Ayo gets", "Host Maya gets", "Service charge"]);
+  assert.ok(why && /shared between them and the host/.test(why));
+});
+test("quote: a team spray shows the pool split between the players and the host's share", () => {
+  const q = teamQuote("bag", "H", [{ userId: "H", isHost: true }, { userId: "A", isHost: false }, { userId: "B", isHost: false }], null, DEFAULT_RATES);
+  assert.equal(q.parts.reduce((a, p) => a + p.kobo, 0) + q.serviceKobo, q.priceKobo);
+  assert.equal(q.team!.players, 3);
+  const { lines, why } = quoteLines(parseQuote({ ...q, parts: q.parts.map((p) => ({ ...p, name: p.userId })) })!);
+  assert.match(lines[0].label, /3 players share, about/);
+  assert.ok(lines.some((l) => l.label === "Host H gets") && lines[lines.length - 1].label === "Service charge" && why);
+});
+test("quote: anything malformed is no breakdown, never a crash", () => {
+  for (const bad of [null, {}, { priceKobo: 1, serviceKobo: 1, parts: [] }, { priceKobo: 1, serviceKobo: -1, parts: [{ kind: "recipient", kobo: 1 }] }, { priceKobo: 1, serviceKobo: 1, parts: [{ kind: "x", kobo: 1 }] }]) assert.equal(parseQuote(bad), null);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
