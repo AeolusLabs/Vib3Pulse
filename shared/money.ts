@@ -12,10 +12,10 @@ export type SprayTier = "note" | "bundle" | "bag" | "rain";
 
 /** 1 V3C = 1 kobo. V3C is only a price label, never a balance. */
 export const SPRAY_CATALOGUE: Readonly<Record<SprayTier, Readonly<{ v3c: number; kobo: number; platformPct: number; label: string }>>> = Object.freeze({
-  note: Object.freeze({ v3c: 50000, kobo: 50000, platformPct: 30, label: "Note" }),
-  bundle: Object.freeze({ v3c: 100000, kobo: 100000, platformPct: 25, label: "Bundle" }),
-  bag: Object.freeze({ v3c: 1000000, kobo: 1000000, platformPct: 20, label: "Money bag" }),
-  rain: Object.freeze({ v3c: 10000000, kobo: 10000000, platformPct: 15, label: "Make it Rain" }),
+  note: Object.freeze({ v3c: 50000, kobo: 50000, platformPct: 15, label: "Note" }),
+  bundle: Object.freeze({ v3c: 100000, kobo: 100000, platformPct: 12, label: "Bundle" }),
+  bag: Object.freeze({ v3c: 1000000, kobo: 1000000, platformPct: 10, label: "Money bag" }),
+  rain: Object.freeze({ v3c: 10000000, kobo: 10000000, platformPct: 8, label: "Make it Rain" }),
 });
 
 /** Every tier, smallest first. */
@@ -68,7 +68,7 @@ export type RateKey = typeof RATE_KEYS[number];
 export type Rates = Record<RateKey, number>;
 
 export const DEFAULT_RATES: Readonly<Rates> = Object.freeze({
-  spray_platform_note: 30, spray_platform_bundle: 25, spray_platform_bag: 20, spray_platform_rain: 15,
+  spray_platform_note: 15, spray_platform_bundle: 12, spray_platform_bag: 10, spray_platform_rain: 8,
   ticket_platform: 15, stage_guest_host: 15, spray_reserve: 2.5, ticket_reserve: 1,
 });
 

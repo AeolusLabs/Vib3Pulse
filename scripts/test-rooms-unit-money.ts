@@ -18,10 +18,10 @@ test("catalogue: exactly note, bundle, bag, rain in that order (no n20/n50/n100)
   for (const old of ["n20", "n50", "n100"]) assert.equal(isSprayTier(old), false, old);
 });
 const want: Record<SprayTier, { kobo: number; v3c: number; platformPct: number }> = {
-  note: { kobo: 50000, v3c: 50000, platformPct: 30 },
-  bundle: { kobo: 100000, v3c: 100000, platformPct: 25 },
-  bag: { kobo: 1000000, v3c: 1000000, platformPct: 20 },
-  rain: { kobo: 10000000, v3c: 10000000, platformPct: 15 },
+  note: { kobo: 50000, v3c: 50000, platformPct: 15 },
+  bundle: { kobo: 100000, v3c: 100000, platformPct: 12 },
+  bag: { kobo: 1000000, v3c: 1000000, platformPct: 10 },
+  rain: { kobo: 10000000, v3c: 10000000, platformPct: 8 },
 };
 for (const t of ["note", "bundle", "bag", "rain"] as SprayTier[]) {
   test(`catalogue ${t}: kobo, v3c (1 V3C = 1 kobo) and platformPct`, () => {
@@ -43,20 +43,20 @@ test("catalogue is frozen (no runtime price edits)", () => {
 // ---------------------------------------------------------------- every kobo field, every tier, both splits
 const vectors: Record<SprayTier, { host: object; guest: object }> = {
   note: {
-    host: { price: 50000, vat: 3488, fee: 750, reserve: 1250, net: 44512, platform: 13354, host: 31158, guest: null },
-    guest: { price: 50000, vat: 3488, fee: 750, reserve: 1250, net: 44512, platform: 13354, host: 6677, guest: 24481 },
+    host: { price: 50000, vat: 3488, fee: 750, reserve: 1250, net: 44512, platform: 6677, host: 37835, guest: null },
+    guest: { price: 50000, vat: 3488, fee: 750, reserve: 1250, net: 44512, platform: 6677, host: 6677, guest: 31158 },
   },
   bundle: {
-    host: { price: 100000, vat: 6977, fee: 1500, reserve: 2500, net: 89023, platform: 22256, host: 66767, guest: null },
-    guest: { price: 100000, vat: 6977, fee: 1500, reserve: 2500, net: 89023, platform: 22256, host: 13353, guest: 53414 },
+    host: { price: 100000, vat: 6977, fee: 1500, reserve: 2500, net: 89023, platform: 10683, host: 78340, guest: null },
+    guest: { price: 100000, vat: 6977, fee: 1500, reserve: 2500, net: 89023, platform: 10683, host: 13353, guest: 64987 },
   },
   bag: {
-    host: { price: 1000000, vat: 69767, fee: 25000, reserve: 25000, net: 880233, platform: 176047, host: 704186, guest: null },
-    guest: { price: 1000000, vat: 69767, fee: 25000, reserve: 25000, net: 880233, platform: 176047, host: 132035, guest: 572151 },
+    host: { price: 1000000, vat: 69767, fee: 25000, reserve: 25000, net: 880233, platform: 88023, host: 792210, guest: null },
+    guest: { price: 1000000, vat: 69767, fee: 25000, reserve: 25000, net: 880233, platform: 88023, host: 132035, guest: 660175 },
   },
   rain: {
-    host: { price: 10000000, vat: 697674, fee: 160000, reserve: 250000, net: 8892326, platform: 1333849, host: 7558477, guest: null },
-    guest: { price: 10000000, vat: 697674, fee: 160000, reserve: 250000, net: 8892326, platform: 1333849, host: 1333849, guest: 6224628 },
+    host: { price: 10000000, vat: 697674, fee: 160000, reserve: 250000, net: 8892326, platform: 711386, host: 8180940, guest: null },
+    guest: { price: 10000000, vat: 697674, fee: 160000, reserve: 250000, net: 8892326, platform: 711386, host: 1333849, guest: 6847091 },
   },
 };
 for (const t of SPRAY_TIERS) {

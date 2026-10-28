@@ -21,7 +21,7 @@ t("with the default rates every tier adds up and every share is a positive whole
 });
 t("the stage person gets the largest share at the defaults, the host a smaller fixed cut of what is left", () => {
   const b = sprayBreakdown("note", true);
-  assert.deepEqual({ price: b.price, vat: b.vat, fee: b.fee, reserve: b.reserve, platform: b.platform, host: b.host, guest: b.guest }, { price: 50000, vat: 3488, fee: 750, reserve: 1250, platform: 13354, host: 6677, guest: 24481 });
+  assert.deepEqual({ price: b.price, vat: b.vat, fee: b.fee, reserve: b.reserve, platform: b.platform, host: b.host, guest: b.guest }, { price: 50000, vat: 3488, fee: 750, reserve: 1250, platform: 6677, host: 6677, guest: 31158 });
 });
 t("spraySplit hands the host the whole share on a host spray and shares only on stage", () => {
   assert.equal(spraySplit("bag", "host").guestKobo, null);

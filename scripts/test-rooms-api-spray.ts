@@ -1000,7 +1000,7 @@ try {
     check("rates: the split sent to the provider carries the new host amount", mock.calls.charge.find((c) => c.reference === postRow.provider_ref)?.split.shares[0].amountKobo === want.host);
     check("rates: the spray from before the change keeps its stored split", Number((await rowById(pre.json.sprayId)).platform_kobo) === Number(preRow.platform_kobo));
     // a spray started before a change still delivers with the split it started with
-    await rates.setRate({ key: "spray_platform_note", value: 30, adminId: "sp-test-admin", reason: "spray rate test back to 30" });
+    await rates.setRate({ key: "spray_platform_note", value: 15, adminId: "sp-test-admin", reason: "spray rate test back to 15" });
     const PQ = await payer("p_rates_pending", { card: false });
     await spray(PQ.id, R, body(H));
     const midRow = (await sprayRows(PQ.id))[0];
@@ -1010,7 +1010,7 @@ try {
     check("rates: the webhook for the pending spray is accepted after the change", (await webhook("charge.success", { reference: midRow.provider_ref, metadata: { type: "spray" } })) === 200);
     const midAfter = await rowById(midRow.id);
     check("rates: the pending spray delivers with its ORIGINAL split and the same amount", midAfter.status === "delivered" && Number(midAfter.platform_kobo) === midBefore.platform && Number(midAfter.host_kobo) === midBefore.host && Number(midAfter.amount_kobo) === midBefore.amount, JSON.stringify([midBefore, midAfter]));
-    await rates.setRate({ key: "spray_platform_note", value: 30, adminId: "sp-test-admin", reason: "spray rate test restore" });
+    await rates.setRate({ key: "spray_platform_note", value: 15, adminId: "sp-test-admin", reason: "spray rate test restore" });
   }
 
   // =============================================================== boot: production with the flag off and no key still boots

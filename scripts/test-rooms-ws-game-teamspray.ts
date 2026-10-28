@@ -219,18 +219,18 @@ try {
   const sum = (col: string) => rows1.reduce((a: number, r: any) => a + Number(r[col] ?? 0), 0);
   check("rows: each row's parts sum to its amount; rows sum to the charge", rows1.every((r: any) =>
     Number(r.vat_kobo) + Number(r.fee_kobo) + Number(r.reserve_kobo) + Number(r.platform_kobo) + Number(r.host_kobo) + Number(r.guest_kobo ?? 0) === Number(r.amount_kobo)) && sum("amount_kobo") === 100_000);
-  check("rows: platform 22,256, host 13,353, VAT 6,977, fee 1,500, reserve 2,500; each player's cut 26,707 (pool 53,414 / 2)",
-    sum("platform_kobo") === 22_256 && sum("host_kobo") === 13_353 && sum("vat_kobo") === 6_977 && sum("fee_kobo") === 1_500 && sum("reserve_kobo") === 2_500
-    && rows1.every((r: any) => Number(r.guest_kobo) === 26_707), JSON.stringify(rows1.map((r: any) => [r.platform_kobo, r.host_kobo, r.guest_kobo])));
+  check("rows: platform 10,683, host 13,353, VAT 6,977, fee 1,500, reserve 2,500; each player's cut 32,493 or 32,494 (pool 64,987 / 2)",
+    sum("platform_kobo") === 10_683 && sum("host_kobo") === 13_353 && sum("vat_kobo") === 6_977 && sum("fee_kobo") === 1_500 && sum("reserve_kobo") === 2_500
+    && rows1.every((r: any) => [32_493, 32_494].includes(Number(r.guest_kobo))) && rows1.reduce((a: number, r: any) => a + Number(r.guest_kobo), 0) === 64_987, JSON.stringify(rows1.map((r: any) => [r.platform_kobo, r.host_kobo, r.guest_kobo])));
   check("rows hold a DERIVED unique key and reference and the subaccount snapshot; the share reference is not the charge's",
     new Set(rows1.map((r: any) => r.idempotency_key)).size === 2 && new Set(rows1.map((r: any) => r.provider_ref)).size === 2
     && rows1.every((r: any) => r.provider_ref !== b1.provider_ref && r.recipient_subaccount === codeOf.get(r.recipient_id)));
   const tx1 = mock.txs.get(b1.provider_ref)!;
   const byCode = new Map(tx1.split.shares.map((s) => [s.subaccountCode, s.amountKobo]));
-  check("ONE provider transaction, a team split of 3 entries: each player 26,707, the host 13,353", mock.charges === 1 && tx1.split.team === true && tx1.split.shares.length === 3
-    && byCode.get(codeOf.get(A1)!) === 26_707 && byCode.get(codeOf.get(A2)!) === 26_707 && byCode.get(codeOf.get(H)!) === 13_353, JSON.stringify(tx1.split));
+  check("ONE provider transaction, a team split of 3 entries: each player 32,493 or 32,494, the host 13,353", mock.charges === 1 && tx1.split.team === true && tx1.split.shares.length === 3
+    && [32_493, 32_494].includes(byCode.get(codeOf.get(A1)!) as number) && [32_493, 32_494].includes(byCode.get(codeOf.get(A2)!) as number) && (byCode.get(codeOf.get(A1)!) as number) + (byCode.get(codeOf.get(A2)!) as number) === 64_987 && byCode.get(codeOf.get(H)!) === 13_353, JSON.stringify(tx1.split));
   check("the split sums to charge - VAT - fee - reserve - platform (the rest stays with the platform)",
-    tx1.split.shares.reduce((a, s) => a + s.amountKobo, 0) === 100_000 - 6_977 - 1_500 - 2_500 - 22_256);
+    tx1.split.shares.reduce((a, s) => a + s.amountKobo, 0) === 100_000 - 6_977 - 1_500 - 2_500 - 10_683);
   check("ledger: one spray row per share", (await ledger(b1.provider_ref, "spray")).length === 2);
   // WS: one room:spray per share (toId = the player) and ONE system line
   const ev = await Promise.all([A1, A2].map((id) => watcher.waitFor((m) => m.type === "room:spray" && m.toId === id)));
@@ -318,7 +318,7 @@ try {
   const out2 = await finalizeSpray(b2.provider_ref);
   check("paid after a player left: DELIVERED (the split is fixed at init), never reversed or refunded", out2 === "delivered" && !mock.refunds.has(b2.provider_ref)
     && (await batchesOf(P2))[0].status === "delivered" && (await sharesOf(b2.id)).every((r: any) => r.status === "delivered"));
-  check("the departed player keeps their share (a row with their cut), no clawbacks", (await sharesOf(b2.id)).some((r: any) => r.recipient_id === A2 && Number(r.guest_kobo) === 26_707)
+  check("the departed player keeps their share (a row with their cut), no clawbacks", (await sharesOf(b2.id)).some((r: any) => r.recipient_id === A2 && [32_493, 32_494].includes(Number(r.guest_kobo)))
     && (await q(`select 1 from host_clawbacks where spray_id = any($1::uuid[])`, [(await sharesOf(b2.id)).map((r: any) => r.id)])).length === 0);
   check("webhook replay of the same payment is a no-op", (await finalizeSpray(b2.provider_ref)) === "already" && (await ledger(b2.provider_ref, "spray")).length === 2);
 
@@ -328,7 +328,7 @@ try {
   check("team of 1 left: the 1,000 naira tier is allowed (500 x 1), bank page", r5.status === 200 && r5.json?.status === "action_required" && r5.json.shares.length === 1 && r5.json.shares[0].userId === A1, r5.raw);
   const b5 = (await batchesOf(P6))[0];
   const rows5 = await sharesOf(b5.id);
-  check("team of 1: the whole pool is that player's cut", rows5.length === 1 && Number(rows5[0].amount_kobo) === 100_000 && Number(rows5[0].guest_kobo) === 53_414);
+  check("team of 1: the whole pool is that player's cut", rows5.length === 1 && Number(rows5[0].amount_kobo) === 100_000 && Number(rows5[0].guest_kobo) === 64_987);
   await rs.setStatus(R, "ended");
   mock.pay(b5.provider_ref);
   watcher.msgs = [];
