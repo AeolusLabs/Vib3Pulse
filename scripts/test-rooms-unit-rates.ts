@@ -13,7 +13,7 @@ const test = (name: string, fn: () => void) => {
 
 test("DEFAULT_RATES equal today's constants, keys in a fixed order", () => {
   assert.deepEqual([...RATE_KEYS], ["spray_platform_note", "spray_platform_bundle", "spray_platform_bag", "spray_platform_rain", "ticket_platform", "stage_guest_host", "spray_reserve", "ticket_reserve"]);
-  assert.deepEqual({ ...DEFAULT_RATES }, { spray_platform_note: 15, spray_platform_bundle: 12, spray_platform_bag: 10, spray_platform_rain: 8, ticket_platform: 15, stage_guest_host: 15, spray_reserve: 2.5, ticket_reserve: 1 });
+  assert.deepEqual({ ...DEFAULT_RATES }, { spray_platform_note: 10, spray_platform_bundle: 10, spray_platform_bag: 10, spray_platform_rain: 10, ticket_platform: 15, stage_guest_host: 15, spray_reserve: 2.5, ticket_reserve: 1 });
   assert.equal(TICKET_PLATFORM_PCT, 15);
 });
 
@@ -21,11 +21,11 @@ test("DEFAULT_RATES equal today's constants, keys in a fixed order", () => {
 test("no rates passed: every number equals the pre-change result", () => {
   assert.deepEqual(ticketBreakdown(500000), { price: 500000, vat: 34884, fee: 17500, reserve: 5000, net: 442616, platform: 66392, host: 376224, guest: null });
   assert.deepEqual(ticketBreakdown(100000), { price: 100000, vat: 6977, fee: 1500, reserve: 1000, net: 90523, platform: 13578, host: 76945, guest: null });
-  assert.deepEqual(sprayBreakdown("note"), { price: 50000, vat: 3488, fee: 750, reserve: 1250, net: 44512, platform: 6677, host: 37835, guest: null });
-  assert.deepEqual(sprayBreakdown("note", true), { price: 50000, vat: 3488, fee: 750, reserve: 1250, net: 44512, platform: 6677, host: 6677, guest: 31158 });
-  assert.deepEqual(sprayBreakdown("bundle"), { price: 100000, vat: 6977, fee: 1500, reserve: 2500, net: 89023, platform: 10683, host: 78340, guest: null });
+  assert.deepEqual(sprayBreakdown("note"), { price: 50000, vat: 3488, fee: 750, reserve: 1250, net: 44512, platform: 4451, host: 40061, guest: null });
+  assert.deepEqual(sprayBreakdown("note", true), { price: 50000, vat: 3488, fee: 750, reserve: 1250, net: 44512, platform: 4451, host: 6677, guest: 33384 });
+  assert.deepEqual(sprayBreakdown("bundle"), { price: 100000, vat: 6977, fee: 1500, reserve: 2500, net: 89023, platform: 8902, host: 80121, guest: null });
   assert.deepEqual(sprayBreakdown("bag"), { price: 1000000, vat: 69767, fee: 25000, reserve: 25000, net: 880233, platform: 88023, host: 792210, guest: null });
-  assert.deepEqual(sprayBreakdown("rain"), { price: 10000000, vat: 697674, fee: 160000, reserve: 250000, net: 8892326, platform: 711386, host: 8180940, guest: null });
+  assert.deepEqual(sprayBreakdown("rain"), { price: 10000000, vat: 697674, fee: 160000, reserve: 250000, net: 8892326, platform: 889233, host: 8003093, guest: null });
 });
 
 test("passing DEFAULT_RATES explicitly gives the same answer as passing nothing", () => {
@@ -42,8 +42,8 @@ test("a changed ticket platform share is that percent of net, host is the rest",
 });
 
 test("a changed spray tier share only moves that tier", () => {
-  const rates: Rates = { ...DEFAULT_RATES, spray_platform_note: 10 };
-  assert.equal(sprayBreakdown("note", false, rates).platform, Math.round((44512 * 10) / 100));
+  const rates: Rates = { ...DEFAULT_RATES, spray_platform_note: 20 };
+  assert.equal(sprayBreakdown("note", false, rates).platform, Math.round((44512 * 20) / 100));
   assert.deepEqual(sprayBreakdown("bundle", false, rates), sprayBreakdown("bundle"));
 });
 
@@ -64,7 +64,7 @@ test("stage guest host share is a percent of net and the guest gets the rest", (
 });
 
 test("spraySplit threads rates through and defaults when none", () => {
-  const rates: Rates = { ...DEFAULT_RATES, spray_platform_note: 10 };
+  const rates: Rates = { ...DEFAULT_RATES, spray_platform_note: 20 };
   assert.equal(spraySplit("note", "host", rates).breakdown.platform, sprayBreakdown("note", false, rates).platform);
   assert.deepEqual(spraySplit("note", "host").breakdown, sprayBreakdown("note"));
   assert.equal(spraySplit("note", "stage", rates).guestKobo, sprayBreakdown("note", true, rates).guest);

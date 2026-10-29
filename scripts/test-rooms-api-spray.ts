@@ -956,27 +956,27 @@ try {
     const PR = await payer("p_rates");
     const pre = await spray(PR.id, R, body(H));
     const preRow = await rowById(pre.json.sprayId);
-    check("rates: before any change a Note splits at the default 30% platform share", Number(preRow.platform_kobo) === money.sprayBreakdown("note").platform && Number(preRow.host_kobo) === money.sprayBreakdown("note").host, JSON.stringify(preRow));
-    await rates.setRate({ key: "spray_platform_note", value: 10, adminId: "sp-test-admin", reason: "spray rate test" });
+    check("rates: before any change a Note splits at the default 10% platform share", Number(preRow.platform_kobo) === money.sprayBreakdown("note").platform && Number(preRow.host_kobo) === money.sprayBreakdown("note").host, JSON.stringify(preRow));
+    await rates.setRate({ key: "spray_platform_note", value: 20, adminId: "sp-test-admin", reason: "spray rate test" });
     const want = money.sprayBreakdown("note", false, await rates.getRates());
     const post = await spray(PR.id, R, body(H));
     const postRow = await rowById(post.json.sprayId);
-    check("rates: a Note after the change uses 10%: stored platform and host shares match, price and VAT unchanged", Number(postRow.platform_kobo) === want.platform && Number(postRow.host_kobo) === want.host
-      && Number(postRow.amount_kobo) === SPRAY_CATALOGUE.note.kobo && Number(postRow.vat_kobo) === want.vat && want.platform < money.sprayBreakdown("note").platform, JSON.stringify(postRow));
+    check("rates: a Note after the change uses 20%: stored platform and host shares match, price and VAT unchanged", Number(postRow.platform_kobo) === want.platform && Number(postRow.host_kobo) === want.host
+      && Number(postRow.amount_kobo) === SPRAY_CATALOGUE.note.kobo && Number(postRow.vat_kobo) === want.vat && want.platform > money.sprayBreakdown("note").platform, JSON.stringify(postRow));
     check("rates: the split sent to the provider carries the new host amount", mock.calls.charge.find((c) => c.reference === postRow.provider_ref)?.split.shares[0].amountKobo === want.host);
     check("rates: the spray from before the change keeps its stored split", Number((await rowById(pre.json.sprayId)).platform_kobo) === Number(preRow.platform_kobo));
     // a spray started before a change still delivers with the split it started with
-    await rates.setRate({ key: "spray_platform_note", value: 15, adminId: "sp-test-admin", reason: "spray rate test back to 15" });
+    await rates.setRate({ key: "spray_platform_note", value: 10, adminId: "sp-test-admin", reason: "spray rate test back to 10" });
     const PQ = await payer("p_rates_pending", { card: false });
     await spray(PQ.id, R, body(H));
     const midRow = (await sprayRows(PQ.id))[0];
     const midBefore = { platform: Number(midRow.platform_kobo), host: Number(midRow.host_kobo), amount: Number(midRow.amount_kobo) };
-    await rates.setRate({ key: "spray_platform_note", value: 10, adminId: "sp-test-admin", reason: "spray rate test mid-flight" });
+    await rates.setRate({ key: "spray_platform_note", value: 20, adminId: "sp-test-admin", reason: "spray rate test mid-flight" });
     mock.pay(midRow.provider_ref);
     check("rates: the webhook for the pending spray is accepted after the change", (await webhook("charge.success", { reference: midRow.provider_ref, metadata: { type: "spray" } })) === 200);
     const midAfter = await rowById(midRow.id);
     check("rates: the pending spray delivers with its ORIGINAL split and the same amount", midAfter.status === "delivered" && Number(midAfter.platform_kobo) === midBefore.platform && Number(midAfter.host_kobo) === midBefore.host && Number(midAfter.amount_kobo) === midBefore.amount, JSON.stringify([midBefore, midAfter]));
-    await rates.setRate({ key: "spray_platform_note", value: 15, adminId: "sp-test-admin", reason: "spray rate test restore" });
+    await rates.setRate({ key: "spray_platform_note", value: 10, adminId: "sp-test-admin", reason: "spray rate test restore" });
   }
 
   // =============================================================== boot: production with the flag off and no key still boots

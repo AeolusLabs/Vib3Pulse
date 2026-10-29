@@ -76,7 +76,7 @@ try {
   // ---- a real change
   const ok = await call("PUT", "/api/admin/rooms/rates/ticket_platform", SA, { value: 12.5, reason: "launch promotion for new hosts" });
   check("a super_admin can change a rate: 200 changed:true with the new value", ok.status === 200 && ok.json?.changed === true && ok.json?.key === "ticket_platform" && ok.json?.value === 12.5, JSON.stringify(ok.json));
-  check("the new rate is live (the rates module reads it) and nothing else moved", (await rates.getRates()).ticket_platform === 12.5 && (await rates.getRates()).spray_platform_note === 15);
+  check("the new rate is live (the rates module reads it) and nothing else moved", (await rates.getRates()).ticket_platform === 12.5 && (await rates.getRates()).spray_platform_note === 10);
   const a1 = await audits("ticket_platform");
   check("exactly one audit row with the reason and before/after", a1.length === 1 && a1[0].reason === "launch promotion for new hosts" && JSON.parse(a1[0].details).before === 15 && JSON.parse(a1[0].details).after === 12.5 && a1[0].target_type === "room_rate", JSON.stringify(a1));
   const l1 = await logRows("ticket_platform");

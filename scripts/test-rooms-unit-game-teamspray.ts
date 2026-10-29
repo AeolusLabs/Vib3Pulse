@@ -54,23 +54,23 @@ test("worked check: team of 2, 1,000 naira bundle, host not a player", () => {
   assert.equal(b.whole.vat, 6_977);
   assert.equal(b.whole.paystackFee, 1_500);
   assert.equal(b.whole.reserve, 2_500);
-  assert.equal(b.whole.platform, 10_683);
+  assert.equal(b.whole.platform, 8_902);
   assert.equal(b.whole.host, 13_353);
-  assert.equal(b.whole.pool, 64_987);
-  assert.deepEqual(b.shares.map((s) => s.recipient), [32_494, 32_493]);
+  assert.equal(b.whole.pool, 66_768);
+  assert.deepEqual(b.shares.map((s) => s.recipient), [33_384, 33_384]);
   assert.equal(b.hostTotal, 13_353);
   assert.equal(sumOf(b), 100_000);
 });
-test("worked check: team of 4, same spray: pool 64,987 / 4 = 16,246 r 3, featured first then team order", () => {
+test("worked check: team of 4, same spray: pool 66,768 / 4 = 16,692 exactly, featured first then team order", () => {
   const b = teamSprayBreakdown("bundle", plain(4), "p0");
-  assert.deepEqual(b.shares.map((s) => s.recipient), [16_247, 16_247, 16_247, 16_246]);
+  assert.deepEqual(b.shares.map((s) => s.recipient), [16_692, 16_692, 16_692, 16_692]);
   assert.equal(sumOf(b), 100_000);
 });
 test("the remainder starts at the featured player, not at the first in the list", () => {
-  const b = teamSprayBreakdown("bundle", plain(3), "p2"); // pool 64,987 / 3 = 21,662 r 1
-  assert.deepEqual(b.shares.map((s) => s.recipient), [21_662, 21_662, 21_663]); // p2 (featured) gets the extra kobo
-  const none = teamSprayBreakdown("bundle", plain(3), null);
-  assert.deepEqual(none.shares.map((s) => s.recipient), [21_663, 21_662, 21_662]);
+  const b = teamSprayBreakdown("bag", plain(3), "p2"); // pool 660,175 / 3 = 220,058 r 1
+  assert.deepEqual(b.shares.map((s) => s.recipient), [220_058, 220_058, 220_059]); // p2 (featured) gets the extra kobo
+  const none = teamSprayBreakdown("bag", plain(3), null);
+  assert.deepEqual(none.shares.map((s) => s.recipient), [220_059, 220_058, 220_058]);
 });
 test("each row's gross is the equal split of the charge, remainder kobo to the featured player (as splitShares)", () => {
   for (const n of [1, 2, 3, 4]) for (const t of teamSprayTiers(n)) {

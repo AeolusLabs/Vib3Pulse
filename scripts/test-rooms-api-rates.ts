@@ -32,7 +32,7 @@ try {
   const s1 = await r.setRate({ key: "ticket_platform", value: 12, adminId: A, reason: "launch promotion" });
   check("setRate: changed, before 15, after 12", s1.changed === true && s1.before === 15 && s1.after === 12, JSON.stringify(s1));
   check("getRates shows the new value at once (this process's cache is cleared)", (await r.getRates()).ticket_platform === 12);
-  check("the other rates are untouched", (await r.getRates()).spray_platform_note === 15 && (await r.getRates()).ticket_reserve === 1);
+  check("the other rates are untouched", (await r.getRates()).spray_platform_note === 10 && (await r.getRates()).ticket_reserve === 1);
   const s2 = await r.setRate({ key: "ticket_platform", value: 12, adminId: A, reason: "again again" });
   check("saving the same value again is changed:false and adds no log row", s2.changed === false && (await q(`select 1 from room_rate_changes`)).length === 1, JSON.stringify(s2));
   let threw = 0;
