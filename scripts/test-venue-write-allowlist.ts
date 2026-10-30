@@ -27,7 +27,7 @@ await db.connect();
 const one = async (sql: string, p: unknown[] = []) => (await db.query(sql, p)).rows[0];
 
 // ── fixtures ────────────────────────────────────────────────────────────────
-const password = "Passw0rd!allowlist";
+const password = `Tp1!${globalThis.crypto.randomUUID().slice(0, 12)}`; // random per run
 const hash = await bcrypt.hash(password, 10);
 const mkUser = async (username: string, type: string) =>
   (await one(

@@ -5,6 +5,7 @@ import { storage } from "../storage";
 import { requireAuth, requireOrganizer } from "../middleware";
 import {
   authRateLimiter,
+  trackingRateLimiter,
   sanitizeTextOnly,
 } from "../security";
 import { deliverNotification } from "../notifications";
@@ -825,7 +826,7 @@ export function registerEventsRoutes(app: Express): void {
     }
   });
 
-  app.post("/api/events/:id/track-view", async (req, res) => {
+  app.post("/api/events/:id/track-view", trackingRateLimiter, async (req, res) => {
     try {
       const userId = req.user?.id;
       const event = await storage.getEvent(req.params.id);
@@ -840,7 +841,7 @@ export function registerEventsRoutes(app: Express): void {
     }
   });
 
-  app.post("/api/events/:id/track-click", async (req, res) => {
+  app.post("/api/events/:id/track-click", trackingRateLimiter, async (req, res) => {
     try {
       // Only the interaction type the dashboards count, not arbitrary client-supplied strings.
       const { actionType } = z.object({ actionType: z.literal("click") }).parse(req.body);

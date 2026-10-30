@@ -897,10 +897,7 @@ export function registerUsersRoutes(app: Express): void {
   });
 
   // Follow/Unfollow routes
-  app.post("/api/users/:identifier/follow", async (req, res) => {
-    if (!req.isAuthenticated()) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
+  app.post("/api/users/:identifier/follow", requireAuth, async (req, res) => {
 
     try {
       const targetUserId = await resolveUserId(req.params.identifier);
@@ -946,10 +943,7 @@ export function registerUsersRoutes(app: Express): void {
     }
   });
 
-  app.post("/api/users/:identifier/unfollow", async (req, res) => {
-    if (!req.isAuthenticated()) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
+  app.post("/api/users/:identifier/unfollow", requireAuth, async (req, res) => {
 
     try {
       const targetUserId = await resolveUserId(req.params.identifier);

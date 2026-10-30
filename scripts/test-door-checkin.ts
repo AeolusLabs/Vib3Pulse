@@ -60,7 +60,7 @@ class Client {
 }
 
 // ── fixtures ────────────────────────────────────────────────────────────────
-const password = "Passw0rd!door";
+const password = `Tp1!${globalThis.crypto.randomUUID().slice(0, 12)}`; // random per run
 const hash = await bcrypt.hash(password, 10);
 const tag = Date.now().toString(36);
 const mkUser = async (username: string, displayName: string | null, type = "organizer") =>

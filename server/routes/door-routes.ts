@@ -23,6 +23,8 @@ function parseLimit(raw: unknown): number | null {
 const undoSchema = z.object({ ticketId: z.string().min(1), eventId: z.string().min(1) });
 
 export function registerDoorRoutes(app: Express): void {
+  // Auth note: the scanner routes below carry no requireAuth on purpose. Door staff sign in with an event PIN, not an
+  // account, so each handler checks the x-scanner-token (resolveScannerToken) or, for undo, resolveDoorActor.
   // Door counters for the scanner header. Staff token only (event or venue night).
   app.get("/api/scanner/stats", async (req, res) => {
     try {

@@ -76,7 +76,7 @@ async function http(method: string, path: string, o: { who?: Who; user?: string;
   return { status: res.status, json, text, headers: res.headers, setCookie: cookies.find((c) => c.startsWith("admin.sid=")) ?? null, cookies };
 }
 
-const PASSWORD = "Passw0rd!x-test";
+const PASSWORD = `Tp1!${globalThis.crypto.randomUUID().slice(0, 12)}`; // random per run
 const pwHash = await bcrypt.hash(PASSWORD, 4);
 const tag = crypto.randomBytes(3).toString("hex");
 async function mkAdmin(name: string, role: string, active = true): Promise<Who> {
