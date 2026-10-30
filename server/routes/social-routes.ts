@@ -1,3 +1,4 @@
+import { toPublicProfile } from "../utils/publicProfile";
 import { directThreadExists, enforceAgeGap } from "../utils/ageGate";
 import type { Express } from "express";
 import express from "express";
@@ -53,7 +54,7 @@ export function registerSocialRoutes(app: Express): void {
       const post = await storage.getPost(req.params.postId);
       if (!post) return res.status(404).json({ message: "Post not found" });
       const user = await storage.getUser(post.userId);
-      res.json({ ...post, user });
+      res.json({ ...post, user: user && toPublicProfile(user) });
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch post" });
     }

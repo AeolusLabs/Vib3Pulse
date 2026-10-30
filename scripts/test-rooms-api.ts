@@ -67,7 +67,8 @@ async function http(method: string, path: string, as: string | null, body?: unkn
   return { status: res.status, json };
 }
 
-const hash = await bcrypt.hash("Passw0rd!rooms", 4);
+const TEST_PW = `Tp1!${globalThis.crypto.randomUUID().slice(0, 12)}`; // random per run
+const hash = await bcrypt.hash(TEST_PW, 4);
 const stamp = Date.now();
 const mk = async (name: string, dob: string | null = null, ageDays = 60) => (await q(
   `insert into users (email, username, user_type, password_hash, is_verified, onboarding_complete, date_of_birth, created_at)
@@ -80,7 +81,7 @@ const yearsAgo = (y: number, dayOffset = 0) => {
 try {
   // ============ Task 1: minimum age 13 at signup / complete-profile ============
   const signupBody = (tag: string, dob: string) => ({
-    email: `${tag}${stamp}@t.dev`, username: `${tag}${stamp}`, password: "Passw0rd!rooms1", userType: "social",
+    email: `${tag}${stamp}@t.dev`, username: `${tag}${stamp}`, password: TEST_PW, userType: "social",
     displayName: tag, dateOfBirth: dob, gender: "Male", interests: ["music"],
   });
   {

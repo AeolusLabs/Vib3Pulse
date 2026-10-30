@@ -131,6 +131,15 @@ export const authRateLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Anonymous view/click beacons: generous for real browsing, but stops one client inflating an organiser's analytics.
+export const trackingRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  message: { message: "Too many requests", code: "RATE_LIMITED" },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 export const apiRateLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 300,

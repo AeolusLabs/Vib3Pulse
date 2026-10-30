@@ -175,6 +175,7 @@ import { cached, postsCache, eventsCache, storiesCache, invalidateCache } from "
 import { planTierSync } from "./utils/tierSync";
 import { conversionPct } from "@shared/analyticsMath";
 import { toPublicUser, toPublicAdminUser, type PublicUser, type PublicAdminUser } from "./auth";
+import { toPublicProfile, hidePrivateContact } from "./utils/publicProfile";
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -1824,10 +1825,9 @@ export class DbStorage implements IStorage {
 
     if (!result[0]) return undefined;
 
-    const { passwordHash, ...organizerWithoutPassword } = result[0].organizer;
     return {
       ...result[0].event,
-      organizer: organizerWithoutPassword as User,
+      organizer: toPublicProfile(result[0].organizer) as User,
       community: result[0].community
         ? { ...result[0].community, memberCount: result[0].memberCount }
         : null,
@@ -2268,10 +2268,9 @@ export class DbStorage implements IStorage {
       .orderBy(desc(posts.createdAt));
     
     return result.map(row => {
-      const { passwordHash, ...userWithoutPassword } = row.users;
       return {
         ...row.posts,
-        user: userWithoutPassword as User,
+        user: toPublicProfile(row.users) as User,
       };
     });
   }
@@ -2307,7 +2306,7 @@ export class DbStorage implements IStorage {
 
     return likedPosts.map(row => ({
       ...row.post,
-      user: toPublicUser(row.user),
+      user: (toPublicProfile(row.user) as PublicUser),
     }));
   }
 
@@ -2325,7 +2324,7 @@ export class DbStorage implements IStorage {
 
     return repostedPosts.map(row => ({
       ...row.post,
-      user: toPublicUser(row.user),
+      user: (toPublicProfile(row.user) as PublicUser),
     }));
   }
 
@@ -2407,10 +2406,9 @@ export class DbStorage implements IStorage {
           .limit(100);
 
         return rows.map(row => {
-          const { passwordHash, ...userWithoutPassword } = row.user;
           return {
             ...row.story,
-            user: userWithoutPassword as User,
+            user: toPublicProfile(row.user) as User,
             likeCount: row.likeCount,
             viewCount: row.viewCount,
             isLiked: row.isLiked,
@@ -2505,10 +2503,9 @@ export class DbStorage implements IStorage {
       .orderBy(desc(storyViews.viewedAt));
 
     return Promise.all(viewers.map(async (row) => {
-      const { passwordHash, ...userWithoutPassword } = row.users;
       const hasLiked = await this.hasUserLikedStory(row.users.id, storyId);
       return {
-        user: userWithoutPassword as User,
+        user: toPublicProfile(row.users) as User,
         viewedAt: row.story_views.viewedAt,
         hasLiked,
       };
@@ -2620,10 +2617,9 @@ export class DbStorage implements IStorage {
       .where(eq(follows.followingId, userId));
     
     return result.map(row => {
-      const { passwordHash, ...userWithoutPassword } = row.users;
       return {
         ...row.follows,
-        follower: userWithoutPassword as User,
+        follower: toPublicProfile(row.users) as User,
       };
     });
   }
@@ -2646,10 +2642,9 @@ export class DbStorage implements IStorage {
       .where(eq(follows.followerId, userId));
     
     return result.map(row => {
-      const { passwordHash, ...userWithoutPassword } = row.users;
       return {
         ...row.follows,
-        following: userWithoutPassword as User,
+        following: toPublicProfile(row.users) as User,
       };
     });
   }
@@ -2683,8 +2678,7 @@ export class DbStorage implements IStorage {
       );
     
     return result.map(user => {
-      const { passwordHash, ...userWithoutPassword } = user;
-      return userWithoutPassword as User;
+      return toPublicProfile(user) as User;
     });
   }
 
@@ -2712,10 +2706,9 @@ export class DbStorage implements IStorage {
       .orderBy(desc(events.eventDate));
     
     return result.map(row => {
-      const { passwordHash, ...userWithoutPassword } = row.users;
       return {
         ...row.events,
-        organizer: userWithoutPassword as User,
+        organizer: toPublicProfile(row.users) as User,
       };
     });
   }
@@ -2745,10 +2738,9 @@ export class DbStorage implements IStorage {
       .orderBy(desc(posts.createdAt));
     
     return result.map(row => {
-      const { passwordHash, ...userWithoutPassword } = row.users;
       return {
         ...row.posts,
-        user: userWithoutPassword as User,
+        user: toPublicProfile(row.users) as User,
       };
     });
   }
@@ -2834,12 +2826,11 @@ export class DbStorage implements IStorage {
         const now = Date.now();
         return rows
           .map(row => {
-            const { passwordHash, ...userWithoutPassword } = row.user;
-            const ageHours = (now - row.post.createdAt.getTime()) / 3_600_000;
+                        const ageHours = (now - row.post.createdAt.getTime()) / 3_600_000;
             const rawEngagement = row.likeCount * 2 + row.commentCount * 3;
             return {
               ...row.post,
-              user: userWithoutPassword as User,
+              user: toPublicProfile(row.user) as User,
               likeCount: row.likeCount,
               commentCount: row.commentCount,
               decayScore: rawEngagement / Math.pow(ageHours + 2, 1.8),
@@ -2876,10 +2867,9 @@ export class DbStorage implements IStorage {
 
         return rows
           .map(row => {
-            const { passwordHash, ...userWithoutPassword } = row.user;
             return {
               ...row.event,
-              organizer: userWithoutPassword as User,
+              organizer: toPublicProfile(row.user) as User,
               rsvpCount: row.rsvpCount,
               ticketCount: row.ticketCount,
               engagementScore: row.rsvpCount * 2 + row.ticketCount * 3 + (row.event.isPromoted ? 10 : 0),
@@ -2942,8 +2932,7 @@ export class DbStorage implements IStorage {
       .limit(limit);
     
     return suggested.map(user => {
-      const { passwordHash, ...userWithoutPassword } = user;
-      return userWithoutPassword as User;
+      return toPublicProfile(user) as User;
     });
   }
 
@@ -2996,9 +2985,8 @@ export class DbStorage implements IStorage {
         score += 1;
       }
       
-      const { passwordHash, ...userWithoutPassword } = user;
       return {
-        ...userWithoutPassword as User,
+        ...toPublicProfile(user) as User,
         matchScore: score,
         sharedInterestsCount: sharedInterests.length,
         sameLocation: currentUser.location && user.location && 
@@ -3103,10 +3091,9 @@ export class DbStorage implements IStorage {
       .limit(limit);
 
     return result.map(row => {
-      const { passwordHash, ...userWithoutPassword } = row.users;
       return {
         ...row.comments,
-        user: userWithoutPassword as User,
+        user: toPublicProfile(row.users) as User,
       };
     });
   }
@@ -3145,10 +3132,9 @@ export class DbStorage implements IStorage {
     }
 
     return result.map(row => {
-      const { passwordHash, ...userWithoutPassword } = row.users;
       return {
         ...row.comments,
-        user: userWithoutPassword as User,
+        user: toPublicProfile(row.users) as User,
         likeCount: likeCountMap.get(row.comments.id) ?? 0,
         isLiked: viewerLikedSet.has(row.comments.id),
       };
@@ -3202,10 +3188,9 @@ export class DbStorage implements IStorage {
     }
 
     return result.map(row => {
-      const { passwordHash, ...userWithoutPassword } = row.users;
       return {
         ...row.comments,
-        user: userWithoutPassword as User,
+        user: toPublicProfile(row.users) as User,
         likeCount: likeCountMap.get(row.comments.id) ?? 0,
         isLiked: viewerLikedSet.has(row.comments.id),
       };
@@ -3274,10 +3259,9 @@ export class DbStorage implements IStorage {
       .orderBy(comments.createdAt);
 
     return result.map(row => {
-      const { passwordHash, ...userWithoutPassword } = row.users;
       return {
         ...row.comments,
-        user: userWithoutPassword as User,
+        user: toPublicProfile(row.users) as User,
       };
     });
   }
@@ -3428,7 +3412,7 @@ export class DbStorage implements IStorage {
     .where(eq(hashtags.tag, normalizedTag))
     .orderBy(desc(posts.createdAt));
 
-    return result.map(r => ({ ...r.post, user: toPublicUser(r.user) }));
+    return result.map(r => ({ ...r.post, user: (toPublicProfile(r.user) as PublicUser) }));
   }
 
   async getTrendingHashtags(limit: number = 10): Promise<Hashtag[]> {
@@ -3466,7 +3450,7 @@ export class DbStorage implements IStorage {
     .where(eq(postMentions.mentionedUserId, userId))
     .orderBy(desc(posts.createdAt));
 
-    return result.map(r => ({ ...r.post, user: toPublicUser(r.user) }));
+    return result.map(r => ({ ...r.post, user: (toPublicProfile(r.user) as PublicUser) }));
   }
 
   // ==================== SAFETY SYSTEM ====================
@@ -5625,11 +5609,10 @@ export class DbStorage implements IStorage {
     // any caller of the public GET /api/communities endpoint. Strip it here
     // rather than trusting every route to remember to.
     return result.map(r => {
-      const { passwordHash, ...creatorWithoutPassword } = r.creator;
       return {
         ...r.community,
         memberCount: r.memberCount,
-        creator: creatorWithoutPassword as User,
+        creator: toPublicProfile(r.creator) as User,
       };
     });
   }
@@ -5712,10 +5695,9 @@ export class DbStorage implements IStorage {
     // Same passwordHash-leak class as getCommunities() above — this backs
     // the public GET /api/communities/:id/members endpoint.
     return result.map(r => {
-      const { passwordHash, ...userWithoutPassword } = r.user;
       return {
         ...r.membership,
-        user: userWithoutPassword as User,
+        user: toPublicProfile(r.user) as User,
       };
     });
   }
@@ -5784,7 +5766,7 @@ export class DbStorage implements IStorage {
 
     return result.map(r => ({
       ...r.post,
-      user: toPublicUser(r.user),
+      user: (toPublicProfile(r.user) as PublicUser),
       community: r.community,
     }));
   }
@@ -5828,11 +5810,10 @@ export class DbStorage implements IStorage {
 
     return result
       .map(r => {
-        const { passwordHash, ...creatorWithoutPassword } = r.creator;
         return {
           ...r.community,
           memberCount: r.memberCount,
-          creator: creatorWithoutPassword as User,
+          creator: toPublicProfile(r.creator) as User,
           trendingScore: r.recentPosts * 3 + r.recentJoins * 2,
         };
       })
@@ -5852,11 +5833,10 @@ export class DbStorage implements IStorage {
       .where(eq(communities.id, id));
 
     if (!result[0]) return undefined;
-    const { passwordHash, ...creatorWithoutPassword } = result[0].creator;
     return {
       ...result[0].community,
       memberCount: result[0].memberCount,
-      creator: creatorWithoutPassword as User,
+      creator: toPublicProfile(result[0].creator) as User,
     };
   }
 
@@ -5906,7 +5886,7 @@ export class DbStorage implements IStorage {
         const feed: any[] = [];
 
         for (const r of postsResult) {
-          const item = { ...r.post, user: toPublicUser(r.user), community: r.community, isRepost: false };
+          const item = { ...r.post, user: (toPublicProfile(r.user) as PublicUser), community: r.community, isRepost: false };
           postMap.set(r.post.id, item);
           feed.push(item);
         }
@@ -5920,7 +5900,7 @@ export class DbStorage implements IStorage {
         for (const r of repostsResult) {
           const originalPost = postMap.get(r.repost.postId);
           if (!originalPost) continue; // original was deleted
-          const repostingUser = toPublicUser(r.repostingUser);
+          const repostingUser = (toPublicProfile(r.repostingUser) as PublicUser);
           feed.push({
             id: `repost-${r.repost.id}`,
             isRepost: true,
@@ -5964,7 +5944,7 @@ export class DbStorage implements IStorage {
 
     const postMap = new Map<string, any>();
     for (const r of postsResult) {
-      postMap.set(r.post.id, { ...r.post, user: toPublicUser(r.user), community: r.community });
+      postMap.set(r.post.id, { ...r.post, user: (toPublicProfile(r.user) as PublicUser), community: r.community });
     }
 
     // Fetch original posts for reposts not covered by the posts window
@@ -5979,18 +5959,18 @@ export class DbStorage implements IStorage {
         .leftJoin(communities, eq(posts.communityId, communities.id))
         .where(inArray(posts.id, missingIds));
       for (const r of missing) {
-        postMap.set(r.post.id, { ...r.post, user: toPublicUser(r.user), community: r.community });
+        postMap.set(r.post.id, { ...r.post, user: (toPublicProfile(r.user) as PublicUser), community: r.community });
       }
     }
 
     const feed: any[] = [];
     for (const r of postsResult) {
-      feed.push({ ...r.post, user: toPublicUser(r.user), community: r.community, isRepost: false });
+      feed.push({ ...r.post, user: (toPublicProfile(r.user) as PublicUser), community: r.community, isRepost: false });
     }
     for (const r of repostsResult) {
       const originalPost = postMap.get(r.repost.postId);
       if (!originalPost) continue;
-      const repostingUser = toPublicUser(r.repostingUser);
+      const repostingUser = (toPublicProfile(r.repostingUser) as PublicUser);
       feed.push({
         id: `repost-${r.repost.id}`,
         isRepost: true,
@@ -6097,7 +6077,7 @@ export class DbStorage implements IStorage {
     const participantsByConvId = new Map<string, Array<ConversationParticipant & { user: PublicUser }>>();
     for (const row of allParticipantRows) {
       const list = participantsByConvId.get(row.participant.conversationId) ?? [];
-      list.push({ ...row.participant, user: toPublicUser(row.user) });
+      list.push({ ...row.participant, user: (hidePrivateContact(toPublicUser(row.user)) as PublicUser) });
       participantsByConvId.set(row.participant.conversationId, list);
     }
 
@@ -6270,7 +6250,7 @@ export class DbStorage implements IStorage {
 
     return result.map(r => ({
       ...r.participant,
-      user: toPublicUser(r.user),
+      user: (hidePrivateContact(toPublicUser(r.user)) as PublicUser),
     }));
   }
 
@@ -6384,7 +6364,7 @@ export class DbStorage implements IStorage {
       .orderBy(desc(conversationMessages.createdAt))
       .limit(limit);
 
-    return result.map(r => ({ ...r.message, sender: toPublicUser(r.sender) }));
+    return result.map(r => ({ ...r.message, sender: (hidePrivateContact(toPublicUser(r.sender)) as PublicUser) }));
   }
 
   async getConversationMessages(conversationId: string, limit: number = 50, before?: string): Promise<Array<ConversationMessage & { sender: PublicUser; replyTo?: ConversationMessage & { sender: PublicUser }; story?: Story & { user: PublicUser } }>> {
@@ -6415,7 +6395,7 @@ export class DbStorage implements IStorage {
         .innerJoin(users, eq(stories.userId, users.id))
         .where(inArray(stories.id, storyIds));
       for (const row of storyRows) {
-        storiesById.set(row.story.id, { ...row.story, user: toPublicUser(row.storyUser) });
+        storiesById.set(row.story.id, { ...row.story, user: (hidePrivateContact(toPublicUser(row.storyUser)) as PublicUser) });
       }
     }
 
@@ -6432,7 +6412,7 @@ export class DbStorage implements IStorage {
         .innerJoin(users, eq(conversationMessages.senderId, users.id))
         .where(inArray(conversationMessages.id, replyToIds));
       for (const row of replyRows) {
-        replyToById.set(row.message.id, { ...row.message, sender: toPublicUser(row.sender) });
+        replyToById.set(row.message.id, { ...row.message, sender: (hidePrivateContact(toPublicUser(row.sender)) as PublicUser) });
       }
     }
 
@@ -6441,7 +6421,7 @@ export class DbStorage implements IStorage {
       const replyTo = blanked.replyToId ? replyToById.get(blanked.replyToId) : undefined;
       return {
         ...blanked,
-        sender: toPublicUser(r.sender),
+        sender: (hidePrivateContact(toPublicUser(r.sender)) as PublicUser),
         replyTo: replyTo ? { ...this.blankIfDeleted(replyTo), sender: replyTo.sender } : undefined,
         story: blanked.storyId ? storiesById.get(blanked.storyId) : undefined,
       };
@@ -6541,13 +6521,13 @@ export class DbStorage implements IStorage {
       optionsWithVotes.push({
         ...option,
         voteCount: votesResult.length,
-        voters: votesResult.map(v => toPublicUser(v.user)),
+        voters: votesResult.map(v => (hidePrivateContact(toPublicUser(v.user)) as PublicUser)),
       });
     }
 
     return {
       ...poll,
-      creator: toPublicUser(creator),
+      creator: (hidePrivateContact(toPublicUser(creator)) as PublicUser),
       options: optionsWithVotes,
     };
   }

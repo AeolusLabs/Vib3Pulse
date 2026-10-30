@@ -111,7 +111,7 @@ function check(label: string, ok: boolean, detail?: unknown) {
 
 // ---- fixtures ------------------------------------------------------------------------------------------------------
 const tag = crypto.randomBytes(3).toString("hex");
-const PASSWORD = "Passw0rd!x-test";
+const PASSWORD = `Tp1!${globalThis.crypto.randomUUID().slice(0, 12)}`; // random per run
 const pwHash = await bcrypt.hash(PASSWORD, 4);
 let phoneSeq = 40000 + Math.floor(Math.random() * 50000);
 async function mkUser(name: string, o: { phone?: boolean; ageDays?: number } = {}) {
@@ -344,7 +344,7 @@ try {
   // =====================================================================
   console.log("\nsignup can't grant privileges; the profile phone can't be set or leaked");
   const signupBody = {
-    email: `Mass-${tag}@Test.Local`, username: `mass_${tag}`, password: "Passw0rd!x-ok", userType: "social", displayName: "Mallory", dateOfBirth: "1990-01-01", gender: "Female", interests: ["Music"], bio: "hello",
+    email: `Mass-${tag}@Test.Local`, username: `mass_${tag}`, password: PASSWORD, userType: "social", displayName: "Mallory", dateOfBirth: "1990-01-01", gender: "Female", interests: ["Music"], bio: "hello",
     // none of these may be accepted from a signup request:
     isVerified: true, isOfficial: true, freePromotionCredits: 99, verifiedPhone: "+447700900999", phoneVerifiedAt: new Date().toISOString(),
     phoneNumber: "+447700900888", usernameChangesRemaining: 99, zernioProfileId: "zernio-x", onboardingComplete: false, readReceiptsEnabled: false, deletedAt: new Date().toISOString(),
@@ -354,7 +354,7 @@ try {
   const [nu] = await q(`select is_verified, is_official, free_promotion_credits, verified_phone, phone_verified_at, phone_number, username_changes_remaining, zernio_profile_id, onboarding_complete, read_receipts_enabled, deleted_at, email, display_name, interests, user_type from users where username=$1`, [`mass_${tag}`]);
   check("none of the privileged / verification fields were taken from the request", nu && nu.is_verified === false && nu.is_official === false && nu.free_promotion_credits === 0 && nu.verified_phone === null && nu.phone_verified_at === null && nu.phone_number === null && nu.username_changes_remaining === 2 && nu.zernio_profile_id === null && nu.onboarding_complete === true && nu.read_receipts_enabled === true && nu.deleted_at === null, nu);
   check("the legitimate signup fields were stored (email lower-cased, name, interests, type)", nu?.email === `mass-${tag}@test.local` && nu?.display_name === "Mallory" && nu?.interests?.[0] === "Music" && nu?.user_type === "social");
-  const orgSignup = await http("POST", "/api/auth/signup", { label: "signup", body: { email: `org-${tag}@test.local`, username: `org_${tag}`, password: "Passw0rd!x-ok", userType: "organizer", organizationName: "Club Co", contactEmail: "hi@club.test", socialMediaLinks: ["https://club.test"], canManageVenues: true, bio: "b", isOfficial: true } });
+  const orgSignup = await http("POST", "/api/auth/signup", { label: "signup", body: { email: `org-${tag}@test.local`, username: `org_${tag}`, password: PASSWORD, userType: "organizer", organizationName: "Club Co", contactEmail: "hi@club.test", socialMediaLinks: ["https://club.test"], canManageVenues: true, bio: "b", isOfficial: true } });
   const [ou] = await q(`select organization_name, contact_email, can_manage_venues, is_official from users where username=$1`, [`org_${tag}`]);
   check("an organiser signup keeps its own fields (venue-manager checkbox, org name) but not isOfficial", orgSignup.status < 300 && ou?.organization_name === "Club Co" && ou?.can_manage_venues === true && ou?.is_official === false, ou);
   const unverified = await mkUser("emailunverified"); await q(`update users set is_verified=false where id=$1`, [unverified]);
