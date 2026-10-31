@@ -1,779 +1,360 @@
-import { useState } from "react";
-import { getCurrencySymbol } from "@/lib/currency";
-import { Link } from "wouter";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { motion } from "framer-motion";
-
 import { format } from "date-fns";
-import type { Event } from "@shared/schema";
-import { CalendarIcon, TicketIcon, MapPinIcon, ArrowRightIcon, ChevronRightIcon, ExternalLinkIcon, ClockIcon, MusicIcon, PaletteIcon, ShieldIcon, UsersIcon } from "@/components/ui/icons";
-import { Utensils, Code, Trophy, Dumbbell } from "lucide-react";
+import { getCurrencySymbol } from "@/lib/currency";
+import { Bars, ChatScreen, Qr, TicketScreen } from "./landing/Screens";
+import "./landing/landing.css";
 
-const inView = {
-  hidden: { opacity: 0, y: 28 },
-  visible: {
-    opacity: 1,
-    y: 0,
-    transition: { duration: 0.65, ease: [0.22, 1, 0.36, 1] },
-  },
+/** Shape of GET /api/public/landing (server/routes/public-landing-routes.ts). */
+interface PublicEvent {
+  id: string; title: string; category: string; eventDate: string; venue: string; city: string | null;
+  minPrice: number; currency: string; imageUrl: string | null; externalTicketUrl: string | null;
+  ageRestriction: string; description: string;
+}
+
+const KINDS = [
+  { value: "music", label: "Music" },
+  { value: "food", label: "Food & Drink" },
+  { value: "tech", label: "Tech" },
+  { value: "art", label: "Arts" },
+  { value: "sports", label: "Sports" },
+  { value: "wellness", label: "Wellness" },
+] as const;
+type Kind = (typeof KINDS)[number]["value"];
+type Role = "out" | "host" | "venue";
+
+// Shown only when there is no real event for the chosen night. Always labelled "sample" on the page.
+const SAMPLE: Record<Kind, Array<[string, string, string]>> = {
+  music: [["Friday Pre-Drinks", "Fri · 8:00 PM", "From ₦5,000"], ["Afrobeats Night", "Sat · 10:00 PM", "From ₦8,000"], ["Live Sessions", "Sun · 6:00 PM", "Free"]],
+  food: [["Rooftop Supper Club", "Sat · 7:30 PM", "From ₦12,000"], ["Street Food Market", "Sun · 12:00 PM", "Free"], ["Tasting Table", "Thu · 7:00 PM", "From ₦9,000"]],
+  tech: [["Builders Meetup", "Thu · 6:00 PM", "Free"], ["Demo Night", "Fri · 5:30 PM", "Free"], ["Product Breakfast", "Sat · 9:00 AM", "From ₦3,000"]],
+  art: [["Gallery Late", "Sat · 5:00 PM", "From ₦3,000"], ["Open Studios", "Sun · 1:00 PM", "Free"], ["Poetry and Wine", "Fri · 7:00 PM", "From ₦4,000"]],
+  sports: [["Five-a-side Night", "Wed · 7:00 PM", "From ₦2,000"], ["Match Day Watch", "Sat · 3:00 PM", "Free"], ["Padel Social", "Sun · 4:00 PM", "From ₦6,000"]],
+  wellness: [["Sunrise Run Club", "Sun · 6:30 AM", "Free"], ["Rooftop Yoga", "Sat · 8:00 AM", "From ₦3,500"], ["Sound Bath", "Fri · 6:00 PM", "From ₦5,000"]],
 };
 
-const heroEyebrow = {
-  hidden: { opacity: 0, y: 14 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.22, 1, 0.36, 1] } },
+const ROLE_TEXT: Record<Role, { title: string; body: string; cta: string }> = {
+  out: { title: "Going out", body: "Find something on tonight, get your ticket, message the crew and share your route home with a buddy.", cta: "Join free" },
+  host: { title: "Hosting", body: "Put your event in front of people already looking for a night out, and run tickets and RSVPs in one place.", cta: "List your event" },
+  venue: { title: "Own a venue", body: "Give your club or bar a page people can find, fill your nights with events, and meet the promoters who want your room.", cta: "Claim your venue page" },
 };
 
-const heroHeadline = {
-  hidden: { opacity: 0, y: 52 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.85, ease: [0.22, 1, 0.36, 1] } },
-};
+interface Item { key: string; kindLabel: string; title: string; when: string; venue: string; price: string; real: PublicEvent | null }
 
-const stagger = {
-  visible: { transition: { staggerChildren: 0.09 } },
+const priceLabel = (e: PublicEvent) =>
+  e.minPrice === 0 ? "Free" : `From ${getCurrencySymbol(e.currency)}${Math.round(e.minPrice / 100).toLocaleString()}`;
+
+/** The sign-up link carries the visitor's choice. Built only from fixed lists, never from the URL or typed text. */
+function destination(role: Role, kind: Kind) {
+  return `/signup?${new URLSearchParams({ from: "landing", role, kind }).toString()}`;
+}
+
+const reduced = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+const PIN_CAPTIONS: Record<string, string> = {
+  find: "Discover: events, venues and people in one search box.",
+  getin: "Your ticket: show the code at the door, staff scan it.",
+  crew: "Group chat: a poll for the venue, and the crew votes.",
+  avatar: "The avatar maker: a cartoon you, used across the app.",
+  map: "The map: tonight's events, venues and friends who share with you.",
+  safe: "Safety Settings: choose the people who get your SOS.",
+  rooms: "A Room: hang out as your avatar. Sample room, made-up people.",
+  spray: "Spray: money rains down over whoever is on stage.",
 };
 
 export default function LandingPage() {
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
+  const [, setLocation] = useLocation();
+  const [kind, setKind] = useState<Kind>("music");
+  const [role, setRole] = useState<Role>("out");
+  const [swap, setSwap] = useState(false);
+  const [pin, setPin] = useState("find");
+  const [barOn, setBarOn] = useState(false);
+  const [scanned, setScanned] = useState(false);
+  const [torn, setTorn] = useState(false);
+  const heroRef = useRef<HTMLElement>(null);
+  const closeRef = useRef<HTMLElement>(null);
 
-  const { data: featuredEvents = [], isLoading: isFeaturedLoading } = useQuery<Event[]>({
-    queryKey: ["/api/events/featured"],
-  });
+  const { data } = useQuery<{ events: PublicEvent[] }>({ queryKey: ["/api/public/landing"], staleTime: 60_000 });
+  const events = data?.events ?? [];
 
-  const { data: categoryEvents = [], isLoading: isCategoryLoading } = useQuery<Event[]>({
-    queryKey: ["/api/events/by-category", selectedCategory],
-    enabled: !!selectedCategory,
-  });
+  // Real events for this night; samples (labelled) only when there are none.
+  const items: Item[] = useMemo(() => {
+    const label = KINDS.find((k) => k.value === kind)!.label;
+    // Categories are free-form on the server ("food & drink"), so match on the start.
+    const real = events.filter((e) => e.category.startsWith(kind));
+    if (real.length > 0) {
+      return real.slice(0, 3).map((e) => ({
+        key: e.id, kindLabel: label, title: e.title,
+        when: format(new Date(e.eventDate), "EEE · h:mm a"),
+        venue: `${e.venue}${e.city ? `, ${e.city}` : ""}`, price: priceLabel(e), real: e,
+      }));
+    }
+    return SAMPLE[kind].map(([title, when, price]) => ({ key: title, kindLabel: `${label} · sample`, title, when, venue: "Sample venue", price, real: null }));
+  }, [events, kind]);
+  const hasReal = items[0]?.real != null;
+  const head = items[0];
+  const dest = destination(role, kind);
+  const kindLabel = KINDS.find((k) => k.value === kind)!.label;
 
-  const eventCategories = [
-    { icon: MusicIcon,   label: "Music",       value: "music"   },
-    { icon: Utensils,    label: "Food & Drink", value: "food"    },
-    { icon: Code,        label: "Tech",         value: "tech"    },
-    { icon: PaletteIcon, label: "Arts",         value: "art"     },
-    { icon: Trophy,      label: "Sports",       value: "sports"  },
-    { icon: Dumbbell,    label: "Wellness",     value: "wellness" },
-  ];
+  const choose = useCallback((fn: () => void) => {
+    if (reduced()) { fn(); return; }
+    setSwap(true);
+    window.setTimeout(() => { fn(); setSwap(false); }, 150);
+  }, []);
 
-  const pillars = [
-    {
-      number: "01",
-      icon: CalendarIcon,
-      title: "Discover Events",
-      desc: "Find concerts, club nights, exhibitions, and more. Curated for your city and your taste.",
-    },
-    {
-      number: "02",
-      icon: TicketIcon,
-      title: "Buy Tickets",
-      desc: "Secure in-app ticketing with instant QR codes. Everything lives in your digital wallet.",
-    },
-    {
-      number: "03",
-      icon: UsersIcon,
-      title: "Plan Together",
-      desc: "Group chats, shared polls, and stories from the night. Your crew, all in one place.",
-    },
-    {
-      number: "04",
-      icon: ShieldIcon,
-      title: "Stay Safe",
-      desc: "Safety Buddy, check-in times, and one-tap SOS alerts. Go out with confidence.",
-    },
-  ];
+  // reveal-on-scroll, pinned phone follows the section in view, sticky join bar
+  useEffect(() => {
+    const els = Array.from(document.querySelectorAll<HTMLElement>(".lp .reveal"));
+    if (!("IntersectionObserver" in window) || reduced()) { els.forEach((el) => el.classList.add("in")); }
+    const ios: IntersectionObserver[] = [];
+    if ("IntersectionObserver" in window && !reduced()) {
+      const en = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add("in"); en.unobserve(e.target); } }), { threshold: 0.06 });
+      els.forEach((el) => en.observe(el)); ios.push(en);
+    }
+    if ("IntersectionObserver" in window) {
+      const pk = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) setPin((e.target as HTMLElement).dataset.stub || "find"); }), { rootMargin: "-45% 0px -45% 0px" });
+      document.querySelectorAll(".lp .st[data-stub]").forEach((s) => pk.observe(s)); ios.push(pk);
+      let heroIn = true, closeIn = false;
+      const upd = () => setBarOn(!heroIn && !closeIn);
+      const h = new IntersectionObserver((es) => { heroIn = es[0].isIntersecting; upd(); }, { threshold: 0.35 });
+      const c = new IntersectionObserver((es) => { closeIn = es[0].isIntersecting; upd(); }, { threshold: 0.2 });
+      if (heroRef.current) h.observe(heroRef.current);
+      if (closeRef.current) c.observe(closeRef.current);
+      ios.push(h, c);
+    } else setBarOn(true);
+    return () => ios.forEach((o) => o.disconnect());
+  }, []);
 
-  const formatEventDate = (date: Date | string) => {
-    const d = typeof date === "string" ? new Date(date) : date;
-    return format(d, "EEE, MMM d");
+  const goTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: reduced() ? "auto" : "smooth", block: "start" });
+  const pickRole = (r: Role) => setRole(r);
+  const tear = () => {
+    setTorn(true);
+    window.setTimeout(() => setLocation(dest), reduced() ? 0 : 420);
   };
 
-  const formatEventTime = (date: Date | string) => {
-    const d = typeof date === "string" ? new Date(date) : date;
-    return format(d, "h:mm a");
-  };
-
-  const formatPrice = (event: Event) => {
-    if (event.ticketPrice === undefined || event.ticketPrice === null) return null;
-    if (event.ticketPrice === 0) return "Free";
-    const symbol = getCurrencySymbol((event as any).currency);
-    return `From ${symbol}${(event.ticketPrice / 100).toFixed(0)}`;
-  };
+  // Plain functions (not components) so the pinned layers keep their DOM nodes between renders.
+  const layer = (id: string, children: ReactNode) => (
+    <div key={id} className={`ly${pin === id ? " on" : ""}`} data-for={id}>{children}</div>
+  );
+  const img = (id: string, src: string) => (
+    <img key={id} className={`ly${pin === id ? " on" : ""}`} data-for={id} src={src} alt="" width={780} height={1568} loading="lazy" />
+  );
 
   return (
-    <div className="min-h-screen bg-[#090909] text-white font-sans">
-
-      {/* ─── Navigation ──────────────────────────────────────────────── */}
-      <header className="fixed top-0 left-0 right-0 z-50 border-b border-white/[0.06] bg-[#090909]/90 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <Link href="/" className="no-underline">
-            <span className="font-serif text-[1.4rem] font-bold text-white tracking-tight select-none">
-              Vib3Pulse
-            </span>
-          </Link>
-          <nav className="flex items-center gap-1">
-            <Link href="/login">
-              <Button
-                variant="ghost"
-                className="text-white/60 hover:text-white hover:bg-white/[0.06] rounded-full px-5 h-9 text-sm transition-colors duration-200"
-                data-testid="button-header-login"
-              >
-                Sign In
-              </Button>
-            </Link>
-            <Link href="/signup">
-              <Button
-                className="bg-violet-600 hover:bg-violet-500 active:scale-[0.97] text-white rounded-full px-5 h-9 text-sm border-0 shadow-lg shadow-violet-600/20 transition-all duration-200"
-                data-testid="button-header-signup"
-              >
-                Join Free
-              </Button>
-            </Link>
-          </nav>
-        </div>
-      </header>
-
-      {/* ─── Hero ────────────────────────────────────────────────────── */}
-      <section className="relative min-h-screen flex flex-col justify-center pt-16 overflow-hidden">
-        {/* Subtle noise texture */}
-        <div
-          className="absolute inset-0 opacity-[0.018] pointer-events-none"
-          style={{
-            backgroundImage:
-              'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 200 200\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'n\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.85\' numOctaves=\'4\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23n)\'/%3E%3C/svg%3E")',
-            backgroundSize: "180px",
-          }}
-        />
-        {/* Violet glows — more visible, atmospheric */}
-        <div className="absolute top-1/4 -left-1/4 w-[800px] h-[800px] bg-violet-600/[0.14] rounded-full blur-[140px] pointer-events-none" />
-        <div className="absolute bottom-0 right-0 w-[500px] h-[500px] bg-violet-900/[0.16] rounded-full blur-[120px] pointer-events-none" />
-
-        <div className="max-w-7xl mx-auto px-6 py-28 lg:py-32">
-          <motion.div
-            initial="hidden"
-            animate="visible"
-            variants={stagger}
-            className="max-w-5xl"
-          >
-            {/* Eyebrow */}
-            <motion.p
-              variants={heroEyebrow}
-              className="text-white/50 text-[0.7rem] tracking-[0.3em] uppercase mb-12 font-sans"
-            >
-              Every City Has a Pulse. Find Yours.
-            </motion.p>
-
-            {/* Giant editorial headline */}
-            <motion.h1
-              variants={heroHeadline}
-              className="font-serif font-bold uppercase leading-[0.88] tracking-[-0.02em] text-white mb-10"
-              style={{ fontSize: "clamp(3.8rem, 13vw, 11.5rem)" }}
-            >
-              Find
-              <br />
-              Your
-              <br />
-              <span className="text-violet-400">Vib3.</span>
-            </motion.h1>
-
-            {/* Subline */}
-            <motion.p
-              variants={inView}
-              className="text-base md:text-lg text-white/60 max-w-sm leading-relaxed mb-12 font-sans"
-            >
-              Events. Tickets. Community. Safety.
-              <br />
-              All in one place.
-            </motion.p>
-
-            {/* CTAs */}
-            <motion.div
-              variants={inView}
-              className="flex flex-wrap items-center gap-3 mb-20"
-            >
-              <Link href="/signup">
-                <Button
-                  size="lg"
-                  className="h-12 px-8 bg-violet-600 hover:bg-violet-500 active:scale-[0.97] text-white rounded-full border-0 font-sans font-medium text-base shadow-xl shadow-violet-600/25 transition-all duration-200"
-                  data-testid="button-hero-signup"
-                >
-                  Get Started
-                  <ArrowRightIcon className="ml-2 w-4 h-4" />
-                </Button>
-              </Link>
-              <Link href="/login">
-                <Button
-                  size="lg"
-                  variant="ghost"
-                  className="h-12 px-7 text-white/60 hover:text-white hover:bg-white/[0.06] active:scale-[0.97] rounded-full font-sans text-base transition-all duration-200"
-                  data-testid="button-hero-login"
-                >
-                  Sign In
-                </Button>
-              </Link>
-            </motion.div>
-
-            {/* Category pills */}
-            <motion.div variants={inView} className="flex flex-wrap gap-2">
-              {eventCategories.map((cat) => (
-                <motion.button
-                  key={cat.value}
-                  onClick={() => setSelectedCategory(cat.value)}
-                  whileHover={{ y: -3 }}
-                  whileTap={{ scale: 0.93 }}
-                  transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-full border text-sm font-sans transition-colors duration-200 cursor-pointer ${
-                    selectedCategory === cat.value
-                      ? "bg-violet-600/20 border-violet-500/40 text-violet-300"
-                      : "border-white/[0.1] bg-white/[0.04] hover:bg-white/[0.08] hover:border-white/20 text-white/60 hover:text-white"
-                  }`}
-                  data-testid={`button-category-${cat.value}`}
-                >
-                  <cat.icon className="w-3.5 h-3.5" />
-                  {cat.label}
-                </motion.button>
-              ))}
-            </motion.div>
-          </motion.div>
-        </div>
-
-        {/* Scroll indicator */}
-        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1.5">
-          <div className="w-1 h-1 rounded-full bg-white/20 animate-bounce" />
-          <div className="w-px h-12 bg-gradient-to-b from-white/15 to-transparent" />
-        </div>
-      </section>
-
-      {/* ─── Social Proof Belt ───────────────────────────────────────── */}
-      <div className="border-y border-white/[0.06]">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="flex flex-col sm:flex-row items-center justify-center divide-y sm:divide-y-0 sm:divide-x divide-white/[0.08]">
-            {[
-              { value: "6", label: "Event Categories" },
-              { value: "2", label: "Cities Live" },
-              { value: "Free", label: "Always Free to Join" },
-            ].map((stat) => (
-              <div key={stat.label} className="flex flex-col items-center py-7 px-10 sm:px-14 gap-1">
-                <span className="font-serif text-2xl font-bold text-white/80">{stat.value}</span>
-                <span className="text-white/40 text-xs font-sans tracking-wide">{stat.label}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* ─── Featured Events ─────────────────────────────────────────── */}
-      {(isFeaturedLoading || featuredEvents.length > 0) && (
-        <section className="py-28">
-          <div className="max-w-7xl mx-auto px-6">
-            <div className="flex items-end justify-between mb-14">
-              <div>
-                <p className="text-white/45 text-[0.65rem] tracking-[0.28em] uppercase font-sans mb-3">
-                  Upcoming
-                </p>
-                <h2 className="font-serif text-4xl md:text-5xl font-bold text-white tracking-tight">
-                  Events
-                </h2>
-              </div>
-              <Link href="/signup">
-                <button
-                  className="flex items-center gap-1 text-sm text-white/40 hover:text-white/70 transition-colors font-sans cursor-pointer"
-                  data-testid="button-view-all"
-                >
-                  View all
-                  <ChevronRightIcon className="w-4 h-4" />
-                </button>
-              </Link>
+    <div className="lp" data-testid="landing-page">
+      {/* ─── Hero: one full-screen ticket ─────────────────────────────── */}
+      <section className="hero" id="top" ref={heroRef}>
+        <div className="tk">
+          <div className="tk-main">
+            <div className="nav">
+              <Link href="/" className="brand">Vib3Pulse</Link>
+              <nav aria-label="Primary">
+                <button type="button" className="t host" onClick={() => { pickRole("host"); goTo("go"); }} data-testid="button-header-host">List your event</button>
+                <Link href="/login" className="t" data-testid="button-header-login">Sign in</Link>
+                <Link href={dest} className="j" data-testid="button-header-signup">Join free</Link>
+              </nav>
             </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              {isFeaturedLoading
-                ? Array.from({ length: 4 }).map((_, i) => (
-                    <div key={i} className="rounded-2xl bg-white/[0.04] animate-pulse h-64" />
-                  ))
-                : featuredEvents.slice(0, 4).map((event, idx) => (
-                    <motion.button
-                      key={event.id}
-                      onClick={() => setSelectedEvent(event)}
-                      className={`group relative overflow-hidden rounded-2xl bg-[#111111] border border-white/[0.1] hover:border-violet-500/30 transition-all duration-300 text-left cursor-pointer ${
-                        idx === 0 ? "sm:col-span-2" : ""
-                      }`}
-                      whileHover={{ y: -3, transition: { duration: 0.2 } }}
-                      initial={{ opacity: 0, y: 20 }}
-                      whileInView={{ opacity: 1, y: 0 }}
-                      viewport={{ once: true }}
-                      transition={{ duration: 0.5, delay: idx * 0.07, ease: [0.22, 1, 0.36, 1] }}
-                      data-testid={`button-event-${event.id}`}
-                    >
-                      <div
-                        className={`relative overflow-hidden ${
-                          idx === 0 ? "aspect-[2/1] sm:aspect-[16/7]" : "aspect-[4/3]"
-                        }`}
-                      >
-                        {event.imageUrl ? (
-                          <img
-                            src={event.imageUrl}
-                            alt={event.title}
-                            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.06]"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <div className="w-full h-full bg-gradient-to-br from-violet-900/25 to-[#0f0f0f] flex items-center justify-center">
-                            <CalendarIcon className="w-10 h-10 text-white/10" />
-                          </div>
-                        )}
-                        {/* Gradient overlay */}
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent" />
-
-                        {/* Category badge */}
-                        <div className="absolute top-3 left-3">
-                          <span className="text-[0.6rem] font-sans font-medium tracking-[0.18em] uppercase text-white/60 px-2.5 py-1 rounded-full bg-black/40 backdrop-blur-sm border border-white/[0.08]">
-                            {event.category}
-                          </span>
-                        </div>
-
-                        {event.externalTicketUrl && (
-                          <div className="absolute top-3 right-3">
-                            <span className="text-[0.6rem] font-sans font-medium tracking-[0.18em] uppercase text-violet-300 px-2.5 py-1 rounded-full bg-violet-600/25 backdrop-blur-sm border border-violet-500/20">
-                              External
-                            </span>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Card content */}
-                      <div className={`absolute bottom-0 left-0 right-0 p-4 ${idx === 0 ? "p-5" : ""}`}>
-                        <h3
-                          className={`font-sans font-semibold text-white line-clamp-1 mb-1.5 group-hover:text-violet-300 transition-colors duration-200 ${
-                            idx === 0 ? "text-base sm:text-lg" : "text-sm"
-                          }`}
-                        >
-                          {event.title}
-                        </h3>
-                        <div className="flex items-center justify-between gap-3 text-white/40 text-xs font-sans">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <span className="flex items-center gap-1.5 flex-shrink-0">
-                              <ClockIcon className="w-3 h-3" />
-                              {formatEventDate(event.eventDate)}
-                            </span>
-                            {event.location && (
-                              <span className="flex items-center gap-1.5 min-w-0">
-                                <MapPinIcon className="w-3 h-3 flex-shrink-0" />
-                                <span className="truncate">{event.location}</span>
-                              </span>
-                            )}
-                          </div>
-                          {!event.externalTicketUrl && formatPrice(event) && (
-                            <span className="text-violet-400/80 flex-shrink-0 flex items-center gap-1">
-                              <TicketIcon className="w-3 h-3" />
-                              {formatPrice(event)}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </motion.button>
+            <div>
+              <h1>Find your Vib3.</h1>
+              <p className="lead">One app to find what's on, get in, plan with your crew and get home safe.</p>
+            </div>
+            <div className="pick">
+              <div className="pick-top">
+                <div className="chips" role="group" aria-label="Pick your kind of night">
+                  {KINDS.map((k) => (
+                    <button key={k.value} type="button" aria-pressed={kind === k.value} data-testid={`button-category-${k.value}`}
+                      onClick={() => kind !== k.value && choose(() => setKind(k.value))}>{k.label}</button>
                   ))}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* ─── Rule ────────────────────────────────────────────────────── */}
-      <div className="max-w-7xl mx-auto px-6">
-        <div className="h-px bg-white/[0.06]" />
-      </div>
-
-      {/* ─── Pillars ─────────────────────────────────────────────────── */}
-      <section className="py-28">
-        <div className="max-w-7xl mx-auto px-6">
-          <p className="text-white/45 text-[0.65rem] tracking-[0.28em] uppercase font-sans mb-14">
-            Why Vib3Pulse
-          </p>
-
-          {/* Card grid — gap-px on a white/[0.06] background creates hairline dividers */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-px bg-white/[0.06]">
-            {pillars.map((pillar, idx) => (
-              <motion.div
-                key={pillar.number}
-                initial={{ opacity: 0, y: 24 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.55, delay: idx * 0.09, ease: [0.22, 1, 0.36, 1] }}
-                className="relative bg-[#090909] p-8 flex flex-col gap-5"
-              >
-                {/* Icon chip */}
-                <div className="w-9 h-9 rounded-xl bg-violet-600/[0.12] flex items-center justify-center flex-shrink-0">
-                  <pillar.icon className="w-4 h-4 text-violet-400" />
                 </div>
-
-                <div>
-                  <h3 className="font-sans font-semibold text-white text-base mb-2.5 tracking-tight">
-                    {pillar.title}
-                  </h3>
-                  <p className="font-sans text-white/55 text-sm leading-relaxed">
-                    {pillar.desc}
-                  </p>
-                </div>
-
-                {/* Number — editorial detail, bottom-right */}
-                <span className="absolute bottom-6 right-6 text-white/[0.18] font-sans text-[0.6rem] tracking-[0.22em]">
-                  {pillar.number}
-                </span>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ─── Rule ────────────────────────────────────────────────────── */}
-      <div className="max-w-7xl mx-auto px-6">
-        <div className="h-px bg-white/[0.06]" />
-      </div>
-
-      {/* ─── Safety callout ──────────────────────────────────────────── */}
-      <section className="py-28">
-        <div className="max-w-7xl mx-auto px-6">
-          <motion.div
-            initial={{ opacity: 0, y: 24 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-            className="rounded-3xl bg-[#0e0e0e] border border-white/[0.08] p-10 md:p-16 relative overflow-hidden"
-          >
-            {/* Subtle glow */}
-            <div className="absolute top-0 right-0 w-72 h-72 bg-violet-600/[0.1] rounded-full blur-3xl pointer-events-none" />
-
-            <div className="relative max-w-2xl">
-              <div className="flex items-center gap-2.5 mb-10">
-                <ShieldIcon className="w-4 h-4 text-violet-400" />
-                <span className="text-white/45 text-[0.65rem] font-sans tracking-[0.28em] uppercase">
-                  Safety First
-                </span>
               </div>
-              <h2 className="font-serif text-3xl md:text-5xl lg:text-6xl font-bold text-white mb-7 leading-[1.05] tracking-tight">
-                Go Out.
-                <br />
-                <span className="text-white/50">Come Home Safe.</span>
-              </h2>
-              <p className="font-sans text-white/60 text-base md:text-lg leading-relaxed mb-10 max-w-lg">
-                Our Safety Buddy system lets you assign a trusted contact, set
-                a check-in time before you head out, and send instant SOS alerts
-                with your location. All in one tap.
-              </p>
-              <Link href="/signup">
-                <Button
-                  size="lg"
-                  variant="outline"
-                  className="h-11 px-7 rounded-full border-white/[0.18] text-white/70 bg-transparent hover:bg-white/[0.05] hover:text-white hover:border-white/30 active:scale-[0.97] font-sans text-sm transition-all duration-200"
-                >
-                  Learn More
-                  <ArrowRightIcon className="ml-2 w-4 h-4" />
-                </Button>
-              </Link>
+              <div className={`print${swap ? " out" : ""}`} aria-live="polite">
+                <div className="info">
+                  <span className="kind">{head.kindLabel}</span>
+                  <span className="title">{head.title}</span>
+                  <span className="where">{head.when} · {head.venue}</span>
+                </div>
+                <div className="go">
+                  <span className="price">{head.price}</span>
+                  <Link href={dest} className="btn" data-testid="button-hero-signup">Get this ticket <span aria-hidden="true">→</span></Link>
+                </div>
+              </div>
+              <p className="fine">{hasReal ? "Real upcoming events. Join free to get your ticket." : "Sample ticket. Pick a night and it prints. Real events appear when you join, free."}</p>
             </div>
-          </motion.div>
-        </div>
-      </section>
-
-      {/* ─── CTA ─────────────────────────────────────────────────────── */}
-      <section className="py-36">
-        <div className="max-w-7xl mx-auto px-6 text-center">
-          <motion.div
-            initial={{ opacity: 0, y: 32 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-          >
-            <p className="text-white/45 text-[0.65rem] tracking-[0.28em] uppercase font-sans mb-10">
-              Ready?
-            </p>
-            <h2
-              className="font-serif font-bold text-white uppercase tracking-tight leading-[0.9] mb-14"
-              style={{ fontSize: "clamp(2.8rem, 9vw, 8.5rem)" }}
-            >
-              Your Vib3
-              <br />
-              <span className="text-white/35">Starts Here.</span>
-            </h2>
-            <motion.div
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.97 }}
-              transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
-              className="inline-block"
-            >
-              <Link href="/signup">
-                <Button
-                  size="lg"
-                  className="h-14 px-12 bg-violet-600 hover:bg-violet-500 text-white rounded-full border-0 font-sans font-medium text-lg shadow-2xl shadow-violet-600/30 transition-colors duration-200"
-                  data-testid="button-cta-signup"
-                >
-                  Create Account (it's free)
-                  <ArrowRightIcon className="ml-2 w-5 h-5" />
-                </Button>
-              </Link>
-            </motion.div>
-            <p className="mt-5 text-white/30 text-sm font-sans">
-              Already a member?{" "}
-              <Link href="/login">
-                <span className="text-violet-400/70 hover:text-violet-300 transition-colors cursor-pointer" data-testid="button-cta-login">
-                  Sign in
-                </span>
-              </Link>
-            </p>
-            <p className="mt-3 text-white/25 text-sm font-sans">
-              Organising events?{" "}
-              <Link href="/signup">
-                <span className="text-white/40 hover:text-white/70 transition-colors cursor-pointer">
-                  List yours →
-                </span>
-              </Link>
-            </p>
-          </motion.div>
-        </div>
-      </section>
-
-      {/* ─── Footer ──────────────────────────────────────────────────── */}
-      <footer className="border-t border-white/[0.06] py-10">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-6">
-          {/* Left: logo + city callout */}
-          <div className="flex flex-col items-center sm:items-start gap-1">
-            <span className="font-serif text-xl font-bold text-white/55 tracking-tight">
-              Vib3Pulse
-            </span>
-            <span className="font-sans text-white/30 text-[0.65rem] tracking-[0.12em]">
-              Lagos · London · More cities coming
-            </span>
           </div>
-
-          {/* Centre: nav links */}
-          <nav className="flex items-center gap-5">
-            <Link
-              href="/privacy"
-              className="font-sans text-white/25 hover:text-white/50 transition-colors text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-400 rounded-sm"
-            >
-              Privacy
-            </Link>
-            {["Terms", "Contact"].map((link) => (
-              <span
-                key={link}
-                className="font-sans text-white/25 hover:text-white/50 transition-colors text-xs cursor-pointer"
-              >
-                {link}
-              </span>
-            ))}
-          </nav>
-
-          {/* Right: copyright */}
-          <p className="font-sans text-white/35 text-xs">
-            © 2026 Vib3Pulse. All rights reserved.
-          </p>
+          <aside className="stub1" aria-label="Your pass">
+            <div className="meta"><span>Admit one</span><span>Seat: anywhere</span></div>
+            <TicketScreen label="A Vib3Pulse ticket in the Tickets tab, with a QR code to show at the door." />
+            <Bars n={36} seed={7} />
+          </aside>
         </div>
+      </section>
+
+      <div className="assure" aria-label="Good to know">
+        <span>Free to join</span><span>Tickets in your phone</span><span>13+ with age limits on events</span><span>Safety Buddies built in</span>
+        <a className="hot" href="#rooms-sec" onClick={(e) => { e.preventDefault(); goTo("rooms-sec"); }}>Interactive live-streamed Rooms with real-time fan tipping (Spray)<em>Early access</em></a>
+      </div>
+
+      {/* ─── Find your Vib3: browse by category, or step into a Room ─── */}
+      <section className="week" id="find" aria-labelledby="wk">
+        <div className="week-head">
+          <h2 id="wk">Find your Vib3</h2>
+          <p>Browse events by category, or step into a live-streamed Room.</p>
+        </div>
+        <div className="cats" role="group" aria-label="Browse by category">
+          {KINDS.map((k) => {
+            const live = events.some((e) => e.category.startsWith(k.value));
+            return (
+              <button key={k.value} type="button" className={`cat${kind === k.value ? " on" : ""}`} aria-pressed={kind === k.value}
+                onClick={() => { if (kind !== k.value) choose(() => setKind(k.value)); goTo("top"); }} data-testid={`button-browse-${k.value}`}>
+                <span className="k">{live ? "Events on now" : "Browse"}</span><span className="t">{k.label}</span>
+              </button>
+            );
+          })}
+          <a className="cat room" href="#rooms-sec" onClick={(e) => { e.preventDefault(); goTo("rooms-sec"); }} data-testid="link-browse-rooms">
+            <span className="k">Live · early access</span><span className="t">Rooms</span>
+          </a>
+        </div>
+      </section>
+
+      {/* ─── Pinned app screens + stubs ──────────────────────────────── */}
+      <div className="stage">
+        <aside className="pin" aria-hidden="true">
+          <figure>
+            <div className="phone">
+              {img("find", "/landing/discover.webp")}
+              {layer("getin", <TicketScreen />)}
+              {layer("crew", <ChatScreen />)}
+              {img("avatar", "/landing/avatar.webp")}
+              {img("map", "/landing/map.webp")}
+              {img("safe", "/landing/safety.webp")}
+              {img("rooms", "/landing/room.webp")}
+              {img("spray", "/landing/spray.webp")}
+            </div>
+            <figcaption>{PIN_CAPTIONS[pin]}</figcaption>
+          </figure>
+        </aside>
+
+        <div className="stubs">
+          <section className="st reveal" id="how" data-stub="find">
+            <h2>Find what's on</h2>
+            <p className="lead">Music, food, tech, art, sport, wellness. One search for events, venues and people.</p>
+            <ul className="facts"><li>Trending events, and picks made for you</li><li>Tap I'm interested, or grab a ticket</li></ul>
+            <figure className="shot"><img src="/landing/discover.webp" alt="The Discover screen with a search box, filters and trending events." width={780} height={1568} loading="lazy" /><figcaption>Discover</figcaption></figure>
+          </section>
+
+          <section className="st p2 reveal" data-stub="getin">
+            <h2>Get in without the faff</h2>
+            <p className="lead">Your ticket waits in one place, the Tickets tab. Show the code. Staff scan it.</p>
+            <div className={`gate${scanned ? " done" : ""}`}><Qr seed={5} /><small>Sample pass, not a real ticket</small><div className="ok" aria-hidden="true">You're in.</div></div>
+            <button className="btn" type="button" onClick={() => setScanned((s) => !s)} style={{ "--bb": "var(--ink)", "--bf": "var(--paper)" } as CSSProperties}>{scanned ? "Scan again" : "Scan me at the door"}</button>
+            <p className="sm">No printouts, no hunting through old emails.</p>
+            <figure className="shot"><TicketScreen label="A ticket in the Tickets tab with a QR code and short code." /><figcaption>Your ticket, in the Tickets tab</figcaption></figure>
+          </section>
+
+          <section className="st reveal" data-stub="crew">
+            <h2>Bring your crew</h2>
+            <p className="lead">Plan it in group chats, with polls so the venue is decided before midnight.</p>
+            <ul className="facts"><li>Follow friends and post what you're up to</li><li>Stories that vanish after 24 hours</li><li>Communities for your city, scene or interests</li></ul>
+            <figure className="shot"><ChatScreen label="A group chat with a poll for tonight's venue, with the crew's votes coming in." /><figcaption>A group chat, with a poll for the venue</figcaption></figure>
+          </section>
+
+          <section className="st p2 reveal" data-stub="avatar">
+            <h2>Make it yours</h2>
+            <p className="lead">Build a little cartoon you. It's your face in chats, on the map and in Rooms.</p>
+            <ul className="facts"><li>Pick your hair, outfit and colours</li><li>Change your look whenever you like</li></ul>
+            <figure className="shot"><img src="/landing/avatar.webp" alt="The avatar editor showing a cartoon woman in a violet hoodie." width={780} height={1568} loading="lazy" /><figcaption>The avatar maker</figcaption></figure>
+          </section>
+
+          <section className="st reveal" data-stub="map">
+            <h2>See who's out</h2>
+            <p className="lead">Tonight's events and venues, and friends who choose to share where they are.</p>
+            <p className="body">Sharing starts switched off. Positions are rounded, so nobody sees exactly where you stand. Ghost mode hides you whenever you like.</p>
+            <figure className="shot"><img src="/landing/map.webp" alt="The map with filters for Friends, Tonight and Venues, and a Ghost button." width={780} height={1568} loading="lazy" /><figcaption>The map, with sharing off</figcaption></figure>
+          </section>
+
+          <section className="st ac reveal" data-stub="safe">
+            <h2>Get home safe</h2>
+            <p className="lead">Pick up to five Safety Buddies in the app and up to five by phone number.</p>
+            <p className="body">Send an SOS and they get your location. A friend without Vib3Pulse can still look out for you by text.</p>
+            <p className="sm">Vib3Pulse is not an emergency service. In an emergency call 999 in the UK, 112 in Nigeria or the EU, or 911 in the US.</p>
+            <figure className="shot"><img src="/landing/safety.webp" alt="The Safety Settings screen showing in-app and phone Safety Buddies." width={780} height={1568} loading="lazy" /><figcaption>Safety Settings</figcaption></figure>
+          </section>
+
+          <section className="st nt reveal" id="rooms-sec" data-stub="rooms">
+            <h2>Hang out from the couch</h2>
+            <p className="lead">Rooms are live hangouts. Drop in as your avatar, chat, talk and react.</p>
+            <p className="body">Host or watch live-streamed sessions, and let the audience tip performers in real time with Spray. Pre-drinks with the friends who couldn't make it work too. In early access.</p>
+            <figure className="shot"><img src="/landing/room.webp" alt="A room called Friday Pre-Drinks showing avatars of the people inside, and the chat." width={780} height={1568} loading="lazy" /><figcaption>A sample room, made-up people</figcaption></figure>
+          </section>
+
+          <section className="st ac reveal" id="spray" data-stub="spray">
+            <h2>Spray the room</h2>
+            <p className="lead">Spraying is the party tradition of throwing money at someone having a moment. In a Room, it's a tap.</p>
+            <p className="body">Pick a note, a bundle, a bag or a full rain, and it showers down the screen over whoever is on stage.</p>
+            <ul className="facts">
+              <li>The host decides if spraying is on, and can switch it off mid-show</li>
+              <li>Only ID-verified adults can spray or be sprayed</li>
+              <li>Only in 18+ and 21+ rooms, never in a room open to under-18s</li>
+              <li>Prefer a low profile? Spray without your name showing</li>
+              <li>Admins can switch it off for any room</li>
+            </ul>
+            <figure className="shot"><img src="/landing/spray.webp" alt="Money notes with a V3 logo raining down over a stage, with buttons to throw a note, a bundle, a bag or make it rain." width={780} height={1568} loading="lazy" /><figcaption>Spraying in a Room</figcaption></figure>
+          </section>
+
+          <section className="st p2 reveal" id="who">
+            <h2>Which night is yours?</h2>
+            <div className="roles" role="group" aria-label="Choose your kind of night">
+              {(Object.keys(ROLE_TEXT) as Role[]).map((r) => (
+                <button key={r} type="button" aria-pressed={role === r} onClick={() => pickRole(r)}>{ROLE_TEXT[r].title}</button>
+              ))}
+            </div>
+            <div className="panel" aria-live="polite"><h3>{ROLE_TEXT[role].title}</h3><p>{ROLE_TEXT[role].body}</p></div>
+            <Link href={dest} className="btn">{ROLE_TEXT[role].cta}</Link>
+          </section>
+        </div>
+      </div>
+
+      {/* ─── Good questions ──────────────────────────────────────────── */}
+      <section className="faq reveal" aria-labelledby="fq">
+        <h2 id="fq">Good questions</h2>
+        <div className="faq-list">
+          <details><summary>Is it free?</summary><p>Joining is free. Tickets cost whatever the host sets, and some events are free.</p></details>
+          <details><summary>How old do I need to be?</summary><p>13 or older. Under-18s and adults are kept apart by default, and events and rooms can carry age limits. Your age can be checked by a real person, and the photos used are deleted once the decision is made.</p></details>
+          <details><summary>Who can see where I am?</summary><p>Nobody, until you choose. Location sharing starts switched off, positions are rounded, and Ghost mode hides you whenever you like.</p></details>
+          <details><summary>Is Vib3Pulse an emergency service?</summary><p>No. If you are in danger call 999 in the UK, 112 in Nigeria or the EU, or 911 in the US. Safety Buddies are for the people you trust to look out for you.</p></details>
+          <details><summary>What are Rooms?</summary><p>Live hangouts where you show up as your avatar. They are in early access, and the audience can spray the host and people on stage.</p></details>
+          <details><summary>How does spraying work in a Room?</summary><p>Spraying is the party tradition of throwing money at someone having a moment. In an 18+ or 21+ Room, tap Spray, pick a note, a bundle, a bag or a full rain, and it showers down the screen over whoever is on stage. Only ID-verified adults can spray or be sprayed, the host decides whether it is on, and you can spray without your name showing. You pay on our payment provider's secure page, not inside the room.</p></details>
+          <details><summary>I run events or a venue. Can I list them?</summary><p>Yes. Create an event, set the price and number of tickets, watch sales and RSVPs, and scan people in at the door. Venues get a page with photos, nights and ticket sales.</p></details>
+        </div>
+      </section>
+
+      {/* ─── Close: the tear-off ─────────────────────────────────────── */}
+      <section className="close" id="go" aria-labelledby="cl" ref={closeRef}>
+        <h2 id="cl">Your Vib3 starts here.</h2>
+        <div className={`tear${torn ? " torn" : ""}`}>
+          <div className="main">
+            <b>{role === "out" ? `Admit one: ${kindLabel}` : "Organiser pass"}</b>
+            <span>Free to join. Takes you straight to sign up.</span>
+          </div>
+          <button className="st1" type="button" onClick={tear} aria-label="Tear off your ticket and sign up" data-testid="button-cta-signup"><span>Tear here<br />to join →</span></button>
+        </div>
+        <div className="alt">
+          <Link href="/login" data-testid="button-cta-login">Already a member? Sign in</Link>
+          <Link href={destination("host", kind)}>Organising events? List yours</Link>
+        </div>
+      </section>
+
+      <footer className="foot">
+        <span>Vib3Pulse</span>
+        <span><Link href="/privacy">Privacy</Link> · <a href="/terms-of-service.txt">Terms</a></span>
+        <small>© 2026 Vib3Pulse. Built by AeolusLabs LTD.</small>
       </footer>
 
-      {/* ─── Category Dialog ─────────────────────────────────────────── */}
-      <Dialog open={!!selectedCategory} onOpenChange={() => setSelectedCategory(null)}>
-        <DialogContent className="bg-[#111111] border-white/[0.08] text-white max-w-2xl max-h-[85vh]">
-          <DialogHeader>
-            <DialogTitle className="font-sans text-lg font-semibold flex items-center gap-3">
-              {(() => {
-                const cat = eventCategories.find((c) => c.value === selectedCategory);
-                if (!cat) return null;
-                const Icon = cat.icon;
-                return (
-                  <>
-                    <Icon className="w-5 h-5 text-violet-400" />
-                    {cat.label} Events
-                  </>
-                );
-              })()}
-            </DialogTitle>
-          </DialogHeader>
-
-          <ScrollArea className="max-h-[58vh] pr-2">
-            {isCategoryLoading ? (
-              <div className="grid gap-3">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="h-20 rounded-xl bg-white/[0.04] animate-pulse" />
-                ))}
-              </div>
-            ) : categoryEvents.length === 0 ? (
-              <div className="text-center py-14">
-                <CalendarIcon className="w-12 h-12 text-white/10 mx-auto mb-4" />
-                <p className="text-white/35 font-sans text-sm">No events in this category yet</p>
-                <p className="text-white/20 font-sans text-xs mt-1">Check back soon</p>
-              </div>
-            ) : (
-              <div className="grid gap-2">
-                {categoryEvents.map((event) => (
-                  <button
-                    key={event.id}
-                    onClick={() => {
-                      setSelectedCategory(null);
-                      setSelectedEvent(event);
-                    }}
-                    className="flex gap-4 p-4 rounded-xl bg-white/[0.03] border border-white/[0.06] hover:border-violet-500/25 hover:bg-white/[0.06] transition-all text-left group cursor-pointer"
-                    data-testid={`button-category-event-${event.id}`}
-                  >
-                    <div className="w-20 h-20 rounded-lg overflow-hidden flex-shrink-0">
-                      {event.imageUrl ? (
-                        <img
-                          src={event.imageUrl}
-                          alt={event.title}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-full h-full bg-violet-900/20 flex items-center justify-center">
-                          <CalendarIcon className="w-6 h-6 text-white/15" />
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0 py-1">
-                      <div className="flex items-start justify-between gap-2 mb-1.5">
-                        <h4 className="font-sans font-medium text-white group-hover:text-violet-300 transition-colors line-clamp-1 text-sm">
-                          {event.title}
-                        </h4>
-                        {event.externalTicketUrl && (
-                          <span className="text-[0.6rem] text-violet-400 border border-violet-500/25 rounded-full px-2 py-0.5 flex-shrink-0 flex items-center gap-1">
-                            <ExternalLinkIcon className="w-2.5 h-2.5" />
-                            Ext
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1.5 text-white/40 text-xs font-sans mb-1">
-                        <ClockIcon className="w-3 h-3 flex-shrink-0" />
-                        {formatEventDate(event.eventDate)} · {formatEventTime(event.eventDate)}
-                      </div>
-                      {event.location && (
-                        <div className="flex items-center gap-1.5 text-white/30 text-xs font-sans">
-                          <MapPinIcon className="w-3 h-3 flex-shrink-0" />
-                          <span className="truncate">{event.location}</span>
-                        </div>
-                      )}
-                      {!event.externalTicketUrl && formatPrice(event) && (
-                        <div className="flex items-center gap-1.5 text-violet-400/70 text-xs font-sans mt-1">
-                          <TicketIcon className="w-3 h-3 flex-shrink-0" />
-                          {formatPrice(event)}
-                        </div>
-                      )}
-                    </div>
-                    <ChevronRightIcon className="w-4 h-4 text-white/15 group-hover:text-white/40 transition-colors flex-shrink-0 self-center" />
-                  </button>
-                ))}
-              </div>
-            )}
-          </ScrollArea>
-
-          {categoryEvents.length > 0 && (
-            <div className="pt-3 border-t border-white/[0.06]">
-              <Link href="/signup">
-                <Button className="w-full bg-violet-600 hover:bg-violet-500 text-white border-0 rounded-xl font-sans text-sm h-11">
-                  Sign up to get tickets
-                  <ArrowRightIcon className="ml-2 w-4 h-4" />
-                </Button>
-              </Link>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* ─── Event Detail Dialog ─────────────────────────────────────── */}
-      <Dialog open={!!selectedEvent} onOpenChange={() => setSelectedEvent(null)}>
-        <DialogContent className="bg-[#111111] border-white/[0.08] text-white max-w-xl max-h-[90vh] overflow-y-auto">
-          {selectedEvent && (
-            <>
-              <div className="relative -mx-6 -mt-6 mb-6">
-                <div className="aspect-video relative overflow-hidden rounded-t-2xl">
-                  {selectedEvent.imageUrl ? (
-                    <img
-                      src={selectedEvent.imageUrl}
-                      alt={selectedEvent.title}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full bg-gradient-to-br from-violet-900/25 to-[#0f0f0f] flex items-center justify-center">
-                      <CalendarIcon className="w-16 h-16 text-white/10" />
-                    </div>
-                  )}
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#111111] via-transparent to-transparent" />
-                  <div className="absolute top-4 left-4 flex gap-2">
-                    <span className="text-[0.6rem] font-sans font-medium tracking-[0.18em] uppercase text-white/60 px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-sm border border-white/[0.08]">
-                      {selectedEvent.category}
-                    </span>
-                    {selectedEvent.externalTicketUrl && (
-                      <span className="text-[0.6rem] font-sans font-medium tracking-[0.18em] uppercase text-violet-300 px-2.5 py-1 rounded-full bg-violet-600/25 backdrop-blur-sm border border-violet-500/20">
-                        External
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <DialogHeader>
-                <DialogTitle className="font-sans text-xl font-semibold text-white leading-tight">
-                  {selectedEvent.title}
-                </DialogTitle>
-              </DialogHeader>
-
-              <div className="mt-4 space-y-3 font-sans text-sm">
-                <div className="flex items-center gap-3 text-white/55">
-                  <ClockIcon className="w-4 h-4 text-violet-400 flex-shrink-0" />
-                  <span>
-                    {format(new Date(selectedEvent.eventDate), "EEEE, MMMM d, yyyy 'at' h:mm a")}
-                  </span>
-                </div>
-                {selectedEvent.location && (
-                  <div className="flex items-center gap-3 text-white/55">
-                    <MapPinIcon className="w-4 h-4 text-violet-400 flex-shrink-0" />
-                    <span>
-                      {selectedEvent.location}
-                      {selectedEvent.city && `, ${selectedEvent.city}`}
-                    </span>
-                  </div>
-                )}
-                {selectedEvent.ticketPrice !== undefined && !selectedEvent.externalTicketUrl && (
-                  <div className="flex items-center gap-3 text-white/55">
-                    <TicketIcon className="w-4 h-4 text-violet-400 flex-shrink-0" />
-                    <span>{formatPrice(selectedEvent) ?? "Free"}</span>
-                  </div>
-                )}
-
-                {selectedEvent.description && (
-                  <div className="pt-4 border-t border-white/[0.06]">
-                    <p className="text-white/50 leading-relaxed">{selectedEvent.description}</p>
-                  </div>
-                )}
-
-                <div className="pt-4 flex flex-col gap-2.5">
-                  {selectedEvent.externalTicketUrl ? (
-                    <a
-                      href={selectedEvent.externalTicketUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block"
-                    >
-                      <Button className="w-full bg-violet-600 hover:bg-violet-500 text-white border-0 rounded-xl h-11">
-                        <ExternalLinkIcon className="mr-2 w-4 h-4" />
-                        Get Tickets
-                      </Button>
-                    </a>
-                  ) : (
-                    <Link href="/signup">
-                      <Button className="w-full bg-violet-600 hover:bg-violet-500 text-white border-0 rounded-xl h-11">
-                        Sign up to get tickets
-                        <ArrowRightIcon className="ml-2 w-4 h-4" />
-                      </Button>
-                    </Link>
-                  )}
-                  <p className="text-center text-white/25 text-xs font-sans">
-                    Create an account to purchase tickets and RSVP
-                  </p>
-                </div>
-              </div>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
+      <div className={`bar${barOn ? " show" : ""}`} role="region" aria-label="Join Vib3Pulse">
+        <span>{role === "out" ? `${kindLabel} events` : ROLE_TEXT[role].cta}</span>
+        <Link href={dest} className="btn">{ROLE_TEXT[role].cta}</Link>
+      </div>
     </div>
   );
 }

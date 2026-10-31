@@ -198,6 +198,16 @@ export const inviteRsvpLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// The anonymous landing page's one data call: per-IP, a real visitor needs one request per page load.
+export const publicLandingLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  keyGenerator: (req) => ipKeyGenerator(req.ip ?? ""),
+  message: { message: "Too many requests. Please try again shortly.", code: "RATE_LIMITED" },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 export const verificationEmailLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
   max: 3,

@@ -23,6 +23,7 @@ import { registerBlockRoutes } from "./routes/block-routes";
 import { registerVenueSocialRoutes } from "./routes/venue-social-routes";
 import { registerDoorRoutes } from "./routes/door-routes";
 import { registerEventsRoutes } from "./routes/events-routes";
+import { registerPublicLandingRoutes } from "./routes/public-landing-routes";
 import { registerSocialEventGate, registerSocialEventRoutes, registerGuestDataExportBlock } from "./routes/social-events-routes";
 import { startGuestRetentionJob } from "./services/guestPrivacy";
 import { registerPhoneRoutes } from "./routes/phone-routes";
@@ -58,6 +59,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Before the generic events routes so /api/tickets/undo-check-in is never shadowed.
   registerDoorRoutes(app);
   registerEventsRoutes(app);
+  registerPublicLandingRoutes(app);
   registerSocialEventRoutes(app);
   registerPhoneRoutes(app);
   registerNewSocialRoutes(app);
